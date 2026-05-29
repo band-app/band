@@ -139,6 +139,13 @@ jobs:
 
             Step 2 — Dispatch ONE general-purpose subagent.
 
+            The subagent will follow the orchestration instructions in
+            the `review-changes` skill file directly. We Read the file
+            instead of going through the `Skill` tool because the GHA
+            action runtime does NOT auto-discover project-defined
+            skills under `.claude/skills/` — `Skill(skill="review-changes")`
+            returns "Unknown skill" in this environment.
+
             Make exactly one Agent call:
 
               Agent(subagent_type="general-purpose", prompt=<see below>)
@@ -146,13 +153,16 @@ jobs:
             The subagent's prompt is exactly this (with values
             substituted from Step 1):
 
-                Invoke the `review-changes` skill via the Skill tool with
-                the arguments below. Then return the skill's COMPLETE
-                output as your final message — pass it through verbatim,
-                do not modify, summarize, prefix, suffix, decorate,
-                paraphrase, or comment on it.
+                You are running Band's CI PR review.
 
-                Skill arguments:
+                Step A — Read the orchestration spec:
+                    Read `.claude/skills/review-changes/SKILL.md` end-to-end.
+                    This file tells you the four specialists to dispatch,
+                    the context bundle shape, the aggregation rules, and
+                    the exact output format.
+
+                Step B — Run the orchestration the file describes, using
+                these inputs:
 
                     Review this change set.
                     - Repo:   <REPO>
@@ -161,15 +171,35 @@ jobs:
                     - Head:   <HEAD>
                     - Issues: <linked-issue list, or "none detected">
 
-                Your only allowed actions:
-                  1. Call Skill(skill="review-changes", args=<arguments above>)
-                  2. Return what the skill returned.
+                Concretely: gather the diff via `gh pr diff <PR>`, fetch
+                any linked issue bodies via `gh issue view <N>`, then
+                dispatch the four specialist sub-agents IN PARALLEL via
+                FOUR `Agent` tool calls in a SINGLE message:
 
-                Do not perform any review yourself. Do not Read the
-                criteria files. Do not call Agent. Do not call gh or
-                git directly. If the Skill call fails or returns
-                nothing, return the error message verbatim — do not
-                substitute a hand-written review.
+                  Agent(subagent_type="coding-reviewer",      prompt=<bundle>)
+                  Agent(subagent_type="testing-reviewer",     prompt=<bundle>)
+                  Agent(subagent_type="security-reviewer",    prompt=<bundle>)
+                  Agent(subagent_type="performance-reviewer", prompt=<bundle>)
+
+                The bundle prompt template is in the skill file under
+                "Step 2 — Dispatch four specialists in parallel."
+
+                Step C — Aggregate per the skill's "Step 3" and emit
+                per the skill's "Step 4". The OUTPUT FORMAT is fixed:
+                four `<Coding|Testing|Security|Performance> <emoji>`
+                headers in that exact order (emoji is one of 🚨 / ⚠️ /
+                ✅ computed per the skill), each followed by its
+                findings in standard `[N] severity:... <path>:<line>`
+                format, ending with a single
+                `Verdict: <approved 👍 | request changes 👎>` line.
+
+                Step D — Your final message IS the report. The first
+                line must be `Coding <emoji>`. The last line must be
+                `Verdict: <emoji>`. Do not wrap, prefix, suffix, or
+                comment on the output. Do not add `## ` to the headers.
+                Do not swap the emojis — `🚨 / ⚠️ / ✅` for status,
+                `👍 / 👎` for verdict. Pass through verbatim from your
+                own aggregation step.
 
             Wait for the subagent to return. Treat its return value as
             opaque text — that IS the comment body content.
