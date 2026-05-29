@@ -179,7 +179,13 @@ function assertWorktreeRelative(cwd: string, filePath: string): string {
   if (target !== cwd && !target.startsWith(cwd + sep)) {
     throw new Error("Invalid path");
   }
-  const relative = target === cwd ? "" : target.slice(cwd.length + 1);
+  // Reject `target === cwd` (the worktree root itself) — callers pass
+  // single-file paths; `"."` would otherwise let `revertFile` issue
+  // `git checkout <ref> -- .`, silently reverting the whole worktree.
+  if (target === cwd) {
+    throw new Error("Invalid path");
+  }
+  const relative = target.slice(cwd.length + 1);
   if (relative === ".git" || relative.startsWith(`.git${sep}`) || relative.startsWith(".git/")) {
     throw new Error("Refusing to touch .git internals");
   }
@@ -440,11 +446,19 @@ export class DiffService {
     // us this string and we don't trust it.
     const targetAbs = assertWorktreeRelative(cwd, options.filePath);
 
-    // Check if file is untracked
-    const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
-    const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
+    // Scope the untracked-check to this single file rather than scanning
+    // every untracked file in the workspace — `getFileDiff` only ever
+    // needs the boolean "is this file untracked?". The `--` separator
+    // pins `options.filePath` as a pathspec (not a flag) at git's level
+    // even though the leading-dash guard above already rejects it at
+    // the schema level.
+    const untrackedOutput = await execGit(
+      ["ls-files", "--others", "--exclude-standard", "--", options.filePath],
+      cwd,
+    );
+    const isUntracked = untrackedOutput.trim().split("\n").filter(Boolean).length > 0;
 
-    if (untrackedFiles.includes(options.filePath)) {
+    if (isUntracked) {
       // Synthesize diff for untracked file
       try {
         const content = await readFile(targetAbs, "utf-8");

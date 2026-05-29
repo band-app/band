@@ -118,6 +118,13 @@ export class FilesService {
    * worktree. Shared by `deletePath`, `renamePath`, and `copyPath`.
    */
   private assertNotGitInternals(root: string, target: string, label: string): void {
+    // Defensive: every current caller passes through `resolveInside`
+    // with `allowRoot: false`, which already rejects `target === root`.
+    // Guarding here too makes the slice arithmetic obviously safe and
+    // stops a future caller from sneaking a worktree-root mutation past.
+    if (target === root) {
+      throw new Error(`Refusing to ${label} worktree root`);
+    }
     const relative = target.slice(root.length + 1);
     if (relative === ".git" || relative.startsWith(`.git${sep}`) || relative.startsWith(".git/")) {
       throw new Error(`Refusing to ${label} .git internals`);

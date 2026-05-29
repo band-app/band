@@ -720,14 +720,9 @@ export class WorkspaceService {
     if (body) {
       args.push("-m", body);
     }
-    try {
-      await execGit(args, cwd);
-    } catch (e) {
-      // Preserve the original error stack — `execGit`'s rejection
-      // carries the git stderr, which is the diagnostic the user
-      // actually needs to see in a failure trace.
-      throw e;
-    }
+    // `execGit`'s rejection carries the git stderr and a real stack —
+    // let it propagate up the await chain unchanged.
+    await execGit(args, cwd);
     return { ok: true };
   }
 
@@ -752,22 +747,19 @@ export class WorkspaceService {
     }
     const cwd = workspace.worktree.path;
 
-    // Cheap pre-flight: refuse early if there are no pending changes so we
-    // don't spin up an agent process just to have it report "nothing to
-    // commit". `git status --porcelain` covers staged, unstaged, and
-    // untracked files in one call.
-    try {
-      const status = await execGit(["status", "--porcelain"], cwd);
-      if (!status.trim()) {
-        throw new Error("No changes to summarise");
-      }
-    } catch (e) {
-      // Re-throw the explicit "no changes" error; swallow other status
-      // failures (e.g. unborn HEAD on a brand-new repo) and let the agent
-      // figure it out.
-      if (e instanceof Error && e.message === "No changes to summarise") {
-        throw e;
-      }
+    // Cheap pre-flight: refuse early if there are no pending changes so
+    // we don't spin up an agent process just to have it report "nothing
+    // to commit". `git status --porcelain` covers staged, unstaged, and
+    // untracked files in one call — and on a brand-new unborn-HEAD
+    // repository it still succeeds (showing untracked entries).
+    //
+    // Any execGit failure here (not a git repo, git binary missing,
+    // permission denied, …) is a real, user-actionable error: surface
+    // it instead of silently spawning an agent that will run the same
+    // status command and fail the same way.
+    const status = await execGit(["status", "--porcelain"], cwd);
+    if (!status.trim()) {
+      throw new Error("No changes to summarise");
     }
 
     const settings = settingsService.get();
