@@ -7,11 +7,7 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import {
-  bandHome,
-  resolveAgentDefinition,
-  SettingsQueries,
-} from "../db/queries/settings";
+import { bandHome, resolveAgentDefinition, SettingsQueries } from "../db/queries/settings";
 
 const settingsQueries = new SettingsQueries();
 const loadSettings = () => settingsQueries.load();

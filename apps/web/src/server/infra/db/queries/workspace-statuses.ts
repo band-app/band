@@ -14,9 +14,9 @@
  */
 
 import { eq } from "drizzle-orm";
+import type { WorkspaceStatusSnapshot } from "../../events/status-event-bus";
 import { getDb } from "../connection";
 import { workspaceStatuses as workspaceStatusesTable } from "../schema";
-import type { WorkspaceStatusSnapshot } from "../../events/status-event-bus";
 
 function rowToSnapshot(row: typeof workspaceStatusesTable.$inferSelect): WorkspaceStatusSnapshot {
   return {

@@ -7,8 +7,8 @@ import {
   type StatusListener,
   subscribe as subscribeRaw,
 } from "../infra/events/status-event-bus";
-import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
 import { getRunningSetups } from "../infra/setup/setup-runner";
+import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
 import { loadCurrentStatuses } from "./state";
 
 /**

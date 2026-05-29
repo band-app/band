@@ -1,13 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { diffService } from "../../services/diff-service";
-import { filesService } from "../../services/files-service";
 import { subscribeToFileChanges } from "../../services/file-watcher";
+import { filesService } from "../../services/files-service";
 import { FormatterError, formatFile } from "../../services/formatter";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
-import { WorkspaceNotFoundError } from "../../services/workspace-service";
-import { workspaceService } from "../../services/workspace-service";
+import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

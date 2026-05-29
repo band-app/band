@@ -212,10 +212,7 @@ export class FilesService {
     return { ok: true };
   }
 
-  async deletePath(
-    workspaceId: string,
-    path: string,
-  ): Promise<{ ok: true; kind: FileEntryKind }> {
+  async deletePath(workspaceId: string, path: string): Promise<{ ok: true; kind: FileEntryKind }> {
     const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
     this.assertNotGitInternals(root, target, "delete");
 

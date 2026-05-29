@@ -7,7 +7,6 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
-import { browserService } from "./browser-service";
 // FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
 // which imports `workspaceService` from this file. The cycle is safe only
 // because every `workspaceService` reference is inside a function body
@@ -16,7 +15,11 @@ import { browserService } from "./browser-service";
 import { createWorkspaceAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
+import { loadProjectConfig } from "../infra/setup/project-config";
+import { runSetup } from "../infra/setup/setup-runner";
+import { browserService } from "./browser-service";
 import { getOrCreateDefaultChat, removeWorkspaceChats, updateChat } from "./chat-manager";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `lib/workspace`, which imports
@@ -25,9 +28,6 @@ import { getOrCreateDefaultChat, removeWorkspaceChats, updateChat } from "./chat
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
-import { loadProjectConfig } from "../infra/setup/project-config";
-import { runSetup } from "../infra/setup/setup-runner";
 import { clearQueuedMessages } from "./queued-message-store";
 import {
   bandHome,

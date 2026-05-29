@@ -10,8 +10,8 @@ import {
   type WorktreeState,
 } from "../infra/db/queries/projects";
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
-import { GitClient } from "../infra/git/git-client";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
+import { GitClient } from "../infra/git/git-client";
 import { type SettingsService, settingsService } from "./settings-service";
 
 /**

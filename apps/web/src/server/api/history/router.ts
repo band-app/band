@@ -1,8 +1,5 @@
 import { z } from "zod";
-import {
-  browserHistoryService,
-  type ClearRange,
-} from "../../services/browser-history-service";
+import { browserHistoryService, type ClearRange } from "../../services/browser-history-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

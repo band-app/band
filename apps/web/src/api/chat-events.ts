@@ -1,11 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import type {
-  ChatEvent,
-  ChatEventPayload,
-  ChatEventUsage,
-  ToolInputAvailableEvent,
-} from "../shared/chat-events";
 import { agentService } from "../server/services/agent-service";
 import { getChat } from "../server/services/chat-manager";
 import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";
@@ -24,6 +18,12 @@ import {
   subscribe as subscribeTask,
 } from "../server/services/task-service";
 import { resolveWorkspace } from "../server/services/workspace";
+import type {
+  ChatEvent,
+  ChatEventPayload,
+  ChatEventUsage,
+  ToolInputAvailableEvent,
+} from "../shared/chat-events";
 
 const log = createLogger("chat-events");
 
@@ -318,7 +318,11 @@ async function replayPast(opts: {
       try {
         const workspace = resolveWorkspace(chatWorkspaceId);
         if (workspace) {
-          const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
+          const agent = await agentService.getOrCreateAgent(
+            chatId,
+            workspace.worktree.path,
+            agentTypeHint,
+          );
           if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
             const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
             const messages = result.messages;
@@ -375,7 +379,11 @@ async function replayPast(opts: {
     try {
       const workspace = resolveWorkspace(chatWorkspaceId);
       if (workspace) {
-        const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
+        const agent = await agentService.getOrCreateAgent(
+          chatId,
+          workspace.worktree.path,
+          agentTypeHint,
+        );
         if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
           const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
           const messages = result.messages;

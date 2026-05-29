@@ -34,8 +34,8 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { CHAT_EVENT_TYPES, type ChatEvent, type ChatEventFile } from "../../shared/chat-events";
 import { trpc } from "../../lib/trpc-client";
+import { CHAT_EVENT_TYPES, type ChatEvent, type ChatEventFile } from "../../shared/chat-events";
 import { type ChatSubscriptionState, chatEventReducer, INITIAL_STATE } from "./chat-event-reducer";
 
 export interface UseChatSubscriptionOptions {

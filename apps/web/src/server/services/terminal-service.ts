@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import type { WorkspaceTerminalConfig } from "@/dashboard";
+import { loadProjectConfig } from "../infra/setup/project-config";
 import {
   type SpawnOptions,
   type TerminalListEntry,
@@ -8,7 +9,6 @@ import {
   type TerminalSession,
   terminalPool,
 } from "../infra/terminals/terminal-pool";
-import { loadProjectConfig } from "../infra/setup/project-config";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,

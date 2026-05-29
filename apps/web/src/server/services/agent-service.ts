@@ -59,11 +59,7 @@ export class AgentService {
    *   - `skills` router (`agent.listSkills()`)
    *   - `chats.setActiveSession` (`agent.getSessionInfo()`)
    */
-  getOrCreateAgent(
-    chatId: string,
-    worktreePath: string,
-    agentId?: string,
-  ): Promise<CodingAgent> {
+  getOrCreateAgent(chatId: string, worktreePath: string, agentId?: string): Promise<CodingAgent> {
     return this.pool.getOrCreateAgent(chatId, worktreePath, agentId);
   }
 

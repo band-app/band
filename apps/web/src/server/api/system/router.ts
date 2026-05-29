@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { listWorktrees } from "../../infra/git/git-client";
 // TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
 // inline worktree-filter / aggregation / sort logic in `resourcesProjects`
 // and `resourcesProjectSize` are a layering bypass — the architecture doc
@@ -13,7 +14,6 @@ import { z } from "zod";
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
 // `apps/web/src/server/api/router.ts` for the consolidated checklist.
 import { getPollerActivity, setPollerActivity } from "../../services/branch-status-poller";
-import { listWorktrees } from "../../infra/git/git-client";
 import { loadState } from "../../services/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";
