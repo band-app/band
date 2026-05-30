@@ -15,6 +15,7 @@ import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import {
   attachEdgeGroupDragVisibility,
+  centralPanelPosition,
   ensureEdgeGroups,
   registerInnerDockview,
 } from "../lib/dockview-edge-groups";
@@ -1000,12 +1001,19 @@ export function DockviewBrowserContainer({
       if (event.kind === "browser-created" && typeof event.browserId === "string") {
         // Skip if this panel already exists (we created it ourselves)
         if (api.getPanel(event.browserId)) return;
+        // Pin the new panel to the inner dockview's central area.
+        // Without this explicit position, dockview's fallback uses
+        // `activeGroup`, which can be one of the collapsed edge
+        // groups added by `ensureEdgeGroups` — making the panel
+        // render as a thin docked strip. See `centralPanelPosition`
+        // for the full rationale.
         api.addPanel({
           id: event.browserId,
           component: "browserTab",
           tabComponent: "browserTab",
           title: "New Tab",
           params: { workspaceId, browserId: event.browserId },
+          position: centralPanelPosition(api),
         });
       } else if (event.kind === "browser-removed" && typeof event.browserId === "string") {
         const panel = api.getPanel(event.browserId);
@@ -1193,6 +1201,10 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
   trpc.browsers.create.mutate({ workspaceId, id: browserId }).catch((err) => {
     console.error("[DockviewBrowserContainer] error creating default browser:", err);
   });
+  // Pin the default panel to the inner dockview's central area so it
+  // lands there instead of leaking into an edge group that
+  // `ensureEdgeGroups` may have already added. See
+  // `centralPanelPosition` for the full rationale.
   api.addPanel({
     id: browserId,
     component: "browserTab",
@@ -1202,5 +1214,6 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
       workspaceId,
       browserId,
     },
+    position: centralPanelPosition(api),
   });
 }

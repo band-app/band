@@ -22,6 +22,7 @@ import React, {
 import { useAdapter } from "@/dashboard";
 import {
   attachEdgeGroupDragVisibility,
+  centralPanelPosition,
   ensureEdgeGroups,
   registerInnerDockview,
 } from "../lib/dockview-edge-groups";
@@ -698,12 +699,19 @@ export function DockviewTerminalContainer({
       if (event.kind === "terminal-created" && typeof event.terminalId === "string") {
         // Skip if this panel already exists (we created it ourselves)
         if (api.getPanel(event.terminalId)) return;
+        // Pin the new panel to the inner dockview's central area.
+        // Without this explicit position, dockview's fallback uses
+        // `activeGroup`, which can be one of the collapsed edge
+        // groups added by `ensureEdgeGroups` — making the panel
+        // render as a thin docked strip. See `centralPanelPosition`
+        // for the full rationale.
         api.addPanel({
           id: event.terminalId,
           component: "terminalTab",
           tabComponent: "terminalTab",
           title: "Terminal",
           params: { workspaceId, terminalId: event.terminalId },
+          position: centralPanelPosition(api),
         });
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
         const panel = api.getPanel(event.terminalId);
@@ -887,6 +895,10 @@ function createDefaultTerminal(api: DockviewApi, workspaceId: string): void {
   // Generate ID client-side so we can add the panel immediately.
   const terminalId = newTerminalId();
 
+  // Pin the default panel to the inner dockview's central area so it
+  // lands there instead of leaking into an edge group that
+  // `ensureEdgeGroups` may have already added. See
+  // `centralPanelPosition` for the full rationale.
   api.addPanel({
     id: terminalId,
     component: "terminalTab",
@@ -896,6 +908,7 @@ function createDefaultTerminal(api: DockviewApi, workspaceId: string): void {
       workspaceId,
       terminalId,
     },
+    position: centralPanelPosition(api),
   });
 
   // Create the server-side terminal (spawns PTY + updates layout + emits event).
@@ -923,6 +936,13 @@ async function seedFromConfigOrDefault(
         for (const pane of panes) {
           try {
             const terminalId = newTerminalId();
+            // `seedFromConfigOrDefault` is async and runs AFTER the
+            // synchronous `ensureEdgeGroups` call in `onReady` — by
+            // the time we get here, the inner dockview's collapsed
+            // edge groups already exist. Pin each seeded panel to
+            // the central area so it lands there instead of being
+            // appended into one of those edge groups. See
+            // `centralPanelPosition` for the full rationale.
             api.addPanel({
               id: terminalId,
               component: "terminalTab",
@@ -935,6 +955,7 @@ async function seedFromConfigOrDefault(
                 cwd: pane.cwd,
                 env: pane.env,
               },
+              position: centralPanelPosition(api),
             });
             await trpc.terminal.create.mutate({
               workspaceId,

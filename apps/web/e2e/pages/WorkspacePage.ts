@@ -349,4 +349,83 @@ export class WorkspacePage {
     const state = await this.readActiveState(workspaceId);
     return state?.groups[groupId];
   }
+
+  /** Reset the per-workspace shared-dockview state entry in
+   *  `localStorage` and (re-)navigate to the workspace so the next
+   *  mount runs against a clean slate. Two-step (matches
+   *  `resetLabelStateAndGoto`): navigate first to land on the origin
+   *  (localStorage isn't accessible until a same-origin page has
+   *  loaded), then evaluate the clear. Centralises the
+   *  `ACTIVE_STATE_KEY_PREFIX` key construction so test bodies don't
+   *  rebuild the key inline.
+   *
+   *  IMPORTANT: the clear runs AFTER the initial `goto`, so the React
+   *  tree's in-memory copy of the active state still reflects what was
+   *  in storage at mount time. Tests that need a fully clean React
+   *  state should follow up with another `goto(...)` (or `reload()`)
+   *  before exercising layout behaviour. */
+  async resetDockviewActiveStateAndGoto(workspaceId: string): Promise<void> {
+    await test.step(`Reset dockview active state, navigate to ${workspaceId}`, async () => {
+      await this.goto(workspaceId);
+      await this.page.evaluate(
+        ([prefix, id]) => {
+          localStorage.removeItem(`${prefix}${id}`);
+        },
+        [ACTIVE_STATE_KEY_PREFIX, workspaceId] as const,
+      );
+    });
+  }
+
+  /** Fetch the persisted server-side dockview layout for the given
+   *  inner container (`chat`, `terminal`, or `browser`). Each container
+   *  has its own tRPC namespace (`chatLayout.get`, `terminalLayout.get`,
+   *  `browserLayout.get`) that returns `{ tree }`; this helper unwraps
+   *  the response and returns the parsed tree (or `null` when no layout
+   *  has been persisted yet).
+   *
+   *  Used by the panel-default-position regression test to verify that
+   *  newly-added panels end up in a central (grid-located) leaf instead
+   *  of being appended into one of the three collapsed edge groups
+   *  (`edge-left`, `edge-right`, `edge-bottom`) that `ensureEdgeGroups`
+   *  adds in `onReady`. The return type narrows the response into the
+   *  dockview-toJSON shape the test traverses — keeps dockview
+   *  knowledge inside the page object so test bodies can skip casts. */
+  async readInnerLayout(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<DockviewLayoutSnapshot | null> {
+    const procedure =
+      container === "chat"
+        ? "chatLayout.get"
+        : container === "terminal"
+          ? "terminalLayout.get"
+          : "browserLayout.get";
+    const input = encodeURIComponent(JSON.stringify({ workspaceId }));
+    const res = await this.page.request.get(
+      `${this.baseUrl}/trpc/${procedure}?input=${input}&token=${this.token}`,
+    );
+    if (!res.ok()) {
+      throw new Error(`readInnerLayout(${container}) failed: ${res.status()} ${await res.text()}`);
+    }
+    const body = (await res.json()) as {
+      result: { data: { tree: DockviewLayoutSnapshot | null } };
+    };
+    return body.result.data.tree;
+  }
 }
+
+/** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of
+ *  `dockview.toJSON()` the regression test traverses (`grid.root` walk
+ *  + `panels` lookup); other fields are ignored. Lives at the bottom of
+ *  the page-object file so callers get a typed return from
+ *  `readInnerLayout` without re-deriving the shape inline. */
+export interface DockviewLayoutSnapshot {
+  grid?: {
+    root?: DockviewGridNode;
+  };
+  panels: Record<string, unknown>;
+}
+
+export type DockviewGridNode =
+  | { type: "leaf"; data: { id: string; views: string[]; activeView?: string } }
+  | { type: "branch"; data: DockviewGridNode[] };

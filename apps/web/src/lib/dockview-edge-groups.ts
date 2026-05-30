@@ -23,6 +23,40 @@ export const EDGE_GROUP_IDS = {
 export type EdgeDirection = keyof typeof EDGE_GROUP_IDS;
 
 /**
+ * Build a dockview `addPanel` `position` value that pins a new panel
+ * to the central area of `api`, regardless of which group happens to
+ * be `activeGroup` right now.
+ *
+ * Background: every inner dockview (Chat / Terminal / Browser) calls
+ * `ensureEdgeGroups` in `onReady` to add the three cardinal edge groups
+ * (left / right / bottom) collapsed. dockview-core's `addPanel` falls
+ * back to `activeGroup` when `position` is omitted, and once edge groups
+ * exist `activeGroup` can be one of those collapsed edge groups — which
+ * makes the new panel render as a thin collapsed strip docked at the
+ * edge instead of filling the center.
+ *
+ * Strategy:
+ * - If any grid-located group exists, return
+ *   `{ referenceGroup: <id> }` so the new panel becomes a tab in the
+ *   central area.
+ * - Otherwise return `{ direction: "within" }`, which routes through
+ *   dockview-core's `orthogonalize('center')` → `createGroupAtLocation([0])`
+ *   path and creates a fresh central group regardless of what
+ *   `activeGroup` happens to be. Passing this direction WITHOUT a
+ *   reference (`referencePanel`/`referenceGroup`) is the dockview API
+ *   shape that means "create a new central group from scratch" — the
+ *   only way to force the create-new-group branch when only edge
+ *   groups exist.
+ */
+export function centralPanelPosition(
+  api: DockviewApi,
+): { referenceGroup: string } | { direction: "within" } {
+  const central = api.groups.find((g) => g.api.location.type === "grid");
+  if (central) return { referenceGroup: central.id };
+  return { direction: "within" };
+}
+
+/**
  * Add the three cardinal edge groups (left/right/bottom) to `api` if
  * they aren't already present, collapsed and with no panels. Then set
  * each one's visibility based on whether it currently holds panels —
