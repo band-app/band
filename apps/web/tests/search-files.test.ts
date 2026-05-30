@@ -1,13 +1,16 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome,
+  type ServerHandle,
+  startServer,
+  trpcData,
+  trpcQuery,
+} from "./helpers/server";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "search-files-test-token";
 
 // ---------------------------------------------------------------------------
@@ -24,106 +27,6 @@ const DEFAULT_TOKEN = "search-files-test-token";
 // repo and pin both the new positive behaviour and the unchanged
 // exclusion semantics.
 // ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-search-files-test-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: opts.tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: opts.tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
-
-const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
-
-async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
-  const url =
-    input !== undefined
-      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
-      : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: defaultHeaders });
-}
-
-async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
-  return body.result.data;
-}
 
 const gitEnv = {
   ...process.env,
@@ -143,7 +46,7 @@ describe("tRPC — workspace.searchFiles", () => {
   let repoPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-search-files-test-");
 
     // Outer workspace: a real git repo with a tracked file.
     repoPath = join(tmpHome, "outer");
@@ -203,10 +106,12 @@ describe("tRPC — workspace.searchFiles", () => {
   });
 
   it("surfaces files inside nested git repositories (issue #530)", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "outer-main",
-      query: "",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "outer-main", query: "" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
 
     const { files } = await trpcData<{ files: string[] }>(res);
@@ -219,10 +124,12 @@ describe("tRPC — workspace.searchFiles", () => {
   });
 
   it("excludes node_modules and .gitignored paths", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "outer-main",
-      query: "",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "outer-main", query: "" },
+      DEFAULT_TOKEN,
+    );
     const { files } = await trpcData<{ files: string[] }>(res);
 
     expect(files.some((f) => f.startsWith("node_modules/"))).toBe(false);
@@ -236,30 +143,48 @@ describe("tRPC — workspace.searchFiles", () => {
     // The exact scenario reported in issue #530: searching `composite`
     // should put `flow-source-composite.ts` at (or very near) the top,
     // even when scattered subsequence matches exist elsewhere.
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "outer-main",
-      query: "composite",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "outer-main", query: "composite" },
+      DEFAULT_TOKEN,
+    );
     const { files } = await trpcData<{ files: string[] }>(res);
     expect(files[0]).toBe("flow-source-composite.ts");
   });
 
   it("respects the limit parameter", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "outer-main",
-      query: "",
-      limit: 2,
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "outer-main", query: "", limit: 2 },
+      DEFAULT_TOKEN,
+    );
     const { files } = await trpcData<{ files: string[] }>(res);
     expect(files.length).toBe(2);
   });
 
   it("returns an error for an unknown workspace", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "nonexistent-main",
-      query: "",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "nonexistent-main", query: "" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(500);
+  });
+
+  it("rejects unauthenticated requests with 401", async () => {
+    // Negative auth test (TEST-13): the band_token cookie gates every
+    // tRPC endpoint at the transport layer; a request without it must
+    // be rejected before it ever reaches `workspace.searchFiles`. We
+    // call `fetch` directly here rather than going through `trpcQuery`
+    // because the helper unconditionally attaches the Cookie header.
+    const url = `${server.url}/trpc/workspace.searchFiles?input=${encodeURIComponent(
+      JSON.stringify({ workspaceId: "outer-main", query: "" }),
+    )}`;
+    const res = await fetch(url);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -274,7 +199,7 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
   let plainDir: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-search-files-test-");
 
     plainDir = join(tmpHome, "plain");
     mkdirSync(plainDir, { recursive: true });
@@ -303,10 +228,12 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
   });
 
   it("lists files in a workspace that is not a git repository", async () => {
-    const res = await trpcQuery(server.url, "workspace.searchFiles", {
-      workspaceId: "plain-main",
-      query: "",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "workspace.searchFiles",
+      { workspaceId: "plain-main", query: "" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const { files } = await trpcData<{ files: string[] }>(res);
     expect(files).toContain("note.md");

@@ -73,7 +73,7 @@ importers:
         specifier: 0.20.0-beta.215
         version: 0.20.0-beta.215(@xterm/xterm@6.1.0-beta.216)
       fzf:
-        specifier: ^0.5.2
+        specifier: 0.5.2
         version: 0.5.2
       node-pty:
         specifier: ^1.1.0
