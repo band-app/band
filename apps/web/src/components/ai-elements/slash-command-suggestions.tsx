@@ -101,7 +101,13 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
         e.stopPropagation();
         handleSelect(filteredSkills[selectedIndex]);
       } else if (e.key === "Escape") {
+        // Swallow Esc so it doesn't bubble to the chat-level handler that
+        // cancels the in-flight task — the user just wants to close this
+        // dropdown. Listener is registered in the capture phase, so
+        // stopPropagation() here also keeps the event from reaching the
+        // textarea's React onKeyDown.
         e.preventDefault();
+        e.stopPropagation();
         setTextareaValue("");
         setCommandHint(null);
       } else if (e.key === "Tab") {
