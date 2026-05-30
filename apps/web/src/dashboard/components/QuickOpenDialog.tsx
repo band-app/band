@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { getFileIcon } from "../lib/file-icon";
 import { formatFileLocation, parseFileLocation } from "../lib/file-location";
+import { shouldBailAutoOpen } from "../lib/quick-open-bail";
 
 interface QuickOpenDialogProps {
   workspaceId: string;
@@ -197,7 +198,9 @@ export function QuickOpenDialog({
     // the file into the wrong workspace's tab state — exactly the leak
     // path described in issue #539. Closing the dialog cleanly returns
     // the parent to the pre-open state without a bogus tab append.
-    if (openedWorkspaceIdRef.current != null && openedWorkspaceIdRef.current !== workspaceId) {
+    // The decision logic is in `shouldBailAutoOpen` (sibling lib
+    // module) so the four-branch contract has direct unit coverage.
+    if (shouldBailAutoOpen(openedWorkspaceIdRef.current, workspaceId)) {
       autoOpened.current = true;
       onOpenChange(false);
       return;
