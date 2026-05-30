@@ -25,9 +25,19 @@
  *     out of results — `.gitignore` is still honoured for everything
  *     else, so `node_modules/`, build output, etc. stay excluded. See
  *     issue #536.
+ *
+ * The same binary also drives `listFiles` (below) which powers the
+ * Quick Open (Cmd+P) file picker. `git ls-files` was the original
+ * implementation but stops at nested git repo boundaries — workspaces
+ * that contain independently-cloned subrepos lost every file outside
+ * the outer worktree (issue #530). ripgrep's `--files --no-require-git`
+ * mode walks the directory tree directly so nested repos / submodules
+ * are surfaced too, while still respecting per-directory `.gitignore`
+ * via `--no-ignore-parent --no-ignore-global` (we want the local
+ * exclude rules but not the user's `~/.gitignore`).
  */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { rgPath } from "@vscode/ripgrep";
 
 export interface RipgrepOptions {
@@ -187,4 +197,84 @@ function createIterator(options: RipgrepOptions): AsyncIterator<RipgrepMatch> {
       throw err;
     },
   };
+}
+
+/**
+ * Buffer cap for `listFiles`. A monorepo workspace easily produces a few
+ * hundred KB of newline-separated paths; 50 MB keeps the same generous
+ * ceiling used elsewhere (see `git-client.ts::MAX_BUFFER`) so a large
+ * tree never truncates silently. We never expose the buffer to a
+ * client — it's only used as a sanity bound for `execFile`.
+ */
+const LIST_FILES_MAX_BUFFER = 50 * 1024 * 1024;
+
+/**
+ * Enumerate every file under `cwd` using `rg --files`, returning paths
+ * relative to `cwd`. This replaces `git ls-files --cached --others
+ * --exclude-standard` (issue #530): `git ls-files` refuses to descend
+ * into nested git repositories, so workspaces containing
+ * independently-cloned subrepos lost every file outside the outer
+ * worktree.
+ *
+ * Flag rationale (in order, all defensible against the issue):
+ *   - `--files` — list paths instead of grepping content.
+ *   - `--hidden` — surface dotfiles (e.g. `.github/workflows/*`); the
+ *     `--glob '!**\/.git'` exclusion below keeps `.git` internals out.
+ *   - `--follow` — follow symlinks (matches users' mental model where
+ *     a linked directory is "part of the project").
+ *   - `--no-require-git` — keep listing files even when `cwd` is not a
+ *     git checkout (Band workspaces are sometimes plain directories;
+ *     see `search-content.test.ts::"non-git directories"`).
+ *   - `--no-ignore-parent` / `--no-ignore-global` / `--no-config` —
+ *     respect the workspace's own `.gitignore` / `.rgignore` but ignore
+ *     the user's `~/.gitignore` and `~/.config/ripgreprc`. We want the
+ *     same exclusions every contributor sees, not whatever the host
+ *     happens to have configured.
+ *   - `--glob '!**\/.git'` — exclude the `.git` directory itself
+ *     (ripgrep already skips it when running inside a checkout, but
+ *     `--no-require-git` turns that off, so we re-add it explicitly).
+ *   - `--glob '!**\/node_modules'` — these are huge and never useful
+ *     in Quick Open; the previous `git ls-files` implementation already
+ *     excluded them via `.gitignore` so this preserves behaviour.
+ *   - `--glob '!**\/.DS_Store'` — macOS metadata droppings; same
+ *     rationale as above.
+ *
+ * Non-UTF-8 paths are dropped by ripgrep when stdout is set to text
+ * encoding; the UI couldn't render them anyway.
+ */
+export function listFiles(cwd: string): Promise<string[]> {
+  const args = [
+    "--files",
+    "--hidden",
+    "--follow",
+    "--no-require-git",
+    "--no-ignore-parent",
+    "--no-ignore-global",
+    "--no-config",
+    "-g",
+    "!**/.git",
+    "-g",
+    "!**/node_modules",
+    "-g",
+    "!**/.DS_Store",
+  ];
+  return new Promise((resolve, reject) => {
+    execFile(
+      rgPath,
+      args,
+      { cwd, maxBuffer: LIST_FILES_MAX_BUFFER, encoding: "utf-8" },
+      (err, stdout, stderr) => {
+        // ripgrep exits non-zero only on true errors here — `--files`
+        // returns 0 on success (even with zero matches) and 2 on
+        // failure. Surface stderr so the caller gets an actionable
+        // message; the WorkspaceNotFoundError path lives upstream.
+        if (err) {
+          reject(new Error(stderr || err.message));
+          return;
+        }
+        const files = stdout.split("\n").filter(Boolean);
+        resolve(files);
+      },
+    );
+  });
 }

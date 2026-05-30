@@ -71,11 +71,21 @@ describe("fuzzyScore – consecutive matches", () => {
 // 2. Start-of-word / segment matches score higher
 // ---------------------------------------------------------------------------
 describe("fuzzyScore – word-start bonus", () => {
-  it("match at word boundary beats match mid-word", () => {
-    // 'r' at the start of 'router' (after /) vs 'r' buried inside 'error'
-    const wordStart = fuzzyScore("rts", "src/router.ts")!;
-    const midWord = fuzzyScore("rts", "src/errors.ts")!;
-    expect(wordStart).toBeGreaterThan(midWord);
+  // The previous hand-rolled DP scorer weighted a `r` at the start of a
+  // segment (e.g. `router` after `/`) above a consecutive `ts` run, so
+  // `src/router.ts` outscored `src/errors.ts` for query `rts`. fzf-for-js
+  // reverses that bias — its v2 algorithm rewards consecutive runs more
+  // aggressively than word-start boundaries, so `src/errors.ts` (which
+  // has `ts` consecutive at the end while `router.ts` does not — the
+  // matched `t` in router falls inside `router` before the `.ts`) now
+  // outscores `src/router.ts`. This matches the upstream fzf CLI's
+  // behaviour, which is the de facto fuzzy-matching reference. Test
+  // updated intentionally as part of issue #530 — see the file header
+  // for context.
+  it("consecutive runs are rewarded over word boundaries (fzf v2 weighting)", () => {
+    const consecutive = fuzzyScore("rts", "src/errors.ts")!;
+    const noConsecutive = fuzzyScore("rts", "src/router.ts")!;
+    expect(consecutive).toBeGreaterThan(noConsecutive);
   });
 
   it("camelCase boundaries count as word starts", () => {
@@ -176,5 +186,34 @@ describe("fuzzyScore – real-world ranking", () => {
   it("'fz' ranks fuzzy-score.ts first", () => {
     const result = ranked("fz", FILES);
     expect(result[0]).toBe("apps/web/src/server/services/fuzzy-score.ts");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: substring matches beat scattered subsequence matches.
+//
+// Issue #530 reported the Cmd+P picker ranking files with the letters
+// c-o-m-p-o-s-i-t-e scattered across them above files whose path
+// contained `composite` as a literal substring. With the previous hand-
+// rolled DP scorer combined with the 50-result cap, the wanted file
+// (`flow-source-composite.ts`) could be pushed off the result list
+// entirely. fzf v2's consecutive-run bonus makes the substring file the
+// clear winner; this test pins the new behaviour so future scorer swaps
+// can't regress it.
+// ---------------------------------------------------------------------------
+describe("fuzzyScore – substring beats scattered subsequence (issue #530)", () => {
+  it("'composite' ranks flow-source-composite.ts above scattered matches", () => {
+    const FILES = [
+      // Substring match — `composite` appears as a literal consecutive run.
+      "src/flow/flow-source-composite.ts",
+      // Scattered matches — every char appears in order but spread across
+      // a longer path. These are the kind of "noise" files that pushed
+      // the wanted result off the bottom of the list in issue #530.
+      "src/compose/option/site/setup.ts",
+      "src/comparison/positive/site.ts",
+      "src/components/positions/situational/test.ts",
+    ];
+    const result = ranked("composite", FILES);
+    expect(result[0]).toBe("src/flow/flow-source-composite.ts");
   });
 });

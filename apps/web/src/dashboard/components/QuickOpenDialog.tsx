@@ -112,7 +112,10 @@ export function QuickOpenDialog({
 
     const delay = searchQuery ? 150 : 0;
     debounceRef.current = setTimeout(() => {
-      adapter.searchWorkspaceFiles!(workspaceId, searchQuery, 50)
+      // Limit raised from 50 → 200 (issue #530) so substring matches in
+      // workspaces with nested git repos / large monorepos can't get
+      // pushed off the result list when the user types a short query.
+      adapter.searchWorkspaceFiles!(workspaceId, searchQuery, 200)
         .then((result) => {
           if (!cancelled) setFiles(result.files);
         })
