@@ -147,7 +147,7 @@ test.describe("Panel visibility context (issue #469)", () => {
 
     // Anchor on B's visible-true marker first — proves the new
     // workspace actually rendered before we assert on A's now-hidden
-    // state (TEST-25: negative assertions need a positive companion).
+    // state.
     await expect(workspacePage.chatTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible();
 
     // A is cached → `wsActive=false` → context value becomes
