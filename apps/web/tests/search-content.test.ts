@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,6 +168,18 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
     writeFileSync(join(repoPath, ".gitignore"), "ignored.txt\n");
     writeFileSync(join(repoPath, "ignored.txt"), "ignored BAND_RG_MARKER skip\n");
 
+    // Tracked file inside a dot-directory — ripgrep skips these by default
+    // (any path starting with `.`), so without `--hidden` find-in-files
+    // silently misses content the user can see in the file picker. See
+    // issue #536.
+    mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
+    writeFileSync(
+      join(repoPath, ".github", "workflows", "ci.yml"),
+      "name: ci\nrun: BAND_RG_MARKER dot-dir content\n",
+    );
+    git(repoPath, ["add", ".github/workflows/ci.yml"]);
+    git(repoPath, ["commit", "-m", "ci workflow"]);
+
     seedState(tmpHome, {
       projects: [
         {
@@ -209,6 +221,39 @@ describe("tRPC — workspace.searchContent (ripgrep)", () => {
       expect(r.content).toContain("BAND_RG_MARKER");
       expect(r.line).toBeGreaterThan(0);
     }
+  });
+
+  it("returns matches from tracked files inside dot-directories (#536)", async () => {
+    const res = await trpcQuery(server.url, "workspace.searchContent", {
+      workspaceId: "repo-main",
+      query: "BAND_RG_MARKER",
+    });
+    expect(res.status).toBe(200);
+
+    const { results } = await trpcData<{ results: SearchResult[] }>(res);
+    expect(results.some((r) => r.file === ".github/workflows/ci.yml")).toBe(true);
+  });
+
+  it("does not surface the .git/ internal database", async () => {
+    // Positive anchor: confirm that .git/HEAD actually contains "ref:" on
+    // the seeded repo. If this ever stops being true (e.g. someone packs
+    // refs and HEAD becomes a SHA), the assertion below becomes vacuous,
+    // so fail loudly here instead of silently passing the negative check.
+    const headContent = readFileSync(join(repoPath, ".git", "HEAD"), "utf-8");
+    expect(headContent).toContain("ref:");
+
+    // With `--hidden` enabled the only thing keeping the .git/ contents
+    // out of results is the explicit `--glob !.git` exclusion — verify
+    // it sticks. The query "ref:" is chosen because none of the seeded
+    // fixture files contain it, so any match would have to come from
+    // .git/ itself.
+    const res = await trpcQuery(server.url, "workspace.searchContent", {
+      workspaceId: "repo-main",
+      query: "ref:",
+    });
+    expect(res.status).toBe(200);
+    const { results } = await trpcData<{ results: SearchResult[] }>(res);
+    expect(results.some((r) => r.file.startsWith(".git/"))).toBe(false);
   });
 
   it("respects .gitignore and excludes ignored files", async () => {
