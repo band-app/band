@@ -85,18 +85,25 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
     [inputValue, setTextareaValue, setCommandHint],
   );
 
-  // Intercept keyboard events on the textarea for navigation
+  // Intercept keyboard events on the textarea for navigation.
+  //
+  // The listener is gated only on `isOpen` — NOT on `hasResults` — so
+  // that Esc is swallowed even when the user has typed `/something`
+  // that matches no skill (e.g. mid-typing before a longer command
+  // name becomes valid). Otherwise Esc would fall through to the
+  // chat-level handler that cancels the in-flight task. Mirrors the
+  // same fix applied to `file-mention-suggestions.tsx`.
   useEffect(() => {
-    if (!isOpen || !hasResults) return;
+    if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" && hasResults) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev + 1) % filteredSkills.length);
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp" && hasResults) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
-      } else if (e.key === "Enter" && !e.shiftKey) {
+      } else if (e.key === "Enter" && !e.shiftKey && hasResults) {
         e.preventDefault();
         e.stopPropagation();
         handleSelect(filteredSkills[selectedIndex]);
@@ -110,7 +117,7 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
         e.stopPropagation();
         setTextareaValue("");
         setCommandHint(null);
-      } else if (e.key === "Tab") {
+      } else if (e.key === "Tab" && hasResults) {
         e.preventDefault();
         handleSelect(filteredSkills[selectedIndex]);
       }

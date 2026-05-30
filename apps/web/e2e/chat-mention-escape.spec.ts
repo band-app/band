@@ -163,11 +163,11 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     await expect(chatPane.stopButton).toBeVisible();
 
     // Type `@` in the (now-empty) prompt to open the file-mention
-    // dropdown. `fill("")` after submit ensures the textarea is empty
-    // first — most submit paths clear it, but the prompt's draft logic
-    // can leave whitespace, and the dropdown's regex needs `@` at
-    // position 0 or preceded by whitespace.
-    await chatPane.promptInput.fill("");
+    // dropdown. `clearPrompt()` ensures the textarea is empty first —
+    // most submit paths clear it, but the prompt's draft logic can
+    // leave whitespace, and the dropdown's regex needs `@` at position
+    // 0 or preceded by whitespace.
+    await chatPane.clearPrompt();
     await chatPane.focusPrompt();
     await chatPane.pressKey("@");
 
@@ -195,17 +195,24 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     //    Esc, that assertion might pass before the cancel response
     //    landed.
     //
-    //    Instead, poll the button's visibility over a 1.5 s window via
-    //    repeated `toBeVisible()` calls. Each call returns ~immediately
-    //    when visible and only waits if the button is missing; the
-    //    tight loop consumes real wall-clock time as Playwright keeps
-    //    querying the DOM, comfortably longer than the worst-case
-    //    cancel round-trip. If the button ever becomes invisible in
-    //    that window, `toBeVisible({ timeout: 100 })` times out and
-    //    the test fails — catching the regression.
+    //    The natural reflex is `expect.poll(() => isVisible(), {
+    //    timeout: 1500 }).toBe(true)`, but that's WRONG here: poll
+    //    stops on the first iteration where the predicate returns the
+    //    expected value, so it succeeds immediately when the button is
+    //    visible and never samples STABILITY over the window. We need
+    //    the opposite — assert visibility is maintained across many
+    //    samples spanning the full 1.5 s.
     //
-    //    `page.waitForTimeout` is banned by repo convention, so this
-    //    natural-DOM-query polling is the idiomatic alternative.
+    //    Instead, loop with `toBeVisible({ timeout: 100 })` for
+    //    1.5 s. Each call returns ~immediately when visible and only
+    //    waits if the button is missing; the tight loop consumes real
+    //    wall-clock time as Playwright keeps querying the DOM,
+    //    comfortably longer than the worst-case cancel round-trip. If
+    //    the button ever becomes invisible in that window, the per-
+    //    iteration assertion times out and the test fails — catching
+    //    the regression. `page.waitForTimeout` is banned by repo
+    //    convention, so this natural-DOM-query polling is the
+    //    idiomatic alternative.
     const deadline = Date.now() + 1500;
     while (Date.now() < deadline) {
       await expect(chatPane.stopButton).toBeVisible({ timeout: 100 });

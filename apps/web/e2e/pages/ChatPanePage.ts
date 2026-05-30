@@ -88,6 +88,16 @@ export class ChatPanePage {
     });
   }
 
+  /** Clear the prompt textarea. Most submit paths empty the textarea
+   *  already, but the draft-persistence logic in `PromptInput` can
+   *  leave whitespace behind — call this before tests that need a
+   *  guaranteed-empty input (e.g. typing `@` or `/` at position 0). */
+  async clearPrompt(): Promise<void> {
+    await test.step("Clear the prompt", async () => {
+      await this.promptInput.fill("");
+    });
+  }
+
   /** Submit the typed message via Enter (mirrors the keyboard path users
    *  take). The form's submit handler triggers `useChatSubscription.send`
    *  which dispatches the optimistic user-message + task-started events. */
