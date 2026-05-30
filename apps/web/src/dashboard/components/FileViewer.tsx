@@ -117,6 +117,15 @@ interface FileViewerProps {
    * so the close path can keep the tab open.
    */
   onSaveAs?: (content: string) => Promise<string | null>;
+  /**
+   * Called when the workspace/external loader rejects (typically
+   * `ENOENT: no such file or directory ...` from the server's `stat`
+   * call). The parent can use this to self-heal stale tab state — e.g.
+   * dropping a persisted active tab that points at a path which doesn't
+   * exist in the current workspace (issue #539: a cross-workspace leak
+   * could write a non-existent path into `band-open-tabs:<ws>`).
+   */
+  onLoadError?: (err: { filePath: string; message: string }) => void;
 }
 
 function getFilename(path: string): string {
@@ -213,6 +222,7 @@ export function FileViewer({
   languageOverride,
   onLanguageOverrideChange,
   onSaveAs,
+  onLoadError,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -247,6 +257,13 @@ export function FileViewer({
   const editorViewRef = useRef<EditorView | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
+  // Keep a ref to the latest `onLoadError` so the load effect's deps
+  // don't change every render (the callback identity from the parent is
+  // not always stable, and including it would re-fire the loader on
+  // every render). Mirror-pair lives next to the other ref/state-mirror
+  // pairs above so a reader sees all of them in one place.
+  const onLoadErrorRef = useRef(onLoadError);
+  onLoadErrorRef.current = onLoadError;
 
   // Untitled tabs are "dirty" whenever they have any content typed in —
   // there's no on-disk baseline to compare against. An empty buffer
@@ -375,7 +392,16 @@ export function FileViewer({
         if (!cancelled) setData(result);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to read file");
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to read file";
+        setError(message);
+        // Notify the parent so it can self-heal stale state (e.g. drop a
+        // persisted active tab pointing at a path that doesn't exist in
+        // this workspace, the leak path described in issue #539). The
+        // callback is intentionally fire-and-forget — the FileViewer
+        // still surfaces the error itself, and the parent decides
+        // whether the error is worth acting on (ENOENT vs. transient).
+        onLoadErrorRef.current?.({ filePath, message });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -140,6 +140,18 @@ export function QuickOpenDialog({
   const autoOpened = useRef(false);
   const [dialogVisible, setDialogVisible] = useState(!autoOpen);
 
+  // Workspace the dialog was opened against. Captured at the moment of
+  // open so a workspace switch in flight (between `open` going true and
+  // the search resolving) can't cause the dialog to auto-open the file
+  // against the NEW workspace — that's how a chat-file click in
+  // workspace A used to leak into workspace B's tab list and write a
+  // bogus path into `band-open-tabs:<B>` (issue #539). Even with the
+  // workspace-scoped `band:open-file` dispatcher in place, this is the
+  // belt-and-braces guard inside the dialog: if `workspaceId` flips
+  // between open and resolve, we abandon the auto-open silently rather
+  // than running `onOpenFile` against a stale workspace handler.
+  const openedWorkspaceIdRef = useRef<string | null>(null);
+
   // When the dialog opens with autoOpen, hide it until search resolves.
   // When opened normally (no autoOpen), show it immediately.
   // This is needed because useState(!autoOpen) only evaluates on mount —
@@ -147,12 +159,26 @@ export function QuickOpenDialog({
   useEffect(() => {
     if (open) {
       setDialogVisible(!autoOpen);
+      openedWorkspaceIdRef.current = workspaceId;
     }
-  }, [open, autoOpen]);
+  }, [open, autoOpen, workspaceId]);
 
   useEffect(() => {
     if (!open || !autoOpen || autoOpened.current) return;
     if (!searchResolved.current) return; // search hasn't completed yet
+
+    // Bail if the workspace switched while we were waiting for the
+    // search. `onOpenFile` is bound to the parent's *current* workspace
+    // (e.g. `handleOpenFile(activeWorkspaceId, filename)` in
+    // `SharedDockviewLayout`), so firing it after a switch would write
+    // the file into the wrong workspace's tab state — exactly the leak
+    // path described in issue #539. Closing the dialog cleanly returns
+    // the parent to the pre-open state without a bogus tab append.
+    if (openedWorkspaceIdRef.current != null && openedWorkspaceIdRef.current !== workspaceId) {
+      autoOpened.current = true;
+      onOpenChange(false);
+      return;
+    }
 
     autoOpened.current = true;
     if (files.length === 1) {
@@ -167,7 +193,7 @@ export function QuickOpenDialog({
       // 0 or 2+ results — reveal the dialog so the user can pick
       setDialogVisible(true);
     }
-  }, [autoOpen, files, open, parsedQuery, onOpenFile, onOpenChange]);
+  }, [autoOpen, files, open, parsedQuery, onOpenFile, onOpenChange, workspaceId]);
 
   // Keep a ref to the current query so the close effect can read it without depending on it
   const queryRef = useRef(query);
@@ -184,6 +210,7 @@ export function QuickOpenDialog({
       setFiles([]);
       autoOpened.current = false;
       searchResolved.current = false;
+      openedWorkspaceIdRef.current = null;
     }
   }, [open, onQueryChange]);
 
@@ -241,7 +268,11 @@ export function QuickOpenDialog({
 
   return (
     <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]" showCloseButton={false}>
+      <DialogContent
+        data-testid="quick-open__root"
+        className="overflow-hidden p-0 sm:max-w-[520px]"
+        showCloseButton={false}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Quick Open</DialogTitle>
           <DialogDescription>Search for files by name</DialogDescription>

@@ -64,6 +64,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "./ai-elements/conversation";
+import { FileLinkWorkspaceProvider } from "./ai-elements/file-link-components";
 import { FileMentionSuggestions } from "./ai-elements/file-mention-suggestions";
 import { groupMessageParts } from "./ai-elements/group-parts";
 import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
@@ -706,29 +707,38 @@ export function ChatView({
   }, [messages]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
-        <ConversationContent>
-          {/* Sentinel for scroll-back pagination */}
-          {hasMore && !loadingHistory && (
-            <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
-          )}
+    // Scope every `band-file:` link clicked inside this chat to *this*
+    // workspace — `dispatchOpenFile` reads the id from context, so a
+    // dockview that has both workspace A and workspace B alive at once
+    // (LRU cache) routes each click to the chat's owning workspace rather
+    // than racing every mounted layout against the active tab. Without
+    // this, a click in workspace A's chat would open the file in
+    // whichever workspace happens to be active when the listener fires
+    // (issue #539).
+    <FileLinkWorkspaceProvider workspaceId={workspaceId}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
+          <ConversationContent>
+            {/* Sentinel for scroll-back pagination */}
+            {hasMore && !loadingHistory && (
+              <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
+            )}
 
-          {/* Loading indicator for older messages — skeleton row matching
+            {/* Loading indicator for older messages — skeleton row matching
               the bubble layout so the prepended history doesn't pop. */}
-          {loadingOlder && (
-            <output
-              className="flex animate-pulse flex-col gap-2 py-3"
-              aria-busy="true"
-              aria-label="Loading older messages"
-            >
-              <SkeletonBar widthClass="w-2/3" />
-              <SkeletonBar widthClass="w-3/4" />
-              <SkeletonBar widthClass="w-1/2" />
-            </output>
-          )}
+            {loadingOlder && (
+              <output
+                className="flex animate-pulse flex-col gap-2 py-3"
+                aria-busy="true"
+                aria-label="Loading older messages"
+              >
+                <SkeletonBar widthClass="w-2/3" />
+                <SkeletonBar widthClass="w-3/4" />
+                <SkeletonBar widthClass="w-1/2" />
+              </output>
+            )}
 
-          {/*
+            {/*
             Skeleton / empty-state decision (issue #478, simplified):
             The ONLY signal that determines "we're still loading vs. done
             loading" is whether the EventSource is connected. Everything
@@ -748,54 +758,92 @@ export function ChatView({
             with empty messages" and "messages populate" is sub-frame in
             practice — empty-state flash is imperceptible.
           */}
-          {messages.length === 0 && !subscription.isConnected && <ConversationSkeleton />}
+            {messages.length === 0 && !subscription.isConnected && <ConversationSkeleton />}
 
-          {messages.length === 0 && subscription.isConnected && (
-            <ConversationEmptyState
-              icon={
-                agentType ? (
-                  <AgentIcon type={agentType} className="size-8" />
-                ) : (
-                  <Bot className="size-8" />
-                )
-              }
-              title={workspaceName}
-              description="Send a message to start coding"
-            />
-          )}
+            {messages.length === 0 && subscription.isConnected && (
+              <ConversationEmptyState
+                icon={
+                  agentType ? (
+                    <AgentIcon type={agentType} className="size-8" />
+                  ) : (
+                    <Bot className="size-8" />
+                  )
+                }
+                title={workspaceName}
+                description="Send a message to start coding"
+              />
+            )}
 
-          {(() => {
-            return messages.map((message, messageIndex) => {
-              const isLastMessage = messageIndex === messages.length - 1;
-              const isLastAssistant = message.role === "assistant" && isLastMessage;
-              const hasPendingInteractiveTool =
-                isLastAssistant &&
-                message.parts.some(
+            {(() => {
+              return messages.map((message, messageIndex) => {
+                const isLastMessage = messageIndex === messages.length - 1;
+                const isLastAssistant = message.role === "assistant" && isLastMessage;
+                const hasPendingInteractiveTool =
+                  isLastAssistant &&
+                  message.parts.some(
+                    (p) =>
+                      isToolUIPart(p) &&
+                      IN_PROGRESS_STATES.has(p.state) &&
+                      (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
+                  );
+                const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
+
+                if (message.role !== "assistant") {
+                  // User messages render normally
+                  const userParts = groupMessageParts(message.parts);
+                  if (userParts.length === 0) return null;
+                  return (
+                    <Message key={message.id} from="user">
+                      <MessageContent>
+                        {userParts.map((segment) => {
+                          if (
+                            segment.type === "text" &&
+                            segment.part.type === "text" &&
+                            segment.part.text.trim()
+                          ) {
+                            return (
+                              <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                                {segment.part.text}
+                              </MessageResponse>
+                            );
+                          }
+                          if (segment.type === "file") {
+                            return (
+                              <MessageFilePart
+                                key={`${message.id}-file-${segment.partIndex}`}
+                                part={segment.part}
+                              />
+                            );
+                          }
+                          return null;
+                        })}
+                      </MessageContent>
+                    </Message>
+                  );
+                }
+
+                // Assistant message — under the chat-events model every queued
+                // turn becomes its own user-role message, so we never need to
+                // split an assistant message at `data-prompt` boundaries.
+                const visibleParts = message.parts.filter(
                   (p) =>
-                    isToolUIPart(p) &&
-                    IN_PROGRESS_STATES.has(p.state) &&
-                    (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
+                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
                 );
-              const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-
-              if (message.role !== "assistant") {
-                // User messages render normally
-                const userParts = groupMessageParts(message.parts);
-                if (userParts.length === 0) return null;
+                if (visibleParts.length === 0 && !showThinking) return null;
                 return (
-                  <Message key={message.id} from="user">
+                  <Message key={message.id} from="assistant">
                     <MessageContent>
-                      {userParts.map((segment) => {
-                        if (
-                          segment.type === "text" &&
-                          segment.part.type === "text" &&
-                          segment.part.text.trim()
-                        ) {
-                          return (
-                            <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                              {segment.part.text}
-                            </MessageResponse>
-                          );
+                      {groupMessageParts(message.parts).map((segment) => {
+                        if (segment.type === "text") {
+                          const { part, partIndex } = segment;
+                          if (part.type === "text" && part.text.trim()) {
+                            return (
+                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                                {part.text}
+                              </MessageResponse>
+                            );
+                          }
+                          return null;
                         }
                         if (segment.type === "file") {
                           return (
@@ -805,156 +853,120 @@ export function ChatView({
                             />
                           );
                         }
-                        return null;
+                        const item = toolPartToItem(segment.part);
+                        if (isTaskTool(item.toolName)) return null;
+                        return (
+                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
+                        );
                       })}
+                      {showThinking && <ThinkingIndicator />}
                     </MessageContent>
                   </Message>
                 );
-              }
-
-              // Assistant message — under the chat-events model every queued
-              // turn becomes its own user-role message, so we never need to
-              // split an assistant message at `data-prompt` boundaries.
-              const visibleParts = message.parts.filter(
-                (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-              );
-              if (visibleParts.length === 0 && !showThinking) return null;
-              return (
-                <Message key={message.id} from="assistant">
-                  <MessageContent>
-                    {groupMessageParts(message.parts).map((segment) => {
-                      if (segment.type === "text") {
-                        const { part, partIndex } = segment;
-                        if (part.type === "text" && part.text.trim()) {
-                          return (
-                            <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                              {part.text}
-                            </MessageResponse>
-                          );
-                        }
-                        return null;
-                      }
-                      if (segment.type === "file") {
-                        return (
-                          <MessageFilePart
-                            key={`${message.id}-file-${segment.partIndex}`}
-                            part={segment.part}
-                          />
-                        );
-                      }
-                      const item = toolPartToItem(segment.part);
-                      if (isTaskTool(item.toolName)) return null;
-                      return (
-                        <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                      );
-                    })}
-                    {showThinking && <ThinkingIndicator />}
-                  </MessageContent>
-                </Message>
-              );
-            });
-          })()}
-          {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
-            <Message from="assistant">
-              <MessageContent>
-                <ThinkingIndicator />
-              </MessageContent>
-            </Message>
-          )}
-          {queuedMessagesView.length > 0 && (
-            <DndContext
-              sensors={dndSensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleReorderQueued}
-            >
-              <SortableContext
-                items={queuedMessagesView.map((m) => m.id)}
-                strategy={verticalListSortingStrategy}
+              });
+            })()}
+            {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
+              <Message from="assistant">
+                <MessageContent>
+                  <ThinkingIndicator />
+                </MessageContent>
+              </Message>
+            )}
+            {queuedMessagesView.length > 0 && (
+              <DndContext
+                sensors={dndSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleReorderQueued}
               >
-                {queuedMessagesView.map((m) => (
-                  <QueuedMessageBubble
-                    key={m.id}
-                    id={m.id}
-                    text={m.text}
-                    files={m.files}
-                    onCancel={() => handleCancelQueued(m.id)}
-                    onEdit={(newText) => handleEditQueued(m.id, newText)}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+                <SortableContext
+                  items={queuedMessagesView.map((m) => m.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {queuedMessagesView.map((m) => (
+                    <QueuedMessageBubble
+                      key={m.id}
+                      id={m.id}
+                      text={m.text}
+                      files={m.files}
+                      onCancel={() => handleCancelQueued(m.id)}
+                      onEdit={(newText) => handleEditQueued(m.id, newText)}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+            )}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
-        <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        <PromptInput
-          onSubmit={handleSubmit}
-          draftKey={workspaceId}
-          visible={visible}
-          wsActive={wsActive}
-        >
-          <SlashCommandSuggestions skills={skills} />
-          <FileMentionSuggestions workspaceId={workspaceId} />
-          <PromptInputTextarea
-            placeholder="Type a message..."
-            onEscape={handleEscape}
-            onPreviousMessage={getLastUserMessage}
-            // Shift+Tab toggles Edit/Plan mode, but only while the chat
-            // input has focus — the same band:toggle-mode listener picks
-            // up palette invocations as well.
-            onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
-          />
-          <PromptInputActions>
-            <div className="flex items-center gap-0.5">
-              <PromptInputAttach />
-              {supportsSessionListing && (
-                <SessionHistoryMenu
-                  workspaceId={workspaceId}
-                  chatId={chatId}
-                  activeSessionId={currentSessionId}
-                  onSelectSession={handleSelectSession}
-                  onNewSession={handleNewSession}
-                />
-              )}
-              {contextMeterEnabled && (
-                <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
-              )}
-              {(agentGroups.length > 0 || models.length > 0) && (
-                <AgentModelMenu
-                  agentGroups={agentGroups}
-                  currentAgentId={codingAgentId}
-                  currentAgentType={agentType}
-                  selectedModel={selectedModel}
-                  onSelectModel={handleModelSelect}
-                  onSwitchAgent={onSwitchAgent}
-                  disabled={isStreaming}
-                />
-              )}
-              {modes.length > 0 && (
-                <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
-              )}
-            </div>
-            {/* PromptInputSubmit was built against the AI SDK's ChatStatus
+        <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
+          <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
+          <PromptInput
+            onSubmit={handleSubmit}
+            draftKey={workspaceId}
+            visible={visible}
+            wsActive={wsActive}
+          >
+            <SlashCommandSuggestions skills={skills} />
+            <FileMentionSuggestions workspaceId={workspaceId} />
+            <PromptInputTextarea
+              placeholder="Type a message..."
+              onEscape={handleEscape}
+              onPreviousMessage={getLastUserMessage}
+              // Shift+Tab toggles Edit/Plan mode, but only while the chat
+              // input has focus — the same band:toggle-mode listener picks
+              // up palette invocations as well.
+              onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
+            />
+            <PromptInputActions>
+              <div className="flex items-center gap-0.5">
+                <PromptInputAttach />
+                {supportsSessionListing && (
+                  <SessionHistoryMenu
+                    workspaceId={workspaceId}
+                    chatId={chatId}
+                    activeSessionId={currentSessionId}
+                    onSelectSession={handleSelectSession}
+                    onNewSession={handleNewSession}
+                  />
+                )}
+                {contextMeterEnabled && (
+                  <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
+                )}
+                {(agentGroups.length > 0 || models.length > 0) && (
+                  <AgentModelMenu
+                    agentGroups={agentGroups}
+                    currentAgentId={codingAgentId}
+                    currentAgentType={agentType}
+                    selectedModel={selectedModel}
+                    onSelectModel={handleModelSelect}
+                    onSwitchAgent={onSwitchAgent}
+                    disabled={isStreaming}
+                  />
+                )}
+                {modes.length > 0 && (
+                  <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
+                )}
+              </div>
+              {/* PromptInputSubmit was built against the AI SDK's ChatStatus
                 union (`"ready" | "submitted" | "streaming" | "error"`).
                 Our reducer's ChatStatus is the same shape under different
                 names; map at the boundary. */}
-            <PromptInputSubmit
-              status={
-                status === "submitting"
-                  ? "submitted"
-                  : status === "idle" || status === "completed"
-                    ? "ready"
-                    : status
-              }
-              onStop={handleStop}
-            />
-          </PromptInputActions>
-        </PromptInput>
+              <PromptInputSubmit
+                status={
+                  status === "submitting"
+                    ? "submitted"
+                    : status === "idle" || status === "completed"
+                      ? "ready"
+                      : status
+                }
+                onStop={handleStop}
+              />
+            </PromptInputActions>
+          </PromptInput>
+        </div>
       </div>
-    </div>
+    </FileLinkWorkspaceProvider>
   );
 }
 
