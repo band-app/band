@@ -363,4 +363,58 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
   // isolation (only capture on `open: false → true`, never on
   // mid-flight `workspaceId` changes) is documented in
   // `QuickOpenDialog.tsx` and was verified by code review on PR #545.
+
+  test("cross-workspace event with a matching filename does NOT leak the file into the wrong workspace's persisted tab list", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+
+    // Both worktrees have a file at `shared.ts`. Without the fix, the
+    // SharedDockviewLayout listener would catch a workspace-agnostic
+    // `band:open-file` event addressed to A while B is active, route
+    // it through QuickOpenDialog.autoOpen, find `shared.ts` in B's
+    // index, and write the path into `band-open-tabs:<B>` — the
+    // exact symptom in the issue #539 description ("workspace B's
+    // Files panel tries to open the same workspace-relative path
+    // against B's root"). With the fix, the listener filters on
+    // `detail.workspaceId` and silently drops the cross-workspace
+    // event before the dialog can open.
+    //
+    // Verified against origin/main (the bug code): without the fix,
+    // after dispatching `{ filename: "shared.ts", workspaceId: A }`
+    // while B is active and waiting ~2 s for the full debounce +
+    // search + autoOpen + persist effect, B's tab list reads
+    // `{"tabs":["shared.ts"],"active":"shared.ts"}`. The fix code
+    // leaves B's tab list empty.
+    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.waitForReady();
+    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
+    await workspacePage.switchWorkspace(WORKSPACE_B);
+    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
+    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
+
+    await workspacePage.writeOpenTabsState(WORKSPACE_B, { tabs: [], active: null });
+
+    await workspacePage.dispatchOpenFileEvent({
+      filename: "shared.ts",
+      workspaceId: WORKSPACE_A,
+    });
+
+    // Poll for 3 s — the bug's full lifecycle (150 ms debounce +
+    // search round-trip + autoOpen effect + per-workspace-state
+    // propagation + CodeBrowserView openTabPinned + useFileTabs
+    // persist effect) takes ~2 s on a slow CI worker. A regression
+    // would surface within that window as `shared.ts` appearing in
+    // B's tab list.
+    await expect
+      .poll(
+        async () => {
+          const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
+          return state?.tabs ?? [];
+        },
+        { timeout: 3000 },
+      )
+      .not.toContain("shared.ts");
+  });
 });
