@@ -63,6 +63,7 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { pathInside } from "../lib/path-inside";
 import { consumeExternalOpen, subscribeExternalOpens } from "../lib/pending-external-open";
+import { shouldDropPersistedTab } from "../lib/persisted-tab-self-heal";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -460,6 +461,34 @@ export function CodeBrowserView({
     // editor renders immediately when returning to a workspace.
     return fileTabs.activeTabPath ?? "";
   });
+  // Persisted-tab restore self-heal (issue #539): when this mount's
+  // initial `viewFilePath` came from `fileTabs.activeTabPath` (a value
+  // restored from `band-open-tabs:<ws>` in localStorage) rather than
+  // explicit navigation, and the FileViewer then fails to load it with
+  // an ENOENT-style error, drop the tab silently instead of leaving a
+  // broken tab pinned to the workspace forever. This is belt-and-braces
+  // against any code path that ever writes a stale path into the
+  // persisted tab list — the root-cause fix in
+  // `dispatchOpenFile`/`QuickOpenDialog` prevents NEW leaks, but
+  // anything already persisted on a user's machine from an older build
+  // self-heals on the next mount.
+  //
+  // The ref captures ONE path — the active tab restored on first mount.
+  // The self-filtering is by path inequality in `handleFileLoadError`:
+  // any subsequent navigation to a different path won't match this
+  // ref's value, so the handler short-circuits without touching the
+  // user's chosen tab. We only clear the ref after a successful
+  // self-heal close (to prevent re-firing on re-mount of the same
+  // FileViewer instance), not on every navigation — keeping the clear
+  // out of the navigation path means the ref is dead-simple to reason
+  // about: "this path, this mount, ENOENT → close once and never
+  // again." A user who deliberately re-opens the same broken path
+  // after the auto-close will not trigger a second auto-close (the
+  // ref is already null) — they'll see the ENOENT error and can
+  // dismiss the tab manually.
+  const initialRestoredTabRef = useRef<string | null>(
+    !file && fileTabs.activeTabPath ? fileTabs.activeTabPath : null,
+  );
   const [viewLine, setViewLine] = useState<number | undefined>(() => {
     if (!file) return undefined;
     return parseFileLocation(file).line;
@@ -1086,6 +1115,26 @@ export function CodeBrowserView({
       fileTabs.closeTab(filePath);
     },
     [fileTabs.closeTab, tabState.removeFile],
+  );
+
+  // Self-heal handler for FileViewer load errors on persisted-tab
+  // restores (see `initialRestoredTabRef` above and issue #539). The
+  // four-branch decision lives in the pure `shouldDropPersistedTab`
+  // helper at module scope (above) so the contract is unit-testable
+  // without rendering CodeBrowserView; the only state read here is
+  // the ref's current value.
+  const handleFileLoadError = useCallback(
+    ({ filePath, message }: { filePath: string; message: string }) => {
+      if (!shouldDropPersistedTab(filePath, initialRestoredTabRef.current, message)) return;
+      // Clear the ref first so a re-render between `handleTabClose`
+      // and the active-tab-sync effect doesn't trigger this handler
+      // again for the same path. Subsequent loads of a *different*
+      // tab don't match the ref's value, so they're already filtered
+      // by the helper's first check.
+      initialRestoredTabRef.current = null;
+      handleTabClose(filePath);
+    },
+    [handleTabClose],
   );
 
   const handleBack = useCallback(() => {
@@ -1924,6 +1973,7 @@ export function CodeBrowserView({
                 ? (content) => handleSaveUntitled(viewFilePath, content)
                 : undefined
             }
+            onLoadError={handleFileLoadError}
             toolbar={
               search.searchOpen ? (
                 <SearchBar
@@ -2139,6 +2189,7 @@ export function CodeBrowserView({
                         ? (content) => handleSaveUntitled(viewFilePath, content)
                         : undefined
                     }
+                    onLoadError={handleFileLoadError}
                     toolbar={
                       search.searchOpen ? (
                         <SearchBar

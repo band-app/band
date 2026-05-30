@@ -289,6 +289,18 @@ export class WorkspacePage {
     await this.maximizeButtons.first().waitFor({ state: "visible", timeout: 15_000 });
   }
 
+  /** Wait for the mobile workspace layout to be interactive. The
+   *  mobile route doesn't render the dockview's header buttons, so
+   *  `waitForReady` (which keys off Maximize) won't work — instead
+   *  we anchor on the workspace tab nav's "Files" button, set by
+   *  `WorkspaceTabNav.tsx`. The aria-label is system-controlled,
+   *  not localisable copy. */
+  async waitForMobileReady(): Promise<void> {
+    await this.page
+      .getByRole("button", { name: "Files" })
+      .waitFor({ state: "visible", timeout: 15_000 });
+  }
+
   /** Click the Nth Maximize button (0-indexed). Useful when the layout
    *  has multiple groups and the test wants to target a specific one. */
   async maximizePanel(index = 0): Promise<void> {
@@ -411,6 +423,102 @@ export class WorkspacePage {
       result: { data: { tree: DockviewLayoutSnapshot | null } };
     };
     return body.result.data.tree;
+  }
+
+  /** The QuickOpenDialog content root. `data-testid` is set on
+   *  `DialogContent` in `QuickOpenDialog.tsx` — system-controlled,
+   *  BEM convention — so the locator stays stable against placeholder
+   *  string changes or visible-copy edits (the alternative
+   *  `getByPlaceholder("Search files by name...")` would tie the test
+   *  to a localisable English copy).
+   *
+   *  Used by tests that need to observe whether the dialog is mounted
+   *  in response to a `band:open-file` event, particularly when proving
+   *  cross-workspace event filtering (issue #539). */
+  quickOpenDialog(): Locator {
+    return this.page.getByTestId("quick-open__root");
+  }
+
+  /** Dismiss the QuickOpenDialog via the Escape key — same path a
+   *  real user would take. Encapsulated here so test bodies don't
+   *  reach for `page.keyboard.*` directly. */
+  async closeQuickOpenDialog(): Promise<void> {
+    await test.step("Press Escape to close Quick Open dialog", async () => {
+      await this.page.keyboard.press("Escape");
+    });
+  }
+
+  /** Dispatch a synthetic `band:open-file` window event into the page
+   *  context. Captures the cross-workspace routing contract under test:
+   *  events addressed to a specific workspace must reach only THAT
+   *  workspace's listener, while events with no `workspaceId` fall
+   *  through to the currently-active workspace (backwards-compat for
+   *  legacy / non-chat dispatchers). */
+  async dispatchOpenFileEvent(opts: { filename: string; workspaceId?: string }): Promise<void> {
+    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+    await test.step(`Dispatch band:open-file for "${opts.filename}"${target}`, async () => {
+      await this.page.evaluate(({ filename, workspaceId }) => {
+        window.dispatchEvent(
+          new CustomEvent("band:open-file", {
+            detail: { filename, workspaceId },
+          }),
+        );
+      }, opts);
+    });
+  }
+
+  /** Write the persisted open-tabs state for a workspace directly into
+   *  localStorage under the key `band-open-tabs:<workspaceId>`. Used
+   *  by tests that need to seed a "this workspace has a stale tab
+   *  restored from a prior session" baseline, e.g. the self-heal
+   *  regression for issue #539: a tab pointing at a path that doesn't
+   *  exist on disk must be silently dropped on the next mount. */
+  async writeOpenTabsState(
+    workspaceId: string,
+    state: { tabs: string[]; active: string | null },
+  ): Promise<void> {
+    await test.step(`Seed band-open-tabs:${workspaceId}`, async () => {
+      await this.page.evaluate(
+        ({ key, value }) => {
+          localStorage.setItem(key, value);
+        },
+        { key: `band-open-tabs:${workspaceId}`, value: JSON.stringify(state) },
+      );
+    });
+  }
+
+  /** Read the persisted open-tabs state for a workspace out of
+   *  localStorage. Returns `null` when the entry is missing or
+   *  malformed (matches the runtime parse semantics in
+   *  `parseTabState`). Used by self-heal regression tests to assert
+   *  that a stale tab was actually removed from storage, not just
+   *  hidden from the UI. */
+  async readOpenTabsState(
+    workspaceId: string,
+  ): Promise<{ tabs: string[]; active: string | null } | null> {
+    return await this.page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      try {
+        const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
+        if (!Array.isArray(parsed.tabs)) return null;
+        const tabs: string[] = [];
+        for (const t of parsed.tabs) {
+          if (typeof t === "string") tabs.push(t);
+          else if (
+            t !== null &&
+            typeof t === "object" &&
+            typeof (t as { filePath?: unknown }).filePath === "string"
+          ) {
+            tabs.push((t as { filePath: string }).filePath);
+          }
+        }
+        const active = typeof parsed.active === "string" ? parsed.active : null;
+        return { tabs, active };
+      } catch {
+        return null;
+      }
+    }, `band-open-tabs:${workspaceId}`);
   }
 }
 

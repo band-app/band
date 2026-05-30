@@ -1152,18 +1152,28 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("keydown", handler, true);
   }, []);
 
-  // Listen for file link clicks from chat messages → open Quick Open with query
+  // Listen for file link clicks from chat messages → open Quick Open with query.
+  //
+  // Filter by `detail.workspaceId` so a click in workspace A's chat doesn't
+  // open the file against workspace B when B is the currently-active tab.
+  // The dockview keeps up to `maxCachedWorkspaces` workspace subtrees alive
+  // at once, but only this single layout owns the Quick Open dialog —
+  // dropping cross-workspace events here is what keeps the dialog bound
+  // to the correct workspace (see `dispatchOpenFile` in
+  // `file-link-components.tsx` and issue #539). A missing detail
+  // (legacy dispatcher / forward-compat) falls through to the active
+  // workspace so any non-chat caller keeps working.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filename: string }>).detail;
-      if (detail?.filename) {
-        setQuickOpenQuery(detail.filename);
-        setQuickOpenOpen(true);
-      }
+      const detail = (e as CustomEvent<{ filename?: string; workspaceId?: string }>).detail;
+      if (!detail?.filename) return;
+      if (detail.workspaceId && detail.workspaceId !== activeWorkspaceId) return;
+      setQuickOpenQuery(detail.filename);
+      setQuickOpenOpen(true);
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
-  }, []);
+  }, [activeWorkspaceId]);
 
   // File-tree toolbar window-event triggers
   useEffect(() => {

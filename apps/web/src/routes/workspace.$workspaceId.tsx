@@ -249,18 +249,24 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
     setActiveTab("code");
   }, []);
 
-  // Listen for file link clicks from chat messages → open Quick Open with query
+  // Listen for file link clicks from chat messages → open Quick Open with query.
+  //
+  // Filter by `detail.workspaceId` so a click whose owning chat lives in
+  // a different workspace doesn't open against this one. A missing detail
+  // (legacy dispatcher / non-chat caller) falls through to this workspace
+  // so unrelated dispatchers keep working. See `dispatchOpenFile` in
+  // `file-link-components.tsx` and issue #539.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filename: string }>).detail;
-      if (detail?.filename) {
-        setQuickOpenQuery(detail.filename);
-        setQuickOpenOpen(true);
-      }
+      const detail = (e as CustomEvent<{ filename?: string; workspaceId?: string }>).detail;
+      if (!detail?.filename) return;
+      if (detail.workspaceId && detail.workspaceId !== workspaceId) return;
+      setQuickOpenQuery(detail.filename);
+      setQuickOpenOpen(true);
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
-  }, []);
+  }, [workspaceId]);
 
   // Window-event triggers for the file-tree toolbar's Quick Open / Search
   // in Files buttons. We use a window event (rather than threading the
