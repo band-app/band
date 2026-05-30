@@ -15,10 +15,11 @@
  *      to its sibling `dispatch-open-file.ts` mirrors the existing
  *      "tiny pure helper + side-by-side test" pattern in
  *      `apps/web/tests/dispatch-open-file.test.ts`.
- *   2. Exporting from `CodeBrowserView` would be exporting an
- *      internal solely so the test can import it — TEST-1 in the
- *      repo testing criteria explicitly bans that shape. The helper
- *      belongs in its own module either way.
+ *   2. Exporting a symbol from a production module solely so a test
+ *      can import it inverts the dependency direction — the helper
+ *      belongs in its own module either way, with the test reaching
+ *      into a stable public surface rather than into a component's
+ *      internals.
  */
 
 /**

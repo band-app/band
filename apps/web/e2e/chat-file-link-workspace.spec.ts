@@ -226,6 +226,17 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
       active: STALE_PATH,
     });
 
+    // Positive anchor for the seed: confirm the write landed in
+    // localStorage before relying on the negative self-heal poll
+    // below. Without this, a silent seed failure (storage quota,
+    // wrong key shape, etc.) would make the post-self-heal poll
+    // trivially pass on a broken build because the path was never
+    // there to drop.
+    expect(await workspacePage.readOpenTabsState(WORKSPACE_A)).toEqual({
+      tabs: [STALE_PATH],
+      active: STALE_PATH,
+    });
+
     // Reload so CodeBrowserView re-mounts with the seeded localStorage
     // entry as its initial state. `viewFilePath` is derived from
     // `fileTabs.activeTabPath ?? ""` at mount time (see

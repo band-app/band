@@ -154,16 +154,15 @@ test.describe("mobile chat file-link workspace scoping (issue #539)", () => {
     // `toBeHidden` snapshot inside the poll would be ambiguous
     // (auto-retrying assertions return immediately on the first
     // match, so `toBeHidden` is true at t=0 and the poll succeeds
-    // even on a buggy build). Instead we poll for the dialog's
-    // visibility transitioning to TRUE within a bounded timeout
-    // and assert the timeout DOES expire (no visibility flip) — the
-    // assertion is positive-shaped per TEST-23, and the bounded
-    // timeout makes the test deterministic. With the bug, the
-    // dialog goes visible within ~200 ms (0-result auto-open) and
-    // the assertion fails fast; with the fix, the listener drops
-    // the event and the poll exhausts the budget without finding
-    // a true. We catch the polling rejection to convert "poll
-    // timed out without finding true" into "test passed".
+    // even on a buggy build). Instead the assertion polls for the
+    // dialog transitioning to visible within a bounded window and
+    // asserts the timeout expires without a flip, so a buggy build
+    // fails fast and the poll is not trivially true at t=0. With
+    // the bug, the dialog goes visible within ~200 ms (0-result
+    // auto-open) and the assertion fails fast; with the fix, the
+    // listener drops the event and the poll exhausts the budget
+    // without finding a true. We catch the polling rejection to
+    // convert "poll timed out without finding true" into "test passed".
     await workspacePage.dispatchOpenFileEvent({
       filename: "missing-from-A-too.ts",
       workspaceId: WORKSPACE_OTHER,
