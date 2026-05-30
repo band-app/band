@@ -375,7 +375,11 @@ export const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         query: z.string().default(""),
-        limit: z.number().default(50),
+        // Raised from 50 → 200 to match the corpus expansion in issue
+        // #530: with files from nested git repos now visible to Quick
+        // Open, the previous 50-entry cap could push a wanted match
+        // off the result list entirely.
+        limit: z.number().default(200),
       }),
     )
     .query(({ input }) =>

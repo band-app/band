@@ -1,203 +1,121 @@
 /**
- * Fuzzy file-path scoring algorithm, inspired by VS Code's Quick Open.
+ * Fuzzy file-path scoring — thin wrapper around `fzf-for-js` (npm `fzf`),
+ * a faithful TypeScript port of fzf v2's algorithm.
  *
- * Returns a numeric score (higher = better match) or null if the query
- * does not match the target at all.
+ * Why fzf and not the previous hand-rolled DP scorer:
+ *   The old scorer (see git history for the `fuzzy-score.ts` it replaced)
+ *   used a two-row dynamic-programming approach that occasionally ranked
+ *   scattered subsequence matches above literal substring matches — the
+ *   real-world example from issue #530 was the query `composite` matching
+ *   `flow-source-composite.ts` (a substring run) being out-scored by
+ *   files where the letters c-o-m-p-o-s-i-t-e happened to appear strewn
+ *   across a longer path. With Quick Open's result cap the wanted file
+ *   could be pushed off the list entirely.
+ *
+ *   fzf's v2 algorithm rewards consecutive runs, word boundaries, and
+ *   camel-case boundaries — and it's the upstream-maintained matcher
+ *   junegunn/fzf ships, so we get correct substring-beats-scattered
+ *   behaviour for free without owning the algorithm ourselves.
+ *
+ * Public API preserved verbatim from the previous implementation so the
+ * `SearchService.searchFiles` call site (and any direct consumers in the
+ * test suite) keep working unchanged:
+ *
+ *     fuzzyScore(query, filePath) → number | null
+ *
+ *   - `null`   — no fuzzy match (any query char missing in order)
+ *   - `number` — relative score; higher is a better match. Empty query
+ *                returns 0 (matches everything) for parity with the old
+ *                contract.
+ *
+ * On top of fzf we add two adjustments that mirror the old DP scorer:
+ *
+ *   1. Per-character filename bonus. fzf doesn't know about path
+ *      structure, so `router` in `src/trpc/router.ts` and
+ *      `router/src/trpc.ts` score identically — both are a clean
+ *      consecutive run at a `/` boundary. We boost positions that fall
+ *      inside the filename portion (after the last `/`) so Quick Open
+ *      users see file-name matches above directory matches, which is
+ *      the implicit expectation every Quick Open implementation
+ *      validates (VS Code, Sublime, etc.).
+ *
+ *   2. Short-path tiebreaker. Among equally-scored paths, prefer the
+ *      shorter one (closer to the project root). Small enough that it
+ *      never overturns a real score difference.
  */
 
-// ---------------------------------------------------------------------------
-// Scoring constants
-// ---------------------------------------------------------------------------
+import { Fzf, type FzfResultItem } from "fzf";
 
-/** Base score awarded for every matched character. */
-const SCORE_MATCH = 1;
-
-/** Bonus when two matched characters are adjacent in the target. */
-const BONUS_CONSECUTIVE = 8;
-
-/** Bonus when a matched character sits at a word boundary (after / . - _ space). */
-const BONUS_WORD_START = 7;
-
-/** Bonus for a camelCase boundary (lowercase → uppercase transition). */
-const BONUS_CAMEL_CASE = 6;
-
-/** Bonus when the match starts at the very first character of the filename. */
-const BONUS_FILENAME_START = 10;
-
-/** Per-character bonus for every match that falls inside the filename portion. */
+/**
+ * Per-character bonus for every matched position that falls inside the
+ * filename portion of the path. Mirrors `BONUS_FILENAME_CHAR = 3` in
+ * the old DP scorer — same value, same semantics.
+ */
 const BONUS_FILENAME_CHAR = 3;
 
-/** Penalty applied when a match follows a gap (non-consecutive). */
-const PENALTY_GAP_START = -3;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const SEPARATOR_CODES: Set<number> = new Set([
-  47, // '/'
-  92, // '\\'
-  46, // '.'
-  45, // '-'
-  95, // '_'
-  32, // ' '
-]);
-
-function isSeparatorCode(code: number): boolean {
-  return SEPARATOR_CODES.has(code);
-}
+/**
+ * Length tiebreaker — among equally-scored results, prefer shorter
+ * paths (closer to the project root). The factor is small enough that
+ * it never overturns a real score difference; for a 150-char path it
+ * shifts the score by at most ~1.5. Mirrors the constant in the
+ * previous DP implementation exactly.
+ */
+const SHORT_PATH_TIEBREAKER_WEIGHT = 0.01;
 
 /**
- * Compute the per-position bonus for matching at `target[j]`.
+ * fzf options reused on every call. We construct a fresh `Fzf` per
+ * call because the wrapper API takes one (query, path) pair at a time;
+ * this is hot but well-bounded (Quick Open corpora are typically <10k
+ * paths) and the per-call cost is dominated by fzf's matcher itself.
  *
- * Bonuses are awarded for:
- * - Being inside the filename portion of the path
- * - Immediately following a separator (word start)
- * - Being the very first character of the filename
- * - Sitting at a camelCase boundary
+ * `casing: "case-insensitive"` preserves the old contract: the
+ * previous DP scorer always lower-cased both operands, so `QOD` matched
+ * `quod_file.tsx`. fzf's default `smart-case` would reject that.
+ *
+ * `forward: false` matches from the end of the string. fzf documents
+ * this exact case in its own JSDoc: "useful if one needs to match a
+ * file path and they prefer querying for the file name over directory
+ * names present in the path." Without it, `git` in
+ * `src/server/infra/git/git-client.ts` matches the `infra/git/`
+ * directory rather than the `git-client.ts` filename — both score
+ * identically in fzf, and forward:true picks the first occurrence.
+ * forward:false picks the last one, which combined with the per-char
+ * filename bonus below gives Quick Open the right ranking.
  */
-function positionBonus(target: string, j: number, filenameStart: number): number {
-  let bonus = 0;
+const FZF_OPTIONS = { casing: "case-insensitive", forward: false } as const;
 
-  // Bonus for every match inside the filename
-  if (j >= filenameStart) {
-    bonus += BONUS_FILENAME_CHAR;
-  }
-
-  // Word-boundary / segment-start bonuses
-  if (j === 0 || isSeparatorCode(target.charCodeAt(j - 1))) {
-    bonus += j === filenameStart ? BONUS_FILENAME_START : BONUS_WORD_START;
-  } else {
-    // camelCase boundary: previous char is lowercase, current is uppercase
-    const curr = target.charCodeAt(j);
-    const prev = target.charCodeAt(j - 1);
-    if (curr >= 65 && curr <= 90 && prev >= 97 && prev <= 122) {
-      bonus += BONUS_CAMEL_CASE;
-    }
-  }
-
-  return bonus;
-}
-
-// ---------------------------------------------------------------------------
-// DP scorer
-// ---------------------------------------------------------------------------
-
-/**
- * Find the optimal subsequence-match of `queryLower` inside `target` and
- * return its score.  Uses a two-row DP:
- *
- *   M[j] = best score matching query[0..i] where query[i] IS matched at target[j]
- *   D[j] = best score matching query[0..i] with last match at-or-before target[j]
- *
- * Transition (for query char i, target position j where chars match):
- *   consecutive  = M_prev[j-1] + SCORE_MATCH + BONUS_CONSECUTIVE + posBonus
- *   afterGap     = D_prev[j-1] + SCORE_MATCH + posBonus + PENALTY_GAP_START
- *   M[j]         = max(consecutive, afterGap)
- *   D[j]         = max(D[j-1], M[j])
- */
-function dpScore(
-  queryLower: string,
-  target: string,
-  targetLower: string,
-  filenameStart: number,
-): number {
-  const n = queryLower.length;
-  const m = targetLower.length;
-
-  let M = new Array<number>(m).fill(-Infinity);
-  let D = new Array<number>(m).fill(-Infinity);
-
-  // --- first query character (i = 0) ---
-  for (let j = 0; j < m; j++) {
-    if (targetLower[j] === queryLower[0]) {
-      M[j] = SCORE_MATCH + positionBonus(target, j, filenameStart);
-    }
-    D[j] = j === 0 ? M[j] : Math.max(D[j - 1], M[j]);
-  }
-
-  // --- remaining query characters ---
-  for (let i = 1; i < n; i++) {
-    const prevM = M;
-    const prevD = D;
-    M = new Array<number>(m).fill(-Infinity);
-    D = new Array<number>(m).fill(-Infinity);
-
-    for (let j = i; j < m; j++) {
-      if (targetLower[j] === queryLower[i]) {
-        const bonus = positionBonus(target, j, filenameStart);
-
-        // Continue a consecutive run (query[i-1] matched at target[j-1])
-        const consecutive = prevM[j - 1] + SCORE_MATCH + BONUS_CONSECUTIVE + bonus;
-
-        // Start a new run after a gap (penalised)
-        const afterGap = prevD[j - 1] + SCORE_MATCH + bonus + PENALTY_GAP_START;
-
-        M[j] = Math.max(consecutive, afterGap);
-      }
-
-      D[j] = j > 0 ? Math.max(D[j - 1], M[j]) : M[j];
-    }
-  }
-
-  return D[m - 1];
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Compute a fuzzy-match score for `query` against `filePath`.
- *
- * @returns A numeric score (higher = better) or `null` when the query does
- *          not match the path at all.  An empty query matches everything
- *          with score 0.
- */
 export function fuzzyScore(query: string, filePath: string): number | null {
+  // Preserve the legacy contract for the empty-string edge cases. fzf
+  // returns an empty result list for an empty query (treats it as "no
+  // pattern"), but callers expect 0 (matches everything with neutral
+  // score) so they can sort files by path-length alone in that mode.
   if (!query) return 0;
   if (!filePath) return null;
 
-  const queryLower = query.toLowerCase();
-  const pathLower = filePath.toLowerCase();
-  const n = queryLower.length;
-  const m = pathLower.length;
+  const result: FzfResultItem<string> | undefined = new Fzf([filePath], FZF_OPTIONS).find(query)[0];
+  if (!result) return null;
 
-  if (n > m) return null;
-
-  // Quick rejection: verify all query chars exist in order
-  let qi = 0;
-  for (let i = 0; i < m && qi < n; i++) {
-    if (pathLower[i] === queryLower[qi]) qi++;
-  }
-  if (qi < n) return null;
-
+  // Add a per-character bonus for every matched position that falls in
+  // the filename portion of the path. fzf returns positions as a
+  // `Set<number>` — iterate once and count how many are at-or-after the
+  // filename start. We deliberately do NOT take a max(full, filename)
+  // here because fzf gives the same raw score for matching `router`
+  // against the full path vs against just the filename — the
+  // per-position bonus is what differentiates them.
   const filenameStart = filePath.lastIndexOf("/") + 1;
-
-  // Score against the full path
-  let score = dpScore(queryLower, filePath, pathLower, filenameStart);
-
-  // If all query chars can be found inside the filename alone, also score
-  // against just the filename.  This effectively gives a large bonus to
-  // filename-only matches because filenameStart becomes 0 and every char
-  // gets BONUS_FILENAME_START / BONUS_FILENAME_CHAR.
+  let filenameBonus = 0;
   if (filenameStart > 0) {
-    const filename = filePath.slice(filenameStart);
-    const filenameLower = pathLower.slice(filenameStart);
-
-    qi = 0;
-    for (let i = 0; i < filenameLower.length && qi < n; i++) {
-      if (filenameLower[i] === queryLower[qi]) qi++;
+    for (const pos of result.positions) {
+      if (pos >= filenameStart) filenameBonus += BONUS_FILENAME_CHAR;
     }
-
-    if (qi === n) {
-      const fnScore = dpScore(queryLower, filename, filenameLower, 0);
-      score = Math.max(score, fnScore);
-    }
+  } else {
+    // No `/` in the path means the whole thing is the filename; every
+    // matched position counts. Iterate `result.positions` instead of
+    // multiplying by query length because fzf positions may include
+    // bonus characters in non-fuzzy modes (defensive, even though our
+    // mode is plain v2 fuzzy).
+    filenameBonus = result.positions.size * BONUS_FILENAME_CHAR;
   }
 
-  // Tiebreaker: among equally-scored files, prefer shorter paths (more
-  // prominent / closer to the project root).  The factor is small enough
-  // (max ~1.5 for a 150-char path) that it only affects ties.
-  return score - filePath.length * 0.01;
+  return result.score + filenameBonus - filePath.length * SHORT_PATH_TIEBREAKER_WEIGHT;
 }

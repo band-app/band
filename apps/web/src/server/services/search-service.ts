@@ -1,17 +1,24 @@
 /**
- * Workspace search service — file-name fuzzy search (over `git ls-files`)
- * and content search (over ripgrep, via `infra/search/ripgrep-client`).
- * Lifted out of `api/workspace/router.ts` (issue #535, follow-up 1) so
- * the router contains validation + delegation only.
+ * Workspace search service — file-name fuzzy search and content search,
+ * both backed by ripgrep via `infra/search/ripgrep-client`. Lifted out
+ * of `api/workspace/router.ts` (issue #535, follow-up 1) so the router
+ * contains validation + delegation only.
  *
  * The shell-out lives in `infra/search/ripgrep-client.ts`; this service
  * applies the business decisions on top of the raw match stream (limit
  * cap, cancellation on cap-hit, workspace resolution).
+ *
+ * `searchFiles` used to call `git ls-files --cached --others
+ * --exclude-standard`, but that command refuses to descend into nested
+ * git repositories — so a workspace whose subdirectories were
+ * independently-cloned repos lost every file outside the outer worktree
+ * (issue #530). We now use `rg --files` which walks the directory tree
+ * directly, surfacing files in nested repos / submodules while still
+ * respecting the workspace's own `.gitignore` / `.rgignore`.
  */
 
 import { WorkspaceNotFoundError } from "../errors";
-import { execGit } from "../infra/git/git-client";
-import { streamMatches } from "../infra/search/ripgrep-client";
+import { listFiles, streamMatches } from "../infra/search/ripgrep-client";
 import { fuzzyScore } from "./_utils/fuzzy-score";
 import {
   workspaceService as defaultWorkspaceService,
@@ -43,10 +50,13 @@ export class SearchService {
   /**
    * Fuzzy-search file names within a workspace.
    *
-   * Falls back to a plain `git ls-files` listing when `query` is empty —
-   * the caller (file palette) can use that for an initial unfiltered view.
-   * Respects `.gitignore` because `git ls-files --others --exclude-standard`
-   * already does.
+   * Falls back to a plain `rg --files` listing when `query` is empty —
+   * the caller (file palette) can use that for an initial unfiltered
+   * view. Respects the workspace's own `.gitignore` / `.rgignore`
+   * because that's what ripgrep does by default; the user's global
+   * `~/.gitignore` is deliberately ignored so every contributor sees
+   * the same corpus (see `ripgrep-client.ts::listFiles` for the full
+   * flag rationale).
    */
   async searchFiles(
     workspaceId: string,
@@ -55,11 +65,12 @@ export class SearchService {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
-    const limit = options.limit ?? 50;
-    const cwd = workspace.worktree.path;
-    const output = await execGit(["ls-files", "--cached", "--others", "--exclude-standard"], cwd);
-
-    let files = output.trim().split("\n").filter(Boolean);
+    // Limit cap raised from 50 → 200 alongside the corpus expansion
+    // (issue #530): with files from nested git repos now in the corpus,
+    // the previous 50-entry cap could push a wanted match off the list
+    // entirely when the user typed a short query.
+    const limit = options.limit ?? 200;
+    let files = await listFiles(workspace.worktree.path);
 
     if (options.query) {
       const scored: { file: string; score: number }[] = [];
