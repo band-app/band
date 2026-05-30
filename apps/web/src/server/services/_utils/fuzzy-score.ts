@@ -49,6 +49,14 @@
  *   own score, we re-sort the result set after applying it.
  */
 
+// `fzf` is the npm package name for `ajitid/fzf-for-js`, the TypeScript
+// port of junegunn/fzf's v2 algorithm. Snyk lists the package as
+// "Inactive" (no releases since 2022), accepted as technical debt here:
+// the v2 algorithm itself is intentionally frozen (junegunn/fzf upstream
+// has not changed it), and the package has zero runtime dependencies and
+// a 70 KB unpacked size. The version is pinned to an exact `0.5.2` in
+// `package.json` so a future floating-range resolution can't silently
+// pull in an unaudited patch. Verified publisher: `ajitid` (BSD-3-Clause).
 import { Fzf } from "fzf";
 
 export interface ScoredFile {

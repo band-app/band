@@ -238,4 +238,16 @@ describe("tRPC — workspace.searchFiles in non-git directories", () => {
     const { files } = await trpcData<{ files: string[] }>(res);
     expect(files).toContain("note.md");
   });
+
+  it("rejects unauthenticated requests with 401", async () => {
+    // Mirrors the auth test in the git-backed suite above (TEST-13).
+    // The transport-layer middleware is the same for both suites, but
+    // an auditor reading just the non-git block would otherwise see no
+    // auth coverage in this suite — explicit is better than implicit.
+    const url = `${server.url}/trpc/workspace.searchFiles?input=${encodeURIComponent(
+      JSON.stringify({ workspaceId: "plain-main", query: "" }),
+    )}`;
+    const res = await fetch(url);
+    expect(res.status).toBe(401);
+  });
 });
