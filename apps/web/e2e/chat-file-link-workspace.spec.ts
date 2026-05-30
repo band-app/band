@@ -242,11 +242,10 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // worktree root.
     await workspacePage.reload();
     await workspacePage.waitForReady();
-    // Click into the Files tab so the FileViewer panel actually mounts
-    // and the load effect fires. The dockview keeps panel content
-    // cached but a panel that's never been activated may defer its
-    // first mount. Using the system-controlled `data-testid` set in
-    // `SharedDockviewLayout`'s DefaultTab — see WorkspacePage.tab().
+    // Click into the Files tab so the FileViewer panel actually
+    // mounts and the load effect fires. The dockview keeps panel
+    // content cached but a panel that's never been activated may
+    // defer its first mount.
     await workspacePage.tab("files").click();
 
     // The self-heal should drop the stale tab from the persisted state.
@@ -288,8 +287,9 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
   // search has already resolved and `autoOpened.current` is true, so
   // the bail check is never reached. The correctness of the ref
   // isolation (only capture on `open: false → true`, never on
-  // mid-flight `workspaceId` changes) is documented in
-  // `QuickOpenDialog.tsx` and was verified by code review on PR #545.
+  // mid-flight `workspaceId` changes) is documented inline at the
+  // capture-effect site and exercised by the `shouldBailAutoOpen`
+  // pure-helper unit suite.
 
   test("cross-workspace event with a matching filename does NOT leak the file into the wrong workspace's persisted tab list", async ({
     page,

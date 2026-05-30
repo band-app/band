@@ -188,20 +188,22 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
 
     // Wait for the rendered `band-file:` link to appear — the
     // anchor's accessible name comes from the inline-code child's
-    // text content.
-    const link = chatPane.fileLinkAnchor(/src\/main\.rs:42/);
-    await expect(link).toBeVisible({ timeout: 10_000 });
+    // text content. `fileLinkAnchor()` is exposed on the POM for
+    // the visibility wait; the click goes through the action
+    // method `clickFileLinkAnchor()` so the test body never
+    // interacts with a raw Locator.
+    await expect(chatPane.fileLinkAnchor(/src\/main\.rs:42/)).toBeVisible({ timeout: 10_000 });
 
     // Confirm the capture is clean before clicking, so the
     // post-click assertion is unambiguous.
     expect(await chatPane.capturedOpenFileEvents()).toEqual([]);
 
-    // Click the rendered link. `FileLinkedAnchor`'s onClick calls
+    // Click the rendered link. The onClick handler calls
     // `e.preventDefault() + e.stopPropagation()` to suppress the
-    // browser's native navigation, reads `workspaceId` from
-    // `FileLinkWorkspaceContext` (provided by ChatView), and
-    // calls `dispatchOpenFile(filename, workspaceId)`.
-    await link.click();
+    // browser's native navigation, reads `workspaceId` from the
+    // surrounding `FileLinkWorkspaceContext`, and dispatches the
+    // band:open-file event.
+    await chatPane.clickFileLinkAnchor(/src\/main\.rs:42/);
 
     // The dispatched event MUST carry both `filename` and
     // `workspaceId`. Without the issue #539 fix, the detail would

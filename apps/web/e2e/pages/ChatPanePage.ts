@@ -160,11 +160,20 @@ export class ChatPanePage {
 
   /** Locate a `band-file:` anchor by its visible accessible name —
    *  the inline-code path the rendered link wraps (e.g. the
-   *  pattern `src/main.rs:42`). Used by the file-link dispatcher
-   *  spec to click a real assistant-message link without reaching
-   *  into `page.*` from the test body. */
+   *  pattern `src/main.rs:42`). Kept around for tests that need to
+   *  assert visibility before clicking; prefer the action method
+   *  `clickFileLinkAnchor()` for the click itself. */
   fileLinkAnchor(name: RegExp | string): Locator {
     return this.page.getByRole("link", { name });
+  }
+
+  /** Click a `band-file:` anchor in the rendered chat by its visible
+   *  accessible name. Encapsulates the locate + click so the test
+   *  body doesn't hold a raw locator variable. */
+  async clickFileLinkAnchor(name: RegExp | string): Promise<void> {
+    await test.step(`Click band-file link "${name}"`, async () => {
+      await this.fileLinkAnchor(name).click();
+    });
   }
 
   /** Install a window-event listener for `band:open-file` that
