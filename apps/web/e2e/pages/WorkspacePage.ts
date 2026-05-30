@@ -364,6 +364,15 @@ export class WorkspacePage {
     return this.page.getByTestId("quick-open__root");
   }
 
+  /** Dismiss the QuickOpenDialog via the Escape key — same path a
+   *  real user would take. Encapsulated here so test bodies don't
+   *  reach for `page.keyboard.*` directly. */
+  async closeQuickOpenDialog(): Promise<void> {
+    await test.step("Press Escape to close Quick Open dialog", async () => {
+      await this.page.keyboard.press("Escape");
+    });
+  }
+
   /** Dispatch a synthetic `band:open-file` window event into the page
    *  context. Captures the cross-workspace routing contract under test:
    *  events addressed to a specific workspace must reach only THAT

@@ -226,7 +226,7 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // Close the probe dialog so the next assertion observes a clean
     // baseline. Escape is the user-facing close path the Dialog wires
     // up by default.
-    await page.keyboard.press("Escape");
+    await workspacePage.closeQuickOpenDialog();
     await expect(workspacePage.quickOpenDialog()).toBeHidden();
 
     // Tighten the second negative check with an inline positive
