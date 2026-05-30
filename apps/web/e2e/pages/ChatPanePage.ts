@@ -44,6 +44,10 @@ export class ChatPanePage {
    *  #509 regression spec so a future change that updates one and
    *  forgets the other still trips the test. */
   readonly toolCallStatusDots: Locator;
+  /** The `@`-mention file dropdown — opens when the user types `@` in
+   *  the prompt. ARIA name is system-controlled in
+   *  `file-mention-suggestions.tsx`. */
+  readonly fileMentionDropdown: Locator;
 
   constructor(
     private readonly page: Page,
@@ -59,6 +63,7 @@ export class ChatPanePage {
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
+    this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
   }
 
   /** Navigate to the workspace's chat view. The only place URLs are
@@ -80,6 +85,16 @@ export class ChatPanePage {
   async typeMessage(text: string): Promise<void> {
     await test.step(`Type "${text}" into the prompt`, async () => {
       await this.promptInput.fill(text);
+    });
+  }
+
+  /** Clear the prompt textarea. Most submit paths empty the textarea
+   *  already, but the draft-persistence logic in `PromptInput` can
+   *  leave whitespace behind — call this before tests that need a
+   *  guaranteed-empty input (e.g. typing `@` or `/` at position 0). */
+  async clearPrompt(): Promise<void> {
+    await test.step("Clear the prompt", async () => {
+      await this.promptInput.fill("");
     });
   }
 
@@ -121,6 +136,25 @@ export class ChatPanePage {
   async clickNewSession(): Promise<void> {
     await test.step("Click New session", async () => {
       await this.newSessionMenuItem.click();
+    });
+  }
+
+  /** Type a single key in the focused prompt textarea. The prompt
+   *  must already be focused — call `focusPrompt()` first. Used by the
+   *  mention/slash-dropdown tests where `fill()` would replace the whole
+   *  value and lose the `@`/`/` trigger context. */
+  async pressKey(key: string): Promise<void> {
+    await test.step(`Press "${key}" in the prompt`, async () => {
+      await this.promptInput.press(key);
+    });
+  }
+
+  /** Focus the prompt textarea so subsequent `pressKey()` calls land
+   *  there. Click is used instead of `focus()` so the textarea also
+   *  becomes the document's `activeElement` for keydown dispatch. */
+  async focusPrompt(): Promise<void> {
+    await test.step("Focus the prompt", async () => {
+      await this.promptInput.click();
     });
   }
 }

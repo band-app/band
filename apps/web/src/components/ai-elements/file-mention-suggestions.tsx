@@ -96,29 +96,42 @@ export function FileMentionSuggestions({ workspaceId }: FileMentionSuggestionsPr
     [inputValue, setTextareaValue],
   );
 
-  // Intercept keyboard events on the textarea for navigation
+  // Intercept keyboard events on the textarea for navigation.
+  //
+  // The listener is gated only on `isOpen` — NOT on `files.length` — so
+  // that Esc is swallowed even while the dropdown is showing the
+  // "Searching..." placeholder (files not yet loaded). Otherwise the
+  // user could open the dropdown, press Esc before the network query
+  // returns, and have Esc fall through to the chat-level handler that
+  // cancels the in-flight task.
   useEffect(() => {
-    if (!isOpen || files.length === 0) return;
+    if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" && files.length > 0) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev + 1) % files.length);
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp" && files.length > 0) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev - 1 + files.length) % files.length);
-      } else if (e.key === "Enter" && !e.shiftKey) {
+      } else if (e.key === "Enter" && !e.shiftKey && files.length > 0) {
         e.preventDefault();
         e.stopPropagation();
         handleSelect(files[selectedIndex]);
       } else if (e.key === "Escape") {
+        // Swallow Esc so it doesn't bubble to the chat-level handler that
+        // cancels the in-flight task — the user just wants to close this
+        // dropdown. Listener is registered in the capture phase, so
+        // stopPropagation() here also keeps the event from reaching the
+        // textarea's React onKeyDown.
         e.preventDefault();
+        e.stopPropagation();
         // Remove the @ trigger to dismiss
         const current = getMentionContext(inputValue);
         if (current) {
           setTextareaValue(current.prefix);
         }
-      } else if (e.key === "Tab") {
+      } else if (e.key === "Tab" && files.length > 0) {
         e.preventDefault();
         handleSelect(files[selectedIndex]);
       }
