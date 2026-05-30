@@ -236,11 +236,10 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     });
 
     // Reload so CodeBrowserView re-mounts with the seeded localStorage
-    // entry as its initial state. `viewFilePath` is derived from
-    // `fileTabs.activeTabPath ?? ""` at mount time (see
-    // `apps/web/src/components/CodeBrowserView.tsx` line 457-462),
-    // which immediately drives the FileViewer to attempt loading the
-    // stale path against workspace A's worktree root.
+    // entry as its initial state. The component reads the persisted
+    // active tab on mount, which immediately drives the FileViewer
+    // to attempt loading the stale path against workspace A's
+    // worktree root.
     await workspacePage.reload();
     await workspacePage.waitForReady();
     // Click into the Files tab so the FileViewer panel actually mounts

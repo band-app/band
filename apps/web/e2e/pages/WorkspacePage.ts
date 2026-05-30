@@ -453,9 +453,7 @@ export class WorkspacePage {
    *  events addressed to a specific workspace must reach only THAT
    *  workspace's listener, while events with no `workspaceId` fall
    *  through to the currently-active workspace (backwards-compat for
-   *  legacy / non-chat dispatchers). See `dispatchOpenFile` in
-   *  `apps/web/src/components/ai-elements/file-link-components.tsx`
-   *  and the spec `chat-file-link-workspace.spec.ts`. */
+   *  legacy / non-chat dispatchers). */
   async dispatchOpenFileEvent(opts: { filename: string; workspaceId?: string }): Promise<void> {
     const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
     await test.step(`Dispatch band:open-file for "${opts.filename}"${target}`, async () => {
@@ -470,12 +468,11 @@ export class WorkspacePage {
   }
 
   /** Write the persisted open-tabs state for a workspace directly into
-   *  localStorage. Used by tests that need to seed a "this workspace
-   *  has a stale tab restored from a prior session" baseline, e.g. the
-   *  self-heal regression for issue #539: a tab pointing at a path
-   *  that doesn't exist on disk must be silently dropped on the next
-   *  mount. Storage key shape matches `storageKey(workspaceId)` in
-   *  `apps/web/src/hooks/useFileTabs.ts`. */
+   *  localStorage under the key `band-open-tabs:<workspaceId>`. Used
+   *  by tests that need to seed a "this workspace has a stale tab
+   *  restored from a prior session" baseline, e.g. the self-heal
+   *  regression for issue #539: a tab pointing at a path that doesn't
+   *  exist on disk must be silently dropped on the next mount. */
   async writeOpenTabsState(
     workspaceId: string,
     state: { tabs: string[]; active: string | null },
