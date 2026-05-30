@@ -110,7 +110,7 @@ test.describe("mobile chat file-link workspace scoping (issue #539)", () => {
     // instead for the mobile-specific surface — the chat tab is the
     // default landing view. README.md exists on disk, so the
     // mobile tab nav is visible once the route hydrates.
-    await expect(page.getByRole("button", { name: "Files" })).toBeVisible();
+    await workspacePage.waitForMobileReady();
 
     // Filename DELIBERATELY missing from workspace A's index so the
     // bug version's auto-open shortcut would take the 0-result
@@ -123,39 +123,62 @@ test.describe("mobile chat file-link workspace scoping (issue #539)", () => {
     // current workspaceId. The mobile listener's filter check
     // (`detail.workspaceId && detail.workspaceId !== workspaceId`)
     // must drop this event so the dialog stays hidden.
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "missing-from-A-too.ts",
-      workspaceId: WORKSPACE_OTHER,
-    });
-
-    // Negative assertion over a duration: we want to prove the
-    // dialog NEVER becomes visible across the dialog's full
-    // lifecycle (150 ms debounce + search + autoOpen effect). A
-    // fixed wait is the only deterministic primitive for this —
-    // `expect.poll(...).toBe(false)` returns IMMEDIATELY when the
-    // predicate first matches, so on the bug version it would
-    // succeed at t=0 (before the dialog has had time to open) and
-    // create a false-green. The 800 ms wall-clock wait spans the
-    // bug version's actual transition window (the dialog becomes
-    // visible at ~150 ms with the 0-result auto-open branch, and
-    // stays visible). The TEST-24 doctrine prefers auto-retrying
-    // assertions; that doctrine assumes the assertion has a
-    // positive shape ("becomes visible") — for absence-over-time
-    // proofs, an explicit wait is acceptable. Counter-anchored
-    // below by a positive control.
-    await page.waitForTimeout(800);
-    expect(await workspacePage.quickOpenDialog().isVisible()).toBe(false);
-
-    // Positive control: same shape, but addressed to this route's
-    // workspaceId. The listener MUST accept this one. Confirms the
-    // listener is alive on this route — only the cross-workspace
-    // event was dropped. Uses a 0-result filename so the 0-result
-    // auto-open branch reveals the dialog (visible) deterministically.
+    // Positive control FIRST. We dispatch a known-good event
+    // addressed to THIS workspace and wait for the dialog to become
+    // visible. By the time `toBeVisible()` resolves, the React
+    // commit, the 150 ms search debounce, the search round-trip,
+    // and the 0-result autoOpen branch have all run. The positive
+    // control is the timing anchor: any in-flight listener work
+    // that the cross-workspace dispatch below would trigger has the
+    // same ~150 ms-ish lifecycle, so by the time we're past the
+    // positive control's `toBeVisible()` the cross-workspace event
+    // has had at least as much time as the positive control did.
     await workspacePage.dispatchOpenFileEvent({
       filename: "still-missing-mobile.ts",
       workspaceId: WORKSPACE_A,
     });
     await expect(workspacePage.quickOpenDialog()).toBeVisible();
+
+    // Close the dialog so the cross-workspace dispatch below
+    // observes a clean baseline (hidden) — otherwise the positive
+    // control's open state masks the negative we're trying to prove.
+    await workspacePage.closeQuickOpenDialog();
+    await expect(workspacePage.quickOpenDialog()).toBeHidden();
+
+    // Now the cross-workspace dispatch. The positive control above
+    // proved the listener's react/render/search path runs in well
+    // under our `toBeVisible()` 5 s default expect-timeout, so a
+    // bounded poll for "dialog stays hidden" of 1 s is more than
+    // enough time for the bug version's autoOpen to land — if it
+    // were going to land at all, it'd land within ~200 ms. A
+    // `toBeHidden` snapshot inside the poll would be ambiguous
+    // (auto-retrying assertions return immediately on the first
+    // match, so `toBeHidden` is true at t=0 and the poll succeeds
+    // even on a buggy build). Instead we poll for the dialog's
+    // visibility transitioning to TRUE within a bounded timeout
+    // and assert the timeout DOES expire (no visibility flip) — the
+    // assertion is positive-shaped per TEST-23, and the bounded
+    // timeout makes the test deterministic. With the bug, the
+    // dialog goes visible within ~200 ms (0-result auto-open) and
+    // the assertion fails fast; with the fix, the listener drops
+    // the event and the poll exhausts the budget without finding
+    // a true. We catch the polling rejection to convert "poll
+    // timed out without finding true" into "test passed".
+    await workspacePage.dispatchOpenFileEvent({
+      filename: "missing-from-A-too.ts",
+      workspaceId: WORKSPACE_OTHER,
+    });
+    let leaked = false;
+    try {
+      await expect
+        .poll(() => workspacePage.quickOpenDialog().isVisible(), { timeout: 800 })
+        .toBe(true);
+      leaked = true;
+    } catch {
+      // poll exhausted budget without observing a flip to visible —
+      // exactly the contract we want to confirm. swallow.
+    }
+    expect(leaked).toBe(false);
   });
 
   test("event with no workspaceId in its detail falls through to this route's workspace (backwards-compat)", async ({
@@ -163,7 +186,7 @@ test.describe("mobile chat file-link workspace scoping (issue #539)", () => {
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await workspacePage.goto(WORKSPACE_A);
-    await expect(page.getByRole("button", { name: "Files" })).toBeVisible();
+    await workspacePage.waitForMobileReady();
 
     await workspacePage.dispatchOpenFileEvent({
       filename: "does-not-resolve-anywhere-mobile-compat.ts",

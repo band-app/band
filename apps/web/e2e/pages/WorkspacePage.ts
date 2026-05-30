@@ -289,6 +289,18 @@ export class WorkspacePage {
     await this.maximizeButtons.first().waitFor({ state: "visible", timeout: 15_000 });
   }
 
+  /** Wait for the mobile workspace layout to be interactive. The
+   *  mobile route doesn't render the dockview's header buttons, so
+   *  `waitForReady` (which keys off Maximize) won't work — instead
+   *  we anchor on the workspace tab nav's "Files" button, set by
+   *  `WorkspaceTabNav.tsx`. The aria-label is system-controlled,
+   *  not localisable copy. */
+  async waitForMobileReady(): Promise<void> {
+    await this.page
+      .getByRole("button", { name: "Files" })
+      .waitFor({ state: "visible", timeout: 15_000 });
+  }
+
   /** Click the Nth Maximize button (0-indexed). Useful when the layout
    *  has multiple groups and the test wants to target a specific one. */
   async maximizePanel(index = 0): Promise<void> {

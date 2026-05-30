@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { shouldDropPersistedTab } from "../src/components/CodeBrowserView";
+import { shouldDropPersistedTab } from "../src/lib/persisted-tab-self-heal";
 
 describe("shouldDropPersistedTab — four-branch contract (issue #539)", () => {
   // ---------------------------------------------------------------------

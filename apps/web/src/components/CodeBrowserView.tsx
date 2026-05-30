@@ -63,6 +63,7 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { pathInside } from "../lib/path-inside";
 import { consumeExternalOpen, subscribeExternalOpens } from "../lib/pending-external-open";
+import { shouldDropPersistedTab } from "../lib/persisted-tab-self-heal";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -416,41 +417,6 @@ function FileTreeToolbar({
       )}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Persisted-tab self-heal predicate (issue #539, fix layer 3)
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true iff the FileViewer's load failure for `failedPath` should
- * cause `handleTabClose(failedPath)` to fire on the persisted-tab
- * self-heal path. Pure function — extracted from `handleFileLoadError`
- * below so the four-branch contract can be exhaustively tested without
- * spinning up CodeBrowserView in jsdom.
- *
- * The four branches:
- *   1. `restoredTabPath` is null (workspace mounted without restoring a
- *      persisted active tab — every load failure here is on a tab the
- *      user explicitly opened in-session; never auto-close). → false
- *   2. `restoredTabPath` differs from `failedPath` (a load failure on
- *      some OTHER tab; the persisted-tab restore was successful and
- *      this failure is unrelated). → false
- *   3. Paths match but the error is NOT an ENOENT-style "missing
- *      file" (transient network / permission / parse errors; the file
- *      may still exist and a retry could succeed). → false
- *   4. Paths match AND the error is ENOENT-style ("no such file or
- *      directory" or the literal `ENOENT` substring from `fs.stat`). → true
- *
- * Tested in `apps/web/tests/persisted-tab-self-heal.test.ts`.
- */
-export function shouldDropPersistedTab(
-  failedPath: string,
-  restoredTabPath: string | null,
-  errorMessage: string,
-): boolean {
-  if (restoredTabPath !== failedPath) return false;
-  return /ENOENT|no such file or directory/i.test(errorMessage);
 }
 
 // ---------------------------------------------------------------------------
