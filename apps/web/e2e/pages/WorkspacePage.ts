@@ -351,9 +351,11 @@ export class WorkspacePage {
   }
 
   /** The QuickOpenDialog content root. `data-testid` is set on
-   *  `DialogContent` in `QuickOpenDialog.tsx` (system-controlled, BEM
-   *  convention) so the locator is stable against placeholder /
-   *  visible-copy changes — see TEST-23 and TEST-26.
+   *  `DialogContent` in `QuickOpenDialog.tsx` — system-controlled,
+   *  BEM convention — so the locator stays stable against placeholder
+   *  string changes or visible-copy edits (the alternative
+   *  `getByPlaceholder("Search files by name...")` would tie the test
+   *  to a localisable English copy).
    *
    *  Used by tests that need to observe whether the dialog is mounted
    *  in response to a `band:open-file` event, particularly when proving

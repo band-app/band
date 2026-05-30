@@ -229,18 +229,33 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     await page.keyboard.press("Escape");
     await expect(workspacePage.quickOpenDialog()).toBeHidden();
 
-    // Now dispatch the cross-workspace event AGAIN and follow it with
-    // a no-op assertion that polls for the dialog opening — if the
-    // listener filter is regressed, the dialog will pop within a
-    // few ms. `expect.poll` with a bounded timeout gives us a
-    // deterministic negative check without `waitForTimeout`.
+    // Tighten the second negative check with an inline positive
+    // companion: dispatch the cross-workspace event FIRST (which must
+    // be silently dropped), then a probe event addressed to the
+    // active workspace. Because window CustomEvent dispatches and
+    // their listeners run synchronously in registration order, the
+    // probe's `toBeVisible()` is the deterministic anchor: by the
+    // time it resolves, the cross-workspace event has already been
+    // through its listener. A regression where the listener no
+    // longer filtered would have opened the dialog from the
+    // cross-workspace event itself, and the probe's visibility
+    // assertion would then be unable to distinguish "probe opened
+    // it" from "cross-workspace leaked it". The
+    // `quickOpenDialog().isVisible() === false` snapshot taken
+    // immediately AFTER the cross-workspace dispatch (before the
+    // probe) is the assertion that pins the listener-filter
+    // contract.
     await workspacePage.dispatchOpenFileEvent({
       filename: "only-in-a.ts",
       workspaceId: WORKSPACE_A,
     });
-    await expect
-      .poll(() => workspacePage.quickOpenDialog().isVisible(), { timeout: 500 })
-      .toBe(false);
+    expect(await workspacePage.quickOpenDialog().isVisible()).toBe(false);
+
+    await workspacePage.dispatchOpenFileEvent({
+      filename: "another-missing-file-anchor-99999.ts",
+      workspaceId: WORKSPACE_B,
+    });
+    await expect(workspacePage.quickOpenDialog()).toBeVisible();
   });
 
   test("event with no workspaceId in its detail falls through to the active workspace (backwards-compat)", async ({
