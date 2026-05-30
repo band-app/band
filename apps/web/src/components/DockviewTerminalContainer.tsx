@@ -10,11 +10,9 @@ import {
 } from "dockview";
 import { Columns2, Plus, Rows2, TerminalSquare, X } from "lucide-react";
 import React, {
-  createContext,
   lazy,
   Suspense,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -33,6 +31,7 @@ import {
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
+import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR
 const TerminalPanel = lazy(() =>
@@ -142,8 +141,6 @@ const terminalTabTheme: DockviewTheme = {
 // Terminal tab panel component (renders inside each dockview tab)
 // ---------------------------------------------------------------------------
 
-const TerminalVisibilityContext = createContext({ visible: true, wsActive: true });
-
 interface TerminalTabParams {
   workspaceId: string;
   terminalId: string;
@@ -154,7 +151,7 @@ interface TerminalTabParams {
 }
 
 function TerminalTabPanel({ params, api }: IDockviewPanelProps<TerminalTabParams>) {
-  const { visible } = useContext(TerminalVisibilityContext);
+  const { visible } = usePanelVisibility();
 
   // Stable callback to update the dockview tab title when the shell emits a title change
   const onTitleChange = useCallback(
@@ -177,7 +174,14 @@ function TerminalTabPanel({ params, api }: IDockviewPanelProps<TerminalTabParams
       : undefined;
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    // `data-testid` encodes the visibility signal the SHARED
+    // `PanelVisibilityContext` propagated into this tab panel
+    // (see `panel-visibility-context.tsx`), so an integration test can
+    // assert the context plumbing reaches the leaf.
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      data-testid={`dockview-terminal-tab__visible-${visible ? "true" : "false"}`}
+    >
       <Suspense fallback={null}>
         <TerminalPanel
           workspaceId={params.workspaceId}
@@ -860,7 +864,7 @@ export function DockviewTerminalContainer({
 
   return (
     <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
-      <TerminalVisibilityContext.Provider value={visibilityValue}>
+      <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={terminalTabTheme}
           className="h-full"
@@ -870,7 +874,7 @@ export function DockviewTerminalContainer({
           onReady={onReady}
           rightHeaderActionsComponent={RightHeaderActions}
         />
-      </TerminalVisibilityContext.Provider>
+      </PanelVisibilityContext.Provider>
     </div>
   );
 }

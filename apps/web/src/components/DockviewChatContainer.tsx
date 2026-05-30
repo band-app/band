@@ -9,15 +9,7 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import { Columns2, Plus, Rows2, X } from "lucide-react";
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon, useAdapter } from "@/dashboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -31,6 +23,7 @@ import {
 } from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
+import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // ---------------------------------------------------------------------------
 // Track chat IDs that were just created by an "add tab" action.
@@ -142,9 +135,9 @@ const chatTabTheme: DockviewTheme = {
 // Chat tab panel component (renders inside each dockview tab)
 // ---------------------------------------------------------------------------
 
-// Visibility context — propagated from DockviewChatContainer via React
-// context instead of dockview's updateParameters (which clobbers params).
-const ChatVisibilityContext = createContext({ visible: true, wsActive: true });
+// Visibility is propagated from DockviewChatContainer via the shared
+// PanelVisibilityContext instead of dockview's updateParameters (which
+// clobbers params).
 
 interface ChatTabParams {
   workspaceId: string;
@@ -154,7 +147,7 @@ interface ChatTabParams {
 function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
   // Track visibility: combine parent visibility context with dockview's own active state
   const [tabActive, setTabActive] = useState(api.isActive);
-  const { visible: parentVisible, wsActive } = useContext(ChatVisibilityContext);
+  const { visible: parentVisible, wsActive } = usePanelVisibility();
 
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
@@ -207,7 +200,16 @@ function ChatTabContent({
   }, [state.sessionQueryDone, state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    // `data-testid` encodes the visibility signal the SHARED
+    // `PanelVisibilityContext` propagated into this tab panel
+    // (see `panel-visibility-context.tsx`), so an integration test can
+    // assert that the context plumbing — not just dockview's outer
+    // detach behaviour — actually reaches the leaf. Pinned to the wrapper
+    // div so the BEM convention matches the rest of the codebase.
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      data-testid={`dockview-chat-tab__visible-${visible ? "true" : "false"}`}
+    >
       <ChatPane
         workspaceId={workspaceId}
         chatId={chatId}
@@ -750,7 +752,7 @@ export function DockviewChatContainer({
     });
   }, [adapter, workspaceId]);
 
-  // Visibility is now propagated via ChatVisibilityContext (React context)
+  // Visibility is now propagated via PanelVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
@@ -791,7 +793,7 @@ export function DockviewChatContainer({
           createDefaultPanel(event.api, workspaceId);
         }
 
-        // Visibility is propagated via ChatVisibilityContext — no param update needed.
+        // Visibility is propagated via PanelVisibilityContext — no param update needed.
 
         // Prune panels whose chat records no longer exist on the server —
         // e.g. the user removed them via `band chats remove` while the
@@ -885,7 +887,7 @@ export function DockviewChatContainer({
 
   return (
     <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
-      <ChatVisibilityContext.Provider value={visibilityValue}>
+      <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={chatTabTheme}
           className="h-full"
@@ -895,7 +897,7 @@ export function DockviewChatContainer({
           onReady={onReady}
           rightHeaderActionsComponent={RightHeaderActions}
         />
-      </ChatVisibilityContext.Provider>
+      </PanelVisibilityContext.Provider>
     </div>
   );
 }

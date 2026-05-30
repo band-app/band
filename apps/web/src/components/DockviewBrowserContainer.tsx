@@ -9,16 +9,7 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import { Columns2, Globe, Plus, Rows2, X } from "lucide-react";
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "@/dashboard";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
@@ -35,6 +26,7 @@ import {
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
+import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // ---------------------------------------------------------------------------
 // Track browser IDs that were just created by an "add tab" action.
@@ -172,9 +164,9 @@ const browserTabTheme: DockviewTheme = {
 // Browser tab panel component (renders inside each dockview tab)
 // ---------------------------------------------------------------------------
 
-// Visibility context — propagated from DockviewBrowserContainer via React
-// context instead of dockview's updateParameters (which clobbers params).
-const BrowserVisibilityContext = createContext({ visible: true, wsActive: true });
+// Visibility is propagated from DockviewBrowserContainer via the shared
+// PanelVisibilityContext instead of dockview's updateParameters (which
+// clobbers params).
 
 interface BrowserTabParams {
   workspaceId: string;
@@ -183,7 +175,7 @@ interface BrowserTabParams {
 }
 
 function BrowserTabPanel({ params, api }: IDockviewPanelProps<BrowserTabParams>) {
-  const { visible } = useContext(BrowserVisibilityContext);
+  const { visible } = usePanelVisibility();
 
   if (!params.workspaceId || !params.browserId) return null;
 
@@ -199,7 +191,19 @@ function BrowserTabPanel({ params, api }: IDockviewPanelProps<BrowserTabParams>)
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    // `data-testid` encodes the visibility signal the SHARED
+    // `PanelVisibilityContext` propagated into this tab panel
+    // (see `panel-visibility-context.tsx`), so an integration test can
+    // assert the context plumbing reaches the leaf. Note: the browser
+    // path is only mounted in the Electron desktop build (see
+    // `SharedDockviewLayout`'s `BrowserPanelComponent` web-fallback
+    // branch), so the marker is only observable from desktop e2e
+    // coverage — but the assignment is part of the same shared-context
+    // contract, so we mark it here for parity.
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      data-testid={`dockview-browser-tab__visible-${visible ? "true" : "false"}`}
+    >
       <BrowserPaneComponent
         params={paneParams}
         api={api}
@@ -1016,7 +1020,7 @@ export function DockviewBrowserContainer({
     });
   }, [adapter, workspaceId]);
 
-  // Visibility is now propagated via BrowserVisibilityContext (React context)
+  // Visibility is now propagated via PanelVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
@@ -1168,7 +1172,7 @@ export function DockviewBrowserContainer({
 
   return (
     <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
-      <BrowserVisibilityContext.Provider value={visibilityValue}>
+      <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={browserTabTheme}
           className="h-full"
@@ -1178,7 +1182,7 @@ export function DockviewBrowserContainer({
           onReady={onReady}
           rightHeaderActionsComponent={RightHeaderActions}
         />
-      </BrowserVisibilityContext.Provider>
+      </PanelVisibilityContext.Provider>
     </div>
   );
 }
