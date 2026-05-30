@@ -19,7 +19,7 @@
 
 import { WorkspaceNotFoundError } from "../errors";
 import { listFiles, streamMatches } from "../infra/search/ripgrep-client";
-import { fuzzyScore } from "./_utils/fuzzy-score";
+import { scoreFiles } from "./_utils/fuzzy-score";
 import {
   workspaceService as defaultWorkspaceService,
   type WorkspaceService,
@@ -70,19 +70,19 @@ export class SearchService {
     // the previous 50-entry cap could push a wanted match off the list
     // entirely when the user typed a short query.
     const limit = options.limit ?? 200;
-    let files = await listFiles(workspace.worktree.path);
+    const files = await listFiles(workspace.worktree.path);
 
-    if (options.query) {
-      const scored: { file: string; score: number }[] = [];
-      for (const f of files) {
-        const score = fuzzyScore(options.query, f);
-        if (score !== null) scored.push({ file: f, score });
-      }
-      scored.sort((a, b) => b.score - a.score);
-      files = scored.map((r) => r.file);
+    if (!options.query) {
+      // Empty query → just return the raw listing capped to `limit`.
+      // The file picker uses this for its initial unfiltered view.
+      return { files: files.slice(0, limit) };
     }
 
-    return { files: files.slice(0, limit) };
+    // Score + sort the whole corpus in one `Fzf` pass. Returns only
+    // matches, sorted highest-first with the filename bonus and length
+    // tiebreaker already applied; we just slice to the limit here.
+    const scored = scoreFiles(options.query, files);
+    return { files: scored.slice(0, limit).map((r) => r.file) };
   }
 
   /**
