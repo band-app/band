@@ -329,20 +329,34 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
       workspaceId: WORKSPACE_A,
     });
 
-    // Poll for 3 s — the bug's full lifecycle (150 ms debounce +
-    // search round-trip + autoOpen effect + per-workspace-state
-    // propagation + CodeBrowserView openTabPinned + useFileTabs
-    // persist effect) takes ~2 s on a slow CI worker. A regression
-    // would surface within that window as `shared.ts` appearing in
-    // B's tab list.
-    await expect
-      .poll(
-        async () => {
-          const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
-          return state?.tabs ?? [];
-        },
-        { timeout: 3000 },
-      )
-      .not.toContain("shared.ts");
+    // Positive-shaped poll for the leak's APPEARANCE within a
+    // bounded window, then assert the poll exhausted its budget
+    // without finding it. `expect.poll(state).not.toContain(...)`
+    // would succeed trivially at t=0 because the seed above leaves
+    // B's tab list empty — the poll returns success before the
+    // bug's full lifecycle (150 ms debounce + search + autoOpen +
+    // per-workspace-state propagation + CodeBrowserView
+    // openTabPinned + useFileTabs persist) has had time to write
+    // the leak (~200-300 ms post-dispatch). The
+    // poll-for-appearance shape catches the regression by FAILING
+    // fast when the leak arrives; the try/catch converts
+    // "timed out without finding the leak" into "test passed".
+    let leaked = false;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
+            return state?.tabs ?? [];
+          },
+          { timeout: 2000 },
+        )
+        .toContain("shared.ts");
+      leaked = true;
+    } catch {
+      // poll exhausted budget without observing shared.ts land in
+      // B's tab list — exactly the contract we want to confirm.
+    }
+    expect(leaked).toBe(false);
   });
 });
