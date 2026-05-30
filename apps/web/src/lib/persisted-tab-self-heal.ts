@@ -7,19 +7,11 @@
  * it" and "leave the tab alone because the failure is on a
  * user-owned tab or is transient".
  *
- * Lives here, not inline in `CodeBrowserView`, because:
- *
- *   1. The branches are subtle (path equality + ENOENT-shaped error
- *      vs. literal `ENOENT` substring), and a unit test pinning the
- *      truth table is the right tool — co-locating the helper next
- *      to its sibling `dispatch-open-file.ts` mirrors the existing
- *      "tiny pure helper + side-by-side test" pattern in
- *      `apps/web/tests/dispatch-open-file.test.ts`.
- *   2. Exporting a symbol from a production module solely so a test
- *      can import it inverts the dependency direction — the helper
- *      belongs in its own module either way, with the test reaching
- *      into a stable public surface rather than into a component's
- *      internals.
+ * Lives in its own module so the four branches can be exhaustively
+ * unit-tested with no React or component rendering involved.
+ * Exporting from a component just to make the helper importable
+ * from a test would invert the dependency direction; a stable
+ * library-shaped surface is the right home.
  */
 
 /**

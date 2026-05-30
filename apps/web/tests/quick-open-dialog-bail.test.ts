@@ -28,11 +28,10 @@
  *      `autoOpen` is false, the dialog just becomes visible and the
  *      user picks manually. `onOpenFile` MUST NOT fire automatically.
  *
- * Avoids `@testing-library/react` — uses the same minimal
- * `createRoot` + `act` pattern as `useFileTabs.test.ts` and
- * `editor-history.test.ts`. The dashboard context is supplied
- * directly by rendering `<DashboardProvider>` around the dialog so
- * `useAdapter()` / `useCapabilities()` resolve.
+ * Uses the same minimal `createRoot` + `act` render harness that
+ * other React unit tests in this directory use. The dashboard
+ * context is supplied directly by rendering `<DashboardProvider>`
+ * around the dialog so `useAdapter()` / `useCapabilities()` resolve.
  */
 
 import { act, createElement } from "react";

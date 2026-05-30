@@ -68,7 +68,7 @@ function git(cwd: string, args: string[], home: string): void {
 }
 
 let server!: ServerHandle;
-let tmpHome: string;
+let tmpHome: string | undefined;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -96,7 +96,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (server) await server.close();
-  cleanupTmpHome(tmpHome);
+  // `tmpHome` may be `undefined` if `beforeAll` threw before
+  // `createTmpHome()` resolved — guard so the cleanup path is a
+  // no-op rather than calling `rmSync(undefined)`.
+  if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
 test.describe("mobile chat file-link workspace scoping (issue #539)", () => {

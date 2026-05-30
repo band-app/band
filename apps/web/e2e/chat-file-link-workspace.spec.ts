@@ -99,7 +99,7 @@ function git(cwd: string, args: string[], home: string): void {
 }
 
 let server!: ServerHandle;
-let tmpHome: string;
+let tmpHome: string | undefined;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -161,7 +161,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (server) await server.close();
-  cleanupTmpHome(tmpHome);
+  // `tmpHome` may be `undefined` if `beforeAll` threw before
+  // `createTmpHome()` resolved — guard so the cleanup path is a
+  // no-op rather than calling `rmSync(undefined)`.
+  if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
 test.describe("chat file-link workspace scoping (issue #539)", () => {
@@ -182,19 +185,14 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
   }) => {
     const workspacePage = new WorkspacePage(_page, server.url, TOKEN);
 
-    // Land directly on B — we don't need A alive for this assertion;
-    // we only need the active workspace's listener to honour a
-    // detail-less event (the legacy / non-chat dispatcher shape that
-    // pre-dates the workspace-scoping fix).
     await workspacePage.goto(WORKSPACE_B);
     await workspacePage.waitForReady();
     await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
 
-    // Dispatch without `workspaceId`. The listener must fall through
-    // to the active workspace (B) so any future non-chat caller —
-    // command palette item, CLI bridge, etc. — keeps working without
-    // needing to know the workspace id. The 0-result auto-open path
-    // again reveals the dialog as proof.
+    // Contract: dispatching without `workspaceId` must open the
+    // dialog. The 0-result filename forces the auto-open shortcut
+    // into its reveal branch so the assertion has something to wait
+    // on.
     await workspacePage.dispatchOpenFileEvent({
       filename: "does-not-resolve-anywhere-67890.ts",
     });
