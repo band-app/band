@@ -79,6 +79,32 @@ export class WorkspacePage {
     return this.page.getByTestId(`workspace-panel-host__cached-entry--${workspaceId}`);
   }
 
+  /** Locator for the chat tab panel's visibility marker inside a specific
+   *  workspace's cached panel host (issue #469). The marker testid is set
+   *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
+   *  visibility signal the shared `PanelVisibilityContext` propagated
+   *  into the tab — so the test can observe context plumbing directly,
+   *  independent of dockview's outer detach behaviour.
+   *
+   *  Scoping the locator to the workspace's cached entry lets a test
+   *  query workspace A's marker and workspace B's marker independently
+   *  even when both are mounted (active + cached) at once. */
+  chatTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
+    return this.cachedPanelEntries(workspaceId).getByTestId(
+      `dockview-chat-tab__visible-${visible ? "true" : "false"}`,
+    );
+  }
+
+  /** Locator for the terminal tab panel's visibility marker inside a
+   *  specific workspace's cached panel host (issue #469). Counterpart of
+   *  `chatTabVisibilityMarker` for the terminal container — see that
+   *  method's doc comment for the rationale. */
+  terminalTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
+    return this.cachedPanelEntries(workspaceId).getByTestId(
+      `dockview-terminal-tab__visible-${visible ? "true" : "false"}`,
+    );
+  }
+
   /** Right-click the workspace card to open its context menu, then click
    *  "Delete workspace". The deletion goes through the real
    *  `useRemoveWorkspace` mutation — same path the user takes — so the
