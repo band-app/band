@@ -16,6 +16,15 @@
  *     ripgrep reads from stdin and hangs for the same reason.
  *   - Non-UTF-8 paths/lines come back as `bytes` (base64) instead of
  *     `text`; we skip those because the UI can't render them.
+ *   - `--hidden` is passed so files inside dot-directories like
+ *     `.github/`, `.husky/`, `.claude/`, `.vscode/` are searched. By
+ *     default ripgrep skips any path whose name starts with `.`, which
+ *     caused find-in-files to silently miss content the user could see
+ *     in the file picker (`git ls-files` already returns those tracked
+ *     dot-paths). `--glob !.git` keeps the repo's internal git database
+ *     out of results — `.gitignore` is still honoured for everything
+ *     else, so `node_modules/`, build output, etc. stay excluded. See
+ *     issue #536.
  *
  * The same binary also drives `listFiles` (below) which powers the
  * Quick Open (Cmd+P) file picker. `git ls-files` was the original
@@ -75,6 +84,10 @@ function createIterator(options: RipgrepOptions): AsyncIterator<RipgrepMatch> {
   if (!options.caseSensitive) args.push("--ignore-case");
   if (options.wholeWord) args.push("--word-regexp");
   if (!options.regex) args.push("--fixed-strings");
+  // Surface tracked content inside dot-directories (.github, .husky,
+  // .claude, .vscode, ...) — see file header. .git/ stays excluded so
+  // we don't dump the repo's internal git database into results.
+  args.push("--hidden", "--glob", "!.git");
   args.push("--json");
   args.push("--", options.query, "./");
 
