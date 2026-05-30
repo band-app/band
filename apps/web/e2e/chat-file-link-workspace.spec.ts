@@ -165,98 +165,17 @@ test.afterAll(async () => {
 });
 
 test.describe("chat file-link workspace scoping (issue #539)", () => {
-  test("event addressed to an inactive workspace is ignored — no Quick Open dialog leaks into the active workspace", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-
-    // Land on workspace A first, then switch to B via the sidebar so
-    // both workspaces stay in `MultiWorkspacePanelHost`'s LRU cache.
-    // The bug only manifests with two cached workspaces — a full
-    // navigation to B would wipe A's panel state and there'd be no
-    // chat-pane to "leak from" in the original repro.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_A).first()).toBeVisible();
-
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    // Sanity: both workspaces are alive at this point. If a future
-    // change to the LRU cache evicts A here, the test loses its
-    // ability to model the cross-workspace dispatch and silently
-    // passes — pin both as alive before going further.
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
-
-    // Active workspace is B. Dispatch a `band:open-file` event
-    // addressed to A — pre-fix, the SharedDockviewLayout listener
-    // would catch it (no workspace filter) and pop the Quick Open
-    // dialog against B. Post-fix, the listener filters by
-    // `detail.workspaceId` and the event is silently ignored.
-    //
-    // We bracket the cross-workspace dispatch with a probe addressed
-    // to the ACTIVE workspace (B). Window CustomEvent dispatches are
-    // synchronous and listeners run in registration order, so by the
-    // time the probe's `toBeVisible()` resolves we know the
-    // cross-workspace event has already been processed — no
-    // `waitForTimeout` needed. This converts the "no side effect"
-    // assertion into a deterministic ordering check: if the
-    // cross-workspace event had wrongly opened the dialog, the
-    // dialog would already be visible BEFORE we dispatch the probe,
-    // and the post-close `toBeHidden` assertion below would have
-    // nothing to wait on (because the cross-workspace open would
-    // race with the probe close).
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "only-in-a.ts",
-      workspaceId: WORKSPACE_A,
-    });
-
-    // Probe addressed to B with a deliberately-missing filename.
-    // The 0-result auto-open branch reveals the dialog (the shortcut
-    // only hides it on a single match), giving us a deterministic
-    // positive event to await. Once the probe resolves, every
-    // previous event has been processed.
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "does-not-resolve-anywhere-12345.ts",
-      workspaceId: WORKSPACE_B,
-    });
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
-
-    // Close the probe dialog so the next assertion observes a clean
-    // baseline. Escape is the user-facing close path the Dialog wires
-    // up by default.
-    await workspacePage.closeQuickOpenDialog();
-    await expect(workspacePage.quickOpenDialog()).toBeHidden();
-
-    // Tighten the second negative check with an inline positive
-    // companion: dispatch the cross-workspace event FIRST (which must
-    // be silently dropped), then a probe event addressed to the
-    // active workspace. Because window CustomEvent dispatches and
-    // their listeners run synchronously in registration order, the
-    // probe's `toBeVisible()` is the deterministic anchor: by the
-    // time it resolves, the cross-workspace event has already been
-    // through its listener. A regression where the listener no
-    // longer filtered would have opened the dialog from the
-    // cross-workspace event itself, and the probe's visibility
-    // assertion would then be unable to distinguish "probe opened
-    // it" from "cross-workspace leaked it". The
-    // `quickOpenDialog().isVisible() === false` snapshot taken
-    // immediately AFTER the cross-workspace dispatch (before the
-    // probe) is the assertion that pins the listener-filter
-    // contract.
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "only-in-a.ts",
-      workspaceId: WORKSPACE_A,
-    });
-    expect(await workspacePage.quickOpenDialog().isVisible()).toBe(false);
-
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "another-missing-file-anchor-99999.ts",
-      workspaceId: WORKSPACE_B,
-    });
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
-  });
+  // NOTE: the original "event addressed to an inactive workspace is
+  // ignored" test (which dispatched `{ filename: "only-in-a.ts",
+  // workspaceId: A }` while B was active and asserted dialog
+  // visibility) was deleted as redundant — the cross-workspace
+  // tab-leak test below covers the same listener-filter contract
+  // with a stronger, persistent-state assertion that actually
+  // distinguishes bug code from fix code. The visibility-snapshot
+  // approach happened to pass on bug code because `only-in-a.ts`
+  // doesn't exist in B's index, so B's auto-open shortcut took the
+  // 0-result branch and never leaked anything observable through the
+  // dialog's `open` state.
 
   test("event with no workspaceId in its detail falls through to the active workspace (backwards-compat)", async ({
     page: _page,

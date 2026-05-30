@@ -419,6 +419,41 @@ function FileTreeToolbar({
 }
 
 // ---------------------------------------------------------------------------
+// Persisted-tab self-heal predicate (issue #539, fix layer 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true iff the FileViewer's load failure for `failedPath` should
+ * cause `handleTabClose(failedPath)` to fire on the persisted-tab
+ * self-heal path. Pure function — extracted from `handleFileLoadError`
+ * below so the four-branch contract can be exhaustively tested without
+ * spinning up CodeBrowserView in jsdom.
+ *
+ * The four branches:
+ *   1. `restoredTabPath` is null (workspace mounted without restoring a
+ *      persisted active tab — every load failure here is on a tab the
+ *      user explicitly opened in-session; never auto-close). → false
+ *   2. `restoredTabPath` differs from `failedPath` (a load failure on
+ *      some OTHER tab; the persisted-tab restore was successful and
+ *      this failure is unrelated). → false
+ *   3. Paths match but the error is NOT an ENOENT-style "missing
+ *      file" (transient network / permission / parse errors; the file
+ *      may still exist and a retry could succeed). → false
+ *   4. Paths match AND the error is ENOENT-style ("no such file or
+ *      directory" or the literal `ENOENT` substring from `fs.stat`). → true
+ *
+ * Tested in `apps/web/tests/persisted-tab-self-heal.test.ts`.
+ */
+export function shouldDropPersistedTab(
+  failedPath: string,
+  restoredTabPath: string | null,
+  errorMessage: string,
+): boolean {
+  if (restoredTabPath !== failedPath) return false;
+  return /ENOENT|no such file or directory/i.test(errorMessage);
+}
+
+// ---------------------------------------------------------------------------
 // CodeBrowserView
 // ---------------------------------------------------------------------------
 
@@ -1116,27 +1151,20 @@ export function CodeBrowserView({
     [fileTabs.closeTab, tabState.removeFile],
   );
 
-  // Self-heal handler for FileViewer load errors on persisted-tab restores
-  // (see `initialRestoredTabRef` above and issue #539). We only act when:
-  //   1. The failing path is the one we restored on mount from
-  //      `band-open-tabs:<ws>` (any subsequent user-initiated tab is the
-  //      user's call to keep or close).
-  //   2. The error message looks like an ENOENT — the path doesn't exist
-  //      in this workspace at all. We deliberately don't act on every
-  //      load failure (network blips, permission errors) — those are
-  //      transient and self-heal on retry. Match both the literal
-  //      `ENOENT` substring (`fs.stat` rejection) and the
-  //      "no such file or directory" prose (some adapters wrap the
-  //      error before forwarding).
+  // Self-heal handler for FileViewer load errors on persisted-tab
+  // restores (see `initialRestoredTabRef` above and issue #539). The
+  // four-branch decision lives in the pure `shouldDropPersistedTab`
+  // helper at module scope (above) so the contract is unit-testable
+  // without rendering CodeBrowserView; the only state read here is
+  // the ref's current value.
   const handleFileLoadError = useCallback(
     ({ filePath, message }: { filePath: string; message: string }) => {
-      if (initialRestoredTabRef.current !== filePath) return;
-      const isMissing = /ENOENT|no such file or directory/i.test(message);
-      if (!isMissing) return;
-      // Clear the ref first so a re-render between `handleTabClose` and
-      // the active-tab-sync effect doesn't trigger this handler again
-      // for the same path. Subsequent loads of a *different* tab don't
-      // match the ref's value, so they're already filtered.
+      if (!shouldDropPersistedTab(filePath, initialRestoredTabRef.current, message)) return;
+      // Clear the ref first so a re-render between `handleTabClose`
+      // and the active-tab-sync effect doesn't trigger this handler
+      // again for the same path. Subsequent loads of a *different*
+      // tab don't match the ref's value, so they're already filtered
+      // by the helper's first check.
       initialRestoredTabRef.current = null;
       handleTabClose(filePath);
     },

@@ -177,12 +177,10 @@ export function QuickOpenDialog({
     // `workspaceIdRef` is read via the ref so this effect's dep array
     // does NOT include `workspaceId` — including it would re-fire the
     // capture on every workspace switch and silently defeat the bail.
-    // This isolation is not covered by an integration test: the bail's
-    // exercise path requires the workspace to flip BEFORE the dialog's
-    // first search resolves, which is faster than Playwright's
-    // black-box await granularity on a tiny test fixture. The
-    // correctness here was caught by code review (CI Claude reviewer
-    // on PR #545) rather than by a regression test.
+    // The regression is locked down by
+    // `apps/web/tests/quick-open-dialog-bail.test.ts` (ref-isolation
+    // scenario): flipping the workspaceId prop while the dialog is
+    // open MUST NOT overwrite the captured value.
     if (open) {
       openedWorkspaceIdRef.current = workspaceIdRef.current;
     }
