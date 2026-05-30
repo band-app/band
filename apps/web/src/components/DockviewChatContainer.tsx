@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AgentIcon, useAdapter } from "@/dashboard";
 import {
   attachEdgeGroupDragVisibility,
+  centralPanelPosition,
   ensureEdgeGroups,
   registerInnerDockview,
 } from "../lib/dockview-edge-groups";
@@ -732,12 +733,19 @@ export function DockviewChatContainer({
       if (event.kind === "chat-created" && typeof event.chatId === "string") {
         // Skip if this panel already exists (we created it ourselves)
         if (api.getPanel(event.chatId)) return;
+        // Pin the new panel to the inner dockview's central area.
+        // Without this explicit position, dockview's fallback uses
+        // `activeGroup`, which can be one of the collapsed edge
+        // groups added by `ensureEdgeGroups` — making the panel
+        // render as a thin docked strip instead of in the center.
+        // See `centralPanelPosition` for the full rationale.
         api.addPanel({
           id: event.chatId,
           component: "chatTab",
           tabComponent: "chatTab",
           title: "Chat",
           params: { workspaceId, chatId: event.chatId },
+          position: centralPanelPosition(api),
         });
       } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
         const panel = api.getPanel(event.chatId);
@@ -904,6 +912,10 @@ export function DockviewChatContainer({
 
 function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
   const chatId = newChatId();
+  // Pin the default panel to the inner dockview's central area so it
+  // lands there instead of leaking into an edge group that
+  // `ensureEdgeGroups` may have already added. See
+  // `centralPanelPosition` for the full rationale.
   api.addPanel({
     id: chatId,
     component: "chatTab",
@@ -913,5 +925,6 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
       workspaceId,
       chatId,
     },
+    position: centralPanelPosition(api),
   });
 }
