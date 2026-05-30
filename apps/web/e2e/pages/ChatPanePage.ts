@@ -157,4 +157,38 @@ export class ChatPanePage {
       await this.promptInput.click();
     });
   }
+
+  /** Locate a `band-file:` anchor by its visible accessible name —
+   *  the inline-code path the rendered link wraps (e.g. the
+   *  pattern `src/main.rs:42`). Used by the file-link dispatcher
+   *  spec to click a real assistant-message link without reaching
+   *  into `page.*` from the test body. */
+  fileLinkAnchor(name: RegExp | string): Locator {
+    return this.page.getByRole("link", { name });
+  }
+
+  /** Install a window-event listener for `band:open-file` that
+   *  captures the dispatched event details into a page-global
+   *  array, runnable BEFORE any chat message renders.
+   *  `addInitScript` is the right primitive — the script runs in
+   *  the page on every navigation, before any other script. The
+   *  captured array is read back via `capturedOpenFileEvents()`. */
+  async installOpenFileCapture(): Promise<void> {
+    await this.page.addInitScript(() => {
+      const win = window as unknown as { __dispatchedOpenFile: unknown[] };
+      win.__dispatchedOpenFile = [];
+      window.addEventListener("band:open-file", (e) => {
+        win.__dispatchedOpenFile.push((e as CustomEvent).detail);
+      });
+    });
+  }
+
+  /** Read the `band:open-file` event details captured by
+   *  `installOpenFileCapture()`. Returns an empty array if the
+   *  capture wasn't installed or no events fired. */
+  async capturedOpenFileEvents(): Promise<unknown[]> {
+    return await this.page.evaluate(
+      () => (window as unknown as { __dispatchedOpenFile?: unknown[] }).__dispatchedOpenFile ?? [],
+    );
+  }
 }

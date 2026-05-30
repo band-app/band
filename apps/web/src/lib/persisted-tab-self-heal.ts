@@ -32,8 +32,6 @@
  * literal `ENOENT` substring (the shape from `fs.stat` rejection)
  * and the "no such file or directory" prose form (in case an
  * adapter wraps the rejection before forwarding).
- *
- * Tested in `apps/web/tests/persisted-tab-self-heal.test.ts`.
  */
 export function shouldDropPersistedTab(
   failedPath: string,

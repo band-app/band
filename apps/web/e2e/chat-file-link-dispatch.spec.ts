@@ -169,44 +169,32 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
 
     // Install the window event capture BEFORE any chat-message
     // renders so the very first click on a `band-file:` link is
-    // observed. `addInitScript` runs the function in the page
-    // before any other script, so the array exists when
-    // `FileLinkedAnchor`'s click handler dispatches.
-    await page.addInitScript(() => {
-      (window as unknown as { __dispatchedOpenFile: unknown[] }).__dispatchedOpenFile = [];
-      window.addEventListener("band:open-file", (e) => {
-        (window as unknown as { __dispatchedOpenFile: unknown[] }).__dispatchedOpenFile.push(
-          (e as CustomEvent).detail,
-        );
-      });
-    });
+    // observed. The capture lives behind a POM method so the test
+    // body doesn't reach for `page.addInitScript` directly.
+    await chatPane.installOpenFileCapture();
 
     await workspacePage.goto(WORKSPACE);
     await workspacePage.waitForReady();
     await chatPane.waitForReady();
 
     // Send a message to wake up the fake-agent. The agent replies
-    // with an assistant message containing a `band-file:` link
-    // (from the scenario seeded in beforeAll). The remark plugin
-    // in `MessageResponse` auto-wraps `src/main.rs:42` in an
-    // anchor with `href="band-file:src/main.rs:42"`.
+    // with an assistant message containing an inline-code path
+    // `` `src/main.rs:42` `` (from the scenario seeded in
+    // beforeAll). The `rehypeFileLinkedCode` plugin in
+    // `MessageResponse` wraps the rendered `<code>` in an
+    // `<a href="band-file:src/main.rs:42">`.
     await chatPane.typeMessage("kick off");
     await chatPane.submit();
 
-    // Wait for the rendered `band-file:` link to appear. The
-    // `FileLinkedAnchor` component sets `title="Open src/main.rs:42"`
-    // — system-controlled (not localisable copy), so the
-    // role+name locator is the right shape. The accessible name
-    // comes from the inline-code child's text content.
-    const link = page.getByRole("link", { name: /src\/main\.rs:42/ });
+    // Wait for the rendered `band-file:` link to appear — the
+    // anchor's accessible name comes from the inline-code child's
+    // text content.
+    const link = chatPane.fileLinkAnchor(/src\/main\.rs:42/);
     await expect(link).toBeVisible({ timeout: 10_000 });
 
-    // Capture any pre-existing dispatches (there should be none)
-    // before clicking, so the assertion is unambiguous.
-    const before = (await page.evaluate(
-      () => (window as unknown as { __dispatchedOpenFile: unknown[] }).__dispatchedOpenFile.length,
-    )) as number;
-    expect(before).toBe(0);
+    // Confirm the capture is clean before clicking, so the
+    // post-click assertion is unambiguous.
+    expect(await chatPane.capturedOpenFileEvents()).toEqual([]);
 
     // Click the rendered link. `FileLinkedAnchor`'s onClick calls
     // `e.preventDefault() + e.stopPropagation()` to suppress the
@@ -221,13 +209,7 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
     // With the fix, the chat's owning workspace flows through
     // the context to the dispatch.
     await expect
-      .poll(async () =>
-        page.evaluate(
-          () =>
-            (window as unknown as { __dispatchedOpenFile: { workspaceId?: string }[] })
-              .__dispatchedOpenFile,
-        ),
-      )
+      .poll(() => chatPane.capturedOpenFileEvents())
       .toEqual([{ filename: "src/main.rs:42", workspaceId: WORKSPACE }]);
   });
 });

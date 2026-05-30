@@ -177,11 +177,15 @@ export function QuickOpenDialog({
   useEffect(() => {
     // `workspaceIdRef` is read via the ref so this effect's dep array
     // does NOT include `workspaceId` — including it would re-fire the
-    // capture on every workspace switch and silently defeat the bail.
-    // The regression is locked down by
-    // `apps/web/tests/quick-open-dialog-bail.test.ts` (ref-isolation
-    // scenario): flipping the workspaceId prop while the dialog is
-    // open MUST NOT overwrite the captured value.
+    // capture on every workspace switch and silently defeat the bail
+    // (the ref would track the LATEST workspaceId, so the bail
+    // comparison `capturedWorkspaceId !== currentWorkspaceId` would
+    // never trip). This timing contract resists end-to-end test
+    // coverage because the race window (workspace flips between
+    // dialog-open and search-resolve) is faster than Playwright's
+    // black-box await granularity on a tiny fixture. The bail's
+    // pure decision logic IS covered by the
+    // `shouldBailAutoOpen` unit suite.
     if (open) {
       openedWorkspaceIdRef.current = workspaceIdRef.current;
     }
