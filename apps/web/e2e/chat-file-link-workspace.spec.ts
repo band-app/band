@@ -26,23 +26,23 @@
  *      search resolves — belt-and-braces for the in-flight workspace
  *      switch race.
  *
- * Test architecture (per `docs/integration-testing.md` and the
- * `write-integration-test` skill at
- * `.claude/skills/write-integration-test/SKILL.md`):
+ * Test architecture:
  *
- *   - Real production `dist/start-server.mjs` against a fresh tmp home.
- *   - Two real git worktrees so `workspace.searchWorkspaceFiles` has
+ *   - Boots the real production server against a fresh tmp home.
+ *   - Two real git worktrees so the file-search procedure has
  *     something to walk for the QuickOpenDialog's auto-open path.
- *   - No tRPC mocking, no MSW, no `page.route()` on our own routes.
- *   - DOM events dispatched from the page context via the page-object
- *     helper `workspacePage.dispatchOpenFileEvent(...)`. The dispatcher
- *     half of the fix (`FileLinkWorkspaceProvider` + `useContext`) is
- *     intentionally not driven from this spec — there is currently no
- *     unit-test surface for the React click→dispatch chain. A
- *     follow-up could render a real chat message containing a
- *     `band-file:` link, click it, and assert the dispatched event's
- *     `detail.workspaceId` matches the chat's owning workspace; that
- *     would close the dispatcher-side coverage gap.
+ *   - No tRPC mocking, no MSW, no page.route() interception of own
+ *     routes — external services would be stubbed via Express on a
+ *     random port, but this spec drives DOM events directly via
+ *     `workspacePage.dispatchOpenFileEvent(...)` so no stub is needed.
+ *
+ * The dispatcher half of the fix (the React context + useContext read
+ * in `FileLinkedAnchor`) is intentionally not driven from this spec —
+ * there is currently no unit-test surface for the React click→dispatch
+ * chain. A follow-up could render a real chat message containing a
+ * `band-file:` link, click it, and assert the dispatched event's
+ * `detail.workspaceId` matches the chat's owning workspace; that would
+ * close the dispatcher-side coverage gap.
  */
 
 import { execFileSync } from "node:child_process";
@@ -334,35 +334,18 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
     // the code comment at `CodeBrowserView.tsx` ~line 1108-1133.
   });
 
-  // KNOWN COVERAGE GAP: the QuickOpenDialog `openedWorkspaceIdRef` bail
-  // (see `apps/web/src/dashboard/components/QuickOpenDialog.tsx` lines
-  // 140-178) is the belt-and-braces guard for the in-flight workspace
-  // switch race. It fires when:
-  //
-  //   1. The dialog opens with `autoOpen=true` for workspace X.
-  //   2. The dialog captures X into `openedWorkspaceIdRef` at open time.
-  //   3. The user switches to workspace Y BEFORE the 150 ms search
-  //      debounce + search execution completes.
-  //   4. The search resolves with a single match against Y.
-  //   5. The autoOpen effect reads `openedWorkspaceIdRef (X) !==
-  //      workspaceId (Y)` and bails without calling `onOpenFile`.
-  //
-  // Reliably reproducing this window from a black-box Playwright spec
-  // is not practical without instrumenting the search adapter to add
-  // a controllable delay — Playwright's `await` granularity is wider
-  // than the 150 ms debounce, and React's batching can collapse the
-  // open + initial-search into a single commit before the test gets a
-  // chance to fire the workspace switch. A spec written naively
-  // (dispatch event → switch workspace → assert no tab opened) was
-  // tried and passes even when the bail is removed, because the test
-  // doesn't actually hit the autoOpen-with-mismatched-workspaceId
-  // branch the bail guards.
-  //
-  // The reasoning for the bail is captured at the source, and the
-  // listener-filter test above covers the bug's primary path
-  // (`dispatchOpenFile` now carries workspaceId, listeners filter on
-  // it). The bail remains as a defence-in-depth guard — a follow-up
-  // could add a vitest-level unit test that drives `QuickOpenDialog`
-  // directly with a controlled `searchWorkspaceFiles` mock, which is
-  // the right tool for race-window verification.
+  // The `QuickOpenDialog.openedWorkspaceIdRef` bail (defence layer 3
+  // in the issue #539 fix) has an exercise path that resists
+  // black-box integration testing: it only fires when the workspace
+  // flips BEFORE the dialog's first `searchWorkspaceFiles` resolves,
+  // which on a tiny test fixture happens within the first few
+  // milliseconds — faster than Playwright's await granularity can
+  // reliably interleave. A test that dispatches the event then
+  // immediately clicks the workspace card passes both with and
+  // without the bail because by the time the click commits, the
+  // search has already resolved and `autoOpened.current` is true, so
+  // the bail check is never reached. The correctness of the ref
+  // isolation (only capture on `open: false → true`, never on
+  // mid-flight `workspaceId` changes) is documented in
+  // `QuickOpenDialog.tsx` and was verified by code review on PR #545.
 });

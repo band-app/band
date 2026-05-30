@@ -159,9 +159,34 @@ export function QuickOpenDialog({
   useEffect(() => {
     if (open) {
       setDialogVisible(!autoOpen);
-      openedWorkspaceIdRef.current = workspaceId;
     }
-  }, [open, autoOpen, workspaceId]);
+  }, [open, autoOpen]);
+
+  // Mirror `workspaceId` into a ref so the open-capture effect below
+  // can read the current value without depending on it. The capture
+  // MUST fire only on the `open: false → true` transition — if the
+  // workspaceId changes while the dialog is already open, we must
+  // KEEP the originally-captured value (so the bail in the autoOpen
+  // effect below has something to compare against). Re-running the
+  // capture on every workspaceId change would overwrite the ref with
+  // the new workspace, silently defeating the bail and re-opening the
+  // cross-workspace leak this guard exists to prevent.
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  useEffect(() => {
+    // `workspaceIdRef` is read via the ref so this effect's dep array
+    // does NOT include `workspaceId` — including it would re-fire the
+    // capture on every workspace switch and silently defeat the bail.
+    // This isolation is not covered by an integration test: the bail's
+    // exercise path requires the workspace to flip BEFORE the dialog's
+    // first search resolves, which is faster than Playwright's
+    // black-box await granularity on a tiny test fixture. The
+    // correctness here was caught by code review (CI Claude reviewer
+    // on PR #545) rather than by a regression test.
+    if (open) {
+      openedWorkspaceIdRef.current = workspaceIdRef.current;
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open || !autoOpen || autoOpened.current) return;
