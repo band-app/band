@@ -210,14 +210,35 @@ describe("published @band-app/server runs via the bin shim", () => {
     }
   }, 120_000);
 
-  afterAll((ctx) => {
+  afterAll(async (ctx) => {
     if (ctx.tasks.some((t) => t.result?.state === "fail")) {
       process.stderr.write(
         `\n--- @band-app/server output ---\n${serverOutput.join("")}\n--- exit code: ${exitCode} ---\n`,
       );
     }
+    // Wait for the spawned server to actually exit before removing workDir.
+    // Without this await, `rmSync(workDir, { recursive: true })` races the
+    // server's writes to `BAND_HOME` (SQLite WAL checkpoints, pino log lines,
+    // settings.json updates) — on macOS APFS that surfaces as ENOTEMPTY when
+    // the recursive walk has emptied a child directory but the server writes
+    // back into it between the child removal and the parent rmdir. Observed
+    // on Release run 26726110047 / job 78761522277 with all 1052 tests
+    // otherwise passing.
     if (server && server.exitCode === null && !server.killed) {
+      const exited = new Promise<void>((resolve) => {
+        server!.once("exit", () => resolve());
+      });
       server.kill("SIGTERM");
+      // Escalate to SIGKILL if SIGTERM doesn't take within a few seconds, so
+      // a wedged child can never deadlock cleanup.
+      const escalate = setTimeout(() => {
+        if (server && server.exitCode === null) server.kill("SIGKILL");
+      }, 5_000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(escalate);
+      }
     }
     if (workDir) {
       rmSync(workDir, { recursive: true, force: true });
