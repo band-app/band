@@ -54,11 +54,11 @@ test("settings dialog renders every section in a single scrolling list", async (
   await settingsPage.openDialog();
 
   // Every section is now rendered at once — there is no master/detail
-  // navigation. We expect eight SettingsSection cards to be present and
+  // navigation. We expect nine SettingsSection cards to be present and
   // every section's first row to be visible (after scrolling, if needed).
-  // The eight sections are: Appearance, General, Browser, Labels, Coding
-  // Agents, Notifications, Web Server, Terminal.
-  await expect(settingsPage.sectionCards()).toHaveCount(8);
+  // The nine sections are: Appearance, General, Browser, Labels, Coding
+  // Agents, Notifications, Web Server, Usage report, Terminal.
+  await expect(settingsPage.sectionCards()).toHaveCount(9);
 
   // Appearance — Theme dropdown rendered by SettingsRow.
   await expect(settingsPage.themeSelect()).toBeVisible();
