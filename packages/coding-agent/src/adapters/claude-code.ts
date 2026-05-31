@@ -17,6 +17,7 @@ import {
 import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
+import { computeCost } from "../pricing.js";
 import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
@@ -27,6 +28,8 @@ import type {
   SessionInfo,
   SessionListItem,
   SessionMessageItem,
+  SessionUsageSnapshot,
+  SessionUsageTurn,
   SkillInfo,
   UserInputRequest,
 } from "../types.js";
@@ -625,6 +628,129 @@ export class ClaudeCodeAdapter implements CodingAgent {
       messages: slice.map(mapSessionMessage),
       hasMore,
       firstOffset: offset,
+    };
+  }
+
+  /**
+   * Read per-turn token + USD cost for a single session from
+   * `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`.
+   *
+   * **What's in the file.** Claude Code's session JSONL does NOT contain
+   * `result` events with `total_cost_usd` — that field is computed by
+   * the SDK at query time and isn't persisted. The file does contain one
+   * `assistant` event per API round-trip, each with `message.usage.*`
+   * (input/output/cache tokens) and `message.model` for the per-call
+   * model id. One assistant event = one row in our `usage_events`
+   * (consistent with how Codex and OpenCode count "turns").
+   *
+   * **Cost.** Computed from `pricing.ts` ratecard × per-message tokens.
+   * Anthropic's API doesn't surface a separate cost field, and the SDK
+   * doesn't write one to disk, so the ratecard is the only path for
+   * historical sessions. Live Band-driven sessions still see live
+   * `data-result` chat-view events with the SDK's `total_cost_usd`,
+   * but that's a UI nicety, not the storage path.
+   *
+   * Returns `null` when the session isn't found — the scanner skips it
+   * silently. Throws on permission errors etc. so the caller can log.
+   */
+  async getSessionUsage(sessionId: string, dir: string): Promise<SessionUsageSnapshot | null> {
+    let raw: SessionMessage[];
+    try {
+      raw = await getSessionMessages(sessionId, { dir });
+    } catch (err) {
+      // The SDK throws ENOENT-style errors when the session file is
+      // missing. Treat that as "nothing to scan" rather than propagating
+      // up — a workspace can list a sessionId then have its file pruned
+      // by Claude between the listing and the read.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("ENOENT") || msg.toLowerCase().includes("not found")) {
+        return null;
+      }
+      throw err;
+    }
+    if (raw.length === 0) return null;
+
+    const turns: SessionUsageTurn[] = [];
+    let turnIndex = 0;
+    let startedAt = Number.POSITIVE_INFINITY;
+    let updatedAt = 0;
+    let modelFallback = "";
+
+    for (const m of raw) {
+      // `timestamp` in the JSONL is an ISO string; SDK keeps it as such.
+      const tsRaw = (m as { timestamp?: string | number }).timestamp;
+      const capturedAt =
+        typeof tsRaw === "number"
+          ? tsRaw
+          : typeof tsRaw === "string"
+            ? Date.parse(tsRaw)
+            : Number.NaN;
+      if (Number.isFinite(capturedAt)) {
+        startedAt = Math.min(startedAt, capturedAt);
+        updatedAt = Math.max(updatedAt, capturedAt);
+      }
+
+      if ((m as { type?: string }).type !== "assistant") continue;
+
+      const message = (
+        m as {
+          message?: {
+            model?: string;
+            usage?: {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
+          };
+        }
+      ).message;
+      const usage = message?.usage;
+      if (!usage) continue;
+      const model = message?.model;
+      if (model && !modelFallback) modelFallback = model;
+
+      const inputTokens = usage.input_tokens ?? 0;
+      const outputTokens = usage.output_tokens ?? 0;
+      const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+      const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
+
+      // Skip zero-rows (rare — happens when the assistant message is
+      // structural rather than an API round-trip).
+      if (
+        inputTokens === 0 &&
+        outputTokens === 0 &&
+        cacheReadTokens === 0 &&
+        cacheCreationTokens === 0
+      ) {
+        continue;
+      }
+
+      const costUsd = computeCost(model, {
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
+      });
+
+      turns.push({
+        turnIndex: turnIndex++,
+        capturedAt: Number.isFinite(capturedAt) ? capturedAt : Date.now(),
+        model,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
+        costUsd,
+      });
+    }
+
+    return {
+      sessionId,
+      modelFallback,
+      startedAt: Number.isFinite(startedAt) ? startedAt : updatedAt || Date.now(),
+      updatedAt: updatedAt || Date.now(),
+      turns,
     };
   }
 

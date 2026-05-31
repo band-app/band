@@ -9,6 +9,7 @@ import type { ThreadEvent, ThreadItem, TodoListItem } from "@openai/codex-sdk";
 import { Codex } from "@openai/codex-sdk";
 import type { CodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
+import { computeCost } from "../pricing.js";
 import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
@@ -18,6 +19,8 @@ import type {
   RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
+  SessionUsageSnapshot,
+  SessionUsageTurn,
   SkillInfo,
 } from "../types.js";
 
@@ -431,6 +434,193 @@ export class CodexAdapter implements CodingAgent {
   ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
     log.info({ sessionId, dir, ...options }, "getSessionMessages");
     return readCodexSessionMessages(sessionId, options);
+  }
+
+  /**
+   * Read per-turn token usage for one Codex session, computing cost via
+   * the local ratecard (`packages/coding-agent/src/pricing.ts`) since the
+   * OpenAI Responses API doesn't surface a `costUsd` field the way the
+   * Claude SDK does.
+   *
+   * Codex emits `event_msg` lines with `payload.type == "token_count"` in
+   * its rollout JSONL. Each carries a `last_token_usage` (delta for that
+   * turn) and a `total_token_usage` (cumulative). We use **`last_token_usage`**
+   * — summing `total_token_usage` would massively double-count (the
+   * 91× inflation bug ccusage hit: github.com/ryoppippi/ccusage/issues/950).
+   *
+   * Model attribution: the most recent `turn_context` event preceding a
+   * `token_count` carries the model id (Codex supports switching models
+   * mid-session). We track the running `currentModel` as we walk the
+   * file.
+   *
+   * Subagent guard: if the session's `session_meta` has a
+   * `parent_thread_id`, the rollout re-replays the parent's history
+   * with the subagent's creation timestamp. Skip those re-replays to
+   * avoid the same 91× inflation — we treat subagent rollouts as
+   * non-billable echoes and let the parent rollout carry the real cost.
+   */
+  async getSessionUsage(sessionId: string, _dir: string): Promise<SessionUsageSnapshot | null> {
+    const files = await findSessionFiles();
+    let targetFile: string | undefined;
+
+    // Optimistic path: rollout files end with the session id (e.g.
+    // `rollout-2026-04-19T11-23-00-<sessionId>.jsonl`), so we can short-
+    // circuit the linear scan with an `endsWith` check before opening any
+    // files. Fall back to `session_meta` scan if naming drifts.
+    for (const f of files) {
+      if (f.endsWith(`${sessionId}.jsonl`)) {
+        targetFile = f;
+        break;
+      }
+    }
+    if (!targetFile) {
+      for (const f of files) {
+        try {
+          const rl = createInterface({
+            input: createReadStream(f),
+            crlfDelay: Number.POSITIVE_INFINITY,
+          });
+          for await (const line of rl) {
+            const obj = JSON.parse(line) as { type?: string; payload?: { id?: string } };
+            if (obj.type === "session_meta" && obj.payload?.id === sessionId) {
+              targetFile = f;
+              break;
+            }
+            // Only the first line is the meta; bail out after a few
+            // lines if we don't see one (file isn't a Codex rollout).
+            break;
+          }
+        } catch {
+          // Skip unreadable files.
+        }
+        if (targetFile) break;
+      }
+    }
+    if (!targetFile) return null;
+
+    const turns: SessionUsageTurn[] = [];
+    let turnIndex = 0;
+    let startedAt = Number.POSITIVE_INFINITY;
+    let updatedAt = 0;
+    let modelFallback = "";
+    let currentModel: string | undefined;
+    let isSubagent = false;
+
+    const rl = createInterface({
+      input: createReadStream(targetFile),
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let obj: {
+        type?: string;
+        timestamp?: string;
+        payload?: Record<string, unknown>;
+      };
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const tsMs = typeof obj.timestamp === "string" ? Date.parse(obj.timestamp) : Number.NaN;
+      if (Number.isFinite(tsMs)) {
+        startedAt = Math.min(startedAt, tsMs);
+        updatedAt = Math.max(updatedAt, tsMs);
+      }
+
+      if (obj.type === "session_meta") {
+        // The presence of `parent_thread_id` marks this rollout as a
+        // subagent replay. We flip a flag and return empty turns —
+        // the parent's rollout will carry the real cost (see ccusage
+        // issue #950).
+        const parent = obj.payload?.parent_thread_id;
+        if (typeof parent === "string" && parent.length > 0) {
+          isSubagent = true;
+          break;
+        }
+        continue;
+      }
+
+      if (obj.type === "turn_context") {
+        const model = (obj.payload as { model?: string })?.model;
+        if (typeof model === "string" && model.length > 0) {
+          currentModel = model;
+          if (!modelFallback) modelFallback = model;
+        }
+        continue;
+      }
+
+      if (obj.type !== "event_msg") continue;
+      const payload = obj.payload as
+        | {
+            type?: string;
+            info?: {
+              last_token_usage?: {
+                input_tokens?: number;
+                cached_input_tokens?: number;
+                output_tokens?: number;
+                reasoning_output_tokens?: number;
+              };
+            };
+          }
+        | undefined;
+      if (payload?.type !== "token_count") continue;
+      const last = payload.info?.last_token_usage;
+      if (!last) continue;
+
+      const inputTokens = Number(last.input_tokens ?? 0);
+      const cacheReadTokens = Number(last.cached_input_tokens ?? 0);
+      const outputTokens = Number(last.output_tokens ?? 0);
+      const reasoningOutputTokens = Number(last.reasoning_output_tokens ?? 0);
+
+      // Codex's `input_tokens` is the FULL prompt size (already inclusive
+      // of cached content). The ratecard prices the uncached fresh input
+      // separately from cache reads, so we subtract the cached subset
+      // before pricing — otherwise we'd over-charge by the cache discount.
+      // Floor at 0 in case the SDK ever inverts (defensive).
+      const uncachedInput = Math.max(0, inputTokens - cacheReadTokens);
+
+      const cost = computeCost(currentModel, {
+        inputTokens: uncachedInput,
+        outputTokens,
+        cacheReadTokens,
+        reasoningOutputTokens,
+      });
+
+      turns.push({
+        turnIndex: turnIndex++,
+        capturedAt: Number.isFinite(tsMs) ? tsMs : Date.now(),
+        model: currentModel,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        reasoningOutputTokens,
+        costUsd: cost,
+      });
+    }
+
+    if (isSubagent) {
+      // Bail out: subagent rollouts double-count parent usage. Return an
+      // empty turn list (still a valid snapshot so the scanner advances
+      // its watermark) so a future read doesn't re-attempt.
+      return {
+        sessionId,
+        modelFallback,
+        startedAt: Number.isFinite(startedAt) ? startedAt : updatedAt || Date.now(),
+        updatedAt: updatedAt || Date.now(),
+        turns: [],
+      };
+    }
+
+    return {
+      sessionId,
+      modelFallback,
+      startedAt: Number.isFinite(startedAt) ? startedAt : updatedAt || Date.now(),
+      updatedAt: updatedAt || Date.now(),
+      turns,
+    };
   }
 }
 

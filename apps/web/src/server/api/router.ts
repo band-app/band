@@ -52,6 +52,7 @@ import { modesRouter } from "./modes/router";
 import { prereqsRouter } from "./prereqs/router";
 import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
+import { reportsRouter } from "./reports/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
 import { skillsRouter } from "./skills/router";
@@ -92,6 +93,7 @@ export const appRouter = t.router({
   status: statusRouter,
   history: historyRouter,
   queue: queueRouter,
+  reports: reportsRouter,
   // `system` is the new home for the legacy `servicesRouter`. The wire
   // surface is preserved by mounting it under the original `services`
   // key so every existing client (TunnelDialog, ResourcesPage, the

@@ -92,6 +92,25 @@ export interface Settings {
    * `dashboard/types.ts::Settings.webBrowserCdpEnabled`.
    */
   webBrowserCdpEnabled?: boolean;
+  /**
+   * Retention window, in days, for the Reports `usage_events` table
+   * (issue #425). When unset, the prune sweep falls back to
+   * `USAGE_EVENT_RETENTION_MS` (1 year). Users with extreme volumes
+   * can lower this to free disk; users who want a longer history can
+   * raise it (the per-hour bucketing keeps row count tiny — see the
+   * JSDoc on `USAGE_EVENT_RETENTION_MS`).
+   */
+  usageRetentionDays?: number;
+  /**
+   * Whether the Reports usage scanner runs (issue #425). When `false`,
+   * `UsageScannerService.tick()` is a no-op — the periodic 5-minute
+   * sweep and the fire-and-forget tick triggered by opening the
+   * Reports dialog are both skipped. Useful for users who don't care
+   * about cost reporting and want to claw back the per-tick CPU /
+   * subprocess churn (Codex/OpenCode adapters spawn helpers).
+   * Defaults to `true` (treat `undefined` as enabled).
+   */
+  usagePollingEnabled?: boolean;
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

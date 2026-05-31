@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
@@ -103,6 +103,78 @@ export const cronjobs = sqliteTable("cronjobs", {
   lastRunAt: text("last_run_at"),
   lastRunStatus: text("last_run_status", { enum: ["completed", "failed", "skipped"] }),
 });
+
+// Persistent record of token usage and cost from coding-agent sessions
+// (issue #425 — Reports page).
+//
+// One row per `UsageEvent` emitted by an adapter (token streams arrive per
+// turn) PLUS one cost-only row per successful `session-result` when the
+// adapter reports `costUsd > 0` (Claude Code today; Codex/Gemini/OpenCode
+// report 0). The split keeps the SQL simple: `SUM` over each column still
+// produces the right total because token-only and cost-only rows have
+// zeros in the columns they don't carry.
+//
+// Pruned by the background sweep in `queries/usage-events.ts` on the same
+// 30-day retention window as the tasks table. Indexes match the three
+// primary aggregate filters (period range, drill-into-task,
+// drill-into-workspace).
+export const usageEvents = sqliteTable(
+  "usage_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /**
+     * Band's task id when the row came from a Band-driven session
+     * (`tsk_*`); empty string for rows backfilled by the disk scanner
+     * (issue #425) for sessions Band didn't own.
+     */
+    taskId: text("task_id").notNull(),
+    chatId: text("chat_id"),
+    workspaceId: text("workspace_id").notNull(),
+    project: text("project").notNull(),
+    sessionId: text("session_id"),
+    codingAgentId: text("coding_agent_id"),
+    // "claude" | "codex" | "gemini" | "opencode" | "cursor"
+    provider: text("provider"),
+    model: text("model"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheCreationTokens: integer("cache_creation_tokens").notNull().default(0),
+    reasoningOutputTokens: integer("reasoning_output_tokens").notNull().default(0),
+    costUsd: real("cost_usd").notNull().default(0),
+    capturedAt: integer("captured_at").notNull(),
+    /**
+     * Dedup key for the disk scanner — `${provider}:${sessionId}:${turnIndex}`.
+     * Combined with the unique index below, lets the scanner re-read a
+     * growing session each tick and only write new turns. Nullable so
+     * rows captured before the scanner shipped don't all need a backfill.
+     */
+    externalKey: text("external_key"),
+  },
+  (t) => [
+    index("usage_events_captured_at_idx").on(t.capturedAt),
+    index("usage_events_task_idx").on(t.taskId),
+    index("usage_events_workspace_idx").on(t.workspaceId),
+    uniqueIndex("usage_events_external_key_uq").on(t.externalKey),
+  ],
+);
+
+/**
+ * Per-(workspace, agent) watermark for the Reports usage scanner
+ * (issue #425). Tracks the highest `lastModified` timestamp the scanner
+ * has already processed so each tick only re-reads sessions touched
+ * since the previous run. Workspaces aren't a first-class DB row, so
+ * cleanup on workspace removal is explicit (see `workspace-service`).
+ */
+export const usageScanState = sqliteTable(
+  "usage_scan_state",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    agentType: text("agent_type").notNull(),
+    lastScannedUpdatedAt: integer("last_scanned_updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("usage_scan_state_pk").on(t.workspaceId, t.agentType)],
+);
 
 // Persistent browser pane history (per-workspace).
 //

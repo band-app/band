@@ -8,6 +8,8 @@ import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
 import { TaskQueries } from "../infra/db/queries/tasks";
+import { UsageEventQueries } from "../infra/db/queries/usage-events";
+import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
@@ -197,7 +199,11 @@ function isRebaseCollision(err: unknown): boolean {
 }
 
 export class WorkspaceService {
-  constructor(private readonly queries: WorkspaceQueries = new WorkspaceQueries()) {}
+  constructor(
+    private readonly queries: WorkspaceQueries = new WorkspaceQueries(),
+    private readonly usageEventQueries: UsageEventQueries = new UsageEventQueries(),
+    private readonly usageScanStateQueries: UsageScanStateQueries = new UsageScanStateQueries(),
+  ) {}
 
   /**
    * Resolve a workspace ID to its parent project + worktree row.
@@ -443,6 +449,27 @@ export class WorkspaceService {
       }
     } catch (err) {
       log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
+    }
+
+    // Delete persisted usage-event history + scan watermarks alongside
+    // tasks (issue #425). Same best-effort policy as the tasks cleanup
+    // above. Dropping the watermark lets a future workspace at the same
+    // id start scanning from scratch.
+    try {
+      const deletedEvents = this.usageEventQueries.deleteWorkspaceEvents(workspaceId);
+      if (deletedEvents > 0) {
+        log.info(
+          { workspaceId, count: deletedEvents },
+          "deleted workspace usage events on removal",
+        );
+      }
+    } catch (err) {
+      log.error({ workspaceId, err }, "failed to delete workspace usage events on removal");
+    }
+    try {
+      this.usageScanStateQueries.deleteWorkspace(workspaceId);
+    } catch (err) {
+      log.error({ workspaceId, err }, "failed to delete workspace usage scan state on removal");
     }
 
     // Notify subscribers (dashboard status stream) that this workspace is gone
