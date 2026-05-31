@@ -806,6 +806,12 @@ async function runTask(chatId: string, task: InternalTask) {
               );
             }
           }
+
+          // The Reports dialog reads usage / cost from the provider's
+          // on-disk session file via the periodic scanner
+          // (`usage-scanner-service.ts`, issue #425) — no live capture
+          // here. The chat-view context meter is still driven by the
+          // `data-usage` broadcast below.
           broadcast(chatId, {
             type: "data-usage" as UIMessageChunk["type"],
             data: {
@@ -842,6 +848,16 @@ async function runTask(chatId: string, task: InternalTask) {
             task.status = "completed";
             task.completedAt = Date.now();
             persistTask(task);
+
+            // Reports usage capture is decoupled from this path on
+            // purpose (issue #425): the `usage_events` table is filled
+            // by the periodic scanner in `usage-scanner-service.ts`,
+            // and the `reports.summary` tRPC handler triggers a fresh
+            // tick on every read. Keeping `task-service` ignorant of
+            // the Reports feature means we don't accrete a new
+            // `case "session-result":` side-effect for each future
+            // session-consumer.
+
             broadcast(chatId, {
               type: "data-result" as UIMessageChunk["type"],
               data: {

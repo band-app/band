@@ -225,6 +225,22 @@ export interface Settings {
    * @default false
    */
   webBrowserCdpEnabled?: boolean;
+  /**
+   * Retention window, in days, for the Reports `usage_events` table
+   * (issue #425). Bounded by the server-side Zod schema to [1, 3650].
+   * When unset, the prune sweep falls back to 365 days.
+   * @default 365
+   */
+  usageRetentionDays?: number;
+  /**
+   * Whether the Reports usage scanner polls for new data (issue #425).
+   * When `false`, the scanner is silent — the Reports dialog still
+   * renders whatever's already in `usage_events`, but no new sessions
+   * are picked up until the user re-enables polling. Treat `undefined`
+   * as the default.
+   * @default true
+   */
+  usagePollingEnabled?: boolean;
 }
 
 export interface HooksStatus {

@@ -113,6 +113,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "recharts": "^3.8.1",
     "remark-breaks": "^4.0.0",
     "sirv": "^3.0.0",
     "streamdown": "^2.3.0",

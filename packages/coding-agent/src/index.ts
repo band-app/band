@@ -26,6 +26,12 @@ export {
   SUPPORTED_AGENT_TYPES,
   type SupportedAgentType,
 } from "./install-skills.js";
+export {
+  type ComputeCostInput,
+  computeCost,
+  MODEL_PRICING,
+  type ModelRates,
+} from "./pricing.js";
 export type {
   AgentMode,
   AgentModel,
@@ -36,6 +42,8 @@ export type {
   SessionInfo,
   SessionListItem,
   SessionMessageItem,
+  SessionUsageSnapshot,
+  SessionUsageTurn,
   SkillInfo,
   UserInputRequest,
 } from "./types.js";

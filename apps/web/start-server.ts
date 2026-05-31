@@ -22,6 +22,10 @@ import {
   stopTaskPruneScheduler,
   TaskQueries,
 } from "./src/server/infra/db/queries/tasks.ts";
+import {
+  startUsageEventPruneScheduler,
+  stopUsageEventPruneScheduler,
+} from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
@@ -40,6 +44,10 @@ import {
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
+import {
+  startUsageScanner,
+  stopUsageScanner,
+} from "./src/server/services/usage-scanner-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------
@@ -1007,6 +1015,18 @@ async function main() {
     // days. The timer is unref()'d so it doesn't block shutdown.
     startTaskPruneScheduler();
 
+    // Same pattern for the Reports usage-event store (issue #425): one
+    // pass immediately, then every 24h, 30-day retention. Independent
+    // from `startTaskPruneScheduler` so the schedules can drift apart
+    // later (e.g. shorter retention for usage events if storage gets
+    // tight).
+    startUsageEventPruneScheduler();
+
+    // Kick off the periodic Reports usage scanner (issue #425). One
+    // pass immediately to backfill terminal-driven sessions that
+    // happened while Band was down, then every 30 s.
+    startUsageScanner();
+
     // Reset any "working" agent statuses — no agent is active on a
     // fresh server start.
     const resetCount = resetAgentStatuses();
@@ -1065,6 +1085,8 @@ async function main() {
     branchStatusPoller.stop();
     cronjobService.stop();
     stopTaskPruneScheduler();
+    stopUsageEventPruneScheduler();
+    stopUsageScanner();
     terminalService.killAll();
     killAllServers();
 

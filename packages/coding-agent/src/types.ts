@@ -76,6 +76,46 @@ export interface AgentModel {
   contextWindow?: number;
 }
 
+/**
+ * Per-turn token + cost snapshot for one session, read from the provider's
+ * on-disk session storage (issue #425 — Reports dialog).
+ *
+ * Adapters that implement `getSessionUsage` walk their provider's session
+ * file once and return the cumulative per-turn breakdown. The Reports
+ * scanner upserts these into `usage_events` keyed by
+ * `(provider, sessionId, turnIndex)` so re-reads are idempotent — a session
+ * still being appended to is rescanned each tick and only the new turns
+ * land as new rows.
+ */
+export interface SessionUsageTurn {
+  /** 0-based ordinal within the session. Pairs with `sessionId` to form
+   *  the dedup key the scanner uses (`external_key`). */
+  turnIndex: number;
+  /** Epoch ms when this turn was completed (provider timestamp). */
+  capturedAt: number;
+  /** Model id for this specific turn. May differ from `SessionUsageSnapshot.modelFallback`
+   *  when the user switched models mid-session (Codex supports this). */
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Provider-reported USD cost when the provider exposes one
+   *  (Claude `total_cost_usd`, OpenCode `part.cost`); otherwise computed
+   *  from `tokens × MODEL_PRICING[model]` (Codex, Gemini). */
+  costUsd: number;
+}
+
+export interface SessionUsageSnapshot {
+  sessionId: string;
+  /** Default model id when individual turns don't override it. */
+  modelFallback: string;
+  startedAt: number;
+  updatedAt: number;
+  turns: SessionUsageTurn[];
+}
+
 export interface RunSessionOptions {
   maxTurns?: number;
   mode?: string;
@@ -139,6 +179,26 @@ export interface CodingAgent {
     dir: string,
     options?: GetSessionMessagesOptions,
   ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }>;
+  /**
+   * Read token + cost usage for a single session from the provider's
+   * on-disk record. Used by the Reports scanner (issue #425) to backfill
+   * `usage_events` for sessions the user runs in the terminal (outside
+   * Band's chat) as well as Band-driven sessions.
+   *
+   * Implementations should:
+   *
+   *   • Parse the provider's session file(s) without invoking the agent
+   *     (no `runSession` call, no streaming).
+   *   • Return *every* turn the file contains — the caller dedupes by
+   *     `(provider, sessionId, turnIndex)` via `INSERT OR IGNORE` so
+   *     re-scanning a growing session is cheap.
+   *   • Return `null` when the session isn't found on disk; the scanner
+   *     skips it without logging an error.
+   *
+   * Adapters whose provider doesn't persist usage data (Gemini CLI without
+   * telemetry, Cursor) omit this method entirely.
+   */
+  getSessionUsage?(sessionId: string, dir: string): Promise<SessionUsageSnapshot | null>;
   listSkills?(): Promise<SkillInfo[]>;
   listModes?(): AgentMode[];
   listModels?(): AgentModel[] | Promise<AgentModel[]>;

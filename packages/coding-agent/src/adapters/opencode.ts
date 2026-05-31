@@ -14,6 +14,8 @@ import type {
   RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
+  SessionUsageSnapshot,
+  SessionUsageTurn,
   SkillInfo,
 } from "../types.js";
 
@@ -22,6 +24,12 @@ const log = createLogger("coding-agent:opencode");
 export class OpenCodeAdapter implements CodingAgent {
   readonly name = "OpenCode";
   readonly supportedFeatures = {
+    // The Reports dialog (issue #425) reads cost from `getSessionUsage`
+    // via `opencode export <id>` rather than from live `session-result`
+    // events. The adapter's runtime emit path doesn't need to carry a
+    // live cost — leave `costTracking: false` so other consumers of the
+    // event stream (chat-view context meter) don't read a half-baked
+    // number, and let the scanner be the single source of truth.
     costTracking: false,
     sessionListing: true,
   } as const;
@@ -182,7 +190,9 @@ export class OpenCodeAdapter implements CodingAgent {
               break;
             }
 
-            // step_start, step_finish — no Band equivalent, skip
+            // step_start, step_finish — no Band equivalent in the live
+            //   event stream (the Reports dialog reads usage / cost from
+            //   the session file on disk via `getSessionUsage` instead).
           }
         }
 
@@ -329,6 +339,130 @@ export class OpenCodeAdapter implements CodingAgent {
     log.info({ sessionId, ...options }, "getSessionMessages");
     return fetchOpenCodeSessionMessages(this.executablePath, sessionId, options);
   }
+
+  /**
+   * Read per-turn token + USD cost for one OpenCode session by shelling
+   * out to `opencode export <sessionId>` and walking the assistant
+   * messages' `step-finish` parts. Each `step-finish` is one LLM
+   * round-trip with `cost` (USD) and `tokens.{input,output,reasoning,cache.read}`
+   * inline.
+   *
+   * `cache.write` tokens are intentionally dropped — the
+   * `cacheCreationTokens` field on `UsageEvent` is reserved for Claude
+   * (see `events.ts`), and the chat-view legacy-snapshot detector
+   * misclassifies any non-Claude row with `cacheCreationTokens` set as
+   * Claude when `provider` is unset. OpenCode's cache-write count is
+   * typically zero.
+   *
+   * Returns `null` when the session isn't found / export fails.
+   */
+  async getSessionUsage(sessionId: string, _dir: string): Promise<SessionUsageSnapshot | null> {
+    let raw: string;
+    try {
+      raw = await new Promise<string>((resolve, reject) => {
+        execFile(
+          this.executablePath,
+          ["export", sessionId],
+          { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
+          (err, stdout) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve(stdout);
+          },
+        );
+      });
+    } catch (err) {
+      // ENOENT-style errors (session missing, opencode binary missing)
+      // collapse to "no data". Logs in debug rather than error so a
+      // scanner pass over a fresh workspace isn't noisy.
+      log.debug({ err, sessionId }, "opencode export failed; treating as no data");
+      return null;
+    }
+
+    const jsonStart = raw.indexOf("{");
+    if (jsonStart === -1) return null;
+    let session: OpenCodeExportedSession;
+    try {
+      session = JSON.parse(raw.slice(jsonStart)) as OpenCodeExportedSession;
+    } catch {
+      log.warn({ sessionId }, "failed to parse opencode export for usage");
+      return null;
+    }
+
+    const turns: SessionUsageTurn[] = [];
+    let turnIndex = 0;
+    let startedAt = Number.POSITIVE_INFINITY;
+    let updatedAt = 0;
+    let modelFallback = "";
+
+    if (session.info.time?.created) {
+      startedAt = Math.min(startedAt, session.info.time.created);
+    }
+    if (session.info.time?.updated) {
+      updatedAt = Math.max(updatedAt, session.info.time.updated);
+    }
+
+    for (const msg of session.messages) {
+      if (msg.info.role !== "assistant") continue;
+      const msgModel = msg.info.modelID;
+      if (msgModel && !modelFallback) modelFallback = msgModel;
+      const msgCreated = msg.info.time?.created ?? 0;
+      if (msgCreated > 0) {
+        startedAt = Math.min(startedAt, msgCreated);
+        updatedAt = Math.max(updatedAt, msgCreated);
+      }
+
+      for (const part of msg.parts) {
+        if (part.type !== "step-finish") continue;
+        const tokens = part.tokens ?? {};
+        const inputTokens = Number(tokens.input ?? 0);
+        const outputTokens = Number(tokens.output ?? 0);
+        const reasoningOutputTokens = Number(tokens.reasoning ?? 0);
+        const cacheReadTokens = Number(tokens.cache?.read ?? 0);
+        const costUsd = Number(part.cost ?? 0);
+
+        // Skip totally-empty step-finish entries — they'd just be zero
+        // rows in `usage_events`. Real OpenCode steps always have at
+        // least output tokens.
+        if (
+          inputTokens === 0 &&
+          outputTokens === 0 &&
+          reasoningOutputTokens === 0 &&
+          cacheReadTokens === 0 &&
+          costUsd === 0
+        ) {
+          continue;
+        }
+
+        const capturedAt = part.time ?? msgCreated ?? Date.now();
+        if (capturedAt > 0) {
+          startedAt = Math.min(startedAt, capturedAt);
+          updatedAt = Math.max(updatedAt, capturedAt);
+        }
+
+        turns.push({
+          turnIndex: turnIndex++,
+          capturedAt,
+          model: msgModel,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+          reasoningOutputTokens,
+          costUsd,
+        });
+      }
+    }
+
+    return {
+      sessionId,
+      modelFallback,
+      startedAt: Number.isFinite(startedAt) ? startedAt : updatedAt || Date.now(),
+      updatedAt: updatedAt || Date.now(),
+      turns,
+    };
+  }
 }
 
 const DEFAULT_MODELS: AgentModel[] = [
@@ -433,6 +567,8 @@ interface OpenCodeExportedSession {
     id: string;
     title: string;
     directory: string;
+    /** Created / updated timestamps (epoch ms). */
+    time?: { created?: number; updated?: number };
   };
   messages: OpenCodeExportedMessage[];
 }
@@ -441,6 +577,10 @@ interface OpenCodeExportedMessage {
   info: {
     role: "user" | "assistant";
     id: string;
+    /** Model id when assistant; absent for user messages. */
+    modelID?: string;
+    /** Epoch ms when the message landed. */
+    time?: { created?: number };
   };
   parts: OpenCodeExportedPart[];
 }
@@ -461,7 +601,22 @@ type OpenCodeExportedPart =
       };
     }
   | { type: "step-start" }
-  | { type: "step-finish" };
+  | {
+      type: "step-finish";
+      /** USD cost reported by OpenCode for this step (per
+       *  `opencode run --format json` schema). */
+      cost?: number;
+      /** Per-step token splits. `cache.write` is reported but dropped at
+       *  ingest time — see `usage-scanner-service.ts`. */
+      tokens?: {
+        input?: number;
+        output?: number;
+        reasoning?: number;
+        cache?: { read?: number; write?: number };
+      };
+      /** Epoch ms when the step completed. */
+      time?: number;
+    };
 
 async function fetchOpenCodeSessionMessages(
   executablePath: string,

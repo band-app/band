@@ -100,6 +100,15 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [webBrowserCdpEnabled, setWebBrowserCdpEnabled] = useState(
     settings.webBrowserCdpEnabled ?? false,
   );
+  // String-backed so the input can hold an empty/in-flight value; parsed
+  // on Save and rejected if outside [1, 3650]. Empty = "use default".
+  const [usageRetentionDays, setUsageRetentionDays] = useState(
+    settings.usageRetentionDays?.toString() ?? "",
+  );
+  // Default true — see Settings.usagePollingEnabled JSDoc.
+  const [usagePollingEnabled, setUsagePollingEnabled] = useState(
+    settings.usagePollingEnabled ?? true,
+  );
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
@@ -145,6 +154,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
     if (webBrowserCdpEnabled !== (settings.webBrowserCdpEnabled ?? false)) return true;
+    if (usageRetentionDays !== (settings.usageRetentionDays?.toString() ?? "")) return true;
+    if (usagePollingEnabled !== (settings.usagePollingEnabled ?? true)) return true;
     return false;
   }, [
     worktreesDir,
@@ -162,6 +173,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     selectedTheme,
     useWebGLTerminalRenderer,
     webBrowserCdpEnabled,
+    usageRetentionDays,
+    usagePollingEnabled,
     settings,
   ]);
 
@@ -181,6 +194,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setSelectedTheme(settings.theme ?? "system");
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
     setWebBrowserCdpEnabled(settings.webBrowserCdpEnabled ?? false);
+    setUsageRetentionDays(settings.usageRetentionDays?.toString() ?? "");
+    setUsagePollingEnabled(settings.usagePollingEnabled ?? true);
   }, [
     settings.worktreesDir,
     settings.codingAgents,
@@ -196,6 +211,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.theme,
     settings.useWebGLTerminalRenderer,
     settings.webBrowserCdpEnabled,
+    settings.usageRetentionDays,
+    settings.usagePollingEnabled,
   ]);
 
   const handleBrowse = async () => {
@@ -221,6 +238,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       if (Number.isNaN(n) || n < 1 || n > 20) return;
       parsedMaxCachedWorkspaces = n;
     }
+    let parsedUsageRetentionDays: number | undefined;
+    if (usageRetentionDays.trim()) {
+      const n = parseInt(usageRetentionDays.trim(), 10);
+      if (Number.isNaN(n) || n < 1 || n > 3650) return;
+      parsedUsageRetentionDays = n;
+    }
     await updateSettingsMutation.mutateAsync({
       worktreesDir: worktreesDir.trim() || null,
       codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
@@ -244,6 +267,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       theme: selectedTheme,
       useWebGLTerminalRenderer,
       webBrowserCdpEnabled,
+      usageRetentionDays: parsedUsageRetentionDays,
+      usagePollingEnabled,
     });
   };
 
@@ -711,6 +736,43 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="auto-start-tunnel"
                   checked={autoStartTunnel}
                   onCheckedChange={setAutoStartTunnel}
+                />
+              </SettingsRow>
+            </SettingsSection>
+
+            {/* ── Usage report ───────────────────────────────── */}
+            <SettingsSection
+              title="Usage report"
+              description="Configure how the Usage dialog collects and retains per-session token and cost rows."
+            >
+              <SettingsRow
+                htmlFor="usage-polling-enabled"
+                label="Poll for usage data"
+                description="Periodically scan your coding agents' session files to populate the Usage dialog. Disable to skip the background scan if you don't use the Usage dialog or want to claw back CPU."
+              >
+                <Switch
+                  id="usage-polling-enabled"
+                  checked={usagePollingEnabled}
+                  onCheckedChange={setUsagePollingEnabled}
+                />
+              </SettingsRow>
+              <SettingsRow
+                variant="responsive"
+                htmlFor="usage-retention-days"
+                label="Retention period (days)"
+                description="How long to keep usage history. Older rows are pruned daily. Leave empty for the default (365 days). Max 3650."
+              >
+                <Input
+                  id="usage-retention-days"
+                  type="number"
+                  placeholder="365 (default)"
+                  value={usageRetentionDays}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setUsageRetentionDays(e.target.value)
+                  }
+                  min={1}
+                  max={3650}
+                  className="h-8 w-full text-sm sm:w-32"
                 />
               </SettingsRow>
             </SettingsSection>

@@ -1,9 +1,10 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenuItem } from "@band-app/ui";
-import { Activity, Globe, ListTodo, Timer } from "lucide-react";
+import { Activity, BarChart3, Globe, ListTodo, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
+import { ReportsPageContent } from "./ReportsPageContent";
 import { ResourcesPage } from "./ResourcesPage";
 import { TasksPageContent } from "./TasksPageContent";
 import { TunnelDialog } from "./TunnelDialog";
@@ -11,13 +12,14 @@ import { TunnelDialog } from "./TunnelDialog";
 interface ToolbarOverflowContextValue {
   openTasks: () => void;
   openCronjobs: () => void;
+  openReports: () => void;
   openTunnel: () => void;
   openResources: () => void;
   /** Tunnel state hint for the menu item (so we can show running/error coloring). */
   tunnelStatus: "idle" | "running" | "error";
-  /** True when any toolbar dialog (Tasks, Cronjobs, Tunnel, Prereq,
-   *  Resources) is open. SharedDockviewLayout merges this with its
-   *  own dialog state to hide Electron BrowserView webviews that
+  /** True when any toolbar dialog (Tasks, Cronjobs, Reports, Tunnel,
+   *  Prereq, Resources) is open. SharedDockviewLayout merges this with
+   *  its own dialog state to hide Electron BrowserView webviews that
    *  would otherwise render on top. */
   anyDialogOpen: boolean;
 }
@@ -40,6 +42,7 @@ export function useAnyToolbarDialogOpen(): boolean {
 export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
+  const [showReportsDialog, setShowReportsDialog] = useState(false);
   const [showResourcesDialog, setShowResourcesDialog] = useState(false);
 
   const {
@@ -58,6 +61,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
   const openTasks = useCallback(() => setShowTasksDialog(true), []);
   const openCronjobs = useCallback(() => setShowCronjobsDialog(true), []);
+  const openReports = useCallback(() => setShowReportsDialog(true), []);
   const openTunnel = useCallback(() => openTunnelDialog(), [openTunnelDialog]);
   const openResources = useCallback(() => setShowResourcesDialog(true), []);
 
@@ -68,18 +72,24 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       : "idle";
 
   const anyDialogOpen =
-    showTasksDialog || showCronjobsDialog || showTunnelDialog || showPrereq || showResourcesDialog;
+    showTasksDialog ||
+    showCronjobsDialog ||
+    showReportsDialog ||
+    showTunnelDialog ||
+    showPrereq ||
+    showResourcesDialog;
 
   const value = useMemo(
     () => ({
       openTasks,
       openCronjobs,
+      openReports,
       openTunnel,
       openResources,
       tunnelStatus,
       anyDialogOpen,
     }),
-    [openTasks, openCronjobs, openTunnel, openResources, tunnelStatus, anyDialogOpen],
+    [openTasks, openCronjobs, openReports, openTunnel, openResources, tunnelStatus, anyDialogOpen],
   );
 
   return (
@@ -103,6 +113,18 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
             <DialogTitle>Cronjobs</DialogTitle>
           </DialogHeader>
           <CronjobsPageContent />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showReportsDialog} onOpenChange={setShowReportsDialog}>
+        <DialogContent
+          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          data-testid="reports-dialog"
+        >
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Usage</DialogTitle>
+          </DialogHeader>
+          <ReportsPageContent />
         </DialogContent>
       </Dialog>
 
@@ -153,6 +175,10 @@ export function ToolbarOverflowMenuItems() {
       <DropdownMenuItem onClick={ctx.openCronjobs}>
         <Timer className="size-4" />
         Cronjobs
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={ctx.openReports} data-testid="menu__reports">
+        <BarChart3 className="size-4" />
+        Usage
       </DropdownMenuItem>
       <DropdownMenuItem onClick={ctx.openTunnel}>
         <Globe

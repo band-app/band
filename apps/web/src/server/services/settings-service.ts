@@ -75,6 +75,16 @@ export const settingsUpdateInput = z
     useWebGLTerminalRenderer: z.boolean().optional(),
     webBrowserCdpEnabled: z.boolean().optional(),
     theme: z.enum(["system", "light", "dark"]).optional(),
+    // Retention window for the Reports `usage_events` table
+    // (issue #425). Bounded to [1, 3650] days so a stray UI value
+    // can't accidentally configure a 100-year window (which would
+    // silently disable the prune sweep). Falls back to 365 days
+    // (USAGE_EVENT_RETENTION_MS) when omitted.
+    usageRetentionDays: z.number().int().min(1).max(3650).optional(),
+    // Off-switch for the Reports usage scanner (issue #425). When
+    // false, `UsageScannerService.tick()` short-circuits — used by
+    // the dashboard's "Disable usage polling" toggle.
+    usagePollingEnabled: z.boolean().optional(),
   })
   .passthrough();
 
