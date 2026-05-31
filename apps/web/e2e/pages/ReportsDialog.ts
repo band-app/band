@@ -89,4 +89,50 @@ export class ReportsDialog {
     await expect(this.root).toBeVisible({ timeout: 15_000 });
     await expect(this.totalCost).toBeVisible({ timeout: 15_000 });
   }
+
+  /**
+   * Switch the Radix period <Select> to one of "Today" / "Last 7 days" /
+   * etc. by clicking the trigger, then the named option. Keeps the raw
+   * `getByRole("option", …)` lookup out of test bodies so they can
+   * express the intent ("switch to Today") instead of how the Radix
+   * popup is built.
+   */
+  async selectPeriod(label: string): Promise<void> {
+    await this.periodSelect.click();
+    await this.page.getByRole("option", { name: label }).click();
+  }
+
+  /**
+   * Set the viewport to a narrow mobile width. Wraps Playwright's
+   * `page.setViewportSize` so test bodies don't reach for the raw page
+   * object — the size lives on the page object alongside the
+   * `assertNoHorizontalOverflow` check that consumes it.
+   */
+  async setMobileViewport(): Promise<void> {
+    await this.page.setViewportSize({ width: 375, height: 800 });
+  }
+
+  /**
+   * Assert that nothing in the dialog (or the document) exceeds the
+   * viewport width. Used to pin the mobile-overflow regression that
+   * issue #425's tables originally introduced.
+   *
+   * Reads the viewport once via `page.viewportSize()` and the dialog's
+   * bounding box once, then does a one-pixel-tolerance comparison
+   * against both the dialog and `document.documentElement.scrollWidth`
+   * so a sub-pixel rounding artefact doesn't flake the test.
+   */
+  async assertNoHorizontalOverflow(): Promise<void> {
+    const viewport = this.page.viewportSize();
+    if (!viewport) throw new Error("viewport size unset");
+
+    const dialogBox = await this.dialog.boundingBox();
+    if (!dialogBox) throw new Error("dialog has no bounding box");
+    expect(dialogBox.width).toBeLessThanOrEqual(viewport.width + 1);
+
+    const bodyOverflow = await this.page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(bodyOverflow).toBeLessThanOrEqual(1);
+  }
 }

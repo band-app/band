@@ -215,23 +215,12 @@ test.describe("Reports dialog (issue #425)", () => {
     // at most the viewport width (with a 1px tolerance for sub-pixel
     // rounding) so the fix can't silently regress.
     const reports = new ReportsDialog(page, server.url, TOKEN);
-    await page.setViewportSize({ width: 375, height: 800 });
+    await reports.setMobileViewport();
 
     await reports.open();
     await reports.waitForReady();
 
-    const viewport = page.viewportSize();
-    if (!viewport) throw new Error("viewport size unset");
-
-    const dialogBox = await reports.dialog.boundingBox();
-    if (!dialogBox) throw new Error("dialog has no bounding box");
-    expect(dialogBox.width).toBeLessThanOrEqual(viewport.width + 1);
-
-    // The page <body> shouldn't have grown a horizontal scrollbar either.
-    const bodyOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    );
-    expect(bodyOverflow).toBeLessThanOrEqual(1);
+    await reports.assertNoHorizontalOverflow();
 
     // Sanity check: the by-model section is still visible inside the
     // viewport (i.e. content didn't disappear under `overflow-hidden`).
@@ -246,11 +235,10 @@ test.describe("Reports dialog (issue #425)", () => {
     // Default "Last 7 days" — both seeded tasks are inside the window.
     await expect(reports.totalSessions).toContainText("2");
 
-    // Switch to "Today" via the Radix Select. The select trigger
-    // exposes its currently-displayed value as text, so the click +
-    // option flow is the standard Radix pattern.
-    await reports.periodSelect.click();
-    await page.getByRole("option", { name: "Today" }).click();
+    // Switch to "Today" via the Radix Select. The page object hides
+    // the Radix trigger + option click sequence so the intent stays
+    // visible here.
+    await reports.selectPeriod("Today");
 
     // tsk_b was on "yesterday" — it must drop out, leaving only tsk_a.
     await expect(reports.totalSessions).toContainText("1");

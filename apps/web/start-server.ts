@@ -1024,7 +1024,9 @@ async function main() {
 
     // Kick off the periodic Reports usage scanner (issue #425). One
     // pass immediately to backfill terminal-driven sessions that
-    // happened while Band was down, then every 30 s.
+    // happened while Band was down, then every `USAGE_SCAN_INTERVAL_MS`
+    // (currently 5 min — see the rationale on that constant in
+    // `infra/usage-scanner/usage-scanner.ts`).
     startUsageScanner();
 
     // Reset any "working" agent statuses — no agent is active on a
