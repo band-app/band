@@ -471,4 +471,63 @@ describe("reports.summary (issue #425)", () => {
     expect(data.byModel).toEqual([]);
     expect(data.byBucket).toEqual([]);
   });
+
+  it("picks day buckets for ranges ≤ 60 days", async () => {
+    // 30-day window — well inside the day threshold. The response's
+    // `bucketSize` is the contract the dashboard reads from, so we
+    // assert through the HTTP boundary rather than calling
+    // `ReportsService.pickBucket` directly.
+    const now = Date.now();
+    const res = await trpcQuery(server.url, "reports.summary", {
+      fromMs: now - 30 * DAY_MS,
+      toMs: now,
+    });
+    const data = await trpcData<ReportsSummary>(res);
+    expect(data.bucketSize).toBe("day");
+  });
+
+  it("picks week buckets for ranges just past 60 days", async () => {
+    // "Last 90 days" preset territory — must land in week buckets.
+    const now = Date.now();
+    const res = await trpcQuery(server.url, "reports.summary", {
+      fromMs: now - 90 * DAY_MS,
+      toMs: now,
+    });
+    const data = await trpcData<ReportsSummary>(res);
+    expect(data.bucketSize).toBe("week");
+  });
+
+  it("picks week buckets at exactly the 365-day boundary", async () => {
+    // "Last year" preset territory — boundary stays inclusive in week.
+    const now = Date.now();
+    const res = await trpcQuery(server.url, "reports.summary", {
+      fromMs: now - 365 * DAY_MS,
+      toMs: now,
+    });
+    const data = await trpcData<ReportsSummary>(res);
+    expect(data.bucketSize).toBe("week");
+  });
+
+  it("picks month buckets past 365 days", async () => {
+    const now = Date.now();
+    const res = await trpcQuery(server.url, "reports.summary", {
+      fromMs: now - 400 * DAY_MS,
+      toMs: now,
+    });
+    const data = await trpcData<ReportsSummary>(res);
+    expect(data.bucketSize).toBe("month");
+  });
+
+  it("returns 401 when called without the auth cookie", async () => {
+    // Negative-auth contract. The endpoint MUST require the same
+    // `band_token` cookie every other tRPC procedure does — a missing
+    // token must not return aggregated cost data to an unauthenticated
+    // request, even if the server is reachable on localhost.
+    const res = await fetch(
+      `${server.url}/trpc/reports.summary?input=${encodeURIComponent(
+        JSON.stringify({ fromMs: Date.now() - DAY_MS, toMs: Date.now() }),
+      )}`,
+    );
+    expect(res.status).toBe(401);
+  });
 });

@@ -28,6 +28,10 @@ import {
 } from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import {
+  startUsageScanner,
+  stopUsageScanner,
+} from "./src/server/infra/usage-scanner/usage-scanner.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
@@ -44,10 +48,6 @@ import {
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
-import {
-  startUsageScanner,
-  stopUsageScanner,
-} from "./src/server/services/usage-scanner-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------

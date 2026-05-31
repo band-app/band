@@ -255,8 +255,11 @@ test.describe("Reports dialog (issue #425)", () => {
     // tsk_b was on "yesterday" — it must drop out, leaving only tsk_a.
     await expect(reports.totalSessions).toContainText("1");
     await expect(reports.totalCost).toContainText("$0.05");
-    // Codex no longer appears at all in any breakdown for the
-    // narrowed range.
+    // Positive anchor: the narrowed range did render and still shows
+    // claude-code. THEN assert codex is absent — without the positive
+    // anchor first, the `not.toContainText("codex")` would pass against
+    // a half-rendered table that hasn't loaded its rows yet.
+    await expect(reports.byAgent).toContainText("claude-code");
     await expect(reports.byAgent).not.toContainText("codex");
   });
 });

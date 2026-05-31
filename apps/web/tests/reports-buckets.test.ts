@@ -1,26 +1,26 @@
 // Integration tests for the trend-chart bucket sizing (issue #425).
 //
-// Two halves:
+// Three halves:
 //
-//   1. `pickBucket` thresholds — pure function, no I/O. Pins the
-//      day/week/month switchovers at 60d and 365d so a refactor can't
-//      silently widen the day bucket to a year-long range that
-//      recharts can't draw legibly.
+//   1. Pure frontend helpers — `resolvePeriod`, `formatBucketTick`,
+//      `formatBucketTooltipLabel`. Locale-independent shape assertions.
 //
 //   2. `UsageEventQueries.aggregate({ groupBy: "week" | "month" })` —
-//      real SQLite, real production schema. Seeds rows that straddle a
-//      week boundary and a month boundary and asserts the bucketed
-//      results collapse into the expected counts. SQLite's
-//      `'localtime'` modifier means the bucket math runs in the
-//      server's local TZ; the test seeds times relative to local
+//      real SQLite, real production schema (the infra-tier public
+//      surface, same shape as `usage-events-retention.test.ts`). Seeds
+//      rows that straddle a week boundary and a month boundary and
+//      asserts the bucketed results collapse into the expected counts.
+//      SQLite's `'localtime'` modifier means the bucket math runs in
+//      the server's local TZ; the test seeds times relative to local
 //      midnight to stay deterministic across CI regions.
+//
+// The bucket-size SELECTION policy (≤60d → day, ≤365d → week, > → month)
+// is tested through the public `reports.summary` HTTP endpoint in
+// `reports.test.ts` rather than by importing `ReportsService.pickBucket`
+// directly — keeps the black-box rule intact for any API-tier code.
 //
 // Same in-process pattern as `usage-events-retention.test.ts`: tmp
 // BAND_HOME per test, `closeDb()` between tests.
-//
-// The frontend `resolvePeriod` + `formatBucketTick` helpers are pure
-// and locale-independent — covered alongside the backend pieces here
-// rather than spinning up a separate vitest file.
 
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,49 +31,10 @@ import {
   formatBucketTooltipLabel,
   resolvePeriod,
 } from "../src/lib/format-report";
-import { pickBucket } from "../src/server/api/reports/router";
 import { closeDb } from "../src/server/infra/db/connection";
 import { UsageEventQueries } from "../src/server/infra/db/queries/usage-events";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// ---------------------------------------------------------------------------
-// pickBucket — pure thresholds
-// ---------------------------------------------------------------------------
-
-describe("pickBucket — bucket-size selection by range width", () => {
-  const now = Date.now();
-
-  it("uses day buckets for ranges ≤ 60 days", () => {
-    expect(pickBucket(now - 1 * DAY_MS, now)).toBe("day");
-    expect(pickBucket(now - 7 * DAY_MS, now)).toBe("day");
-    expect(pickBucket(now - 30 * DAY_MS, now)).toBe("day");
-    // Exactly 60 days — boundary stays inclusive in the "day" bucket
-    // so the 60-day mark is unambiguous.
-    expect(pickBucket(now - 60 * DAY_MS, now)).toBe("day");
-  });
-
-  it("switches to week buckets just past 60 days", () => {
-    // The "Last 90 days" preset lands here.
-    expect(pickBucket(now - 61 * DAY_MS, now)).toBe("week");
-    expect(pickBucket(now - 90 * DAY_MS, now)).toBe("week");
-    expect(pickBucket(now - 180 * DAY_MS, now)).toBe("week");
-    expect(pickBucket(now - 365 * DAY_MS, now)).toBe("week");
-  });
-
-  it("switches to month buckets past 365 days", () => {
-    expect(pickBucket(now - 366 * DAY_MS, now)).toBe("month");
-    expect(pickBucket(now - 2 * 365 * DAY_MS, now)).toBe("month");
-    expect(pickBucket(now - 10 * 365 * DAY_MS, now)).toBe("month");
-  });
-
-  it("treats the zero-width range as a day bucket (degenerate)", () => {
-    // The Reports dialog never sends `fromMs === toMs`, but the
-    // Zod input only requires `nonnegative`/`positive` — the function
-    // must not blow up if it does. "day" is the safest default.
-    expect(pickBucket(now, now)).toBe("day");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // resolvePeriod — preset → range conversion
@@ -96,24 +57,28 @@ describe("resolvePeriod — new presets", () => {
     const { fromMs, toMs } = resolvePeriod("last90");
     expect(fromMs).toBe(localMidnightDaysAgo(89));
     // toMs is `Date.now()` snap; we don't pin to the exact ms but do
-    // assert it's at-or-after this run's `localMidnight` (today). And
-    // that the resulting span lands in the WEEK bucket per pickBucket.
+    // assert it's at-or-after this run's `localMidnight` (today). The
+    // range width crosses the 60-day day/week threshold — the
+    // resulting bucket-size selection is asserted via HTTP in
+    // `reports.test.ts`.
     expect(toMs).toBeGreaterThanOrEqual(localMidnight);
-    expect(pickBucket(fromMs, toMs)).toBe("week");
+    expect((toMs - fromMs) / DAY_MS).toBeGreaterThan(60);
   });
 
   it("last365 spans 364 prior days + today", () => {
     const { fromMs, toMs } = resolvePeriod("last365");
     expect(fromMs).toBe(localMidnightDaysAgo(364));
-    expect(pickBucket(fromMs, toMs)).toBe("week");
+    // Range width is between the 60-day and 365-day thresholds.
+    expect((toMs - fromMs) / DAY_MS).toBeGreaterThan(60);
+    expect((toMs - fromMs) / DAY_MS).toBeLessThanOrEqual(365);
   });
 
-  it("last30 still lands in the day bucket", () => {
+  it("last30 produces a range under the 60-day day/week boundary", () => {
     const { fromMs, toMs } = resolvePeriod("last30");
-    expect(pickBucket(fromMs, toMs)).toBe("day");
+    expect((toMs - fromMs) / DAY_MS).toBeLessThanOrEqual(60);
   });
 
-  it("custom > 365 days lands in the month bucket", () => {
+  it("custom > 365 days exceeds the week/month boundary", () => {
     // Two years back via `setDate` so the from-date doesn't drift past
     // a leap-day or DST boundary the way `localMidnight - N * DAY_MS`
     // does. ISO date strings (YYYY-MM-DD) are what the custom-range
@@ -123,7 +88,7 @@ describe("resolvePeriod — new presets", () => {
     const to = new Date(localMidnight);
     const toIso = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, "0")}-${String(to.getDate()).padStart(2, "0")}`;
     const { fromMs, toMs } = resolvePeriod("custom", fromIso, toIso);
-    expect(pickBucket(fromMs, toMs)).toBe("month");
+    expect((toMs - fromMs) / DAY_MS).toBeGreaterThan(365);
   });
 });
 

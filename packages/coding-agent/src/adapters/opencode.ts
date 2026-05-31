@@ -607,7 +607,7 @@ type OpenCodeExportedPart =
        *  `opencode run --format json` schema). */
       cost?: number;
       /** Per-step token splits. `cache.write` is reported but dropped at
-       *  ingest time — see `usage-scanner-service.ts`. */
+       *  ingest time — see `apps/web/src/server/infra/usage-scanner/`. */
       tokens?: {
         input?: number;
         output?: number;

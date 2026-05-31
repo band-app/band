@@ -3,12 +3,11 @@
 // Exercises the scanner orchestration against a real SQLite database
 // (via the production migrations + `UsageEventQueries`). The adapter
 // surface (`agent.listSessions` + `agent.getSessionUsage`) is the
-// scanner's external boundary, so the test provides stub implementations
-// via the constructor's DI seam — same pattern CLAUDE.md describes for
-// out-of-process boundaries (agent binaries, third-party APIs). The DB
-// itself is the real production schema; the row shape, the
-// `external_key` unique-index dedup, and the watermark advance all run
-// through the production code.
+// scanner's out-of-process boundary, so the test provides stub
+// implementations via the constructor's DI seam. The DB itself is the
+// real production schema; the row shape, the `external_key`
+// unique-index dedup, and the watermark advance all run through the
+// production code.
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { UsageEventQueries } from "../src/server/infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../src/server/infra/db/queries/usage-scan-state";
-import { UsageScannerService } from "../src/server/services/usage-scanner-service";
+import { UsageScannerService } from "../src/server/infra/usage-scanner/usage-scanner";
 
 const MIGRATIONS_FOLDER = join(
   import.meta.dirname,

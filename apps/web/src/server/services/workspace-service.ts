@@ -199,7 +199,11 @@ function isRebaseCollision(err: unknown): boolean {
 }
 
 export class WorkspaceService {
-  constructor(private readonly queries: WorkspaceQueries = new WorkspaceQueries()) {}
+  constructor(
+    private readonly queries: WorkspaceQueries = new WorkspaceQueries(),
+    private readonly usageEventQueries: UsageEventQueries = new UsageEventQueries(),
+    private readonly usageScanStateQueries: UsageScanStateQueries = new UsageScanStateQueries(),
+  ) {}
 
   /**
    * Resolve a workspace ID to its parent project + worktree row.
@@ -452,7 +456,7 @@ export class WorkspaceService {
     // above. Dropping the watermark lets a future workspace at the same
     // id start scanning from scratch.
     try {
-      const deletedEvents = new UsageEventQueries().deleteWorkspaceEvents(workspaceId);
+      const deletedEvents = this.usageEventQueries.deleteWorkspaceEvents(workspaceId);
       if (deletedEvents > 0) {
         log.info(
           { workspaceId, count: deletedEvents },
@@ -463,7 +467,7 @@ export class WorkspaceService {
       log.error({ workspaceId, err }, "failed to delete workspace usage events on removal");
     }
     try {
-      new UsageScanStateQueries().deleteWorkspace(workspaceId);
+      this.usageScanStateQueries.deleteWorkspace(workspaceId);
     } catch (err) {
       log.error({ workspaceId, err }, "failed to delete workspace usage scan state on removal");
     }

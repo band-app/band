@@ -1,10 +1,11 @@
 import type { CodingAgent, SessionUsageSnapshot } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@/dashboard";
-import { createWorkspaceAgent } from "../infra/agents/agent-pool";
-import { UsageEventQueries } from "../infra/db/queries/usage-events";
-import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
-import { loadSettings, loadState } from "./state";
+import { createWorkspaceAgent } from "../agents/agent-pool";
+import { ProjectQueries } from "../db/queries/projects";
+import { SettingsQueries } from "../db/queries/settings";
+import { UsageEventQueries } from "../db/queries/usage-events";
+import { UsageScanStateQueries } from "../db/queries/usage-scan-state";
 
 /** Hour in milliseconds — bucket size for the Reports usage table. */
 const HOUR_MS = 60 * 60 * 1000;
@@ -141,7 +142,8 @@ const log = createLogger("usage-scanner");
 export interface UsageScannerDeps {
   usageEvents: UsageEventQueries;
   scanState: UsageScanStateQueries;
-  /** Override for tests — defaults to `loadState` / `loadSettings`. */
+  /** Override for tests — defaults to enumerating every workspace from
+   *  `ProjectQueries` and every installed agent from `SettingsQueries`. */
   listWorkspaces?: () => Array<{
     workspaceId: string;
     project: string;
@@ -474,11 +476,13 @@ export class UsageScannerService {
   }
 }
 
-/** Default workspace lister — every worktree of every project. */
+/** Default workspace lister — every worktree of every project.
+ *  Walks `ProjectQueries.loadAll()` directly (the infra-tier query) so
+ *  this module doesn't depend on the services tier. */
 function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listWorkspaces"]>> {
-  const state = loadState();
+  const projects = new ProjectQueries().loadAll();
   const out: Array<{ workspaceId: string; project: string; worktreePath: string }> = [];
-  for (const project of state.projects) {
+  for (const project of projects) {
     for (const worktree of project.worktrees) {
       out.push({
         workspaceId: toWorkspaceId(project.name, worktree.branch),
@@ -490,23 +494,25 @@ function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listW
   return out;
 }
 
-/** Default agent lister — every agent installed in user settings. */
+/** Default agent lister — every agent installed in user settings.
+ *  Reads `SettingsQueries.load()` directly so the scanner stays in the
+ *  infra tier (no services-tier dependency). */
 function defaultListAgents(): ReturnType<NonNullable<UsageScannerDeps["listAgents"]>> {
-  const settings = loadSettings();
+  const settings = new SettingsQueries().load();
   const codingAgents = settings.codingAgents ?? [];
   return codingAgents.map((def) => ({ agentId: def.id, agentType: def.type }));
 }
 
 /**
  * Default polling-enabled predicate — reads `usagePollingEnabled` from
- * the live `settings.json` and treats `undefined` (or any non-boolean
- * value) as enabled. Re-reading each tick means a user toggling the
- * setting in the dashboard takes effect on the next tick without
- * needing a server restart.
+ * the live `settings.json` (via the infra-tier `SettingsQueries`) and
+ * treats `undefined` (or any non-boolean value) as enabled. Re-reading
+ * each tick means a user toggling the setting in the dashboard takes
+ * effect on the next tick without needing a server restart.
  */
 function defaultIsPollingEnabled(): boolean {
   try {
-    const settings = loadSettings();
+    const settings = new SettingsQueries().load();
     return settings.usagePollingEnabled !== false;
   } catch {
     // Malformed settings file — fail open. The scanner running when
