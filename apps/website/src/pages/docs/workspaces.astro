@@ -55,6 +55,30 @@ band workspaces create my-app feat/api --base develop</code></pre>
     simply returns its path without duplicating anything.
   </p>
 
+  <h3>Untracked file copying</h3>
+  <p>
+    A fresh worktree only contains files git knows about. Untracked files like
+    <code>.env</code>, local credential overrides, or IDE settings are absent by
+    default. Configure them to be copied from the project's main checkout into
+    every new worktree via either of two declarative sources at the project root:
+  </p>
+  <ul>
+    <li>
+      <code>.band/config.json::workspace.copyFiles</code> &mdash; explicit list of paths
+      (literals or globs). See <a href="/docs/configuration">Project Configuration</a>.
+    </li>
+    <li>
+      <code>.worktreeinclude</code> &mdash; gitignore-syntax patterns. Only files
+      that match a pattern AND are gitignored are copied (Claude Code parity).
+    </li>
+  </ul>
+  <p>
+    When both sources are present, the union is copied. Copies happen after
+    <code>git worktree add</code> and before the <code>setup</code> script runs,
+    so the setup script can read <code>.env</code> just like it can in the main
+    checkout. Missing source files are skipped with a warning.
+  </p>
+
   <h2>Workspace List</h2>
   <p>
     Workspaces appear nested under their parent project in the dashboard. Each workspace card
