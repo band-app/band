@@ -33,10 +33,14 @@
 // Each scenario uses its own project subdirectory inside the shared tmp
 // home so the seven creates don't fight over the same `.band/config.json`
 // / `.worktreeinclude` files. The server boots once for the file.
+//
+// See docs/integration-testing.md and .claude/skills/write-integration-test/SKILL.md
+// for the real-server doctrine this file implements (TEST-1...TEST-35 in
+// .claude/testing-criteria.md).
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
@@ -77,6 +81,16 @@ interface CreateRepoOpts {
    */
   untrackedFiles: Record<string, string>;
   /**
+   * Files to write AFTER the initial commit, OVERWRITING tracked content
+   * left on disk. These bytes live only in the main checkout's working
+   * tree — `git worktree add` for a new branch checks out the committed
+   * version. Used by the "matched-but-tracked" scenario to make the
+   * "Option B re-copied a tracked file" failure mode observable: if the
+   * implementation incorrectly re-copies, the worktree ends up with the
+   * post-commit bytes instead of the committed bytes.
+   */
+  mutateAfterCommit?: Record<string, string>;
+  /**
    * `.band/config.json` payload. Omitted when the test only exercises
    * Option B.
    */
@@ -108,7 +122,7 @@ function buildProject(
 
   for (const [path, content] of Object.entries(opts.trackedFiles)) {
     const abs = join(repoPath, path);
-    mkdirSync(join(abs, ".."), { recursive: true });
+    mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, content);
   }
   git(repoPath, ["add", "."]);
@@ -116,7 +130,12 @@ function buildProject(
 
   for (const [path, content] of Object.entries(opts.untrackedFiles)) {
     const abs = join(repoPath, path);
-    mkdirSync(join(abs, ".."), { recursive: true });
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  }
+
+  for (const [path, content] of Object.entries(opts.mutateAfterCommit ?? {})) {
+    const abs = join(repoPath, path);
     writeFileSync(abs, content);
   }
 
@@ -242,6 +261,17 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       },
       untrackedFiles: {
         ".env": "FROM_INCLUDE=1\n",
+      },
+      // Overwrite the working-tree copy of `config.json` AFTER the commit
+      // so the main checkout's on-disk bytes differ from the committed
+      // bytes. `git worktree add` checks out the committed bytes into the
+      // new worktree — so if the implementation correctly skips the
+      // tracked file, the worktree holds `{"tracked":true}`. If it
+      // incorrectly re-copies from the main checkout, the worktree gets
+      // `{"tracked":true,"WORKING_TREE_DRIFT":true}` and the assertion
+      // below fails. This is what makes the test falsifiable.
+      mutateAfterCommit: {
+        "config.json": '{"tracked":true,"WORKING_TREE_DRIFT":true}\n',
       },
       worktreeInclude: "*.json\n.env\n",
     });
@@ -421,15 +451,34 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       "FROM_INCLUDE=1\n",
     );
 
-    // `config.json` is a tracked file in the main checkout. It already
-    // appears in the worktree via `git worktree add`, but it must NOT be
-    // an Option-B re-copy: the rule "only files that match AND are
-    // gitignored are copied" means tracked-but-matching is a no-op for
-    // Option B. We verify by reading the worktree copy's bytes — it
-    // should match the committed bytes (`{"tracked":true}\n`), not be
-    // mutated by our copy path.
+    // `config.json` is a tracked file in the main checkout, and its
+    // working-tree bytes were deliberately drifted post-commit to
+    // `{"tracked":true,"WORKING_TREE_DRIFT":true}` (see the fixture's
+    // `mutateAfterCommit`). `git worktree add` only checks out the
+    // *committed* bytes — `{"tracked":true}`. So:
+    //   - Correct behaviour (Option B skips tracked files) → worktree
+    //     holds the committed bytes.
+    //   - Buggy behaviour (Option B re-copies tracked files) → worktree
+    //     would be overwritten with the drifted bytes and this assertion
+    //     would fail.
+    // That asymmetry is what makes the assertion falsifiable.
     expect(readFileSync(join(pMatchedButTracked.worktreePath, "config.json"), "utf-8")).toBe(
       '{"tracked":true}\n',
     );
+  });
+
+  it("rejects workspaces.create without an auth token (401)", async () => {
+    // TEST-13 negative auth case — boots the same server but skips the
+    // `Cookie: band_token=...` header by bypassing the `trpcMutate`
+    // helper. Pins that the file-copy feature can't be reached
+    // unauthenticated; a future regression that loosened auth on the
+    // workspaces.create handler would surface here, not just in the
+    // shared `trpc.test.ts` suite.
+    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: pConfigOnly.name, branch: "unauth-attempt" }),
+    });
+    expect(res.status).toBe(401);
   });
 });
