@@ -30,7 +30,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <pre><code set:html={`{
   "setup": "npm install && npm run db:migrate",
-  "teardown": "npm run db:reset"
+  "teardown": "npm run db:reset",
+  "workspace": {
+    "copyFiles": [".env", ".env.local", "config/local.json"]
+  }
 }`}></code></pre>
 
   <h2>Setup Command</h2>
@@ -60,10 +63,99 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <pre><code>"teardown": "docker compose down -v"</code></pre>
 
+  <h2>Workspace File Copying</h2>
+
+  <p>
+    Workspaces are fresh git worktrees, so untracked files like <code>.env</code>,
+    <code>.env.local</code>, local credential overrides, or IDE settings are <strong>not</strong>
+    present after creation — git only checks out tracked files. Band can copy those files into
+    a new worktree on creation, driven by either of two declarative sources at the project root:
+  </p>
+
+  <h3>Option A: <code>.band/config.json::workspace.copyFiles</code></h3>
+
+  <p>
+    Explicit list of paths relative to the project root. Glob patterns
+    (<code>*</code>, <code>?</code>, <code>[abc]</code>, <code>{`{a,b}`}</code>) are supported.
+  </p>
+
+  <pre><code set:html={`{
+  "workspace": {
+    "copyFiles": [
+      ".env",
+      ".env.local",
+      "config/*.local.json",
+      ".vscode/settings.json"
+    ]
+  }
+}`}></code></pre>
+
+  <h3>Option B: <code>.worktreeinclude</code></h3>
+
+  <p>
+    A <code>.gitignore</code>-syntax file at the project root, parallel to
+    <code>.gitignore</code>. Patterns use the same grammar as <code>.gitignore</code>
+    (anchored leading slash, <code>**</code> segments, character classes, etc.).
+  </p>
+
+  <p>
+    Only files that match a pattern <strong>and</strong> are gitignored are copied
+    (parity with Claude Code's own <code>.worktreeinclude</code> behavior). Tracked
+    files are never duplicated — git already provides them via the worktree checkout.
+  </p>
+
+  <pre><code set:html={`# .worktreeinclude
+.env*
+config/*.local.json
+.vscode/
+`}></code></pre>
+
+  <h3>Precedence and Semantics</h3>
+
+  <ul>
+    <li>
+      When both sources are present, the resulting file sets are <strong>UNIONed</strong>
+      and de-duped by absolute source path — neither source wins, and a file declared
+      by both is copied exactly once.
+    </li>
+    <li>
+      The source is always the project's <strong>main checkout</strong>, not another
+      worktree, so copies are deterministic regardless of which worktrees happen to
+      exist at the time of creation.
+    </li>
+    <li>
+      Files are copied as <strong>regular files</strong>, not symlinks — edits inside
+      the new worktree don't bleed back to the main checkout. Relative directory
+      structure is preserved (<code>config/local.json</code> lands at
+      <code>&lt;worktree&gt;/config/local.json</code>).
+    </li>
+    <li>
+      Missing source files are <strong>skipped with a warning</strong>, not treated
+      as fatal. Stale entries in the config don't break workspace creation.
+    </li>
+    <li>
+      Copies run <strong>after</strong> <code>git worktree add</code> and
+      <strong>before</strong> the <code>setup</code> script (and the first agent
+      prompt, when one is supplied via <code>band workspaces create --prompt</code>),
+      so the setup script can read <code>.env</code> / local credentials just like
+      it can in the main checkout.
+    </li>
+  </ul>
+
+  <p>
+    Out of scope (today): per-user overrides (<code>.band/config.local.json</code>),
+    copying files back from a worktree to the main checkout on cleanup
+    (workspace-files copy is one-way only), and variable substitution inside copied
+    files.
+  </p>
+
   <h2>Full Example</h2>
 
   <pre><code set:html={`{
   "setup": "npm install && npx prisma db push && cp .env.example .env.local",
-  "teardown": "docker compose down -v"
+  "teardown": "docker compose down -v",
+  "workspace": {
+    "copyFiles": [".env", ".env.local", "config/*.local.json"]
+  }
 }`}></code></pre>
 </DocsLayout>

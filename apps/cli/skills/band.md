@@ -120,8 +120,43 @@ band projects remove my-app
 - The CLI never modifies files directly — all operations go through the server API
 - `workspaces create` is idempotent — creating an existing workspace returns its path
 - `setup` scripts run after workspace creation, `teardown` before removal (both non-fatal)
+- Workspace file copying runs after `git worktree add` and before the `setup` script — see "Workspace file copying" below
 - Project and branch names must not contain control characters or path traversals (`../`)
 - Exit code 0 = success, 1 = error
+
+## Workspace file copying
+
+Workspaces are fresh git worktrees, so untracked files (`.env`, `.env.local`,
+local credentials, IDE overrides) are missing by default. Band can copy a
+declared set of those files from the project's main checkout into each new
+worktree, driven by either of two sources at the project root:
+
+**Option A — `.band/config.json::workspace.copyFiles`** (explicit list,
+supports globs):
+
+```json
+{
+  "workspace": {
+    "copyFiles": [".env", ".env.local", "config/*.local.json", ".vscode/settings.json"]
+  }
+}
+```
+
+**Option B — `.worktreeinclude`** (gitignore-syntax, Claude Code parity):
+
+```
+.env*
+config/*.local.json
+```
+
+Only entries that match a `.worktreeinclude` pattern AND are gitignored are
+copied. Tracked files are never duplicated.
+
+When both sources are present, the resulting file sets are UNIONed and
+de-duped by absolute source path. Missing source files are skipped with a
+warning (not fatal). Files are copied (not symlinked) so edits in the
+worktree don't bleed back to the main checkout. Out of scope: per-user
+overrides, copy-back on cleanup, variable substitution.
 
 ## Configuration
 
