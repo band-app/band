@@ -20,6 +20,14 @@ const log = createLogger("terminal-ws");
 // rather than the truncated tail.
 const MAX_CLOSE_REASON_BYTES = 123;
 
+// Server-side protocol-ping cadence. Every interval we ping the client and
+// terminate the socket if the previous ping went unanswered — so a client
+// that slept or dropped off the network is reaped within one interval instead
+// of lingering with live listeners. The PTY is kept alive regardless (see the
+// close handler) so the client can reconnect. 30s is lenient enough not to
+// race a briefly-backgrounded tab whose timers are throttled.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 function clampCloseReason(reason: string): string {
   const enc = new TextEncoder();
   const bytes = enc.encode(reason);
@@ -189,6 +197,28 @@ function attachSession(
     }
   });
 
+  // Protocol-level heartbeat: reap server sockets whose client vanished
+  // (machine slept, network dropped) so their listeners don't leak. The PTY
+  // is intentionally left alive — `ws.on("close")` keeps it — so the client
+  // can reconnect and resume. `ws.ping()` triggers a TCP-level pong from any
+  // live peer; if the previous ping went unanswered we terminate.
+  let isAlive = true;
+  ws.on("pong", () => {
+    isAlive = true;
+  });
+  const pingInterval = setInterval(() => {
+    if (!isAlive) {
+      ws.terminate();
+      return;
+    }
+    isAlive = false;
+    try {
+      ws.ping();
+    } catch {
+      // socket already closing — the close handler will clean up
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
   // WebSocket input -> PTY
   ws.on("message", (data: Buffer | string) => {
     handleMessage(ws, terminalId, session, data.toString());
@@ -197,6 +227,7 @@ function attachSession(
   // WebSocket close -> detach listeners but keep PTY alive
   ws.on("close", () => {
     clearInterval(processInterval);
+    clearInterval(pingInterval);
     dataDisposable.dispose();
     exitDisposable.dispose();
     log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);
@@ -216,6 +247,16 @@ function handleMessage(
   if (message.startsWith("{")) {
     try {
       const parsed = JSON.parse(message);
+      if (parsed.type === "ping") {
+        // Application-level heartbeat. The browser WebSocket API can't send
+        // or observe protocol-level ping/pong, so the client pings over the
+        // data channel and relies on this pong to detect a dead socket after
+        // sleep / network loss.
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: "pong" }));
+        }
+        return;
+      }
       if (parsed.type === "resize" && parsed.cols && parsed.rows) {
         terminalService.resize(terminalId, parsed.cols, parsed.rows);
         return;
