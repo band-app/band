@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ClipboardCopy,
   ClipboardPaste,
+  CornerDownLeft,
   TextCursorInput,
   X,
 } from "lucide-react";
@@ -73,6 +74,7 @@ export interface TerminalToolbarProps {
 // keys on a desktop browser — sending them as raw input mirrors that path.
 const SEQ_ESC = "\x1b";
 const SEQ_TAB = "\t";
+const SEQ_ENTER = "\r";
 const SEQ_ARROW_UP = "\x1b[A";
 const SEQ_ARROW_DOWN = "\x1b[B";
 const SEQ_ARROW_RIGHT = "\x1b[C";
@@ -178,110 +180,131 @@ export function TerminalToolbar({
       style={{ bottom: bottomOffset }}
       className="fixed inset-x-0 z-50 flex justify-center border-t border-border bg-background/95 shadow-lg backdrop-blur-md"
     >
-      <div className="flex w-full max-w-3xl items-center gap-1 overflow-x-auto px-2 py-1.5">
-        {selectionMode ? (
-          <>
-            <ToolbarButton
-              ariaLabel="Copy selection and exit"
-              title="Copy"
-              onPointerDown={tap(handleCopyAndExit)}
-              variant="primary"
-            >
-              <ClipboardCopy className="size-4" />
-              <span className="text-xs">Copy</span>
-            </ToolbarButton>
-            <ToolbarButton
-              ariaLabel="Exit selection mode"
-              title="Done"
-              onPointerDown={tap(onExitSelection)}
-            >
-              <X className="size-4" />
-              <span className="text-xs">Done</span>
-            </ToolbarButton>
-
-            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
-
-            <span
-              className="mr-1 shrink-0 select-none text-xs font-medium uppercase tracking-wide text-muted-foreground"
-              aria-hidden="true"
-            >
-              Extend
-            </span>
-
-            {selectionArrows.map(({ Icon, dir, ariaLabel }) => (
+      <div className="flex w-full max-w-3xl items-center gap-1 px-2 py-1.5">
+        {/* Scrolling key row. Enter is pulled out of this container (below) so
+         *  it stays pinned to the right edge while the rest of the keys scroll
+         *  horizontally behind it — Enter is the highest-frequency key and must
+         *  never be scrolled off-screen on a narrow phone. */}
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {selectionMode ? (
+            <>
               <ToolbarButton
-                key={dir}
-                ariaLabel={ariaLabel}
-                title={ariaLabel}
-                onPointerDown={tap(() => onExtendSelection(dir))}
+                ariaLabel="Copy selection and exit"
+                title="Copy"
+                onPointerDown={tap(handleCopyAndExit)}
+                variant="primary"
               >
-                <Icon className="size-4" />
+                <ClipboardCopy className="size-4" />
+                <span className="text-xs">Copy</span>
               </ToolbarButton>
-            ))}
-          </>
-        ) : (
-          <>
-            {/* No idle-mode Copy: there's no way to make a selection without
-             *  entering selection mode (long-press or Select All), so an
-             *  idle Copy button is always either disabled or stale (the
-             *  toolbar doesn't re-render on xterm selection changes). Copy
-             *  lives in the selection-mode layout where it's reachable
-             *  immediately after creating a selection. */}
-            <ToolbarButton
-              ariaLabel="Paste from clipboard"
-              title="Paste"
-              onPointerDown={tap(handlePaste)}
-            >
-              <ClipboardPaste className="size-4" />
-              <span className="text-xs">Paste</span>
-            </ToolbarButton>
-            <ToolbarButton
-              ariaLabel="Select all"
-              title="Select all"
-              // Delegates to the parent so the highlight is paired with a
-              // mode flip into selection-mode — otherwise the user would
-              // see a selection but have no UI to copy it.
-              onPointerDown={tap(onSelectAll)}
-            >
-              <TextCursorInput className="size-4" />
-              <span className="text-xs">All</span>
-            </ToolbarButton>
-
-            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
-
-            {idleKeyButtons.map(({ label, seq, ariaLabel }) => (
               <ToolbarButton
-                key={label}
-                ariaLabel={ariaLabel}
-                title={label}
-                onPointerDown={tap(() => sendInput(seq))}
+                ariaLabel="Exit selection mode"
+                title="Done"
+                onPointerDown={tap(onExitSelection)}
               >
-                <span className="text-xs font-medium">{label}</span>
+                <X className="size-4" />
+                <span className="text-xs">Done</span>
               </ToolbarButton>
-            ))}
-            <ToolbarButton
-              ariaLabel={pendingCtrl ? "Cancel pending Ctrl" : "Arm Ctrl modifier"}
-              title="Ctrl (sticky — taps the next key as Ctrl+key)"
-              onPointerDown={tap(onToggleCtrl)}
-              active={pendingCtrl}
-            >
-              <span className="text-xs font-medium">Ctrl</span>
-            </ToolbarButton>
 
-            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+              <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
 
-            {idleArrows.map(({ Icon, seq, ariaLabel }) => (
+              <span
+                className="mr-1 shrink-0 select-none text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                aria-hidden="true"
+              >
+                Extend
+              </span>
+
+              {selectionArrows.map(({ Icon, dir, ariaLabel }) => (
+                <ToolbarButton
+                  key={dir}
+                  ariaLabel={ariaLabel}
+                  title={ariaLabel}
+                  onPointerDown={tap(() => onExtendSelection(dir))}
+                >
+                  <Icon className="size-4" />
+                </ToolbarButton>
+              ))}
+            </>
+          ) : (
+            <>
+              {/* No idle-mode Copy: there's no way to make a selection without
+               *  entering selection mode (long-press or Select All), so an
+               *  idle Copy button is always either disabled or stale (the
+               *  toolbar doesn't re-render on xterm selection changes). Copy
+               *  lives in the selection-mode layout where it's reachable
+               *  immediately after creating a selection. */}
               <ToolbarButton
-                key={ariaLabel}
-                ariaLabel={ariaLabel}
-                title={ariaLabel}
-                onPointerDown={tap(() => sendInput(seq))}
+                ariaLabel="Paste from clipboard"
+                title="Paste"
+                onPointerDown={tap(handlePaste)}
               >
-                <Icon className="size-4" />
+                <ClipboardPaste className="size-4" />
+                <span className="text-xs">Paste</span>
               </ToolbarButton>
-            ))}
-          </>
-        )}
+              <ToolbarButton
+                ariaLabel="Select all"
+                title="Select all"
+                // Delegates to the parent so the highlight is paired with a
+                // mode flip into selection-mode — otherwise the user would
+                // see a selection but have no UI to copy it.
+                onPointerDown={tap(onSelectAll)}
+              >
+                <TextCursorInput className="size-4" />
+                <span className="text-xs">All</span>
+              </ToolbarButton>
+
+              <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+
+              {idleKeyButtons.map(({ label, seq, ariaLabel }) => (
+                <ToolbarButton
+                  key={label}
+                  ariaLabel={ariaLabel}
+                  title={label}
+                  onPointerDown={tap(() => sendInput(seq))}
+                >
+                  <span className="text-xs font-medium">{label}</span>
+                </ToolbarButton>
+              ))}
+              <ToolbarButton
+                ariaLabel={pendingCtrl ? "Cancel pending Ctrl" : "Arm Ctrl modifier"}
+                title="Ctrl (sticky — taps the next key as Ctrl+key)"
+                onPointerDown={tap(onToggleCtrl)}
+                active={pendingCtrl}
+              >
+                <span className="text-xs font-medium">Ctrl</span>
+              </ToolbarButton>
+
+              <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+
+              {idleArrows.map(({ Icon, seq, ariaLabel }) => (
+                <ToolbarButton
+                  key={ariaLabel}
+                  ariaLabel={ariaLabel}
+                  title={ariaLabel}
+                  onPointerDown={tap(() => sendInput(seq))}
+                >
+                  <Icon className="size-4" />
+                </ToolbarButton>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* Enter — pinned to the right edge, outside the scroll container, so
+         *  it's always reachable. Tinted like a CTA since it's the primary
+         *  action. Sends a carriage return (\r), the same byte a hardware
+         *  Return key produces. */}
+        <div className="h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+        <ToolbarButton
+          ariaLabel="Send Enter"
+          title="Enter"
+          onPointerDown={tap(() => sendInput(SEQ_ENTER))}
+          variant="primary"
+        >
+          <CornerDownLeft className="size-4" />
+          <span className="text-xs">Enter</span>
+        </ToolbarButton>
       </div>
     </div>
   );
