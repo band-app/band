@@ -301,6 +301,60 @@ export class WorkspacePage {
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
+  /** The mobile workspace header's title button. Its aria-label
+   *  ("Switch workspace") is system-controlled (set in
+   *  `workspace.$workspaceId.tsx` MobileWorkspaceLayout), so
+   *  `getByRole({ name })` is the preferred locator. Tapping it opens the
+   *  WorkspacePickerDialog. */
+  get switchWorkspaceButton(): Locator {
+    return this.page.getByRole("button", { name: "Switch workspace" });
+  }
+
+  /** The mobile header's back button — navigates (in-app) to the project
+   *  list at `/`. aria-label set in MobileWorkspaceLayout. */
+  get backToProjectListButton(): Locator {
+    return this.page.getByRole("button", { name: "Back to project list" });
+  }
+
+  /** Open the workspace switcher from the mobile header title. */
+  async openSwitcherFromHeader(): Promise<void> {
+    await test.step("Tap the mobile header title to open the workspace switcher", async () => {
+      await this.switchWorkspaceButton.click();
+    });
+  }
+
+  /** Tap the mobile header back button to return to the project list via
+   *  client-side navigation (not a full reload — so the in-memory
+   *  `activeWorkspaceId` store survives, which is the behaviour the
+   *  active-persistence test asserts). */
+  async goBackToProjectList(): Promise<void> {
+    await test.step("Tap back to project list", async () => {
+      await this.backToProjectListButton.click();
+    });
+  }
+
+  /** Open the workspace picker on desktop via its Ctrl+R shortcut. The
+   *  handler lives on a window keydown listener in
+   *  `SharedDockviewLayout.tsx`; it ignores the shortcut while the
+   *  terminal is focused, so we route the keypress through the project
+   *  list root (focusable, non-editable) — the same anchor the label
+   *  shortcut test uses. */
+  async openWorkspacePickerViaShortcut(): Promise<void> {
+    await test.step("Open workspace picker (Ctrl+R)", async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press("Control+r");
+    });
+  }
+
+  /** The active workspace card, identified by the `data-active` attribute
+   *  `WorkspaceCard` sets when its workspaceId matches the store's
+   *  `activeWorkspaceId`. Scoped to a specific workspaceId so the test can
+   *  assert the right card carries the active marker. */
+  activeWorkspaceCard(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).and(this.page.locator("[data-active]"));
+  }
+
   /** Activate the outer Terminal tab so the inner
    *  `DockviewTerminalContainer` mounts and (on cold start) seeds a
    *  default terminal panel, which boots a real PTY server-side. */

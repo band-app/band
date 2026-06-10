@@ -116,6 +116,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
         className="overflow-hidden border-0 bg-popover p-0 shadow-2xl sm:max-w-[520px]"
         overlayClassName="backdrop-blur-sm"
         showCloseButton={false}
+        data-testid="workspace-picker"
         // On touch devices, don't auto-focus the search input on open — that
         // would pop the soft keyboard over the list the user wants to tap. They
         // can tap the input to search. On desktop (fine pointer) keep the
@@ -140,6 +141,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                   key={entry.workspaceId}
                   value={`${entry.projectName} ${entry.branch}`}
                   onSelect={() => handleSelect(entry.workspaceId)}
+                  data-testid={`workspace-picker__item--${entry.workspaceId}`}
                   // Coarse pointers (touch) get a 44px-tall row (iOS HIG hit
                   // target) and `touch-manipulation` to drop the tap delay, so
                   // workspaces are easy to select by tap — mirroring the
@@ -160,6 +162,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                     <button
                       type="button"
                       aria-label={pinnedNow ? "Unpin workspace" : "Pin workspace"}
+                      data-testid={`workspace-picker__pin--${entry.workspaceId}`}
                       // Hover-reveal on fine pointers (mouse); always visible on
                       // coarse pointers (touch has no hover) and sized to a 36px
                       // tap target so it can be pinned/unpinned by tap.

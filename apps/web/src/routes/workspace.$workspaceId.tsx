@@ -347,6 +347,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             <button
               type="button"
               onClick={handleBack}
+              aria-label="Back to project list"
               className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
             >
               <ArrowLeft className="size-4" />
