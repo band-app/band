@@ -7,6 +7,7 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   CornerDownLeft,
+  Slash,
   TextCursorInput,
   X,
 } from "lucide-react";
@@ -20,7 +21,7 @@ import type { ArrowDirection } from "../lib/terminal-selection";
  * terminal panel. Has two layouts that swap based on `selectionMode`:
  *
  * - **Idle** (`selectionMode === false`): Paste · Select All · Esc · Tab ·
- *   Ctrl · ← → ↑ ↓ (arrows send ANSI escape sequences to the PTY,
+ *   Slash · Ctrl · ← ↑ ↓ → (arrows send ANSI escape sequences to the PTY,
  *   identical to a hardware arrow press). No Copy in idle mode — there's
  *   no way to make a selection from idle without entering selection mode
  *   (long-press, or Select All which delegates to the parent's
@@ -75,6 +76,10 @@ export interface TerminalToolbarProps {
 const SEQ_ESC = "\x1b";
 const SEQ_TAB = "\t";
 const SEQ_ENTER = "\r";
+// Plain "/" — a literal keystroke, not an escape. Lives on the toolbar so the
+// agent slash-command menu is one tap away on a phone (the iOS soft keyboard
+// buries "/" behind the number/symbol layer).
+const SEQ_SLASH = "/";
 const SEQ_ARROW_UP = "\x1b[A";
 const SEQ_ARROW_DOWN = "\x1b[B";
 const SEQ_ARROW_RIGHT = "\x1b[C";
@@ -141,16 +146,15 @@ export function TerminalToolbar({
     [],
   );
 
-  // Arrow order matches the PR description and the visual convention on
-  // physical iOS keyboards: horizontal pair first (← →), then vertical
-  // pair (↑ ↓). Earlier the order was ← ↓ ↑ → which contradicted the
-  // documented layout (PR #413 review).
+  // Arrow order: ← ↑ ↓ →. Horizontal extremes bookend the vertical pair so a
+  // thumb can rock left/right at the edges and nudge up/down in the middle —
+  // the layout requested for the mobile toolbar.
   const idleArrows = useMemo(
     () => [
       { Icon: ArrowLeft, seq: SEQ_ARROW_LEFT, ariaLabel: "Arrow Left" },
-      { Icon: ArrowRight, seq: SEQ_ARROW_RIGHT, ariaLabel: "Arrow Right" },
       { Icon: ArrowUp, seq: SEQ_ARROW_UP, ariaLabel: "Arrow Up" },
       { Icon: ArrowDown, seq: SEQ_ARROW_DOWN, ariaLabel: "Arrow Down" },
+      { Icon: ArrowRight, seq: SEQ_ARROW_RIGHT, ariaLabel: "Arrow Right" },
     ],
     [],
   );
@@ -159,9 +163,9 @@ export function TerminalToolbar({
     () =>
       [
         { Icon: ArrowLeft, dir: "left", ariaLabel: "Extend selection left" },
-        { Icon: ArrowRight, dir: "right", ariaLabel: "Extend selection right" },
         { Icon: ArrowUp, dir: "up", ariaLabel: "Extend selection up" },
         { Icon: ArrowDown, dir: "down", ariaLabel: "Extend selection down" },
+        { Icon: ArrowRight, dir: "right", ariaLabel: "Extend selection right" },
       ] as const,
     [],
   );
@@ -266,6 +270,14 @@ export function TerminalToolbar({
                   <span className="text-xs font-medium">{label}</span>
                 </ToolbarButton>
               ))}
+              {/* Slash — one-tap entry into an agent's slash-command menu. */}
+              <ToolbarButton
+                ariaLabel="Send slash"
+                title="Slash command"
+                onPointerDown={tap(() => sendInput(SEQ_SLASH))}
+              >
+                <Slash className="size-4" />
+              </ToolbarButton>
               <ToolbarButton
                 ariaLabel={pendingCtrl ? "Cancel pending Ctrl" : "Arm Ctrl modifier"}
                 title="Ctrl (sticky — taps the next key as Ctrl+key)"
@@ -303,7 +315,6 @@ export function TerminalToolbar({
           variant="primary"
         >
           <CornerDownLeft className="size-4" />
-          <span className="text-xs">Enter</span>
         </ToolbarButton>
       </div>
     </div>

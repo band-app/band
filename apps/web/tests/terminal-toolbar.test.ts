@@ -443,6 +443,21 @@ describe("TerminalToolbar – special keys", () => {
     unmount(root, container);
   });
 
+  it("Slash button sends a literal '/' (one-tap agent slash-command entry)", () => {
+    const sent: string[] = [];
+    const term = makeFakeTerminal();
+    const { container, root } = mount({ terminal: term, sendInput: (d) => sent.push(d) });
+    const slashBtn = container.querySelector(
+      "button[aria-label='Send slash']",
+    ) as HTMLButtonElement;
+    expect(slashBtn).not.toBeNull();
+    act(() => {
+      dispatchPointerDown(slashBtn);
+    });
+    expect(sent).toEqual(["/"]);
+    unmount(root, container);
+  });
+
   it("Ctrl button toggles a pending state via onToggleCtrl", () => {
     const onToggleCtrl = vi.fn();
     const term = makeFakeTerminal();
