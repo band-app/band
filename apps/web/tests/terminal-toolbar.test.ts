@@ -458,6 +458,21 @@ describe("TerminalToolbar – special keys", () => {
     unmount(root, container);
   });
 
+  it("Enter button sends a carriage return (icon-only, always pinned right)", () => {
+    const sent: string[] = [];
+    const term = makeFakeTerminal();
+    const { container, root } = mount({ terminal: term, sendInput: (d) => sent.push(d) });
+    const enterBtn = container.querySelector(
+      "button[aria-label='Send Enter']",
+    ) as HTMLButtonElement;
+    expect(enterBtn).not.toBeNull();
+    act(() => {
+      dispatchPointerDown(enterBtn);
+    });
+    expect(sent).toEqual(["\r"]);
+    unmount(root, container);
+  });
+
   it("Ctrl button toggles a pending state via onToggleCtrl", () => {
     const onToggleCtrl = vi.fn();
     const term = makeFakeTerminal();
