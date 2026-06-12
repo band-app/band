@@ -532,6 +532,7 @@ describe("TerminalToolbar – selection mode", () => {
     expect(container.querySelector("button[aria-label='Arm Ctrl modifier']")).toBeNull();
     expect(container.querySelector("button[aria-label='Send Escape']")).toBeNull();
     expect(container.querySelector("button[aria-label='Send Tab']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Send slash']")).toBeNull();
     // The four extend buttons + Copy + Done should be present.
     expect(container.querySelector("button[aria-label='Copy selection and exit']")).not.toBeNull();
     expect(container.querySelector("button[aria-label='Exit selection mode']")).not.toBeNull();

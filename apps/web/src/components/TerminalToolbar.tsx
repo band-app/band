@@ -27,7 +27,7 @@ import type { ArrowDirection } from "../lib/terminal-selection";
  *   (long-press, or Select All which delegates to the parent's
  *   `onSelectAll` callback to flip into selection mode immediately).
  *
- * - **Selecting** (`selectionMode === true`): Copy · Done · ← → ↑ ↓ (arrows
+ * - **Selecting** (`selectionMode === true`): Copy · Done · ← ↑ ↓ → (arrows
  *   extend the highlighted selection one cell at a time; the parent owns the
  *   anchor/head state and updates xterm via `terminal.select()`).
  *
