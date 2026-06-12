@@ -686,7 +686,10 @@ export function TerminalPanel({
       const scheduleReconnect = () => {
         if (intentionalClose || reconnectTimer !== null) return;
         const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
-        reconnectAttempts += 1;
+        // Stop growing the exponent once the backoff is pinned at the ceiling —
+        // otherwise 2 ** reconnectAttempts overflows to Infinity after ~1023
+        // consecutive drops.
+        if (delay < RECONNECT_MAX_MS) reconnectAttempts += 1;
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
           connect();
@@ -758,6 +761,11 @@ export function TerminalPanel({
         };
 
         ws.onclose = () => {
+          // Discard events from a socket that's already been replaced —
+          // `handleResume` can call `connect()` while a previous socket is
+          // still CONNECTING, and that orphan's late `onclose` would otherwise
+          // schedule a second, overlapping reconnect.
+          if (wsRef.current !== ws) return;
           stopHeartbeat();
           if (intentionalClose) return;
           // Transient drop — tell the user we're retrying. The message is

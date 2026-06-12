@@ -350,7 +350,14 @@ export class WorkspacePage {
   /** The active workspace card, identified by the `data-active` attribute
    *  `WorkspaceCard` sets when its workspaceId matches the store's
    *  `activeWorkspaceId`. Scoped to a specific workspaceId so the test can
-   *  assert the right card carries the active marker. */
+   *  assert the right card carries the active marker.
+   *
+   *  The `[data-active]` presence filter is intentional rather than a CSS
+   *  selector smell: `data-active` is a binary *state* marker (present ⇔
+   *  active), so the card's identity still comes from its `getByTestId`-based
+   *  `workspaceCard(...)` locator — this only narrows it to the active state.
+   *  A separate testid per state would duplicate the marker the component
+   *  already owns. */
   activeWorkspaceCard(workspaceId: string): Locator {
     return this.workspaceCard(workspaceId).and(this.page.locator("[data-active]"));
   }

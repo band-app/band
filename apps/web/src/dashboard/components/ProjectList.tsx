@@ -176,9 +176,14 @@ function SortableProject({
   // the open workspace belonged to once scrolled away from its card — this
   // tints the header (and its folder icon) to close that gap.
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
-  const gitHeaderIsActive =
-    !isPlain &&
-    project.worktrees.some((wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId);
+  // Memoized: every Zustand update re-renders this row, and the `.some(...)`
+  // walk is O(worktrees) — recompute only when the inputs actually change.
+  const gitHeaderIsActive = useMemo(
+    () =>
+      !isPlain &&
+      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId),
+    [isPlain, project.worktrees, project.name, activeWorkspaceId],
+  );
 
   // Single onClick / onKeyDown for the plain-project header (mirrors the
   // navigate-or-open dance WorkspaceCard does). For git projects the

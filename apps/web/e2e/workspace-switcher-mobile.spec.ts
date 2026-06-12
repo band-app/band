@@ -112,11 +112,13 @@ test.describe("Mobile workspace switcher", () => {
 
     await picker.dismiss();
 
-    // Positive anchor: dialog gone, and we're still on the same workspace
-    // (the mobile layout is interactive again) — dismissing did not navigate.
-    await expect(picker.dialog).toBeHidden();
+    // Establish the positive anchor first: the mobile layout is interactive
+    // again and we're still on the same workspace (dismissing did not
+    // navigate). Only then assert the dialog is gone, so the negative
+    // assertion has live state to anchor against.
     await workspacePage.waitForMobileReady();
     await expect(page).toHaveURL(new RegExp(WORKSPACE));
+    await expect(picker.dialog).toBeHidden();
   });
 
   test("the workspace stays active after returning to the project-list menu", async ({ page }) => {

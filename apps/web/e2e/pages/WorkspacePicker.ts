@@ -12,6 +12,12 @@
  * The pin button additionally carries a system-controlled aria-label that
  * flips between "Pin workspace" and "Unpin workspace" — the observable signal
  * the pin/select-separation regression test asserts on.
+ *
+ * This is a *component* object, not a route page object: the dialog has no URL
+ * of its own (it's opened by a gesture on whatever page already rendered), so
+ * it deliberately omits the `(page, baseUrl)` constructor + `goto()` that route
+ * page objects (e.g. WorkspacePage) carry. Component objects take only `page`
+ * and expose interaction methods.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";

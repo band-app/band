@@ -63,7 +63,11 @@ function safeClose(ws: WebSocket, code: number, reason: string): void {
 }
 
 export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
+  if (!req.url) {
+    safeClose(ws, 4000, "Missing request URL");
+    return;
+  }
+  const url = new URL(req.url, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
   const terminalId = url.searchParams.get("terminalId");
 
@@ -96,7 +100,13 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
             command: typeof parsed.command === "string" ? parsed.command : undefined,
             cwd: typeof parsed.cwd === "string" ? parsed.cwd : undefined,
             env:
-              parsed.env && typeof parsed.env === "object" && !Array.isArray(parsed.env)
+              parsed.env &&
+              typeof parsed.env === "object" &&
+              !Array.isArray(parsed.env) &&
+              // A client could send non-string values (e.g. a number); the PTY
+              // spawn expects a string map, so reject the whole env field
+              // rather than silently passing a non-string through.
+              Object.values(parsed.env).every((v) => typeof v === "string")
                 ? (parsed.env as Record<string, string>)
                 : undefined,
           };
