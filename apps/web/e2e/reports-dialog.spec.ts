@@ -41,22 +41,26 @@ test.use({ viewport: { width: 1280, height: 800 } });
 let server!: ServerHandle;
 let tmpHome: string;
 
-// Anchor to start-of-day on the test host so the byBucket day buckets are
-// stable across timezones and don't depend on wall-clock at run time.
+// Seed "today" data relative to the real clock so the "Today" period filter
+// (server-side: captured_at in [start-of-today, now)) always includes it.
 //
-// Using `dayStart` directly means seeded "today" data lives at
-// dayStart + 9h — which is in the FUTURE if the test runs before
-// local 9am, and `reports.summary`'s `captured_at < toMs (now)`
-// filter excludes it (caused flake when tests ran in the early
-// morning). Anchor to `now - 3h` instead so "today" data is always
-// in the past relative to wall-clock when the test runs.
+// Earlier anchors were brittle around clock edges:
+//   - dayStart + 9h put "today" in the FUTURE before 9am, so the
+//     `captured_at < now` filter dropped it.
+//   - now - 3h fixed the morning case but pushed "today" into the PREVIOUS
+//     calendar day when the suite ran between midnight and 3am, so the
+//     "Today" filter (which keys off the real start-of-today) dropped it
+//     instead — a deterministic failure every night, not a flake.
+//
+// Anchor today's row to one minute ago, clamped so it can't fall before
+// midnight: that's guaranteed to sit in [start-of-today, now) at any hour.
 const nowMs = Date.now();
-const TODAY_ANCHOR = nowMs - 3 * 60 * 60 * 1000;
 const dayStart = (() => {
-  const d = new Date(TODAY_ANCHOR);
+  const d = new Date(nowMs);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 })();
+const TODAY_ANCHOR = Math.max(dayStart, nowMs - 60 * 1000);
 
 function openDb(home: string): DatabaseSync {
   const dbPath = join(home, ".band", "band.db");
