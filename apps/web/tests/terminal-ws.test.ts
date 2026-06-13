@@ -255,3 +255,84 @@ describe("terminal WebSocket — close-reason byte cap", () => {
     expect(healthRes.status).toBeLessThan(500);
   });
 });
+
+describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    // A real, existing worktree directory so the PTY actually spawns — the
+    // ping/pong path only runs once a session is attached.
+    const projectPath = join(tmpHome, "workspace");
+    mkdirSync(projectPath, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "workspace",
+          path: projectPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: projectPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer(tmpHome);
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("responds with a {type:'pong'} frame to a client {type:'ping'}", async () => {
+    const workspaceId = "workspace-main";
+    const terminalId = "ping-pong-terminal";
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+
+    const ws = new WebSocket(wsUrl, {
+      headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+    });
+
+    let gotPong = false;
+    let pinged = false;
+
+    await new Promise<void>((resolve, reject) => {
+      // Spawn the PTY. The `init` message is consumed by the handler's
+      // one-shot listener; the persistent `message` listener (which serves
+      // ping/pong) is only attached after the async spawn resolves, so we
+      // must wait for the first server frame before pinging — otherwise the
+      // ping races ahead of the listener and is dropped.
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ type: "init" }));
+      });
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!pinged) {
+          // First frame (PTY scrollback / shell prompt) proves the session is
+          // attached and the message listener is live — now ping.
+          pinged = true;
+          ws.send(JSON.stringify({ type: "ping" }));
+          return;
+        }
+        if (isBinary) return; // further PTY output frames
+        try {
+          const parsed = JSON.parse(data.toString());
+          if (parsed.type === "pong") {
+            gotPong = true;
+            resolve();
+          }
+        } catch {
+          // ignore non-JSON frames
+        }
+      });
+      ws.on("error", reject);
+      setTimeout(() => reject(new Error("No pong received within 10 s")), 10_000);
+    });
+
+    expect(gotPong).toBe(true);
+    ws.close();
+  });
+});

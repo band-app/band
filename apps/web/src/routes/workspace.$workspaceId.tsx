@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronsUpDown } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   DiffView,
@@ -8,6 +8,7 @@ import {
   useDashboardStore,
   useDiffTarget,
   useSettingsQuery,
+  WorkspacePickerDialog,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@/dashboard";
@@ -126,17 +127,18 @@ function WorkspaceLayout() {
     setHydrated(true);
   }, []);
 
-  // Sync zustand active workspace from URL.
-  // Two effects: one updates on param change, the other clears only on unmount.
-  // Combining them caused a brief null-then-set toggle on every workspace
-  // switch, which made sidebar cards flash inactive for one frame.
+  // Sync zustand active workspace from URL. We set on param change but never
+  // clear on unmount: on mobile the project-list "menu" lives on a *separate*
+  // route (`/`) from the workspace (`/workspace/$id`), so unmounting this route
+  // to show the menu would wipe `activeWorkspaceId` and leave the menu unable
+  // to bold the workspace the user just came from. Keeping the last-opened id
+  // lets the menu mark it active on every viewport. The title bar reads the
+  // active id from the pathname (`parseWorkspaceFromPath` in __root), not this
+  // store, so it still clears correctly when no workspace route is mounted.
   const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
   useEffect(() => {
     setActiveWorkspace(decoded);
   }, [decoded, setActiveWorkspace]);
-  useEffect(() => {
-    return () => setActiveWorkspace(null);
-  }, [setActiveWorkspace]);
 
   // Clear needs_attention status when viewing this workspace
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
@@ -235,6 +237,12 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
       cancelled = true;
     };
   }, [workspaceId, chatKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Workspace switcher (recent / previous workspaces). Tapping the header
+  // title opens it so the user can jump to another worktree without first
+  // navigating back to the full project list — and can dismiss it (backdrop /
+  // Esc) to stay on the current workspace if they change their mind.
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Quick Open state for file link clicks from chat
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
@@ -339,13 +347,24 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             <button
               type="button"
               onClick={handleBack}
+              aria-label="Back to project list"
               className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
             >
               <ArrowLeft className="size-4" />
             </button>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-center text-sm font-semibold">{workspaceId}</h1>
-            </div>
+            {/* Tapping the title opens the workspace switcher — the fast path
+                to jump to a recent/previous worktree without going back to the
+                full project list. The chevron signals it's interactive. */}
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              aria-haspopup="dialog"
+              aria-label="Switch workspace"
+              className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent active:bg-accent"
+            >
+              <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
+              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
             <div aria-hidden="true" className="size-7 shrink-0" />
           </header>
           <WorkspaceTabNav
@@ -391,6 +410,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             onOpenChange={setSearchFilesOpen}
             onOpenFile={handleOpenFile}
           />
+          <WorkspacePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
         </div>
       </AgentSwitcherContext.Provider>
     </SessionListContext.Provider>

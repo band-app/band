@@ -623,66 +623,184 @@ export function TerminalPanel({
       containerEl.addEventListener("touchend", onTapEnd, { passive: true });
       containerEl.addEventListener("touchcancel", onTapCancel, { passive: true });
 
-      // Connect WebSocket
+      // Connect WebSocket — with auto-reconnect + heartbeat so the terminal
+      // survives machine sleep, network drops, and tab-backgrounding. The
+      // server keeps the PTY alive across socket drops and replays scrollback
+      // on reconnect (see apps/web/src/server/api/terminals/ws.ts), so the
+      // client only has to notice the drop and re-open the socket.
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(
-        `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`,
-      );
-      wsRef.current = ws;
+      const wsUrl = `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`;
 
-      // Binary frames = PTY data, text frames = JSON control messages (e.g. title updates)
-      ws.binaryType = "arraybuffer";
+      // Heartbeat: the browser WebSocket API can neither send protocol-level
+      // pings nor observe protocol-level pongs, so after sleep a dead socket
+      // can sit in `readyState === OPEN` indefinitely without ever firing
+      // `onclose`. We run an application-level ping/pong instead: ping every
+      // HEARTBEAT_INTERVAL_MS, and if no pong arrives within
+      // HEARTBEAT_TIMEOUT_MS treat the socket as dead and force it closed
+      // (which triggers the reconnect path). On wake the suspended interval
+      // fires immediately and sees a stale `lastPongAt`, so the zombie socket
+      // is caught at once rather than only when the user next types.
+      const HEARTBEAT_INTERVAL_MS = 10_000;
+      const HEARTBEAT_TIMEOUT_MS = 20_000;
+      const RECONNECT_BASE_MS = 500;
+      const RECONNECT_MAX_MS = 10_000;
 
-      ws.onopen = () => {
-        // Send init message with pane metadata (command, cwd, env) if available.
-        // The server uses this to configure the PTY on first spawn.
-        if (paneMetadata && (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)) {
-          const initMsg: Record<string, unknown> = { type: "init" };
-          if (paneMetadata.command) initMsg.command = paneMetadata.command;
-          if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
-          if (paneMetadata.env) initMsg.env = paneMetadata.env;
-          ws.send(JSON.stringify(initMsg));
+      let intentionalClose = false;
+      let didConnectOnce = false;
+      let reconnectAttempts = 0;
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+      let lastPongAt = 0;
+
+      const clearReconnectTimer = () => {
+        if (reconnectTimer !== null) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
         }
-
-        fitAddon.fit();
-        ws.send(
-          JSON.stringify({
-            type: "resize",
-            cols: terminal.cols,
-            rows: terminal.rows,
-          }),
-        );
-
-        // Auto-focus this terminal if requested
-        if (autoFocus) {
-          terminal.focus();
+      };
+      const stopHeartbeat = () => {
+        if (heartbeatTimer !== null) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
         }
       };
 
-      ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          // Binary frame = raw PTY output
-          terminal.write(new Uint8Array(event.data));
-        } else {
-          // Text frame = JSON control message
-          try {
-            const msg = JSON.parse(event.data as string);
-            if (msg.type === "title" && typeof msg.title === "string") {
-              onTitleChangeRef.current?.(msg.title);
-            }
-          } catch {
-            // Not valid JSON — write as-is (shouldn't happen)
-            terminal.write(event.data);
+      // Probe the live socket: drop it if a pong is overdue, otherwise ping.
+      // Shared by the heartbeat interval and the resume handler.
+      const probeConnection = () => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - lastPongAt > HEARTBEAT_TIMEOUT_MS) {
+          // No pong within the timeout window — the socket is a zombie.
+          // Closing it fires `onclose`, which schedules a reconnect.
+          ws.close();
+          return;
+        }
+        try {
+          ws.send(JSON.stringify({ type: "ping" }));
+        } catch {
+          ws.close();
+        }
+      };
+
+      const scheduleReconnect = () => {
+        if (intentionalClose || reconnectTimer !== null) return;
+        const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
+        // Stop growing the exponent once the backoff is pinned at the ceiling —
+        // otherwise 2 ** reconnectAttempts overflows to Infinity after ~1023
+        // consecutive drops.
+        if (delay < RECONNECT_MAX_MS) reconnectAttempts += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, delay);
+      };
+
+      function connect() {
+        if (intentionalClose) return;
+        clearReconnectTimer();
+        const isReconnect = didConnectOnce;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        // Binary frames = PTY data, text frames = JSON control messages.
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          reconnectAttempts = 0;
+          lastPongAt = Date.now();
+
+          // On reconnect the server replays the full buffered scrollback, so
+          // wipe the local buffer first to avoid duplicating everything the
+          // user already sees. (On the first connect there's nothing to clear.)
+          if (isReconnect) terminal.reset();
+
+          // Send the init message only on the very first connect — the server
+          // spawns the PTY once and ignores `init` for an existing session.
+          if (
+            !didConnectOnce &&
+            paneMetadata &&
+            (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)
+          ) {
+            const initMsg: Record<string, unknown> = { type: "init" };
+            if (paneMetadata.command) initMsg.command = paneMetadata.command;
+            if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
+            if (paneMetadata.env) initMsg.env = paneMetadata.env;
+            ws.send(JSON.stringify(initMsg));
           }
+          didConnectOnce = true;
+
+          fitAddon.fit();
+          ws.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+
+          // Auto-focus only on the initial open — stealing focus on every
+          // background reconnect would be hostile.
+          if (autoFocus && !isReconnect) terminal.focus();
+
+          stopHeartbeat();
+          heartbeatTimer = setInterval(probeConnection, HEARTBEAT_INTERVAL_MS);
+        };
+
+        ws.onmessage = (event) => {
+          if (event.data instanceof ArrayBuffer) {
+            // Binary frame = raw PTY output
+            terminal.write(new Uint8Array(event.data));
+          } else {
+            // Text frame = JSON control message
+            try {
+              const msg = JSON.parse(event.data as string);
+              if (msg.type === "pong") {
+                lastPongAt = Date.now();
+              } else if (msg.type === "title" && typeof msg.title === "string") {
+                onTitleChangeRef.current?.(msg.title);
+              }
+            } catch {
+              // Not valid JSON — write as-is (shouldn't happen)
+              terminal.write(event.data);
+            }
+          }
+        };
+
+        ws.onclose = () => {
+          // Discard events from a socket that's already been replaced —
+          // `handleResume` can call `connect()` while a previous socket is
+          // still CONNECTING, and that orphan's late `onclose` would otherwise
+          // schedule a second, overlapping reconnect.
+          if (wsRef.current !== ws) return;
+          stopHeartbeat();
+          if (intentionalClose) return;
+          // Transient drop — tell the user we're retrying. The message is
+          // wiped by `terminal.reset()` once the reconnect lands.
+          terminal.write("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n");
+          scheduleReconnect();
+        };
+      }
+
+      // Re-establish the connection immediately when the machine wakes, the
+      // network returns, or the tab is refocused, rather than waiting for the
+      // next heartbeat tick. If the socket is already gone we reconnect now;
+      // if it merely looks alive we probe it so a zombie is caught fast.
+      const handleResume = () => {
+        if (intentionalClose) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+          reconnectAttempts = 0;
+          clearReconnectTimer();
+          connect();
+        } else if (ws.readyState === WebSocket.OPEN) {
+          probeConnection();
         }
       };
-
-      ws.onclose = () => {
-        terminal.write("\r\n\x1b[90m[Terminal disconnected]\x1b[0m\r\n");
+      const handleVisibility = () => {
+        if (!document.hidden) handleResume();
       };
+      window.addEventListener("online", handleResume);
+      document.addEventListener("visibilitychange", handleVisibility);
+
+      connect();
 
       terminal.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(data);
         }
       });
@@ -741,7 +859,8 @@ export function TerminalPanel({
       // defers that work, this assumption would need to move to a
       // post-fit `onResize` listener instead.
       const sendPtyResize = () => {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
         if (terminal.cols <= 0 || terminal.rows <= 0) return;
         ws.send(
           JSON.stringify({
@@ -874,6 +993,13 @@ export function TerminalPanel({
       bindDprListener();
 
       cleanup = () => {
+        // Mark the close intentional so neither the heartbeat nor `onclose`
+        // tries to reconnect during teardown.
+        intentionalClose = true;
+        clearReconnectTimer();
+        stopHeartbeat();
+        window.removeEventListener("online", handleResume);
+        document.removeEventListener("visibilitychange", handleVisibility);
         themeObserver.disconnect();
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
@@ -894,7 +1020,7 @@ export function TerminalPanel({
         containerEl.removeEventListener("touchstart", onTapStart);
         containerEl.removeEventListener("touchend", onTapEnd);
         containerEl.removeEventListener("touchcancel", onTapCancel);
-        ws.close();
+        wsRef.current?.close();
         // `terminal.dispose()` cascades to all loaded addons (including the
         // WebGL addon if present), so we don't need to dispose it manually.
         terminal.dispose();

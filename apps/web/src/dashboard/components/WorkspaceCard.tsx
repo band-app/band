@@ -165,7 +165,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     }
   };
 
-  const className = `@container group flex flex-row items-center justify-between pl-3 pr-2 py-1 min-w-0 overflow-hidden cursor-pointer select-none transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  // `py-1` keeps the row compact with a mouse; on touch devices the
+  // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
+  // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
+  // drops the 300ms double-tap delay so taps register immediately.
+  const className = `@container group flex flex-row items-center justify-between pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden cursor-pointer select-none touch-manipulation transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,
@@ -222,7 +226,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
                 <span
-                  className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}
+                  className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
                 >
                   {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
                 </span>

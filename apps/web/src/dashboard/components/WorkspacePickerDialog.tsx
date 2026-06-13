@@ -108,7 +108,23 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]" showCloseButton={false}>
+      <DialogContent
+        // No border ("white frame") and the app's floating-surface colour
+        // (`bg-popover`, same as dropdowns / context menus) so the picker reads
+        // as part of the app rather than a stock modal. `shadow-2xl` + the
+        // blurred overlay give it depth without a hard edge.
+        className="overflow-hidden border-0 bg-popover p-0 shadow-2xl sm:max-w-[520px]"
+        overlayClassName="backdrop-blur-sm"
+        showCloseButton={false}
+        data-testid="workspace-picker"
+        // On touch devices, don't auto-focus the search input on open — that
+        // would pop the soft keyboard over the list the user wants to tap. They
+        // can tap the input to search. On desktop (fine pointer) keep the
+        // default focus so type-to-filter works immediately.
+        onOpenAutoFocus={(e) => {
+          if (window.matchMedia("(pointer: coarse)").matches) e.preventDefault();
+        }}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Switch Workspace</DialogTitle>
           <DialogDescription>Search workspaces by name, project, or branch</DialogDescription>
@@ -125,7 +141,12 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                   key={entry.workspaceId}
                   value={`${entry.projectName} ${entry.branch}`}
                   onSelect={() => handleSelect(entry.workspaceId)}
-                  className="group"
+                  data-testid={`workspace-picker__item--${entry.workspaceId}`}
+                  // Coarse pointers (touch) get a 44px-tall row (iOS HIG hit
+                  // target) and `touch-manipulation` to drop the tap delay, so
+                  // workspaces are easy to select by tap — mirroring the
+                  // project-list rows.
+                  className="group touch-manipulation [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:gap-3"
                 >
                   <AgentStatusIndicator agent={entry.agent} />
                   <span className="text-sm font-medium">
@@ -141,22 +162,21 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                     <button
                       type="button"
                       aria-label={pinnedNow ? "Unpin workspace" : "Pin workspace"}
-                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                      // onMouseDown + preventDefault + stopPropagation keeps
-                      // cmdk's onSelect from firing on pointer activation
-                      // (which would navigate and close the dialog). Keyboard
-                      // activation (Tab to the button + Enter/Space) goes
-                      // through `click`, not `mousedown`, so we mirror the
-                      // toggle here and stop propagation so the focused
-                      // CommandItem doesn't also fire onSelect.
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        togglePinned(entry.projectName, entry.branch, pinnedNow);
-                      }}
+                      data-testid={`workspace-picker__pin--${entry.workspaceId}`}
+                      // Hover-reveal on fine pointers (mouse); always visible on
+                      // coarse pointers (touch has no hover) and sized to a 36px
+                      // tap target so it can be pinned/unpinned by tap.
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-opacity text-muted-foreground hover:text-foreground group-hover:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:size-9 [@media(pointer:coarse)]:opacity-100"
+                      // Pin/unpin is a distinct action — it must never select
+                      // the workspace. cmdk fires the row's onSelect from the
+                      // item's bubbled `onClick`, so we stopPropagation on every
+                      // event that could reach it: pointerdown/mousedown (touch
+                      // + mouse activation) and click (the actual select trigger
+                      // + keyboard Enter/Space). We toggle once, on click, so a
+                      // tap and a keyboard press behave identically.
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
-                        // Skip when the mousedown handler already toggled.
-                        if (e.detail !== 0) return;
                         e.preventDefault();
                         e.stopPropagation();
                         togglePinned(entry.projectName, entry.branch, pinnedNow);

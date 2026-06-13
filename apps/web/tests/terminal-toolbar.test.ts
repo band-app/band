@@ -443,6 +443,36 @@ describe("TerminalToolbar – special keys", () => {
     unmount(root, container);
   });
 
+  it("Slash button sends a literal '/' (one-tap agent slash-command entry)", () => {
+    const sent: string[] = [];
+    const term = makeFakeTerminal();
+    const { container, root } = mount({ terminal: term, sendInput: (d) => sent.push(d) });
+    const slashBtn = container.querySelector(
+      "button[aria-label='Send slash']",
+    ) as HTMLButtonElement;
+    expect(slashBtn).not.toBeNull();
+    act(() => {
+      dispatchPointerDown(slashBtn);
+    });
+    expect(sent).toEqual(["/"]);
+    unmount(root, container);
+  });
+
+  it("Enter button sends a carriage return (icon-only, always pinned right)", () => {
+    const sent: string[] = [];
+    const term = makeFakeTerminal();
+    const { container, root } = mount({ terminal: term, sendInput: (d) => sent.push(d) });
+    const enterBtn = container.querySelector(
+      "button[aria-label='Send Enter']",
+    ) as HTMLButtonElement;
+    expect(enterBtn).not.toBeNull();
+    act(() => {
+      dispatchPointerDown(enterBtn);
+    });
+    expect(sent).toEqual(["\r"]);
+    unmount(root, container);
+  });
+
   it("Ctrl button toggles a pending state via onToggleCtrl", () => {
     const onToggleCtrl = vi.fn();
     const term = makeFakeTerminal();
@@ -517,6 +547,7 @@ describe("TerminalToolbar – selection mode", () => {
     expect(container.querySelector("button[aria-label='Arm Ctrl modifier']")).toBeNull();
     expect(container.querySelector("button[aria-label='Send Escape']")).toBeNull();
     expect(container.querySelector("button[aria-label='Send Tab']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Send slash']")).toBeNull();
     // The four extend buttons + Copy + Done should be present.
     expect(container.querySelector("button[aria-label='Copy selection and exit']")).not.toBeNull();
     expect(container.querySelector("button[aria-label='Exit selection mode']")).not.toBeNull();

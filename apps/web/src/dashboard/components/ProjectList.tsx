@@ -170,6 +170,21 @@ function SortableProject({
   const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
   const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
 
+  // For git projects: is the currently-active workspace one of this project's
+  // branches? Plain projects already surface this via `plainIsActive`. Git
+  // headers had no active treatment, so the user couldn't tell which project
+  // the open workspace belonged to once scrolled away from its card — this
+  // tints the header (and its folder icon) to close that gap.
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  // Memoized: every Zustand update re-renders this row, and the `.some(...)`
+  // walk is O(worktrees) — recompute only when the inputs actually change.
+  const gitHeaderIsActive = useMemo(
+    () =>
+      !isPlain &&
+      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId),
+    [isPlain, project.worktrees, project.name, activeWorkspaceId],
+  );
+
   // Single onClick / onKeyDown for the plain-project header (mirrors the
   // navigate-or-open dance WorkspaceCard does). For git projects the
   // header onClick toggles collapse — branched at the call site.
@@ -192,11 +207,17 @@ function SortableProject({
   // (see the `<h2>` block below). `py-1.5` gives a taller hit target
   // than a workspace card (`py-1`) so the row reads as a project, not
   // a nested workspace.
+  // On touch devices (`pointer: coarse`) the row grows to a 44px-tall hit
+  // target (iOS HIG minimum) so projects are easy to tap in the list; with a
+  // mouse the row stays compact. `touch-pan-y` (not `touch-manipulation`) is
+  // kept because dnd-kit needs vertical panning to scroll the list mid-drag.
   const headerClassName = isPlain
-    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
-        plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
+    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2.5 ${
+        plainIsActive ? "bg-primary/15 hover:bg-primary/15 border-l-2 border-l-primary" : ""
       } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
-    : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
+    : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 ${
+        gitHeaderIsActive ? "bg-primary/15 hover:bg-primary/15 border-l-2 border-l-primary" : ""
+      }`;
 
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
@@ -237,9 +258,13 @@ function SortableProject({
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
               ) : collapsed ? (
-                <Folder className="size-4 shrink-0 text-muted-foreground" />
+                <Folder
+                  className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                />
               ) : (
-                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                <FolderOpen
+                  className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                />
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -249,8 +274,10 @@ function SortableProject({
                       bump to full-foreground for the same emphasis a
                       WorkspaceCard would get. */}
                   <h2
-                    className={`text-sm font-semibold truncate ${
-                      isPlain && plainIsActive ? "text-foreground" : "text-foreground/80"
+                    className={`text-sm truncate ${
+                      (isPlain && plainIsActive) || gitHeaderIsActive
+                        ? "font-bold text-foreground"
+                        : "font-semibold text-foreground/80"
                     }`}
                   >
                     {project.name}
@@ -358,7 +385,11 @@ function SortableProject({
       {/* Nested workspaces section — only meaningful for git projects.
           Plain projects are flat: the header above IS the workspace. */}
       {!isPlain && !collapsed && (
-        <div className="flex flex-col gap-0.5 overflow-hidden">
+        // `ml-3 border-l` draws a thin tree rail down the left of the branch
+        // list so the workspaces read as children of the project header above,
+        // not as sibling rows. The header sits at `pl-1`; the rail lands just
+        // under its folder icon so the hierarchy is obvious at a glance.
+        <div className="flex flex-col gap-0.5 overflow-hidden ml-3 border-l border-border/50">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
               <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
@@ -921,7 +952,14 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                     ))}
                   {!groupCollapsed &&
                     group.projects.map((project) => (
-                      <div key={project.name}>
+                      // Thin divider between consecutive projects in a label
+                      // group (skipped on the first row, which sits flush under
+                      // the label header) so project blocks are visually
+                      // separated without a heavy border.
+                      <div
+                        key={project.name}
+                        className="border-border/40 pt-1 first:pt-0 not-first:border-t"
+                      >
                         <SortableProject
                           project={project}
                           statuses={statuses}

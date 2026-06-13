@@ -129,6 +129,10 @@ export async function loadLanguage(lang: string): Promise<LanguageSupport | null
         return import("@codemirror/legacy-modes/mode/clojure").then(
           ({ clojure }) => new LanguageSupport(StreamLanguage.define(clojure)),
         );
+      case "dart":
+        return import("@codemirror/legacy-modes/mode/clike").then(
+          ({ dart }) => new LanguageSupport(StreamLanguage.define(dart)),
+        );
       case "erlang":
         return import("@codemirror/legacy-modes/mode/erlang").then(
           ({ erlang }) => new LanguageSupport(StreamLanguage.define(erlang)),
