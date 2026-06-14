@@ -11,7 +11,9 @@ import {
   Textarea,
 } from "@band-app/ui";
 import { useState } from "react";
+import { slugifyBranchName } from "../../lib/branch-name";
 import { useCreateWorkspace } from "../hooks/use-project-mutations";
+import { useProjects } from "../hooks/use-projects";
 
 interface Props {
   projectName: string;
@@ -24,13 +26,27 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
   const createWorkspaceMutation = useCreateWorkspace();
+  const { projects } = useProjects();
+
+  const slug = slugifyBranchName(branch);
+
+  const slugError: string | null = (() => {
+    if (branch && !slug) return "Branch name contains no valid characters.";
+    if (slug) {
+      const project = projects.find((p) => p.name === projectName);
+      if (project?.worktrees.some((wt) => wt.branch === slug)) {
+        return `A workspace named "${slug}" already exists.`;
+      }
+    }
+    return null;
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!branch.trim()) return;
+    if (!slug || slugError) return;
     await createWorkspaceMutation.mutateAsync({
       project: projectName,
-      branch: branch.trim(),
+      branch: slug,
       base: base.trim() || undefined,
       prompt: prompt.trim() || undefined,
     });
@@ -60,6 +76,12 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               spellCheck={false}
               autoFocus
             />
+            {branch && slug !== branch && !slugError && (
+              <p className="text-xs text-muted-foreground">
+                Will be created as: <code>{slug}</code>
+              </p>
+            )}
+            {slugError && <p className="text-xs text-destructive">{slugError}</p>}
             <Label htmlFor="base-branch">Base branch (optional)</Label>
             <Input
               id="base-branch"
@@ -83,7 +105,12 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Create</Button>
+            <Button
+              type="submit"
+              disabled={!slug || !!slugError || createWorkspaceMutation.isPending}
+            >
+              Create
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
