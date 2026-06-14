@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
+import { slugifyBranchName } from "@/lib/branch-name";
 import { WorkspaceNotFoundError } from "../errors";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
@@ -260,6 +261,14 @@ export class WorkspaceService {
    *      synchronously.
    */
   create(input: WorkspaceCreateInput): { ok: true; path: string } {
+    const sanitizedBranch = slugifyBranchName(input.branch);
+    if (!sanitizedBranch) {
+      throw new Error(
+        `Branch name "${input.branch}" is invalid — it contains no valid characters after sanitization.`,
+      );
+    }
+    input = { ...input, branch: sanitizedBranch };
+
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
     if (!project) {
