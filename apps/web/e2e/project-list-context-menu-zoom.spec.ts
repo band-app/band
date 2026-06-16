@@ -191,11 +191,13 @@ test.describe("Project list context menu — zoom regression", () => {
 
     const { cursor, menu } = await workspacePage.openProjectContextMenuAndMeasureAnchor(PROJECT);
 
-    // The menu's top edge aligns with the cursor's Y, and its left edge
-    // sits within a small placement offset of the cursor's X. A 30px band
-    // cleanly separates the fixed case (≈0–6px off) from the pre-fix bug
-    // (≈67–100px off at 1.5×).
-    expect(Math.abs(menu.top - cursor.y)).toBeLessThan(30);
+    // The menu's top edge aligns with the cursor's Y essentially exactly
+    // (≈0px off when fixed), while its left edge sits within a small
+    // placement offset of the cursor's X (≈0–6px). Both tolerances stay
+    // well below the pre-fix error (≈67px Y / ≈100px X at 1.5×). The Y
+    // band is kept tight so a future regression that nudges the vertical
+    // anchor still trips it.
+    expect(Math.abs(menu.top - cursor.y)).toBeLessThan(10);
     expect(Math.abs(menu.left - cursor.x)).toBeLessThan(30);
   });
 

@@ -12,7 +12,7 @@
  * preferred locator.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
@@ -120,7 +120,7 @@ export class WorkspacePage {
   // ──────────────────────────────────────────────────────────────────────
   // Project-list context menu (zoom regression — context menu disappears /
   // mispositions under app zoom). Locators + actions so the spec body never
-  // touches raw `page.*` (TEST-21).
+  // touches raw `page.*`.
   // ──────────────────────────────────────────────────────────────────────
 
   /** A project header row in the sidebar. `data-testid` is set by
@@ -136,7 +136,7 @@ export class WorkspacePage {
 
   /** The "Collapse"/"Expand" item in a git project's context menu. Located
    *  by `data-testid` (set in `ProjectList.tsx`) rather than its localisable
-   *  visible text (TEST-26). */
+   *  visible text, which would tie the locator to English UI copy. */
   get collapseMenuItem(): Locator {
     return this.page.getByTestId("project-list__context-menu-item--collapse");
   }
@@ -230,7 +230,7 @@ export class WorkspacePage {
         );
       });
       await this.projectHeader(projectName).click({ button: "right" });
-      await this.contextMenu.waitFor({ state: "visible" });
+      await expect(this.contextMenu).toBeVisible();
       const cursor = await this.page.evaluate(
         () => (window as unknown as { __ctxCursor: { x: number; y: number } }).__ctxCursor,
       );
