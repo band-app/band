@@ -14,17 +14,16 @@
  * 100% zoom the popper offset keeps the first item ~7 CSS px right of the
  * cursor so pointerup misses the menu, but at other zoom levels sub-pixel
  * rounding puts the cursor inside the item and the heuristic fires. Fix:
- * `packages/ui/src/components/context-menu.tsx` swallows non-left-button
- * pointer events in the capture phase so they never reach item handlers.
+ * the shared `ContextMenuContent` swallows non-left-button pointer events
+ * in the capture phase so they never reach item handlers.
  *
  * Bug 2 — menu mispositioned under app zoom. The dashboard zooms the
- * whole UI via CSS `zoom` on `<html>` (`applyZoomLevelToDom` in
- * `apps/web/src/lib/zoom.ts`, mirrored onto the `--app-zoom` variable).
- * Floating UI anchors the popper wrapper (a `position: fixed` child of
- * `<body>`) at the pointer's clientX/clientY in *visual* px, but the CSS
- * `zoom` then scales that translate again, landing every popper at
- * clientXY × zoom. Fix: the global counter-scale rule in
- * `apps/web/src/styles/globals.css` cancels the doubled scaling.
+ * whole UI via CSS `zoom` on `<html>` (mirrored onto the `--app-zoom`
+ * variable). Floating UI anchors the popper wrapper (a `position: fixed`
+ * child of `<body>`) at the pointer's clientX/clientY in *visual* px, but
+ * the CSS `zoom` then scales that translate again, landing every popper at
+ * clientXY × zoom. Fix: a global counter-scale stylesheet rule keyed on
+ * `--app-zoom` cancels the doubled scaling.
  *
  * Architecture (mirrors the rest of the e2e suite):
  *   - The real production binary runs against a fresh tmp `~/.band/`.
@@ -59,8 +58,7 @@ const BRANCH = "feature-zoom-ctx";
 const WORKSPACE_ID = toWorkspaceId(PROJECT, BRANCH);
 
 // Wide viewport so the desktop layout — and therefore the sidebar project
-// list — is the one that mounts. Matches the `>= 1024px` cutoff in
-// `apps/web/src/hooks/useIsDesktop.ts`.
+// list — is the one that mounts. Matches the `>= 1024px` desktop cutoff.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -131,6 +129,10 @@ test.describe("Project list context menu — zoom regression", () => {
     await workspacePage.waitForReady();
 
     await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
+    // Positive pre-condition: the worktree card is rendered before the
+    // action, so the post-action "still visible" assertion below proves
+    // Collapse did NOT fire (rather than the card never having existed).
+    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
     await workspacePage.openProjectContextMenu(PROJECT);
 
     // Confirm the menu actually mounted before driving pointer events.
@@ -165,6 +167,12 @@ test.describe("Project list context menu — zoom regression", () => {
     await workspacePage.goto(WORKSPACE_ID);
     await workspacePage.waitForReady();
 
+    // Positive pre-condition before zooming: the worktree card is present
+    // in the expanded project, so the post-action assertion proves the
+    // menu stayed open (Collapse didn't fire) rather than the card never
+    // existing.
+    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
+
     await workspacePage.applyBodyZoom(ZOOM_FACTOR);
 
     await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
@@ -178,7 +186,7 @@ test.describe("Project list context menu — zoom regression", () => {
   test("context menu anchors at the cursor at 150% app zoom", async ({ page }) => {
     // Positioning regression (bug 2, distinct from the disappearing-menu
     // bug above). We set CSS `zoom` on `<html>` plus `--app-zoom` exactly
-    // as production does (the init script in `__root.tsx` seeds both),
+    // as production does (the pre-paint init script seeds both),
     // then assert the opened menu's top-left lands within a few px of the
     // coordinates the `contextmenu` event actually reported. Pre-fix, at
     // 1.5× the menu is ~100px / ~67px off — far outside the tolerance.

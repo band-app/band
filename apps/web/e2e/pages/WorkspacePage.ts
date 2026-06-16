@@ -123,8 +123,8 @@ export class WorkspacePage {
   // touches raw `page.*`.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** A project header row in the sidebar. `data-testid` is set by
-   *  `SortableProject` in `ProjectList.tsx`. */
+  /** A project header row in the sidebar. `data-testid` is set by the
+   *  `SortableProject` component that renders each project header. */
   projectHeader(projectName: string): Locator {
     return this.page.getByTestId(`project-list__project-header--${projectName}`);
   }
@@ -135,8 +135,8 @@ export class WorkspacePage {
   }
 
   /** The "Collapse"/"Expand" item in a git project's context menu. Located
-   *  by `data-testid` (set in `ProjectList.tsx`) rather than its localisable
-   *  visible text, which would tie the locator to English UI copy. */
+   *  by its `data-testid` rather than its localisable visible text, which
+   *  would tie the locator to English UI copy. */
   get collapseMenuItem(): Locator {
     return this.page.getByTestId("project-list__context-menu-item--collapse");
   }
@@ -158,9 +158,10 @@ export class WorkspacePage {
     });
   }
 
-  /** Apply an app-wide zoom the way production does: CSS `zoom` on `<html>`
-   *  plus the `--app-zoom` variable the global popper-position fix keys off
-   *  (see `apps/web/src/lib/zoom.ts` and the rule in `globals.css`). */
+  /** Apply an app-wide zoom the way production does: set CSS `zoom` on
+   *  `<html>` and mirror the factor onto the `--app-zoom` custom property,
+   *  which the global popper counter-scale rule keys off so menus stay
+   *  anchored at the cursor under zoom. */
   async applyAppZoom(factor: number): Promise<void> {
     await test.step(`Apply app zoom ${factor}`, async () => {
       await this.page.evaluate((z) => {
@@ -232,8 +233,13 @@ export class WorkspacePage {
       await this.projectHeader(projectName).click({ button: "right" });
       await expect(this.contextMenu).toBeVisible();
       const cursor = await this.page.evaluate(
-        () => (window as unknown as { __ctxCursor: { x: number; y: number } }).__ctxCursor,
+        () => (window as unknown as { __ctxCursor?: { x: number; y: number } }).__ctxCursor ?? null,
       );
+      if (!cursor) {
+        throw new Error(
+          "contextmenu event was not captured — the right-click may have been swallowed",
+        );
+      }
       const menu = await this.contextMenu.evaluate((el) => {
         const r = el.getBoundingClientRect();
         return { left: r.left, top: r.top };
