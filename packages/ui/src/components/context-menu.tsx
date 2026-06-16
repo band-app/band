@@ -20,12 +20,47 @@ function ContextMenuPortal({ ...props }: React.ComponentProps<typeof ContextMenu
 
 function ContextMenuContent({
   className,
+  onPointerDownCapture,
+  onPointerUpCapture,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
+        // Swallow right-button (button=2) pointer events in the capture
+        // phase so they never reach the inner `MenuItem` handlers.
+        //
+        // Why: Radix's `MenuItem` synthesises a `.click()` on every
+        // `pointerup` that fires on an item without a matching prior
+        // `pointerdown` on the same item — a heuristic to support
+        // "drag from outside, release on item" UX. The opening
+        // right-click sequence (`pointerdown` on the trigger →
+        // `contextmenu` opens the menu → `pointerup` at the cursor)
+        // matches that heuristic verbatim: `pointerdown` was on the
+        // trigger, `pointerup` is now on a freshly-mounted item, the
+        // ref is `false`, and Radix calls `click()` → the first item
+        // activates and the menu closes.
+        //
+        // At browser zoom = 100% the first item sits ~7 CSS px right
+        // of the cursor (1px border + 4px padding + 2px popper
+        // sideOffset), so `pointerup` lands on the trigger and the
+        // bug is invisible. At any other zoom, sub-pixel rounding by
+        // Floating UI / Chromium puts the cursor inside the item's
+        // bounding box, the heuristic fires, and the menu disappears
+        // before the user can pick anything.
+        //
+        // Only right-button (button=2) events are swallowed. Left-button
+        // (selection, hover, focus, keyboard activation) and middle-button
+        // (auto-scroll in tall menus) events still propagate untouched.
+        onPointerDownCapture={(event) => {
+          onPointerDownCapture?.(event);
+          if (event.button === 2) event.stopPropagation();
+        }}
+        onPointerUpCapture={(event) => {
+          onPointerUpCapture?.(event);
+          if (event.button === 2) event.stopPropagation();
+        }}
         className={cn(
           "z-50 max-h-(--radix-context-menu-content-available-height) min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className,

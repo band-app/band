@@ -231,6 +231,7 @@ function SortableProject({
           {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the ProjectList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
           <div
             className={headerClassName}
+            data-testid={`project-list__project-header--${project.name}`}
             onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(project.name))}
           >
             {/* Drag listeners live on the title (folder icon + project name)
@@ -317,7 +318,10 @@ function SortableProject({
               for users who can't reach the header click target). Plain
               projects have nothing to collapse — they're already flat. */}
           {!isPlain && (
-            <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
+            <ContextMenuItem
+              data-testid="project-list__context-menu-item--collapse"
+              onClick={() => onToggleCollapse(project.name)}
+            >
               <ChevronRight className={collapsed ? "" : "rotate-90"} />
               {collapsed ? "Expand" : "Collapse"}
             </ContextMenuItem>

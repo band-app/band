@@ -12,7 +12,7 @@
  * preferred locator.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
@@ -114,6 +114,137 @@ export class WorkspacePage {
     await test.step(`Delete workspace ${workspaceId} via sidebar context menu`, async () => {
       await this.workspaceCard(workspaceId).click({ button: "right" });
       await this.deleteWorkspaceMenuItem.click();
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Project-list context menu (zoom regression — context menu disappears /
+  // mispositions under app zoom). Locators + actions so the spec body never
+  // touches raw `page.*`.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** A project header row in the sidebar. `data-testid` is set by the
+   *  `SortableProject` component that renders each project header. */
+  projectHeader(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-header--${projectName}`);
+  }
+
+  /** The currently-open context menu (Radix `role="menu"`). */
+  get contextMenu(): Locator {
+    return this.page.getByRole("menu");
+  }
+
+  /** The "Collapse"/"Expand" item in a git project's context menu. Located
+   *  by its `data-testid` rather than its localisable visible text, which
+   *  would tie the locator to English UI copy. */
+  get collapseMenuItem(): Locator {
+    return this.page.getByTestId("project-list__context-menu-item--collapse");
+  }
+
+  /** Right-click a project header to open its context menu. */
+  async openProjectContextMenu(projectName: string): Promise<void> {
+    await test.step(`Open context menu for project ${projectName}`, async () => {
+      await this.projectHeader(projectName).click({ button: "right" });
+    });
+  }
+
+  /** Apply a browser zoom factor on `<body>` — the legacy reproduction path
+   *  for the disappearing-menu bug. */
+  async applyBodyZoom(factor: number): Promise<void> {
+    await test.step(`Apply body zoom ${factor}`, async () => {
+      await this.page.evaluate((z) => {
+        document.body.style.zoom = String(z);
+      }, factor);
+    });
+  }
+
+  /** Apply an app-wide zoom the way production does: set CSS `zoom` on
+   *  `<html>` and mirror the factor onto the `--app-zoom` custom property,
+   *  which the global popper counter-scale rule keys off so menus stay
+   *  anchored at the cursor under zoom. */
+  async applyAppZoom(factor: number): Promise<void> {
+    await test.step(`Apply app zoom ${factor}`, async () => {
+      await this.page.evaluate((z) => {
+        document.documentElement.style.zoom = String(z);
+        document.documentElement.style.setProperty("--app-zoom", String(z));
+      }, factor);
+    });
+  }
+
+  /** Click the collapse/expand item via a normal left click. */
+  async clickCollapseMenuItem(): Promise<void> {
+    await test.step("Click the collapse/expand menu item", async () => {
+      await this.collapseMenuItem.click();
+    });
+  }
+
+  /** Dispatch the bug-triggering synthetic right-button pointer sequence
+   *  directly on the collapse menu item: a `pointermove` (cursor over the
+   *  item) followed by a `button=2` `pointerup` with no matching
+   *  `pointerdown` — the exact pattern Radix's `MenuItem` heuristic
+   *  mistakes for a click. `bubbles: true` is required so the event reaches
+   *  React's root listener. */
+  async dispatchRightButtonPointerUpOnCollapseItem(): Promise<void> {
+    await test.step("Dispatch right-button pointerup on the collapse item", async () => {
+      await this.collapseMenuItem.evaluate((el) => {
+        el.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            cancelable: true,
+            pointerType: "mouse",
+          }),
+        );
+        el.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            cancelable: true,
+            pointerType: "mouse",
+            button: 2,
+            buttons: 0,
+          }),
+        );
+      });
+    });
+  }
+
+  /** Right-click the project header while capturing the `contextmenu`
+   *  event's client coordinates, then return both the captured cursor point
+   *  and the opened menu's top-left — so a test can assert the menu anchors
+   *  at the cursor under zoom. Waits for the menu to be visible (the
+   *  positive anchor) before measuring. */
+  async openProjectContextMenuAndMeasureAnchor(projectName: string): Promise<{
+    cursor: { x: number; y: number };
+    menu: { left: number; top: number };
+  }> {
+    return await test.step(`Measure context-menu anchor for ${projectName}`, async () => {
+      await this.page.evaluate(() => {
+        (window as unknown as { __ctxCursor?: unknown }).__ctxCursor = undefined;
+        window.addEventListener(
+          "contextmenu",
+          (e) => {
+            (window as unknown as { __ctxCursor: unknown }).__ctxCursor = {
+              x: (e as MouseEvent).clientX,
+              y: (e as MouseEvent).clientY,
+            };
+          },
+          { once: true },
+        );
+      });
+      await this.projectHeader(projectName).click({ button: "right" });
+      await expect(this.contextMenu).toBeVisible();
+      const cursor = await this.page.evaluate(
+        () => (window as unknown as { __ctxCursor?: { x: number; y: number } }).__ctxCursor ?? null,
+      );
+      if (!cursor) {
+        throw new Error(
+          "contextmenu event was not captured — the right-click may have been swallowed",
+        );
+      }
+      const menu = await this.contextMenu.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top };
+      });
+      return { cursor, menu };
     });
   }
 

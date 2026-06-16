@@ -199,3 +199,28 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+ * CSS `zoom` on <html> (set by the zoom-apply helper on startup and on every
+ * user zoom change, mirrored onto --app-zoom) scales fixed-position
+ * descendants — including Radix's popper wrapper — by the zoom factor.
+ * Floating UI already positions
+ * that wrapper at the anchor's clientX/clientY in *visual* pixels, so the extra
+ * zoom scaling lands every popper (context menu, dropdown, tooltip, popover,
+ * select) at clientXY × zoom instead of clientXY.
+ *
+ * Counter the wrapper by 1/zoom about the viewport origin to cancel the doubled
+ * scaling, then scale the inner content back up so the popper still renders at
+ * the zoomed UI size. The `scale` individual property composes with the
+ * `transform: translate(...)` Floating UI writes inline, so this never fights
+ * its repositioning. No-op when --app-zoom is unset or 1.
+ */
+[data-radix-popper-content-wrapper] {
+  transform-origin: 0 0;
+  scale: calc(1 / var(--app-zoom, 1));
+}
+
+[data-radix-popper-content-wrapper] > * {
+  transform-origin: 0 0;
+  scale: var(--app-zoom, 1);
+}
