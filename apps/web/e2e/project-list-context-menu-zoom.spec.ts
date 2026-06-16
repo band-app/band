@@ -91,7 +91,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (server) await server.close();
+  await server.close();
   cleanupTmpHome(tmpHome);
 });
 
