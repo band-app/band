@@ -1,8 +1,6 @@
 /**
  * Regression coverage for two distinct zoom bugs in the project-list
- * context menu. See `docs/integration-testing.md` and the
- * `.claude/skills/write-integration-test` skill for the doctrine this
- * suite follows (real server boot, Page Object Model, no mocking).
+ * context menu. Real server boot, Page Object Model, no mocking.
  *
  * Bug 1 — menu disappears on right-button release. At non-100% zoom,
  * right-clicking a project header makes the context menu appear and
@@ -224,6 +222,10 @@ test.describe("Project list context menu — zoom regression", () => {
     // project — proving the capture-phase filter is button-selective.
     await workspacePage.clickCollapseMenuItem();
     await expect(workspacePage.contextMenu).not.toBeVisible();
+    // Positive anchor: the project header stays present while its worktree
+    // cards collapse away — proving the collapsed state actually rendered
+    // rather than the whole row disappearing.
+    await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
     await expect(workspacePage.workspaceCard(WORKSPACE_ID)).not.toBeVisible();
   });
 });
