@@ -555,5 +555,16 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
     // `terminalId` can branch on the absence of the field.
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
+
+    // Defence in depth: the fallback must not have leaked a PTY before
+    // re-routing. A regression that spawned a terminal and *then*
+    // re-wrote `via` to "chat" would still pass the response-shape
+    // assertions above; this pins the side-effect side too.
+    const terminals = await listTerminals(
+      server.url,
+      toWorkspaceId("fbproj", "feat/fallback"),
+      TOKEN,
+    );
+    expect(terminals).toEqual([]);
   });
 });

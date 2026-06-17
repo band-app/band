@@ -153,8 +153,10 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
       "implement feature E2E",
     );
     expect(created.via).toBe("terminal");
-    expect(created.terminalId).toEqual(expect.any(String));
-    expect((created.terminalId ?? "").length).toBeGreaterThan(0);
+    // Single matcher rather than two checks: `toMatch(/^.+$/)` makes
+    // `null`, `undefined`, and `""` each fail explicitly without the
+    // `?? ""` fallback masking a `null`.
+    expect(created.terminalId).toMatch(/^.+$/);
 
     // Phase 2: drive the dashboard to the newly-created workspace and
     // assert the terminal pane mounts. The outer shared dockview lays
@@ -167,15 +169,12 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
     await workspacePage.goto(targetWorkspaceId);
     await workspacePage.waitForReady();
 
-    // xterm.js mounts on first visibility — clicking the outer terminal
-    // tab triggers the layout activate → React render → xterm init
-    // handshake. Anchor on `state: "attached"` rather than
-    // `toBeVisible()` because xterm keeps its input as an offscreen
-    // "helper" textarea Playwright reports as hidden (see
-    // `WorkspacePage.waitForTerminalReady` doc-comment). The 75 s
-    // budget mirrors `workspace-maximize-state.spec.ts:346` for CI
-    // parity; locally the element attaches in < 2 s.
+    // xterm.js mounts on first visibility — `openTerminalTab` clicks
+    // the outer terminal tab and triggers the layout activate → React
+    // render → xterm init handshake. The 75 s budget passed to
+    // `waitForTerminalReady` mirrors `workspace-maximize-state.spec.ts:346`
+    // for CI parity; locally the element attaches in < 2 s.
     await workspacePage.openTerminalTab();
-    await workspacePage.terminalInput.first().waitFor({ state: "attached", timeout: 75_000 });
+    await workspacePage.waitForTerminalReady(75_000);
   });
 });

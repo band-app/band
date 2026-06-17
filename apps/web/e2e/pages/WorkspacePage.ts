@@ -526,9 +526,16 @@ export class WorkspacePage {
   /** Wait for the terminal's xterm input to be attached — the DOM-level
    *  signal that the xterm instance mounted. xterm keeps its input as an
    *  offscreen "helper" textarea (Playwright reports it as hidden, never
-   *  "visible"), so we wait for `attached`, not `visible`. */
-  async waitForTerminalReady(): Promise<void> {
-    await this.terminalInput.first().waitFor({ state: "attached", timeout: 15_000 });
+   *  "visible"), so we wait for `attached`, not `visible`.
+   *
+   *  `timeoutMs` defaults to 15 s, which is the right budget for tests
+   *  that boot xterm from a freshly-mounted dockview without parallel
+   *  CI contention. Tests running under high parallel load (or chained
+   *  with workspace switches that re-mount the panel host) can pass a
+   *  longer budget — see `workspace-maximize-state.spec.ts:346` and
+   *  `workspace-create-via-terminal.spec.ts:179`, both at 75 s. */
+  async waitForTerminalReady(timeoutMs = 15_000): Promise<void> {
+    await this.terminalInput.first().waitFor({ state: "attached", timeout: timeoutMs });
   }
 
   /** Type a line into the focused terminal and submit it with Enter.

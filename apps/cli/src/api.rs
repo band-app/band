@@ -19,7 +19,7 @@ impl ApiClient {
     /// `cmd_workspaces_create` walking the `--via` precedence chain)
     /// share a single load — the file is small but the syscall pair
     /// (`stat` + `read`) adds up if we do it twice per CLI invocation.
-    pub fn from_loaded_settings(settings: state::Settings) -> Self {
+    pub(crate) fn from_loaded_settings(settings: state::Settings) -> Self {
         let base_url = if let Ok(url) = std::env::var("BAND_SERVER_URL") {
             url
         } else {

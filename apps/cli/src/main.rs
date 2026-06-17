@@ -1005,9 +1005,16 @@ fn read_repo_default_via() -> Option<String> {
     if cwd_config.is_file() {
         return parse_default_via(&cwd_config);
     }
+    // Neutralise `GIT_DIR` and `GIT_WORK_TREE` so an outer git
+    // configuration can't redirect the toplevel lookup to a different
+    // repo — `validate_via` already rejects anything but
+    // `"chat"|"terminal"`, so this is defence-in-depth rather than a
+    // hot path, but eliminating the trust boundary is cheap.
     let toplevel = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(&cwd)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .ok()
         .filter(|o| o.status.success())
