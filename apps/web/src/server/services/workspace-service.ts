@@ -15,6 +15,7 @@ import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
+import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { clearQueuedMessages } from "./_utils/queued-message-store";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
 // `workspaceService` directly from this file (the `services/workspace.ts`
@@ -259,7 +260,7 @@ export class WorkspaceService {
    *      installed). When there is no setup script, the task is dispatched
    *      synchronously.
    */
-  create(input: WorkspaceCreateInput): { ok: true; path: string } {
+  async create(input: WorkspaceCreateInput): Promise<{ ok: true; path: string }> {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
     if (!project) {
@@ -313,6 +314,28 @@ export class WorkspaceService {
     saveState(state);
 
     const workspaceId = toWorkspaceId(input.project, input.branch);
+
+    // Copy declared workspace files from the main checkout into the new
+    // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
+    // `.worktreeinclude` at the project root — see `copyWorkspaceFiles`
+    // for the union/intersection semantics. Runs AFTER `git worktree add`
+    // (so the destination directory exists) and BEFORE `runSetup` (so the
+    // setup script can read `.env` / local credentials / etc. just like
+    // it can in the main checkout). Missing source files are skipped
+    // with a warning rather than failing the create, matching the
+    // non-fatal contract used by the setup script itself.
+    try {
+      const copied = await copyWorkspaceFiles(project.path, worktreePath);
+      if (copied.length > 0) {
+        log.info({ workspaceId, count: copied.length }, "copied workspace files into new worktree");
+      }
+    } catch (err) {
+      // Catch-all backstop. `copyWorkspaceFiles` already logs per-file
+      // failures internally; this guard exists so an unexpected crash
+      // (e.g. a truly malformed config) doesn't abort the create flow
+      // before the chat pane / setup script have a chance to run.
+      log.warn({ err, workspaceId }, "copyWorkspaceFiles raised — continuing");
+    }
 
     // Materialize the default chat pane so the workspace surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt.
