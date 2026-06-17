@@ -160,9 +160,12 @@ enum WorkspacesCmd {
         /// Coding agent ID to use (e.g. 'claude-code')
         #[arg(long)]
         agent: Option<String>,
-        /// Dispatch target for the prompt: 'chat' (default) submits to the
-        /// workspace chat pane; 'terminal' launches the agent's interactive
-        /// CLI in a fresh terminal pane (issue #551)
+        /// Dispatch target for the prompt: 'terminal' (CLI default —
+        /// launches the agent's interactive CLI in a fresh terminal pane)
+        /// or 'chat' (submits to the workspace chat pane). Override
+        /// precedence highest first: `--via` flag → `BAND_DISPATCH` env →
+        /// `.band/config.json` `workspace.defaultVia` →
+        /// `~/.band/settings.json` `cli.defaultVia` → terminal (issue #551)
         #[arg(long)]
         via: Option<String>,
     },
@@ -843,7 +846,14 @@ fn cmd_workspaces_create(
         validate::validate_name(b, "Base branch")?;
     }
 
-    let client = api::ApiClient::from_settings()?;
+    // Read settings once and share the snapshot between the API client
+    // (port + auth token) and the dispatch-target resolver (which may
+    // fall back to `cli.defaultVia`). Without this, the bottom of the
+    // `--via` precedence chain re-reads `~/.band/settings.json` on
+    // every CLI invocation that doesn't supply `--via` and
+    // `BAND_DISPATCH`.
+    let settings = state::load_settings()?;
+    let client = api::ApiClient::from_loaded_settings(settings.clone());
 
     // Resolve dispatch target (issue #551). Precedence, highest first:
     //   1. --via flag.
@@ -855,7 +865,7 @@ fn cmd_workspaces_create(
     // The server-side default is "chat" so the web UI keeps its
     // existing behavior; the CLI explicitly forwards the resolved
     // value on every call so the server never has to guess.
-    let resolved_via = resolve_dispatch_target(via)?;
+    let resolved_via = resolve_dispatch_target(via, &settings)?;
 
     let mut input = serde_json::json!({
         "project": project,
@@ -882,21 +892,26 @@ fn cmd_workspaces_create(
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
-    // The server returns the via it actually dispatched with (it may have
-    // fallen back to "chat" when the chosen adapter doesn't support a
-    // terminal-pane launch). Mirror that into the CLI output so a caller
-    // scripting around `terminalId` can detect the fallback.
+    // The server is the source of truth for the actual dispatch. It echoes
+    // back the via it dispatched with (which may differ from
+    // `resolved_via` when the chosen adapter falls back to chat) and
+    // emits `terminalId` only when a PTY was reserved. On the idempotent
+    // path (existing workspace) the server omits both fields entirely —
+    // no fresh dispatch happened — and the CLI must suppress them too so
+    // a caller scripting on `.terminalId` can detect that case.
     let actual_via = data
         .get("via")
         .and_then(|v| v.as_str())
-        .unwrap_or(&resolved_via)
-        .to_string();
+        .map(std::string::ToString::to_string);
     let terminal_id = data
         .get("terminalId")
         .and_then(|t| t.as_str())
         .map(std::string::ToString::to_string);
 
-    let mut json = serde_json::json!({"path": path, "via": actual_via});
+    let mut json = serde_json::json!({ "path": path });
+    if let Some(ref v) = actual_via {
+        json["via"] = serde_json::json!(v);
+    }
     if let Some(ref tid) = terminal_id {
         json["terminalId"] = serde_json::json!(tid);
     }
@@ -914,10 +929,18 @@ fn cmd_workspaces_create(
 ///   4. `~/.band/settings.json` `cli.defaultVia`.
 ///   5. Built-in CLI default: `"terminal"`.
 ///
+/// Takes a pre-loaded `Settings` snapshot so the caller can share its
+/// file read with the API client (`api::ApiClient::from_loaded_settings`)
+/// — without it, every `band workspaces create` without `--via` or
+/// `BAND_DISPATCH` would `stat`+`read` `~/.band/settings.json` twice.
+///
 /// Rejects unknown string values with a CLI error so a typo
 /// (e.g. `--via terminall` or `BAND_DISPATCH=chats`) fails fast instead
 /// of being silently rejected by the server's `z.enum` validator.
-fn resolve_dispatch_target(flag: Option<&str>) -> Result<String, String> {
+fn resolve_dispatch_target(
+    flag: Option<&str>,
+    settings: &state::Settings,
+) -> Result<String, String> {
     if let Some(v) = flag {
         return validate_via(v, "--via flag");
     }
@@ -930,7 +953,7 @@ fn resolve_dispatch_target(flag: Option<&str>) -> Result<String, String> {
     if let Some(v) = read_repo_default_via() {
         return validate_via(&v, ".band/config.json workspace.defaultVia");
     }
-    if let Some(v) = read_user_default_via() {
+    if let Some(v) = user_default_via(settings) {
         return validate_via(&v, "~/.band/settings.json cli.defaultVia");
     }
     Ok("terminal".to_string())
@@ -974,10 +997,9 @@ fn read_repo_default_via() -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-/// Read `cli.defaultVia` from `~/.band/settings.json`. Returns `None`
-/// when the file or key is absent.
-fn read_user_default_via() -> Option<String> {
-    let settings = state::load_settings().ok()?;
+/// Pluck `cli.defaultVia` out of an already-loaded `Settings` snapshot.
+/// Returns `None` when the key is absent or has the wrong type.
+fn user_default_via(settings: &state::Settings) -> Option<String> {
     settings
         .cli
         .as_ref()

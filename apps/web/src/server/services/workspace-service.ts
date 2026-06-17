@@ -315,6 +315,24 @@ export class WorkspaceService {
    *   dispatch (e.g. cursor-cli today), the service logs a warning and
    *   falls back to `"chat"` so the create call still succeeds. The
    *   response then carries `via: "chat"` and no `terminalId`.
+   *
+   * **`terminalId` is a *reserved* id, not a guarantee.** When dispatch
+   * resolves to `"terminal"`, the service generates the id up front and
+   * includes it in the response, but `terminalService.spawn` runs
+   * asynchronously inside `onSetupComplete` — the spawn may still fail
+   * (cwd missing, shell binary absent, EAGAIN, …). Failures are logged
+   * and the `terminal-created` event simply never fires; the dashboard
+   * will not see a panel materialise. Callers scripting on `terminalId`
+   * should treat it as "the pane the server will try to spawn", not
+   * "the pane that already exists". The terminal-created / terminal-killed
+   * event stream is the authoritative liveness signal.
+   *
+   * On the **idempotent path** (the workspace's branch already exists as
+   * a worktree row), the method returns just `{ ok: true, path }` —
+   * `via` and `terminalId` are omitted because no fresh dispatch
+   * happened. The Rust CLI propagates that absence so a caller can
+   * distinguish "newly created + dispatched" from "already existed,
+   * no dispatch."
    */
   async create(input: WorkspaceCreateInput): Promise<{
     ok: true;

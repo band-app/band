@@ -11,6 +11,15 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn from_settings() -> Result<Self, String> {
         let settings = state::load_settings()?;
+        Ok(Self::from_loaded_settings(settings))
+    }
+
+    /// Build the client from an already-loaded `Settings` snapshot.
+    /// Lets callers that need to read settings for other reasons (e.g.
+    /// `cmd_workspaces_create` walking the `--via` precedence chain)
+    /// share a single load — the file is small but the syscall pair
+    /// (`stat` + `read`) adds up if we do it twice per CLI invocation.
+    pub fn from_loaded_settings(settings: state::Settings) -> Self {
         let base_url = if let Ok(url) = std::env::var("BAND_SERVER_URL") {
             url
         } else {
@@ -23,11 +32,11 @@ impl ApiClient {
                 .http_status_as_error(false)
                 .build(),
         );
-        Ok(Self {
+        Self {
             agent,
             base_url,
             token,
-        })
+        }
     }
 
     pub fn trpc_query(
