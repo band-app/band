@@ -224,30 +224,18 @@ test.describe("Workspace maximize state (issue #490)", () => {
   test("regression — non-maximized group's saved active view is restored on workspace switch", async ({
     page,
   }) => {
-    // Phase 2 of this test (the `terminalInput` visibility check) is
-    // the slowest assertion in the suite — it requires xterm.js to
-    // boot its DOM after restore (panel activate → React render →
-    // xterm init → textbox emitted with the `Terminal input` aria-
-    // name). The 75 s assertion budget plus 120 s test budget below is
-    // the relaxation log:
-    //   - 15 s (original) — passed reliably until the new
-    //     workspace-cache-eviction.spec landed and started racing
-    //     against this one under CI's 2-worker parallelism.
-    //   - 25 s — held until PR #523 added four `settings-page.spec`
-    //     tests, pushing 2-worker contention high enough that the
-    //     xterm boot exceeded 25 s on at least one CI run (#26537498794).
-    //   - 45 s — comfortably above the previously observed worst-case
-    //     xterm boot under contention, until run #26562509645 on PR
-    //     #526's CI exceeded even the 45 s budget under 2-worker load
-    //     with the freshly-built workspace-service binary in play.
-    //   - 75 s (current) — paired with a 120 s test-level timeout so
-    //     the assertion budget plus the setup steps still fit inside
-    //     one test even when CI worker contention spikes.
-    // Locally the test still completes in ~1.1 s in isolation and
-    // ~4–5 s under parallel load, so the higher ceiling is only paid
-    // when CI actually needs it (`toBeVisible` returns as soon as the
-    // element appears).
-    test.setTimeout(120_000);
+    // History: this test previously asserted on
+    // `workspacePage.terminalInput` being visible after un-maximize,
+    // which transitively waited for the entire terminal pipeline
+    // (panel activate → React render → xterm init → helper textbox
+    // emit) to settle. xterm boot lag under 2-worker CI contention
+    // forced four timeout bumps (15 s → 25 s → 45 s → 75 s, with a
+    // 120 s test budget) and still flaked on run #27690969480.
+    // Switched to asserting on the dockview-owned `.dv-active-tab`
+    // class on the outer Terminal tab — the exact signal we care
+    // about (the saved active view was restored in the hidden group),
+    // emitted synchronously by dockview the moment `setActive` runs.
+    // No xterm-boot dependency, no CI-load sensitivity.
     // This guards the second bug the reviewer surfaced on this PR
     // (`SharedDockviewLayout.tsx:1473`): an earlier fix attempt
     // skipped `setActive` on hidden groups to avoid exiting maximize
@@ -331,18 +319,18 @@ test.describe("Workspace maximize state (issue #490)", () => {
     await workspacePage.restorePanel();
     await expect(workspacePage.maximizeButtons.first()).toBeVisible();
 
-    // Two-phase assertion to keep this stable under CI load (see
-    // README of the issue #502 review thread). Phase 1 is the fast
-    // negative regression check — if the wrong tab (Changes) leaked
-    // across the workspace switch, its "Files changed" heading
-    // renders quickly and fails the test deterministically. Phase 2
-    // is the slow positive: xterm.js mounts its DOM after the panel
-    // activate → React render → xterm init handshake, which can take
-    // multiple seconds in CI even when correctness is fine, so we
-    // give the textbox a generous timeout instead of relying on
-    // Playwright's 5 s default. See the `test.setTimeout(120_000)`
-    // call at the top of this test for the budget rationale.
+    // Two-phase assertion. Phase 1 is the fast negative regression
+    // check — if the wrong tab (Changes) leaked across the workspace
+    // switch, its "Files changed" heading renders quickly and fails
+    // the test deterministically. Phase 2 is the positive: the outer
+    // Terminal tab carries dockview's `.dv-active-tab` class. That
+    // class is added synchronously by dockview as soon as
+    // `setActive` runs on the panel, so it's the cheapest reliable
+    // proof that A's saved active view ("terminal") was restored on
+    // the hidden group — without depending on xterm's downstream
+    // boot timing (which is what flaked the previous
+    // `terminalInput` assertion under CI load).
     await expect(workspacePage.changesHeading).not.toBeVisible();
-    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 75_000 });
+    await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
   });
 });

@@ -395,6 +395,27 @@ export class WorkspacePage {
     return this.page.getByTestId(`workspace__tab--${panelComponent}`);
   }
 
+  /** Locate the dockview-owned `.dv-tab` wrapper that contains the named
+   *  outer tab. The `data-testid` we set in `DefaultTab` / `BadgeTab` lives
+   *  on the inner `.dv-default-tab` element; dockview wraps it with its
+   *  own `.dv-tab` parent, which gets `dv-active-tab` added/removed by
+   *  the library as the user (or our code) switches the active panel in
+   *  the group. Using this wrapper is the fastest deterministic signal
+   *  that a specific tab is the active view in its group — much faster
+   *  than waiting for the panel's content (e.g. xterm) to finish
+   *  booting, and it isn't affected by xterm's offscreen helper textarea
+   *  visibility quirks. */
+  tabContainer(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+    // Anchor on our own testid (the one on `.dv-default-tab`) and walk
+    // up to dockview's `.dv-tab` wrapper via the `:has(...)` pseudo —
+    // a Playwright-supported CSS selector that picks the parent
+    // containing a descendant matching the inner selector. Keeps the
+    // locator scoped to outer tabs only (nested dockviews use their
+    // own per-instance tab renderers and never carry
+    // `workspace__tab--*` testids).
+    return this.page.locator(`.dv-tab:has([data-testid="workspace__tab--${panelComponent}"])`);
+  }
+
   /** Navigate to the given workspace. The workspace URL no longer carries a
    *  sub-path for the active tab — see issue #467 for the route unification
    *  that folded `/changes`, `/code`, `/terminal` into `/workspace/:id`. */
