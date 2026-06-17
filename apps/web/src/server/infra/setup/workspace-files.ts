@@ -1,6 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, globSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { gitCmd } from "../git/git-client";
 import { getCopyFiles } from "./project-config";
@@ -70,6 +78,18 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
     );
   }
 
+  // Resolve the project root once to compare against `realpathSync`
+  // results below. `realpathSync` returns canonical paths with
+  // OS-resolved symlinks, so the comparison root must be canonical too
+  // — otherwise a project at `/var/folders/...` (macOS) wouldn't match
+  // a realpath under `/private/var/folders/...`.
+  let canonicalProjectRoot: string;
+  try {
+    canonicalProjectRoot = realpathSync(projectPath);
+  } catch {
+    canonicalProjectRoot = projectPath;
+  }
+
   const copied: string[] = [];
   for (const [absSource, source] of byAbs) {
     const rel = relative(projectPath, absSource);
@@ -96,6 +116,29 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
         log.warn({ source, entry: rel }, "source file disappeared — skipping");
         continue;
       }
+
+      // Symlink-escape guard: `copyFileSync` follows symlinks when
+      // reading the source, so a symlink inside the project root
+      // pointing OUTSIDE (`<root>/.env -> /etc/passwd`) would pass the
+      // relative-path check above (the symlink *path* is inside the
+      // root) but `copyFileSync` would copy the target's bytes into the
+      // worktree. Resolving via `realpathSync` and comparing to the
+      // canonical project root closes that vector. Equal paths
+      // (canonicalProjectRoot === canonicalSource — i.e. the entry
+      // itself IS the project root, e.g. a degenerate `.` glob match)
+      // and proper descendants both pass.
+      const canonicalSource = realpathSync(absSource);
+      const insideRoot =
+        canonicalSource === canonicalProjectRoot ||
+        canonicalSource.startsWith(canonicalProjectRoot + sep);
+      if (!insideRoot) {
+        log.warn(
+          { source, entry: rel, target: canonicalSource },
+          "refusing to copy symlink that points outside project root — skipping",
+        );
+        continue;
+      }
+
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(absSource, dest);
       log.debug({ source, file: rel }, "copied workspace file");

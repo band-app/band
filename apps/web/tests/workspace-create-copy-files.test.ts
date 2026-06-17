@@ -39,7 +39,8 @@
 // .claude/testing-criteria.md).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -169,6 +170,8 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   let pGlob: ProjectFixture;
   let pIgnoredButNotIncluded: ProjectFixture;
   let pMatchedButTracked: ProjectFixture;
+  let pSymlinkEscape: ProjectFixture;
+  let symlinkEscapeTarget: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-copy-files-");
@@ -276,6 +279,27 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
       worktreeInclude: "*.json\n.env\n",
     });
 
+    pSymlinkEscape = buildProject(tmpHome, "symlink-escape", branch, {
+      trackedFiles: { ".gitignore": "escape.txt\n" },
+      untrackedFiles: {},
+      bandConfig: {
+        workspace: {
+          // The symlink at `<repo>/escape.txt` is created below — it
+          // points OUTSIDE the project root. Listing it here exercises
+          // the symlink-escape guard.
+          copyFiles: ["escape.txt"],
+        },
+      },
+    });
+    // Drop the secret outside the project root in a sibling tmpdir so a
+    // resolved-real-path check sees a path that does NOT start with the
+    // project root prefix. Using `tmpdir()` rather than parent dirs of
+    // the home keeps the test robust to whatever directory layout the
+    // test runner picks.
+    symlinkEscapeTarget = join(tmpdir(), `band-symlink-escape-target-${Date.now()}.txt`);
+    writeFileSync(symlinkEscapeTarget, "SECRET-OUTSIDE-PROJECT\n");
+    symlinkSync(symlinkEscapeTarget, join(pSymlinkEscape.repoPath, "escape.txt"));
+
     seedState(tmpHome, {
       projects: [
         {
@@ -320,6 +344,12 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: pMatchedButTracked.repoPath }],
         },
+        {
+          name: pSymlinkEscape.name,
+          path: pSymlinkEscape.repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: pSymlinkEscape.repoPath }],
+        },
       ],
     });
     seedSettings(tmpHome, {
@@ -333,6 +363,10 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
+    // The symlink-escape target lives outside `tmpHome`, so it has to be
+    // cleaned up explicitly — otherwise repeated test runs leak files
+    // under the system tmpdir.
+    rmSync(symlinkEscapeTarget, { force: true });
   });
 
   async function create(project: string): Promise<Response> {
@@ -465,6 +499,22 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
     expect(readFileSync(join(pMatchedButTracked.worktreePath, "config.json"), "utf-8")).toBe(
       '{"tracked":true}\n',
     );
+  });
+
+  it("refuses to follow a symlink that points outside the project root", async () => {
+    const res = await create(pSymlinkEscape.name);
+    // Create still succeeds — the symlink-escape guard is non-fatal,
+    // matching the project's "missing source files are skipped, not
+    // errors" contract.
+    expect(res.status).toBe(200);
+
+    // The symlink target sits OUTSIDE the project root and contains a
+    // secret. A regression that follows the symlink would land its
+    // bytes inside the new worktree at `escape.txt`. The guard MUST
+    // refuse to copy: the worktree must not contain `escape.txt` at
+    // all (since the source is a dangling-after-guard symlink, not a
+    // real file we'd want to expose).
+    expect(existsSync(join(pSymlinkEscape.worktreePath, "escape.txt"))).toBe(false);
   });
 
   it("rejects workspaces.create without an auth token (401)", async () => {
