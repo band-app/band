@@ -83,14 +83,18 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
   // OS-resolved symlinks, so the comparison root must be canonical too
   // — otherwise a project at `/var/folders/...` (macOS) wouldn't match
   // a realpath under `/private/var/folders/...`.
+  const copied: string[] = [];
   let canonicalProjectRoot: string;
   try {
     canonicalProjectRoot = realpathSync(projectPath);
-  } catch {
-    canonicalProjectRoot = projectPath;
+  } catch (err) {
+    // If the project root itself can't be canonicalised, every
+    // per-file `realpathSync` comparison below would mismatch and
+    // silently refuse all copies. Bail loudly instead so the skipped
+    // copy is visible rather than masquerading as "nothing to copy".
+    log.warn({ err, projectPath }, "failed to resolve project root — skipping workspace file copy");
+    return copied;
   }
-
-  const copied: string[] = [];
   for (const [absSource, source] of byAbs) {
     const rel = relative(projectPath, absSource);
     const dest = join(worktreePath, rel);
@@ -108,15 +112,6 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
     }
 
     try {
-      // The source must still exist at copy time (a Option-B git pass
-      // could race with a delete; an Option-A literal could have
-      // disappeared between resolution and copy). Treat as "missing
-      // source file" per the spec.
-      if (!existsSync(absSource)) {
-        log.warn({ source, entry: rel }, "source file disappeared — skipping");
-        continue;
-      }
-
       // Symlink-escape guard: `copyFileSync` follows symlinks when
       // reading the source, so a symlink inside the project root
       // pointing OUTSIDE (`<root>/.env -> /etc/passwd`) would pass the
@@ -126,7 +121,10 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
       // canonical project root closes that vector. Equal paths
       // (canonicalProjectRoot === canonicalSource — i.e. the entry
       // itself IS the project root, e.g. a degenerate `.` glob match)
-      // and proper descendants both pass.
+      // and proper descendants both pass. `realpathSync` also throws
+      // `ENOENT` if the source disappeared between resolution and copy
+      // (a Option-B git pass racing a delete, a vanished Option-A
+      // literal) — handled as "source file disappeared" in the catch.
       const canonicalSource = realpathSync(absSource);
       const insideRoot =
         canonicalSource === canonicalProjectRoot ||
@@ -146,8 +144,16 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
     } catch (err) {
       // A copy failure (permission, EISDIR, etc.) is non-fatal for the
       // same reason missing files are: the user clicked "New workspace"
-      // and the workspace is otherwise functional. Surface as a warning.
-      log.warn({ err, source, entry: rel }, "failed to copy workspace file");
+      // and the workspace is otherwise functional. A source that
+      // vanished between resolution and copy surfaces here too, as an
+      // `ENOENT` from `realpathSync`/`copyFileSync` — give it the
+      // clearer "disappeared" message and treat the rest as copy
+      // failures.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        log.warn({ source, entry: rel }, "source file disappeared — skipping");
+      } else {
+        log.warn({ err, source, entry: rel }, "failed to copy workspace file");
+      }
     }
   }
 
@@ -172,8 +178,11 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
     // the project root and the relative-path computation downstream
     // can't produce a sensible destination for them.
     if (isAbsolute(entry) || entry.startsWith("..")) {
+      // Already warned with the accurate "must be project-relative"
+      // message here — do NOT funnel through `missing[]`, or the
+      // caller's loop emits a second, misleading "not found in project"
+      // warning for the same entry.
       log.warn({ entry }, "workspace.copyFiles entry must be a project-relative path — skipping");
-      missing.push(entry);
       continue;
     }
 
@@ -202,16 +211,13 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
       }
     } else {
       const abs = resolve(projectPath, entry);
-      if (!existsSync(abs)) {
-        missing.push(entry);
-        continue;
-      }
+      // A single `statSync` with try/catch covers both existence and
+      // file-type: `ENOENT` (missing literal) lands in the catch as a
+      // miss; a directory or non-regular entry stats fine but fails
+      // `isFile()` and is ignored silently (the spec only covers files).
       try {
         if (statSync(abs).isFile()) {
           out.push(abs);
-        } else {
-          // A directory or non-regular entry — same handling as glob:
-          // ignore silently, the spec only covers files.
         }
       } catch {
         missing.push(entry);

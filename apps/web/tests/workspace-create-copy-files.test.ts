@@ -33,10 +33,6 @@
 // Each scenario uses its own project subdirectory inside the shared tmp
 // home so the seven creates don't fight over the same `.band/config.json`
 // / `.worktreeinclude` files. The server boots once for the file.
-//
-// See docs/integration-testing.md and .claude/skills/write-integration-test/SKILL.md
-// for the real-server doctrine this file implements (TEST-1...TEST-35 in
-// .claude/testing-criteria.md).
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -171,7 +167,10 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   let pIgnoredButNotIncluded: ProjectFixture;
   let pMatchedButTracked: ProjectFixture;
   let pSymlinkEscape: ProjectFixture;
-  let symlinkEscapeTarget: string;
+  // Initialised to "" so a `beforeAll` failure before the assignment
+  // below doesn't make `afterAll`'s cleanup call `rmSync(undefined)` and
+  // swallow the original error with a TypeError.
+  let symlinkEscapeTarget = "";
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-copy-files-");
@@ -365,8 +364,9 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
     rmSync(tmpHome, { recursive: true, force: true });
     // The symlink-escape target lives outside `tmpHome`, so it has to be
     // cleaned up explicitly — otherwise repeated test runs leak files
-    // under the system tmpdir.
-    rmSync(symlinkEscapeTarget, { force: true });
+    // under the system tmpdir. Guard on the assignment having happened
+    // (see the declaration) so a failed setup doesn't throw here.
+    if (symlinkEscapeTarget) rmSync(symlinkEscapeTarget, { force: true });
   });
 
   async function create(project: string): Promise<Response> {
