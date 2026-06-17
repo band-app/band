@@ -1,7 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../../errors";
 import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
@@ -64,7 +63,7 @@ export const tasksRouter = t.router({
       const workspaceIds = new Set<string>();
       for (const p of state.projects) {
         for (const wt of p.worktrees) {
-          workspaceIds.add(toWorkspaceId(p.name, wt.branch));
+          workspaceIds.add(wt.id);
         }
       }
       return {

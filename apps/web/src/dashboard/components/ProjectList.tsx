@@ -64,7 +64,6 @@ import {
 } from "../hooks/use-project-mutations";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
@@ -159,10 +158,9 @@ function SortableProject({
   // Plain projects are guaranteed to have exactly one worktree (the
   // implicit `main` synthesized by projects.add and re-synthesized by
   // `reconcileKindForProject` on any git → plain flip). Read
-  // `worktrees[0].branch` directly rather than `?.branch ?? "main"`;
-  // the optional chain would mask a real state-corruption bug.
-  const plainBranch = isPlain ? project.worktrees[0].branch : "";
-  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainBranch) : "";
+  // `worktrees[0]` directly rather than `?.` chaining; the optional chain
+  // would mask a real state-corruption bug.
+  const plainWorkspaceId = isPlain ? project.worktrees[0].workspaceId : "";
   const plainIsActive = useDashboardStore(
     (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
   );
@@ -179,10 +177,8 @@ function SortableProject({
   // Memoized: every Zustand update re-renders this row, and the `.some(...)`
   // walk is O(worktrees) — recompute only when the inputs actually change.
   const gitHeaderIsActive = useMemo(
-    () =>
-      !isPlain &&
-      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId),
-    [isPlain, project.worktrees, project.name, activeWorkspaceId],
+    () => !isPlain && project.worktrees.some((wt) => wt.workspaceId === activeWorkspaceId),
+    [isPlain, project.worktrees, activeWorkspaceId],
   );
 
   // Single onClick / onKeyDown for the plain-project header (mirrors the
@@ -400,7 +396,7 @@ function SortableProject({
             )
           ) : (
             project.worktrees.map((wt) => {
-              const wsId = toWorkspaceId(project.name, wt.branch);
+              const wsId = wt.workspaceId;
               const currentIndex = workspaceIndex++;
               return (
                 <WorkspaceCard
@@ -614,7 +610,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
       return g.projects.flatMap((p) => {
         if (projectCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.branch));
+        return p.worktrees.map((wt) => wt.workspaceId);
       });
     });
     return [...pinnedPart, ...rest];
@@ -718,9 +714,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     }
     for (const group of groups) {
       for (const project of group.projects) {
-        const containsActive = project.worktrees.some(
-          (wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId,
-        );
+        const containsActive = project.worktrees.some((wt) => wt.workspaceId === activeWorkspaceId);
         if (!containsActive) continue;
         if (labelFilter && group.labelId !== labelFilter) return;
         const headerVisible = labels.length > 0 && !labelFilter;

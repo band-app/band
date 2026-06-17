@@ -39,7 +39,7 @@ interface CronjobRecord {
 interface ProjectInfo {
   name: string;
   defaultBranch: string;
-  worktrees: { branch: string; workspaceId?: string }[];
+  worktrees: { branch: string; workspaceId: string }[];
 }
 
 function relativeTime(iso: string): string {
@@ -63,6 +63,12 @@ export function CronjobsPageContent() {
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [showDialog, setShowDialog] = useState(false);
   const [editingJob, setEditingJob] = useState<CronjobRecord | null>(null);
+  // Maps each workspace's stable `workspaceId` to its owning project name.
+  // Built from `projects.list` so a workspace-scoped cronjob can be attributed
+  // to its project WITHOUT parsing the workspaceId string (the id no longer
+  // reliably encodes the project, since it's frozen at worktree creation and
+  // survives branch switches).
+  const [workspaceProject, setWorkspaceProject] = useState<Map<string, string>>(new Map());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -83,25 +89,54 @@ export function CronjobsPageContent() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // The workspaceId → project map only changes when a worktree is
+  // added/removed/renamed — far less often than the 5s cronjob poll, and
+  // `projects.list` spawns a `git worktree list` subprocess per project
+  // server-side. Fetch it once on mount instead of on every tick so the page
+  // doesn't fork git every 5s (and so the Map identity stays stable, keeping
+  // the `filteredCronjobs` / `projectNames` memos from recomputing each poll).
+  useEffect(() => {
+    let cancelled = false;
+    trpc.projects.list
+      .query()
+      .then((projectsData) => {
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const project of projectsData.projects as ProjectInfo[]) {
+          for (const wt of project.worktrees) {
+            map.set(wt.workspaceId, project.name);
+          }
+        }
+        setWorkspaceProject(map);
+      })
+      .catch(() => {
+        // Leave the existing map in place; a project-attribution miss only
+        // affects the filter dropdown, and the cronjob list still renders.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filteredCronjobs = useMemo(() => {
     if (projectFilter === "all") return cronjobs;
     return cronjobs.filter((job) => {
       if (job.scope === "project") return job.fileKey === projectFilter;
-      return job.workspaceId?.startsWith(`${projectFilter}-`);
+      return job.workspaceId ? workspaceProject.get(job.workspaceId) === projectFilter : false;
     });
-  }, [cronjobs, projectFilter]);
+  }, [cronjobs, projectFilter, workspaceProject]);
 
   const projectNames = useMemo(() => {
     const names = new Set<string>();
     for (const job of cronjobs) {
       if (job.scope === "project") names.add(job.fileKey);
       else if (job.workspaceId) {
-        const dash = job.workspaceId.indexOf("-");
-        if (dash > 0) names.add(job.workspaceId.slice(0, dash));
+        const projectName = workspaceProject.get(job.workspaceId);
+        if (projectName) names.add(projectName);
       }
     }
     return Array.from(names).sort();
-  }, [cronjobs]);
+  }, [cronjobs, workspaceProject]);
 
   const handleEdit = useCallback((job: CronjobRecord) => {
     setEditingJob(job);
@@ -421,7 +456,7 @@ function CronjobDialog({
     return (
       project?.worktrees.map((w) => ({
         branch: w.branch,
-        workspaceId: w.workspaceId ?? `${selectedProject}-${w.branch.replaceAll("/", "-")}`,
+        workspaceId: w.workspaceId,
       })) ?? []
     );
   }, [projects, selectedProject]);

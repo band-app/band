@@ -453,7 +453,10 @@ export class CronjobService {
     const appState = loadState();
     const project = appState.projects.find((p) => p.name === fileKey);
     if (!project) return null;
-    return toWorkspaceId(project.name, project.defaultBranch);
+    // Resolve to the default-branch worktree's frozen id. Fall back to the
+    // derived value only if no worktree currently sits on the default branch.
+    const defaultWorktree = project.worktrees.find((wt) => wt.branch === project.defaultBranch);
+    return defaultWorktree?.id ?? toWorkspaceId(project.name, project.defaultBranch);
   }
 
   // -------------------------------------------------------------------------

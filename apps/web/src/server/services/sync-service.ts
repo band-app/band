@@ -1,3 +1,4 @@
+import { toWorkspaceId } from "@/dashboard";
 import { execGit, getRepoInfo, listWorktrees } from "../infra/git/git-client";
 import {
   loadState,
@@ -69,7 +70,7 @@ export async function syncWorktrees(): Promise<void> {
   // end of this function — `projects.list` discards the return value
   // since queries shouldn't write to the DB.
   for (const project of state.projects) {
-    if (reconcileKindForProject(project)) {
+    if (reconcileKindForProject(project, toWorkspaceId(project.name, "main"))) {
       changed = true;
     }
   }
@@ -116,19 +117,24 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   let diskWorktrees: WorktreeState[];
   try {
     const gitWorktrees = await listWorktrees(project.path);
-    // Preserve the `pinned` flag for branches that still exist —
-    // syncWorktrees runs on a timer, and replacing the tracked
-    // worktrees with git's view would otherwise wipe pin state on
-    // every sync that adds/removes a worktree.
-    const pinnedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt.pinned]));
+    // Match by PATH (the stable worktree identity), not branch — a worktree
+    // whose branch was switched keeps the same path, so we carry over its
+    // frozen `id` and `pinned` flag instead of treating it as a brand-new
+    // worktree (which would mint a new id and orphan its chats/tasks). A
+    // worktree we've never seen (created outside Band) mints a fresh id.
+    const existingByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
     diskWorktrees = gitWorktrees
       .filter((wt) => !wt.isBare)
-      .map((wt) => ({
-        branch: wt.branch,
-        path: wt.path,
-        head: wt.head,
-        pinned: pinnedByBranch.get(wt.branch) ?? false,
-      }));
+      .map((wt) => {
+        const existing = existingByPath.get(wt.path);
+        return {
+          id: existing?.id ?? toWorkspaceId(project.name, wt.branch),
+          branch: wt.branch,
+          path: wt.path,
+          head: wt.head,
+          pinned: existing?.pinned ?? false,
+        };
+      });
   } catch {
     // If git fails for this project (e.g. path was deleted, NFS mount is
     // gone), it has no usable origin — clear `hasOrigin` so the CI poller

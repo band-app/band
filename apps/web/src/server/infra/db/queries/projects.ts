@@ -65,6 +65,14 @@ export interface ProjectState {
  * worktree at `{branch: "main", path: project.path}`.
  */
 export interface WorktreeState {
+  /**
+   * Stable, opaque workspace identity. Minted once when the worktree is
+   * created (`toWorkspaceId(project, branch)`) and frozen for the worktree's
+   * lifetime — a `git switch` inside the worktree changes `branch` but NOT
+   * `id`, so chats / tasks / cronjobs / panels keyed on it survive the
+   * rename. The worktree PATH is the real identity; `id` is its handle.
+   */
+  id: string;
   branch: string;
   path: string;
   head?: string;
@@ -88,9 +96,12 @@ export interface WorktreeState {
  *
  * Lives in the Infra tier (not the service) because both the
  * sync-state poller and the back-compat `lib/state.ts` re-export need
- * to reach it without pulling in the higher service layer.
+ * to reach it without pulling in the higher service layer. The caller
+ * supplies `plainWorkspaceId` (the id to freeze on the synthesized
+ * `main` worktree on a git → plain flip) rather than the infra tier
+ * computing it from the browser-side `toWorkspaceId` helper.
  */
-export function reconcileKindForProject(project: ProjectState): boolean {
+export function reconcileKindForProject(project: ProjectState, plainWorkspaceId: string): boolean {
   // Skip rows whose path no longer exists — leave kind alone rather
   // than synthesize a workspace under a missing directory.
   if (!existsSync(project.path)) return false;
@@ -113,7 +124,14 @@ export function reconcileKindForProject(project: ProjectState): boolean {
   // with no `.git` to reach back to) and the flattened plain UI would
   // render the wrong branch label.
   if (detectedKind === "plain") {
-    project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
+    project.worktrees = [
+      {
+        id: plainWorkspaceId,
+        branch: "main",
+        path: project.path,
+        pinned: false,
+      },
+    ];
   }
   return true;
 }
@@ -147,6 +165,7 @@ export class ProjectQueries {
     for (const row of worktreeRows) {
       const list = wtByProject.get(row.projectName) ?? [];
       list.push({
+        id: row.workspaceId,
         branch: row.branch,
         path: row.path,
         head: row.head ?? undefined,
@@ -203,6 +222,7 @@ export class ProjectQueries {
           tx.insert(worktreesTable)
             .values({
               projectName: project.name,
+              workspaceId: wt.id,
               branch: wt.branch,
               path: wt.path,
               head: wt.head ?? null,

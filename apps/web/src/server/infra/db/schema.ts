@@ -48,16 +48,28 @@ export const projects = sqliteTable("projects", {
   hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
 });
 
-export const worktrees = sqliteTable("worktrees", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  projectName: text("project_name")
-    .notNull()
-    .references(() => projects.name, { onDelete: "cascade" }),
-  branch: text("branch").notNull(),
-  path: text("path").notNull(),
-  head: text("head"),
-  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
-});
+export const worktrees = sqliteTable(
+  "worktrees",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    projectName: text("project_name")
+      .notNull()
+      .references(() => projects.name, { onDelete: "cascade" }),
+    branch: text("branch").notNull(),
+    path: text("path").notNull(),
+    head: text("head"),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    // Stable, opaque workspace identity. Minted once at worktree creation
+    // (`toWorkspaceId(project, branch)`) and frozen thereafter — switching
+    // the git branch inside the worktree must NOT re-key the workspace, or
+    // every chat / task / cronjob / panel row bound to this id would orphan.
+    // Existing rows are backfilled to the historical derived value by the
+    // accompanying migration, so persisted references stay valid. Identity
+    // is the worktree PATH; the branch is just a mutable label on top.
+    workspaceId: text("workspace_id").notNull().default(""),
+  },
+  (table) => [uniqueIndex("worktrees_workspace_id_unique").on(table.workspaceId)],
+);
 
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),

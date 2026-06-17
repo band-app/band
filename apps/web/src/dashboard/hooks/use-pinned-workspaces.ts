@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useAdapter } from "../context";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { queryKeys } from "../query-client";
 import { useDashboardStore } from "../stores/index";
 import type { ProjectInfo, WorktreeInfo } from "../types";
@@ -36,7 +35,7 @@ export function usePinnedWorkspaces() {
           list.push({
             project,
             worktree: wt,
-            workspaceId: toWorkspaceId(project.name, wt.branch),
+            workspaceId: wt.workspaceId,
           });
         }
       }

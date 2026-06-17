@@ -233,12 +233,30 @@ export class WorkspaceService {
     const state = loadState();
     for (const project of state.projects) {
       for (const worktree of project.worktrees) {
-        if (toWorkspaceId(project.name, worktree.branch) === workspaceId) {
+        // Match the worktree's frozen identity, not a value re-derived from
+        // its branch — a `git switch` inside the worktree changes the branch
+        // but must still resolve to the same workspace.
+        if (worktree.id === workspaceId) {
           return { project, worktree };
         }
       }
     }
     return null;
+  }
+
+  /**
+   * Resolve a workspace by its `(project, branch)` pair. Used by the legacy
+   * `(project, branch)`-keyed git surface (`gitPull`/`gitPush`) — the
+   * workspaceId-keyed callers go through `resolve()` instead. Returns the
+   * first worktree whose current branch matches; the stable id lives on the
+   * returned `worktree.id` when callers need it.
+   */
+  private resolveByBranch(projectName: string, branch: string): ResolvedWorkspace | null {
+    const state = loadState();
+    const project = state.projects.find((p) => p.name === projectName);
+    if (!project) return null;
+    const worktree = project.worktrees.find((w) => w.branch === branch);
+    return worktree ? { project, worktree } : null;
   }
 
   /**
@@ -310,10 +328,17 @@ export class WorkspaceService {
       throw new Error(e instanceof Error ? e.message : String(e));
     }
 
-    project.worktrees.push({ branch: input.branch, path: worktreePath, pinned: false });
-    saveState(state);
-
+    // Mint the workspace identity once, here, and freeze it on the row. From
+    // now on the id travels with the worktree path — switching the branch
+    // inside the worktree won't re-key it.
     const workspaceId = toWorkspaceId(input.project, input.branch);
+    project.worktrees.push({
+      id: workspaceId,
+      branch: input.branch,
+      path: worktreePath,
+      pinned: false,
+    });
+    saveState(state);
 
     // Copy declared workspace files from the main checkout into the new
     // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
@@ -426,10 +451,14 @@ export class WorkspaceService {
     }
 
     // ── Fast path: update state and emit immediately ──
+    // Capture the worktree's frozen id BEFORE pruning it from state — all the
+    // workspace-scoped cleanup below keys on the stored id, not a value
+    // re-derived from the branch (which may have been switched since create).
+    const tracked = project.worktrees.find((wt) => wt.branch === input.branch);
     project.worktrees = project.worktrees.filter((wt) => wt.branch !== input.branch);
     saveState(state);
 
-    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const workspaceId = tracked?.id ?? toWorkspaceId(input.project, input.branch);
     try {
       unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
     } catch {
@@ -612,8 +641,7 @@ export class WorkspaceService {
    * case and a thrown error would surface as a red toast.
    */
   async gitPull(input: WorkspaceGitInput): Promise<{ ok: true }> {
-    const workspaceId = toWorkspaceId(input.project, input.branch);
-    const workspace = this.resolve(workspaceId);
+    const workspace = this.resolveByBranch(input.project, input.branch);
     if (!workspace) {
       throw new WorkspaceNotFoundError(input.branch);
     }
@@ -643,8 +671,7 @@ export class WorkspaceService {
    * a second failing push.
    */
   async gitPush(input: WorkspaceGitInput): Promise<{ ok: true }> {
-    const workspaceId = toWorkspaceId(input.project, input.branch);
-    const workspace = this.resolve(workspaceId);
+    const workspace = this.resolveByBranch(input.project, input.branch);
     if (!workspace) {
       throw new WorkspaceNotFoundError(input.branch);
     }

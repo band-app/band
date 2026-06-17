@@ -16,7 +16,6 @@ import { useCapabilities } from "../context";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import { useProjects } from "../hooks/use-projects";
 import { getRecentWorkspaceOrder, recordWorkspaceAccess } from "../lib/recent-workspaces";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type { AgentInfo } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
@@ -64,7 +63,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
     const entries: WorkspaceEntry[] = [];
     for (const project of projects) {
       for (const worktree of project.worktrees) {
-        const workspaceId = toWorkspaceId(project.name, worktree.branch);
+        const workspaceId = worktree.workspaceId;
         entries.push({
           workspaceId,
           projectName: project.name,

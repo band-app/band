@@ -40,7 +40,6 @@ import {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type { ProjectInfo } from "../types";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -140,9 +139,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   // is dominated by render cost anyway.
   const findProjectForWorkspace = useCallback(
     (workspaceId: string): ProjectInfo | undefined =>
-      projects.find((p) =>
-        p.worktrees.some((wt) => toWorkspaceId(p.name, wt.branch) === workspaceId),
-      ),
+      projects.find((p) => p.worktrees.some((wt) => wt.workspaceId === workspaceId)),
     [projects],
   );
 
