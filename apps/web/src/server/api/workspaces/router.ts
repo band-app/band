@@ -27,9 +27,9 @@ import { publicProcedure, t } from "../trpc";
  * there.
  */
 export const workspacesRouter = t.router({
-  create: publicProcedure.input(workspaceCreateInput).mutation(({ input }) => {
+  create: publicProcedure.input(workspaceCreateInput).mutation(async ({ input }) => {
     try {
-      return workspaceService.create(input);
+      return await workspaceService.create(input);
     } catch (err) {
       throwAsTrpcError(err);
     }

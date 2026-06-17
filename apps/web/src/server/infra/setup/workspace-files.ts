@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -9,11 +9,26 @@ import {
   statSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { gitCmd } from "../git/git-client";
 import { getCopyFiles } from "./project-config";
 
 const log = createLogger("workspace-files");
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Upper bounds on Option-A (`workspace.copyFiles`) expansion. `copyFiles`
+ * is a project-owned config file, but a careless recursive glob on a large
+ * repo could expand `globSync` into thousands of synchronous `statSync`
+ * calls and block the event loop for seconds — the create path is shared
+ * with SSE / streaming connections. We cap both the number of declared
+ * entries and the total number of glob matches we'll materialise, logging
+ * a warning that names the cap so a truncation is never silent.
+ */
+const MAX_COPY_FILES_ENTRIES = 100;
+const MAX_COPY_FILES_MATCHES = 500;
 
 /**
  * Copy untracked files from the project's main checkout into a freshly
@@ -42,12 +57,17 @@ const log = createLogger("workspace-files");
  * path's logger and by the integration tests to assert the union /
  * de-duplication shape.
  *
- * Synchronous on purpose: the create path is already synchronous through
- * `execFileSync` for `git worktree add`, the copy fan-out runs once per
- * workspace creation, and the file counts here are in the tens at most —
- * the cost is dominated by the git worktree command, not by these copies.
+ * Async so the two `git ls-files` spawns in Option B don't block the
+ * shared event loop (SSE / streaming connections live on it) while the
+ * create path waits on git. The per-file copy fan-out itself stays
+ * synchronous — it's a handful of `copyFileSync` calls bounded by
+ * `MAX_COPY_FILES_MATCHES`, dominated by the git work, not worth the
+ * overhead of going async per file.
  */
-export function copyWorkspaceFiles(projectPath: string, worktreePath: string): string[] {
+export async function copyWorkspaceFiles(
+  projectPath: string,
+  worktreePath: string,
+): Promise<string[]> {
   // Resolve both Option A (config.json::workspace.copyFiles) and Option B
   // (.worktreeinclude) into lists of absolute source paths inside the
   // project root. De-dup by absolute path so a file declared in both
@@ -62,7 +82,7 @@ export function copyWorkspaceFiles(projectPath: string, worktreePath: string): s
     if (!byAbs.has(abs)) byAbs.set(abs, "config.json");
   }
 
-  const fromInclude = resolveFromWorktreeInclude(projectPath);
+  const fromInclude = await resolveFromWorktreeInclude(projectPath);
   for (const abs of fromInclude) {
     if (!byAbs.has(abs)) byAbs.set(abs, ".worktreeinclude");
   }
@@ -172,8 +192,31 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
   const entries = getCopyFiles(projectPath);
   if (!entries || entries.length === 0) return [];
 
+  // Cap the number of declared entries we'll process so a runaway config
+  // can't fan out without bound. Warn (naming the cap) so the truncation
+  // is visible rather than silent.
+  let workEntries = entries;
+  if (entries.length > MAX_COPY_FILES_ENTRIES) {
+    log.warn(
+      { count: entries.length, cap: MAX_COPY_FILES_ENTRIES },
+      "workspace.copyFiles exceeds the entry cap — processing the first entries only",
+    );
+    workEntries = entries.slice(0, MAX_COPY_FILES_ENTRIES);
+  }
+
   const out: string[] = [];
-  for (const entry of entries) {
+  for (const entry of workEntries) {
+    // Stop once the total materialised match count hits the cap — a
+    // single broad glob can blow past it, so the guard lives at the
+    // per-file granularity. Warn once (naming the cap) and bail.
+    if (out.length >= MAX_COPY_FILES_MATCHES) {
+      log.warn(
+        { cap: MAX_COPY_FILES_MATCHES },
+        "workspace.copyFiles match cap reached — remaining entries skipped",
+      );
+      break;
+    }
+
     // Reject absolute paths and traversals up front — they would escape
     // the project root and the relative-path computation downstream
     // can't produce a sensible destination for them.
@@ -196,6 +239,13 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
         continue;
       }
       for (const m of matches) {
+        if (out.length >= MAX_COPY_FILES_MATCHES) {
+          log.warn(
+            { cap: MAX_COPY_FILES_MATCHES, entry },
+            "workspace.copyFiles match cap reached mid-glob — remaining matches skipped",
+          );
+          break;
+        }
         const abs = resolve(projectPath, m);
         // Skip directories — copyFiles is a *files* declaration; recursing
         // into directories isn't part of the v1 contract. A user who
@@ -250,7 +300,7 @@ function resolveFromConfig(projectPath: string, missing: string[]): string[] {
  * Falls back to an empty list if `git` isn't available or the project isn't
  * a git repo — Option B is a no-op in that case (Option A still works).
  */
-function resolveFromWorktreeInclude(projectPath: string): string[] {
+async function resolveFromWorktreeInclude(projectPath: string): Promise<string[]> {
   const includePath = join(projectPath, ".worktreeinclude");
   if (!existsSync(includePath)) return [];
 
@@ -270,20 +320,14 @@ function resolveFromWorktreeInclude(projectPath: string): string[] {
   let matchingWorktreeInclude: string[];
   let gitignoredStandard: string[];
   try {
-    matchingWorktreeInclude = execFileSync(
-      command,
-      ["ls-files", "--others", "--ignored", `-X`, includePath],
-      opts,
-    )
-      .split("\n")
-      .filter(Boolean);
-    gitignoredStandard = execFileSync(
-      command,
-      ["ls-files", "--others", "--ignored", "--exclude-standard"],
-      opts,
-    )
-      .split("\n")
-      .filter(Boolean);
+    // The two `ls-files` calls are independent, so run them concurrently
+    // and let the event loop service other work while git is spawning.
+    const [matching, standard] = await Promise.all([
+      execFileAsync(command, ["ls-files", "--others", "--ignored", `-X`, includePath], opts),
+      execFileAsync(command, ["ls-files", "--others", "--ignored", "--exclude-standard"], opts),
+    ]);
+    matchingWorktreeInclude = matching.stdout.split("\n").filter(Boolean);
+    gitignoredStandard = standard.stdout.split("\n").filter(Boolean);
   } catch (err) {
     // Not a git repo, git missing, etc. Don't fail the workspace boot —
     // Option B simply contributes nothing.

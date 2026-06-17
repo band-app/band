@@ -18,7 +18,7 @@
 // against a fresh tmp `$HOME`, drives `workspaces.create` over real tRPC,
 // and asserts on the filesystem contents of the resulting worktree.
 //
-// The seven scenarios spelled out in the acceptance criteria each get
+// The eight scenarios spelled out in the acceptance criteria each get
 // their own `it()` block so a regression in one isn't masked by a passing
 // neighbour:
 //
@@ -29,9 +29,10 @@
 //   - glob match
 //   - gitignored-but-not-`.worktreeinclude`-matched (skipped)
 //   - matched-but-tracked (skipped)
+//   - symlink-escape guard (symlink pointing outside the root, skipped)
 //
 // Each scenario uses its own project subdirectory inside the shared tmp
-// home so the seven creates don't fight over the same `.band/config.json`
+// home so the eight creates don't fight over the same `.band/config.json`
 // / `.worktreeinclude` files. The server boots once for the file.
 
 import { execFileSync } from "node:child_process";
@@ -53,7 +54,24 @@ const gitEnv = {
 };
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
+  try {
+    return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
+  } catch (err) {
+    // Re-raise with stderr + status + signal so the test failure carries
+    // the real reason git refused, not just "Command failed: git …".
+    const e = err as {
+      stderr?: Buffer | string;
+      stdout?: Buffer | string;
+      status?: number | null;
+      signal?: string | null;
+      message: string;
+    };
+    const stderr = e.stderr ? String(e.stderr).trim() : "(no stderr)";
+    const stdout = e.stdout ? String(e.stdout).trim() : "(no stdout)";
+    throw new Error(
+      `git ${args.join(" ")} (cwd=${cwd}) failed status=${e.status} signal=${e.signal}\nstdout: ${stdout}\nstderr: ${stderr}`,
+    );
+  }
 }
 
 interface ProjectFixture {
@@ -156,7 +174,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   let tmpHome: string;
   const branch = "feat-copy";
 
-  // Seven independent project fixtures — one per acceptance criterion. We
+  // Eight independent project fixtures — one per acceptance criterion. We
   // build them all up front so `seedState` can register every project in
   // a single transaction before the server boots.
   let pConfigOnly: ProjectFixture;
@@ -518,7 +536,7 @@ describe("workspaces.create copies workspace files into the new worktree", () =>
   });
 
   it("rejects workspaces.create without an auth token (401)", async () => {
-    // TEST-13 negative auth case — boots the same server but skips the
+    // Negative auth case — boots the same server but skips the
     // `Cookie: band_token=...` header by bypassing the `trpcMutate`
     // helper. Pins that the file-copy feature can't be reached
     // unauthenticated; a future regression that loosened auth on the

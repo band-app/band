@@ -80,10 +80,7 @@ export function getCopyFiles(projectPath: string): string[] | null {
 
   const parsed = CopyFilesSchema.safeParse(copyFiles);
   if (!parsed.success) {
-    log.warn(
-      "Invalid workspace.copyFiles config: %s",
-      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-    );
+    log.warn({ err: parsed.error, configPath }, "invalid workspace.copyFiles config — ignoring");
     return null;
   }
 

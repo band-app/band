@@ -260,7 +260,7 @@ export class WorkspaceService {
    *      installed). When there is no setup script, the task is dispatched
    *      synchronously.
    */
-  create(input: WorkspaceCreateInput): { ok: true; path: string } {
+  async create(input: WorkspaceCreateInput): Promise<{ ok: true; path: string }> {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
     if (!project) {
@@ -325,7 +325,7 @@ export class WorkspaceService {
     // with a warning rather than failing the create, matching the
     // non-fatal contract used by the setup script itself.
     try {
-      const copied = copyWorkspaceFiles(project.path, worktreePath);
+      const copied = await copyWorkspaceFiles(project.path, worktreePath);
       if (copied.length > 0) {
         log.info({ workspaceId, count: copied.length }, "copied workspace files into new worktree");
       }
