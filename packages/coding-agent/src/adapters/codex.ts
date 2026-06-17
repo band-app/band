@@ -641,17 +641,33 @@ export class CodexAdapter implements CodingAgent {
 
 /**
  * Resolve the `codex` binary from the system PATH.
+ *
  * The SDK's built-in `findCodexPath()` requires the platform-specific npm
  * package (e.g. `@openai/codex-darwin-arm64`) which we don't bundle.
  * Instead we expect `codex` to be installed on the user's system.
+ *
+ * **Cached at module load.** Constructor now runs on the hot
+ * `workspaces.create --via terminal` path (workspace-service →
+ * `agentService.createWorkspaceAgent` may pick this adapter), and the
+ * underlying `execFileSync("which", ["codex"])` blocks the Node event
+ * loop for 1–10 ms per invocation. The `which` result is process-stable
+ * — the user's PATH doesn't change mid-process — so resolving it once
+ * keeps the constructor sync without paying the subprocess cost on
+ * every request.
  */
-function resolveCodexBinary(): string | undefined {
+function resolveCodexBinaryUncached(): string | undefined {
   try {
     const cmd = process.platform === "win32" ? "where" : "which";
     return execFileSync(cmd, ["codex"], { encoding: "utf-8" }).trim() || undefined;
   } catch {
     return undefined;
   }
+}
+
+const cachedCodexBinary = resolveCodexBinaryUncached();
+
+function resolveCodexBinary(): string | undefined {
+  return cachedCodexBinary;
 }
 
 // ─── Models ─────────────────────────────────────────────────────────────────

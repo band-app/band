@@ -40,6 +40,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { toWorkspaceId } from "@/dashboard";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -266,9 +267,7 @@ describe("workspaces.create via=terminal happy path", () => {
     expect(data.terminalId!.length).toBeGreaterThan(0);
     expect(data.path.endsWith("/feat/term")).toBe(true);
 
-    // `toWorkspaceId(project, branch)` normalises `/` to `-` so the
-    // workspaceId is filesystem-safe and routable.
-    const workspaceId = "viaproj-feat-term";
+    const workspaceId = toWorkspaceId("viaproj", "feat/term");
 
     const terminals = await waitFor(
       async () => {
@@ -433,7 +432,7 @@ describe("workspaces.create via=chat path", () => {
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
 
-    const workspaceId = "chatproj-feat-chatpath";
+    const workspaceId = toWorkspaceId("chatproj", "feat/chatpath");
 
     // Positive anchor: prove the chat path actually dispatched.
     // `taskService.submitTask` persists a task row before the agent
@@ -477,7 +476,7 @@ describe("workspaces.create via=chat path", () => {
     // Same positive anchor as above — the schema makes `via` optional
     // and the server defaults to chat so the web UI continues working
     // without sending the field.
-    const workspaceId = "chatproj-feat-default";
+    const workspaceId = toWorkspaceId("chatproj", "feat/default");
     const tasks = await waitFor(
       async () => {
         const list = await listTasksForWorkspace(server.url, workspaceId, TOKEN);

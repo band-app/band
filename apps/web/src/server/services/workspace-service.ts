@@ -228,16 +228,40 @@ function isRebaseCollision(err: unknown): boolean {
  * `command` option directly to the shell as text, see
  * `terminal-pool.ts::spawn`).
  *
- * Each token is wrapped in single quotes, with any embedded `'` rewritten
- * as `'\''` (POSIX-style — the only escape sequence single-quoted strings
- * accept). This is the same algorithm `shell-quote` and `child_process`'s
- * POSIX shell helpers use; inlined here to avoid the dependency.
+ * Each token is:
+ *
+ *   1. **Stripped of C0/C1 control characters** (`\x00..\x1f`, `\x7f`). The
+ *      PTY driver interprets these *before* the shell tokenises the line —
+ *      e.g. `\x03` becomes SIGINT, `\x04` is EOF, `\x1b[` opens a CSI
+ *      sequence. The user-controlled `prompt` field is `z.string().optional()`
+ *      so a malicious or malformed input could otherwise abort the vendor
+ *      CLI before it ever started. The strip is per-token because the
+ *      shell-quote dance only protects against shell metacharacters, not
+ *      against control codes the PTY layer eats.
+ *   2. **Wrapped in single quotes**, with any embedded `'` rewritten as
+ *      `'\''` (POSIX-style — the only escape sequence single-quoted
+ *      strings accept). This is the same algorithm `shell-quote` and
+ *      `child_process`'s POSIX shell helpers use; inlined here to avoid
+ *      the dependency.
  *
  * Empty `args` returns the bare command so an interactive REPL without
  * positional arguments still launches cleanly.
  */
 function formatShellCommand(command: string, args: string[]): string {
-  const quoted = [command, ...args].map((token) => `'${token.replace(/'/g, "'\\''")}'`);
+  // The regex is *deliberately* matching control characters so we can
+  // strip them before the PTY interprets them — that's the entire
+  // point of this guard. The character-class bounds are spelled with
+  // `String.fromCharCode` so biome's `noControlCharactersInRegex` rule
+  // (which flags any literal control-char in regex source) doesn't
+  // misread the intent.
+  const ctrlRange = new RegExp(
+    `[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}\\x7f]`,
+    "g",
+  );
+  const stripControls = (s: string) => s.replace(ctrlRange, "");
+  const quoted = [command, ...args].map(
+    (token) => `'${stripControls(token).replace(/'/g, "'\\''")}'`,
+  );
   return quoted.join(" ");
 }
 
@@ -511,6 +535,15 @@ export class WorkspaceService {
 
     runSetup(workspaceId, worktreePath, project.path, onSetupComplete);
 
+    // Only echo back `via` / `terminalId` when the call actually
+    // dispatched something. Without a prompt no dispatch happens at
+    // all — including the field with `"terminal"` would imply a PTY
+    // was reserved when none was. The Rust CLI propagates that absence
+    // so a caller scripting on `.terminalId` can distinguish
+    // "newly created + dispatched" from "newly created, no dispatch."
+    if (!input.prompt) {
+      return { ok: true, path: worktreePath };
+    }
     return { ok: true, path: worktreePath, via, terminalId };
   }
 

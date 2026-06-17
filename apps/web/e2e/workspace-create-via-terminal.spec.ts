@@ -174,7 +174,7 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
     // test waits on (`workspace-maximize-state.spec.ts:346`), and we
     // give it the same 75 s assertion budget for CI parity. Locally
     // the textbox appears in < 2 s.
-    await workspacePage.tab("terminal").click();
+    await workspacePage.openTerminalTab();
     await expect(workspacePage.terminalInput).toBeVisible({ timeout: 75_000 });
   });
 });
