@@ -55,15 +55,25 @@ function makeProjects(): {
   path: string;
   defaultBranch: string;
   kind: "git";
-  worktrees: { branch: string; path: string; pinned: boolean }[];
+  worktrees: { branch: string; path: string; pinned: boolean; workspaceId: string }[];
 }[] {
-  return Array.from({ length: PROJECT_COUNT }, (_, i) => ({
-    name: `project-${String(i).padStart(2, "0")}`,
-    path: `/tmp/fake/project-${i}`,
-    defaultBranch: "main",
-    kind: "git",
-    worktrees: [{ branch: "main", path: `/tmp/fake/project-${i}`, pinned: false }],
-  }));
+  return Array.from({ length: PROJECT_COUNT }, (_, i) => {
+    const name = `project-${String(i).padStart(2, "0")}`;
+    return {
+      name,
+      path: `/tmp/fake/project-${i}`,
+      defaultBranch: "main",
+      kind: "git" as const,
+      worktrees: [
+        {
+          branch: "main",
+          path: `/tmp/fake/project-${i}`,
+          pinned: false,
+          workspaceId: toWorkspaceId(name, "main"),
+        },
+      ],
+    };
+  });
 }
 
 const FIRST_WORKSPACE = toWorkspaceId("project-00", "main");

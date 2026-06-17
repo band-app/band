@@ -81,14 +81,28 @@ async function setupMocks(page: Page): Promise<MockHandles> {
         path: `/tmp/fake/${PROJECT_A}`,
         defaultBranch: "main",
         kind: "git",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_A}`, pinned: false }],
+        worktrees: [
+          {
+            branch: "main",
+            path: `/tmp/fake/${PROJECT_A}`,
+            pinned: false,
+            workspaceId: WORKSPACE_A,
+          },
+        ],
       },
       {
         name: PROJECT_B,
         path: `/tmp/fake/${PROJECT_B}`,
         defaultBranch: "main",
         kind: "git",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_B}`, pinned: false }],
+        worktrees: [
+          {
+            branch: "main",
+            path: `/tmp/fake/${PROJECT_B}`,
+            pinned: false,
+            workspaceId: WORKSPACE_B,
+          },
+        ],
       },
     ],
   });
