@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -366,7 +366,12 @@ export class WorkspaceService {
     }
 
     try {
-      execFileSync(command, args, { cwd: project.path, env, encoding: "utf-8" });
+      // Async — `git worktree add` on a large repo can take 200–500 ms
+      // and the surrounding `create` is already async, so blocking the
+      // event loop for the duration would stall every concurrent SSE
+      // stream / chat event / API request. Mirrors the async `git`
+      // helpers used by `remove` below.
+      await execFileAsync(command, args, { cwd: project.path, env, encoding: "utf-8" });
     } catch (e) {
       throw new Error(e instanceof Error ? e.message : String(e));
     }
@@ -427,10 +432,11 @@ export class WorkspaceService {
         // an abort handle we should release for tidiness.
         adapter.abort?.();
         if (!invocation || invocation.unsupported) {
-          const reason =
-            invocation?.unsupported && "reason" in invocation
-              ? invocation.reason
-              : "adapter does not expose cliInvocation";
+          // The discriminated union guarantees `reason` is present
+          // whenever `unsupported` is true; fall back to a generic
+          // message only when the adapter doesn't expose `cliInvocation`
+          // at all.
+          const reason = invocation?.reason ?? "adapter does not expose cliInvocation";
           log.warn(
             { workspaceId, agentId: input.codingAgentId, reason },
             "via=terminal requested but adapter does not support it; falling back to chat",

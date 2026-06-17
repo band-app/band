@@ -14,14 +14,12 @@
 // We also pin the cleanup side: `workspaces.remove` must kill the PTY
 // that `via=terminal` spawned (issue #551 acceptance criterion).
 //
-// Doctrine: real production server (`dist/start-server.mjs`), real PTY
-// (node-pty), real git repo, real SQLite. No tRPC mocking, no MSW. Each
-// describe block boots its own server with a tmp `$HOME` so a regression
-// that crashes the server (e.g. an SDK adapter that panics on a malformed
+// Real production server (`dist/start-server.mjs`), real PTY (node-pty),
+// real git repo, real SQLite. No tRPC mocking, no MSW. Each describe
+// block boots its own server with a tmp `$HOME` so a regression that
+// crashes the server (e.g. an SDK adapter that panics on a malformed
 // stub) is contained to one scenario instead of cascading into the next
-// test's `beforeAll`. Following the doctrine in
-// `docs/integration-testing.md` and
-// `.claude/skills/write-integration-test/SKILL.md`.
+// test's `beforeAll`.
 //
 // Two stubs are used for the spawned-process surface:
 //

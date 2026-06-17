@@ -2,14 +2,11 @@
  * End-to-end coverage for issue #551 — the dashboard surfaces a real
  * terminal pane after a CLI-initiated `workspaces.create --via terminal`.
  *
- * Doctrine: the test boots the production server bundle against a tmp
- * `~/.band/`, fires the same tRPC mutation the Rust CLI fires (no CLI
- * binary involved — the wire shape is what we're pinning), then drives
- * the dashboard via `WorkspacePage` to observe the rendered DOM. No
- * tRPC mocking, no in-process React. See
- * `.claude/skills/write-integration-test/SKILL.md` and
- * `docs/integration-testing.md` for the project doctrine these tests
- * follow.
+ * The test boots the production server bundle against a tmp `~/.band/`,
+ * fires the same tRPC mutation the Rust CLI fires (no CLI binary
+ * involved — the wire shape is what we're pinning), then drives the
+ * dashboard via `WorkspacePage` to observe the rendered DOM. No tRPC
+ * mocking, no in-process React.
  *
  * What's pinned:
  *

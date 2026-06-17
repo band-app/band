@@ -223,12 +223,14 @@ export class GeminiCliAdapter implements CodingAgent {
    * Resolved CLI invocation for `workspaces.create --via terminal`
    * (issue #551). Opens an interactive Gemini CLI REPL with `prompt`
    * pre-loaded as the first positional argument (cmux-style:
-   * `gemini "<prompt>"`).
+   * `gemini -- "<prompt>"`). The end-of-options `--` mirrors
+   * `runSession` above and prevents a prompt that starts with `-` from
+   * being parsed as a flag by the Gemini binary.
    */
   cliInvocation(prompt: string): CliInvocation {
     return {
       command: this.executablePath,
-      args: [prompt],
+      args: ["--", prompt],
     };
   }
 }
