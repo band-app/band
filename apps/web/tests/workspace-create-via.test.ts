@@ -185,15 +185,21 @@ async function waitFor<T>(
   } = {},
 ): Promise<T> {
   const start = Date.now();
+  // Only the three explicit "not done" sentinels — `undefined`, `null`,
+  // `false` — loop. Bare `!value` would also loop on `""`, `0`, and
+  // other falsy-but-valid success values, which would silently never
+  // terminate if a caller's predicate ever returned them.
+  const notDone = (v: T | undefined | null | false): v is undefined | null | false =>
+    v === undefined || v === null || v === false;
   let value = await fn();
-  while (!value) {
+  while (notDone(value)) {
     if (Date.now() - start > timeoutMs) {
       throw new Error(`waitFor(${label}) timed out after ${timeoutMs}ms`);
     }
     await new Promise((r) => setTimeout(r, intervalMs));
     value = await fn();
   }
-  return value as T;
+  return value;
 }
 
 interface CreateResponse {

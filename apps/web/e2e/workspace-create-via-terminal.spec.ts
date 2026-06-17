@@ -153,28 +153,29 @@ test.describe("workspaces.create --via terminal (issue #551)", () => {
       "implement feature E2E",
     );
     expect(created.via).toBe("terminal");
-    expect(typeof created.terminalId).toBe("string");
-    expect(created.terminalId!.length).toBeGreaterThan(0);
+    expect(created.terminalId).toEqual(expect.any(String));
+    expect((created.terminalId ?? "").length).toBeGreaterThan(0);
 
     // Phase 2: drive the dashboard to the newly-created workspace and
     // assert the terminal pane mounts. The outer shared dockview lays
     // out a `terminal` tab unconditionally; we click it to make sure
     // the terminal container becomes the active view, then anchor on
-    // the xterm.js textbox aria-name ("Terminal input"). The textbox
-    // is only emitted by xterm.js once a PTY session is attached to
-    // its inner-dockview panel — so its presence is the DOM-level proof
-    // that the spawned terminal landed in the layout, not just an empty
-    // tab.
+    // xterm's input element. The element is only emitted by xterm.js
+    // once a PTY session is attached to its inner-dockview panel — so
+    // its presence is the DOM-level proof that the spawned terminal
+    // landed in the layout, not just an empty tab.
     await workspacePage.goto(targetWorkspaceId);
     await workspacePage.waitForReady();
 
     // xterm.js mounts on first visibility — clicking the outer terminal
     // tab triggers the layout activate → React render → xterm init
-    // handshake. The same boot path the workspace-maximize regression
-    // test waits on (`workspace-maximize-state.spec.ts:346`), and we
-    // give it the same 75 s assertion budget for CI parity. Locally
-    // the textbox appears in < 2 s.
+    // handshake. Anchor on `state: "attached"` rather than
+    // `toBeVisible()` because xterm keeps its input as an offscreen
+    // "helper" textarea Playwright reports as hidden (see
+    // `WorkspacePage.waitForTerminalReady` doc-comment). The 75 s
+    // budget mirrors `workspace-maximize-state.spec.ts:346` for CI
+    // parity; locally the element attaches in < 2 s.
     await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 75_000 });
+    await workspacePage.terminalInput.first().waitFor({ state: "attached", timeout: 75_000 });
   });
 });

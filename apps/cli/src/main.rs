@@ -855,23 +855,39 @@ fn cmd_workspaces_create(
     let settings = state::load_settings()?;
     let client = api::ApiClient::from_loaded_settings(settings.clone());
 
-    // Resolve dispatch target (issue #551). Precedence, highest first:
-    //   1. --via flag.
-    //   2. $BAND_DISPATCH env var.
-    //   3. .band/config.json `workspace.defaultVia` in the current repo.
-    //   4. ~/.band/settings.json `cli.defaultVia`.
-    //   5. Built-in CLI default: "terminal".
-    //
-    // The server-side default is "chat" so the web UI keeps its
-    // existing behavior; the CLI explicitly forwards the resolved
-    // value on every call so the server never has to guess.
-    let resolved_via = resolve_dispatch_target(via, &settings)?;
+    // The server only branches on `via` when a prompt is present —
+    // a no-prompt workspace create is a pure worktree-add with no
+    // dispatch. Skip the precedence resolution entirely in that case
+    // so we don't fork `git rev-parse --show-toplevel` or `stat` the
+    // `.band/config.json` for nothing. We still validate an
+    // explicitly-passed `--via` so a typo fails fast even without a
+    // prompt — but BAND_DISPATCH / config / settings fallbacks are
+    // dead weight on the no-prompt path.
+    let resolved_via = if prompt.is_some() {
+        // Resolve dispatch target (issue #551). Precedence, highest first:
+        //   1. --via flag.
+        //   2. $BAND_DISPATCH env var.
+        //   3. .band/config.json `workspace.defaultVia` in the current repo.
+        //   4. ~/.band/settings.json `cli.defaultVia`.
+        //   5. Built-in CLI default: "terminal".
+        //
+        // The server-side default is "chat" so the web UI keeps its
+        // existing behavior; the CLI explicitly forwards the resolved
+        // value on every call so the server never has to guess.
+        Some(resolve_dispatch_target(via, &settings)?)
+    } else if let Some(v) = via {
+        Some(validate_via(v, "--via flag")?)
+    } else {
+        None
+    };
 
     let mut input = serde_json::json!({
         "project": project,
         "branch": branch,
-        "via": resolved_via,
     });
+    if let Some(ref v) = resolved_via {
+        input["via"] = serde_json::json!(v);
+    }
     if let Some(base) = base {
         input["base"] = serde_json::json!(base);
     }
@@ -976,19 +992,31 @@ fn validate_via(value: &str, source: &str) -> Result<String, String> {
 /// `cli.defaultVia`. We deliberately read the file directly (no server
 /// roundtrip) so the CLI behaves the same way whether the dashboard is
 /// running or not.
+///
+/// **Cheap-stat first.** Most callers are outside a `.band/`-configured
+/// repo (or run from a workspace that has none), so we check whether
+/// `cwd/.band/config.json` exists *before* forking `git
+/// rev-parse --show-toplevel`. If the file already sits in cwd we read
+/// it directly; otherwise we fall through to the git-toplevel resolution
+/// (the common case for being deep inside a subdirectory).
 fn read_repo_default_via() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
+    let cwd_config = cwd.join(".band").join("config.json");
+    if cwd_config.is_file() {
+        return parse_default_via(&cwd_config);
+    }
     let toplevel = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(&cwd)
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))
-        .unwrap_or(cwd);
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))?;
+    parse_default_via(&toplevel.join(".band").join("config.json"))
+}
 
-    let config_path = toplevel.join(".band").join("config.json");
-    let raw = std::fs::read_to_string(&config_path).ok()?;
+fn parse_default_via(config_path: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
     parsed
         .get("workspace")

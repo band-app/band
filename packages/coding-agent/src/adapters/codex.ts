@@ -94,7 +94,7 @@ export class CodexAdapter implements CodingAgent {
     this.workspaceDir = config.workspaceDir;
     this.maxTurns = config.maxTurns;
     this.model = config.options.model;
-    this.executablePath = config.options.executablePath ?? resolveCodexBinary();
+    this.executablePath = config.options.executablePath ?? cachedCodexBinary;
   }
 
   abort(): void {
@@ -646,29 +646,23 @@ export class CodexAdapter implements CodingAgent {
  * package (e.g. `@openai/codex-darwin-arm64`) which we don't bundle.
  * Instead we expect `codex` to be installed on the user's system.
  *
- * **Cached at module load.** Constructor now runs on the hot
- * `workspaces.create --via terminal` path (workspace-service →
+ * **Must remain a module-level const.** The constructor now runs on
+ * the hot `workspaces.create --via terminal` path (workspace-service →
  * `agentService.createWorkspaceAgent` may pick this adapter), and the
  * underlying `execFileSync("which", ["codex"])` blocks the Node event
- * loop for 1–10 ms per invocation. The `which` result is process-stable
- * — the user's PATH doesn't change mid-process — so resolving it once
- * keeps the constructor sync without paying the subprocess cost on
- * every request.
+ * loop for 1–10 ms per invocation. Moving this inside a function or a
+ * lazily-evaluated path would re-introduce that per-request cost. The
+ * `which` result is process-stable — the user's PATH doesn't change
+ * mid-process — so resolving it once at module load is safe.
  */
-function resolveCodexBinaryUncached(): string | undefined {
+const cachedCodexBinary: string | undefined = (() => {
   try {
     const cmd = process.platform === "win32" ? "where" : "which";
     return execFileSync(cmd, ["codex"], { encoding: "utf-8" }).trim() || undefined;
   } catch {
     return undefined;
   }
-}
-
-const cachedCodexBinary = resolveCodexBinaryUncached();
-
-function resolveCodexBinary(): string | undefined {
-  return cachedCodexBinary;
-}
+})();
 
 // ─── Models ─────────────────────────────────────────────────────────────────
 

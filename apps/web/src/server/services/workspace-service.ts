@@ -102,7 +102,13 @@ export const workspaceCreateInput = z.object({
   project: z.string(),
   branch: z.string(),
   base: z.string().optional(),
-  prompt: z.string().optional(),
+  // Cap at 100 KiB. On the via=terminal path the prompt is embedded
+  // verbatim (after quoting) into the PTY command line, so an
+  // unbounded value could exceed OS argv-length limits (typically
+  // 128 KiB on Linux) or overflow the PTY write buffer. 100k is well
+  // above any realistic interactive prompt while keeping the embed
+  // safely inside the kernel's ARG_MAX.
+  prompt: z.string().max(100_000).optional(),
   maxTurns: z.number().int().positive().optional(),
   mode: z.string().optional(),
   model: z.string().optional(),
