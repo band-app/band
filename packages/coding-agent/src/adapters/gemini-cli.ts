@@ -7,7 +7,13 @@ import { createLogger } from "@band-app/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { readSkillsFromDir } from "../skills.js";
-import type { AgentModel, CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
+import type {
+  AgentModel,
+  CliInvocation,
+  CodingAgent,
+  RunSessionOptions,
+  SkillInfo,
+} from "../types.js";
 
 const log = createLogger("coding-agent:gemini-cli");
 
@@ -211,6 +217,19 @@ export class GeminiCliAdapter implements CodingAgent {
         contextWindow: 1_000_000,
       },
     ];
+  }
+
+  /**
+   * Resolved CLI invocation for `workspaces.create --via terminal`
+   * (issue #551). Opens an interactive Gemini CLI REPL with `prompt`
+   * pre-loaded as the first positional argument (cmux-style:
+   * `gemini "<prompt>"`).
+   */
+  cliInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath,
+      args: [prompt],
+    };
   }
 }
 

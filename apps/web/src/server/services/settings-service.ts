@@ -85,6 +85,18 @@ export const settingsUpdateInput = z
     // false, `UsageScannerService.tick()` short-circuits — used by
     // the dashboard's "Disable usage polling" toggle.
     usagePollingEnabled: z.boolean().optional(),
+    // CLI-scoped preferences (issue #551). Today only `defaultVia`
+    // is recognized — the user-level fallback for `band workspaces
+    // create --prompt` dispatch when no `--via` flag, `BAND_DISPATCH`
+    // env var, or repo `.band/config.json` value is set. Nested object
+    // is `.passthrough()` so future per-CLI keys can be added without
+    // round-trip data loss when an older client persists the document.
+    cli: z
+      .object({
+        defaultVia: z.enum(["chat", "terminal"]).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 

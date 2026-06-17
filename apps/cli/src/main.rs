@@ -160,6 +160,11 @@ enum WorkspacesCmd {
         /// Coding agent ID to use (e.g. 'claude-code')
         #[arg(long)]
         agent: Option<String>,
+        /// Dispatch target for the prompt: 'chat' (default) submits to the
+        /// workspace chat pane; 'terminal' launches the agent's interactive
+        /// CLI in a fresh terminal pane (issue #551)
+        #[arg(long)]
+        via: Option<String>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -492,6 +497,7 @@ fn main() {
                 mode,
                 model,
                 agent,
+                via,
             } => cmd_workspaces_create(
                 &project,
                 &branch,
@@ -501,6 +507,7 @@ fn main() {
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
+                via.as_deref(),
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
@@ -828,6 +835,7 @@ fn cmd_workspaces_create(
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
+    via: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -836,9 +844,23 @@ fn cmd_workspaces_create(
     }
 
     let client = api::ApiClient::from_settings()?;
+
+    // Resolve dispatch target (issue #551). Precedence, highest first:
+    //   1. --via flag.
+    //   2. $BAND_DISPATCH env var.
+    //   3. .band/config.json `workspace.defaultVia` in the current repo.
+    //   4. ~/.band/settings.json `cli.defaultVia`.
+    //   5. Built-in CLI default: "terminal".
+    //
+    // The server-side default is "chat" so the web UI keeps its
+    // existing behavior; the CLI explicitly forwards the resolved
+    // value on every call so the server never has to guess.
+    let resolved_via = resolve_dispatch_target(via)?;
+
     let mut input = serde_json::json!({
         "project": project,
         "branch": branch,
+        "via": resolved_via,
     });
     if let Some(base) = base {
         input["base"] = serde_json::json!(base);
@@ -860,11 +882,108 @@ fn cmd_workspaces_create(
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    // The server returns the via it actually dispatched with (it may have
+    // fallen back to "chat" when the chosen adapter doesn't support a
+    // terminal-pane launch). Mirror that into the CLI output so a caller
+    // scripting around `terminalId` can detect the fallback.
+    let actual_via = data
+        .get("via")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&resolved_via)
+        .to_string();
+    let terminal_id = data
+        .get("terminalId")
+        .and_then(|t| t.as_str())
+        .map(std::string::ToString::to_string);
+
+    let mut json = serde_json::json!({"path": path, "via": actual_via});
+    if let Some(ref tid) = terminal_id {
+        json["terminalId"] = serde_json::json!(tid);
+    }
 
     Ok(CommandResult {
         text: format!("{path}\n"),
-        json: serde_json::json!({"path": path}),
+        json,
     })
+}
+
+/// Walk the dispatch-target precedence chain (issue #551):
+///   1. `--via` flag value.
+///   2. `$BAND_DISPATCH` env var.
+///   3. `.band/config.json` `workspace.defaultVia` in the current repo.
+///   4. `~/.band/settings.json` `cli.defaultVia`.
+///   5. Built-in CLI default: `"terminal"`.
+///
+/// Rejects unknown string values with a CLI error so a typo
+/// (e.g. `--via terminall` or `BAND_DISPATCH=chats`) fails fast instead
+/// of being silently rejected by the server's `z.enum` validator.
+fn resolve_dispatch_target(flag: Option<&str>) -> Result<String, String> {
+    if let Some(v) = flag {
+        return validate_via(v, "--via flag");
+    }
+    if let Ok(env) = std::env::var("BAND_DISPATCH") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return validate_via(trimmed, "BAND_DISPATCH env var");
+        }
+    }
+    if let Some(v) = read_repo_default_via() {
+        return validate_via(&v, ".band/config.json workspace.defaultVia");
+    }
+    if let Some(v) = read_user_default_via() {
+        return validate_via(&v, "~/.band/settings.json cli.defaultVia");
+    }
+    Ok("terminal".to_string())
+}
+
+fn validate_via(value: &str, source: &str) -> Result<String, String> {
+    match value {
+        "chat" | "terminal" => Ok(value.to_string()),
+        other => Err(format!(
+            "Invalid dispatch target '{other}' from {source}: expected 'chat' or 'terminal'."
+        )),
+    }
+}
+
+/// Read `workspace.defaultVia` from `.band/config.json` in the current
+/// working directory's git toplevel (or `cwd` when not in a git repo).
+/// Returns `None` if the file is absent, malformed, or missing the key.
+///
+/// The repo-level config is the per-project override for the user-level
+/// `cli.defaultVia`. We deliberately read the file directly (no server
+/// roundtrip) so the CLI behaves the same way whether the dashboard is
+/// running or not.
+fn read_repo_default_via() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    let toplevel = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))
+        .unwrap_or(cwd);
+
+    let config_path = toplevel.join(".band").join("config.json");
+    let raw = std::fs::read_to_string(&config_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed
+        .get("workspace")
+        .and_then(|w| w.get("defaultVia"))
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
+}
+
+/// Read `cli.defaultVia` from `~/.band/settings.json`. Returns `None`
+/// when the file or key is absent.
+fn read_user_default_via() -> Option<String> {
+    let settings = state::load_settings().ok()?;
+    settings
+        .cli
+        .as_ref()
+        .and_then(|c| c.get("defaultVia"))
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
 }
 
 fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, String> {
@@ -2570,8 +2689,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
+                {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
             ],
-            "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
+            "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the workspace's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband workspaces create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
         serde_json::json!({
             "name": "workspaces remove",

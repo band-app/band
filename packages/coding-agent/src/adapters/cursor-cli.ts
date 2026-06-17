@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { CursorAgent } from "@nothumanwork/cursor-agents-sdk";
 import type { CursorCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { AgentModel, CodingAgent, RunSessionOptions } from "../types.js";
+import type { AgentModel, CliInvocation, CodingAgent, RunSessionOptions } from "../types.js";
 
 const log = createLogger("coding-agent:cursor-cli");
 
@@ -165,6 +165,22 @@ export class CursorCliAdapter implements CodingAgent {
     // chosen model. No SDK-side reporting; leave undefined so the meter
     // falls back to the static MODEL_CONTEXT_WINDOWS default (200k).
     return [{ id: "auto", name: "Auto", description: "Cursor chooses the best model" }];
+  }
+
+  /**
+   * Cursor CLI does not currently expose a one-shot interactive REPL
+   * invocation that accepts an initial prompt as a positional argument
+   * (the SDK transport is JSON over a managed subprocess). For
+   * `workspaces.create --via terminal` (issue #551) we return the
+   * `unsupported` sentinel so the workspace service falls back to the
+   * SDK/chat path instead of spawning a terminal that would just open a
+   * shell prompt with the user's text echoed at it.
+   */
+  cliInvocation(_prompt: string): CliInvocation {
+    return {
+      unsupported: true,
+      reason: "Cursor CLI has no interactive prompt-loading invocation; falling back to chat.",
+    };
   }
 }
 

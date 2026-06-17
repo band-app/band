@@ -122,6 +122,30 @@ export interface RunSessionOptions {
   model?: string;
 }
 
+/**
+ * Resolved vendor-CLI invocation for spawning the agent interactively in a
+ * terminal pane (see `cliInvocation` below). Composed by `terminalService`
+ * into a single shell command string with the prompt as the first positional
+ * argument, so the CLI's REPL opens with the prompt already loaded
+ * (cmux-style: `claude "<prompt>"`, `codex "<prompt>"`, etc.).
+ *
+ * `unsupported: true` is the sentinel an adapter returns when it cannot
+ * resolve a vendor binary (Cursor CLI today). Callers should fall back to
+ * the SDK/chat path rather than spawning a terminal in that case.
+ */
+export type CliInvocation =
+  | {
+      command: string;
+      args: string[];
+      unsupported?: false;
+    }
+  | {
+      command?: undefined;
+      args?: undefined;
+      unsupported: true;
+      reason: string;
+    };
+
 export interface CodingAgent {
   readonly name: string;
   readonly supportedFeatures: CodingAgentFeatures;
@@ -202,4 +226,20 @@ export interface CodingAgent {
   listSkills?(): Promise<SkillInfo[]>;
   listModes?(): AgentMode[];
   listModels?(): AgentModel[] | Promise<AgentModel[]>;
+  /**
+   * Resolve the one-shot CLI invocation for spawning this agent in an
+   * interactive terminal pane with `prompt` pre-loaded as the first
+   * positional argument (cmux-style, e.g. `claude "Implement X"`).
+   *
+   * Powers `workspaces.create --via terminal` (issue #551). The server
+   * passes the returned `command + args` straight to
+   * `terminalService.spawn`, which composes a shell-escaped command line
+   * inside the workspace's PTY.
+   *
+   * Adapters whose vendor binary doesn't have a usable interactive
+   * mode (e.g. `cursor-cli`) return `{ unsupported: true, reason: "..." }`;
+   * the workspace service then warns and falls back to the SDK/chat path
+   * so the create call still succeeds.
+   */
+  cliInvocation?(prompt: string): CliInvocation;
 }

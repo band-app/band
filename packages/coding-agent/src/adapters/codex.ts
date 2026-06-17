@@ -14,6 +14,7 @@ import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
   AgentModel,
+  CliInvocation,
   CodingAgent,
   GetSessionMessagesOptions,
   RunSessionOptions,
@@ -419,6 +420,18 @@ export class CodexAdapter implements CodingAgent {
 
   listModels(): AgentModel[] {
     return CODEX_MODELS;
+  }
+
+  /**
+   * Resolved CLI invocation for `workspaces.create --via terminal`
+   * (issue #551). Opens an interactive Codex REPL with `prompt` pre-loaded
+   * as the first positional argument (cmux-style: `codex "<prompt>"`).
+   */
+  cliInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CODEX_DEFAULT_BINARY,
+      args: [prompt],
+    };
   }
 
   async listSessions(dir: string): Promise<SessionListItem[]> {

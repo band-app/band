@@ -9,6 +9,7 @@ import type { AgentEvent } from "../events.js";
 import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentModel,
+  CliInvocation,
   CodingAgent,
   GetSessionMessagesOptions,
   RunSessionOptions,
@@ -314,6 +315,24 @@ export class OpenCodeAdapter implements CodingAgent {
     }
 
     return DEFAULT_MODELS;
+  }
+
+  /**
+   * Resolved CLI invocation for `workspaces.create --via terminal`
+   * (issue #551). Opens an interactive OpenCode TUI with `prompt`
+   * pre-loaded.
+   *
+   * Unlike `codex`/`claude` — whose first positional IS the prompt — the
+   * OpenCode TUI's positional argument is a *project path* (`opencode
+   * [project]`), so a bare `opencode "<prompt>"` would be misread as a
+   * directory to start in. The prompt is fed to the interactive TUI via
+   * the dedicated `--prompt` flag instead.
+   */
+  cliInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath,
+      args: ["--prompt", prompt],
+    };
   }
 
   async listSessions(dir: string): Promise<SessionListItem[]> {

@@ -735,6 +735,37 @@ export class WorkspacePage {
     return body.result.data.tree;
   }
 
+  /** Fire the `workspaces.create` mutation over HTTP with `via:
+   *  "terminal"` — the same wire shape the Rust CLI sends after
+   *  resolving the `--via` precedence chain (`cmd_workspaces_create`).
+   *  Keeps the raw `page.request.post` out of test bodies (issue #551).
+   *  Authenticates via the `band_token` cookie, mirroring how the
+   *  dashboard's tRPC client reaches the server. Returns the unwrapped
+   *  create payload so the test can assert on `via` / `terminalId` /
+   *  `path`. */
+  async createWorkspaceViaTerminal(
+    project: string,
+    branch: string,
+    prompt: string,
+  ): Promise<{ path: string; via?: string; terminalId?: string }> {
+    const res = await this.page.request.post(`${this.baseUrl}/trpc/workspaces.create`, {
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `band_token=${this.token}`,
+      },
+      data: { project, branch, prompt, via: "terminal" },
+    });
+    if (!res.ok()) {
+      throw new Error(
+        `createWorkspaceViaTerminal(${project}, ${branch}) failed: ${res.status()} ${await res.text()}`,
+      );
+    }
+    const body = (await res.json()) as {
+      result: { data: { path: string; via?: string; terminalId?: string } };
+    };
+    return body.result.data;
+  }
+
   /** The QuickOpenDialog content root. `data-testid` is set on
    *  `DialogContent` in `QuickOpenDialog.tsx` — system-controlled,
    *  BEM convention — so the locator stays stable against placeholder

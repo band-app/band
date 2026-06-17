@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -76,6 +77,27 @@ export interface ResolvedWorkspace {
  * future non-tRPC entry points (CLI, scripts) share a single source of
  * truth for the accepted shape — same pattern as `settingsUpdateInput`.
  */
+/**
+ * Where to dispatch a `--prompt` task on workspace create (issue #551).
+ *
+ *   - `"chat"` — current behavior: submit a task to the SDK-backed agent
+ *     and stream events into the workspace's default chat pane.
+ *   - `"terminal"` — spawn the adapter's interactive CLI (`claude
+ *     "<prompt>"`, `codex "<prompt>"`, …) in a fresh terminal pane.
+ *
+ * The schema is the single source of truth for the field; both the API
+ * tier and any future non-tRPC entry points (the Rust CLI included)
+ * forward through `WorkspaceService.create`.
+ *
+ * Default behavior when omitted: `"chat"` — the field is optional so
+ * existing callers (the web UI in particular) keep their current
+ * behavior. The CLI defaults to `"terminal"` *client-side* (resolved
+ * in `cmd_workspaces_create`), so the server never silently overrides
+ * a CLI caller's intent.
+ */
+export const workspaceVia = z.enum(["chat", "terminal"]);
+export type WorkspaceVia = z.infer<typeof workspaceVia>;
+
 export const workspaceCreateInput = z.object({
   project: z.string(),
   branch: z.string(),
@@ -85,6 +107,7 @@ export const workspaceCreateInput = z.object({
   mode: z.string().optional(),
   model: z.string().optional(),
   codingAgentId: z.string().optional(),
+  via: workspaceVia.optional(),
 });
 export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
 
@@ -199,6 +222,25 @@ function isRebaseCollision(err: unknown): boolean {
   return String(err).includes("Cannot rebase onto multiple branches");
 }
 
+/**
+ * Compose a `command + args[]` invocation into a single shell-safe command
+ * string for the terminal pane's PTY (`terminalService.spawn` writes the
+ * `command` option directly to the shell as text, see
+ * `terminal-pool.ts::spawn`).
+ *
+ * Each token is wrapped in single quotes, with any embedded `'` rewritten
+ * as `'\''` (POSIX-style — the only escape sequence single-quoted strings
+ * accept). This is the same algorithm `shell-quote` and `child_process`'s
+ * POSIX shell helpers use; inlined here to avoid the dependency.
+ *
+ * Empty `args` returns the bare command so an interactive REPL without
+ * positional arguments still launches cleanly.
+ */
+function formatShellCommand(command: string, args: string[]): string {
+  const quoted = [command, ...args].map((token) => `'${token.replace(/'/g, "'\\''")}'`);
+  return quoted.join(" ");
+}
+
 export class WorkspaceService {
   constructor(
     private readonly queries: WorkspaceQueries = new WorkspaceQueries(),
@@ -259,8 +301,27 @@ export class WorkspaceService {
    *      setup script finishes (so the coding agent sees its dependencies
    *      installed). When there is no setup script, the task is dispatched
    *      synchronously.
+   *
+   * Dispatch target (`input.via`, issue #551):
+   *   - `"chat"` (default when absent) — submit the prompt to the workspace's
+   *     default chat pane via `taskService.submitTask`.
+   *   - `"terminal"` — resolve the chosen agent's interactive CLI invocation
+   *     (`adapter.cliInvocation(prompt)`) and spawn it in a fresh terminal
+   *     pane via `terminalService.spawn`. The pane id is returned alongside
+   *     the worktree path so callers (the Rust CLI in particular) can wire
+   *     follow-up commands directly to the new pane.
+   *
+   *   When the resolved adapter doesn't expose a vendor CLI for terminal
+   *   dispatch (e.g. cursor-cli today), the service logs a warning and
+   *   falls back to `"chat"` so the create call still succeeds. The
+   *   response then carries `via: "chat"` and no `terminalId`.
    */
-  async create(input: WorkspaceCreateInput): Promise<{ ok: true; path: string }> {
+  async create(input: WorkspaceCreateInput): Promise<{
+    ok: true;
+    path: string;
+    via?: WorkspaceVia;
+    terminalId?: string;
+  }> {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
     if (!project) {
@@ -341,12 +402,77 @@ export class WorkspaceService {
     // ready-to-use UI even when the caller didn't pass a prompt.
     const defaultChat = chatService.getOrCreateDefault(workspaceId);
 
-    // If a prompt is provided, defer task submission until the setup
-    // script completes so the agent has dependencies installed. When
-    // there is no setup command, `runSetup` calls `onComplete`
-    // synchronously, so the task is submitted immediately.
+    // Resolve the dispatch target. The router schema lets `via` be
+    // absent; server-side default is `"chat"` so existing callers (the
+    // web UI) keep their behavior unchanged. The Rust CLI defaults to
+    // `"terminal"` *client-side* and forwards it on every call, so the
+    // server never silently overrides a CLI caller's intent.
+    let via: WorkspaceVia = input.via ?? "chat";
+    let terminalId: string | undefined;
+
+    // Pre-resolve the terminal-pane CLI invocation while we're still on
+    // the request thread so we can fall back to chat early when the
+    // chosen adapter doesn't support a one-shot terminal launch (e.g.
+    // cursor-cli today). Doing the resolution up front keeps the
+    // fall-back synchronous from the caller's perspective — the
+    // response carries the actual `via` we ended up dispatching with.
+    let terminalCommand: string | undefined;
+    if (via === "terminal" && input.prompt) {
+      try {
+        const adapter = await agentService.createWorkspaceAgent(worktreePath, input.codingAgentId);
+        const invocation = adapter.cliInvocation?.(input.prompt);
+        // Release the short-lived adapter — we only needed cliInvocation,
+        // which is a pure-data read; no subprocess was spawned by the
+        // constructor, but the SDK objects (claude-code Query, etc.) hold
+        // an abort handle we should release for tidiness.
+        adapter.abort?.();
+        if (!invocation || invocation.unsupported) {
+          const reason =
+            invocation?.unsupported && "reason" in invocation
+              ? invocation.reason
+              : "adapter does not expose cliInvocation";
+          log.warn(
+            { workspaceId, agentId: input.codingAgentId, reason },
+            "via=terminal requested but adapter does not support it; falling back to chat",
+          );
+          via = "chat";
+        } else {
+          terminalCommand = formatShellCommand(invocation.command, invocation.args);
+          terminalId = randomUUID();
+        }
+      } catch (err) {
+        log.warn(
+          { err, workspaceId, agentId: input.codingAgentId },
+          "failed to resolve cliInvocation for via=terminal; falling back to chat",
+        );
+        via = "chat";
+      }
+    }
+
+    // If a prompt is provided, defer dispatch until the setup script
+    // completes so the agent has dependencies installed. When there is
+    // no setup command, `runSetup` calls `onComplete` synchronously, so
+    // the dispatch happens immediately. The terminal-pane spawn lives
+    // in the same callback as the chat-task submit so both share the
+    // same "wait for setup" guarantee.
     const onSetupComplete = input.prompt
-      ? () =>
+      ? () => {
+          if (via === "terminal" && terminalId && terminalCommand) {
+            terminalService
+              .spawn(workspaceId, terminalId, {
+                command: terminalCommand,
+              })
+              .then(() => {
+                emit({ kind: "terminal-created", workspaceId, terminalId: terminalId! });
+              })
+              .catch((err) => {
+                log.error(
+                  { err, workspaceId, terminalId },
+                  "failed to spawn terminal for via=terminal workspace create",
+                );
+              });
+            return;
+          }
           taskService.submitTask({
             workspaceId,
             chatId: defaultChat.id,
@@ -355,12 +481,13 @@ export class WorkspaceService {
             mode: input.mode,
             model: input.model,
             codingAgentId: input.codingAgentId,
-          })
+          });
+        }
       : undefined;
 
     runSetup(workspaceId, worktreePath, project.path, onSetupComplete);
 
-    return { ok: true, path: worktreePath };
+    return { ok: true, path: worktreePath, via, terminalId };
   }
 
   /**
