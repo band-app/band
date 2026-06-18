@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -198,25 +199,20 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
  * without codex don't go red and dev machines exercise the real
  * round-trip.
  *
- * Matches the `bandBinaryReachable` shape in `apps/web/tests/cli-skills.test.ts`
- * — `statSync` against the canonical install locations rather than
- * spawning `which` per spec-file import.
+ * Uses `which codex` rather than a fixed candidate-path list: codex is
+ * commonly installed under a per-Node-version path (nvm/fnm/volta) that
+ * doesn't match the test runner's own `process.version`, so a hardcoded
+ * `.nvm/versions/node/<version>/bin/codex` probe would skip the test on
+ * hosts where codex is genuinely on PATH. `which` resolves exactly what
+ * the server's `execFile("codex", …)` will find at runtime.
  */
 function codexBinaryReachable(): boolean {
-  const candidates = [
-    "/usr/local/bin/codex",
-    "/opt/homebrew/bin/codex",
-    `${process.env.HOME ?? ""}/.nvm/versions/node/${process.version}/bin/codex`,
-  ];
-  for (const path of candidates) {
-    try {
-      statSync(path);
-      return true;
-    } catch {
-      // Not at this path; try the next.
-    }
+  try {
+    execFileSync("which", ["codex"], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 test("clicking Refresh models persists the cached list to settings.json", async ({ page }) => {

@@ -161,6 +161,20 @@ export class SettingsService {
    */
   update(patch: SettingsUpdate): void {
     if (patch.codingAgents) {
+      // This re-attach reads the file once here, then `queries.save()`
+      // re-reads it again under the hood for its own atomic merge. The
+      // second read is intentional, not redundant: `save()` always
+      // merges against the latest on-disk document so a concurrent
+      // write from the desktop shell (which bypasses this server) isn't
+      // clobbered. That same property also makes the
+      // `ModelRefreshService.persistFromSnapshot()` ↔ `update()` race
+      // benign and last-writer-wins: whichever of the two `save()` calls
+      // lands second re-reads the other's freshly-written
+      // `cachedModels` first. The window is narrow and never produces a
+      // torn document — at worst a just-finished model refresh is
+      // re-applied (no-op) or a just-saved label edit lands a beat
+      // later. The settings file is a few KB and `update()` only runs on
+      // an explicit user "Save", so the extra read is negligible.
       const existing = this.queries.load();
       const cached = new Map(
         (existing.codingAgents ?? []).map((a) => [

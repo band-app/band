@@ -96,9 +96,9 @@ export class ModelRefreshService {
    * Compose the full payload the `models.list` tRPC procedure returns
    * for one agent: `{ models, defaultModel, updatedAt }`. Keeps the
    * shape assembly (settings load + agent resolution + cache lookup)
-   * in the service tier so the router stays a one-liner — the
-   * pattern documented in `docs/web-architecture.md` for service →
-   * api boundaries.
+   * in the service tier so the router stays a single delegating call
+   * and the same composition is reachable from other callers without
+   * duplicating the field-by-field assembly logic.
    */
   async listForAgent(
     agentId: string | undefined,
@@ -215,15 +215,20 @@ export class ModelRefreshService {
       };
     }
 
-    // Refresh failed — return the prior cache (or adapter defaults)
-    // without touching the on-disk settings.
-    const prior = await this.getCachedOrDefaultsFromSnapshot(settings, agentId);
-    const priorUpdated =
-      (settings.codingAgents ?? []).find((a) => a.id === agentId)?.cachedModelsUpdatedAt ?? 0;
+    // Refresh failed — return the prior cache without touching the
+    // on-disk settings. Read the cache DIRECTLY off the snapshot rather
+    // than via `getCachedOrDefaultsFromSnapshot`: the fallback path in
+    // that helper spawns a fresh metadata agent on a cache miss, and
+    // since the refresh just failed (typically a missing/broken binary)
+    // a second spawn would only fail again — doubling the subprocess
+    // cost for nothing. An empty list on a cache miss is the correct
+    // "we have nothing to show yet" signal; the `error` field tells the
+    // caller why.
+    const def = (settings.codingAgents ?? []).find((a) => a.id === agentId);
     return {
       agentId,
-      models: prior,
-      updatedAt: priorUpdated,
+      models: def?.cachedModels ?? [],
+      updatedAt: def?.cachedModelsUpdatedAt ?? 0,
       error,
     };
   }

@@ -46,6 +46,14 @@ const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultC
 // when reading or writing the persisted agent definition.
 const MODEL_DEFAULT_SENTINEL = "__band_default__";
 
+// Delimiter for the joined-string proxy used as a memoisation key over
+// the configured agent ids (see the `agentIdsKey` useMemo below). U+001F
+// INFORMATION SEPARATOR ONE is a C0 control character that no user can
+// type into a settings.json agent id through the Settings form's `id`
+// Input, so the join/split round-trip is lossless. Hoisted to module
+// scope so the constant isn't re-created on every component render.
+const ID_DELIMITER = "";
+
 interface Props {
   /** Whether the dialog is visible. */
   open: boolean;
@@ -184,29 +192,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     [],
   );
 
-  // Fetch the cached models for each enabled agent. Reads from
-  // `~/.band/settings.json` via `models.list` — populated by the
-  // boot-time background refresh or an explicit "Refresh models" click.
-  // No live SDK fetch happens here.
-  //
-  // `agentIdsKey` is the stable proxy for "the set of configured agent
-  // ids". Every `setCodingAgents(prev => prev.map(...))` call (e.g.
-  // a keystroke into a per-agent Command input) produces a fresh
-  // `codingAgents` array reference; depending on the array directly
-  // would tRPC-spam `models.list` on every character typed (PERF-9).
-  // Splitting the string back to an array inside `useMemo` gives us a
-  // value the effect can iterate without holding a reference to the
-  // mutable `codingAgents` state.
-  //
-  // Delimiter: U+001F INFORMATION SEPARATOR ONE — a C0 control
-  // character no user can type into a settings.json agent id through
-  // the Settings form's `id` Input, so the join/split round-trip is
-  // lossless for any realistic id. Earlier this was U+0000 (NUL), but
-  // a literal NUL byte in the comment block made tools like ripgrep,
-  // grep, and GitHub code search classify the whole file as binary
-  // and skip it during repo-wide searches. U+001F shares the
-  // "never-appears-in-user-input" property without that drawback.
-  const ID_DELIMITER = "\u001f";
   // Memoise the join so callers downstream of `agentIdsKey` only
   // re-evaluate when the set of agent ids actually changes — not on
   // every keystroke into a per-agent Command input that re-renders
