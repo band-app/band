@@ -465,9 +465,20 @@ export class CodexAdapter implements CodingAgent {
         },
       );
     });
-    const parsed = JSON.parse(raw) as { models?: CodexDebugModel[] };
-    const models = parsed.models ?? [];
-    const visible = models
+    // The shape of `codex debug models` is set by upstream; we
+    // validate enough to keep this from turning a malformed catalog
+    // into a runtime TypeError when accessing `.models` on a
+    // non-object or `.filter` on a non-array. Anything that survives
+    // those guards goes through the per-field filter below.
+    const parsedUnknown = JSON.parse(raw) as unknown;
+    if (typeof parsedUnknown !== "object" || parsedUnknown === null) {
+      throw new Error("codex debug models did not return a JSON object");
+    }
+    const models = (parsedUnknown as { models?: unknown }).models;
+    if (!Array.isArray(models)) {
+      throw new Error("codex debug models did not include a `models` array");
+    }
+    const visible = (models as CodexDebugModel[])
       .filter((m) => m.visibility !== "hide" && typeof m.slug === "string")
       .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
     log.info({ count: visible.length }, "refreshed supported models from codex");

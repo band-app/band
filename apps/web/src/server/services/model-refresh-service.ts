@@ -46,6 +46,7 @@ import type {
   Settings,
 } from "../infra/db/queries/settings";
 import { SettingsQueries } from "../infra/db/queries/settings";
+import { SettingsService } from "./settings-service";
 
 const log = createLogger("model-refresh");
 
@@ -89,6 +90,32 @@ export class ModelRefreshService {
   async getCachedOrDefaults(agentId: string): Promise<CachedAgentModel[]> {
     const settings = this.queries.load();
     return this.getCachedOrDefaultsFromSnapshot(settings, agentId);
+  }
+
+  /**
+   * Compose the full payload the `models.list` tRPC procedure returns
+   * for one agent: `{ models, defaultModel, updatedAt }`. Keeps the
+   * shape assembly (settings load + agent resolution + cache lookup)
+   * in the service tier so the router stays a one-liner — the
+   * pattern documented in `docs/web-architecture.md` for service →
+   * api boundaries.
+   */
+  async listForAgent(
+    agentId: string | undefined,
+    snapshot?: Settings,
+  ): Promise<{
+    models: CachedAgentModel[];
+    defaultModel?: string;
+    updatedAt?: number;
+  }> {
+    const settings = snapshot ?? this.queries.load();
+    const def = SettingsService.resolveAgent(settings, agentId);
+    const models = await this.getCachedOrDefaultsFromSnapshot(settings, def.id);
+    return {
+      models,
+      defaultModel: def.model,
+      updatedAt: def.cachedModelsUpdatedAt,
+    };
   }
 
   /**
@@ -149,7 +176,12 @@ export class ModelRefreshService {
         fresh = await agent.refreshModels();
       }
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      // Surface only a sanitized classification to the tRPC response —
+      // raw error messages from the SDK can include filesystem paths,
+      // partial commands, or other host state the client doesn't need
+      // to see. The full `err` (including the stack) is still logged
+      // server-side at warn level for operator debugging.
+      error = classifyRefreshError(err);
       log.warn({ agentId, err }, "failed to refresh models; keeping prior cache");
     }
 
@@ -232,12 +264,27 @@ export class ModelRefreshService {
       defaultModel?: string;
     }[]
   > {
-    const settings = this.queries.load();
+    return this.getAllCachedOrDefaultsFromSnapshot(this.queries.load());
+  }
+
+  /**
+   * Snapshot-based variant. Callers (the `models.listAll` tRPC handler)
+   * that already hold a settings snapshot pass it in so this method
+   * does zero file reads of its own.
+   */
+  async getAllCachedOrDefaultsFromSnapshot(settings: Settings): Promise<
+    {
+      agentId: string;
+      agentType: string;
+      agentLabel: string;
+      models: CachedAgentModel[];
+      updatedAt?: number;
+      defaultModel?: string;
+    }[]
+  > {
     const agents = settings.codingAgents ?? [];
-    const out: Awaited<ReturnType<typeof this.getAllCachedOrDefaults>> = [];
+    const out: Awaited<ReturnType<typeof this.getAllCachedOrDefaultsFromSnapshot>> = [];
     for (const def of agents) {
-      // Pass the already-loaded snapshot so each per-agent fallback
-      // doesn't pay a fresh settings.json read.
       const models = await this.getCachedOrDefaultsFromSnapshot(settings, def.id);
       out.push({
         agentId: def.id,
@@ -291,6 +338,22 @@ function toCachedModel(m: AgentModel): CachedAgentModel {
     description: m.description,
     contextWindow: m.contextWindow,
   };
+}
+
+/**
+ * Classify a refresh failure into a short, host-state-free string the
+ * tRPC response can carry safely. The full `err` stays in the
+ * server-side log line; this is what the UI renders next to the
+ * "Refresh failed" banner.
+ */
+function classifyRefreshError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/ENOENT|not found|spawn .* ENOENT/i.test(raw)) return "agent binary not found";
+  if (/ETIMEDOUT|timed out|timeout/i.test(raw)) return "agent did not respond in time";
+  if (/ECONNREFUSED|ECONNRESET|ENETUNREACH|EAI_AGAIN/i.test(raw)) return "network error";
+  if (/SyntaxError|Unexpected token|JSON/i.test(raw)) return "could not parse model catalog";
+  if (/permission denied|EACCES|EPERM/i.test(raw)) return "permission denied";
+  return "refresh failed";
 }
 
 /**

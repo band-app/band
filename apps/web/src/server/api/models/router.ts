@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { modelRefreshService } from "../../services/model-refresh-service";
-import { getAgentDefinition, loadSettings } from "../../services/state";
+import { loadSettings } from "../../services/state";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -17,30 +17,17 @@ import { publicProcedure, t } from "../trpc";
 export const modelsRouter = t.router({
   list: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const settings = loadSettings();
-      const agentDef = getAgentDefinition(settings, input.agentId);
-      // Pass the already-loaded snapshot so the service does NOT re-read
-      // settings.json — collapses the read path to one fs hit per query.
-      const models = await modelRefreshService.getCachedOrDefaultsFromSnapshot(
-        settings,
-        agentDef.id,
-      );
-      return {
-        models,
-        defaultModel: agentDef.model,
-        updatedAt: agentDef.cachedModelsUpdatedAt,
-      };
-    }),
+    .query(({ input }) => modelRefreshService.listForAgent(input.agentId)),
 
   /** List all agents with their cached models — used by the combined
-   *  agent/model selector in the chat UI. */
+   *  agent/model selector in the chat UI. Loads settings.json exactly
+   *  once and threads the snapshot through to the service so the read
+   *  path stays at one fs hit per query. */
   listAll: publicProcedure.query(async () => {
     const settings = loadSettings();
     const codingAgents = settings.codingAgents ?? [];
     const defaultAgentId = settings.defaultCodingAgent ?? codingAgents[0]?.id ?? "";
-
-    const agents = await modelRefreshService.getAllCachedOrDefaults();
+    const agents = await modelRefreshService.getAllCachedOrDefaultsFromSnapshot(settings);
     return { agents, defaultAgentId };
   }),
 

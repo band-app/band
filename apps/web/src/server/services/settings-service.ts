@@ -43,6 +43,14 @@ export const settingsUpdateInput = z
     // when the field is cleared — the legacy behavior preserved across the
     // 3-tier migration.
     worktreesDir: z.string().nullish(),
+    // `cachedModels` / `cachedModelsUpdatedAt` are intentionally NOT
+    // in this schema even though they're part of the `CodingAgentDefinition`
+    // shape — they're write-protected through this route. The only
+    // intended writer is `ModelRefreshService.persistFromSnapshot()`,
+    // which composes the patch server-side and bypasses Zod stripping
+    // by calling `SettingsQueries.save()` directly. Adding the fields
+    // here would let any authenticated client overwrite the cache
+    // with attacker-controlled values via `settings.update`.
     codingAgents: z
       .array(
         z.object({
@@ -51,17 +59,6 @@ export const settingsUpdateInput = z
           label: z.string(),
           command: z.string().optional(),
           model: z.string().optional(),
-          cachedModels: z
-            .array(
-              z.object({
-                id: z.string(),
-                name: z.string(),
-                description: z.string().optional(),
-                contextWindow: z.number().optional(),
-              }),
-            )
-            .optional(),
-          cachedModelsUpdatedAt: z.number().optional(),
         }),
       )
       .optional(),
@@ -151,8 +148,37 @@ export class SettingsService {
    * service tier and the tRPC router's `.input(...)` validator stay in
    * lock-step — adding or removing a field in the schema is a compile
    * error at every call site instead of silent drift.
+   *
+   * Special handling for `codingAgents`: the Zod schema deliberately
+   * omits `cachedModels` / `cachedModelsUpdatedAt` so authenticated
+   * clients can't overwrite the model cache through `settings.update`.
+   * But the dashboard reads the full settings, edits one field (label,
+   * command, model), and round-trips the whole array — so a plain
+   * shallow merge of `patch.codingAgents` would WIPE the cache for
+   * every save. To preserve it, we re-attach the on-disk
+   * `cachedModels` / `cachedModelsUpdatedAt` for each agent id present
+   * in the patch before handing the merge to `queries.save()`.
    */
   update(patch: SettingsUpdate): void {
+    if (patch.codingAgents) {
+      const existing = this.queries.load();
+      const cached = new Map(
+        (existing.codingAgents ?? []).map((a) => [
+          a.id,
+          {
+            cachedModels: a.cachedModels,
+            cachedModelsUpdatedAt: a.cachedModelsUpdatedAt,
+          },
+        ]),
+      );
+      patch = {
+        ...patch,
+        codingAgents: patch.codingAgents.map((a) => {
+          const prev = cached.get(a.id);
+          return prev ? { ...a, ...prev } : a;
+        }),
+      };
+    }
     this.queries.save(patch);
   }
 

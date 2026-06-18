@@ -12,8 +12,6 @@
  * `codex debug models` so the codex-refresh case is gated on whether
  * the `codex` binary is on PATH (see the load-bearing assertion in
  * "refresh without agentId" that handles both branches).
- *
- * See: docs/integration-testing.md, .claude/skills/write-integration-test/SKILL.md.
  */
 
 import { readFileSync, rmSync } from "node:fs";
@@ -221,17 +219,20 @@ describe("models router — refresh persists the new list", () => {
     const persisted = readSettingsFile(tmpHome);
     const codex = persisted.codingAgents?.find((a) => a.id === "codex");
     if (codexResult?.error) {
-      // Binary missing — preseeded cache stays put. Pin the error
-      // message at least loosely (must mention codex / ENOENT) so the
-      // branch doesn't silently accept unrelated failures from
-      // `refreshModels()`.
-      expect(codexResult.error).toMatch(/codex|ENOENT|not found/i);
+      // Binary missing — preseeded cache stays put. The service
+      // sanitises raw SDK errors through `classifyRefreshError`, so
+      // pin the exact classification rather than the underlying
+      // ENOENT-flavoured message we used to see.
+      expect(codexResult.error).toBe("agent binary not found");
       expect(codex?.cachedModels).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
       expect(codex?.cachedModelsUpdatedAt).toBe(1_700_000_000_000);
     } else {
       // Binary available — preseeded cache is replaced by the live list.
+      // Don't pin the id prefix — Codex ships new model lines on its own
+      // cadence (gpt-5.x today; o4/o5 or beyond tomorrow). The presence
+      // of >0 entries with a fresh timestamp is enough to prove the
+      // refresh did its job.
       expect(codex?.cachedModels?.length).toBeGreaterThan(0);
-      expect(codex?.cachedModels?.[0]?.id?.startsWith("gpt-")).toBe(true);
       expect(codex?.cachedModelsUpdatedAt).toBeGreaterThan(1_700_000_000_000);
     }
   });

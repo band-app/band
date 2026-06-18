@@ -27,12 +27,9 @@
  *     here. Same shape as existing service-level tests
  *     (`state.test.ts`, `usage-events-retention.test.ts`,
  *     `sync-service.test.ts`).
- *
- * See: docs/integration-testing.md, .claude/skills/write-integration-test/SKILL.md.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentModel, CodingAgent } from "@band-app/coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -42,6 +39,7 @@ import {
   type ModelRefreshPool,
   ModelRefreshService,
 } from "../src/server/services/model-refresh-service";
+import { createTmpHome } from "./helpers/server";
 
 function readSettingsFile(tmpHome: string): Settings {
   const raw = readFileSync(join(tmpHome, ".band", "settings.json"), "utf-8");
@@ -49,7 +47,8 @@ function readSettingsFile(tmpHome: string): Settings {
 }
 
 function writeSettings(tmpHome: string, settings: Settings): void {
-  mkdirSync(join(tmpHome, ".band"), { recursive: true });
+  // `createTmpHome` (from ./helpers/server) already mkdir'd
+  // `tmpHome/.band`; we only need to write the JSON file here.
   writeFileSync(
     join(tmpHome, ".band", "settings.json"),
     `${JSON.stringify(settings, null, 2)}\n`,
@@ -86,7 +85,7 @@ describe("ModelRefreshService", () => {
   let originalBandHome: string | undefined;
 
   beforeEach(() => {
-    tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-model-refresh-")));
+    tmp = createTmpHome("band-model-refresh-");
     // The service reads `~/.band/settings.json` via `SettingsQueries`,
     // which composes the path from `$BAND_HOME` (preferred) or
     // `$HOME/.band`. Override `BAND_HOME` directly so the seam matches
@@ -173,7 +172,10 @@ describe("ModelRefreshService", () => {
 
     const result = await service.refresh("claude-code");
 
-    expect(result.error).toBe("network down");
+    // Service classifies the raw SDK error through
+    // `classifyRefreshError`. "network down" doesn't match any pattern
+    // → falls through to the generic classification.
+    expect(result.error).toBe("refresh failed");
     expect(result.models).toEqual([{ id: "cached-1", name: "Cached 1" }]);
     expect(result.updatedAt).toBe(priorTime);
 
@@ -264,7 +266,8 @@ describe("ModelRefreshService", () => {
     expect(results.map((r) => r.agentId)).toEqual(["claude-code", "codex", "opencode"]);
 
     const codexResult = results.find((r) => r.agentId === "codex");
-    expect(codexResult?.error).toBe("codex binary not found");
+    // "codex binary not found" matches the ENOENT/not-found pattern.
+    expect(codexResult?.error).toBe("agent binary not found");
 
     const claudeResult = results.find((r) => r.agentId === "claude-code");
     expect(claudeResult?.error).toBeUndefined();

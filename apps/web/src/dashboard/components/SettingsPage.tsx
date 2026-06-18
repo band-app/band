@@ -207,7 +207,14 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   // and skip it during repo-wide searches. U+001F shares the
   // "never-appears-in-user-input" property without that drawback.
   const ID_DELIMITER = "\u001f";
-  const agentIdsKey = codingAgents.map((a) => a.id).join(ID_DELIMITER);
+  // Memoise the join so callers downstream of `agentIdsKey` only
+  // re-evaluate when the set of agent ids actually changes — not on
+  // every keystroke into a per-agent Command input that re-renders
+  // the component with a fresh `codingAgents` array reference.
+  const agentIdsKey = useMemo(
+    () => codingAgents.map((a) => a.id).join(ID_DELIMITER),
+    [codingAgents],
+  );
   const agentIds = useMemo(
     () => (agentIdsKey === "" ? [] : agentIdsKey.split(ID_DELIMITER)),
     [agentIdsKey],
@@ -250,7 +257,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     mergeAgentModels(agentId, { isRefreshing: true, error: undefined });
     try {
       const data = await adapter.refreshModels(agentId);
-      const result = data.results.find((r) => r.agentId === agentId) ?? data.results[0];
+      // Strict find — a missing result is a server contract bug and
+      // should be surfaced as an error rather than silently applying
+      // someone else's model list. The previous `?? data.results[0]`
+      // fallback could splice a different agent's models into this
+      // agent's UI state.
+      const result = data.results.find((r) => r.agentId === agentId);
       if (result) {
         mergeAgentModels(agentId, {
           models: result.models,
@@ -259,7 +271,10 @@ export function SettingsPage({ open, onOpenChange }: Props) {
           error: result.error,
         });
       } else {
-        mergeAgentModels(agentId, { isRefreshing: false });
+        mergeAgentModels(agentId, {
+          isRefreshing: false,
+          error: `server returned no refresh result for ${agentId}`,
+        });
       }
     } catch (err) {
       mergeAgentModels(agentId, {
