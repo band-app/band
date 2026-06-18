@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { createLogger } from "@band-app/logger";
 import type { ThreadEvent, ThreadItem, TodoListItem } from "@openai/codex-sdk";
 import { Codex } from "@openai/codex-sdk";
+import { z } from "zod";
 import type { CodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { computeCost } from "../pricing.js";
@@ -465,11 +466,11 @@ export class CodexAdapter implements CodingAgent {
         },
       );
     });
-    // The shape of `codex debug models` is set by upstream; we
-    // validate enough to keep this from turning a malformed catalog
-    // into a runtime TypeError when accessing `.models` on a
-    // non-object or `.filter` on a non-array. Anything that survives
-    // those guards goes through the per-field filter below.
+    // The shape of `codex debug models` is set by upstream. Guard the
+    // envelope (`{ models: [...] }`), then validate each element against
+    // `codexDebugModelSchema` — malformed entries are dropped rather than
+    // discarding the whole catalog, and the schema's `.passthrough()`
+    // tolerates the many fields we don't read.
     const parsedUnknown = JSON.parse(raw) as unknown;
     if (typeof parsedUnknown !== "object" || parsedUnknown === null) {
       throw new Error("codex debug models did not return a JSON object");
@@ -478,8 +479,17 @@ export class CodexAdapter implements CodingAgent {
     if (!Array.isArray(models)) {
       throw new Error("codex debug models did not include a `models` array");
     }
-    const visible = (models as CodexDebugModel[])
-      .filter((m) => m.visibility !== "hide" && typeof m.slug === "string")
+    const validated: CodexDebugModel[] = [];
+    for (const entry of models) {
+      const parsed = codexDebugModelSchema.safeParse(entry);
+      if (parsed.success) {
+        validated.push(parsed.data);
+      } else {
+        log.warn({ entry }, "skipping malformed codex model catalog entry");
+      }
+    }
+    const visible = validated
+      .filter((m) => m.visibility !== "hide")
       .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
     log.info({ count: visible.length }, "refreshed supported models from codex");
     return visible.map(
@@ -737,19 +747,26 @@ const cachedCodexBinary: string | undefined = (() => {
 // ─── Models ─────────────────────────────────────────────────────────────────
 
 /**
- * Subset of the JSON shape emitted by `codex debug models`. Only the
- * fields the adapter actually consumes are typed here — the catalog has
- * many more keys (`base_instructions`, `supported_reasoning_levels`,
- * `availability_nux`, etc.) we don't need.
+ * Zod schema for the subset of the `codex debug models` JSON we consume.
+ * `.passthrough()` keeps the many fields we don't read (`base_instructions`,
+ * `supported_reasoning_levels`, `availability_nux`, …) without rejecting
+ * the element, while still enforcing that `slug` is a string and the
+ * optional fields, when present, have the expected types. Validated
+ * per-element in `refreshModels()` so a single malformed entry is skipped
+ * rather than discarding the whole catalog.
  */
-interface CodexDebugModel {
-  slug: string;
-  display_name?: string;
-  description?: string;
-  visibility?: string;
-  priority?: number;
-  context_window?: number;
-}
+const codexDebugModelSchema = z
+  .object({
+    slug: z.string(),
+    display_name: z.string().optional(),
+    description: z.string().optional(),
+    visibility: z.string().optional(),
+    priority: z.number().optional(),
+    context_window: z.number().optional(),
+  })
+  .passthrough();
+
+type CodexDebugModel = z.infer<typeof codexDebugModelSchema>;
 
 // ─── Skills ─────────────────────────────────────────────────────────────────
 

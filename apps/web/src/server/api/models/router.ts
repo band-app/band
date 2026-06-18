@@ -33,11 +33,7 @@ export const modelsRouter = t.router({
   refresh: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))
     .mutation(async ({ input }) => {
-      if (input.agentId) {
-        const result = await modelRefreshService.refresh(input.agentId);
-        return { results: [result] };
-      }
-      const results = await modelRefreshService.refreshAll();
+      const results = await modelRefreshService.refreshOneOrAll(input.agentId);
       return { results };
     }),
 });

@@ -17,7 +17,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Settings } from "../src/server/infra/db/queries/settings";
 import { seedSettings } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -30,8 +29,24 @@ import {
 
 const TOKEN = "models-router-token";
 
-function readSettingsFile(home: string): Settings {
-  return JSON.parse(readFileSync(join(home, ".band", "settings.json"), "utf-8")) as Settings;
+/**
+ * Just the slice of `~/.band/settings.json` these tests assert on —
+ * described locally rather than importing the production `Settings`
+ * type from `src/server/infra/**`, so the test isn't coupled to the
+ * internal schema (TEST-2).
+ */
+interface PersistedSettings {
+  codingAgents?: {
+    id: string;
+    cachedModels?: { id: string; name?: string }[];
+    cachedModelsUpdatedAt?: number;
+  }[];
+}
+
+function readSettingsFile(home: string): PersistedSettings {
+  return JSON.parse(
+    readFileSync(join(home, ".band", "settings.json"), "utf-8"),
+  ) as PersistedSettings;
 }
 
 /**

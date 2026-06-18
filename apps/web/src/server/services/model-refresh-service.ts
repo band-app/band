@@ -247,6 +247,19 @@ export class ModelRefreshService {
   }
 
   /**
+   * Dispatch a refresh request: one agent when `agentId` is supplied,
+   * otherwise every configured agent. Encapsulates the single-vs-all
+   * branch so the `models.refresh` tRPC router stays a pure delegate
+   * (validate → call service → return).
+   */
+  async refreshOneOrAll(agentId?: string): Promise<ModelRefreshResult[]> {
+    if (agentId) {
+      return [await this.refresh(agentId)];
+    }
+    return this.refreshAll();
+  }
+
+  /**
    * Read the cached model list for every configured coding agent. This is
    * what the Settings UI and the chat model picker call — a single
    * settings.json read returns the full {agentId → models} map plus the
