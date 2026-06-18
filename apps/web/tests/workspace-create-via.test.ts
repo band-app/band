@@ -244,7 +244,15 @@ describe("workspaces.create via=terminal happy path", () => {
         { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
       ],
     });
-    server = await startServer({ tmpHome });
+    // Opt out of the fire-and-forget boot refresh of agent model lists.
+    // The seeded `stub-claude.sh` is a 2-line shell script that exits
+    // immediately — it can't respond to the Claude Agent SDK's protocol
+    // handshake, which would cause the SDK's `supportedModels()` query
+    // to hang and wedge the parent server process on shutdown.
+    server = await startServer({
+      tmpHome,
+      env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
+    });
   });
 
   afterAll(async () => {
@@ -408,9 +416,12 @@ describe("workspaces.create via=chat path", () => {
         },
       ],
     });
+    // Opt out of the boot refresh — `fake-agent.mjs` responds to every
+    // `control_request` with an empty payload, so a `supportedModels()`
+    // query at boot would either return garbage or wedge the SDK.
     server = await startServer({
       tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
+      env: { FAKE_AGENT_SCENARIO: scenarioPath, BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
     });
   });
 
