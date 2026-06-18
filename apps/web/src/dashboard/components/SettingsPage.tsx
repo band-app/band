@@ -52,7 +52,10 @@ const MODEL_DEFAULT_SENTINEL = "__band_default__";
 // type into a settings.json agent id through the Settings form's `id`
 // Input, so the join/split round-trip is lossless. Hoisted to module
 // scope so the constant isn't re-created on every component render.
-const ID_DELIMITER = "";
+// Written as the explicit `\u001f` escape (not a literal control byte)
+// so the value is unambiguous in source — a literal renders as an
+// invisible character in editors and diffs.
+const ID_DELIMITER = "\u001f";
 
 interface Props {
   /** Whether the dialog is visible. */
@@ -237,37 +240,44 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     }
   }, [agentIds, adapter, mergeAgentModels]);
 
-  const handleRefreshModels = async (agentId: string) => {
-    if (!adapter.refreshModels) return;
-    mergeAgentModels(agentId, { isRefreshing: true, error: undefined });
-    try {
-      const data = await adapter.refreshModels(agentId);
-      // Strict find — a missing result is a server contract bug and
-      // should be surfaced as an error rather than silently applying
-      // someone else's model list. The previous `?? data.results[0]`
-      // fallback could splice a different agent's models into this
-      // agent's UI state.
-      const result = data.results.find((r) => r.agentId === agentId);
-      if (result) {
+  // `useCallback` for parity with `mergeAgentModels` and so the handler
+  // reference stays stable across renders (it's passed to each agent's
+  // Refresh button onClick). Deps: `adapter` (the refresh transport) and
+  // the memoised `mergeAgentModels`.
+  const handleRefreshModels = useCallback(
+    async (agentId: string) => {
+      if (!adapter.refreshModels) return;
+      mergeAgentModels(agentId, { isRefreshing: true, error: undefined });
+      try {
+        const data = await adapter.refreshModels(agentId);
+        // Strict find — a missing result is a server contract bug and
+        // should be surfaced as an error rather than silently applying
+        // someone else's model list. The previous `?? data.results[0]`
+        // fallback could splice a different agent's models into this
+        // agent's UI state.
+        const result = data.results.find((r) => r.agentId === agentId);
+        if (result) {
+          mergeAgentModels(agentId, {
+            models: result.models,
+            updatedAt: result.updatedAt,
+            isRefreshing: false,
+            error: result.error,
+          });
+        } else {
+          mergeAgentModels(agentId, {
+            isRefreshing: false,
+            error: `server returned no refresh result for ${agentId}`,
+          });
+        }
+      } catch (err) {
         mergeAgentModels(agentId, {
-          models: result.models,
-          updatedAt: result.updatedAt,
           isRefreshing: false,
-          error: result.error,
-        });
-      } else {
-        mergeAgentModels(agentId, {
-          isRefreshing: false,
-          error: `server returned no refresh result for ${agentId}`,
+          error: err instanceof Error ? err.message : String(err),
         });
       }
-    } catch (err) {
-      mergeAgentModels(agentId, {
-        isRefreshing: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
+    },
+    [adapter, mergeAgentModels],
+  );
 
   const isDirty = useMemo(() => {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;

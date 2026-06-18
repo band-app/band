@@ -32,6 +32,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { CodingAgentType } from "../../src/dashboard/types";
 
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
@@ -197,7 +198,7 @@ export class SettingsPage {
    * (BEM convention). Note: parameter is the agent **type**, not label,
    * to match the `data-testid` attribute in `SettingsPage.tsx`.
    */
-  modelList(agentType: "claude-code" | "codex" | "opencode"): Locator {
+  modelList(agentType: CodingAgentType): Locator {
     return this.dialog.getByTestId(`settings-page__model-list-${agentType}`);
   }
 
@@ -208,7 +209,7 @@ export class SettingsPage {
    * that resolves to every row; callers chain `.first()`, `.nth(i)`,
    * or assert on `.count()` directly.
    */
-  modelListItems(agentType: "claude-code" | "codex" | "opencode"): Locator {
+  modelListItems(agentType: CodingAgentType): Locator {
     return this.modelList(agentType).getByRole("listitem");
   }
 

@@ -59,6 +59,17 @@ export interface ModelRefreshResult {
   error?: string;
 }
 
+/** One agent's entry in the combined picker payload (`getAllCachedOrDefaults`
+ *  / `listAllForPicker`). */
+export interface AgentModelsEntry {
+  agentId: string;
+  agentType: string;
+  agentLabel: string;
+  models: CachedAgentModel[];
+  updatedAt?: number;
+  defaultModel?: string;
+}
+
 export class ModelRefreshService {
   constructor(private readonly queries: SettingsQueries = new SettingsQueries()) {}
 
@@ -243,16 +254,7 @@ export class ModelRefreshService {
    * When an agent has no cached entry yet, falls back to the adapter's
    * static defaults via `getCachedOrDefaultsFromSnapshot`.
    */
-  async getAllCachedOrDefaults(): Promise<
-    {
-      agentId: string;
-      agentType: string;
-      agentLabel: string;
-      models: CachedAgentModel[];
-      updatedAt?: number;
-      defaultModel?: string;
-    }[]
-  > {
+  async getAllCachedOrDefaults(): Promise<AgentModelsEntry[]> {
     return this.getAllCachedOrDefaultsFromSnapshot(this.queries.load());
   }
 
@@ -261,18 +263,9 @@ export class ModelRefreshService {
    * that already hold a settings snapshot pass it in so this method
    * does zero file reads of its own.
    */
-  async getAllCachedOrDefaultsFromSnapshot(settings: Settings): Promise<
-    {
-      agentId: string;
-      agentType: string;
-      agentLabel: string;
-      models: CachedAgentModel[];
-      updatedAt?: number;
-      defaultModel?: string;
-    }[]
-  > {
+  async getAllCachedOrDefaultsFromSnapshot(settings: Settings): Promise<AgentModelsEntry[]> {
     const agents = settings.codingAgents ?? [];
-    const out: Awaited<ReturnType<typeof this.getAllCachedOrDefaultsFromSnapshot>> = [];
+    const out: AgentModelsEntry[] = [];
     for (const def of agents) {
       const models = await this.getCachedOrDefaultsFromSnapshot(settings, def.id);
       out.push({
@@ -285,6 +278,24 @@ export class ModelRefreshService {
       });
     }
     return out;
+  }
+
+  /**
+   * Full payload for the chat UI's combined agent/model picker:
+   * `{ agents, defaultAgentId }`. Loads settings.json once and resolves
+   * the effective default-agent id (explicit `defaultCodingAgent`, else
+   * the first configured agent, else "") here in the service so the
+   * `models.listAll` router stays a single delegating call.
+   */
+  async listAllForPicker(): Promise<{
+    agents: AgentModelsEntry[];
+    defaultAgentId: string;
+  }> {
+    const settings = this.queries.load();
+    const codingAgents = settings.codingAgents ?? [];
+    const defaultAgentId = settings.defaultCodingAgent ?? codingAgents[0]?.id ?? "";
+    const agents = await this.getAllCachedOrDefaultsFromSnapshot(settings);
+    return { agents, defaultAgentId };
   }
 
   /**

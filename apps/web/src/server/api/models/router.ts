@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { modelRefreshService } from "../../services/model-refresh-service";
-import { loadSettings } from "../../services/state";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -20,16 +19,9 @@ export const modelsRouter = t.router({
     .query(({ input }) => modelRefreshService.listForAgent(input.agentId)),
 
   /** List all agents with their cached models — used by the combined
-   *  agent/model selector in the chat UI. Loads settings.json exactly
-   *  once and threads the snapshot through to the service so the read
-   *  path stays at one fs hit per query. */
-  listAll: publicProcedure.query(async () => {
-    const settings = loadSettings();
-    const codingAgents = settings.codingAgents ?? [];
-    const defaultAgentId = settings.defaultCodingAgent ?? codingAgents[0]?.id ?? "";
-    const agents = await modelRefreshService.getAllCachedOrDefaultsFromSnapshot(settings);
-    return { agents, defaultAgentId };
-  }),
+   *  agent/model selector in the chat UI. The service loads settings.json
+   *  once and resolves the effective default-agent id. */
+  listAll: publicProcedure.query(() => modelRefreshService.listAllForPicker()),
 
   /**
    * Refresh the cached model list for the given agent (or every

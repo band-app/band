@@ -16,7 +16,7 @@
 
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Settings } from "../src/server/infra/db/queries/settings";
 import { seedSettings } from "./helpers/seed-state";
 import {
@@ -53,10 +53,13 @@ async function bootWithSettings(settings: object): Promise<{ server: ServerHandl
 }
 
 describe("models router — read path (preseeded cache)", () => {
+  // Read-only block (list / listAll never mutate settings.json), so a
+  // single shared server boot is safe — beforeAll/afterAll instead of
+  // per-test boot (TEST-11).
   let server: ServerHandle;
   let tmpHome: string;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [
@@ -75,7 +78,7 @@ describe("models router — read path (preseeded cache)", () => {
     tmpHome = booted.home;
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
@@ -239,10 +242,11 @@ describe("models router — refresh persists the new list", () => {
 });
 
 describe("models router — fallback when no cache exists", () => {
+  // Read-only block — shared server boot (TEST-11).
   let server: ServerHandle;
   let tmpHome: string;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [{ id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" }],
@@ -251,7 +255,7 @@ describe("models router — fallback when no cache exists", () => {
     tmpHome = booted.home;
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
@@ -270,10 +274,11 @@ describe("models router — fallback when no cache exists", () => {
 });
 
 describe("models router — authentication", () => {
+  // Read-only block (only 401 negative paths) — shared server boot (TEST-11).
   let server: ServerHandle;
   let tmpHome: string;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [{ id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" }],
@@ -282,7 +287,7 @@ describe("models router — authentication", () => {
     tmpHome = booted.home;
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });

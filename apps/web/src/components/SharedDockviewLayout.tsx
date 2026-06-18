@@ -1465,13 +1465,13 @@ export function SharedDockviewLayout() {
       // useEffect doesn't restore per-group active tabs on the FIRST
       // page load — that effect early-returns while `initializedRef`
       // is still `false`, and never re-fires because `activeWorkspaceId`
-      // didn't change. The bug manifests as a hidden group's saved
-      // active tab not being applied after a workspace-switch +
-      // exit-maximize sequence — see the regression test at
-      // `e2e/workspace-maximize-state.spec.ts:224`. Has to happen AFTER
-      // `fromJSON` + the required-panel reconciliation above so the
-      // target panels actually exist in the dockview by the time we
-      // ask to activate them.
+      // didn't change. Invariant: on first mount, every group's active
+      // tab must be applied here (not deferred to the switch effect),
+      // otherwise a hidden group keeps whatever tab the default layout
+      // left it on and the user sees the wrong tab after exiting
+      // maximize. Has to happen AFTER `fromJSON` + the required-panel
+      // reconciliation above so the target panels actually exist in the
+      // dockview by the time we ask to activate them.
       const initialActiveState = loadActiveState(initialWorkspaceId);
       if (initialActiveState) {
         applyGroupActiveViewsToApi(event.api, initialActiveState);
