@@ -181,6 +181,72 @@ export class SettingsPage {
   }
 
   /**
+   * "Refresh" button next to the per-agent model list inside the Coding
+   * Agents accordion. Anchored via `aria-label="Refresh models for
+   * <Agent>"` (system-controlled). The button is rendered only when the
+   * accordion is expanded — callers should expand the accordion first
+   * via `expandAgentAccordion(agentLabel)`.
+   */
+  refreshModelsButton(agentLabel: string): Locator {
+    return this.dialog.getByRole("button", { name: `Refresh models for ${agentLabel}` });
+  }
+
+  /**
+   * Locator for the rendered model list (a `<ul>`) inside the per-agent
+   * accordion. Anchored via `data-testid="settings-page__model-list-<type>"`
+   * (BEM convention). Note: parameter is the agent **type**, not label,
+   * to match the `data-testid` attribute in `SettingsPage.tsx`.
+   */
+  modelList(agentType: "claude-code" | "codex" | "opencode"): Locator {
+    return this.dialog.getByTestId(`settings-page__model-list-${agentType}`);
+  }
+
+  /**
+   * Locator for each `<li>` row in the per-agent model list — anchored via
+   * the `listitem` ARIA role so the test body never reaches in with a
+   * raw CSS tag selector (TEST-23). Returns the Playwright `Locator`
+   * that resolves to every row; callers chain `.first()`, `.nth(i)`,
+   * or assert on `.count()` directly.
+   */
+  modelListItems(agentType: "claude-code" | "codex" | "opencode"): Locator {
+    return this.modelList(agentType).getByRole("listitem");
+  }
+
+  /**
+   * Click the per-agent accordion header to expand it, which mounts the
+   * "Refresh models" button and the model list. The accordion's trigger
+   * is the agent's name button — anchored on `aria-label="Toggle advanced
+   * settings for <Agent>"` (system-controlled). The accordion has two
+   * triggers with that same name (the label region and the chevron); we
+   * pick the first one in DOM order.
+   */
+  async expandAgentAccordion(agentLabel: string): Promise<void> {
+    await test.step(`Expand accordion for ${agentLabel}`, async () => {
+      const trigger = this.dialog
+        .getByRole("button", {
+          name: `Toggle advanced settings for ${agentLabel}`,
+        })
+        .first();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+    });
+  }
+
+  /**
+   * Scroll the "Refresh" button for the named agent into view and click
+   * it. Mirrors the shape of the other action methods (`toggleLsp`,
+   * `selectTheme`) so the test body stays free of raw locator
+   * actions (TEST-21-adjacent).
+   */
+  async clickRefreshModels(agentLabel: string): Promise<void> {
+    await test.step(`Click Refresh models for ${agentLabel}`, async () => {
+      const btn = this.refreshModelsButton(agentLabel);
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click();
+    });
+  }
+
+  /**
    * Scroll the given locator into view and assert it is visible.
    *
    * The Settings dialog is a single fixed-height scrolling column, so

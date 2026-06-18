@@ -48,9 +48,28 @@ export interface DashboardAdapter {
   updateSettings(settings: Settings): Promise<void>;
 
   // Models (for agent configuration)
-  listModels?(
-    agentId?: string,
-  ): Promise<{ id: string; name: string; description?: string; contextWindow?: number }[]>;
+  listModels?(agentId?: string): Promise<{
+    models: { id: string; name: string; description?: string; contextWindow?: number }[];
+    defaultModel?: string;
+    updatedAt?: number;
+  }>;
+
+  /**
+   * Force the server to re-fetch the model list for one agent (or every
+   * configured agent when `agentId` is omitted) from its SDK / CLI and
+   * persist the result into `~/.band/settings.json`. Powers the
+   * Settings UI's "Refresh models" button. Returns the refreshed lists
+   * per agent so the UI can update without a follow-up `listModels`
+   * round-trip.
+   */
+  refreshModels?(agentId?: string): Promise<{
+    results: {
+      agentId: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt: number;
+      error?: string;
+    }[];
+  }>;
 
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(

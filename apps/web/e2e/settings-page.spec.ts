@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -32,7 +32,18 @@ test.beforeAll(async () => {
     ],
     defaultCodingAgent: "claude-code",
   });
-  server = await startServer({ tmpHome });
+  // Disable the boot-time fire-and-forget model refresh so the
+  // "Refresh models" e2e below is actually load-bearing on the button
+  // click — without this, boot would populate `codex.cachedModels` /
+  // `cachedModelsUpdatedAt` in settings.json before the test interacts
+  // with the dialog and the "after click" assertion would pass even if
+  // the click did nothing. The toggle is a boot-orchestrator opt-out
+  // wired in start-server.ts; setting it has no effect on the other
+  // tests in this file.
+  server = await startServer({
+    tmpHome,
+    env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
+  });
 });
 
 test.afterAll(async () => {
@@ -174,6 +185,90 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // would have unmounted into an error boundary.
   await expect(claudeSwitch).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+/**
+ * Probe whether the `codex` binary is reachable on this host. The
+ * "Refresh models" test below clicks a button whose server-side
+ * handler shells out to `codex debug models`; without the binary the
+ * refresh fails with an error message and no persisted cache. Rather
+ * than asserting on the error UI (which would still be a valid test
+ * of the failure path but a weaker test of the success path), we
+ * skip the spec when the binary isn't installed so CI runners
+ * without codex don't go red and dev machines exercise the real
+ * round-trip.
+ *
+ * Matches the `bandBinaryReachable` shape in `apps/web/tests/cli-skills.test.ts`
+ * — `statSync` against the canonical install locations rather than
+ * spawning `which` per spec-file import.
+ */
+function codexBinaryReachable(): boolean {
+  const candidates = [
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+    `${process.env.HOME ?? ""}/.nvm/versions/node/${process.version}/bin/codex`,
+  ];
+  for (const path of candidates) {
+    try {
+      statSync(path);
+      return true;
+    } catch {
+      // Not at this path; try the next.
+    }
+  }
+  return false;
+}
+
+test("clicking Refresh models persists the cached list to settings.json", async ({ page }) => {
+  // User-observable affordance from the refresh-agent-models change:
+  // expanding an agent's accordion in the Settings dialog renders a
+  // "Refresh" button + per-agent model list. Clicking the button must
+  // (a) populate the model list in the DOM and (b) write
+  // `cachedModels` + `cachedModelsUpdatedAt` into ~/.band/settings.json
+  // for that agent.
+  //
+  // We exercise Codex because its `refreshModels()` shells out to
+  // `codex debug models` — deterministic on a host that has codex
+  // installed (the binary returns a stable JSON catalog), and gated
+  // by the `codexBinaryReachable()` probe above so CI hosts without
+  // codex on PATH skip the test rather than fail.
+  test.skip(!codexBinaryReachable(), "codex binary not installed on this host");
+
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  // Open the Codex accordion so the model list + Refresh button mount.
+  await settingsPage.expandAgentAccordion("Codex");
+
+  // Click Refresh and wait for the cached entries to render in the DOM.
+  // The page object's locator anchors on the BEM data-testid.
+  await settingsPage.clickRefreshModels("Codex");
+
+  await expect(settingsPage.modelList("codex")).toBeVisible();
+  // `codex debug models` returns the live catalog (>=1 entry on every
+  // released codex binary); assert >0 so the test isn't brittle if
+  // OpenAI ships or retires a model.
+  await expect(settingsPage.modelListItems("codex")).not.toHaveCount(0);
+
+  // The mutation is fire-and-forget on the client; poll the persisted
+  // JSON until `cachedModelsUpdatedAt` appears for codex.
+  await expect(() => {
+    const settings = readSettings() as {
+      codingAgents?: { id: string; cachedModels?: unknown[]; cachedModelsUpdatedAt?: number }[];
+    };
+    const codex = settings.codingAgents?.find((a) => a.id === "codex");
+    if (!codex?.cachedModels || codex.cachedModels.length === 0) {
+      throw new Error(
+        `expected codex.cachedModels to be persisted, got ${JSON.stringify(codex?.cachedModels)}`,
+      );
+    }
+    if (typeof codex.cachedModelsUpdatedAt !== "number" || codex.cachedModelsUpdatedAt <= 0) {
+      throw new Error(
+        `expected codex.cachedModelsUpdatedAt to be a positive number, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
+      );
+    }
+  }).toPass({ timeout: 5_000 });
 });
 
 test("changing theme via the dropdown persists the new theme", async ({ page }) => {

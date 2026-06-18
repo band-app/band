@@ -39,7 +39,6 @@ export class OpenCodeAdapter implements CodingAgent {
   private readonly model: string | undefined;
   private readonly executablePath: string;
   private activeChild: ChildProcess | null = null;
-  private cachedModels: AgentModel[] | null = null;
 
   constructor(config: OpenCodeConfig) {
     this.workspaceDir = config.workspaceDir;
@@ -61,12 +60,17 @@ export class OpenCodeAdapter implements CodingAgent {
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
     const requestedModel = options?.model ?? this.model;
-    // Only pass models that OpenCode actually supports. Ignore models from
-    // other providers (e.g. Claude) to let OpenCode use its own default.
-    // Use the cached models list if available; fall back to the hardcoded default list.
-    const knownModelIds = new Set((this.cachedModels ?? DEFAULT_MODELS).map((m) => m.id));
-    const effectiveModel =
-      requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
+    // Pass the requested model through verbatim. The chat picker only
+    // offers ids the user's refreshed cache (`~/.band/settings.json`)
+    // surfaced via `refreshModels()`, so anything reaching us here is
+    // either a known OpenCode id, the agent's configured default, or
+    // a foreign provider id left over from a mid-chat agent switch.
+    // For the last case `opencode` itself errors out with a clear
+    // "unknown model" message, which is more informative than the
+    // previous silent fallback-to-default behaviour. We `--model`
+    // only when the caller gave us one — `undefined` means "let
+    // opencode pick its own default".
+    const effectiveModel = requestedModel;
 
     log.info(
       {
@@ -299,22 +303,33 @@ export class OpenCodeAdapter implements CodingAgent {
     return discoverOpenCodeSkills(this.workspaceDir);
   }
 
-  async listModels(): Promise<AgentModel[]> {
-    if (this.cachedModels) {
-      return this.cachedModels;
-    }
+  /**
+   * No static fallback. The live `opencode models --verbose` output is the
+   * single source of truth; `refreshModels()` populates
+   * `~/.band/settings.json` at boot and on user request, and the
+   * Settings + chat pickers read from that cache. On a brand-new install
+   * before the first successful refresh, the picker is briefly empty —
+   * preferable to a hardcoded list that drifts whenever OpenCode adds or
+   * removes a backend model.
+   */
+  listModels(): AgentModel[] {
+    return [];
+  }
 
-    try {
-      const models = await fetchOpenCodeModels(this.executablePath);
-      if (models.length > 0) {
-        this.cachedModels = models;
-        return models;
-      }
-    } catch (err) {
-      log.warn({ err }, "failed to fetch models from opencode CLI, using defaults");
+  /**
+   * Shell out to `opencode models --verbose` to discover the live model
+   * list. Used by the web server's `ModelRefreshService` to refresh the
+   * cached list persisted in `~/.band/settings.json` — both on boot and
+   * on explicit user request.
+   */
+  async refreshModels(): Promise<AgentModel[]> {
+    log.info("refreshing supported models from opencode CLI");
+    const models = await fetchOpenCodeModels(this.executablePath);
+    if (models.length === 0) {
+      throw new Error("opencode models --verbose returned no entries");
     }
-
-    return DEFAULT_MODELS;
+    log.info({ count: models.length }, "refreshed supported models from opencode CLI");
+    return models;
   }
 
   /**
@@ -483,11 +498,6 @@ export class OpenCodeAdapter implements CodingAgent {
     };
   }
 }
-
-const DEFAULT_MODELS: AgentModel[] = [
-  { id: "opencode/big-pickle", name: "Big Pickle" },
-  { id: "opencode/gpt-5-nano", name: "GPT-5 Nano" },
-];
 
 function fetchOpenCodeModels(executablePath: string): Promise<AgentModel[]> {
   return new Promise((resolve, reject) => {

@@ -21,8 +21,8 @@ import {
   SelectValue,
   Switch,
 } from "@band-app/ui";
-import { ChevronDown, FolderOpen, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
@@ -61,6 +61,27 @@ function formatCtxWindow(n: number): string {
   }
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
   return String(n);
+}
+
+/**
+ * Human-friendly relative timestamp ("just now", "3m ago", "2h ago",
+ * "yesterday", "Jan 5, 2026"). Doesn't set any timers — re-rendering on a
+ * stale value is the caller's responsibility (in practice the parent
+ * component re-renders on every settings/model state change). The
+ * absolute-date fallback uses `toLocaleDateString()` so the format
+ * follows the user's browser locale.
+ */
+function formatLastRefreshed(epochMs: number): string {
+  const diff = Date.now() - epochMs;
+  if (diff < 60_000) return "just now";
+  if (diff < 60 * 60_000) return `${Math.round(diff / 60_000)}m ago`;
+  if (diff < 24 * 60 * 60_000) return `${Math.round(diff / (60 * 60_000))}h ago`;
+  if (diff < 48 * 60 * 60_000) return "yesterday";
+  try {
+    return new Date(epochMs).toLocaleDateString();
+  } catch {
+    return new Date(epochMs).toISOString();
+  }
 }
 
 export function SettingsPage({ open, onOpenChange }: Props) {
@@ -109,8 +130,22 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [usagePollingEnabled, setUsagePollingEnabled] = useState(
     settings.usagePollingEnabled ?? true,
   );
+  // Per-agent model cache surfaced from `~/.band/settings.json` via
+  // `models.list`. Keyed by agent id (not agent type) so two registered
+  // agents of the same type stay independent. Each entry tracks the
+  // model array + last-refresh timestamp + an `isRefreshing` flag so the
+  // "Refresh models" button can show a spinner without bouncing the
+  // whole list out of state.
   const [agentModels, setAgentModels] = useState<
-    Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
+    Record<
+      string,
+      {
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt?: number;
+        isRefreshing?: boolean;
+        error?: string;
+      }
+    >
   >({});
   // Experimental flags live in localStorage (per-device) rather than the
   // settings store, so they don't participate in `isDirty` / Save.
@@ -118,20 +153,121 @@ export function SettingsPage({ open, onOpenChange }: Props) {
 
   const adapter = useAdapter();
 
-  // Fetch available models for each enabled agent type
+  // Merge a partial patch into the per-agent state entry, keyed by
+  // `agentId`. Each call site only spells the fields it actually changes;
+  // the helper carries forward the rest. Avoids the
+  // four-near-identical-spreads pattern the prior implementation had.
+  //
+  // Wrapped in `useCallback` with an empty dep list because the body only
+  // uses `setAgentModels` (a stable setter from `useState`); the resulting
+  // function reference stays stable across renders so effects/callbacks
+  // depending on it don't re-fire spuriously.
+  const mergeAgentModels = useCallback(
+    (
+      agentId: string,
+      patch: Partial<{
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt: number | undefined;
+        isRefreshing: boolean;
+        error: string | undefined;
+      }>,
+    ) =>
+      setAgentModels((prev) => ({
+        ...prev,
+        [agentId]: {
+          models: patch.models ?? prev[agentId]?.models ?? [],
+          updatedAt: "updatedAt" in patch ? patch.updatedAt : prev[agentId]?.updatedAt,
+          isRefreshing: patch.isRefreshing ?? prev[agentId]?.isRefreshing ?? false,
+          error: "error" in patch ? patch.error : prev[agentId]?.error,
+        },
+      })),
+    [],
+  );
+
+  // Fetch the cached models for each enabled agent. Reads from
+  // `~/.band/settings.json` via `models.list` — populated by the
+  // boot-time background refresh or an explicit "Refresh models" click.
+  // No live SDK fetch happens here.
+  //
+  // `agentIdsKey` is the stable proxy for "the set of configured agent
+  // ids". Every `setCodingAgents(prev => prev.map(...))` call (e.g.
+  // a keystroke into a per-agent Command input) produces a fresh
+  // `codingAgents` array reference; depending on the array directly
+  // would tRPC-spam `models.list` on every character typed (PERF-9).
+  // Splitting the string back to an array inside `useMemo` gives us a
+  // value the effect can iterate without holding a reference to the
+  // mutable `codingAgents` state.
+  //
+  // Delimiter: U+001F INFORMATION SEPARATOR ONE — a C0 control
+  // character no user can type into a settings.json agent id through
+  // the Settings form's `id` Input, so the join/split round-trip is
+  // lossless for any realistic id. Earlier this was U+0000 (NUL), but
+  // a literal NUL byte in the comment block made tools like ripgrep,
+  // grep, and GitHub code search classify the whole file as binary
+  // and skip it during repo-wide searches. U+001F shares the
+  // "never-appears-in-user-input" property without that drawback.
+  const ID_DELIMITER = "\u001f";
+  const agentIdsKey = codingAgents.map((a) => a.id).join(ID_DELIMITER);
+  const agentIds = useMemo(
+    () => (agentIdsKey === "" ? [] : agentIdsKey.split(ID_DELIMITER)),
+    [agentIdsKey],
+  );
   useEffect(() => {
+    // Drop entries for agents the user has just toggled off — otherwise
+    // a stale `error` / `updatedAt` would reappear if they toggle the
+    // same agent back on before the next refetch lands. Map state on
+    // each effect tick is the cheapest way to keep the lifecycle tied
+    // to the membership of `agentIds`.
+    setAgentModels((prev) => {
+      const allowed = new Set(agentIds);
+      const next: typeof prev = {};
+      let changed = false;
+      for (const [id, entry] of Object.entries(prev)) {
+        if (allowed.has(id)) {
+          next[id] = entry;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
     if (!adapter.listModels) return;
-    for (const agent of codingAgents) {
+    for (const id of agentIds) {
       adapter
-        .listModels(agent.id)
-        .then((models) => {
-          setAgentModels((prev) => ({ ...prev, [agent.type]: models }));
+        .listModels(id)
+        .then((data) => {
+          mergeAgentModels(id, { models: data.models, updatedAt: data.updatedAt });
         })
         .catch(() => {
-          // Models unavailable for this agent type
+          // Models unavailable — leave previous state untouched so a
+          // transient network blip doesn't blank the picker.
         });
     }
-  }, [codingAgents, adapter]);
+  }, [agentIds, adapter, mergeAgentModels]);
+
+  const handleRefreshModels = async (agentId: string) => {
+    if (!adapter.refreshModels) return;
+    mergeAgentModels(agentId, { isRefreshing: true, error: undefined });
+    try {
+      const data = await adapter.refreshModels(agentId);
+      const result = data.results.find((r) => r.agentId === agentId) ?? data.results[0];
+      if (result) {
+        mergeAgentModels(agentId, {
+          models: result.models,
+          updatedAt: result.updatedAt,
+          isRefreshing: false,
+          error: result.error,
+        });
+      } else {
+        mergeAgentModels(agentId, { isRefreshing: false });
+      }
+    } catch (err) {
+      mergeAgentModels(agentId, {
+        isRefreshing: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   const isDirty = useMemo(() => {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
@@ -542,7 +678,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 {KNOWN_AGENTS.map((known) => {
                   const agent = codingAgents.find((a) => a.type === known.type);
                   const enabled = !!agent;
-                  const models = agentModels[known.type] ?? [];
+                  const modelState = agent ? agentModels[agent.id] : undefined;
+                  const models = modelState?.models ?? [];
+                  const isRefreshing = modelState?.isRefreshing ?? false;
+                  const updatedAt = modelState?.updatedAt;
+                  const refreshError = modelState?.error;
                   return (
                     <AccordionItem
                       key={known.id}
@@ -609,7 +749,75 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                             className="h-8 text-xs"
                           />
                         </div>
-                        {models.length > 0 && (
+                        {agent && (
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label className="text-xs text-muted-foreground">
+                                Models {models.length > 0 && `(${models.length})`}
+                              </Label>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 gap-1 px-2 text-xs"
+                                disabled={!enabled || isRefreshing}
+                                onClick={() => handleRefreshModels(agent.id)}
+                                aria-label={`Refresh models for ${known.label}`}
+                                data-testid={`settings-page__refresh-models-${agent.type}`}
+                              >
+                                <RefreshCcw
+                                  className={cn("size-3", isRefreshing && "animate-spin")}
+                                />
+                                {isRefreshing ? "Refreshing…" : "Refresh"}
+                              </Button>
+                            </div>
+                            {models.length > 0 ? (
+                              <ul
+                                className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs"
+                                data-testid={`settings-page__model-list-${agent.type}`}
+                              >
+                                {models.map((m) => (
+                                  // Two-line layout, mirroring the chat-pane
+                                  // model dropdown (`ModelLine` in ChatView):
+                                  // top row is name + optional context-window
+                                  // pill, second row is the description.
+                                  // Keeps Settings and the chat picker
+                                  // visually consistent.
+                                  <li key={m.id} className="flex flex-col items-start gap-0.5 py-1">
+                                    <span className="flex w-full items-baseline justify-between gap-2">
+                                      <span className="font-medium">{m.name}</span>
+                                      {m.contextWindow !== undefined && (
+                                        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                          {formatCtxWindow(m.contextWindow)} ctx
+                                        </span>
+                                      )}
+                                    </span>
+                                    {m.description && (
+                                      <span className="text-[11px] text-muted-foreground">
+                                        {m.description}
+                                      </span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-[11px] text-muted-foreground">
+                                No models cached yet — click Refresh.
+                              </p>
+                            )}
+                            {refreshError && (
+                              <p className="text-[11px] text-destructive">
+                                Refresh failed: {refreshError}
+                              </p>
+                            )}
+                            {updatedAt !== undefined && updatedAt > 0 && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Last refreshed {formatLastRefreshed(updatedAt)}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {agent && models.length > 0 && (
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Default model</Label>
                             <Select

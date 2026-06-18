@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -111,12 +111,16 @@ export class CodexAdapter implements CodingAgent {
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
     const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
-    const requestedModel = options?.model ?? this.model;
-    // Only pass models that Codex actually supports. Ignore models from
-    // other providers (e.g. Claude) to let Codex use its own default.
-    const knownModelIds = new Set(CODEX_MODELS.map((m) => m.id));
-    const effectiveModel =
-      requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
+    // Pass the requested model through verbatim. The chat picker only
+    // offers ids the user's refreshed cache (`~/.band/settings.json`)
+    // surfaced via `refreshModels()` shelling out to
+    // `codex debug models`, so anything reaching us here is either a
+    // known Codex id, the agent's configured default, or a foreign
+    // provider id left over from a mid-chat agent switch. For the last
+    // case Codex itself errors out with a clear "unknown model"
+    // message — more informative than the previous silent
+    // fallback-to-default behaviour.
+    const effectiveModel = options?.model ?? this.model;
     const mode = options?.mode ?? "edit";
 
     log.info(
@@ -418,8 +422,63 @@ export class CodexAdapter implements CodingAgent {
     ];
   }
 
+  /**
+   * No static fallback. The live `codex debug models` output is the
+   * single source of truth; `refreshModels()` populates
+   * `~/.band/settings.json` at boot and on user request, and the
+   * Settings + chat pickers read from that cache. On a brand-new install
+   * before the first successful refresh, the picker is briefly empty —
+   * preferable to a hardcoded list that drifts whenever OpenAI ships a
+   * new model.
+   */
   listModels(): AgentModel[] {
-    return CODEX_MODELS;
+    return [];
+  }
+
+  /**
+   * Discover the live model catalog by shelling out to `codex debug models`,
+   * which renders the SDK's known model catalog as JSON (one entry per model
+   * with `slug`, `display_name`, `description`, `visibility`, `priority`, and
+   * `context_window`). The `debug` subcommand is undocumented in user-facing
+   * help but ships in every released `codex` binary; if its shape ever drifts,
+   * the JSON parse will throw and `ModelRefreshService.refresh()` keeps the
+   * previously cached list intact.
+   *
+   * Filtering: entries with `visibility === "hide"` are internal models the
+   * Codex UI never surfaces (e.g. `codex-auto-review`), so we drop them too.
+   * Sort by `priority` so the picker order matches what `codex` ships.
+   */
+  async refreshModels(): Promise<AgentModel[]> {
+    const binary = this.executablePath ?? CODEX_DEFAULT_BINARY;
+    log.info({ binary }, "refreshing supported models from codex debug models");
+    const raw = await new Promise<string>((resolve, reject) => {
+      execFile(
+        binary,
+        ["debug", "models"],
+        { timeout: 10_000, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(stdout);
+        },
+      );
+    });
+    const parsed = JSON.parse(raw) as { models?: CodexDebugModel[] };
+    const models = parsed.models ?? [];
+    const visible = models
+      .filter((m) => m.visibility !== "hide" && typeof m.slug === "string")
+      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    log.info({ count: visible.length }, "refreshed supported models from codex");
+    return visible.map(
+      (m): AgentModel => ({
+        id: m.slug,
+        name: m.display_name || m.slug,
+        description: m.description,
+        contextWindow: m.context_window,
+      }),
+    );
   }
 
   /**
@@ -666,43 +725,20 @@ const cachedCodexBinary: string | undefined = (() => {
 
 // ─── Models ─────────────────────────────────────────────────────────────────
 
-// All GPT-5 family models cap at 400k tokens inside the Codex CLI tier
-// (Plus / Pro / Business / Enterprise / Edu / Go). The Responses API tier
-// goes higher (1M for 5.5) but Band shells out to the codex binary.
-const CODEX_CTX = 400_000;
-
-const CODEX_MODELS: AgentModel[] = [
-  {
-    id: "gpt-5.5",
-    name: "GPT-5.5",
-    description: "Flagship frontier model",
-    contextWindow: CODEX_CTX,
-  },
-  {
-    id: "gpt-5.4",
-    name: "GPT-5.4",
-    description: "Previous flagship model",
-    contextWindow: CODEX_CTX,
-  },
-  {
-    id: "gpt-5.4-mini",
-    name: "GPT-5.4 Mini",
-    description: "Fast, efficient mini model",
-    contextWindow: CODEX_CTX,
-  },
-  {
-    id: "gpt-5.3-codex",
-    name: "GPT-5.3 Codex",
-    description: "Coding-optimized model",
-    contextWindow: CODEX_CTX,
-  },
-  {
-    id: "gpt-5.2-codex",
-    name: "GPT-5.2 Codex",
-    description: "Previous coding-optimized model",
-    contextWindow: CODEX_CTX,
-  },
-];
+/**
+ * Subset of the JSON shape emitted by `codex debug models`. Only the
+ * fields the adapter actually consumes are typed here — the catalog has
+ * many more keys (`base_instructions`, `supported_reasoning_levels`,
+ * `availability_nux`, etc.) we don't need.
+ */
+interface CodexDebugModel {
+  slug: string;
+  display_name?: string;
+  description?: string;
+  visibility?: string;
+  priority?: number;
+  context_window?: number;
+}
 
 // ─── Skills ─────────────────────────────────────────────────────────────────
 

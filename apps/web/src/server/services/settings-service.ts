@@ -51,6 +51,17 @@ export const settingsUpdateInput = z
           label: z.string(),
           command: z.string().optional(),
           model: z.string().optional(),
+          cachedModels: z
+            .array(
+              z.object({
+                id: z.string(),
+                name: z.string(),
+                description: z.string().optional(),
+                contextWindow: z.number().optional(),
+              }),
+            )
+            .optional(),
+          cachedModelsUpdatedAt: z.number().optional(),
         }),
       )
       .optional(),

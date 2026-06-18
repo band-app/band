@@ -1059,7 +1059,15 @@ async function main() {
     // which only resolves after `phaseBStarted()` fires below.
     (async () => {
       try {
-        await runFirstTimeSetup();
+        // `BAND_DISABLE_BOOT_MODEL_REFRESH=1` is the boot-orchestrator
+        // opt-out used by integration tests that pre-seed cached models
+        // in settings.json and want their assertions to be deterministic.
+        // Production users never set it. Kept here (vs. inside the
+        // setup service) so the business logic stays free of test-only
+        // env-var branches — start-server.ts is the natural seam for
+        // boot-time toggles, alongside `PORT`, `NODE_ENV`, etc.
+        const bootRefresh = process.env.BAND_DISABLE_BOOT_MODEL_REFRESH !== "1";
+        await runFirstTimeSetup({ bootRefresh });
       } catch (err) {
         console.error("First-time setup failed:", err);
       }

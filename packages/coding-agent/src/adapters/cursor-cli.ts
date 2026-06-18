@@ -161,10 +161,17 @@ export class CursorCliAdapter implements CodingAgent {
   }
 
   listModels(): AgentModel[] {
-    // Cursor "auto" routes among multiple backends — context window varies by
-    // chosen model. No SDK-side reporting; leave undefined so the meter
-    // falls back to the static MODEL_CONTEXT_WINDOWS default (200k).
-    return [{ id: "auto", name: "Auto", description: "Cursor chooses the best model" }];
+    return CURSOR_MODELS;
+  }
+
+  /**
+   * Cursor CLI doesn't expose a `models` listing command, so the live
+   * list IS the hardcoded `CURSOR_MODELS` array. Returning it here makes
+   * `ModelRefreshService.refresh()` Just Work — the persisted cache lines
+   * up with whatever the adapter would otherwise serve from `listModels()`.
+   */
+  async refreshModels(): Promise<AgentModel[]> {
+    return CURSOR_MODELS;
   }
 
   /**
@@ -183,6 +190,15 @@ export class CursorCliAdapter implements CodingAgent {
     };
   }
 }
+
+/**
+ * Cursor "auto" routes among multiple backends — context window varies by
+ * the chosen model. No SDK-side reporting; leaving contextWindow undefined
+ * lets the meter fall back to the static MODEL_CONTEXT_WINDOWS default.
+ */
+const CURSOR_MODELS: AgentModel[] = [
+  { id: "auto", name: "Auto", description: "Cursor chooses the best model" },
+];
 
 function* mapCursorEvent(
   event: Record<string, unknown>,

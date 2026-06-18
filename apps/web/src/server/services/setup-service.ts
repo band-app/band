@@ -2,6 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { checkCli, installCli } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
+import { modelRefreshService } from "./model-refresh-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
@@ -15,6 +16,23 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
   { id: "codex", type: "codex", label: "Codex", binary: "codex" },
   { id: "opencode", type: "opencode", label: "OpenCode", binary: "opencode" },
 ];
+
+/**
+ * Options threaded into the boot pipeline. Every field has a production
+ * default; callers that want to opt out of a boot step (typically tests)
+ * pass the override here rather than reaching for an env var inside the
+ * production code path.
+ */
+export interface RunFirstTimeSetupOptions {
+  /**
+   * Whether to kick off the fire-and-forget background refresh of each
+   * configured coding agent's model list at the end of setup. Defaults
+   * to `true`. Integration tests that pre-seed `cachedModels` in
+   * settings.json and want their assertions to be deterministic pass
+   * `false` so the refresh doesn't race their assertions.
+   */
+  bootRefresh?: boolean;
+}
 
 /**
  * Run startup setup. Called every server boot. Each step is idempotent —
@@ -61,7 +79,7 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  * risk exists today. If you ever drop that try/catch, attach a
  * `.catch()` here to preserve the invariant.
  */
-export async function runFirstTimeSetup(): Promise<void> {
+export async function runFirstTimeSetup(options: RunFirstTimeSetupOptions = {}): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
   const projectSync = ensureProjectStateInSync();
 
@@ -84,6 +102,51 @@ export async function runFirstTimeSetup(): Promise<void> {
         r.reason instanceof Error ? r.reason.message : String(r.reason),
       );
     }
+  }
+
+  // Kick off a background refresh of each configured coding agent's model
+  // list. MUST run after `ensureSettingsDefaults` (which is the step that
+  // detects + persists the `codingAgents` array on a fresh install) so
+  // the refresh actually has agents to iterate over. Fire-and-forget —
+  // the SDK calls can take several seconds (network round-trip + binary
+  // spawn) and we don't want to delay the server starting to accept
+  // requests. Failures inside `refreshAll` are already swallowed by the
+  // service; the outer `.catch` here only fires if something explodes
+  // before reaching the try/catch (e.g. dynamic import failure).
+  //
+  // Tests can opt out via the `bootRefresh: false` option so a preseeded
+  // settings.json cache isn't overwritten before the test asserts on it.
+  if (options.bootRefresh !== false) {
+    void refreshAgentModelsInBackground();
+  }
+}
+
+/**
+ * Fire-and-forget background refresh of every configured coding agent's
+ * model list at boot. The result is persisted into `settings.codingAgents[].cachedModels`
+ * by `ModelRefreshService.refreshAll()` so the Settings UI and the chat
+ * picker have the live list available without anyone having to start a
+ * session first. Errors are intentionally swallowed at the top level —
+ * the refresh service already logs per-agent failures at warn level.
+ */
+async function refreshAgentModelsInBackground(): Promise<void> {
+  try {
+    const results = await modelRefreshService.refreshAll();
+    const ok = results.filter((r) => !r.error).length;
+    const failed = results.length - ok;
+    if (results.length > 0) {
+      log.info(
+        "Background model refresh: %d/%d agents updated (%d failed)",
+        ok,
+        results.length,
+        failed,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      "Background model refresh failed: %s",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -296,8 +359,8 @@ async function ensureSkillsInstalled(): Promise<void> {
  * (called from `start-server.ts` and several tests) is preserved.
  */
 export class SetupService {
-  async run(): Promise<void> {
-    return runFirstTimeSetup();
+  async run(options?: RunFirstTimeSetupOptions): Promise<void> {
+    return runFirstTimeSetup(options);
   }
 }
 
