@@ -308,3 +308,116 @@ describe("models router — authentication", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Refresh-FAILURE branches, driven through the real server (no in-process
+// service instantiation). We make a refresh fail deterministically by
+// pointing the codex agent's `command` at a path that doesn't exist:
+// `codex debug models` then fails with ENOENT, which the service maps to
+// the sanitised "agent binary not found" classification. This exercises
+// the "keep prior cache on failure" + "isolate per-agent failure" paths
+// that used to live in the deleted service-level `model-refresh.test.ts`,
+// but now through `models.refresh` over HTTP.
+// ---------------------------------------------------------------------------
+
+const MISSING_CODEX = "/nonexistent/band-test-codex-binary";
+
+describe("models router — refresh failure preserves the prior cache", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeEach(async () => {
+    const booted = await bootWithSettings({
+      tokenSecret: TOKEN,
+      codingAgents: [
+        {
+          id: "codex",
+          type: "codex",
+          label: "Codex",
+          // Point at a binary that doesn't exist → `codex debug models`
+          // fails with ENOENT on every refresh attempt.
+          command: MISSING_CODEX,
+          cachedModels: [{ id: "preseeded-codex", name: "Preseeded Codex" }],
+          cachedModelsUpdatedAt: 1_700_000_000_000,
+        },
+      ],
+      defaultCodingAgent: "codex",
+    });
+    server = booted.server;
+    tmpHome = booted.home;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns a sanitised error and leaves the cached list + timestamp untouched", async () => {
+    const res = await trpcMutate(server.url, "models.refresh", { agentId: "codex" }, TOKEN);
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      results: { agentId: string; models: { id: string }[]; updatedAt: number; error?: string }[];
+    }>(res);
+    expect(data.results).toHaveLength(1);
+    const result = data.results[0];
+    expect(result.agentId).toBe("codex");
+    // The raw ENOENT is classified into a host-state-free string.
+    expect(result.error).toBe("agent binary not found");
+    // The prior cache is echoed back unchanged...
+    expect(result.models).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
+    expect(result.updatedAt).toBe(1_700_000_000_000);
+
+    // ...and settings.json on disk is untouched by the failed refresh.
+    const persisted = readSettingsFile(tmpHome);
+    const codex = persisted.codingAgents?.find((a) => a.id === "codex");
+    expect(codex?.cachedModels).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
+    expect(codex?.cachedModelsUpdatedAt).toBe(1_700_000_000_000);
+  });
+});
+
+describe("models router — refresh-all isolates per-agent failures", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeEach(async () => {
+    const booted = await bootWithSettings({
+      tokenSecret: TOKEN,
+      codingAgents: [
+        // Healthy agent: gemini-cli's refreshModels() returns a hardcoded
+        // list, so it always succeeds.
+        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
+        // Broken agent: codex points at a missing binary.
+        { id: "codex", type: "codex", label: "Codex", command: MISSING_CODEX },
+      ],
+    });
+    server = booted.server;
+    tmpHome = booted.home;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("persists the healthy agent and reports the broken one without aborting the batch", async () => {
+    const res = await trpcMutate(server.url, "models.refresh", {}, TOKEN);
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      results: { agentId: string; error?: string }[];
+    }>(res);
+    expect(data.results.map((r) => r.agentId).sort()).toEqual(["codex", "gemini-cli"]);
+
+    const gemini = data.results.find((r) => r.agentId === "gemini-cli");
+    expect(gemini?.error).toBeUndefined();
+
+    const codex = data.results.find((r) => r.agentId === "codex");
+    expect(codex?.error).toBe("agent binary not found");
+
+    // Healthy agent's cache was written; broken agent's stays absent.
+    const persisted = readSettingsFile(tmpHome);
+    expect(
+      persisted.codingAgents?.find((a) => a.id === "gemini-cli")?.cachedModels?.length,
+    ).toBeGreaterThan(0);
+    expect(persisted.codingAgents?.find((a) => a.id === "codex")?.cachedModels).toBeUndefined();
+  });
+});

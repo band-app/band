@@ -50,19 +50,6 @@ import { SettingsService } from "./settings-service";
 
 const log = createLogger("model-refresh");
 
-/**
- * Adapter-pool seam — tests inject a stub that returns a fake
- * `CodingAgent` so the refresh path can be exercised without spawning
- * the real coding-agent SDK.
- */
-export interface ModelRefreshPool {
-  createMetadataAgent: typeof createMetadataAgent;
-}
-
-const DEFAULT_POOL: ModelRefreshPool = {
-  createMetadataAgent,
-};
-
 export interface ModelRefreshResult {
   agentId: string;
   models: CachedAgentModel[];
@@ -73,10 +60,7 @@ export interface ModelRefreshResult {
 }
 
 export class ModelRefreshService {
-  constructor(
-    private readonly queries: SettingsQueries = new SettingsQueries(),
-    private readonly pool: ModelRefreshPool = DEFAULT_POOL,
-  ) {}
+  constructor(private readonly queries: SettingsQueries = new SettingsQueries()) {}
 
   /**
    * Read the cached model list for one agent, falling back to the
@@ -136,7 +120,7 @@ export class ModelRefreshService {
     // throwaway metadata agent and call its sync `listModels()` — every
     // adapter implements that path without I/O so it's cheap.
     try {
-      const agent = await this.pool.createMetadataAgent(agentId);
+      const agent = await createMetadataAgent(agentId);
       if (!agent.listModels) return [];
       const models = await agent.listModels();
       return models.map(toCachedModel);
@@ -164,7 +148,7 @@ export class ModelRefreshService {
     let error: string | undefined;
 
     try {
-      const agent = await this.pool.createMetadataAgent(agentId);
+      const agent = await createMetadataAgent(agentId);
       if (!agent.refreshModels) {
         // Adapter has no refresh implementation — fall back to its static
         // defaults so the cache still gets seeded with something useful.
