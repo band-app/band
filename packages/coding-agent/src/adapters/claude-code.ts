@@ -799,6 +799,15 @@ export class ClaudeCodeAdapter implements CodingAgent {
    * The conversation is created with a no-op prompt — the SDK requires
    * one, but we never iterate the generator and close the conversation
    * before the prompt is consumed.
+   *
+   * Timeout: a real Claude Code binary returns `supportedModels()` in
+   * <100 ms. If we don't hear back within 10 s, we assume the subprocess
+   * is wedged (e.g. the configured `pathToClaudeCodeExecutable` is a stub
+   * that doesn't speak the SDK protocol — Linux CI exposes this fragility
+   * even when macOS hides it) and abort. Crucially, `conversation.close()`
+   * runs in `finally` so the wedged subprocess gets killed; without this,
+   * the parent server process can hang forever on shutdown waiting for
+   * its child's pipes to close.
    */
   async refreshModels(): Promise<AgentModel[]> {
     log.info("refreshing supported models from SDK");
@@ -815,11 +824,21 @@ export class ClaudeCodeAdapter implements CodingAgent {
         settingSources: [],
       },
     });
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      const models = await conversation.supportedModels();
+      const models = await Promise.race([
+        conversation.supportedModels(),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error("supportedModels() timed out after 10s")),
+            10_000,
+          );
+        }),
+      ]);
       log.info({ count: models.length }, "refreshed supported models from SDK");
       return models.map(mapModelInfo);
     } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       try {
         conversation.close();
       } catch (err) {
