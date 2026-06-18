@@ -773,7 +773,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                                 disabled={!enabled || isRefreshing}
                                 onClick={() => handleRefreshModels(agent.id)}
                                 aria-label={`Refresh models for ${known.label}`}
-                                data-testid={`settings-page__refresh-models-${agent.type}`}
+                                data-testid={`settings-page__refresh-models-${agent.id}`}
                               >
                                 <RefreshCcw
                                   className={cn("size-3", isRefreshing && "animate-spin")}
@@ -784,7 +784,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                             {models.length > 0 ? (
                               <ul
                                 className="rounded-md border border-border bg-muted/30 px-2 py-1 text-xs"
-                                data-testid={`settings-page__model-list-${agent.type}`}
+                                data-testid={`settings-page__model-list-${agent.id}`}
                               >
                                 {models.map((m) => (
                                   // Two-line layout, mirroring the chat-pane

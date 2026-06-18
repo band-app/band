@@ -32,7 +32,6 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { CodingAgentType } from "../../src/dashboard/types";
 
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
@@ -174,6 +173,17 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: `Enable ${agentLabel}` });
   }
 
+  /** Toggle the enable switch for the named agent. Encapsulates the
+   *  raw click (force-clicked because the Radix switch can be partly
+   *  occluded by the accordion chrome) so test bodies don't drive the
+   *  locator directly (TEST-21). Assertions on the resulting
+   *  `data-state` stay in the test. */
+  async toggleAgentEnable(agentLabel: string): Promise<void> {
+    await test.step(`Toggle ${agentLabel} enable switch`, async () => {
+      await this.agentEnableSwitch(agentLabel).click({ force: true });
+    });
+  }
+
   /** Default coding agent dropdown trigger (only renders when at least
    *  one agent is enabled). `aria-label="Default coding agent"` is set
    *  explicitly. */
@@ -194,12 +204,14 @@ export class SettingsPage {
 
   /**
    * Locator for the rendered model list (a `<ul>`) inside the per-agent
-   * accordion. Anchored via `data-testid="settings-page__model-list-<type>"`
-   * (BEM convention). Note: parameter is the agent **type**, not label,
-   * to match the `data-testid` attribute in `SettingsPage.tsx`.
+   * accordion. Anchored via `data-testid="settings-page__model-list-<agentId>"`
+   * (BEM convention). Parameter is the agent **id** (not label or type)
+   * to match the `data-testid` attribute in `SettingsPage.tsx`. For the
+   * built-in agents the id and type happen to coincide
+   * (`"claude-code"`, `"codex"`, …).
    */
-  modelList(agentType: CodingAgentType): Locator {
-    return this.dialog.getByTestId(`settings-page__model-list-${agentType}`);
+  modelList(agentId: string): Locator {
+    return this.dialog.getByTestId(`settings-page__model-list-${agentId}`);
   }
 
   /**
@@ -209,8 +221,8 @@ export class SettingsPage {
    * that resolves to every row; callers chain `.first()`, `.nth(i)`,
    * or assert on `.count()` directly.
    */
-  modelListItems(agentType: CodingAgentType): Locator {
-    return this.modelList(agentType).getByRole("listitem");
+  modelListItems(agentId: string): Locator {
+    return this.modelList(agentId).getByRole("listitem");
   }
 
   /**

@@ -45,8 +45,7 @@ import type {
   CodingAgentDefinition,
   Settings,
 } from "../infra/db/queries/settings";
-import { SettingsQueries } from "../infra/db/queries/settings";
-import { SettingsService } from "./settings-service";
+import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 
 const log = createLogger("model-refresh");
 
@@ -104,7 +103,11 @@ export class ModelRefreshService {
     updatedAt?: number;
   }> {
     const settings = snapshot ?? this.queries.load();
-    const def = SettingsService.resolveAgent(settings, agentId);
+    // Resolve via the infra helper directly (a service → infra
+    // dependency) rather than the `SettingsService.resolveAgent` static,
+    // keeping this service's dependency surface to just `SettingsQueries`
+    // + the agent pool.
+    const def = resolveAgentDefinition(settings, agentId);
     const models = await this.getCachedOrDefaultsFromSnapshot(settings, def.id);
     return {
       models,

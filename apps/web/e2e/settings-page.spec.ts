@@ -165,7 +165,7 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // the initial `data-state` and assert it flipped.
   const initialState = await claudeSwitch.getAttribute("data-state");
   const targetState = initialState === "checked" ? "unchecked" : "checked";
-  await claudeSwitch.click({ force: true });
+  await settingsPage.toggleAgentEnable("Claude Code");
 
   // Wait for the toggle to take effect at the DOM level. Once the switch
   // reports the flipped `data-state`, React has applied the state update

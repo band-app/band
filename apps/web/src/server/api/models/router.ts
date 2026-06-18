@@ -29,6 +29,14 @@ export const modelsRouter = t.router({
    * list to the persisted cache so subsequent `list` / `listAll` calls
    * return the latest models. Failures on individual agents do not
    * abort the batch — each result carries an optional `error` field.
+   *
+   * Latency: this awaits the refresh synchronously. Each agent's
+   * `refreshModels()` is capped at a ~10 s adapter-side timeout, and the
+   * no-`agentId` batch path refreshes agents sequentially, so worst-case
+   * wall-clock is roughly `N agents × 10 s`. The Settings UI only ever
+   * calls this with a single `agentId` (one ~10 s ceiling, with a button
+   * spinner), so the batch ceiling is reached only by an explicit
+   * all-agents API call. Size any client-side tRPC timeout accordingly.
    */
   refresh: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))

@@ -148,7 +148,9 @@ describe("models router — read path (preseeded cache)", () => {
     const codex = data.agents.find((a) => a.agentId === "codex");
     expect(codex?.models).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
     const gemini = data.agents.find((a) => a.agentId === "gemini-cli");
-    expect(gemini?.models.length).toBeGreaterThan(0);
+    // Pin the exact ids (consistent with the `models.list` assertion
+    // above) so a silent add/remove in GEMINI_MODELS is caught here.
+    expect(gemini?.models.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
   });
 });
 
