@@ -38,6 +38,7 @@ import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import {
   type ActiveTabState,
   applyActiveState,
+  applyGroupActiveViewsToApi,
   applyMaximizedGroupToApi,
   extractActiveState,
   walkGridNode,
@@ -1450,11 +1451,31 @@ export function SharedDockviewLayout() {
         lastStructureRef.current = getStructuralFingerprint(initJson);
       }
 
-      // Restore the initial workspace's maximize state, if any. Has to
-      // happen AFTER `fromJSON` + the required-panel reconciliation
-      // above so that the target group actually exists in the dockview
-      // by the time we ask to maximize it.
+      // Restore the initial workspace's saved state: per-group active
+      // tabs first, then the maximize. ORDER MATTERS (same constraint
+      // as the workspace-switch useEffect below): `setActive()` on a
+      // panel inside a non-maximized group implicitly exits any
+      // existing maximize, so doing it after `applyMaximizedGroupToApi`
+      // would silently undo the maximize. Doing setActive first means
+      // every group ends up on the correct tab; the final
+      // `applyMaximizedGroupToApi` then re-applies the maximize over
+      // the top.
+      //
+      // Without this initial-mount setActive pass the workspace-switch
+      // useEffect doesn't restore per-group active tabs on the FIRST
+      // page load — that effect early-returns while `initializedRef`
+      // is still `false`, and never re-fires because `activeWorkspaceId`
+      // didn't change. The bug manifests as a hidden group's saved
+      // active tab not being applied after a workspace-switch +
+      // exit-maximize sequence — see the regression test at
+      // `e2e/workspace-maximize-state.spec.ts:224`. Has to happen AFTER
+      // `fromJSON` + the required-panel reconciliation above so the
+      // target panels actually exist in the dockview by the time we
+      // ask to activate them.
       const initialActiveState = loadActiveState(initialWorkspaceId);
+      if (initialActiveState) {
+        applyGroupActiveViewsToApi(event.api, initialActiveState);
+      }
       if (initialActiveState?.maximizedGroup) {
         applyMaximizedGroupToApi(event.api, initialActiveState.maximizedGroup);
       }
@@ -1579,25 +1600,14 @@ export function SharedDockviewLayout() {
     // `onDidMaximizedGroupChange` event so the persisted state ends up
     // accurate.
     if (activeState) {
-      try {
-        for (const [_groupId, viewId] of Object.entries(activeState.groups)) {
-          const panel = api.getPanel(viewId);
-          if (!panel) continue;
-          // Skip if already active in its group — setActive is a focus-fire
-          // even for no-op tab switches.
-          if (panel.api.isActive) continue;
-          // Skip single-panel groups (e.g. the projects edge group) — there's
-          // nothing to "switch to", and the focus side-effect resets the
-          // project list scroll position.
-          if (panel.group.panels.length <= 1) continue;
-          panel.api.setActive();
-        }
-        // Intentionally do NOT activate `activeState.activeGroup` here for
-        // the same reason: the previous code activated the first panel of
-        // the saved active group to focus that group, which on the edge-left
-        // group meant re-focusing the DashboardShell container and resetting
-        // the project list scroll.
-      } catch {}
+      // Intentionally do NOT activate `activeState.activeGroup` here.
+      // The previous code activated the first panel of the saved
+      // active group to focus that group, which on the edge-left
+      // (projects) group meant re-focusing the DashboardShell
+      // container and resetting the project list scroll. The helper
+      // skips no-op activations + single-panel groups for the same
+      // reason.
+      applyGroupActiveViewsToApi(api, activeState);
     }
     // Apply (or clear) the maximize last. Even when the workspace has
     // no saved state we still need to clear any maximize carried over
