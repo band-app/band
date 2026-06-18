@@ -22,6 +22,7 @@ import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
   AgentModel,
+  CliInvocation,
   CodingAgent,
   GetSessionMessagesOptions,
   RunSessionOptions,
@@ -763,6 +764,19 @@ export class ClaudeCodeAdapter implements CodingAgent {
       { id: "edit", name: "Edit", description: "Agent can read and edit files" },
       { id: "plan", name: "Plan", description: "Agent creates a plan without making changes" },
     ];
+  }
+
+  /**
+   * Resolved CLI invocation for `workspaces.create --via terminal`
+   * (issue #551). Opens an interactive Claude Code REPL with `prompt`
+   * pre-loaded as the first positional argument (cmux-style:
+   * `claude "<prompt>"`).
+   */
+  cliInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CLAUDE_CODE_DEFAULT_BINARY,
+      args: [prompt],
+    };
   }
 
   async listModels(): Promise<AgentModel[]> {

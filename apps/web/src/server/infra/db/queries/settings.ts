@@ -111,6 +111,16 @@ export interface Settings {
    * Defaults to `true` (treat `undefined` as enabled).
    */
   usagePollingEnabled?: boolean;
+  /**
+   * CLI-scoped preferences (issue #551). Today only `defaultVia` is
+   * recognized — the user-level fallback for `band workspaces create
+   * --prompt` dispatch when no `--via` flag, `BAND_DISPATCH` env var,
+   * or repo `.band/config.json` value is set.
+   */
+  cli?: {
+    defaultVia?: "chat" | "terminal";
+    [key: string]: unknown;
+  };
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

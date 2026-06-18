@@ -160,9 +160,31 @@ overrides, copy-back on cleanup, variable substitution.
 
 ## Configuration
 
-| Setting       | Env var           | Default                      |
-| ------------- | ----------------- | ---------------------------- |
-| Server URL    | `BAND_SERVER_URL` | `http://localhost:3456`      |
-| Auth token    | `BAND_TOKEN`      | from `~/.band/settings.json` |
-| Output format | `BAND_OUTPUT`     | `text`                       |
-| Band home dir | `BAND_HOME`       | `~/.band`                    |
+| Setting          | Env var           | Default                      |
+| ---------------- | ----------------- | ---------------------------- |
+| Server URL       | `BAND_SERVER_URL` | `http://localhost:3456`      |
+| Auth token       | `BAND_TOKEN`      | from `~/.band/settings.json` |
+| Output format    | `BAND_OUTPUT`     | `text`                       |
+| Band home dir    | `BAND_HOME`       | `~/.band`                    |
+| Dispatch target  | `BAND_DISPATCH`   | `terminal` (from CLI)        |
+
+### `workspaces create --prompt` dispatch target (issue #551)
+
+By default the CLI dispatches the `--prompt` value to a fresh **terminal**
+pane running the vendor coding agent CLI (cmux-style: `claude "<prompt>"`,
+`codex "<prompt>"`, `opencode "<prompt>"`, `gemini "<prompt>"`). The web
+UI keeps its existing **chat** pane behavior.
+
+Override precedence (highest first):
+
+1. `--via {chat,terminal}` flag.
+2. `BAND_DISPATCH` env var.
+3. `.band/config.json` per-repo: `{"workspace": {"defaultVia": "chat"}}`.
+4. `~/.band/settings.json` per-user: `{"cli": {"defaultVia": "chat"}}`.
+5. Built-in CLI default: `terminal`.
+
+When `via=terminal`, the JSON output includes a `terminalId` you can wire
+into `band terminals attach <id>` or `band terminals output <id> -f`.
+When the chosen coding agent doesn't expose a usable interactive CLI
+(`cursor-cli` today), the server falls back to `chat` and the response's
+`via` field reflects the actual dispatch.

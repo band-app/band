@@ -35,6 +35,7 @@ export {
 export type {
   AgentMode,
   AgentModel,
+  CliInvocation,
   CodingAgent,
   CodingAgentFeatures,
   GetSessionMessagesOptions,

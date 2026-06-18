@@ -151,6 +151,16 @@ impl TestEnv {
             .expect("failed to execute band")
     }
 
+    /// Run the `band` binary with extra env vars.
+    fn band_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_band"));
+        cmd.args(args).env("BAND_HOME", &self.band_dir);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("failed to execute band")
+    }
+
     fn state_json(&self) -> serde_json::Value {
         query_state(&self.band_dir)
     }
@@ -681,6 +691,294 @@ fn workspaces_create_with_prompt_and_base() {
     assert!(
         Path::new(&path).join("marker.txt").exists(),
         "worktree should have marker.txt from main"
+    );
+}
+
+// --- Issue #551: `workspaces create --via` dispatch precedence ---
+//
+// The CLI resolves `via` from this chain, highest first:
+//   1. `--via` flag.
+//   2. `BAND_DISPATCH` env var.
+//   3. `.band/config.json` `workspace.defaultVia` in the cwd repo.
+//   4. `~/.band/settings.json` `cli.defaultVia`.
+//   5. Built-in CLI default: "terminal".
+//
+// The server is the single source of truth for the *actual* dispatch
+// used (it echoes the value back in the response so a fallback for an
+// unsupported adapter is visible to the caller). Each test below pins
+// one layer of the chain by setting up an environment where every
+// lower-precedence layer is absent or contradicts the asserted value.
+
+#[test]
+fn workspaces_create_with_prompt_defaults_to_terminal_from_cli() {
+    let env = TestEnv::new();
+
+    // No flag, no env, no repo config, no user settings override —
+    // CLI's built-in default should send us into terminal dispatch.
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-default",
+        "--prompt",
+        "default via",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected CLI default to be 'terminal'; got {json}"
+    );
+    assert!(
+        json["terminalId"].is_string(),
+        "expected terminalId on terminal dispatch; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_via_chat_flag_overrides_default() {
+    let env = TestEnv::new();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-flag",
+        "--prompt",
+        "flag override",
+        "--via",
+        "chat",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+    assert!(
+        json.get("terminalId").is_none() || json["terminalId"].is_null(),
+        "chat dispatch must not return a terminalId; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_band_dispatch_env_overrides_default() {
+    let env = TestEnv::new();
+
+    // BAND_DISPATCH sits between --via and config files in the precedence
+    // chain. With no --via flag, the env var should win.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-env",
+            "--prompt",
+            "env override",
+        ],
+        &[("BAND_DISPATCH", "chat")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+}
+
+#[test]
+fn workspaces_create_via_flag_beats_band_dispatch_env() {
+    let env = TestEnv::new();
+
+    // --via flag is highest precedence; an opposing env var must lose.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-flag-env",
+            "--prompt",
+            "flag wins",
+            "--via",
+            "chat",
+        ],
+        &[("BAND_DISPATCH", "terminal")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+}
+
+#[test]
+fn workspaces_create_user_settings_default_via_overrides_built_in() {
+    let env = TestEnv::new();
+
+    // Bypass the test harness's seeded settings.json by rewriting it
+    // with `cli.defaultVia: "chat"`. The TestEnv seed used `worktreesDir`
+    // and `tokenSecret`; we preserve those so the server-bound CLI still
+    // authenticates and resolves the worktree root.
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["cli"] = serde_json::json!({ "defaultVia": "chat" });
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    // No --via, no BAND_DISPATCH, no repo `.band/config.json` — the
+    // user-level `cli.defaultVia` should win over the built-in "terminal".
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-user",
+        "--prompt",
+        "user override",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "chat",
+        "expected user settings to override built-in default; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_repo_config_default_via_overrides_user_settings() {
+    let env = TestEnv::new();
+
+    // Set user-level fallback to "chat".
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["cli"] = serde_json::json!({ "defaultVia": "chat" });
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    // Per-repo override beats user settings — write `.band/config.json`
+    // inside the test's git toplevel with `workspace.defaultVia: "terminal"`.
+    let repo_band = env.repo_path.join(".band");
+    fs::create_dir_all(&repo_band).expect("mkdir .band");
+    fs::write(
+        repo_band.join("config.json"),
+        r#"{ "workspace": { "defaultVia": "terminal" } }"#,
+    )
+    .expect("write .band/config.json");
+
+    // Run from inside the repo so `read_repo_default_via` picks it up
+    // (it walks `git rev-parse --show-toplevel` from cwd).
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args([
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-repo",
+            "--prompt",
+            "repo override",
+        ])
+        .env("BAND_HOME", &env.band_dir)
+        .current_dir(&env.repo_path)
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected repo .band/config.json to override user settings; got {json}"
+    );
+    assert!(
+        json["terminalId"].is_string(),
+        "expected terminalId on terminal dispatch; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_band_dispatch_env_beats_repo_config_default_via() {
+    let env = TestEnv::new();
+
+    // Per-repo `.band/config.json::workspace.defaultVia: "chat"` — the
+    // lower-precedence side of the link we're pinning.
+    let repo_band = env.repo_path.join(".band");
+    fs::create_dir_all(&repo_band).expect("mkdir .band");
+    fs::write(
+        repo_band.join("config.json"),
+        r#"{ "workspace": { "defaultVia": "chat" } }"#,
+    )
+    .expect("write .band/config.json");
+
+    // `BAND_DISPATCH=terminal` must override the repo config. Run from
+    // inside the repo so `read_repo_default_via` would otherwise pick up
+    // the per-repo value if the env var weren't winning.
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args([
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-env-vs-repo",
+            "--prompt",
+            "env beats repo",
+        ])
+        .env("BAND_HOME", &env.band_dir)
+        .env("BAND_DISPATCH", "terminal")
+        .current_dir(&env.repo_path)
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected BAND_DISPATCH to override .band/config.json; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_invalid_band_dispatch_fails_fast() {
+    let env = TestEnv::new();
+
+    // A typo in BAND_DISPATCH should fail at the CLI layer rather than
+    // round-tripping through the server's zod validator. The CLI's
+    // resolver lists the source ("BAND_DISPATCH env var") so the user
+    // knows which knob to fix.
+    let output = env.band_with_env(
+        &[
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-bad-env",
+            "--prompt",
+            "bad",
+        ],
+        &[("BAND_DISPATCH", "chats")],
+    );
+    assert!(
+        !output.status.success(),
+        "expected CLI to reject typo'd BAND_DISPATCH"
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("BAND_DISPATCH") && err.contains("chats"),
+        "expected CLI error to name the source and the bad value; got: {err}"
     );
 }
 

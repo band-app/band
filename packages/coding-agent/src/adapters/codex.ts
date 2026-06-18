@@ -14,6 +14,7 @@ import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
   AgentModel,
+  CliInvocation,
   CodingAgent,
   GetSessionMessagesOptions,
   RunSessionOptions,
@@ -93,7 +94,7 @@ export class CodexAdapter implements CodingAgent {
     this.workspaceDir = config.workspaceDir;
     this.maxTurns = config.maxTurns;
     this.model = config.options.model;
-    this.executablePath = config.options.executablePath ?? resolveCodexBinary();
+    this.executablePath = config.options.executablePath ?? cachedCodexBinary;
   }
 
   abort(): void {
@@ -421,6 +422,18 @@ export class CodexAdapter implements CodingAgent {
     return CODEX_MODELS;
   }
 
+  /**
+   * Resolved CLI invocation for `workspaces.create --via terminal`
+   * (issue #551). Opens an interactive Codex REPL with `prompt` pre-loaded
+   * as the first positional argument (cmux-style: `codex "<prompt>"`).
+   */
+  cliInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CODEX_DEFAULT_BINARY,
+      args: [prompt],
+    };
+  }
+
   async listSessions(dir: string): Promise<SessionListItem[]> {
     log.info({ dir }, "listSessions");
     const sessions = await readCodexSessions();
@@ -628,18 +641,28 @@ export class CodexAdapter implements CodingAgent {
 
 /**
  * Resolve the `codex` binary from the system PATH.
+ *
  * The SDK's built-in `findCodexPath()` requires the platform-specific npm
  * package (e.g. `@openai/codex-darwin-arm64`) which we don't bundle.
  * Instead we expect `codex` to be installed on the user's system.
+ *
+ * **Must remain a module-level const.** The constructor now runs on
+ * the hot `workspaces.create --via terminal` path (workspace-service →
+ * `agentService.createWorkspaceAgent` may pick this adapter), and the
+ * underlying `execFileSync("which", ["codex"])` blocks the Node event
+ * loop for 1–10 ms per invocation. Moving this inside a function or a
+ * lazily-evaluated path would re-introduce that per-request cost. The
+ * `which` result is process-stable — the user's PATH doesn't change
+ * mid-process — so resolving it once at module load is safe.
  */
-function resolveCodexBinary(): string | undefined {
+const cachedCodexBinary: string | undefined = (() => {
   try {
     const cmd = process.platform === "win32" ? "where" : "which";
     return execFileSync(cmd, ["codex"], { encoding: "utf-8" }).trim() || undefined;
   } catch {
     return undefined;
   }
-}
+})();
 
 // ─── Models ─────────────────────────────────────────────────────────────────
 

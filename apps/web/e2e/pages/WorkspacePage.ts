@@ -526,9 +526,16 @@ export class WorkspacePage {
   /** Wait for the terminal's xterm input to be attached — the DOM-level
    *  signal that the xterm instance mounted. xterm keeps its input as an
    *  offscreen "helper" textarea (Playwright reports it as hidden, never
-   *  "visible"), so we wait for `attached`, not `visible`. */
-  async waitForTerminalReady(): Promise<void> {
-    await this.terminalInput.first().waitFor({ state: "attached", timeout: 15_000 });
+   *  "visible"), so we wait for `attached`, not `visible`.
+   *
+   *  `timeoutMs` defaults to 15 s, which is the right budget for tests
+   *  that boot xterm from a freshly-mounted dockview without parallel
+   *  CI contention. Tests running under high parallel load (or chained
+   *  with workspace switches that re-mount the panel host) can pass a
+   *  longer budget — see `workspace-maximize-state.spec.ts:346` and
+   *  `workspace-create-via-terminal.spec.ts:179`, both at 75 s. */
+  async waitForTerminalReady(timeoutMs = 15_000): Promise<void> {
+    await this.terminalInput.first().waitFor({ state: "attached", timeout: timeoutMs });
   }
 
   /** Type a line into the focused terminal and submit it with Enter.
@@ -733,6 +740,37 @@ export class WorkspacePage {
       result: { data: { tree: DockviewLayoutSnapshot | null } };
     };
     return body.result.data.tree;
+  }
+
+  /** Fire the `workspaces.create` mutation over HTTP with `via:
+   *  "terminal"` — the same wire shape the Rust CLI sends after
+   *  resolving the `--via` precedence chain (`cmd_workspaces_create`).
+   *  Keeps the raw `page.request.post` out of test bodies (issue #551).
+   *  Authenticates via the `band_token` cookie, mirroring how the
+   *  dashboard's tRPC client reaches the server. Returns the unwrapped
+   *  create payload so the test can assert on `via` / `terminalId` /
+   *  `path`. */
+  async createWorkspaceViaTerminal(
+    project: string,
+    branch: string,
+    prompt: string,
+  ): Promise<{ path: string; via?: string; terminalId?: string }> {
+    const res = await this.page.request.post(`${this.baseUrl}/trpc/workspaces.create`, {
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `band_token=${this.token}`,
+      },
+      data: { project, branch, prompt, via: "terminal" },
+    });
+    if (!res.ok()) {
+      throw new Error(
+        `createWorkspaceViaTerminal(${project}, ${branch}) failed: ${res.status()} ${await res.text()}`,
+      );
+    }
+    const body = (await res.json()) as {
+      result: { data: { path: string; via?: string; terminalId?: string } };
+    };
+    return body.result.data;
   }
 
   /** The QuickOpenDialog content root. `data-testid` is set on
