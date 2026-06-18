@@ -176,7 +176,7 @@ export class SettingsPage {
   /** Toggle the enable switch for the named agent. Encapsulates the
    *  raw click (force-clicked because the Radix switch can be partly
    *  occluded by the accordion chrome) so test bodies don't drive the
-   *  locator directly (TEST-21). Assertions on the resulting
+   *  locator directly. Assertions on the resulting
    *  `data-state` stay in the test. */
   async toggleAgentEnable(agentLabel: string): Promise<void> {
     await test.step(`Toggle ${agentLabel} enable switch`, async () => {
@@ -217,7 +217,7 @@ export class SettingsPage {
   /**
    * Locator for each `<li>` row in the per-agent model list — anchored via
    * the `listitem` ARIA role so the test body never reaches in with a
-   * raw CSS tag selector (TEST-23). Returns the Playwright `Locator`
+   * raw CSS tag selector. Returns the Playwright `Locator`
    * that resolves to every row; callers chain `.first()`, `.nth(i)`,
    * or assert on `.count()` directly.
    */
@@ -242,14 +242,18 @@ export class SettingsPage {
         .first();
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
+      // Provide the synchronisation guarantee here rather than relying on
+      // the next call's implicit wait: under CI scheduler contention the
+      // Radix accordion open animation can delay the Refresh button's
+      // attachment, so wait for it explicitly before returning.
+      await expect(this.refreshModelsButton(agentLabel)).toBeVisible();
     });
   }
 
   /**
    * Scroll the "Refresh" button for the named agent into view and click
    * it. Mirrors the shape of the other action methods (`toggleLsp`,
-   * `selectTheme`) so the test body stays free of raw locator
-   * actions (TEST-21-adjacent).
+   * `selectTheme`) so the test body stays free of raw locator actions.
    */
   async clickRefreshModels(agentLabel: string): Promise<void> {
     await test.step(`Click Refresh models for ${agentLabel}`, async () => {

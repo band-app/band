@@ -12,6 +12,12 @@ import { publicProcedure, t } from "../trpc";
  * Writes go through `modelRefreshService.refresh()`, which calls the
  * adapter's `refreshModels()` (live SDK fetch where applicable) and
  * persists the result back into `settings.codingAgents[].cachedModels`.
+ *
+ * Auth: these use `publicProcedure`, but "public" here means "no extra
+ * per-procedure auth middleware" — every `/trpc/*` route (including the
+ * `refresh` mutation, which spawns an agent subprocess) is gated by the
+ * `band_token` cookie check in `server/.../auth.ts` at the HTTP transport
+ * layer. There is no unauthenticated path to these procedures.
  */
 export const modelsRouter = t.router({
   list: publicProcedure

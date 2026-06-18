@@ -227,10 +227,16 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       return changed ? next : prev;
     });
     if (!adapter.listModels) return;
+    // Guard the async resolutions: if the effect re-runs (agent set
+    // changed) or the component unmounts while a `listModels` call is in
+    // flight, don't write its result back — otherwise it could resurrect
+    // a ghost entry for an agent that was just removed.
+    let aborted = false;
     for (const id of agentIds) {
       adapter
         .listModels(id)
         .then((data) => {
+          if (aborted) return;
           mergeAgentModels(id, { models: data.models, updatedAt: data.updatedAt });
         })
         .catch(() => {
@@ -238,6 +244,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
           // transient network blip doesn't blank the picker.
         });
     }
+    return () => {
+      aborted = true;
+    };
   }, [agentIds, adapter, mergeAgentModels]);
 
   // `useCallback` for parity with `mergeAgentModels` and so the handler

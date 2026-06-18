@@ -150,16 +150,24 @@ export class ModelRefreshService {
    * SDK throws), logs a warning and returns the previously cached list
    * (or the adapter's defaults) without overwriting the cache.
    *
-   * If the SDK fetch succeeds but the agent isn't found in
-   * `settings.codingAgents` (the boot-time race against
-   * `ensureSettingsDefaults`, or a stale `agentId` arrived through the
-   * router), the cache write is skipped and `error` is set so the caller
-   * doesn't render a misleading "Last refreshed just now" timestamp.
+   * Unknown `agentId`: `createMetadataAgent` resolves through
+   * `resolveAgentDefinition`, which silently falls back to the default
+   * agent for an unrecognised id. We don't want a stray id to spawn the
+   * default agent's subprocess, so we reject it up front with an
+   * explicit error instead.
    */
   async refresh(agentId: string): Promise<ModelRefreshResult> {
     const now = Date.now();
     let fresh: AgentModel[] | undefined;
     let error: string | undefined;
+
+    // Guard against the resolveAgentDefinition default-fallback: an id
+    // that isn't a configured agent must not trigger a refresh of some
+    // other (default) agent's subprocess.
+    const known = (this.queries.load().codingAgents ?? []).some((a) => a.id === agentId);
+    if (!known) {
+      return { agentId, models: [], updatedAt: 0, error: "agent not found" };
+    }
 
     try {
       const agent = await createMetadataAgent(agentId);

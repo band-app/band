@@ -33,7 +33,7 @@ const TOKEN = "models-router-token";
  * Just the slice of `~/.band/settings.json` these tests assert on —
  * described locally rather than importing the production `Settings`
  * type from `src/server/infra/**`, so the test isn't coupled to the
- * internal schema (TEST-2).
+ * internal schema and survives refactors of the production type.
  */
 interface PersistedSettings {
   codingAgents?: {
@@ -69,8 +69,8 @@ async function bootWithSettings(settings: object): Promise<{ server: ServerHandl
 
 describe("models router — read path (preseeded cache)", () => {
   // Read-only block (list / listAll never mutate settings.json), so a
-  // single shared server boot is safe — beforeAll/afterAll instead of
-  // per-test boot (TEST-11).
+  // single shared server boot is safe — beforeAll/afterAll instead of a
+  // per-test boot.
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -259,7 +259,7 @@ describe("models router — refresh persists the new list", () => {
 });
 
 describe("models router — fallback when no cache exists", () => {
-  // Read-only block — shared server boot (TEST-11).
+  // Read-only block (no settings.json writes) — shared server boot.
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -291,7 +291,7 @@ describe("models router — fallback when no cache exists", () => {
 });
 
 describe("models router — authentication", () => {
-  // Read-only block (only 401 negative paths) — shared server boot (TEST-11).
+  // Read-only block (only 401 negative paths) — shared server boot.
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -316,6 +316,12 @@ describe("models router — authentication", () => {
         JSON.stringify({ agentId: "gemini-cli" }),
       )}`,
     );
+    expect(res.status).toBe(401);
+  });
+
+  it("models.listAll rejects unauthenticated requests with 401", async () => {
+    // listAll is a new authenticated endpoint too — cover its negative path.
+    const res = await fetch(`${server.url}/trpc/models.listAll`);
     expect(res.status).toBe(401);
   });
 
