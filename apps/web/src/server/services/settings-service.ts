@@ -46,11 +46,11 @@ export const settingsUpdateInput = z
     // `cachedModels` / `cachedModelsUpdatedAt` are intentionally NOT
     // in this schema even though they're part of the `CodingAgentDefinition`
     // shape — they're write-protected through this route. The only
-    // intended writer is `ModelRefreshService.persistFromSnapshot()`,
-    // which composes the patch server-side and bypasses Zod stripping
-    // by calling `SettingsQueries.save()` directly. Adding the fields
-    // here would let any authenticated client overwrite the cache
-    // with attacker-controlled values via `settings.update`.
+    // intended writer is `ModelRefreshService` (its internal `persist`
+    // method), which composes the patch server-side and bypasses Zod
+    // stripping by calling `SettingsQueries.save()` directly. Adding
+    // the fields here would let any authenticated client overwrite the
+    // cache with attacker-controlled values via `settings.update`.
     codingAgents: z
       .array(
         z.object({

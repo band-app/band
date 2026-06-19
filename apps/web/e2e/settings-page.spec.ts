@@ -225,14 +225,20 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
   // the boot-time refresh; the assertion below requires the explicit
   // click to bump it strictly forward, so a no-op click would fail
   // the test rather than passing on the boot-refresh value alone.
+  //
+  // We *also* capture a `referenceTs` from `Date.now()` immediately
+  // before the click. Comparing against `max(beforeTs, referenceTs)`
+  // means the explicit-click write has to land at a real wall-clock
+  // tick strictly after the test reaches this point — no sleep needed
+  // for the rare case where the boot refresh and the click both happen
+  // to fall on the same millisecond.
   const beforeTs = (
     readSettings() as {
       codingAgents?: { id: string; cachedModelsUpdatedAt?: number }[];
     }
   ).codingAgents?.find((a) => a.id === "codex")?.cachedModelsUpdatedAt;
-  // Date.now() granularity is 1 ms; tiny sleep so a sub-ms click
-  // produces a strictly larger value.
-  await new Promise((r) => setTimeout(r, 5));
+  const referenceTs = Date.now();
+  const lowerBound = Math.max(beforeTs ?? 0, referenceTs);
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
@@ -269,10 +275,10 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
     }
     if (
       typeof codex.cachedModelsUpdatedAt !== "number" ||
-      codex.cachedModelsUpdatedAt <= (beforeTs ?? 0)
+      codex.cachedModelsUpdatedAt <= lowerBound
     ) {
       throw new Error(
-        `expected cachedModelsUpdatedAt > ${beforeTs ?? 0}, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
+        `expected cachedModelsUpdatedAt > ${lowerBound}, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
       );
     }
   }).toPass({ timeout: 5_000 });

@@ -75,10 +75,24 @@ function writeStubCodexCli(
  * Boot the production server bundle with the given settings.json. The
  * boot-time fire-and-forget refresh runs unconditionally; callers that
  * need to assert on the cache should `waitForCachedModels` afterwards.
+ *
+ * `prepare` is called AFTER the tmp home is created but BEFORE settings
+ * are seeded and the server starts — use it to create stub binaries that
+ * need a real on-disk path so the seeded settings can reference them
+ * directly. This avoids the cross-process race that bites when settings
+ * are seeded with a `PLACEHOLDER` `command` and then rewritten from the
+ * parent process after `startServer` — the child's boot-refresh can
+ * (and does, on CI) fire against the placeholder before the second
+ * write lands.
  */
-async function bootWithSettings(settings: object): Promise<{ server: ServerHandle; home: string }> {
+async function bootWithSettings(
+  settings: object | ((home: string) => object),
+  prepare?: (home: string) => void,
+): Promise<{ server: ServerHandle; home: string }> {
   const tmpHome = createTmpHome("band-models-router-");
-  seedSettings(tmpHome, settings);
+  prepare?.(tmpHome);
+  const resolved = typeof settings === "function" ? settings(tmpHome) : settings;
+  seedSettings(tmpHome, resolved);
   const server = await startServer({ tmpHome });
   return { server, home: tmpHome };
 }
@@ -113,35 +127,26 @@ describe("models router — read path (boot-refresh-populated cache)", () => {
   let tmpHome: string;
 
   beforeAll(async () => {
-    const booted = await bootWithSettings({
-      tokenSecret: TOKEN,
-      codingAgents: [
-        // Note: no preseeded cachedModels — we let the boot refresh
-        // populate them deterministically via the stub binary below.
-        {
-          id: "codex",
-          type: "codex",
-          label: "Codex",
-          command: "PLACEHOLDER", // overwritten below after createTmpHome
-        },
-        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
-      ],
-      defaultCodingAgent: "codex",
-    });
+    let stubCodex = "";
+    const booted = await bootWithSettings(
+      (home) => ({
+        tokenSecret: TOKEN,
+        codingAgents: [
+          // No preseeded cachedModels — we let the boot refresh populate
+          // them deterministically via the stub binary written above.
+          { id: "codex", type: "codex", label: "Codex", command: stubCodex },
+          { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
+        ],
+        defaultCodingAgent: "codex",
+      }),
+      (home) => {
+        stubCodex = writeStubCodexCli(home, "stub-codex.sh", [
+          { slug: "stub-codex", display_name: "Stub Codex", description: "stub" },
+        ]);
+      },
+    );
     server = booted.server;
     tmpHome = booted.home;
-    // Re-seed with a real stub-codex path now that tmpHome exists.
-    const stubCodex = writeStubCodexCli(tmpHome, "stub-codex.sh", [
-      { slug: "stub-codex", display_name: "Stub Codex", description: "stub", priority: 1 },
-    ]);
-    seedSettings(tmpHome, {
-      tokenSecret: TOKEN,
-      codingAgents: [
-        { id: "codex", type: "codex", label: "Codex", command: stubCodex },
-        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
-      ],
-      defaultCodingAgent: "codex",
-    });
     await waitForCachedModels(tmpHome, ["codex", "gemini-cli"]);
   });
 
@@ -213,27 +218,24 @@ describe("models router — explicit refresh", () => {
   let tmpHome: string;
 
   beforeEach(async () => {
-    const booted = await bootWithSettings({
-      tokenSecret: TOKEN,
-      codingAgents: [
-        { id: "codex", type: "codex", label: "Codex", command: "PLACEHOLDER" },
-        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
-      ],
-      defaultCodingAgent: "codex",
-    });
+    let stubCodex = "";
+    const booted = await bootWithSettings(
+      () => ({
+        tokenSecret: TOKEN,
+        codingAgents: [
+          { id: "codex", type: "codex", label: "Codex", command: stubCodex },
+          { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
+        ],
+        defaultCodingAgent: "codex",
+      }),
+      (home) => {
+        stubCodex = writeStubCodexCli(home, "stub-codex.sh", [
+          { slug: "stub-codex", display_name: "Stub Codex" },
+        ]);
+      },
+    );
     server = booted.server;
     tmpHome = booted.home;
-    const stubCodex = writeStubCodexCli(tmpHome, "stub-codex.sh", [
-      { slug: "stub-codex", display_name: "Stub Codex", priority: 1 },
-    ]);
-    seedSettings(tmpHome, {
-      tokenSecret: TOKEN,
-      codingAgents: [
-        { id: "codex", type: "codex", label: "Codex", command: stubCodex },
-        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
-      ],
-      defaultCodingAgent: "codex",
-    });
     await waitForCachedModels(tmpHome, ["codex", "gemini-cli"]);
   });
 

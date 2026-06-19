@@ -130,9 +130,15 @@ export class ModelRefreshService {
     if (def?.cachedModels && def.cachedModels.length > 0) {
       return def.cachedModels;
     }
-    // Fall back to the adapter's static default list. We instantiate a
-    // throwaway metadata agent and call its sync `listModels()` — every
-    // adapter implements that path without I/O so it's cheap.
+    // Fall back to the adapter's static default list by instantiating a
+    // throwaway metadata agent and calling its sync `listModels()`. Note
+    // that `claude-code` and `codex` deliberately return `[]` from
+    // `listModels()` (their canonical source is the live SDK / `codex
+    // debug models`, populated via `refreshModels()`), so the fallback
+    // only yields a non-empty list for adapters with static hardcoded
+    // catalogues (`cursor-cli`, `gemini-cli`). For the SDK-backed
+    // adapters this branch returns `[]` until the first successful
+    // refresh — the correct "we have nothing to show yet" signal.
     try {
       const agent = await createMetadataAgent(agentId);
       if (!agent.listModels) return [];

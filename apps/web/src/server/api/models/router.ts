@@ -16,8 +16,8 @@ import { publicProcedure, t } from "../trpc";
  * Auth: these use `publicProcedure`, but "public" here means "no extra
  * per-procedure auth middleware" — every `/trpc/*` route (including the
  * `refresh` mutation, which spawns an agent subprocess) is gated by the
- * `band_token` cookie check in `server/.../auth.ts` at the HTTP transport
- * layer. There is no unauthenticated path to these procedures.
+ * HTTP-layer `band_token` auth middleware. There is no unauthenticated
+ * path to these procedures.
  */
 export const modelsRouter = t.router({
   list: publicProcedure
@@ -43,6 +43,14 @@ export const modelsRouter = t.router({
    * calls this with a single `agentId` (one ~10 s ceiling, with a button
    * spinner), so the batch ceiling is reached only by an explicit
    * all-agents API call. Size any client-side tRPC timeout accordingly.
+   *
+   * If the supported-agent list ever grows past the current 5 entries
+   * (claude-code, codex, gemini-cli, cursor-cli, opencode), reconsider:
+   * (a) parallelising the per-agent loop in `refreshAll` (the only
+   * thing that prevents it today is the `settings.json` RMW interleave,
+   * which a single load-merge-save at the end would let us bypass), or
+   * (b) flipping the batch path to fire-and-forget with an SSE notice
+   * so the HTTP response returns immediately.
    */
   refresh: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))
