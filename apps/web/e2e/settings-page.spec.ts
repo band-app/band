@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -14,37 +13,58 @@ import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-settings-test-token";
 
+// Stub Codex catalog the boot refresh + explicit Refresh click both
+// resolve to. Two entries so the test can pin a count and a couple of
+// ids without depending on whatever the host's real `codex debug models`
+// would return.
+const STUB_CODEX_MODELS = [
+  { slug: "stub-codex-1", display_name: "Stub Codex 1", priority: 1 },
+  { slug: "stub-codex-2", display_name: "Stub Codex 2", priority: 2 },
+];
+
+/**
+ * Write a stub Codex shell that prints the JSON the adapter expects
+ * (`{ "models": [...] }`) when invoked as `<stub> debug models`. The
+ * adapter's `refreshModels()` shells out to that exact subcommand
+ * (see `packages/coding-agent/src/adapters/codex.ts`), so this stub
+ * makes both the boot refresh and the explicit Refresh click
+ * deterministic on every CI host without requiring a real codex install.
+ */
+function writeStubCodex(tmpHome: string): string {
+  const binPath = join(tmpHome, "stub-codex.sh");
+  const json = JSON.stringify({ models: STUB_CODEX_MODELS });
+  writeFileSync(
+    binPath,
+    `#!/bin/sh\nif [ "$1" = "debug" ] && [ "$2" = "models" ]; then\n  printf '%s\\n' '${json}'\nfi\n`,
+    "utf-8",
+  );
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
+
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, { projects: [] });
+  const stubCodex = writeStubCodex(tmpHome);
   // Seed codingAgents explicitly so the Default-agent dropdown renders
   // deterministically — without this, runFirstTimeSetup() relies on the
   // host having `claude`/`codex`/`opencode` on PATH, which is true on
-  // dev machines but not on CI runners.
+  // dev machines but not on CI runners. Point Codex at the stub so the
+  // boot refresh + explicit Refresh resolve to a known model list with
+  // no host dependency.
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     theme: "dark",
     codingAgents: [
       { id: "claude-code", type: "claude-code", label: "Claude Code" },
-      { id: "codex", type: "codex", label: "Codex" },
+      { id: "codex", type: "codex", label: "Codex", command: stubCodex },
     ],
     defaultCodingAgent: "claude-code",
   });
-  // Disable the boot-time fire-and-forget model refresh so the
-  // "Refresh models" e2e below is actually load-bearing on the button
-  // click — without this, boot would populate `codex.cachedModels` /
-  // `cachedModelsUpdatedAt` in settings.json before the test interacts
-  // with the dialog and the "after click" assertion would pass even if
-  // the click did nothing. The toggle is a boot-orchestrator opt-out
-  // wired in start-server.ts; setting it has no effect on the other
-  // tests in this file.
-  server = await startServer({
-    tmpHome,
-    env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
-  });
+  server = await startServer({ tmpHome });
 });
 
 test.afterAll(async () => {
@@ -188,47 +208,31 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   expect(errors).toEqual([]);
 });
 
-/**
- * Probe whether the `codex` binary is reachable on this host. The
- * "Refresh models" test below clicks a button whose server-side
- * handler shells out to `codex debug models`; without the binary the
- * refresh fails with an error message and no persisted cache. Rather
- * than asserting on the error UI (which would still be a valid test
- * of the failure path but a weaker test of the success path), we
- * skip the spec when the binary isn't installed so CI runners
- * without codex don't go red and dev machines exercise the real
- * round-trip.
- *
- * Uses `which codex` rather than a fixed candidate-path list: codex is
- * commonly installed under a per-Node-version path (nvm/fnm/volta) that
- * doesn't match the test runner's own `process.version`, so a hardcoded
- * `.nvm/versions/node/<version>/bin/codex` probe would skip the test on
- * hosts where codex is genuinely on PATH. `which` resolves exactly what
- * the server's `execFile("codex", …)` will find at runtime.
- */
-function codexBinaryReachable(): boolean {
-  try {
-    execFileSync("which", ["codex"], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-test("clicking Refresh models persists the cached list to settings.json", async ({ page }) => {
+test("clicking Refresh models persists the stub catalog to settings.json", async ({ page }) => {
   // User-observable affordance from the refresh-agent-models change:
   // expanding an agent's accordion in the Settings dialog renders a
   // "Refresh" button + per-agent model list. Clicking the button must
-  // (a) populate the model list in the DOM and (b) write
-  // `cachedModels` + `cachedModelsUpdatedAt` into ~/.band/settings.json
-  // for that agent.
+  // (a) populate the model list in the DOM with the agent's catalog
+  // and (b) write `cachedModels` + `cachedModelsUpdatedAt` into
+  // ~/.band/settings.json for that agent.
   //
-  // We exercise Codex because its `refreshModels()` shells out to
-  // `codex debug models` — deterministic on a host that has codex
-  // installed (the binary returns a stable JSON catalog), and gated
-  // by the `codexBinaryReachable()` probe above so CI hosts without
-  // codex on PATH skip the test rather than fail.
-  test.skip(!codexBinaryReachable(), "codex binary not installed on this host");
+  // The `beforeAll` above seeded Codex with a stub shell that prints
+  // `{ "models": [...] }` — the same shape the real codex binary
+  // produces — so the round-trip is fully deterministic on every CI
+  // host without a real codex install.
+
+  // Record the pre-click `cachedModelsUpdatedAt` value populated by
+  // the boot-time refresh; the assertion below requires the explicit
+  // click to bump it strictly forward, so a no-op click would fail
+  // the test rather than passing on the boot-refresh value alone.
+  const beforeTs = (
+    readSettings() as {
+      codingAgents?: { id: string; cachedModelsUpdatedAt?: number }[];
+    }
+  ).codingAgents?.find((a) => a.id === "codex")?.cachedModelsUpdatedAt;
+  // Date.now() granularity is 1 ms; tiny sleep so a sub-ms click
+  // produces a strictly larger value.
+  await new Promise((r) => setTimeout(r, 5));
 
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
@@ -237,31 +241,38 @@ test("clicking Refresh models persists the cached list to settings.json", async 
   // Open the Codex accordion so the model list + Refresh button mount.
   await settingsPage.expandAgentAccordion("Codex");
 
-  // Click Refresh and wait for the cached entries to render in the DOM.
-  // The page object's locator anchors on the BEM data-testid.
+  // Click Refresh and wait for the rendered list + persisted file to
+  // reflect the stub catalog exactly.
   await settingsPage.clickRefreshModels("Codex");
-
   await expect(settingsPage.modelList("codex")).toBeVisible();
-  // `codex debug models` returns the live catalog (>=1 entry on every
-  // released codex binary); assert >0 so the test isn't brittle if
-  // OpenAI ships or retires a model.
-  await expect(settingsPage.modelListItems("codex")).not.toHaveCount(0);
+  // The stub returns two entries; assert exact count + ids so a
+  // regression in either the click path or the stub's JSON shape would
+  // fail the test rather than passing on a partial match.
+  await expect(settingsPage.modelListItems("codex")).toHaveCount(2);
 
-  // The mutation is fire-and-forget on the client; poll the persisted
-  // JSON until `cachedModelsUpdatedAt` appears for codex.
+  // Poll the persisted JSON until the stub catalog has landed AND the
+  // explicit-click timestamp is strictly newer than the boot-refresh one.
   await expect(() => {
     const settings = readSettings() as {
-      codingAgents?: { id: string; cachedModels?: unknown[]; cachedModelsUpdatedAt?: number }[];
+      codingAgents?: {
+        id: string;
+        cachedModels?: { id: string; name?: string }[];
+        cachedModelsUpdatedAt?: number;
+      }[];
     };
     const codex = settings.codingAgents?.find((a) => a.id === "codex");
-    if (!codex?.cachedModels || codex.cachedModels.length === 0) {
+    if (!codex) throw new Error("codex agent not present in settings.json");
+    if (codex.cachedModels?.map((m) => m.id).join(",") !== "stub-codex-1,stub-codex-2") {
       throw new Error(
-        `expected codex.cachedModels to be persisted, got ${JSON.stringify(codex?.cachedModels)}`,
+        `expected codex.cachedModels to be the stub catalog, got ${JSON.stringify(codex.cachedModels)}`,
       );
     }
-    if (typeof codex.cachedModelsUpdatedAt !== "number" || codex.cachedModelsUpdatedAt <= 0) {
+    if (
+      typeof codex.cachedModelsUpdatedAt !== "number" ||
+      codex.cachedModelsUpdatedAt <= (beforeTs ?? 0)
+    ) {
       throw new Error(
-        `expected codex.cachedModelsUpdatedAt to be a positive number, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
+        `expected cachedModelsUpdatedAt > ${beforeTs ?? 0}, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
       );
     }
   }).toPass({ timeout: 5_000 });

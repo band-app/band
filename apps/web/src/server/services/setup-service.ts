@@ -18,23 +18,6 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
 ];
 
 /**
- * Options threaded into the boot pipeline. Every field has a production
- * default; callers that want to opt out of a boot step (typically tests)
- * pass the override here rather than reaching for an env var inside the
- * production code path.
- */
-export interface RunFirstTimeSetupOptions {
-  /**
-   * Whether to kick off the fire-and-forget background refresh of each
-   * configured coding agent's model list at the end of setup. Defaults
-   * to `true`. Integration tests that pre-seed `cachedModels` in
-   * settings.json and want their assertions to be deterministic pass
-   * `false` so the refresh doesn't race their assertions.
-   */
-  bootRefresh?: boolean;
-}
-
-/**
  * Run startup setup. Called every server boot. Each step is idempotent —
  * it checks whether the relevant resource is already present and only acts
  * when something is missing.
@@ -79,7 +62,7 @@ export interface RunFirstTimeSetupOptions {
  * risk exists today. If you ever drop that try/catch, attach a
  * `.catch()` here to preserve the invariant.
  */
-export async function runFirstTimeSetup(options: RunFirstTimeSetupOptions = {}): Promise<void> {
+export async function runFirstTimeSetup(): Promise<void> {
   // Kick this off immediately — independent of CLI install and settings.
   const projectSync = ensureProjectStateInSync();
 
@@ -113,12 +96,7 @@ export async function runFirstTimeSetup(options: RunFirstTimeSetupOptions = {}):
   // requests. Failures inside `refreshAll` are already swallowed by the
   // service; the outer `.catch` here only fires if something explodes
   // before reaching the try/catch (e.g. dynamic import failure).
-  //
-  // Tests can opt out via the `bootRefresh: false` option so a preseeded
-  // settings.json cache isn't overwritten before the test asserts on it.
-  if (options.bootRefresh !== false) {
-    void refreshAgentModelsInBackground();
-  }
+  void refreshAgentModelsInBackground();
 }
 
 /**
@@ -359,8 +337,8 @@ async function ensureSkillsInstalled(): Promise<void> {
  * (called from `start-server.ts` and several tests) is preserved.
  */
 export class SetupService {
-  async run(options?: RunFirstTimeSetupOptions): Promise<void> {
-    return runFirstTimeSetup(options);
+  async run(): Promise<void> {
+    return runFirstTimeSetup();
   }
 }
 

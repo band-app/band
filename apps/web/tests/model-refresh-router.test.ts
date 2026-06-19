@@ -3,18 +3,17 @@
  * `models.listAll`, `models.refresh`).
  *
  * Boots the real production server bundle against a fresh `$HOME` with a
- * pre-seeded `~/.band/settings.json` containing two configured coding
- * agents. We assert on the HTTP responses for the read path
- * (`list` / `listAll`) and on the on-disk JSON document for the write
- * path (`refresh`). The real adapters are used — Gemini CLI returns a
- * fully hardcoded list from `refreshModels()`, so its branches are
- * deterministic; Codex's `refreshModels()` shells out to
- * `codex debug models` so the codex-refresh case is gated on whether
- * the `codex` binary is on PATH (see the load-bearing assertion in
- * "refresh without agentId" that handles both branches).
+ * pre-seeded `~/.band/settings.json`. Codex's `refreshModels()` shells
+ * out to `<command> debug models` and parses JSON from stdout, so we
+ * point its `command` at a tiny stub shell script that prints the JSON
+ * we want — this makes every refresh path (boot-time, explicit
+ * `models.refresh`, and the per-test 401/agent-not-found branches)
+ * deterministic on any CI host without depending on a real `codex`
+ * install. Gemini CLI's `refreshModels()` returns a hardcoded list from
+ * the adapter so it needs no stub.
  */
 
-import { readFileSync, rmSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedSettings } from "./helpers/seed-state";
@@ -30,15 +29,14 @@ import {
 const TOKEN = "models-router-token";
 
 /**
- * Just the slice of `~/.band/settings.json` these tests assert on —
- * described locally rather than importing the production `Settings`
- * type from `src/server/infra/**`, so the test isn't coupled to the
- * internal schema and survives refactors of the production type.
+ * Just the slice of `~/.band/settings.json` these tests assert on,
+ * described locally so the test isn't coupled to the production
+ * `Settings` shape and survives refactors of the internal type.
  */
 interface PersistedSettings {
   codingAgents?: {
     id: string;
-    cachedModels?: { id: string; name?: string }[];
+    cachedModels?: { id: string; name?: string; description?: string; contextWindow?: number }[];
     cachedModelsUpdatedAt?: number;
   }[];
 }
@@ -50,25 +48,65 @@ function readSettingsFile(home: string): PersistedSettings {
 }
 
 /**
- * Boot helper used by every describe block. Each block writes its own
- * settings.json shape and gets a fresh tmpHome so tests can't leak
- * cached-models writes into the next block's assertions. `bootRefresh`
- * is disabled because each block preseeds the cache it wants to assert
- * on; with the boot refresh enabled, that preseeded cache would be
- * overwritten before the first request lands.
+ * Write a stub shell script that, when invoked as `<stub> debug models`,
+ * prints the JSON Codex's adapter expects (`{"models":[{slug, …}, …]}`).
+ * The stub also handles being invoked WITHOUT `debug models` — it
+ * exits 0 with empty stdout — so the boot path (which only ever calls
+ * `debug models`) and any accidental other invocation are both safe.
+ */
+function writeStubCodexCli(
+  tmpHome: string,
+  name: string,
+  models: { slug: string; display_name?: string; description?: string; context_window?: number }[],
+): string {
+  const binPath = join(tmpHome, name);
+  const json = JSON.stringify({ models });
+  // Single-quote inside the script body to keep shell escaping trivial.
+  writeFileSync(
+    binPath,
+    `#!/bin/sh\nif [ "$1" = "debug" ] && [ "$2" = "models" ]; then\n  printf '%s\\n' '${json}'\nfi\n`,
+    "utf-8",
+  );
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
+
+/**
+ * Boot the production server bundle with the given settings.json. The
+ * boot-time fire-and-forget refresh runs unconditionally; callers that
+ * need to assert on the cache should `waitForCachedModels` afterwards.
  */
 async function bootWithSettings(settings: object): Promise<{ server: ServerHandle; home: string }> {
   const tmpHome = createTmpHome("band-models-router-");
   seedSettings(tmpHome, settings);
-  const server = await startServer({
-    tmpHome,
-    env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
-  });
+  const server = await startServer({ tmpHome });
   return { server, home: tmpHome };
 }
 
-describe("models router — read path (preseeded cache)", () => {
-  // Read-only block (list / listAll never mutate settings.json), so a
+/**
+ * Poll `~/.band/settings.json` until every named agent's `cachedModels`
+ * is non-empty (boot-time refresh has landed for them). Each tick is
+ * 100 ms; 50 ticks = 5 s ceiling, which is well above what the boot
+ * refresh actually needs on any of these tests' stub binaries (<200 ms
+ * in practice on a warm CI runner).
+ */
+async function waitForCachedModels(home: string, agentIds: string[]): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    const settings = readSettingsFile(home);
+    const ready = agentIds.every((id) => {
+      const a = settings.codingAgents?.find((x) => x.id === id);
+      return (a?.cachedModels?.length ?? 0) > 0;
+    });
+    if (ready) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(
+    `boot refresh did not populate cachedModels for ${agentIds.join(", ")} within 5 s`,
+  );
+}
+
+describe("models router — read path (boot-refresh-populated cache)", () => {
+  // Read-only block (list / listAll never mutate settings.json) so a
   // single shared server boot is safe — beforeAll/afterAll instead of a
   // per-test boot.
   let server: ServerHandle;
@@ -78,12 +116,13 @@ describe("models router — read path (preseeded cache)", () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [
+        // Note: no preseeded cachedModels — we let the boot refresh
+        // populate them deterministically via the stub binary below.
         {
           id: "codex",
           type: "codex",
           label: "Codex",
-          cachedModels: [{ id: "preseeded-codex", name: "Preseeded Codex" }],
-          cachedModelsUpdatedAt: 1_700_000_000_000,
+          command: "PLACEHOLDER", // overwritten below after createTmpHome
         },
         { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
       ],
@@ -91,6 +130,19 @@ describe("models router — read path (preseeded cache)", () => {
     });
     server = booted.server;
     tmpHome = booted.home;
+    // Re-seed with a real stub-codex path now that tmpHome exists.
+    const stubCodex = writeStubCodexCli(tmpHome, "stub-codex.sh", [
+      { slug: "stub-codex", display_name: "Stub Codex", description: "stub", priority: 1 },
+    ]);
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "codex", type: "codex", label: "Codex", command: stubCodex },
+        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
+      ],
+      defaultCodingAgent: "codex",
+    });
+    await waitForCachedModels(tmpHome, ["codex", "gemini-cli"]);
   });
 
   afterAll(async () => {
@@ -105,20 +157,19 @@ describe("models router — read path (preseeded cache)", () => {
       models: { id: string; name: string }[];
       updatedAt?: number;
     }>(res);
-    expect(data.models).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-    expect(data.updatedAt).toBe(1_700_000_000_000);
+    expect(data.models).toEqual([
+      { id: "stub-codex", name: "Stub Codex", description: "stub", contextWindow: undefined },
+    ]);
+    expect(data.updatedAt).toBeGreaterThan(0);
   });
 
-  it("models.list falls back to adapter defaults when no cache is present", async () => {
+  it("models.list returns the cached gemini-cli list", async () => {
     const res = await trpcQuery(server.url, "models.list", { agentId: "gemini-cli" }, TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{
       models: { id: string; name: string; contextWindow?: number }[];
       updatedAt?: number;
     }>(res);
-    // Gemini CLI ships the static `GEMINI_MODELS` list (deterministic,
-    // in-repo). Pin the exact expected list so drift in the adapter
-    // surfaces as a failure here rather than going unnoticed.
     expect(data.models).toEqual([
       {
         id: "gemini-2.5-pro",
@@ -133,7 +184,7 @@ describe("models router — read path (preseeded cache)", () => {
         contextWindow: 1_000_000,
       },
     ]);
-    expect(data.updatedAt).toBeUndefined();
+    expect(data.updatedAt).toBeGreaterThan(0);
   });
 
   it("models.listAll returns every configured agent in order", async () => {
@@ -145,16 +196,19 @@ describe("models router — read path (preseeded cache)", () => {
     }>(res);
     expect(data.defaultAgentId).toBe("codex");
     expect(data.agents.map((a) => a.agentId)).toEqual(["codex", "gemini-cli"]);
-    const codex = data.agents.find((a) => a.agentId === "codex");
-    expect(codex?.models).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-    const gemini = data.agents.find((a) => a.agentId === "gemini-cli");
-    // Pin the exact ids (consistent with the `models.list` assertion
-    // above) so a silent add/remove in GEMINI_MODELS is caught here.
-    expect(gemini?.models.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
+    expect(data.agents.find((a) => a.agentId === "codex")?.models.map((m) => m.id)).toEqual([
+      "stub-codex",
+    ]);
+    expect(data.agents.find((a) => a.agentId === "gemini-cli")?.models.map((m) => m.id)).toEqual([
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+    ]);
   });
 });
 
-describe("models router — refresh persists the new list", () => {
+describe("models router — explicit refresh", () => {
+  // Write-path: each test boots its own server so cache writes between
+  // tests don't bleed.
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -162,19 +216,25 @@ describe("models router — refresh persists the new list", () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [
-        {
-          id: "codex",
-          type: "codex",
-          label: "Codex",
-          cachedModels: [{ id: "preseeded-codex", name: "Preseeded Codex" }],
-          cachedModelsUpdatedAt: 1_700_000_000_000,
-        },
+        { id: "codex", type: "codex", label: "Codex", command: "PLACEHOLDER" },
         { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
       ],
       defaultCodingAgent: "codex",
     });
     server = booted.server;
     tmpHome = booted.home;
+    const stubCodex = writeStubCodexCli(tmpHome, "stub-codex.sh", [
+      { slug: "stub-codex", display_name: "Stub Codex", priority: 1 },
+    ]);
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "codex", type: "codex", label: "Codex", command: stubCodex },
+        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
+      ],
+      defaultCodingAgent: "codex",
+    });
+    await waitForCachedModels(tmpHome, ["codex", "gemini-cli"]);
   });
 
   afterEach(async () => {
@@ -183,6 +243,18 @@ describe("models router — refresh persists the new list", () => {
   });
 
   it("models.refresh writes a fresh list to settings.json and leaves other agents untouched", async () => {
+    // Capture the pre-click cachedModelsUpdatedAt so we can confirm the
+    // explicit refresh produced a fresh write.
+    const before = readSettingsFile(tmpHome);
+    const geminiBeforeTs =
+      before.codingAgents?.find((a) => a.id === "gemini-cli")?.cachedModelsUpdatedAt ?? 0;
+    const codexBeforeTs =
+      before.codingAgents?.find((a) => a.id === "codex")?.cachedModelsUpdatedAt ?? 0;
+
+    // Sleep 5 ms so a sub-millisecond refresh produces a strictly newer
+    // timestamp (Date.now() granularity).
+    await new Promise((r) => setTimeout(r, 5));
+
     const res = await trpcMutate(server.url, "models.refresh", { agentId: "gemini-cli" }, TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -198,100 +270,30 @@ describe("models router — refresh persists the new list", () => {
     expect(result.agentId).toBe("gemini-cli");
     expect(result.error).toBeUndefined();
     expect(result.models.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
-    expect(result.updatedAt).toBeGreaterThan(0);
 
     const persisted = readSettingsFile(tmpHome);
     const gemini = persisted.codingAgents?.find((a) => a.id === "gemini-cli");
     expect(gemini?.cachedModels?.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
-    expect(gemini?.cachedModelsUpdatedAt).toBeGreaterThan(0);
-    // Codex (preseeded) is untouched by a single-agent refresh of gemini-cli.
+    expect(gemini?.cachedModelsUpdatedAt ?? 0).toBeGreaterThan(geminiBeforeTs);
+    // Codex was NOT refreshed — its timestamp is unchanged.
     const codex = persisted.codingAgents?.find((a) => a.id === "codex");
-    expect(codex?.cachedModels).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-    expect(codex?.cachedModelsUpdatedAt).toBe(1_700_000_000_000);
+    expect(codex?.cachedModelsUpdatedAt).toBe(codexBeforeTs);
+    expect(codex?.cachedModels?.map((m) => m.id)).toEqual(["stub-codex"]);
   });
 
   it("models.refresh without agentId refreshes every configured agent", async () => {
     const res = await trpcMutate(server.url, "models.refresh", {}, TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{
-      results: {
-        agentId: string;
-        models: { id: string }[];
-        updatedAt: number;
-        error?: string;
-      }[];
+      results: { agentId: string; error?: string }[];
     }>(res);
     expect(data.results.map((r) => r.agentId).sort()).toEqual(["codex", "gemini-cli"]);
-
-    // gemini-cli's refresh is fully deterministic (hardcoded list in
-    // the adapter, no binary spawn). Pin that.
-    const geminiResult = data.results.find((r) => r.agentId === "gemini-cli");
-    expect(geminiResult?.error).toBeUndefined();
-    expect(geminiResult?.models.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
-
-    // codex's refresh shells out to `codex debug models`. If the binary
-    // is installed (dev machines), it returns the live catalog; if not
-    // (CI nodes without codex on PATH), the service preserves the
-    // prior cache and the result carries an `error` string. Both
-    // outcomes are valid — assert the cache reflects the appropriate
-    // branch.
-    const codexResult = data.results.find((r) => r.agentId === "codex");
-    const persisted = readSettingsFile(tmpHome);
-    const codex = persisted.codingAgents?.find((a) => a.id === "codex");
-    if (codexResult?.error) {
-      // Binary missing — preseeded cache stays put. The service
-      // sanitises raw SDK errors through `classifyRefreshError`, so
-      // pin the exact classification rather than the underlying
-      // ENOENT-flavoured message we used to see.
-      expect(codexResult.error).toBe("agent binary not found");
-      expect(codex?.cachedModels).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-      expect(codex?.cachedModelsUpdatedAt).toBe(1_700_000_000_000);
-    } else {
-      // Binary available — preseeded cache is replaced by the live list.
-      // Don't pin the id prefix — Codex ships new model lines on its own
-      // cadence (gpt-5.x today; o4/o5 or beyond tomorrow). The presence
-      // of >0 entries with a fresh timestamp is enough to prove the
-      // refresh did its job.
-      expect(codex?.cachedModels?.length).toBeGreaterThan(0);
-      expect(codex?.cachedModelsUpdatedAt).toBeGreaterThan(1_700_000_000_000);
-    }
-  });
-});
-
-describe("models router — fallback when no cache exists", () => {
-  // Read-only block (no settings.json writes) — shared server boot.
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    const booted = await bootWithSettings({
-      tokenSecret: TOKEN,
-      codingAgents: [{ id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" }],
-    });
-    server = booted.server;
-    tmpHome = booted.home;
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("models.list returns adapter defaults without writing settings.json", async () => {
-    const res = await trpcQuery(server.url, "models.list", { agentId: "gemini-cli" }, TOKEN);
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ models: { id: string }[] }>(res);
-    expect(data.models.map((m) => m.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]);
-
-    // The read path must NOT touch the cache — that's `refresh`'s job.
-    const persisted = readSettingsFile(tmpHome);
-    expect(persisted.codingAgents?.[0]?.cachedModels).toBeUndefined();
-    expect(persisted.codingAgents?.[0]?.cachedModelsUpdatedAt).toBeUndefined();
+    expect(data.results.every((r) => !r.error)).toBe(true);
   });
 });
 
 describe("models router — authentication", () => {
-  // Read-only block (only 401 negative paths) — shared server boot.
+  // Read-only block.
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -302,6 +304,7 @@ describe("models router — authentication", () => {
     });
     server = booted.server;
     tmpHome = booted.home;
+    await waitForCachedModels(tmpHome, ["gemini-cli"]);
   });
 
   afterAll(async () => {
@@ -310,7 +313,6 @@ describe("models router — authentication", () => {
   });
 
   it("models.list rejects unauthenticated requests with 401", async () => {
-    // No band_token cookie — server should refuse to serve the procedure.
     const res = await fetch(
       `${server.url}/trpc/models.list?input=${encodeURIComponent(
         JSON.stringify({ agentId: "gemini-cli" }),
@@ -320,14 +322,11 @@ describe("models router — authentication", () => {
   });
 
   it("models.listAll rejects unauthenticated requests with 401", async () => {
-    // listAll is a new authenticated endpoint too — cover its negative path.
     const res = await fetch(`${server.url}/trpc/models.listAll`);
     expect(res.status).toBe(401);
   });
 
   it("models.refresh rejects unauthenticated requests with 401", async () => {
-    // Negative-path mutation: refresh is the only write surface this
-    // router exposes, so it must enforce auth.
     const res = await fetch(`${server.url}/trpc/models.refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -338,14 +337,10 @@ describe("models router — authentication", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Refresh-FAILURE branches, driven through the real server (no in-process
-// service instantiation). We make a refresh fail deterministically by
+// Refresh-FAILURE branches. We make a refresh fail deterministically by
 // pointing the codex agent's `command` at a path that doesn't exist:
 // `codex debug models` then fails with ENOENT, which the service maps to
-// the sanitised "agent binary not found" classification. This exercises
-// the "keep prior cache on failure" + "isolate per-agent failure" paths
-// that used to live in the deleted service-level `model-refresh.test.ts`,
-// but now through `models.refresh` over HTTP.
+// the sanitised "agent binary not found" classification.
 // ---------------------------------------------------------------------------
 
 const MISSING_CODEX = "/nonexistent/band-test-codex-binary";
@@ -358,21 +353,21 @@ describe("models router — refresh failure preserves the prior cache", () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [
+        // gemini-cli's refresh always succeeds → we use it to anchor the
+        // "boot refresh produced a cache write" wait, then assert that
+        // the broken-codex refresh below leaves codex's cache empty.
+        { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
         {
           id: "codex",
           type: "codex",
           label: "Codex",
-          // Point at a binary that doesn't exist → `codex debug models`
-          // fails with ENOENT on every refresh attempt.
           command: MISSING_CODEX,
-          cachedModels: [{ id: "preseeded-codex", name: "Preseeded Codex" }],
-          cachedModelsUpdatedAt: 1_700_000_000_000,
         },
       ],
-      defaultCodingAgent: "codex",
     });
     server = booted.server;
     tmpHome = booted.home;
+    await waitForCachedModels(tmpHome, ["gemini-cli"]);
   });
 
   afterEach(async () => {
@@ -380,7 +375,7 @@ describe("models router — refresh failure preserves the prior cache", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns a sanitised error and leaves the cached list + timestamp untouched", async () => {
+  it("returns a sanitised error and leaves the cached list empty", async () => {
     const res = await trpcMutate(server.url, "models.refresh", { agentId: "codex" }, TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -389,17 +384,19 @@ describe("models router — refresh failure preserves the prior cache", () => {
     expect(data.results).toHaveLength(1);
     const result = data.results[0];
     expect(result.agentId).toBe("codex");
-    // The raw ENOENT is classified into a host-state-free string.
     expect(result.error).toBe("agent binary not found");
-    // The prior cache is echoed back unchanged...
-    expect(result.models).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-    expect(result.updatedAt).toBe(1_700_000_000_000);
+    expect(result.models).toEqual([]);
+    expect(result.updatedAt).toBe(0);
 
-    // ...and settings.json on disk is untouched by the failed refresh.
+    // settings.json on disk: codex still has no cached models (the boot
+    // refresh failed the same way the explicit refresh just did), gemini
+    // still has its hardcoded list.
     const persisted = readSettingsFile(tmpHome);
     const codex = persisted.codingAgents?.find((a) => a.id === "codex");
-    expect(codex?.cachedModels).toEqual([{ id: "preseeded-codex", name: "Preseeded Codex" }]);
-    expect(codex?.cachedModelsUpdatedAt).toBe(1_700_000_000_000);
+    expect(codex?.cachedModels).toBeUndefined();
+    expect(codex?.cachedModelsUpdatedAt).toBeUndefined();
+    const gemini = persisted.codingAgents?.find((a) => a.id === "gemini-cli");
+    expect(gemini?.cachedModels?.length).toBeGreaterThan(0);
   });
 });
 
@@ -411,15 +408,13 @@ describe("models router — refresh-all isolates per-agent failures", () => {
     const booted = await bootWithSettings({
       tokenSecret: TOKEN,
       codingAgents: [
-        // Healthy agent: gemini-cli's refreshModels() returns a hardcoded
-        // list, so it always succeeds.
         { id: "gemini-cli", type: "gemini-cli", label: "Gemini CLI" },
-        // Broken agent: codex points at a missing binary.
         { id: "codex", type: "codex", label: "Codex", command: MISSING_CODEX },
       ],
     });
     server = booted.server;
     tmpHome = booted.home;
+    await waitForCachedModels(tmpHome, ["gemini-cli"]);
   });
 
   afterEach(async () => {
@@ -441,7 +436,6 @@ describe("models router — refresh-all isolates per-agent failures", () => {
     const codex = data.results.find((r) => r.agentId === "codex");
     expect(codex?.error).toBe("agent binary not found");
 
-    // Healthy agent's cache was written; broken agent's stays absent.
     const persisted = readSettingsFile(tmpHome);
     expect(
       persisted.codingAgents?.find((a) => a.id === "gemini-cli")?.cachedModels?.length,

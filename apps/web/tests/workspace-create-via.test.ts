@@ -244,15 +244,12 @@ describe("workspaces.create via=terminal happy path", () => {
         { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
       ],
     });
-    // Opt out of the fire-and-forget boot refresh of agent model lists.
-    // The seeded `stub-claude.sh` is a 2-line shell script that exits
-    // immediately — it can't respond to the Claude Agent SDK's protocol
-    // handshake, which would cause the SDK's `supportedModels()` query
-    // to hang and wedge the parent server process on shutdown.
-    server = await startServer({
-      tmpHome,
-      env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
-    });
+    // Note: the fire-and-forget boot refresh fires for this seeded
+    // claude-code agent and the SDK can't complete a model query against
+    // the 2-line `stub-claude.sh`. The 10 s timeout in
+    // `ClaudeCodeAdapter.refreshModels()` catches the wedge; the
+    // resulting "refresh failed" log line is expected and benign.
+    server = await startServer({ tmpHome });
   });
 
   afterAll(async () => {
@@ -416,12 +413,14 @@ describe("workspaces.create via=chat path", () => {
         },
       ],
     });
-    // Opt out of the boot refresh — `fake-agent.mjs` responds to every
-    // `control_request` with an empty payload, so a `supportedModels()`
-    // query at boot would either return garbage or wedge the SDK.
+    // The boot refresh fires for this seeded claude-code agent and
+    // `fake-agent.mjs` responds to its `control_request` with an empty
+    // payload — `supportedModels()` either rejects cleanly or times out
+    // (10 s) inside `ClaudeCodeAdapter.refreshModels()`, where it's
+    // caught and logged.
     server = await startServer({
       tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath, BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
+      env: { FAKE_AGENT_SCENARIO: scenarioPath },
     });
   });
 

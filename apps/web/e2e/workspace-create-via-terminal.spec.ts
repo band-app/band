@@ -116,15 +116,11 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Opt out of the fire-and-forget boot refresh — the seeded
-  // `stub-claude.sh` is a 2-line shell stub (see comment block above)
-  // and can't respond to the Claude Agent SDK's protocol handshake.
-  // Letting the boot refresh fire would wedge the server's child
-  // subprocess and reset the e2e page navigation with ECONNRESET.
-  server = await startServer({
-    tmpHome,
-    env: { BAND_DISABLE_BOOT_MODEL_REFRESH: "1" },
-  });
+  // Boot refresh fires for the seeded claude-code agent. The
+  // 10 s timeout in `ClaudeCodeAdapter.refreshModels()` catches the
+  // protocol-handshake failure against `stub-claude.sh`; the resulting
+  // "refresh failed" log line is expected and benign.
+  server = await startServer({ tmpHome });
 });
 
 test.afterAll(async () => {
