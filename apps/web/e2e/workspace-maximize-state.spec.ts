@@ -224,91 +224,105 @@ test.describe("Workspace maximize state (issue #490)", () => {
   test("regression — non-maximized group's saved active view is restored on workspace switch", async ({
     page,
   }) => {
-    // History: this test previously asserted on
-    // `workspacePage.terminalInput` being visible after un-maximize,
-    // which transitively waited for the entire terminal pipeline
-    // (panel activate → React render → xterm init → helper textbox
-    // emit) to settle. xterm boot lag under 2-worker CI contention
-    // forced four timeout bumps (15 s → 25 s → 45 s → 75 s, with a
-    // 120 s test budget) and still flaked on run #27690969480.
-    // Switched to asserting on the dockview-owned `.dv-active-tab`
-    // class on the outer Terminal tab — the exact signal we care
-    // about (the saved active view was restored in the hidden group),
-    // emitted synchronously by dockview the moment `setActive` runs.
-    // No xterm-boot dependency, no CI-load sensitivity.
-    // This guards the second bug the reviewer surfaced on this PR
-    // (`SharedDockviewLayout.tsx:1473`): an earlier fix attempt
-    // skipped `setActive` on hidden groups to avoid exiting maximize
-    // as a side effect, which then silently dropped the saved
-    // active-view for those hidden groups. When the user later exited
-    // maximize, the hidden group would show whatever tab the PREVIOUS
-    // workspace last left there.
+    // History: this test went through three failure modes in CI before
+    // landing on the current shape.
+    //
+    //   1. The original positive assertion waited on
+    //      `workspacePage.terminalInput` being visible after un-maximize.
+    //      That transitively required the entire terminal pipeline
+    //      (panel activate → React render → xterm init → helper textbox
+    //      emit) to settle and drifted past four successive timeout
+    //      budgets (15 s → 25 s → 45 s → 75 s) under 2-worker CI
+    //      contention.
+    //   2. The next iteration switched the positive to dockview's own
+    //      `.dv-active-tab` class on the outer Terminal tab — synchronous
+    //      with `setActive` and free of xterm-boot timing — but the
+    //      SETUP still wrote A's active state directly to `localStorage`
+    //      between maximize and the next navigation. That write raced
+    //      with a `saveLayout` triggered by a delayed `onDidLayoutChange`
+    //      after the maximize click: roughly 1 in 10 CI runs, the
+    //      `saveLayout` fired AFTER the test's write and clobbered
+    //      `g2=terminal` back to `g2=changes` (the live activeView).
+    //      Reproduced locally at `--workers=2 --repeat-each=10`.
+    //   3. The current shape drives the setup through the UI: click the
+    //      Terminal tab BEFORE maximizing so the live dockview state
+    //      has `g2=terminal`. Now any `saveLayout` fires after the click
+    //      capture the same value the test expects, so the race window
+    //      collapses — there's no test write that could be overwritten.
+    //
+    // This test guards the second bug the reviewer surfaced on PR #491
+    // (`SharedDockviewLayout.tsx:1473`): an earlier fix attempt skipped
+    // `setActive` on hidden groups to avoid exiting maximize as a side
+    // effect, which then silently dropped the saved active-view for
+    // those hidden groups. When the user later exited maximize, the
+    // hidden group would show whatever tab the PREVIOUS workspace last
+    // left there.
     //
     // Setup:
-    //   - A has max on the first group, and a non-default active view
-    //     ("terminal") on the second group.
-    //   - B has a different active view ("changes") on the second
-    //     group, no max.
-    //   - Visit A → visit B (which sets g2's active to "changes" in
-    //     the live dockview) → return to A → exit max.
+    //   - A has terminal as the active view in the second group (set
+    //     by clicking the outer Terminal tab), then maximize on the
+    //     first group.
+    //   - Visit B (default layout has changes in g2, so the live
+    //     dockview's g2 active view is "changes" while B is mounted).
+    //   - Return to A → exit max.
     //
-    // Expectation: in A after exit-max, the second group's active
-    // view is "terminal" again (A's saved value), not "changes" (B's
-    // last-active leakage).
+    // Expectation: in A after exit-max, the second group's active view
+    // is "terminal" again (A's saved value), not "changes" (B's last
+    // active that the live dockview was previously showing).
 
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    // First trip to A: take the default layout, then maximize so the
-    // saved state has a `maximizedGroup`. Wait for it to persist.
+    // First trip to A: take the default layout and click the outer
+    // Terminal tab BEFORE maximizing. Doing it this order means the
+    // live dockview's g2 active view is `terminal` when the maximize
+    // fires, so the subsequent `saveLayout` captures `terminal` — no
+    // direct localStorage write that could race with a delayed save.
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
+    await workspacePage.tab("terminal").click();
     await workspacePage.maximizePanel(0);
     await expect(workspacePage.restoreButton).toBeVisible();
 
-    // Pull the actual group ids out of the persisted layout. We can't
-    // hard-code "1" / "2" because dockview assigns ids when the layout
-    // is built, and the order can shift if the default panel set
-    // changes. The first group's id is the maximizedGroup; the other
-    // is whichever group's id appears in `groups` and ISN'T the max.
+    // Wait for the saveLayout that fires after maximize to settle on
+    // the expected shape: groups populated, terminal as g2's active
+    // view, and a maximizedGroup. `expect.poll` retries the read so a
+    // late save doesn't race with our subsequent reads.
+    await expect
+      .poll(
+        async () => {
+          const state = await workspacePage.readActiveState(WORKSPACE_A);
+          if (!state || !state.maximizedGroup) return null;
+          const groupIds = Object.keys(state.groups);
+          if (groupIds.length < 2) return null;
+          const hiddenId = groupIds.find((id) => id !== state.maximizedGroup);
+          if (!hiddenId) return null;
+          return state.groups[hiddenId] === "terminal" ? hiddenId : null;
+        },
+        { timeout: 5000 },
+      )
+      .toBeTruthy();
+
+    // Read the stable state and pull out group ids. We can't hard-code
+    // "1" / "2" because dockview assigns ids when the layout is built
+    // and the order can shift if the default panel set changes.
     const aStateAfterMax = await workspacePage.readActiveState(WORKSPACE_A);
     expect(aStateAfterMax).toBeDefined();
-    expect(aStateAfterMax?.maximizedGroup).toBeDefined();
-    const groupIds = Object.keys(aStateAfterMax?.groups ?? {});
-    const maxedGroupId = aStateAfterMax?.maximizedGroup as string;
-    const hiddenGroupId = groupIds.find((id) => id !== maxedGroupId);
-    expect(hiddenGroupId).toBeDefined();
+    const maxedGroupId = aStateAfterMax!.maximizedGroup as string;
+    const hiddenGroupId = Object.keys(aStateAfterMax!.groups).find(
+      (id) => id !== maxedGroupId,
+    ) as string;
+    expect(aStateAfterMax!.groups[hiddenGroupId]).toBe("terminal");
 
-    // Seed A with a specific active view on the HIDDEN group so we
-    // have something distinctive to assert on later. Use a panel id
-    // that we know is part of the default layout but ISN'T the
-    // default active view of its group (so the assertion is
-    // observable). "terminal" sits in g2's tab group alongside
-    // "changes" / "files" / "browser" but isn't the activeView by
-    // default.
-    await workspacePage.writeActiveState(WORKSPACE_A, {
-      ...aStateAfterMax!,
-      groups: {
-        ...aStateAfterMax!.groups,
-        [hiddenGroupId as string]: "terminal",
-      },
-    });
-
-    // Visit B with a DIFFERENT activeView on the same hidden group,
-    // then come back to A.
-    await workspacePage.goto(WORKSPACE_B);
-    await workspacePage.waitForReady();
-    await workspacePage.writeActiveState(WORKSPACE_B, {
-      groups: { [hiddenGroupId as string]: "changes" },
-      activeGroup: hiddenGroupId as string,
-    });
-    // Re-navigate to B so the workspace-switch effect applies the
-    // newly-written state to the live dockview.
+    // Visit B (with its own default layout where changes is active in
+    // g2). The hard navigation pumps the dockview's live state to
+    // "changes in g2", which is exactly the contaminated state we need
+    // the return-to-A overlay to override.
     await workspacePage.goto(WORKSPACE_B);
     await workspacePage.waitForReady();
 
-    // Back to A — the workspace-switch effect must restore terminal as
-    // the active view in the hidden group, even though the user can't
-    // see it yet (it's behind the maximize).
+    // Back to A — the layout overlay must restore terminal as the
+    // active view in the hidden group, even though the user can't see
+    // it yet (it's behind the maximize).
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
     await expect(workspacePage.restoreButton).toBeVisible(); // maxed
@@ -324,12 +338,10 @@ test.describe("Workspace maximize state (issue #490)", () => {
     // switch, its "Files changed" heading renders quickly and fails
     // the test deterministically. Phase 2 is the positive: the outer
     // Terminal tab carries dockview's `.dv-active-tab` class. That
-    // class is added synchronously by dockview as soon as
-    // `setActive` runs on the panel, so it's the cheapest reliable
-    // proof that A's saved active view ("terminal") was restored on
-    // the hidden group — without depending on xterm's downstream
-    // boot timing (which is what flaked the previous
-    // `terminalInput` assertion under CI load).
+    // class is added synchronously by dockview as soon as `setActive`
+    // runs on the panel, so it's the cheapest reliable proof that A's
+    // saved active view ("terminal") was restored on the hidden group
+    // — without depending on xterm's downstream boot timing.
     await expect(workspacePage.changesHeading).not.toBeVisible();
     await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
   });
