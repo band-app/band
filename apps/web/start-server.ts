@@ -81,7 +81,26 @@ process.on("unhandledRejection", (reason: unknown) => {
   // Don't crash the server for known recoverable SDK transport errors.
   // The Claude Code SDK can throw "ProcessTransport is not ready for writing"
   // when a canUseTool callback times out after the agent process has exited.
-  if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
+  //
+  // We also absorb rejections from the SDK's stdin transport when the
+  // subprocess exits without consuming the prompt — this can happen
+  // during the boot-time `refreshModels()` call when the configured
+  // `pathToClaudeCodeExecutable` is a stub binary that exits
+  // immediately (e.g. integration tests' `stub-claude.sh`). The 10 s
+  // timeout in `ClaudeCodeAdapter.refreshModels()` has already moved
+  // on by the time these rejections fire, so they're orphaned by
+  // construction; crashing the server for an in-flight orphan would
+  // turn a benign warning into a fatal.
+  if (
+    reason instanceof Error &&
+    (reason.message.includes("ProcessTransport is not ready") ||
+      reason.message.includes("EPIPE") ||
+      reason.message.includes("write EOF") ||
+      reason.message.includes("write CLOSED") ||
+      reason.message.includes("stream.write") ||
+      reason.message.includes("premature close") ||
+      reason.message.includes("Cannot write to closed stream"))
+  ) {
     console.error(`[${timestamp}] Recoverable SDK transport error (not crashing):`, reason.message);
     return;
   }
