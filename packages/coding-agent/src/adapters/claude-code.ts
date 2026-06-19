@@ -824,10 +824,23 @@ export class ClaudeCodeAdapter implements CodingAgent {
         settingSources: [],
       },
     });
+    // CRITICAL: attach a no-op .catch() to the SDK promise BEFORE the
+    // race. When our 10 s timeout wins the race, the SDK's promise is
+    // orphaned — if it eventually rejects (e.g. the subprocess exits
+    // without responding, as a stub binary would in tests), Node 22+
+    // crashes the process on the unhandled rejection. The .catch() here
+    // absorbs the late rejection so the boot-time fire-and-forget refresh
+    // never takes down the server. The actual rejection is still logged
+    // via the `error` channel: the catch we install is purely a guard
+    // for the orphaned case.
+    const supportedPromise = conversation.supportedModels();
+    supportedPromise.catch((err) => {
+      log.debug({ err }, "absorbed late supportedModels() rejection");
+    });
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
       const models = await Promise.race([
-        conversation.supportedModels(),
+        supportedPromise,
         new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(
             () => reject(new Error("supportedModels() timed out after 10s")),
