@@ -202,7 +202,7 @@ export class ModelRefreshService {
 
     if (fresh) {
       const cachedFresh = fresh.map(toCachedModel);
-      const persisted = this.persistFromSnapshot(settings, agentId, cachedFresh, now);
+      const persisted = this.persist(agentId, cachedFresh, now);
       if (!persisted) {
         // SDK fetch worked, but the agent isn't in settings.codingAgents.
         // Don't pretend the cache was updated — fall through to the
@@ -327,24 +327,26 @@ export class ModelRefreshService {
   }
 
   /**
-   * Persist a refreshed model list back into `settings.codingAgents`,
-   * given an already-loaded snapshot. Returns `true` when the matching
-   * agent entry was found and the patch was written, `false` when the
-   * agent is unknown (the caller surfaces that as an explicit error
-   * rather than reporting a phantom successful refresh).
+   * Persist a refreshed model list for one agent. Returns `true` when the
+   * matching agent entry was found and the patch was written, `false`
+   * when the agent is no longer configured (the caller surfaces that as
+   * an explicit error rather than reporting a phantom successful refresh).
    *
-   * Note: the underlying `SettingsQueries.save()` itself re-reads the
-   * file and merges, so the snapshot only guards the find-and-mutate
-   * step in this method — concurrent writers are still serialised at
-   * the file-level by `save()`'s rename-over-tmp pattern.
+   * Reads the settings document FRESH here — right before the
+   * find-and-mutate — rather than reusing the snapshot `refresh()` loaded
+   * before its (up to 10 s) SDK call. `SettingsQueries.save()` replaces
+   * the whole `codingAgents` array (shallow top-level merge), so building
+   * `next` from a stale snapshot would clobber any concurrent
+   * `SettingsService.update()` (e.g. a user editing a label/command/model
+   * during the refresh). Re-reading shrinks that window to the
+   * synchronous find→map→save critical section — the same pattern
+   * `SettingsService.update()` uses for its own cache-preservation merge.
+   * We only ever mutate the target agent's `cachedModels` /
+   * `cachedModelsUpdatedAt`; every other field on every agent is carried
+   * through from the fresh read.
    */
-  private persistFromSnapshot(
-    settings: Settings,
-    agentId: string,
-    models: CachedAgentModel[],
-    updatedAt: number,
-  ): boolean {
-    const agents = settings.codingAgents ?? [];
+  private persist(agentId: string, models: CachedAgentModel[], updatedAt: number): boolean {
+    const agents = this.queries.load().codingAgents ?? [];
     const idx = agents.findIndex((a) => a.id === agentId);
     if (idx === -1) {
       log.warn({ agentId }, "refresh result for unknown agent; not persisting");
