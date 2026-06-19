@@ -161,10 +161,19 @@ export class ModelRefreshService {
     let fresh: AgentModel[] | undefined;
     let error: string | undefined;
 
+    // Load settings exactly once and reuse the snapshot for the
+    // existence guard, the persist step, and the failure fallback. The
+    // snapshot is only used for the in-memory find-and-mutate — the
+    // actual write goes through `persistFromSnapshot` → `queries.save()`,
+    // which re-reads and merges against the latest on-disk document, so
+    // a concurrent write isn't clobbered by this (now slightly older)
+    // snapshot.
+    const settings = this.queries.load();
+
     // Guard against the resolveAgentDefinition default-fallback: an id
     // that isn't a configured agent must not trigger a refresh of some
     // other (default) agent's subprocess.
-    const known = (this.queries.load().codingAgents ?? []).some((a) => a.id === agentId);
+    const known = (settings.codingAgents ?? []).some((a) => a.id === agentId);
     if (!known) {
       return { agentId, models: [], updatedAt: 0, error: "agent not found" };
     }
@@ -190,11 +199,6 @@ export class ModelRefreshService {
       error = classifyRefreshError(err);
       log.warn({ agentId, err }, "failed to refresh models; keeping prior cache");
     }
-
-    // Load settings once and reuse for both the persist (when fresh) and
-    // the fallback path (when refresh failed). Avoids the 2-3 redundant
-    // settings.json reads the prior implementation paid.
-    const settings = this.queries.load();
 
     if (fresh) {
       const cachedFresh = fresh.map(toCachedModel);
