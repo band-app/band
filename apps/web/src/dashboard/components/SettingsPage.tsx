@@ -256,10 +256,16 @@ export function SettingsPage({ open, onOpenChange }: Props) {
           // Models unavailable — leave previous state untouched so a
           // transient network blip doesn't blank the picker.
         });
-    } else if (adapter.listModels) {
-      const fallbackListModels = adapter.listModels;
+    } else {
+      // Optional-chained call preserves the `adapter` receiver so the
+      // method's `this` binding stays intact (the web adapter's
+      // `listModels` reads `this.trpc` internally — a destructured
+      // `const fn = adapter.listModels; fn(id)` would strip `this` and
+      // throw "Cannot read properties of undefined (reading 'models')"
+      // at runtime).
       for (const id of agentIds) {
-        fallbackListModels(id)
+        adapter
+          .listModels?.(id)
           .then((data) => {
             if (aborted) return;
             mergeAgentModels(id, { models: data.models, updatedAt: data.updatedAt });
