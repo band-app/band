@@ -136,6 +136,31 @@ export class WebDashboardAdapter implements DashboardAdapter {
     };
   }
 
+  async listAllModels(): Promise<{
+    agents: {
+      agentId: string;
+      agentType: string;
+      agentLabel: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt?: number;
+      defaultModel?: string;
+    }[];
+    defaultAgentId: string;
+  }> {
+    const data = await this.trpc.models.listAll.query();
+    return data as {
+      agents: {
+        agentId: string;
+        agentType: string;
+        agentLabel: string;
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt?: number;
+        defaultModel?: string;
+      }[];
+      defaultAgentId: string;
+    };
+  }
+
   async refreshModels(agentId?: string): Promise<{
     results: {
       agentId: string;

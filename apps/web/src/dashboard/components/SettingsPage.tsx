@@ -226,23 +226,46 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       }
       return changed ? next : prev;
     });
-    if (!adapter.listModels) return;
+    // Single `models.listAll` round-trip returns every agent's cached
+    // models in one HTTP request + one server-side settings.json read.
+    // Falls back to the per-agent `listModels` loop if the adapter
+    // doesn't ship the batch method yet (e.g. older desktop builds).
+    //
     // Guard the async resolutions: if the effect re-runs (agent set
-    // changed) or the component unmounts while a `listModels` call is in
-    // flight, don't write its result back — otherwise it could resurrect
-    // a ghost entry for an agent that was just removed.
+    // changed) or the component unmounts while the call is in flight,
+    // don't write its result back — otherwise it could resurrect a
+    // ghost entry for an agent that was just removed.
     let aborted = false;
-    for (const id of agentIds) {
+    if (adapter.listAllModels) {
+      const allowed = new Set(agentIds);
       adapter
-        .listModels(id)
+        .listAllModels()
         .then((data) => {
           if (aborted) return;
-          mergeAgentModels(id, { models: data.models, updatedAt: data.updatedAt });
+          for (const entry of data.agents) {
+            // Skip entries for agents that have been toggled off
+            // between the request firing and resolving.
+            if (!allowed.has(entry.agentId)) continue;
+            mergeAgentModels(entry.agentId, {
+              models: entry.models,
+              updatedAt: entry.updatedAt,
+            });
+          }
         })
         .catch(() => {
           // Models unavailable — leave previous state untouched so a
           // transient network blip doesn't blank the picker.
         });
+    } else if (adapter.listModels) {
+      const fallbackListModels = adapter.listModels;
+      for (const id of agentIds) {
+        fallbackListModels(id)
+          .then((data) => {
+            if (aborted) return;
+            mergeAgentModels(id, { models: data.models, updatedAt: data.updatedAt });
+          })
+          .catch(() => {});
+      }
     }
     return () => {
       aborted = true;
