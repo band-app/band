@@ -103,6 +103,19 @@ process.on("uncaughtException", (error: Error) => {
   // above. `EADDRINUSE` surfaces here as a raw `listen` error and is
   // the most common dev-mode silent failure we see.
   process.stderr.write(payload);
+  // Don't exit on EPIPE — the Claude Agent SDK writes to a child
+  // subprocess's stdin via `child.stdin.write()`. If the subprocess has
+  // already exited (e.g. the integration-test stub binaries that exit
+  // immediately), the stream emits an `error` event with EPIPE; with no
+  // listener attached on the SDK side it propagates here as an
+  // uncaughtException. EPIPE is a transport-level event, not a
+  // programmer error — log it and continue so an already-listening
+  // server isn't taken down by an orphaned background refresh.
+  const code = (error as { code?: string }).code;
+  if (code === "EPIPE" || code === "ECONNRESET" || /EPIPE|broken pipe/i.test(error.message)) {
+    console.error(`[${timestamp}] Recoverable transport error (not crashing):`, error.message);
+    return;
+  }
   process.exit(1);
 });
 
