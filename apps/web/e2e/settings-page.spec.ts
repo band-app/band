@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
@@ -13,22 +13,54 @@ import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-settings-test-token";
 
+// Stub Codex catalog the boot refresh + explicit Refresh click both
+// resolve to. Two entries so the test can pin a count and a couple of
+// ids without depending on whatever the host's real `codex debug models`
+// would return.
+const STUB_CODEX_MODELS = [
+  { slug: "stub-codex-1", display_name: "Stub Codex 1", priority: 1 },
+  { slug: "stub-codex-2", display_name: "Stub Codex 2", priority: 2 },
+];
+
+/**
+ * Write a stub Codex shell that prints the JSON the adapter expects
+ * (`{ "models": [...] }`) when invoked as `<stub> debug models`. The
+ * adapter's `refreshModels()` shells out to that exact subcommand
+ * (see `packages/coding-agent/src/adapters/codex.ts`), so this stub
+ * makes both the boot refresh and the explicit Refresh click
+ * deterministic on every CI host without requiring a real codex install.
+ */
+function writeStubCodex(tmpHome: string): string {
+  const binPath = join(tmpHome, "stub-codex.sh");
+  const json = JSON.stringify({ models: STUB_CODEX_MODELS });
+  writeFileSync(
+    binPath,
+    `#!/bin/sh\nif [ "$1" = "debug" ] && [ "$2" = "models" ]; then\n  printf '%s\\n' '${json}'\nfi\n`,
+    "utf-8",
+  );
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
+
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, { projects: [] });
+  const stubCodex = writeStubCodex(tmpHome);
   // Seed codingAgents explicitly so the Default-agent dropdown renders
   // deterministically — without this, runFirstTimeSetup() relies on the
   // host having `claude`/`codex`/`opencode` on PATH, which is true on
-  // dev machines but not on CI runners.
+  // dev machines but not on CI runners. Point Codex at the stub so the
+  // boot refresh + explicit Refresh resolve to a known model list with
+  // no host dependency.
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     theme: "dark",
     codingAgents: [
       { id: "claude-code", type: "claude-code", label: "Claude Code" },
-      { id: "codex", type: "codex", label: "Codex" },
+      { id: "codex", type: "codex", label: "Codex", command: stubCodex },
     ],
     defaultCodingAgent: "claude-code",
   });
@@ -153,7 +185,7 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // the initial `data-state` and assert it flipped.
   const initialState = await claudeSwitch.getAttribute("data-state");
   const targetState = initialState === "checked" ? "unchecked" : "checked";
-  await claudeSwitch.click({ force: true });
+  await settingsPage.toggleAgentEnable("Claude Code");
 
   // Wait for the toggle to take effect at the DOM level. Once the switch
   // reports the flipped `data-state`, React has applied the state update
@@ -174,6 +206,82 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // would have unmounted into an error boundary.
   await expect(claudeSwitch).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("clicking Refresh models persists the stub catalog to settings.json", async ({ page }) => {
+  // User-observable affordance from the refresh-agent-models change:
+  // expanding an agent's accordion in the Settings dialog renders a
+  // "Refresh" button + per-agent model list. Clicking the button must
+  // (a) populate the model list in the DOM with the agent's catalog
+  // and (b) write `cachedModels` + `cachedModelsUpdatedAt` into
+  // ~/.band/settings.json for that agent.
+  //
+  // The `beforeAll` above seeded Codex with a stub shell that prints
+  // `{ "models": [...] }` — the same shape the real codex binary
+  // produces — so the round-trip is fully deterministic on every CI
+  // host without a real codex install.
+
+  // Record the pre-click `cachedModelsUpdatedAt` value populated by
+  // the boot-time refresh; the assertion below requires the explicit
+  // click to bump it strictly forward, so a no-op click would fail
+  // the test rather than passing on the boot-refresh value alone.
+  //
+  // We *also* capture a `referenceTs` from `Date.now()` immediately
+  // before the click. Comparing against `max(beforeTs, referenceTs)`
+  // means the explicit-click write has to land at a real wall-clock
+  // tick strictly after the test reaches this point — no sleep needed
+  // for the rare case where the boot refresh and the click both happen
+  // to fall on the same millisecond.
+  const beforeTs = (
+    readSettings() as {
+      codingAgents?: { id: string; cachedModelsUpdatedAt?: number }[];
+    }
+  ).codingAgents?.find((a) => a.id === "codex")?.cachedModelsUpdatedAt;
+  const referenceTs = Date.now();
+  const lowerBound = Math.max(beforeTs ?? 0, referenceTs);
+
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  // Open the Codex accordion so the model list + Refresh button mount.
+  await settingsPage.expandAgentAccordion("Codex");
+
+  // Click Refresh and wait for the rendered list + persisted file to
+  // reflect the stub catalog exactly.
+  await settingsPage.clickRefreshModels("Codex");
+  await expect(settingsPage.modelList("codex")).toBeVisible();
+  // The stub returns two entries; assert exact count + ids so a
+  // regression in either the click path or the stub's JSON shape would
+  // fail the test rather than passing on a partial match.
+  await expect(settingsPage.modelListItems("codex")).toHaveCount(2);
+
+  // Poll the persisted JSON until the stub catalog has landed AND the
+  // explicit-click timestamp is strictly newer than the boot-refresh one.
+  await expect(() => {
+    const settings = readSettings() as {
+      codingAgents?: {
+        id: string;
+        cachedModels?: { id: string; name?: string }[];
+        cachedModelsUpdatedAt?: number;
+      }[];
+    };
+    const codex = settings.codingAgents?.find((a) => a.id === "codex");
+    if (!codex) throw new Error("codex agent not present in settings.json");
+    if (codex.cachedModels?.map((m) => m.id).join(",") !== "stub-codex-1,stub-codex-2") {
+      throw new Error(
+        `expected codex.cachedModels to be the stub catalog, got ${JSON.stringify(codex.cachedModels)}`,
+      );
+    }
+    if (
+      typeof codex.cachedModelsUpdatedAt !== "number" ||
+      codex.cachedModelsUpdatedAt <= lowerBound
+    ) {
+      throw new Error(
+        `expected cachedModelsUpdatedAt > ${lowerBound}, got ${JSON.stringify(codex.cachedModelsUpdatedAt)}`,
+      );
+    }
+  }).toPass({ timeout: 5_000 });
 });
 
 test("changing theme via the dropdown persists the new theme", async ({ page }) => {

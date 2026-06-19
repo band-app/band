@@ -203,20 +203,17 @@ export class GeminiCliAdapter implements CodingAgent {
   }
 
   listModels(): AgentModel[] {
-    return [
-      {
-        id: "gemini-2.5-pro",
-        name: "Gemini 2.5 Pro",
-        description: "Most capable",
-        contextWindow: 1_000_000,
-      },
-      {
-        id: "gemini-2.5-flash",
-        name: "Gemini 2.5 Flash",
-        description: "Fast and efficient",
-        contextWindow: 1_000_000,
-      },
-    ];
+    return GEMINI_MODELS;
+  }
+
+  /**
+   * Gemini CLI doesn't expose a `models` listing command, so the live
+   * list IS the hardcoded `GEMINI_MODELS` array. Returning it here makes
+   * `ModelRefreshService.refresh()` Just Work — the persisted cache lines
+   * up with whatever the adapter would otherwise serve from `listModels()`.
+   */
+  async refreshModels(): Promise<AgentModel[]> {
+    return GEMINI_MODELS;
   }
 
   /**
@@ -237,6 +234,21 @@ export class GeminiCliAdapter implements CodingAgent {
 
 /** Default executable name for the Gemini CLI. */
 export const GEMINI_CLI_DEFAULT_BINARY = "gemini";
+
+const GEMINI_MODELS: AgentModel[] = [
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    description: "Most capable",
+    contextWindow: 1_000_000,
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Fast and efficient",
+    contextWindow: 1_000_000,
+  },
+];
 
 /**
  * Where freshly-shipped skills should be written. Gemini CLI's user-scope

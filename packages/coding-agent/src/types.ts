@@ -227,6 +227,27 @@ export interface CodingAgent {
   listModes?(): AgentMode[];
   listModels?(): AgentModel[] | Promise<AgentModel[]>;
   /**
+   * Actively fetch the model list from the agent's SDK / binary, bypassing
+   * any in-memory cache. Used by the web server's `ModelRefreshService` to
+   * populate the persisted `cachedModels` array in
+   * `~/.band/settings.json` — both on boot (fire-and-forget) and when the
+   * user hits the Settings UI's "Refresh models" button.
+   *
+   * Implementations should:
+   *
+   *   • Avoid spawning a "real" workspace session — Claude Code's adapter
+   *     uses `settingSources: []` and a neutral cwd to skip the
+   *     `band notify` hook that would otherwise toggle workspace status.
+   *   • Throw on failure (network, missing binary, parse error). The
+   *     caller swallows errors and keeps the previously cached list.
+   *
+   * Adapters whose model list is fully hardcoded (Codex, Gemini CLI,
+   * Cursor CLI) may omit this method or implement it as a synchronous
+   * return of `listModels()`. Callers treat the result as equivalent to
+   * `listModels()` when omitted.
+   */
+  refreshModels?(): Promise<AgentModel[]>;
+  /**
    * Resolve the one-shot CLI invocation for spawning this agent in an
    * interactive terminal pane with `prompt` pre-loaded as the first
    * positional argument (cmux-style, e.g. `claude "Implement X"`).

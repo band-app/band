@@ -21,6 +21,39 @@ export interface CodingAgentDefinition {
   label: string;
   command?: string;
   model?: string;
+  /**
+   * Cached list of models the agent's SDK / binary reports. Refreshed by
+   * `ModelRefreshService.refresh()` — explicitly from the Settings UI's
+   * "Refresh models" button, and fire-and-forget at server boot.
+   *
+   * The picker UI (Settings + Chat) reads from this cache directly so it
+   * stays populated across server restarts and across fresh chats without
+   * needing a live SDK call. When the field is absent (fresh install,
+   * settings.json from an older version, refresh has never succeeded),
+   * callers fall back to the adapter's built-in default list — see
+   * `ModelRefreshService.getCachedOrDefaults()` and the comments on
+   * each adapter's `listModels()` method.
+   */
+  cachedModels?: CachedAgentModel[];
+  /**
+   * Epoch ms when `cachedModels` was last refreshed (success or attempt).
+   * Surfaced in the UI so users can see staleness. Unset until the first
+   * refresh completes.
+   */
+  cachedModelsUpdatedAt?: number;
+}
+
+/**
+ * Cached model entry persisted in `~/.band/settings.json`. Mirrors
+ * `AgentModel` from `@band-app/coding-agent` but kept structural here so
+ * the settings shim doesn't add an inverse dependency back into the
+ * coding-agent package.
+ */
+export interface CachedAgentModel {
+  id: string;
+  name: string;
+  description?: string;
+  contextWindow?: number;
 }
 
 /**

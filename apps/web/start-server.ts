@@ -72,20 +72,27 @@ process.on("unhandledRejection", (reason: unknown) => {
   // Always echo to stderr too. The DMG case pipes stderr to a log file
   // (so this is a duplicate write there), but the dev case
   // (`pnpm dev:web`) leaves the terminal as the only place a developer
-  // sees the failure — without this echo, a crash before `listen()`
+  // sees the failure — without this echo, a rejection before `listen()`
   // (e.g. `EADDRINUSE` when the Band desktop app already owns 3456)
   // showed nothing in the terminal and the developer had to spelunk
   // `~/.band/server.log` to find out why.
   process.stderr.write(payload);
-
-  // Don't crash the server for known recoverable SDK transport errors.
-  // The Claude Code SDK can throw "ProcessTransport is not ready for writing"
-  // when a canUseTool callback times out after the agent process has exited.
-  if (reason instanceof Error && reason.message.includes("ProcessTransport is not ready")) {
-    console.error(`[${timestamp}] Recoverable SDK transport error (not crashing):`, reason.message);
-    return;
-  }
-  process.exit(1);
+  // Deliberately NOT calling process.exit(1) here.
+  //
+  // Node 22+ crashes the process on unhandled rejection by default,
+  // which we previously preserved with an explicit `process.exit(1)`.
+  // That made every background task a single point of failure for the
+  // whole server: a transient SDK rejection in the boot-time model
+  // refresh (which fans out to spawn third-party CLIs that may
+  // misbehave) would kill an otherwise healthy server. The earlier
+  // allowlist-of-recoverable-patterns approach proved fragile — each
+  // SDK release ships new internal error strings we'd need to learn.
+  //
+  // Real fatal conditions (programmer errors, corrupted state) still
+  // surface through `uncaughtException` below, which DOES exit.
+  // Pre-listen blocking errors (EADDRINUSE etc.) are caught by the
+  // explicit `error` listener on the HTTP server itself rather than
+  // escaping as unhandled rejections.
 });
 
 process.on("uncaughtException", (error: Error) => {
@@ -96,6 +103,19 @@ process.on("uncaughtException", (error: Error) => {
   // above. `EADDRINUSE` surfaces here as a raw `listen` error and is
   // the most common dev-mode silent failure we see.
   process.stderr.write(payload);
+  // Don't exit on EPIPE — the Claude Agent SDK writes to a child
+  // subprocess's stdin via `child.stdin.write()`. If the subprocess has
+  // already exited (e.g. the integration-test stub binaries that exit
+  // immediately), the stream emits an `error` event with EPIPE; with no
+  // listener attached on the SDK side it propagates here as an
+  // uncaughtException. EPIPE is a transport-level event, not a
+  // programmer error — log it and continue so an already-listening
+  // server isn't taken down by an orphaned background refresh.
+  const code = (error as { code?: string }).code;
+  if (code === "EPIPE" || code === "ECONNRESET" || /EPIPE|broken pipe/i.test(error.message)) {
+    console.error(`[${timestamp}] Recoverable transport error (not crashing):`, error.message);
+    return;
+  }
   process.exit(1);
 });
 

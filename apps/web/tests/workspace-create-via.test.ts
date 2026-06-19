@@ -244,6 +244,11 @@ describe("workspaces.create via=terminal happy path", () => {
         { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
       ],
     });
+    // Note: the fire-and-forget boot refresh fires for this seeded
+    // claude-code agent and the SDK can't complete a model query against
+    // the 2-line `stub-claude.sh`. The 10 s timeout in
+    // `ClaudeCodeAdapter.refreshModels()` catches the wedge; the
+    // resulting "refresh failed" log line is expected and benign.
     server = await startServer({ tmpHome });
   });
 
@@ -408,6 +413,11 @@ describe("workspaces.create via=chat path", () => {
         },
       ],
     });
+    // The boot refresh fires for this seeded claude-code agent and
+    // `fake-agent.mjs` responds to its `control_request` with an empty
+    // payload — `supportedModels()` either rejects cleanly or times out
+    // (10 s) inside `ClaudeCodeAdapter.refreshModels()`, where it's
+    // caught and logged.
     server = await startServer({
       tmpHome,
       env: { FAKE_AGENT_SCENARIO: scenarioPath },

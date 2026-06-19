@@ -173,11 +173,94 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: `Enable ${agentLabel}` });
   }
 
+  /** Toggle the enable switch for the named agent. Encapsulates the
+   *  raw click (force-clicked because the Radix switch can be partly
+   *  occluded by the accordion chrome) so test bodies don't drive the
+   *  locator directly. Assertions on the resulting
+   *  `data-state` stay in the test. */
+  async toggleAgentEnable(agentLabel: string): Promise<void> {
+    await test.step(`Toggle ${agentLabel} enable switch`, async () => {
+      await this.agentEnableSwitch(agentLabel).click({ force: true });
+    });
+  }
+
   /** Default coding agent dropdown trigger (only renders when at least
    *  one agent is enabled). `aria-label="Default coding agent"` is set
    *  explicitly. */
   defaultAgentSelect(): Locator {
     return this.dialog.getByRole("combobox", { name: "Default coding agent" });
+  }
+
+  /**
+   * "Refresh" button next to the per-agent model list inside the Coding
+   * Agents accordion. Anchored via `aria-label="Refresh models for
+   * <Agent>"` (system-controlled). The button is rendered only when the
+   * accordion is expanded — callers should expand the accordion first
+   * via `expandAgentAccordion(agentLabel)`.
+   */
+  refreshModelsButton(agentLabel: string): Locator {
+    return this.dialog.getByRole("button", { name: `Refresh models for ${agentLabel}` });
+  }
+
+  /**
+   * Locator for the rendered model list (a `<ul>`) inside the per-agent
+   * accordion. Anchored via `data-testid="settings-page__model-list-<agentId>"`
+   * (BEM convention). Parameter is the agent **id** (not label or type)
+   * to match the `data-testid` attribute in `SettingsPage.tsx`. For the
+   * built-in agents the id and type happen to coincide
+   * (`"claude-code"`, `"codex"`, …).
+   */
+  modelList(agentId: string): Locator {
+    return this.dialog.getByTestId(`settings-page__model-list-${agentId}`);
+  }
+
+  /**
+   * Locator for each `<li>` row in the per-agent model list — anchored via
+   * the `listitem` ARIA role so the test body never reaches in with a
+   * raw CSS tag selector. Returns the Playwright `Locator`
+   * that resolves to every row; callers chain `.first()`, `.nth(i)`,
+   * or assert on `.count()` directly.
+   */
+  modelListItems(agentId: string): Locator {
+    return this.modelList(agentId).getByRole("listitem");
+  }
+
+  /**
+   * Click the per-agent accordion header to expand it, which mounts the
+   * "Refresh models" button and the model list. The accordion's trigger
+   * is the agent's name button — anchored on `aria-label="Toggle advanced
+   * settings for <Agent>"` (system-controlled). The accordion has two
+   * triggers with that same name (the label region and the chevron); we
+   * pick the first one in DOM order.
+   */
+  async expandAgentAccordion(agentLabel: string): Promise<void> {
+    await test.step(`Expand accordion for ${agentLabel}`, async () => {
+      const trigger = this.dialog
+        .getByRole("button", {
+          name: `Toggle advanced settings for ${agentLabel}`,
+        })
+        .first();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      // Provide the synchronisation guarantee here rather than relying on
+      // the next call's implicit wait: under CI scheduler contention the
+      // Radix accordion open animation can delay the Refresh button's
+      // attachment, so wait for it explicitly before returning.
+      await expect(this.refreshModelsButton(agentLabel)).toBeVisible();
+    });
+  }
+
+  /**
+   * Scroll the "Refresh" button for the named agent into view and click
+   * it. Mirrors the shape of the other action methods (`toggleLsp`,
+   * `selectTheme`) so the test body stays free of raw locator actions.
+   */
+  async clickRefreshModels(agentLabel: string): Promise<void> {
+    await test.step(`Click Refresh models for ${agentLabel}`, async () => {
+      const btn = this.refreshModelsButton(agentLabel);
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click();
+    });
   }
 
   /**

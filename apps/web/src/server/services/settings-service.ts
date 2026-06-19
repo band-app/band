@@ -43,6 +43,14 @@ export const settingsUpdateInput = z
     // when the field is cleared — the legacy behavior preserved across the
     // 3-tier migration.
     worktreesDir: z.string().nullish(),
+    // `cachedModels` / `cachedModelsUpdatedAt` are intentionally NOT
+    // in this schema even though they're part of the `CodingAgentDefinition`
+    // shape — they're write-protected through this route. The only
+    // intended writer is `ModelRefreshService` (its internal `persist`
+    // method), which composes the patch server-side and bypasses Zod
+    // stripping by calling `SettingsQueries.save()` directly. Adding
+    // the fields here would let any authenticated client overwrite the
+    // cache with attacker-controlled values via `settings.update`.
     codingAgents: z
       .array(
         z.object({
@@ -140,8 +148,51 @@ export class SettingsService {
    * service tier and the tRPC router's `.input(...)` validator stay in
    * lock-step — adding or removing a field in the schema is a compile
    * error at every call site instead of silent drift.
+   *
+   * Special handling for `codingAgents`: the Zod schema deliberately
+   * omits `cachedModels` / `cachedModelsUpdatedAt` so authenticated
+   * clients can't overwrite the model cache through `settings.update`.
+   * But the dashboard reads the full settings, edits one field (label,
+   * command, model), and round-trips the whole array — so a plain
+   * shallow merge of `patch.codingAgents` would WIPE the cache for
+   * every save. To preserve it, we re-attach the on-disk
+   * `cachedModels` / `cachedModelsUpdatedAt` for each agent id present
+   * in the patch before handing the merge to `queries.save()`.
    */
   update(patch: SettingsUpdate): void {
+    if (patch.codingAgents) {
+      // This re-attach reads the file once here, then `queries.save()`
+      // re-reads it again under the hood for its own atomic merge. The
+      // second read is intentional, not redundant: `save()` always
+      // merges against the latest on-disk document so a concurrent
+      // write from the desktop shell (which bypasses this server) isn't
+      // clobbered. That same property also makes the
+      // `ModelRefreshService.persistFromSnapshot()` ↔ `update()` race
+      // benign and last-writer-wins: whichever of the two `save()` calls
+      // lands second re-reads the other's freshly-written
+      // `cachedModels` first. The window is narrow and never produces a
+      // torn document — at worst a just-finished model refresh is
+      // re-applied (no-op) or a just-saved label edit lands a beat
+      // later. The settings file is a few KB and `update()` only runs on
+      // an explicit user "Save", so the extra read is negligible.
+      const existing = this.queries.load();
+      const cached = new Map(
+        (existing.codingAgents ?? []).map((a) => [
+          a.id,
+          {
+            cachedModels: a.cachedModels,
+            cachedModelsUpdatedAt: a.cachedModelsUpdatedAt,
+          },
+        ]),
+      );
+      patch = {
+        ...patch,
+        codingAgents: patch.codingAgents.map((a) => {
+          const prev = cached.get(a.id);
+          return prev ? { ...a, ...prev } : a;
+        }),
+      };
+    }
     this.queries.save(patch);
   }
 

@@ -123,16 +123,61 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.settings.update.mutate(settings as unknown as Record<string, unknown>);
   }
 
-  async listModels(
-    agentId?: string,
-  ): Promise<{ id: string; name: string; description?: string; contextWindow?: number }[]> {
+  async listModels(agentId?: string): Promise<{
+    models: { id: string; name: string; description?: string; contextWindow?: number }[];
+    defaultModel?: string;
+    updatedAt?: number;
+  }> {
     const data = await this.trpc.models.list.query({ agentId });
-    return data.models as {
-      id: string;
-      name: string;
-      description?: string;
-      contextWindow?: number;
+    return data as {
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      defaultModel?: string;
+      updatedAt?: number;
+    };
+  }
+
+  async listAllModels(): Promise<{
+    agents: {
+      agentId: string;
+      agentType: string;
+      agentLabel: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt?: number;
+      defaultModel?: string;
     }[];
+    defaultAgentId: string;
+  }> {
+    const data = await this.trpc.models.listAll.query();
+    return data as {
+      agents: {
+        agentId: string;
+        agentType: string;
+        agentLabel: string;
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt?: number;
+        defaultModel?: string;
+      }[];
+      defaultAgentId: string;
+    };
+  }
+
+  async refreshModels(agentId?: string): Promise<{
+    results: {
+      agentId: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt: number;
+      error?: string;
+    }[];
+  }> {
+    const data = await this.trpc.models.refresh.mutate({ agentId });
+    return data as {
+      results: {
+        agentId: string;
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt: number;
+        error?: string;
+      }[];
+    };
   }
 
   private statusHandlers = new Set<(data: SSEEvent) => void>();

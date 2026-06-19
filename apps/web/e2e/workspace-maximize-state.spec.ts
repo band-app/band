@@ -343,6 +343,15 @@ test.describe("Workspace maximize state (issue #490)", () => {
     // saved active view ("terminal") was restored on the hidden group
     // — without depending on xterm's downstream boot timing.
     await expect(workspacePage.changesHeading).not.toBeVisible();
-    await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+    // Generous timeout (vs. the 5 s default): the `.dv-active-tab` class
+    // is applied synchronously by dockview the moment the workspace-switch
+    // effect's `setActive("terminal")` runs, but that effect can be
+    // scheduler-starved under 2-worker CI contention — the B→A navigation,
+    // its `setActive` pass, and the exit-maximize all queue behind other
+    // workers' work. 15 s absorbs that variance without reintroducing a
+    // dependency on xterm's (much slower) boot pipeline.
+    await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
+      timeout: 15_000,
+    });
   });
 });

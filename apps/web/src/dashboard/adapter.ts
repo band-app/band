@@ -48,9 +48,47 @@ export interface DashboardAdapter {
   updateSettings(settings: Settings): Promise<void>;
 
   // Models (for agent configuration)
-  listModels?(
-    agentId?: string,
-  ): Promise<{ id: string; name: string; description?: string; contextWindow?: number }[]>;
+  listModels?(agentId?: string): Promise<{
+    models: { id: string; name: string; description?: string; contextWindow?: number }[];
+    defaultModel?: string;
+    updatedAt?: number;
+  }>;
+
+  /**
+   * Combined picker payload — every configured agent's cached models in a
+   * single round-trip. Callers that need the whole picker shape (the
+   * Settings dialog's per-agent accordion, the chat pane's model
+   * dropdown) should prefer this over fanning out `listModels` per agent:
+   * one HTTP request + one settings.json read on the server instead of N.
+   */
+  listAllModels?(): Promise<{
+    agents: {
+      agentId: string;
+      agentType: string;
+      agentLabel: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt?: number;
+      defaultModel?: string;
+    }[];
+    defaultAgentId: string;
+  }>;
+
+  /**
+   * Force the server to re-fetch the model list for one agent (or every
+   * configured agent when `agentId` is omitted) from its SDK / CLI and
+   * persist the result into `~/.band/settings.json`. Powers the
+   * Settings UI's "Refresh models" button. Returns the refreshed lists
+   * per agent so the UI can update without a follow-up `listModels`
+   * round-trip.
+   */
+  refreshModels?(agentId?: string): Promise<{
+    results: {
+      agentId: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt: number;
+      error?: string;
+    }[];
+  }>;
 
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(

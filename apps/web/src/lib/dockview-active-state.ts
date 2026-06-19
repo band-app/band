@@ -182,3 +182,59 @@ export function applyMaximizedGroupToApi(api: MaximizeApi, desired: string | und
   if (next.api.isMaximized()) return;
   next.api.maximize();
 }
+
+/**
+ * Minimal subset of the dockview api needed to walk panels and activate
+ * one. Decoupled from `dockview-react` so this helper can be unit-tested
+ * with a hand-rolled fake.
+ */
+export interface ActiveViewsApi {
+  getPanel(id: string): GroupAwarePanel | undefined;
+}
+
+export interface GroupAwarePanel {
+  readonly api: { readonly isActive: boolean; setActive(): void };
+  readonly group: { readonly panels: ReadonlyArray<unknown> };
+}
+
+/**
+ * Drive the live dockview's per-group active view to match the saved
+ * `state.groups` map for the incoming workspace. Idempotent: panels that
+ * are already active in their group are skipped (so dockview doesn't fire
+ * a no-op focus event that would scroll the project list back to the top
+ * — see `SharedDockviewLayout.tsx` for the original rationale on
+ * the workspace-switch effect).
+ *
+ * Called from two places:
+ *
+ *   1. Dockview's `onReady`, for the INITIAL mount — without this the
+ *      first page load wouldn't apply per-group active tabs because the
+ *      workspace-switch useEffect short-circuits on `!initializedRef.current`
+ *      and never re-fires (its dep `[activeWorkspaceId]` is unchanged).
+ *
+ *   2. The workspace-switch useEffect, on every subsequent
+ *      `activeWorkspaceId` change.
+ *
+ * Both call sites also call `applyMaximizedGroupToApi` afterwards, so the
+ * maximize re-asserts itself over the top of any `setActive`-driven
+ * implicit maximize exits.
+ */
+export function applyGroupActiveViewsToApi(api: ActiveViewsApi, state: ActiveTabState): void {
+  try {
+    for (const viewId of Object.values(state.groups)) {
+      const panel = api.getPanel(viewId);
+      if (!panel) continue;
+      // Already the active panel — skip to avoid dockview's focus-fire
+      // side effect (resets project-list scroll on the projects edge
+      // group, refocuses tab content elsewhere).
+      if (panel.api.isActive) continue;
+      // Single-panel groups (e.g. the projects edge group) have nothing
+      // to switch to; the focus side effect would also kick in here.
+      if (panel.group.panels.length <= 1) continue;
+      panel.api.setActive();
+    }
+  } catch {
+    // Best-effort — the workspace-switch path runs on every navigation
+    // and one stale panel id shouldn't break the others.
+  }
+}

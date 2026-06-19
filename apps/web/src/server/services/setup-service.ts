@@ -2,6 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { checkCli, installCli } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
+import { modelRefreshService } from "./model-refresh-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
@@ -84,6 +85,46 @@ export async function runFirstTimeSetup(): Promise<void> {
         r.reason instanceof Error ? r.reason.message : String(r.reason),
       );
     }
+  }
+
+  // Kick off a background refresh of each configured coding agent's model
+  // list. MUST run after `ensureSettingsDefaults` (which is the step that
+  // detects + persists the `codingAgents` array on a fresh install) so
+  // the refresh actually has agents to iterate over. Fire-and-forget —
+  // the SDK calls can take several seconds (network round-trip + binary
+  // spawn) and we don't want to delay the server starting to accept
+  // requests. Failures inside `refreshAll` are already swallowed by the
+  // service; the outer `.catch` here only fires if something explodes
+  // before reaching the try/catch (e.g. dynamic import failure).
+  void refreshAgentModelsInBackground();
+}
+
+/**
+ * Fire-and-forget background refresh of every configured coding agent's
+ * model list at boot. The result is persisted into `settings.codingAgents[].cachedModels`
+ * by `ModelRefreshService.refreshAll()` so the Settings UI and the chat
+ * picker have the live list available without anyone having to start a
+ * session first. Errors are intentionally swallowed at the top level —
+ * the refresh service already logs per-agent failures at warn level.
+ */
+async function refreshAgentModelsInBackground(): Promise<void> {
+  try {
+    const results = await modelRefreshService.refreshAll();
+    const ok = results.filter((r) => !r.error).length;
+    const failed = results.length - ok;
+    if (results.length > 0) {
+      log.info(
+        "Background model refresh: %d/%d agents updated (%d failed)",
+        ok,
+        results.length,
+        failed,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      "Background model refresh failed: %s",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 

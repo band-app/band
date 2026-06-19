@@ -211,7 +211,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
   /** See `claudeCodeConfigSchema.options.partialMessages`. */
   private readonly partialMessages: boolean;
   private activeConversation: ReturnType<typeof query> | null = null;
-  private cachedModels: AgentModel[] | null = null;
 
   constructor(config: ClaudeCodeConfig) {
     this.workspaceDir = config.workspaceDir;
@@ -321,18 +320,10 @@ export class ClaudeCodeAdapter implements CodingAgent {
     this.activeConversation = conversation;
     log.info("query() called, waiting for messages...");
 
-    // Fetch available models from the SDK and cache them
-    if (!this.cachedModels) {
-      conversation
-        .supportedModels()
-        .then((models) => {
-          this.cachedModels = models.map(mapModelInfo);
-          log.info({ count: models.length }, "cached supported models from SDK");
-        })
-        .catch((err) => {
-          log.warn({ err }, "failed to fetch supported models");
-        });
-    }
+    // Note: model-list caching used to live here (lazy, per-adapter-instance).
+    // It now lives in `~/.band/settings.json` via `ModelRefreshService` —
+    // refreshed explicitly from the Settings UI's "Refresh models" button
+    // and fire-and-forget at server boot. See `refreshModels()` below.
 
     const state: ProcessedState = {
       assistantContentIndex: 0,
@@ -779,47 +770,94 @@ export class ClaudeCodeAdapter implements CodingAgent {
     };
   }
 
-  async listModels(): Promise<AgentModel[]> {
-    if (this.cachedModels) {
-      return this.cachedModels;
-    }
+  /**
+   * No static fallback. The live `supportedModels()` SDK call is the
+   * single source of truth; `refreshModels()` populates
+   * `~/.band/settings.json` at boot and on user request, and the
+   * Settings + chat pickers read from that cache. On a brand-new install
+   * before the first successful refresh, the picker is briefly empty —
+   * preferable to a hardcoded list that drifts whenever Anthropic ships
+   * a new model.
+   */
+  listModels(): AgentModel[] {
+    return [];
+  }
 
-    // Return defaults until a real session populates the cache.
-    // Spawning a Claude Code process just to list models triggers hooks
-    // (band notify) which incorrectly sets the workspace status to "working".
-    // The cache is populated during the first runSession() call.
-    return [
-      {
-        id: "claude-sonnet-4-6",
-        name: "Sonnet 4.6",
-        description: "Balanced default for everyday work",
-        contextWindow: claudeContextForId("claude-sonnet-4-6"),
+  /**
+   * Fetch the SDK's `supportedModels()` list. Used by the web server's
+   * `ModelRefreshService` to refresh the cached list persisted in
+   * `~/.band/settings.json` — both on boot and on explicit user request.
+   *
+   * `settingSources: []` is the key knob here: it tells the SDK not to
+   * load `~/.claude/settings.json` (which is where the `band notify` hook
+   * is configured). Without that, every refresh would briefly flip the
+   * workspace to "working" via the hook. We do still spin up a Claude
+   * Code subprocess (the SDK has no out-of-band model query), but it
+   * never sees a hook and we close it immediately after `supportedModels()`
+   * resolves.
+   *
+   * The conversation is created with a no-op prompt — the SDK requires
+   * one, but we never iterate the generator and close the conversation
+   * before the prompt is consumed.
+   *
+   * Timeout: a real Claude Code binary returns `supportedModels()` in
+   * <100 ms. If we don't hear back within 10 s, we assume the subprocess
+   * is wedged (e.g. the configured `pathToClaudeCodeExecutable` is a stub
+   * that doesn't speak the SDK protocol — Linux CI exposes this fragility
+   * even when macOS hides it) and abort. Crucially, `conversation.close()`
+   * runs in `finally` so the wedged subprocess gets killed; without this,
+   * the parent server process can hang forever on shutdown waiting for
+   * its child's pipes to close.
+   */
+  async refreshModels(): Promise<AgentModel[]> {
+    log.info("refreshing supported models from SDK");
+    const conversation = query({
+      // The prompt is required by the SDK signature; we close before
+      // anything reads it.
+      prompt: "",
+      options: {
+        cwd: this.workspaceDir,
+        pathToClaudeCodeExecutable: this.executablePath,
+        // Skip loading user/project setting sources so the `band notify`
+        // hook (configured in `~/.claude/settings.json`) does not fire
+        // during the model-list query. See the JSDoc above.
+        settingSources: [],
       },
-      {
-        id: "claude-sonnet-4-6[1m]",
-        name: "Sonnet 4.6 (1M)",
-        description: "Long-context tier for large sessions",
-        contextWindow: 1_000_000,
-      },
-      {
-        id: "claude-opus-4-7",
-        name: "Opus 4.7",
-        description: "Most capable for complex work",
-        contextWindow: claudeContextForId("claude-opus-4-7"),
-      },
-      {
-        id: "claude-opus-4-7[1m]",
-        name: "Opus 4.7 (1M)",
-        description: "Most capable, long-context tier",
-        contextWindow: 1_000_000,
-      },
-      {
-        id: "claude-haiku-4-5-20251001",
-        name: "Haiku 4.5",
-        description: "Fastest for quick answers",
-        contextWindow: claudeContextForId("claude-haiku-4-5-20251001"),
-      },
-    ];
+    });
+    // CRITICAL: attach a no-op .catch() to the SDK promise BEFORE the
+    // race. When our 10 s timeout wins the race, the SDK's promise is
+    // orphaned — if it eventually rejects (e.g. the subprocess exits
+    // without responding, as a stub binary would in tests), Node 22+
+    // crashes the process on the unhandled rejection. The .catch() here
+    // absorbs the late rejection so the boot-time fire-and-forget refresh
+    // never takes down the server. The actual rejection is still logged
+    // via the `error` channel: the catch we install is purely a guard
+    // for the orphaned case.
+    const supportedPromise = conversation.supportedModels();
+    supportedPromise.catch((err) => {
+      log.debug({ err }, "absorbed late supportedModels() rejection");
+    });
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const models = await Promise.race([
+        supportedPromise,
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error("supportedModels() timed out after 10s")),
+            10_000,
+          );
+        }),
+      ]);
+      log.info({ count: models.length }, "refreshed supported models from SDK");
+      return models.map(mapModelInfo);
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      try {
+        conversation.close();
+      } catch (err) {
+        log.debug({ err }, "error closing refresh conversation (ignored)");
+      }
+    }
   }
 }
 

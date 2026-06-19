@@ -116,6 +116,10 @@ test.beforeAll(async () => {
       },
     ],
   });
+  // Boot refresh fires for the seeded claude-code agent. The
+  // 10 s timeout in `ClaudeCodeAdapter.refreshModels()` catches the
+  // protocol-handshake failure against `stub-claude.sh`; the resulting
+  // "refresh failed" log line is expected and benign.
   server = await startServer({ tmpHome });
 });
 
