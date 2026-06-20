@@ -7,7 +7,6 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { trpcMutate } from "./helpers/trpc";
 
 const TOKEN = "e2e-queue-test-token";
 
@@ -30,12 +29,24 @@ test.afterAll(async () => {
 // Helpers — call the real server's queue store via tRPC HTTP API
 // ---------------------------------------------------------------------------
 
+async function trpcMutate(procedure: string, input: unknown): Promise<void> {
+  const res = await fetch(`${server.url}/trpc/${procedure}?token=${TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${text}`);
+  }
+}
+
 async function pushQueue(workspaceId: string, text: string, chatId?: string): Promise<void> {
-  await trpcMutate(server.url, TOKEN, "queue.push", { workspaceId, text, chatId });
+  await trpcMutate("queue.push", { workspaceId, text, chatId });
 }
 
 async function clearQueue(workspaceId: string, chatId?: string): Promise<void> {
-  await trpcMutate(server.url, TOKEN, "queue.clear", { workspaceId, chatId });
+  await trpcMutate("queue.clear", { workspaceId, chatId });
 }
 
 /**

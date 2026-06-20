@@ -316,14 +316,26 @@ export function ChatView({
   // sees `scrollRef.current === null`. We retry on the next animation
   // frame; the idempotent guard keeps subsequent re-renders cheap.
   useEffect(() => {
+    // Cap the retry loop at 10 frames (~167 ms at 60 Hz) so a
+    // bug that prevents the scroll ref from ever resolving doesn't
+    // leave us scheduling a spinning rAF until unmount. In practice
+    // the ref is populated on the first or second frame.
     let raf = 0;
+    let attempts = 0;
     const attach = () => {
+      attempts += 1;
       const el = stickyContextRef.current?.scrollRef?.current;
-      if (!el) {
-        raf = requestAnimationFrame(attach);
+      if (el) {
+        if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
         return;
       }
-      if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
+      if (attempts >= 10) {
+        console.warn(
+          "[ChatView] StickToBottom scrollRef did not resolve within 10 frames; chat-pane__scroller testid not attached",
+        );
+        return;
+      }
+      raf = requestAnimationFrame(attach);
     };
     attach();
     return () => {
@@ -936,7 +948,13 @@ export function ChatView({
               />
             )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
-              <Message from="assistant">
+              // No `chat-pane__assistant-message` testid on the
+              // standalone thinking bubble — locators that target
+              // assistant message bubbles should never pick up the
+              // intermediate "agent is thinking" placeholder. The
+              // dedicated `chat-pane__thinking-indicator` testid on
+              // `ThinkingIndicator` is what tests use for this state.
+              <Message from="assistant" data-testid={undefined}>
                 <MessageContent>
                   <ThinkingIndicator />
                 </MessageContent>

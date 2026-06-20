@@ -192,8 +192,13 @@ test.describe("Chat message-list virtualization", () => {
     // least one row mounted, so we don't need a separate "> 0" check.
     // Explicit `timeout: 15_000` so a slow CI runner replaying a
     // 500-turn JSONL has time to settle (Playwright's default poll
-    // timeout is ~5 s).
-    await expect.poll(() => chatPane.messageRowCount(), { timeout: 15_000 }).toBeLessThan(100);
+    // timeout is ~5 s). `interval: 500` because the actual signal we
+    // care about (row count stabilising under the bound) flips
+    // exactly once, so polling 10× per second during the long
+    // loading phase wastes CPU compared to ~2× per second.
+    await expect
+      .poll(() => chatPane.messageRowCount(), { timeout: 15_000, interval: 500 })
+      .toBeLessThan(100);
 
     // The very first seeded message must NOT be in the DOM right now —
     // the user is parked at the bottom of a 1000-message conversation,

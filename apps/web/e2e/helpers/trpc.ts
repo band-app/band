@@ -1,11 +1,12 @@
 /**
  * Shared tRPC helper for e2e specs that drive the real server.
  *
- * Centralises the "POST /trpc/<procedure>?token=…" idiom so multiple
- * specs (`queue-ui`, `chat-virtualization`, …) share one
- * implementation instead of each copying it inline. The auth shape
- * (`?token=…` query param) matches the established pattern across
- * existing specs.
+ * Centralises the "POST /trpc/<procedure>" idiom so multiple specs
+ * share one implementation instead of each copying it inline. Auth
+ * is carried via the `band_token` Cookie (matching the
+ * `defaultHeaders` pattern in `apps/web/tests/chat-events.test.ts`)
+ * rather than a `?token=` query param — keeps secrets out of the
+ * server access logs and proxy logs.
  */
 
 /**
@@ -21,9 +22,12 @@ export async function trpcMutate(
   procedure: string,
   input: unknown,
 ): Promise<void> {
-  const res = await fetch(`${serverUrl}/trpc/${procedure}?token=${token}`, {
+  const res = await fetch(`${serverUrl}/trpc/${procedure}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `band_token=${token}`,
+    },
     body: JSON.stringify(input),
   });
   if (!res.ok) {

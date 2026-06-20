@@ -329,9 +329,17 @@ async function replayPast(opts: {
     //      partial (server restart, rotation past the start).
     //   3. Buffer-as-fallback for the rare case JSONL fails *and* the
     //      buffer is partial — emits what we can.
+    // Use `?? Number.POSITIVE_INFINITY` (not `?? 0`) for the
+    // missing-eventId fallback so a malformed buffer entry with no
+    // eventId does NOT spoof `bufferCoversStart`. If we let it
+    // become 0 the buffer path would emit events with `eventId: 0`
+    // and the client's cursor would land at 0 — re-introducing the
+    // exact bug this branch was added to fix.
     const bufferFirstId =
-      buf && buf.events.length > 0 ? (buf.events[0].eventId ?? 0) : Number.POSITIVE_INFINITY;
-    const bufferCoversStart = buf !== undefined && bufferFirstId <= 1;
+      buf && buf.events.length > 0
+        ? (buf.events[0].eventId ?? Number.POSITIVE_INFINITY)
+        : Number.POSITIVE_INFINITY;
+    const bufferCoversStart = buf !== undefined && bufferFirstId > 0 && bufferFirstId <= 1;
 
     if (bufferCoversStart && buf) {
       for (const c of buf.events) {

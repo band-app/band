@@ -135,7 +135,12 @@ export function VirtualizedMessageList<T>({
           <div
             key={virtualRow.key}
             data-index={virtualRow.index}
-            data-testid="chat-pane__message-row"
+            // Skip the testid for null-content rows so
+            // `messageRowCount()` only includes rows that actually
+            // contain a message — without this the windowing bound
+            // would inflate by the count of skipped (renderItem ===
+            // null) entries.
+            data-testid={content == null ? undefined : "chat-pane__message-row"}
             ref={virtualizer.measureElement}
             style={{
               position: "absolute",

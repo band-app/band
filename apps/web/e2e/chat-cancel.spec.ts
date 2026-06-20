@@ -137,9 +137,12 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // screen until we click it.
     await expect(chatPane.stopButton).toBeVisible();
     // "partial reply" is the agent's streamed text (fake-agent
-    // text-delta), so scope to the assistant role — the page object's
-    // locators distinguish user vs assistant after #562's role-scoping
-    // change.
+    // text-delta), so scope to the assistant role. The page object's
+    // `assistantMessage`/`userMessage` locators are role-scoped on
+    // `chat-pane__assistant-message` / `chat-pane__user-message` —
+    // a future rendering change that places user text inside an
+    // assistant bubble (or vice versa) trips this locator instead
+    // of silently passing.
     await expect(chatPane.assistantMessage("partial reply")).toBeVisible();
     // While streaming, the inline thinking indicator IS rendered (the
     // trailing-assistant indicator's condition + the inline
