@@ -3,7 +3,6 @@ import { z } from "zod";
 const claudeCodeConfigSchema = z.object({
   type: z.literal("claude-code"),
   workspaceDir: z.string().default(process.cwd()),
-  maxTurns: z.number().int().positive().default(3),
   additionalDirectories: z.array(z.string()).optional(),
   options: z
     .object({
@@ -23,7 +22,6 @@ const claudeCodeConfigSchema = z.object({
 const cursorCliConfigSchema = z.object({
   type: z.literal("cursor-cli"),
   workspaceDir: z.string().default(process.cwd()),
-  maxTurns: z.number().int().positive().default(3),
   options: z
     .object({
       model: z.string().default("auto"),
@@ -34,7 +32,6 @@ const cursorCliConfigSchema = z.object({
 const codexConfigSchema = z.object({
   type: z.literal("codex"),
   workspaceDir: z.string().default(process.cwd()),
-  maxTurns: z.number().int().positive().default(3),
   options: z
     .object({
       model: z.string().optional(),
@@ -46,7 +43,6 @@ const codexConfigSchema = z.object({
 const geminiCliConfigSchema = z.object({
   type: z.literal("gemini-cli"),
   workspaceDir: z.string().default(process.cwd()),
-  maxTurns: z.number().int().positive().default(3),
   options: z
     .object({
       model: z.string().optional(),
@@ -58,7 +54,6 @@ const geminiCliConfigSchema = z.object({
 const opencodeConfigSchema = z.object({
   type: z.literal("opencode"),
   workspaceDir: z.string().default(process.cwd()),
-  maxTurns: z.number().int().positive().default(3),
   options: z
     .object({
       model: z.string().optional(),

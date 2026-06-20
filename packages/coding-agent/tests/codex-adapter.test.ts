@@ -39,7 +39,6 @@ function makeConfig(overrides?: Record<string, unknown>) {
   return {
     type: "codex" as const,
     workspaceDir: "/tmp/test-workspace",
-    maxTurns: 5,
     options: { model: "codex-mini", ...overrides },
   };
 }
@@ -105,7 +104,6 @@ describe("CodexAdapter", () => {
     const adapter = new CodexAdapter({
       type: "codex" as const,
       workspaceDir: "/tmp/test",
-      maxTurns: 5,
       options: {},
     });
     await collectEvents(adapter.runSession("hello"));
@@ -726,35 +724,23 @@ describe("codex config schema", () => {
       type: "codex",
     });
     assert.equal(result.type, "codex");
-    assert.equal(result.maxTurns, 3);
     assert.deepEqual(result.options, {});
   });
 
   it("parses codex config with model and executablePath", () => {
     const result = codingAgentConfigSchema.parse({
       type: "codex",
-      maxTurns: 10,
       options: {
         model: "gpt-5-codex",
         executablePath: "/opt/codex/bin/codex",
       },
     });
     assert.equal(result.type, "codex");
-    assert.equal(result.maxTurns, 10);
     assert.equal((result.options as { model: string }).model, "gpt-5-codex");
     assert.equal(
       (result.options as { executablePath: string }).executablePath,
       "/opt/codex/bin/codex",
     );
-  });
-
-  it("rejects invalid codex config options", () => {
-    assert.throws(() => {
-      codingAgentConfigSchema.parse({
-        type: "codex",
-        maxTurns: -1,
-      });
-    });
   });
 });
 
@@ -765,7 +751,6 @@ describe("createCodingAgent with codex type", () => {
     const agent = await createCodingAgent({
       type: "codex",
       workspaceDir: "/tmp/test",
-      maxTurns: 3,
       options: {},
     });
     assert.equal(agent.name, "Codex");
@@ -777,7 +762,6 @@ describe("createCodingAgent with codex type", () => {
     const agent = await createCodingAgent({
       type: "codex",
       workspaceDir: "/tmp/test",
-      maxTurns: 3,
       options: {},
     });
     const modes = agent.listModes!();

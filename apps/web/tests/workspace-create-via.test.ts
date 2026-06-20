@@ -49,6 +49,8 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { listTasksForWorkspace } from "./helpers/tasks";
+import { waitFor } from "./helpers/wait-for";
 
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 
@@ -122,13 +124,6 @@ interface TerminalListEntry {
   pid: number;
 }
 
-interface TaskListItem {
-  id: string;
-  workspaceId: string;
-  prompt: string;
-  status: string;
-}
-
 async function listTerminals(
   serverUrl: string,
   workspaceId: string,
@@ -151,55 +146,6 @@ async function readTerminalOutput(
   if (res.status === 404) return null;
   expect(res.status, `terminal.output failed: ${body}`).toBe(200);
   return (JSON.parse(body) as { result: { data: { output: string } } }).result.data.output;
-}
-
-async function listTasksForWorkspace(
-  serverUrl: string,
-  workspaceId: string,
-  token: string,
-): Promise<TaskListItem[]> {
-  const res = await trpcQuery(serverUrl, "tasks.list", { workspaceId }, token);
-  const body = await res.text();
-  expect(res.status, `tasks.list failed: ${body}`).toBe(200);
-  return (JSON.parse(body) as { result: { data: { tasks: TaskListItem[] } } }).result.data.tasks;
-}
-
-/**
- * Polling helper. Spawning a PTY is async and the workspace-create
- * mutation returns before the terminal-pool's `spawn()` promise
- * resolves (the spawn is deliberately fire-and-forget inside
- * `onSetupComplete` — see `WorkspaceService.create` for the rationale).
- * The test awaits readiness by polling rather than racing on a fixed
- * sleep so a slower CI doesn't flake.
- */
-async function waitFor<T>(
-  fn: () => Promise<T | undefined | null | false>,
-  {
-    timeoutMs = 10_000,
-    intervalMs = 50,
-    label = "condition",
-  }: {
-    timeoutMs?: number;
-    intervalMs?: number;
-    label?: string;
-  } = {},
-): Promise<T> {
-  const start = Date.now();
-  // Only the three explicit "not done" sentinels — `undefined`, `null`,
-  // `false` — loop. Bare `!value` would also loop on `""`, `0`, and
-  // other falsy-but-valid success values, which would silently never
-  // terminate if a caller's predicate ever returned them.
-  const notDone = (v: T | undefined | null | false): v is undefined | null | false =>
-    v === undefined || v === null || v === false;
-  let value = await fn();
-  while (notDone(value)) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitFor(${label}) timed out after ${timeoutMs}ms`);
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-    value = await fn();
-  }
-  return value;
 }
 
 interface CreateResponse {

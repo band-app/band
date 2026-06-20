@@ -109,7 +109,6 @@ export const workspaceCreateInput = z.object({
   // above any realistic interactive prompt while keeping the embed
   // safely inside the kernel's ARG_MAX.
   prompt: z.string().max(100_000).optional(),
-  maxTurns: z.number().int().positive().optional(),
   mode: z.string().optional(),
   model: z.string().optional(),
   codingAgentId: z.string().optional(),
@@ -548,7 +547,6 @@ export class WorkspaceService {
             workspaceId,
             chatId: defaultChat.id,
             prompt: input.prompt!,
-            maxTurns: input.maxTurns,
             mode: input.mode,
             model: input.model,
             codingAgentId: input.codingAgentId,
@@ -1062,11 +1060,11 @@ export class WorkspaceService {
     // text deltas are usually narration around tool calls ("Let me check
     // the diff…") that we don't want in the commit message. Each
     // tool-result event resets the buffer so only post-tool prose
-    // survives. `maxTurns` is generous enough for git status + diff +
-    // optional log + final write-up.
+    // survives. No turn cap here — the agent stops on its own after the
+    // short git-status / diff / write-up flow this prompt drives.
     let lastTurnText = "";
     try {
-      for await (const event of agent.runSession(prompt, undefined, { maxTurns: 8 })) {
+      for await (const event of agent.runSession(prompt, undefined)) {
         if (event.type === "text-delta") {
           lastTurnText += event.text;
         } else if (event.type === "tool-result") {

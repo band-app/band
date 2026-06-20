@@ -82,7 +82,6 @@ export interface TaskInfo {
   startedAt: number;
   completedAt?: number;
   prompt: string;
-  maxTurns?: number;
   mode?: string;
   model?: string;
   codingAgentId?: string;
@@ -122,7 +121,6 @@ export interface SubmitTaskOptions {
    * URLs here is allowed but bloats the persisted JSONL.
    */
   displayFiles?: DisplayFile[];
-  maxTurns?: number;
   mode?: string;
   model?: string;
   codingAgentId?: string;
@@ -301,7 +299,6 @@ function persistTask(task: InternalTask): void {
       sessionId: task.sessionId,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
-      maxTurns: task.maxTurns,
       mode: task.mode,
       model: task.model,
       codingAgentId: task.codingAgentId,
@@ -356,7 +353,6 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     sessionId,
     agentPrompt,
     displayFiles,
-    maxTurns,
     mode,
     model,
     codingAgentId,
@@ -384,7 +380,6 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     taskRecordId,
     agentPrompt: agentPrompt ?? prompt,
     displayFiles: displayFiles && displayFiles.length > 0 ? displayFiles : undefined,
-    maxTurns,
     mode,
     model,
     codingAgentId,
@@ -616,10 +611,11 @@ async function runTask(chatId: string, task: InternalTask) {
   };
 
   try {
+    // Per-call mode/model overrides. The truthy guard is fine here — empty
+    // strings on these fields aren't meaningful overrides.
     const sessionOptions =
-      task.maxTurns || task.mode || task.model
+      task.mode || task.model
         ? {
-            ...(task.maxTurns && { maxTurns: task.maxTurns }),
             ...(task.mode && { mode: task.mode }),
             ...(task.model && { model: task.model }),
           }
@@ -1134,7 +1130,6 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     prompt: task.prompt,
-    maxTurns: task.maxTurns,
     mode: task.mode,
     model: task.model,
     codingAgentId: task.codingAgentId,

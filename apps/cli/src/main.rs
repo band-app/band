@@ -148,9 +148,6 @@ enum WorkspacesCmd {
         /// Prompt to pass to the coding agent
         #[arg(long)]
         prompt: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
@@ -216,9 +213,6 @@ enum ChatsCmd {
         /// Workspace ID (auto-detected from cwd if omitted)
         #[arg(long)]
         workspace: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
@@ -496,7 +490,6 @@ fn main() {
                 branch,
                 base,
                 prompt,
-                max_turns,
                 mode,
                 model,
                 agent,
@@ -506,7 +499,6 @@ fn main() {
                 &branch,
                 base.as_deref(),
                 prompt.as_deref(),
-                max_turns,
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
@@ -535,7 +527,6 @@ fn main() {
                 chat_id,
                 message,
                 workspace,
-                max_turns,
                 mode,
                 model,
                 agent,
@@ -543,7 +534,6 @@ fn main() {
                 chat_id.as_deref(),
                 &message,
                 workspace.as_deref(),
-                max_turns,
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
@@ -834,7 +824,6 @@ fn cmd_workspaces_create(
     branch: &str,
     base: Option<&str>,
     prompt: Option<&str>,
-    max_turns: Option<u32>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
@@ -893,9 +882,6 @@ fn cmd_workspaces_create(
     }
     if let Some(prompt) = prompt {
         input["prompt"] = serde_json::json!(prompt);
-    }
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
@@ -1319,7 +1305,6 @@ fn cmd_chats_send(
     chat_id: Option<&str>,
     message: &str,
     workspace_id: Option<&str>,
-    max_turns: Option<u32>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
@@ -1333,9 +1318,6 @@ fn cmd_chats_send(
     });
     if let Some(chat_id) = chat_id {
         input["chatId"] = serde_json::json!(chat_id);
-    }
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
@@ -2742,7 +2724,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
@@ -2861,7 +2842,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the workspace's active chat panel)"},
                 {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
                 {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (auto-detected from cwd if omitted)"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
