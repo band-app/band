@@ -29,8 +29,8 @@
  * `pb-4` instead, so the measured `size` already includes it.
  */
 
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { type ReactNode, useCallback, useRef } from "react";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { memo, type ReactNode, useCallback, useRef } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 export interface VirtualizedMessageListProps<T> {
@@ -121,44 +121,92 @@ export function VirtualizedMessageList<T>({
     >
       {virtualItems.map((virtualRow) => {
         const item = items[virtualRow.index];
-        const content = renderItem(item, virtualRow.index);
-        // Trailing row has no following sibling — drop the inter-row
-        // gap so the conversation doesn't end with an extra 16px of
-        // dead space before the queued-messages / thinking sibling
-        // outside the virtualized region. Skipped rows (renderItem →
-        // null) also drop `pb-4` so an empty assistant turn collapses
-        // to zero height instead of leaving a visible gap (matches
-        // the pre-virtualization `.map() → null` behaviour).
         const isLast = virtualRow.index === items.length - 1;
-        const padding = content == null || isLast ? "" : "pb-4";
         return (
-          <div
+          <VirtualRow
             key={virtualRow.key}
-            data-index={virtualRow.index}
-            // Skip the testid for null-content rows so
-            // `messageRowCount()` only includes rows that actually
-            // contain a message — without this the windowing bound
-            // would inflate by the count of skipped (renderItem ===
-            // null) entries.
-            data-testid={content == null ? undefined : "chat-pane__message-row"}
-            ref={virtualizer.measureElement}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-            // `pb-4` bakes the inter-row gap into the measured size so
-            // visual spacing matches the old `[&>*+*]:mt-4` layout
-            // without depending on a descendant selector that absolute
-            // positioning would defeat.
-            className={padding}
-          >
-            {content}
-          </div>
+            item={item}
+            index={virtualRow.index}
+            start={virtualRow.start}
+            isLast={isLast}
+            renderItem={renderItem}
+            measureRef={virtualizer.measureElement}
+          />
         );
       })}
     </div>
   );
 }
+
+interface VirtualRowProps<T> {
+  item: T;
+  index: number;
+  start: number;
+  isLast: boolean;
+  renderItem: (item: T, index: number) => ReactNode;
+  measureRef: Virtualizer<HTMLElement, Element>["measureElement"];
+}
+
+/**
+ * Memoized row wrapper — short-circuits the React reconciler for rows
+ * whose `(item, index, start, isLast, renderItem, measureRef)` tuple
+ * is reference-equal to the previous render. During streaming
+ * `ChatView` re-renders ~30×/sec and only the trailing (streaming)
+ * message's `item` reference mutates; every other windowed row gets
+ * the same `item` reference from the reducer state, so memoizing the
+ * row skips the `renderItem` call and the inner Streamdown/Shiki
+ * highlight pass for those rows.
+ *
+ * `renderItem` and `measureRef` are stable across renders (the
+ * caller wraps `renderItem` in `useCallback`, and TanStack's
+ * `measureElement` is a stable function on the virtualizer
+ * instance), so React.memo's default shallow comparison is correct.
+ */
+function VirtualRowImpl<T>({
+  item,
+  index,
+  start,
+  isLast,
+  renderItem,
+  measureRef,
+}: VirtualRowProps<T>) {
+  const content = renderItem(item, index);
+  // Trailing row has no following sibling — drop the inter-row gap so
+  // the conversation doesn't end with an extra 16px of dead space
+  // before the queued-messages / thinking sibling outside the
+  // virtualized region. Skipped rows (renderItem → null) also drop
+  // `pb-4` so an empty assistant turn collapses to zero height
+  // instead of leaving a visible gap (matches the pre-virtualization
+  // `.map() → null` behaviour).
+  const padding = content == null || isLast ? "" : "pb-4";
+  return (
+    <div
+      data-index={index}
+      // Skip the testid for null-content rows so `messageRowCount()`
+      // only includes rows that actually contain a message — without
+      // this the windowing bound would inflate by the count of
+      // skipped (renderItem === null) entries.
+      data-testid={content == null ? undefined : "chat-pane__message-row"}
+      ref={measureRef}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${start}px)`,
+      }}
+      // `pb-4` bakes the inter-row gap into the measured size so
+      // visual spacing matches the old `[&>*+*]:mt-4` layout without
+      // depending on a descendant selector that absolute positioning
+      // would defeat.
+      className={padding}
+    >
+      {content}
+    </div>
+  );
+}
+
+// `React.memo` strips the generic parameter from the wrapped
+// component's type. Re-cast through `typeof VirtualRowImpl` so
+// callers retain inference on the element type `T`.
+const VirtualRow = memo(VirtualRowImpl) as typeof VirtualRowImpl;

@@ -154,7 +154,10 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await server.close();
+  // Null-guard: if `startServer` threw in beforeAll, `server` is
+  // unassigned. Letting that bubble would mask the original
+  // setup failure with a `TypeError`.
+  if (server) await server.close();
   cleanupTmpHome(tmpHome);
 });
 

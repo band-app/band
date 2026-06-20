@@ -425,8 +425,16 @@ async function replayPast(opts: {
   //   • `buf.events.length > 0 && cursor + 1 < buf.events[0].eventId` —
   //     buffer rotated past the cursor (MAX_BUFFER_SIZE eviction).
   //     Backfill the missing range from JSONL.
+  // `?? Number.POSITIVE_INFINITY` (not `?? 0`) for the missing-eventId
+  // fallback — matches the cold-path rationale above. A malformed
+  // buffer entry with no eventId must NOT collapse `bufferFirstId` to
+  // 0, which would silently skip the gap-fill JSONL fetch
+  // (`afterEventId + 1 < 0` is impossible for any non-negative
+  // cursor).
   const bufferFirstId =
-    buf && buf.events.length > 0 ? (buf.events[0].eventId ?? 0) : Number.POSITIVE_INFINITY;
+    buf && buf.events.length > 0
+      ? (buf.events[0].eventId ?? Number.POSITIVE_INFINITY)
+      : Number.POSITIVE_INFINITY;
   const needJsonl = !!buf && buf.events.length > 0 && afterEventId + 1 < bufferFirstId;
 
   if (needJsonl && chatWorkspaceId) {

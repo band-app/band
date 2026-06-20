@@ -21,6 +21,20 @@ interface CachedEntry {
 const DEFAULT_MAX_CACHED_WORKSPACES = 3;
 const MIN_MAX_CACHED_WORKSPACES = 1;
 
+// Hoisted style objects so the cached-entry divs receive
+// reference-equal `style` props across renders — React's
+// reconciler short-circuits on `===` before walking individual
+// CSS properties.
+const ACTIVE_ENTRY_STYLE: React.CSSProperties = {
+  visibility: "visible",
+  contentVisibility: "visible",
+};
+const HIDDEN_ENTRY_STYLE: React.CSSProperties = {
+  visibility: "hidden",
+  contentVisibility: "hidden",
+  pointerEvents: "none",
+};
+
 interface MultiWorkspacePanelHostProps {
   /**
    * Rendered when no workspace is selected (index route). Each panel gets a
@@ -264,11 +278,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             // case a future style override re-asserts visibility on a
             // descendant.
             className="absolute inset-0"
-            style={{
-              visibility: isActive ? "visible" : "hidden",
-              contentVisibility: isActive ? "visible" : "hidden",
-              pointerEvents: isActive ? undefined : "none",
-            }}
+            style={isActive ? ACTIVE_ENTRY_STYLE : HIDDEN_ENTRY_STYLE}
           >
             {children(workspaceId, isActive)}
           </div>

@@ -32,6 +32,11 @@ export async function trpcMutate(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${text}`);
+    // Truncate so a chatty validation error that echoes request
+    // input back doesn't bloat test logs or accidentally surface
+    // sensitive fields. 200 chars is enough to identify which
+    // procedure failed and what kind of error it was.
+    const snippet = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${snippet}`);
   }
 }
