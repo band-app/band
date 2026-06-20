@@ -49,6 +49,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { listTasksForWorkspace } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
@@ -123,13 +124,6 @@ interface TerminalListEntry {
   pid: number;
 }
 
-interface TaskListItem {
-  id: string;
-  workspaceId: string;
-  prompt: string;
-  status: string;
-}
-
 async function listTerminals(
   serverUrl: string,
   workspaceId: string,
@@ -152,17 +146,6 @@ async function readTerminalOutput(
   if (res.status === 404) return null;
   expect(res.status, `terminal.output failed: ${body}`).toBe(200);
   return (JSON.parse(body) as { result: { data: { output: string } } }).result.data.output;
-}
-
-async function listTasksForWorkspace(
-  serverUrl: string,
-  workspaceId: string,
-  token: string,
-): Promise<TaskListItem[]> {
-  const res = await trpcQuery(serverUrl, "tasks.list", { workspaceId }, token);
-  const body = await res.text();
-  expect(res.status, `tasks.list failed: ${body}`).toBe(200);
-  return (JSON.parse(body) as { result: { data: { tasks: TaskListItem[] } } }).result.data.tasks;
 }
 
 interface CreateResponse {

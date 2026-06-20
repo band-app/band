@@ -50,9 +50,10 @@ import {
   createTmpHome,
   type ServerHandle,
   startServer,
+  trpcData,
   trpcMutate,
-  trpcQuery,
 } from "./helpers/server";
+import { listTasksForWorkspace } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
 
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
@@ -112,24 +113,6 @@ interface CreateResponse {
   path: string;
   via?: "chat" | "terminal";
   terminalId?: string;
-}
-
-interface TaskListItem {
-  id: string;
-  workspaceId: string;
-  prompt: string;
-  status: string;
-}
-
-async function listTasksForWorkspace(
-  serverUrl: string,
-  workspaceId: string,
-  token: string,
-): Promise<TaskListItem[]> {
-  const res = await trpcQuery(serverUrl, "tasks.list", { workspaceId }, token);
-  const body = await res.text();
-  expect(res.status, `tasks.list failed: ${body}`).toBe(200);
-  return (JSON.parse(body) as { result: { data: { tasks: TaskListItem[] } } }).result.data.tasks;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,10 +179,9 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
       },
       TOKEN,
     );
-    const body = await res.text();
-    expect(res.status, `tasks.submit failed: ${body}`).toBe(200);
+    expect(res.status, `tasks.submit failed: ${await res.clone().text()}`).toBe(200);
 
-    const data = (JSON.parse(body) as { result: { data: SubmitResponse } }).result.data;
+    const data = await trpcData<SubmitResponse>(res);
     expect(data.id).toMatch(/^tsk_/);
     expect(data.workspaceId).toBe(WORKSPACE_ID);
     expect(data.chatId).toBe("strip-chat-baseline");
@@ -228,10 +210,11 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
       maxTurns: 5,
     };
     const res = await trpcMutate(server.url, "tasks.submit", legacyBody, TOKEN);
-    const body = await res.text();
-    expect(res.status, `tasks.submit failed for legacy body: ${body}`).toBe(200);
+    expect(res.status, `tasks.submit failed for legacy body: ${await res.clone().text()}`).toBe(
+      200,
+    );
 
-    const data = (JSON.parse(body) as { result: { data: SubmitResponse } }).result.data;
+    const data = await trpcData<SubmitResponse>(res);
     expect(data.id).toMatch(/^tsk_/);
     expect(data.workspaceId).toBe(WORKSPACE_ID);
     expect(data.chatId).toBe("strip-chat-legacy");
@@ -341,10 +324,9 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
       },
       TOKEN,
     );
-    const body = await res.text();
-    expect(res.status, `workspaces.create failed: ${body}`).toBe(200);
+    expect(res.status, `workspaces.create failed: ${await res.clone().text()}`).toBe(200);
 
-    const data = (JSON.parse(body) as { result: { data: CreateResponse } }).result.data;
+    const data = await trpcData<CreateResponse>(res);
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
@@ -372,10 +354,12 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
       maxTurns: 5,
     };
     const res = await trpcMutate(server.url, "workspaces.create", legacyBody, TOKEN);
-    const body = await res.text();
-    expect(res.status, `workspaces.create failed for legacy body: ${body}`).toBe(200);
+    expect(
+      res.status,
+      `workspaces.create failed for legacy body: ${await res.clone().text()}`,
+    ).toBe(200);
 
-    const data = (JSON.parse(body) as { result: { data: CreateResponse } }).result.data;
+    const data = await trpcData<CreateResponse>(res);
     expect(data.via).toBe("chat");
     expect(data.ok).toBe(true);
 
