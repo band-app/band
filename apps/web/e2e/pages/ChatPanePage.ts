@@ -126,19 +126,17 @@ export class ChatPanePage {
   }
 
   /** Locator for a user-role message bubble carrying the given text.
-   *  Asserts use this directly with `await expect(locator).toBeVisible()`. */
+   *  Scoped to the `chat-pane__user-message` data-testid container so a
+   *  future change that renders user text inside an assistant bubble
+   *  (or vice versa) trips this locator instead of silently passing. */
   userMessage(text: string): Locator {
-    // The conversation's `MessageContent` renders user text inside a
-    // `MessageResponse` element. We anchor on the text the test seeded
-    // — explicitly allowed by the doctrine for runtime-test-data. */
-    return this.page.getByText(text, { exact: false });
+    return this.page.getByTestId("chat-pane__user-message").filter({ hasText: text });
   }
 
   /** Locator for an assistant-role message bubble carrying the given
-   *  text. Same shape as `userMessage` — both anchor on the test's
-   *  seeded runtime data, the doctrine-approved use of `getByText`. */
+   *  text. Same role-scoping rationale as `userMessage`. */
   assistantMessage(text: string): Locator {
-    return this.page.getByText(text, { exact: false });
+    return this.page.getByTestId("chat-pane__assistant-message").filter({ hasText: text });
   }
 
   /** Count of currently-mounted message rows in the virtualized list.

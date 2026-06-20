@@ -6,9 +6,10 @@
  * resident). The fix mounts only messages near the viewport via
  * `@tanstack/react-virtual` inside `<StickToBottom.Content>`.
  *
- * See `docs/integration-testing.md` for the doctrine this spec follows
- * (real-server boot, Express stubs at the network boundary, page-object
- * driving, no tRPC mocking).
+ * Boots the real production server, drives through Playwright + a page
+ * object, no tRPC mocking. The spec body never touches `page.goto` /
+ * `page.getByTestId` / `page.getByText` directly — all locators live on
+ * `ChatPanePage`.
  *
  * What this test proves:
  *

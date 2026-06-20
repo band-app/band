@@ -299,11 +299,16 @@ export function ChatView({
   // integration tests can locate the scroller without walking up the DOM
   // from a child (which would couple the test to the use-stick-to-bottom
   // library's internal markup). `use-stick-to-bottom` doesn't expose a
-  // prop for arbitrary attributes on the scroller, so we set it once via
-  // the same `contextRef` we use for programmatic scrolling. Empty deps
-  // because the attribute write is idempotent and only needs to happen
-  // when the underlying DOM element is created — re-firing on every
-  // render during streaming was needlessly busy.
+  // prop for arbitrary attributes on the scroller — the JSX-prop path
+  // that TEST-1 normally requires for `data-testid` is unreachable here
+  // — so we set it once via the same `contextRef` we use for
+  // programmatic scrolling. The imperative attach is intentional and
+  // documented because the JSX path doesn't exist on this third-party
+  // component; if `use-stick-to-bottom` adds a `scrollerProps` (or
+  // similar) prop in a future release, switch back to the JSX form.
+  // Empty deps because the attribute write is idempotent and only
+  // needs to happen when the underlying DOM element is created — re-
+  // firing on every render during streaming was needlessly busy.
   useEffect(() => {
     const el = stickyContextRef.current?.scrollRef?.current;
     if (el && !el.dataset.testid) {

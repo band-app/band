@@ -68,12 +68,16 @@ export function VirtualizedMessageList<T>({
 }: VirtualizedMessageListProps<T>) {
   const { scrollRef } = useStickToBottomContext();
 
-  // Hoist the estimateSize callback so its identity is stable across
-  // re-renders — during streaming `ChatView` re-renders ~30×/sec and an
-  // inline arrow would allocate a fresh closure each time. The
+  // Hoist the virtualizer callbacks so their identity is stable across
+  // re-renders — during streaming `ChatView` re-renders ~30×/sec and
+  // inline arrows would allocate fresh closures each time. The
   // `useVirtualizer` options memoise on identity, so stable callbacks
-  // also keep the internal `getMeasurementOptions` memo valid.
+  // also keep the internal `getMeasurementOptions` memo valid (which
+  // gates whether `getMeasurements()` re-walks the full count). For
+  // `getItemKey` the cost grows linearly with conversation length, so
+  // it's the highest-leverage one to stabilise.
   const estimateSizeFn = useCallback(() => estimateSize, [estimateSize]);
+  const getItemKeyFn = useCallback((index: number) => getKey(items[index], index), [items, getKey]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -82,7 +86,7 @@ export function VirtualizedMessageList<T>({
     overscan,
     // Stable key per item — important so React reuses the same DOM row
     // when items shift (e.g. a new message pushes earlier ones up).
-    getItemKey: (index) => getKey(items[index], index),
+    getItemKey: getItemKeyFn,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
