@@ -284,7 +284,10 @@ function SortableProject({
                     {project.name}
                   </h2>
                 </TooltipTrigger>
-                <TooltipContent side="top">{project.name}</TooltipContent>
+                {/* Anchored to the right so a long project name doesn't
+                    cover the row above — matches the `side="right"`
+                    treatment on `WorkspaceCard`'s label tooltip. */}
+                <TooltipContent side="right">{project.name}</TooltipContent>
               </Tooltip>
             </div>
             <div className="flex items-center gap-1">

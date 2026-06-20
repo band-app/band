@@ -22,6 +22,13 @@ export type MessageProps = HTMLAttributes<HTMLDivElement> & {
 
 export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
+    // Default role-scoped testid lets integration tests target real
+    // message bubbles. Callers that wrap `Message` in a skeleton
+    // placeholder (see `ConversationSkeleton`) override it with
+    // `data-testid={undefined}` so locators don't pick up loading
+    // states. Spread-after-default means an explicit `data-testid` in
+    // `props` always wins.
+    data-testid={from === "user" ? "chat-pane__user-message" : "chat-pane__assistant-message"}
     className={cn(
       "group flex w-full min-w-0 flex-col gap-2",
       from === "user" ? "is-user ml-auto max-w-[90%] justify-end" : "is-assistant",

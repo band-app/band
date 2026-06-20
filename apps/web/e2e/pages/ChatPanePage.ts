@@ -11,12 +11,19 @@
  *      (a constant prop in `ChatView.tsx`, not localised user copy).
  *   2. `getByTestId("page__element")` — used for the thinking indicator,
  *      where role alone is ambiguous (lots of decorative loaders in
- *      ai-elements).
- *   3. `getByText(value)` — used for assertions on values the TEST itself
- *      supplied (the user-message text we just typed).
+ *      ai-elements). Also used to ROLE-SCOPE the user/assistant message
+ *      bubble containers via
+ *      `getByTestId("chat-pane__user-message").filter({ hasText })` /
+ *      `getByTestId("chat-pane__assistant-message").filter({ hasText })`,
+ *      so a future change rendering user text inside an assistant
+ *      bubble (or vice versa) fails the locator instead of silently
+ *      passing.
+ *   3. `getByText(value)` — only when the value is genuinely
+ *      role-agnostic test data (rarely needed since the role-scoped
+ *      `.filter({ hasText: ... })` form above is preferred).
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 export class ChatPanePage {
   /** The prompt textarea — placeholder is stable, hard-coded in
@@ -48,6 +55,21 @@ export class ChatPanePage {
    *  the prompt. ARIA name is system-controlled in
    *  `file-mention-suggestions.tsx`. */
   readonly fileMentionDropdown: Locator;
+  /** The StickToBottom scroll container — the element whose `scrollTop`
+   *  drives the chat virtualizer. The testid is attached in
+   *  `ChatView.tsx` via the `stickyContextRef.scrollRef.current` since
+   *  `use-stick-to-bottom` doesn't expose a prop for scroller
+   *  attributes. Used for programmatic scrolling in virtualization
+   *  tests. */
+  readonly scroller: Locator;
+  /** Sized wrapper rendered by `VirtualizedMessageList` whose explicit
+   *  height equals the virtualizer's `totalSize`. Tests assert on its
+   *  visibility as a proxy for "messages are mounted". */
+  readonly virtualList: Locator;
+  /** Each currently-mounted message row inside the virtualizer. Use
+   *  `messageRowCount()` to get the windowed count without inlining
+   *  `await this.messageRows.count()` in the test body. */
+  readonly messageRows: Locator;
 
   constructor(
     private readonly page: Page,
@@ -64,6 +86,9 @@ export class ChatPanePage {
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
+    this.scroller = page.getByTestId("chat-pane__scroller");
+    this.virtualList = page.getByTestId("chat-pane__virtual-list");
+    this.messageRows = page.getByTestId("chat-pane__message-row");
   }
 
   /** Navigate to the workspace's chat view. The only place URLs are
@@ -108,12 +133,47 @@ export class ChatPanePage {
   }
 
   /** Locator for a user-role message bubble carrying the given text.
-   *  Asserts use this directly with `await expect(locator).toBeVisible()`. */
+   *  Scoped to the `chat-pane__user-message` data-testid container so a
+   *  future change that renders user text inside an assistant bubble
+   *  (or vice versa) trips this locator instead of silently passing. */
   userMessage(text: string): Locator {
-    // The conversation's `MessageContent` renders user text inside a
-    // `MessageResponse` element. We anchor on the text the test seeded
-    // — explicitly allowed by the doctrine for runtime-test-data. */
-    return this.page.getByText(text, { exact: false });
+    return this.page.getByTestId("chat-pane__user-message").filter({ hasText: text });
+  }
+
+  /** Locator for an assistant-role message bubble carrying the given
+   *  text. Same role-scoping rationale as `userMessage`. */
+  assistantMessage(text: string): Locator {
+    return this.page.getByTestId("chat-pane__assistant-message").filter({ hasText: text });
+  }
+
+  /** Count of currently-mounted message rows in the virtualized list.
+   *  Used by the windowing test to assert the row count is bounded. */
+  async messageRowCount(): Promise<number> {
+    return await this.messageRows.count();
+  }
+
+  /** Wait for the virtualized list container to mount — this is the
+   *  signal that the chat-events subscription has resolved the session
+   *  and the reducer has at least one message to render. Encapsulates
+   *  the raw locator behind a page-object action so the test body
+   *  never touches the locator field directly. */
+  async waitForVirtualList(timeout = 15_000): Promise<void> {
+    await test.step("Wait for chat virtualized list", async () => {
+      await expect(this.virtualList).toBeVisible({ timeout });
+    });
+  }
+
+  /** Scroll the chat container to the top — drives the virtualizer's
+   *  on-demand mount path so earlier-message rows appear in the DOM.
+   *  Uses the scroller locator (same pattern as
+   *  `ChangesPanelPage.scrollTo`) so a missing scroller surfaces as a
+   *  Playwright locator timeout rather than a silent no-op. */
+  async scrollToTop(): Promise<void> {
+    await test.step("Scroll chat to top", async () => {
+      await this.scroller.evaluate((el) => {
+        (el as HTMLDivElement).scrollTop = 0;
+      });
+    });
   }
 
   /** Click the Stop button to cancel the in-flight task. The button is

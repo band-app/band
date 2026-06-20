@@ -1635,3 +1635,154 @@ describe("chat-events — auth + input-validation contracts", () => {
     expect(body).toEqual({ error: "Invalid JSON body" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression coverage for the workspace-switch duplication fix in
+// `apps/web/src/api/chat-events.ts` (the two code paths reviewed under
+// PR #562's Testing [1] blocker).
+// ---------------------------------------------------------------------------
+
+describe("chat-events — cold subscribe + reconnect: no duplication on the workspace-switch path", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+    const scenario = writeScenario(tmpHome, quickScenario("noreplay-session"));
+    server = await startServer({ tmpHome, scenarioPath: scenario });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  /**
+   * Covers the `bufferCoversStart` branch of cold subscribe: when an
+   * in-memory buffer exists from event id 1, the server emits the
+   * BUFFER (real positive eventIds), not JSONL synthetic negative ids.
+   * Then verifies cursor preservation: a reconnect with the highest
+   * buffer eventId emits no further content events.
+   *
+   * Together these two assertions cover the workspace-switch
+   * duplication regression on the buffer-populated path — the exact
+   * scenario reproduced live in PR #562 where typing "hey", switching
+   * away, and switching back duplicated the conversation. The
+   * complementary `buf === undefined` + JSONL-on-disk hot-reconnect
+   * branch is exercised end-to-end by
+   * `apps/web/e2e/chat-virtualization.spec.ts`, which seeds the JSONL
+   * directly and drives the full switch-back through Playwright.
+   */
+  it("cold subscribe uses buffer (real positive ids), and reconnect with that cursor sees no re-emission", async () => {
+    const chatId = newChatId("noreplay");
+
+    // Phase 1: run a real task so the in-memory buffer for the session
+    // is populated with events starting at eventId 1. Subscribe BEFORE
+    // submit so the task's full lifecycle (user-message → task-started
+    // → text-* → task-completed) is captured.
+    const turn1Promise = collectEvents(server.url, chatId, {
+      until: (e) => e.type === "task-completed",
+      timeoutMs: 15_000,
+    });
+    const submitRes = await submitMessage(server.url, chatId, {
+      workspaceId: "testproject-main",
+      text: "hello",
+    });
+    expect(submitRes.status).toBe(200);
+    const turn1 = await turn1Promise;
+
+    expect(turn1.some((e) => e.type === "task-completed")).toBe(true);
+    expect(turn1.some((e) => e.type === "user-message" && e.id > 0)).toBe(true);
+
+    // Phase 2: cold-subscribe to the same chat AGAIN (no Last-Event-ID).
+    // This is the path a fresh tab / cached-workspace cold subscribe
+    // takes — the buffer for the session is now populated with real
+    // events 1..N. The fix's `bufferCoversStart` branch emits the
+    // buffer (positive ids); the previous JSONL-preferred path
+    // emitted synthetic negative ids and stranded the client's cursor
+    // at 0.
+    const cold = await collectEvents(server.url, chatId, {
+      until: (e) => e.type === "task-completed",
+      timeoutMs: 5_000,
+    });
+
+    const contentEventTypes = new Set<ChatEventType>([
+      "user-message",
+      "text-start",
+      "text-delta",
+      "text-end",
+      "tool-input-available",
+      "tool-output-available",
+      "task-started",
+      "task-completed",
+    ]);
+    const contentEvents = cold.filter((e) => contentEventTypes.has(e.type as ChatEventType));
+    expect(contentEvents.length).toBeGreaterThan(0);
+    for (const evt of contentEvents) {
+      // Buffer-emitted events carry their real, positive task-service
+      // eventId. JSONL-backfill events would be negative synthetics.
+      expect(evt.id).toBeGreaterThan(0);
+    }
+    // The client's cursor after dispatching these would be max(ids).
+    const cursor = Math.max(...contentEvents.map((e) => e.id));
+    expect(cursor).toBeGreaterThan(0);
+
+    // Phase 3: reconnect with the cursor from phase 2 — the exact
+    // value the client's `lastEventId` would hold after a buffer-
+    // backed cold subscribe. The server must NOT re-emit any of the
+    // events the client already has; the `evt.eventId <= afterEventId`
+    // filter in the buffer-replay branch drops everything in range.
+    const reconnect = await collectEvents(server.url, chatId, {
+      lastEventId: cursor,
+      // Stop the moment a forbidden content event arrives so a
+      // regression fails fast instead of timing out.
+      until: (evt) => contentEventTypes.has(evt.type as ChatEventType) && evt.id > 0,
+      maxEvents: 20,
+      timeoutMs: 2_500,
+    });
+    // No content event with id > 0 should appear at all on the
+    // reconnect — the previous run already covered every buffered
+    // event up to `cursor`. Explicit `expect(...).toBe(0)` so a silent
+    // timeout (zero events collected within the window) is asserted
+    // as success against the SAME predicate rather than implicitly
+    // passing because the for-loop body never executed.
+    const reEmittedContent = reconnect.filter(
+      (e) => contentEventTypes.has(e.type as ChatEventType) && e.id > 0,
+    );
+    expect(reEmittedContent.length).toBe(0);
+    // Sanity: the stream did open and emit its initial bookkeeping —
+    // this is the positive anchor that proves the timeout is "no
+    // re-emission proven" rather than "the connection never
+    // established".
+    expect(reconnect[0]?.type).toBe("subscription-opened");
+  }, 25_000);
+});
+
+/* Note on the second case the PR #562 review requested — the
+ * `buf === undefined` + JSONL-on-disk hot-reconnect scenario — that we
+ * intentionally do NOT add here:
+ *
+ *   The vitest harness uses the `fake-agent.mjs` stub binary which
+ *   speaks the Claude Agent SDK stdio protocol but does NOT write a
+ *   transcript to `~/.claude/projects/<encoded>/<sessionId>.jsonl`.
+ *   And every attempt to seed that JSONL directly (matching the format
+ *   the working `apps/web/e2e/chat-virtualization.spec.ts` uses) ends
+ *   with the SDK's `getSessionMessages` returning an empty array in
+ *   this harness, even though the identical seed works under
+ *   Playwright. That difference appears to come from the Playwright
+ *   harness booting a real production bundle while vitest boots tsx
+ *   source — but the SDK is closed-source and minified, so confirming
+ *   that is beyond the bounds of this PR.
+ *
+ *   The user-observable scenario the second case would cover (typing
+ *   into a chat, switching away and back, never seeing the
+ *   conversation double) is exercised end-to-end by the live-app
+ *   reproduction documented in PR #562's description: switching
+ *   between two real workspaces 5× while observing both reducer state
+ *   and SSE traffic, before and after the fix. That reproduction is
+ *   the proof the fix works; the test above pins the buffer/cursor
+ *   half of the implementation as the part we can guard
+ *   deterministically in the vitest harness today.
+ */

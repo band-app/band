@@ -41,7 +41,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { getToolName, isToolUIPart } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import {
   Bot,
   ChevronDown,
@@ -83,6 +83,7 @@ import type { ToolPart } from "./ai-elements/tool";
 import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
 import { useChatSubscription } from "./chat/use-chat-subscription";
+import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
   "input-available",
@@ -139,6 +140,10 @@ function SkeletonBar({ widthClass, className }: { widthClass: string; className?
 }
 
 function ConversationSkeleton() {
+  // Skeleton bubbles override the role-scoped `data-testid` that
+  // `Message` stamps by default — locators like
+  // `chatPane.userMessage(text)` should target REAL message bubbles
+  // only, never the loading-state placeholders.
   return (
     <output
       className="flex animate-pulse flex-col gap-6"
@@ -146,7 +151,7 @@ function ConversationSkeleton() {
       aria-label="Loading messages"
     >
       {/* User bubble — right-aligned, narrower */}
-      <Message from="user">
+      <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
             <SkeletonBar widthClass="w-48" className="bg-foreground/10" />
@@ -156,7 +161,7 @@ function ConversationSkeleton() {
       </Message>
 
       {/* Assistant bubble — full width, several lines */}
-      <Message from="assistant">
+      <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
             <SkeletonBar widthClass="w-3/4" />
@@ -168,7 +173,7 @@ function ConversationSkeleton() {
       </Message>
 
       {/* A second user/assistant pair for longer-feeling conversations */}
-      <Message from="user">
+      <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
             <SkeletonBar widthClass="w-40" className="bg-foreground/10" />
@@ -176,7 +181,7 @@ function ConversationSkeleton() {
         </MessageContent>
       </Message>
 
-      <Message from="assistant">
+      <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
             <SkeletonBar widthClass="w-2/3" />
@@ -293,6 +298,50 @@ export function ChatView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const prevVisibleRef = useRef(visible);
+
+  // Attach a stable `data-testid` to the StickToBottom scroll element so
+  // integration tests can locate the scroller without walking up the DOM
+  // from a child (which would couple the test to the use-stick-to-bottom
+  // library's internal markup). The JSX-prop path normally used to
+  // attach `data-testid` to owned elements is unreachable here —
+  // `use-stick-to-bottom` renders the scroll container internally and
+  // exposes no attribute-forwarding prop — so we set it once via the
+  // same `contextRef` we use for programmatic scrolling. The imperative
+  // attach is intentional; if `use-stick-to-bottom` adds a
+  // `scrollerProps` (or similar) prop in a future release, switch back
+  // to the JSX form.
+  //
+  // `use-stick-to-bottom`'s `useImperativeHandle` populates the
+  // context AFTER the first commit, so the very first effect firing
+  // sees `scrollRef.current === null`. We retry on the next animation
+  // frame; the idempotent guard keeps subsequent re-renders cheap.
+  useEffect(() => {
+    // Cap the retry loop at 10 frames (~167 ms at 60 Hz) so a
+    // bug that prevents the scroll ref from ever resolving doesn't
+    // leave us scheduling a spinning rAF until unmount. In practice
+    // the ref is populated on the first or second frame.
+    let raf = 0;
+    let attempts = 0;
+    const attach = () => {
+      attempts += 1;
+      const el = stickyContextRef.current?.scrollRef?.current;
+      if (el) {
+        if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
+        return;
+      }
+      if (attempts >= 10) {
+        console.warn(
+          "[ChatView] StickToBottom scrollRef did not resolve within 10 frames; chat-pane__scroller testid not attached",
+        );
+        return;
+      }
+      raf = requestAnimationFrame(attach);
+    };
+    attach();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
   // The scroll container may have had zero height while hidden, so StickToBottom
@@ -690,13 +739,130 @@ export function ChatView({
     return map;
   }, [messages]);
 
+  // Stable identity for the virtualizer's `getItemKey` — without this,
+  // every `ChatView` render creates a fresh arrow function whose
+  // identity flips the `useVirtualizer` memoization keys, causing
+  // `getMeasurements()` to re-walk the full message count per render.
+  // At a fast-streaming agent (~30 text-delta events/s × N messages
+  // each), the saved per-second work scales linearly with conversation
+  // length.
+  const getMessageKey = useCallback((message: UIMessage) => message.id, []);
+
+  // Stabilise the `renderItem` closure too. Read the variable deps
+  // (`messages`, `isStreaming`) through refs so the callback identity
+  // stays stable across ALL renders, including the streaming hot path
+  // (~30 text-delta events/sec where `messages` is a fresh array each
+  // time). Same pattern as `itemsRef` in `VirtualizedMessageList`.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+  const renderMessageItem = useCallback((message: UIMessage, messageIndex: number) => {
+    const currentMessages = messagesRef.current;
+    const currentIsStreaming = isStreamingRef.current;
+    const isLastMessage = messageIndex === currentMessages.length - 1;
+    const isLastAssistant = message.role === "assistant" && isLastMessage;
+    const hasPendingInteractiveTool =
+      isLastAssistant &&
+      message.parts.some((p) => {
+        if (!isToolUIPart(p) || !IN_PROGRESS_STATES.has(p.state)) return false;
+        // Hoist `getToolName(p)` so the second check doesn't re-invoke
+        // it for every tool part on every render (~30 renders/sec
+        // during streaming).
+        const name = getToolName(p);
+        return name === "AskUserQuestion" || name === "ExitPlanMode";
+      });
+    const showThinking = isLastAssistant && currentIsStreaming && !hasPendingInteractiveTool;
+
+    // Compute the grouped segments ONCE per render — `groupMessageParts`
+    // allocates a fresh array, and the previous version called it twice
+    // per assistant render (once for the emptiness guard, once for the
+    // map). With N assistant messages and ~30 deltas/sec that's 60N
+    // redundant allocations/sec; one call cuts it in half.
+    const segments = groupMessageParts(message.parts);
+
+    if (message.role !== "assistant") {
+      // User messages render normally
+      if (segments.length === 0) return null;
+      return (
+        <Message from="user">
+          <MessageContent>
+            {segments.map((segment) => {
+              if (
+                segment.type === "text" &&
+                segment.part.type === "text" &&
+                segment.part.text.trim()
+              ) {
+                return (
+                  <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                    {segment.part.text}
+                  </MessageResponse>
+                );
+              }
+              if (segment.type === "file") {
+                return (
+                  <MessageFilePart
+                    key={`${message.id}-file-${segment.partIndex}`}
+                    part={segment.part}
+                  />
+                );
+              }
+              return null;
+            })}
+          </MessageContent>
+        </Message>
+      );
+    }
+
+    // Assistant message — under the chat-events model every queued
+    // turn becomes its own user-role message, so we never need to
+    // split an assistant message at `data-prompt` boundaries.
+    if (segments.length === 0 && !showThinking) return null;
+    return (
+      <Message from="assistant">
+        <MessageContent>
+          {segments.map((segment) => {
+            if (segment.type === "text") {
+              const { part, partIndex } = segment;
+              if (part.type === "text" && part.text.trim()) {
+                return (
+                  <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                    {part.text}
+                  </MessageResponse>
+                );
+              }
+              return null;
+            }
+            if (segment.type === "file") {
+              return (
+                <MessageFilePart
+                  key={`${message.id}-file-${segment.partIndex}`}
+                  part={segment.part}
+                />
+              );
+            }
+            const item = toolPartToItem(segment.part);
+            if (isTaskTool(item.toolName)) return null;
+            return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
+          })}
+          {showThinking && <ThinkingIndicator />}
+        </MessageContent>
+      </Message>
+    );
+  }, []);
+
   const getLastUserMessage = useCallback((): string | undefined => {
     // Under the chat-events model, queued/drained user messages emit their
     // own user-role messages — no need to scan assistant parts for
     // `data-prompt` markers (that legacy AI-SDK chunk type is gone).
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role !== "user") continue;
-      const text = messages[i].parts
+    // Read through `messagesRef` (kept in sync above) so the callback
+    // identity is stable across re-renders — `getLastUserMessage` is
+    // a cold-path keyboard-shortcut handler, and re-creating it on
+    // every streaming delta was wasted work.
+    const currentMessages = messagesRef.current;
+    for (let i = currentMessages.length - 1; i >= 0; i--) {
+      if (currentMessages[i].role !== "user") continue;
+      const text = currentMessages[i].parts
         .filter((p): p is { type: "text"; text: string } => p.type === "text")
         .map((p) => p.text)
         .join("\n")
@@ -704,7 +870,7 @@ export function ChatView({
       if (text) return text;
     }
     return undefined;
-  }, [messages]);
+  }, []);
 
   return (
     // Scope every `band-file:` link clicked inside this chat to *this*
@@ -774,99 +940,21 @@ export function ChatView({
               />
             )}
 
-            {(() => {
-              return messages.map((message, messageIndex) => {
-                const isLastMessage = messageIndex === messages.length - 1;
-                const isLastAssistant = message.role === "assistant" && isLastMessage;
-                const hasPendingInteractiveTool =
-                  isLastAssistant &&
-                  message.parts.some(
-                    (p) =>
-                      isToolUIPart(p) &&
-                      IN_PROGRESS_STATES.has(p.state) &&
-                      (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-                  );
-                const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-
-                if (message.role !== "assistant") {
-                  // User messages render normally
-                  const userParts = groupMessageParts(message.parts);
-                  if (userParts.length === 0) return null;
-                  return (
-                    <Message key={message.id} from="user">
-                      <MessageContent>
-                        {userParts.map((segment) => {
-                          if (
-                            segment.type === "text" &&
-                            segment.part.type === "text" &&
-                            segment.part.text.trim()
-                          ) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                                {segment.part.text}
-                              </MessageResponse>
-                            );
-                          }
-                          if (segment.type === "file") {
-                            return (
-                              <MessageFilePart
-                                key={`${message.id}-file-${segment.partIndex}`}
-                                part={segment.part}
-                              />
-                            );
-                          }
-                          return null;
-                        })}
-                      </MessageContent>
-                    </Message>
-                  );
-                }
-
-                // Assistant message — under the chat-events model every queued
-                // turn becomes its own user-role message, so we never need to
-                // split an assistant message at `data-prompt` boundaries.
-                const visibleParts = message.parts.filter(
-                  (p) =>
-                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-                );
-                if (visibleParts.length === 0 && !showThinking) return null;
-                return (
-                  <Message key={message.id} from="assistant">
-                    <MessageContent>
-                      {groupMessageParts(message.parts).map((segment) => {
-                        if (segment.type === "text") {
-                          const { part, partIndex } = segment;
-                          if (part.type === "text" && part.text.trim()) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                                {part.text}
-                              </MessageResponse>
-                            );
-                          }
-                          return null;
-                        }
-                        if (segment.type === "file") {
-                          return (
-                            <MessageFilePart
-                              key={`${message.id}-file-${segment.partIndex}`}
-                              part={segment.part}
-                            />
-                          );
-                        }
-                        const item = toolPartToItem(segment.part);
-                        if (isTaskTool(item.toolName)) return null;
-                        return (
-                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                        );
-                      })}
-                      {showThinking && <ThinkingIndicator />}
-                    </MessageContent>
-                  </Message>
-                );
-              });
-            })()}
+            {messages.length > 0 && (
+              <VirtualizedMessageList
+                items={messages}
+                getKey={getMessageKey}
+                renderItem={renderMessageItem}
+              />
+            )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
-              <Message from="assistant">
+              // No `chat-pane__assistant-message` testid on the
+              // standalone thinking bubble — locators that target
+              // assistant message bubbles should never pick up the
+              // intermediate "agent is thinking" placeholder. The
+              // dedicated `chat-pane__thinking-indicator` testid on
+              // `ThinkingIndicator` is what tests use for this state.
+              <Message from="assistant" data-testid={undefined}>
                 <MessageContent>
                   <ThinkingIndicator />
                 </MessageContent>
@@ -1190,13 +1278,20 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "gemini-2.5-flash": 1_000_000,
 };
 
+// Pre-sorted entries by descending key length so the prefix-match
+// branch in `getContextWindow` doesn't re-sort on every call. The
+// `MODEL_CONTEXT_WINDOWS` map is module-level and immutable so the
+// sort is correct at module init time.
+const SORTED_MODEL_CONTEXT_ENTRIES: ReadonlyArray<[string, number]> = Object.entries(
+  MODEL_CONTEXT_WINDOWS,
+).sort(([a], [b]) => b.length - a.length);
+
 function getContextWindow(model: string | undefined): number {
   if (!model) return 200_000;
   if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
   // Prefix match — sort by descending key length so longer/more specific
   // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
-  const entries = Object.entries(MODEL_CONTEXT_WINDOWS).sort(([a], [b]) => b.length - a.length);
-  for (const [key, value] of entries) {
+  for (const [key, value] of SORTED_MODEL_CONTEXT_ENTRIES) {
     if (model.startsWith(key)) return value;
   }
   return 200_000;
