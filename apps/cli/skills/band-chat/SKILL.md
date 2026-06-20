@@ -55,7 +55,7 @@ JSON output: `{"chat": {"id": "...", "name": "...", "agent": "...", "status": "i
 ### Send a message to a workspace chat (defaults to the workspace's active chat panel)
 
 ```sh
-band chats send [chat_id] --message <string> [--workspace <string>] [--max-turns <integer>] [--mode <string>] [--model <string>] [--agent <string>]
+band chats send [chat_id] --message <string> [--workspace <string>] [--mode <string>] [--model <string>] [--agent <string>]
 ```
 
 Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new "Chat" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.

@@ -86,14 +86,12 @@ export class CodexAdapter implements CodingAgent {
   } as const;
 
   private readonly workspaceDir: string;
-  private readonly maxTurns: number;
   private readonly model: string | undefined;
   private readonly executablePath: string | undefined;
   private activeIterator: AsyncIterator<ThreadEvent> | null = null;
 
   constructor(config: CodexConfig) {
     this.workspaceDir = config.workspaceDir;
-    this.maxTurns = config.maxTurns;
     this.model = config.options.model;
     this.executablePath = config.options.executablePath ?? cachedCodexBinary;
   }
@@ -111,7 +109,6 @@ export class CodexAdapter implements CodingAgent {
     sessionId?: string,
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
-    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     // Pass the requested model through verbatim. The chat picker only
     // offers ids the user's refreshed cache (`~/.band/settings.json`)
     // surfaced via `refreshModels()` shelling out to
@@ -130,7 +127,6 @@ export class CodexAdapter implements CodingAgent {
         sessionId,
         model: effectiveModel,
         cwd: this.workspaceDir,
-        maxTurns: effectiveMaxTurns,
         mode,
       },
       "runSession starting",

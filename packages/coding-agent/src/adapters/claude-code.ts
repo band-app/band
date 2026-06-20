@@ -204,7 +204,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
   onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
 
   private readonly workspaceDir: string;
-  private readonly maxTurns: number;
   private readonly model: string | undefined;
   private readonly executablePath: string | undefined;
   private readonly additionalDirectories: string[] | undefined;
@@ -214,7 +213,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
 
   constructor(config: ClaudeCodeConfig) {
     this.workspaceDir = config.workspaceDir;
-    this.maxTurns = config.maxTurns;
     this.model = config.options.model;
     this.executablePath = config.options.executablePath;
     this.additionalDirectories = config.additionalDirectories;
@@ -234,7 +232,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
     sessionId?: string,
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
-    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     const env = { ...process.env };
     env.CLAUDECODE = undefined;
     env.CLAUDE_CODE_ENTRYPOINT = undefined;
@@ -248,7 +245,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
         sessionId,
         model: effectiveModel,
         cwd: this.workspaceDir,
-        maxTurns: effectiveMaxTurns,
         claudeCodePath: this.executablePath || "(default)",
       },
       "runSession starting",
@@ -292,7 +288,9 @@ export class ClaudeCodeAdapter implements CodingAgent {
       options: {
         cwd: this.workspaceDir,
         model: effectiveModel,
-        maxTurns: effectiveMaxTurns,
+        // No `maxTurns` — the Claude Agent SDK treats `undefined` as "no cap",
+        // which matches Band's contract that the agent runs until it stops on
+        // its own (model decides it's done, user aborts, or the SDK errors).
         resume: sessionId,
         canUseTool,
         env,

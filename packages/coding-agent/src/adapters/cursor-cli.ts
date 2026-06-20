@@ -55,12 +55,10 @@ export class CursorCliAdapter implements CodingAgent {
     sessionListing: false,
   } as const;
 
-  private readonly maxTurns: number;
   private readonly model: string;
   private activeIterator: AsyncIterator<unknown> | null = null;
 
   constructor(config: CursorCliConfig) {
-    this.maxTurns = config.maxTurns;
     this.model = config.options.model;
   }
 
@@ -84,7 +82,6 @@ export class CursorCliAdapter implements CodingAgent {
         prompt: prompt.slice(0, 100),
         sessionId,
         model: effectiveModel,
-        maxTurns: this.maxTurns,
       },
       "runSession starting",
     );

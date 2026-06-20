@@ -25,14 +25,12 @@ export class GeminiCliAdapter implements CodingAgent {
   } as const;
 
   private readonly workspaceDir: string;
-  private readonly maxTurns: number;
   private readonly model: string | undefined;
   private readonly executablePath: string;
   private activeChild: ChildProcess | null = null;
 
   constructor(config: GeminiCliConfig) {
     this.workspaceDir = config.workspaceDir;
-    this.maxTurns = config.maxTurns;
     this.model = config.options.model;
     this.executablePath = config.options.executablePath ?? "gemini";
   }
@@ -50,7 +48,6 @@ export class GeminiCliAdapter implements CodingAgent {
     _sessionId?: string,
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
-    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     const requestedModel = options?.model ?? this.model;
     // Only pass models that Gemini CLI supports. Ignore models from other
     // providers (e.g. Claude/GPT) to let Gemini use its own default.
@@ -63,7 +60,6 @@ export class GeminiCliAdapter implements CodingAgent {
         prompt: prompt.slice(0, 100),
         model: effectiveModel,
         cwd: this.workspaceDir,
-        maxTurns: effectiveMaxTurns,
       },
       "runSession starting",
     );

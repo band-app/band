@@ -32,7 +32,6 @@ interface SubmitBody {
   workspaceId: string;
   text: string;
   sessionId?: string;
-  maxTurns?: number;
   mode?: string;
   model?: string;
   codingAgentId?: string;
@@ -66,7 +65,7 @@ export async function handleChatSubmit(
     return;
   }
 
-  const { workspaceId, text, sessionId, maxTurns, mode, model, codingAgentId, files } = body;
+  const { workspaceId, text, sessionId, mode, model, codingAgentId, files } = body;
   if (!workspaceId || !text?.trim()) {
     sendJson(res, 400, { error: "workspaceId and text are required" });
     return;
@@ -134,7 +133,6 @@ export async function handleChatSubmit(
       sessionId: resumeSessionId,
       agentPrompt,
       displayFiles,
-      maxTurns,
       mode,
       model,
       codingAgentId,

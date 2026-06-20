@@ -117,7 +117,6 @@ export interface SessionUsageSnapshot {
 }
 
 export interface RunSessionOptions {
-  maxTurns?: number;
   mode?: string;
   model?: string;
 }

@@ -30,7 +30,6 @@ export interface TaskRecord {
   sessionId?: string;
   startedAt: number;
   completedAt?: number;
-  maxTurns?: number;
   mode?: string;
   model?: string;
   codingAgentId?: string;
@@ -106,7 +105,6 @@ export class TaskQueries {
         sessionId: task.sessionId ?? null,
         startedAt: task.startedAt,
         completedAt: task.completedAt ?? null,
-        maxTurns: task.maxTurns ?? null,
         mode: task.mode ?? null,
         model: task.model ?? null,
         codingAgentId: task.codingAgentId ?? null,
@@ -123,7 +121,6 @@ export class TaskQueries {
           sessionId: task.sessionId ?? null,
           startedAt: task.startedAt,
           completedAt: task.completedAt ?? null,
-          maxTurns: task.maxTurns ?? null,
           mode: task.mode ?? null,
           model: task.model ?? null,
           codingAgentId: task.codingAgentId ?? null,
@@ -297,7 +294,6 @@ export class TaskQueries {
       sessionId: row.sessionId ?? undefined,
       startedAt: row.startedAt,
       completedAt: row.completedAt ?? undefined,
-      maxTurns: row.maxTurns ?? undefined,
       mode: row.mode ?? undefined,
       model: row.model ?? undefined,
       codingAgentId: row.codingAgentId ?? undefined,
