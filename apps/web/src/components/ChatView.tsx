@@ -41,7 +41,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { getToolName, isToolUIPart } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import {
   Bot,
   ChevronDown,
@@ -83,6 +83,7 @@ import type { ToolPart } from "./ai-elements/tool";
 import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
 import { useChatSubscription } from "./chat/use-chat-subscription";
+import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
   "input-available",
@@ -293,6 +294,21 @@ export function ChatView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const prevVisibleRef = useRef(visible);
+
+  // Attach a stable `data-testid` to the StickToBottom scroll element so
+  // integration tests can locate the scroller without walking up the DOM
+  // from a child (which would couple the test to the use-stick-to-bottom
+  // library's internal markup). `use-stick-to-bottom` doesn't expose a
+  // prop for arbitrary attributes on the scroller, so we set it once via
+  // the same `contextRef` we use for programmatic scrolling. No
+  // dependency array — the ref is populated on first paint and the
+  // attribute survives subsequent renders.
+  useEffect(() => {
+    const el = stickyContextRef.current?.scrollRef?.current;
+    if (el && !el.dataset.testid) {
+      el.dataset.testid = "chat-pane__scroller";
+    }
+  });
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
   // The scroll container may have had zero height while hidden, so StickToBottom
@@ -690,6 +706,18 @@ export function ChatView({
     return map;
   }, [messages]);
 
+  // Stable identity for the virtualizer's `getItemKey` — without this,
+  // every `ChatView` render creates a fresh arrow function whose
+  // identity flips the `useVirtualizer` memoization keys, causing
+  // `getMeasurements()` to re-walk the full message count per render.
+  // At a fast-streaming agent (~30 text-delta events/s × N messages
+  // each), the saved per-second work scales linearly with conversation
+  // length. The `renderItem` closure below captures `messages` and
+  // `isStreaming` so its identity necessarily changes per delta — that
+  // path can't be memoised the same way without recomputing on every
+  // change anyway, so we leave it inline.
+  const getMessageKey = useCallback((message: UIMessage) => message.id, []);
+
   const getLastUserMessage = useCallback((): string | undefined => {
     // Under the chat-events model, queued/drained user messages emit their
     // own user-role messages — no need to scan assistant parts for
@@ -774,38 +802,79 @@ export function ChatView({
               />
             )}
 
-            {(() => {
-              return messages.map((message, messageIndex) => {
-                const isLastMessage = messageIndex === messages.length - 1;
-                const isLastAssistant = message.role === "assistant" && isLastMessage;
-                const hasPendingInteractiveTool =
-                  isLastAssistant &&
-                  message.parts.some(
-                    (p) =>
-                      isToolUIPart(p) &&
-                      IN_PROGRESS_STATES.has(p.state) &&
-                      (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-                  );
-                const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
+            {messages.length > 0 && (
+              <VirtualizedMessageList
+                items={messages}
+                getKey={getMessageKey}
+                renderItem={(message, messageIndex) => {
+                  const isLastMessage = messageIndex === messages.length - 1;
+                  const isLastAssistant = message.role === "assistant" && isLastMessage;
+                  const hasPendingInteractiveTool =
+                    isLastAssistant &&
+                    message.parts.some(
+                      (p) =>
+                        isToolUIPart(p) &&
+                        IN_PROGRESS_STATES.has(p.state) &&
+                        (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
+                    );
+                  const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
 
-                if (message.role !== "assistant") {
-                  // User messages render normally
-                  const userParts = groupMessageParts(message.parts);
-                  if (userParts.length === 0) return null;
+                  if (message.role !== "assistant") {
+                    // User messages render normally
+                    const userParts = groupMessageParts(message.parts);
+                    if (userParts.length === 0) return null;
+                    return (
+                      <Message from="user">
+                        <MessageContent>
+                          {userParts.map((segment) => {
+                            if (
+                              segment.type === "text" &&
+                              segment.part.type === "text" &&
+                              segment.part.text.trim()
+                            ) {
+                              return (
+                                <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                                  {segment.part.text}
+                                </MessageResponse>
+                              );
+                            }
+                            if (segment.type === "file") {
+                              return (
+                                <MessageFilePart
+                                  key={`${message.id}-file-${segment.partIndex}`}
+                                  part={segment.part}
+                                />
+                              );
+                            }
+                            return null;
+                          })}
+                        </MessageContent>
+                      </Message>
+                    );
+                  }
+
+                  // Assistant message — under the chat-events model every queued
+                  // turn becomes its own user-role message, so we never need to
+                  // split an assistant message at `data-prompt` boundaries.
+                  const visibleParts = message.parts.filter(
+                    (p) =>
+                      (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+                  );
+                  if (visibleParts.length === 0 && !showThinking) return null;
                   return (
-                    <Message key={message.id} from="user">
+                    <Message from="assistant">
                       <MessageContent>
-                        {userParts.map((segment) => {
-                          if (
-                            segment.type === "text" &&
-                            segment.part.type === "text" &&
-                            segment.part.text.trim()
-                          ) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                                {segment.part.text}
-                              </MessageResponse>
-                            );
+                        {groupMessageParts(message.parts).map((segment) => {
+                          if (segment.type === "text") {
+                            const { part, partIndex } = segment;
+                            if (part.type === "text" && part.text.trim()) {
+                              return (
+                                <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                                  {part.text}
+                                </MessageResponse>
+                              );
+                            }
+                            return null;
                           }
                           if (segment.type === "file") {
                             return (
@@ -815,56 +884,19 @@ export function ChatView({
                               />
                             );
                           }
-                          return null;
+                          const item = toolPartToItem(segment.part);
+                          if (isTaskTool(item.toolName)) return null;
+                          return (
+                            <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
+                          );
                         })}
+                        {showThinking && <ThinkingIndicator />}
                       </MessageContent>
                     </Message>
                   );
-                }
-
-                // Assistant message — under the chat-events model every queued
-                // turn becomes its own user-role message, so we never need to
-                // split an assistant message at `data-prompt` boundaries.
-                const visibleParts = message.parts.filter(
-                  (p) =>
-                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-                );
-                if (visibleParts.length === 0 && !showThinking) return null;
-                return (
-                  <Message key={message.id} from="assistant">
-                    <MessageContent>
-                      {groupMessageParts(message.parts).map((segment) => {
-                        if (segment.type === "text") {
-                          const { part, partIndex } = segment;
-                          if (part.type === "text" && part.text.trim()) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                                {part.text}
-                              </MessageResponse>
-                            );
-                          }
-                          return null;
-                        }
-                        if (segment.type === "file") {
-                          return (
-                            <MessageFilePart
-                              key={`${message.id}-file-${segment.partIndex}`}
-                              part={segment.part}
-                            />
-                          );
-                        }
-                        const item = toolPartToItem(segment.part);
-                        if (isTaskTool(item.toolName)) return null;
-                        return (
-                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                        );
-                      })}
-                      {showThinking && <ThinkingIndicator />}
-                    </MessageContent>
-                  </Message>
-                );
-              });
-            })()}
+                }}
+              />
+            )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
               <Message from="assistant">
                 <MessageContent>

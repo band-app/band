@@ -221,7 +221,12 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div {...containerProps}>
-          <Tooltip>
+          {/* `delayDuration` overrides the provider's default 500 ms so
+              the tooltip waits long enough that a short mouse pass while
+              scanning the sidebar doesn't fire one — but still snappy
+              enough to feel responsive when the user actually pauses on
+              a card to read the truncated label. */}
+          <Tooltip delayDuration={800}>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
@@ -232,14 +237,18 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 </span>
               </div>
             </TooltipTrigger>
-            {/* When showProjectName is true the visible label already
-                spells out `project/branch`, so re-displaying it in the
-                tooltip is noise. Show the worktree's absolute path
-                instead — that's genuinely supplementary information the
-                card body never surfaces. */}
-            <TooltipContent side="top">
-              {showProjectName ? worktree.path : worktree.branch}
-            </TooltipContent>
+            {/* Always show the full `project/branch` name in the
+                tooltip. The visible label is `truncate`-ellipsised when
+                the sidebar is narrow, so spelling out the full thing on
+                hover is the one thing a tooltip is actually useful for
+                — the worktree's absolute path was clutter (and it
+                exposed `$HOME` paths that the user doesn't typically
+                care about while scanning the list).
+                Anchored to the right of the card (was top) so a long
+                project/branch string doesn't cover the next card down
+                — fans out into open viewport space instead of
+                overlapping siblings. */}
+            <TooltipContent side="right">{`${projectName}/${worktree.branch}`}</TooltipContent>
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
             <SetupStatusIndicator setup={setupStatus} />

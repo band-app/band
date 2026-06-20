@@ -48,6 +48,21 @@ export class ChatPanePage {
    *  the prompt. ARIA name is system-controlled in
    *  `file-mention-suggestions.tsx`. */
   readonly fileMentionDropdown: Locator;
+  /** The StickToBottom scroll container — the element whose `scrollTop`
+   *  drives the chat virtualizer. The testid is attached in
+   *  `ChatView.tsx` via the `stickyContextRef.scrollRef.current` since
+   *  `use-stick-to-bottom` doesn't expose a prop for scroller
+   *  attributes. Used for programmatic scrolling in virtualization
+   *  tests. */
+  readonly scroller: Locator;
+  /** Sized wrapper rendered by `VirtualizedMessageList` whose explicit
+   *  height equals the virtualizer's `totalSize`. Tests assert on its
+   *  visibility as a proxy for "messages are mounted". */
+  readonly virtualList: Locator;
+  /** Each currently-mounted message row inside the virtualizer. Use
+   *  `messageRowCount()` to get the windowed count without inlining
+   *  `await this.messageRows.count()` in the test body. */
+  readonly messageRows: Locator;
 
   constructor(
     private readonly page: Page,
@@ -64,6 +79,9 @@ export class ChatPanePage {
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
+    this.scroller = page.getByTestId("chat-pane__scroller");
+    this.virtualList = page.getByTestId("chat-pane__virtual-list");
+    this.messageRows = page.getByTestId("chat-pane__message-row");
   }
 
   /** Navigate to the workspace's chat view. The only place URLs are
@@ -114,6 +132,32 @@ export class ChatPanePage {
     // `MessageResponse` element. We anchor on the text the test seeded
     // — explicitly allowed by the doctrine for runtime-test-data. */
     return this.page.getByText(text, { exact: false });
+  }
+
+  /** Locator for an assistant-role message bubble carrying the given
+   *  text. Same shape as `userMessage` — both anchor on the test's
+   *  seeded runtime data, the doctrine-approved use of `getByText`. */
+  assistantMessage(text: string): Locator {
+    return this.page.getByText(text, { exact: false });
+  }
+
+  /** Count of currently-mounted message rows in the virtualized list.
+   *  Used by the windowing test to assert the row count is bounded. */
+  async messageRowCount(): Promise<number> {
+    return await this.messageRows.count();
+  }
+
+  /** Scroll the chat container to the top — drives the virtualizer's
+   *  on-demand mount path so earlier-message rows appear in the DOM.
+   *  Uses the scroller locator (same pattern as
+   *  `ChangesPanelPage.scrollTo`) so a missing scroller surfaces as a
+   *  Playwright locator timeout rather than a silent no-op. */
+  async scrollToTop(): Promise<void> {
+    await test.step("Scroll chat to top", async () => {
+      await this.scroller.evaluate((el) => {
+        (el as HTMLDivElement).scrollTop = 0;
+      });
+    });
   }
 
   /** Click the Stop button to cancel the in-flight task. The button is

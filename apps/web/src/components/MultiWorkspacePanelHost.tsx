@@ -237,9 +237,24 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             // cached entry divs would multiply-match the existing
             // `locator('[data-active="true"]')` queries other specs use.
             data-testid={`workspace-panel-host__cached-entry--${workspaceId}`}
-            className="absolute inset-0 transition-opacity duration-150 ease-out"
+            // `content-visibility: hidden` instead of `opacity: 0` for the
+            // inactive entries. opacity-0 still pays the layout + paint
+            // cost for every cached chat on every frame (and Streamdown's
+            // syntax highlighting in particular keeps re-running its
+            // intersection observers); content-visibility:hidden lets the
+            // browser SKIP rendering work on the subtree entirely while
+            // preserving the React tree + DOM state. The element keeps
+            // its 100%×100% box from `absolute inset-0`, so when it
+            // flips back to `visible` the layout settles in one frame
+            // without re-mounting any of its content.
+            //
+            // We also keep `pointer-events: none` as belt-and-suspenders
+            // — content-visibility:hidden already blocks hit-testing,
+            // but the explicit prop guarantees the same on legacy
+            // browsers that haven't shipped the spec.
+            className="absolute inset-0"
             style={{
-              opacity: isActive ? 1 : 0,
+              contentVisibility: isActive ? "visible" : "hidden",
               pointerEvents: isActive ? undefined : "none",
             }}
           >

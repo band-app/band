@@ -305,7 +305,43 @@ async function replayPast(opts: {
   //     only the last turn visible after a page refresh — the buffer
   //     had the new turn and the older JSONL history was elided.
   if (afterEventId === undefined) {
-    // Cold subscribe — JSONL is the full history.
+    // Cold subscribe — replay full session history.
+    //
+    // PREFERENCE ORDER:
+    //   1. In-memory buffer when it covers the session from event 1.
+    //      Buffer events carry their real `eventId`s, so after this
+    //      cold subscribe the client's `state.lastEventId` lines up
+    //      with the buffer's natural numbering. Any reconnect then
+    //      arrives with a cursor at the buffer's tail, and the
+    //      `evt.eventId <= afterEventId` filter on the buffer-replay
+    //      path naturally drops every event the client already has —
+    //      no duplication on workspace switch.
+    //
+    //      Compare this to the JSONL path below: JSONL events carry
+    //      *synthetic* negative ids (so they sort below live buffer
+    //      ids on this single subscription), but those negative ids
+    //      never move the client's `Math.max(state.lastEventId ?? 0,
+    //      eventId)` cursor above 0. The next reconnect then sends
+    //      `lastEventId=0`, and the server's buffer replay re-emits
+    //      every event from id 1 onward — producing the
+    //      "switch-back-doubles-the-conversation" bug.
+    //   2. JSONL backfill for sessions whose buffer is missing or
+    //      partial (server restart, rotation past the start).
+    //   3. Buffer-as-fallback for the rare case JSONL fails *and* the
+    //      buffer is partial — emits what we can.
+    const bufferFirstId =
+      buf && buf.events.length > 0 ? (buf.events[0].eventId ?? 0) : Number.POSITIVE_INFINITY;
+    const bufferCoversStart = buf !== undefined && bufferFirstId <= 1;
+
+    if (bufferCoversStart && buf) {
+      for (const c of buf.events) {
+        const payload = chunkToChatEvent(c as StreamChunk, sessionId);
+        if (!payload) continue;
+        writer.write({ ...payload, eventId: c.eventId ?? 0 } as ChatEvent);
+      }
+      return;
+    }
+
     let jsonlEmittedAny = false;
     if (chatWorkspaceId) {
       try {
@@ -321,7 +357,12 @@ async function replayPast(opts: {
             const messages = result.messages;
             // Synthetic ids sort below any live buffer ids (-1000-N..-1000),
             // so subsequent live events the client receives keep their
-            // monotonic order.
+            // monotonic order. They DO leave `state.lastEventId` at 0 on
+            // the client — that's why the buffer-covers-start branch
+            // above prefers the buffer when it can; this path is reached
+            // only when no buffer exists at all (server restart, fresh
+            // process) and a 0 cursor is harmless because the matching
+            // buffer-replay branch is empty.
             let syntheticId = -1000 - messages.length;
             for (const msg of messages) {
               const events = jsonlMessageToEvents(msg, syntheticId);
@@ -351,12 +392,24 @@ async function replayPast(opts: {
   }
 
   // Hot reconnect path — gap-fill from buffer past the cursor. JSONL is
-  // only re-fetched when the buffer DOESN'T cover the cursor:
+  // only re-fetched when the in-memory buffer EXISTS but doesn't cover
+  // the cursor:
   //
-  //   • `buf === undefined` — the in-memory buffer is GONE (server
-  //     restart, eviction). The client carries a cursor from before the
-  //     restart; without JSONL it would see a blank chat until the next
-  //     agent turn produces fresh events. Treat as a gap, backfill.
+  //   • `buf === undefined` — the in-memory buffer is GONE (no task has
+  //     ever run for this session in this server process, the buffer
+  //     was evicted, or the server was restarted). The client carries
+  //     a cursor it set during an earlier subscription, which means it
+  //     already has the JSONL history in its reducer — DO NOT backfill.
+  //     The previous behaviour was to re-emit the entire transcript
+  //     here, and that's what made every workspace switch re-render
+  //     every cached chat: the JSONL-backfill path generates fresh
+  //     synthetic eventIds, which the client's reducer treats as new
+  //     events, rebuilds the `messages` array, and busts every memo
+  //     downstream — Streamdown re-tokenises every code block on the
+  //     switch back to a cached workspace. The cold-subscribe branch
+  //     above (afterEventId === undefined) still backfills JSONL on a
+  //     fresh page load, which is the only scenario where the client
+  //     doesn't already have history.
   //   • `buf.events.length === 0` — buffer exists but has no events
   //     since the cursor. Client is fully caught up; no JSONL needed.
   //     (Avoids re-pushing the conversation on every workspace switch
@@ -366,7 +419,7 @@ async function replayPast(opts: {
   //     Backfill the missing range from JSONL.
   const bufferFirstId =
     buf && buf.events.length > 0 ? (buf.events[0].eventId ?? 0) : Number.POSITIVE_INFINITY;
-  const needJsonl = !buf || (buf.events.length > 0 && afterEventId + 1 < bufferFirstId);
+  const needJsonl = !!buf && buf.events.length > 0 && afterEventId + 1 < bufferFirstId;
 
   if (needJsonl && chatWorkspaceId) {
     try {
