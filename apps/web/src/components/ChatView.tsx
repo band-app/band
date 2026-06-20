@@ -298,17 +298,17 @@ export function ChatView({
   // Attach a stable `data-testid` to the StickToBottom scroll element so
   // integration tests can locate the scroller without walking up the DOM
   // from a child (which would couple the test to the use-stick-to-bottom
-  // library's internal markup). `use-stick-to-bottom` doesn't expose a
-  // prop for arbitrary attributes on the scroller — the JSX-prop path
-  // that TEST-1 normally requires for `data-testid` is unreachable here
-  // — so we set it once via the same `contextRef` we use for
-  // programmatic scrolling. The imperative attach is intentional and
-  // documented because the JSX path doesn't exist on this third-party
-  // component; if `use-stick-to-bottom` adds a `scrollerProps` (or
-  // similar) prop in a future release, switch back to the JSX form.
-  // Empty deps because the attribute write is idempotent and only
-  // needs to happen when the underlying DOM element is created — re-
-  // firing on every render during streaming was needlessly busy.
+  // library's internal markup). The JSX-prop path normally used to
+  // attach `data-testid` to owned elements is unreachable here —
+  // `use-stick-to-bottom` renders the scroll container internally and
+  // exposes no attribute-forwarding prop — so we set it once via the
+  // same `contextRef` we use for programmatic scrolling. The imperative
+  // attach is intentional; if `use-stick-to-bottom` adds a
+  // `scrollerProps` (or similar) prop in a future release, switch back
+  // to the JSX form. Empty deps because the attribute write is
+  // idempotent and only needs to happen when the underlying DOM element
+  // is created — re-firing on every render during streaming was
+  // needlessly busy.
   useEffect(() => {
     const el = stickyContextRef.current?.scrollRef?.current;
     if (el && !el.dataset.testid) {
@@ -718,11 +718,103 @@ export function ChatView({
   // `getMeasurements()` to re-walk the full message count per render.
   // At a fast-streaming agent (~30 text-delta events/s × N messages
   // each), the saved per-second work scales linearly with conversation
-  // length. The `renderItem` closure below captures `messages` and
-  // `isStreaming` so its identity necessarily changes per delta — that
-  // path can't be memoised the same way without recomputing on every
-  // change anyway, so we leave it inline.
+  // length.
   const getMessageKey = useCallback((message: UIMessage) => message.id, []);
+
+  // Stabilise the `renderItem` closure too. Its deps (`messages`,
+  // `isStreaming`) DO change during streaming, so this only helps for
+  // the renders where they don't — chatQuery refetches, settings
+  // refetches, parent context refreshes etc. — but for those it cuts
+  // the per-render closure allocation entirely.
+  const renderMessageItem = useCallback(
+    (message: UIMessage, messageIndex: number) => {
+      const isLastMessage = messageIndex === messages.length - 1;
+      const isLastAssistant = message.role === "assistant" && isLastMessage;
+      const hasPendingInteractiveTool =
+        isLastAssistant &&
+        message.parts.some(
+          (p) =>
+            isToolUIPart(p) &&
+            IN_PROGRESS_STATES.has(p.state) &&
+            (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
+        );
+      const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
+
+      if (message.role !== "assistant") {
+        // User messages render normally
+        const userParts = groupMessageParts(message.parts);
+        if (userParts.length === 0) return null;
+        return (
+          <Message from="user">
+            <MessageContent>
+              {userParts.map((segment) => {
+                if (
+                  segment.type === "text" &&
+                  segment.part.type === "text" &&
+                  segment.part.text.trim()
+                ) {
+                  return (
+                    <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                      {segment.part.text}
+                    </MessageResponse>
+                  );
+                }
+                if (segment.type === "file") {
+                  return (
+                    <MessageFilePart
+                      key={`${message.id}-file-${segment.partIndex}`}
+                      part={segment.part}
+                    />
+                  );
+                }
+                return null;
+              })}
+            </MessageContent>
+          </Message>
+        );
+      }
+
+      // Assistant message — under the chat-events model every queued
+      // turn becomes its own user-role message, so we never need to
+      // split an assistant message at `data-prompt` boundaries.
+      const visibleParts = message.parts.filter(
+        (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+      );
+      if (visibleParts.length === 0 && !showThinking) return null;
+      return (
+        <Message from="assistant">
+          <MessageContent>
+            {groupMessageParts(message.parts).map((segment) => {
+              if (segment.type === "text") {
+                const { part, partIndex } = segment;
+                if (part.type === "text" && part.text.trim()) {
+                  return (
+                    <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                      {part.text}
+                    </MessageResponse>
+                  );
+                }
+                return null;
+              }
+              if (segment.type === "file") {
+                return (
+                  <MessageFilePart
+                    key={`${message.id}-file-${segment.partIndex}`}
+                    part={segment.part}
+                  />
+                );
+              }
+              const item = toolPartToItem(segment.part);
+              if (isTaskTool(item.toolName)) return null;
+              return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
+            })}
+            {showThinking && <ThinkingIndicator />}
+          </MessageContent>
+        </Message>
+      );
+    },
+    [messages, isStreaming],
+  );
 
   const getLastUserMessage = useCallback((): string | undefined => {
     // Under the chat-events model, queued/drained user messages emit their
@@ -812,95 +904,7 @@ export function ChatView({
               <VirtualizedMessageList
                 items={messages}
                 getKey={getMessageKey}
-                renderItem={(message, messageIndex) => {
-                  const isLastMessage = messageIndex === messages.length - 1;
-                  const isLastAssistant = message.role === "assistant" && isLastMessage;
-                  const hasPendingInteractiveTool =
-                    isLastAssistant &&
-                    message.parts.some(
-                      (p) =>
-                        isToolUIPart(p) &&
-                        IN_PROGRESS_STATES.has(p.state) &&
-                        (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-                    );
-                  const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-
-                  if (message.role !== "assistant") {
-                    // User messages render normally
-                    const userParts = groupMessageParts(message.parts);
-                    if (userParts.length === 0) return null;
-                    return (
-                      <Message from="user">
-                        <MessageContent>
-                          {userParts.map((segment) => {
-                            if (
-                              segment.type === "text" &&
-                              segment.part.type === "text" &&
-                              segment.part.text.trim()
-                            ) {
-                              return (
-                                <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                                  {segment.part.text}
-                                </MessageResponse>
-                              );
-                            }
-                            if (segment.type === "file") {
-                              return (
-                                <MessageFilePart
-                                  key={`${message.id}-file-${segment.partIndex}`}
-                                  part={segment.part}
-                                />
-                              );
-                            }
-                            return null;
-                          })}
-                        </MessageContent>
-                      </Message>
-                    );
-                  }
-
-                  // Assistant message — under the chat-events model every queued
-                  // turn becomes its own user-role message, so we never need to
-                  // split an assistant message at `data-prompt` boundaries.
-                  const visibleParts = message.parts.filter(
-                    (p) =>
-                      (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-                  );
-                  if (visibleParts.length === 0 && !showThinking) return null;
-                  return (
-                    <Message from="assistant">
-                      <MessageContent>
-                        {groupMessageParts(message.parts).map((segment) => {
-                          if (segment.type === "text") {
-                            const { part, partIndex } = segment;
-                            if (part.type === "text" && part.text.trim()) {
-                              return (
-                                <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                                  {part.text}
-                                </MessageResponse>
-                              );
-                            }
-                            return null;
-                          }
-                          if (segment.type === "file") {
-                            return (
-                              <MessageFilePart
-                                key={`${message.id}-file-${segment.partIndex}`}
-                                part={segment.part}
-                              />
-                            );
-                          }
-                          const item = toolPartToItem(segment.part);
-                          if (isTaskTool(item.toolName)) return null;
-                          return (
-                            <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                          );
-                        })}
-                        {showThinking && <ThinkingIndicator />}
-                      </MessageContent>
-                    </Message>
-                  );
-                }}
+                renderItem={renderMessageItem}
               />
             )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (

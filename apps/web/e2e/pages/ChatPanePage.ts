@@ -16,7 +16,7 @@
  *      supplied (the user-message text we just typed).
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 export class ChatPanePage {
   /** The prompt textarea — placeholder is stable, hard-coded in
@@ -143,6 +143,17 @@ export class ChatPanePage {
    *  Used by the windowing test to assert the row count is bounded. */
   async messageRowCount(): Promise<number> {
     return await this.messageRows.count();
+  }
+
+  /** Wait for the virtualized list container to mount — this is the
+   *  signal that the chat-events subscription has resolved the session
+   *  and the reducer has at least one message to render. Encapsulates
+   *  the raw locator behind a page-object action so the test body
+   *  never touches the locator field directly. */
+  async waitForVirtualList(timeout = 15_000): Promise<void> {
+    await test.step("Wait for chat virtualized list", async () => {
+      await expect(this.virtualList).toBeVisible({ timeout });
+    });
   }
 
   /** Scroll the chat container to the top — drives the virtualizer's

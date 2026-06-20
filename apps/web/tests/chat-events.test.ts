@@ -1744,18 +1744,18 @@ describe("chat-events — cold subscribe + reconnect: no duplication on the work
     });
     // No content event with id > 0 should appear at all on the
     // reconnect — the previous run already covered every buffered
-    // event up to `cursor`.
-    for (const evt of reconnect) {
-      if (contentEventTypes.has(evt.type as ChatEventType) && evt.id > 0) {
-        // Either the buffer-replay filter (evt.id <= cursor) is broken
-        // or someone removed the buffer-replay path entirely — both
-        // are regressions.
-        throw new Error(
-          `Unexpected re-emission of content event after reconnect: type=${evt.type} id=${evt.id} cursor=${cursor}`,
-        );
-      }
-    }
-    // Sanity: the stream did open and emit its initial bookkeeping.
+    // event up to `cursor`. Explicit `expect(...).toBe(0)` so a silent
+    // timeout (zero events collected within the window) is asserted
+    // as success against the SAME predicate rather than implicitly
+    // passing because the for-loop body never executed.
+    const reEmittedContent = reconnect.filter(
+      (e) => contentEventTypes.has(e.type as ChatEventType) && e.id > 0,
+    );
+    expect(reEmittedContent.length).toBe(0);
+    // Sanity: the stream did open and emit its initial bookkeeping —
+    // this is the positive anchor that proves the timeout is "no
+    // re-emission proven" rather than "the connection never
+    // established".
     expect(reconnect[0]?.type).toBe("subscription-opened");
   }, 25_000);
 });

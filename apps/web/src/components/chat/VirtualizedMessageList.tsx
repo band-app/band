@@ -78,10 +78,14 @@ export function VirtualizedMessageList<T>({
   // it's the highest-leverage one to stabilise.
   const estimateSizeFn = useCallback(() => estimateSize, [estimateSize]);
   const getItemKeyFn = useCallback((index: number) => getKey(items[index], index), [items, getKey]);
+  // `scrollRef` is a stable ref object from the StickToBottom context
+  // — its `.current` may change but the ref identity does not — so
+  // this callback never invalidates after mount.
+  const getScrollElement = useCallback(() => scrollRef.current, [scrollRef]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement,
     estimateSize: estimateSizeFn,
     overscan,
     // Stable key per item — important so React reuses the same DOM row

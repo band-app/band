@@ -49,6 +49,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { fakeAgentPath } from "./helpers/fake-agent";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -76,7 +77,7 @@ const TURNS = 500;
 // different DOM structure).
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
+const FAKE_AGENT_PATH = fakeAgentPath();
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -167,7 +168,9 @@ test.describe("Chat message-list virtualization", () => {
     // Wait for the virtualized list container to mount. Its appearance
     // means the chat-events subscription has resolved the seeded
     // session and the reducer has at least one message to render.
-    await expect(chatPane.virtualList).toBeVisible({ timeout: 15_000 });
+    // Driven through a page-object method so the test body never
+    // touches the raw `virtualList` locator.
+    await chatPane.waitForVirtualList(15_000);
 
     // Wait for the LAST seeded message text to be present. That's how
     // we know JSONL replay completed AND stick-to-bottom did its
@@ -190,9 +193,12 @@ test.describe("Chat message-list virtualization", () => {
 
     // The very first seeded message must NOT be in the DOM right now —
     // the user is parked at the bottom of a 1000-message conversation,
-    // there's no way the row at position 0 is mounted. This is the
-    // dual of the bounded-row assertion: it pins *which* rows are
-    // mounted, not just how many.
+    // there's no way the row at position 0 is mounted. The positive
+    // anchor proving the virtualizer has settled is the
+    // `assistantMessage(lastAssistantTag).toBeVisible()` assertion
+    // above plus the bounded-row poll — once those two hold the
+    // viewport has stabilised at the end of the list, so this
+    // negative assertion is safe (the alternate state has rendered).
     const firstUserTag = userText(0);
     await expect(chatPane.userMessage(firstUserTag)).toHaveCount(0);
 
