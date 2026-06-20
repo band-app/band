@@ -140,6 +140,10 @@ function SkeletonBar({ widthClass, className }: { widthClass: string; className?
 }
 
 function ConversationSkeleton() {
+  // Skeleton bubbles override the role-scoped `data-testid` that
+  // `Message` stamps by default — locators like
+  // `chatPane.userMessage(text)` should target REAL message bubbles
+  // only, never the loading-state placeholders.
   return (
     <output
       className="flex animate-pulse flex-col gap-6"
@@ -147,7 +151,7 @@ function ConversationSkeleton() {
       aria-label="Loading messages"
     >
       {/* User bubble — right-aligned, narrower */}
-      <Message from="user">
+      <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
             <SkeletonBar widthClass="w-48" className="bg-foreground/10" />
@@ -157,7 +161,7 @@ function ConversationSkeleton() {
       </Message>
 
       {/* Assistant bubble — full width, several lines */}
-      <Message from="assistant">
+      <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
             <SkeletonBar widthClass="w-3/4" />
@@ -169,7 +173,7 @@ function ConversationSkeleton() {
       </Message>
 
       {/* A second user/assistant pair for longer-feeling conversations */}
-      <Message from="user">
+      <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
             <SkeletonBar widthClass="w-40" className="bg-foreground/10" />
@@ -177,7 +181,7 @@ function ConversationSkeleton() {
         </MessageContent>
       </Message>
 
-      <Message from="assistant">
+      <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
             <SkeletonBar widthClass="w-2/3" />
@@ -305,15 +309,26 @@ export function ChatView({
   // same `contextRef` we use for programmatic scrolling. The imperative
   // attach is intentional; if `use-stick-to-bottom` adds a
   // `scrollerProps` (or similar) prop in a future release, switch back
-  // to the JSX form. Empty deps because the attribute write is
-  // idempotent and only needs to happen when the underlying DOM element
-  // is created — re-firing on every render during streaming was
-  // needlessly busy.
+  // to the JSX form.
+  //
+  // `use-stick-to-bottom`'s `useImperativeHandle` populates the
+  // context AFTER the first commit, so the very first effect firing
+  // sees `scrollRef.current === null`. We retry on the next animation
+  // frame; the idempotent guard keeps subsequent re-renders cheap.
   useEffect(() => {
-    const el = stickyContextRef.current?.scrollRef?.current;
-    if (el && !el.dataset.testid) {
-      el.dataset.testid = "chat-pane__scroller";
-    }
+    let raf = 0;
+    const attach = () => {
+      const el = stickyContextRef.current?.scrollRef?.current;
+      if (!el) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
+      if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
+    };
+    attach();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
@@ -737,12 +752,14 @@ export function ChatView({
     const isLastAssistant = message.role === "assistant" && isLastMessage;
     const hasPendingInteractiveTool =
       isLastAssistant &&
-      message.parts.some(
-        (p) =>
-          isToolUIPart(p) &&
-          IN_PROGRESS_STATES.has(p.state) &&
-          (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-      );
+      message.parts.some((p) => {
+        if (!isToolUIPart(p) || !IN_PROGRESS_STATES.has(p.state)) return false;
+        // Hoist `getToolName(p)` so the second check doesn't re-invoke
+        // it for every tool part on every render (~30 renders/sec
+        // during streaming).
+        const name = getToolName(p);
+        return name === "AskUserQuestion" || name === "ExitPlanMode";
+      });
     const showThinking = isLastAssistant && currentIsStreaming && !hasPendingInteractiveTool;
 
     // Compute the grouped segments ONCE per render — `groupMessageParts`
@@ -826,9 +843,14 @@ export function ChatView({
     // Under the chat-events model, queued/drained user messages emit their
     // own user-role messages — no need to scan assistant parts for
     // `data-prompt` markers (that legacy AI-SDK chunk type is gone).
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role !== "user") continue;
-      const text = messages[i].parts
+    // Read through `messagesRef` (kept in sync above) so the callback
+    // identity is stable across re-renders — `getLastUserMessage` is
+    // a cold-path keyboard-shortcut handler, and re-creating it on
+    // every streaming delta was wasted work.
+    const currentMessages = messagesRef.current;
+    for (let i = currentMessages.length - 1; i >= 0; i--) {
+      if (currentMessages[i].role !== "user") continue;
+      const text = currentMessages[i].parts
         .filter((p): p is { type: "text"; text: string } => p.type === "text")
         .map((p) => p.text)
         .join("\n")
@@ -836,7 +858,7 @@ export function ChatView({
       if (text) return text;
     }
     return undefined;
-  }, [messages]);
+  }, []);
 
   return (
     // Scope every `band-file:` link clicked inside this chat to *this*

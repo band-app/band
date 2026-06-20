@@ -58,6 +58,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-virtualization-token";
@@ -136,7 +137,7 @@ test.beforeAll(async () => {
   // saved-layout lookup finds it) and point it at our seeded session.
   // Hitting the real tRPC surface keeps the layout/active-session
   // bookkeeping consistent with the production code paths.
-  await trpcMutate("chats.create", {
+  await trpcMutate(server.url, TOKEN, "chats.create", {
     workspaceId: WORKSPACE,
     id: CHAT_ID,
     agent: "claude-code",
@@ -145,7 +146,7 @@ test.beforeAll(async () => {
   // it also synchronously resolves the on-disk summary via the agent so
   // the chat row carries a valid `activeSessionSummary` before the
   // chat-events subscription opens.
-  await trpcMutate("chats.setActiveSession", {
+  await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
     workspaceId: WORKSPACE,
     chatId: CHAT_ID,
     sessionId: SESSION_ID,
@@ -229,30 +230,11 @@ test.describe("Chat message-list virtualization", () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Real tRPC mutation hitting the server's HTTP surface. Same shape as
- * the queue-ui spec — keeps the test's setup path identical to a real
- * client's so the chat row + layout end up in the same on-disk state
- * as a production user clicking the same buttons.
- */
-async function trpcMutate(procedure: string, input: unknown): Promise<void> {
-  // Query-string auth mirrors the established pattern in
-  // `apps/web/e2e/queue-ui.spec.ts` — keeps the test-helper auth idiom
-  // consistent across the suite.
-  const res = await fetch(`${server.url}/trpc/${procedure}?token=${TOKEN}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${text}`);
-  }
-}
-
 /** Build a Claude Code session JSONL with `turns` user→assistant
  *  message pairs. Each prompt and reply carries a unique tag so the
- *  test can `page.getByText(tag)` against a specific message without
+ *  test can address a specific message via
+ *  `chatPane.userMessage(tag)` / `chatPane.assistantMessage(tag)`
+ *  (role-scoped `getByTestId(...).filter({ hasText })`) without
  *  matching the wrong row. */
 function buildLongSessionJsonl(sessionId: string, turns: number): string {
   const lines: string[] = [];

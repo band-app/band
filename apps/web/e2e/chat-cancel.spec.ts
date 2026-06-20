@@ -152,6 +152,12 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // unmounts and the thinking indicator unmounts.
     await chatPane.clickStop();
 
+    // Positive anchor: the prompt becomes interactive again once
+    // status leaves "streaming". Asserting this BEFORE the two
+    // not-toBeVisible() calls below proves the cancel reached
+    // a settled state — without the anchor the negatives could
+    // pass vacuously against a still-mid-transition UI.
+    await expect(chatPane.promptInput).toBeEnabled();
     await expect(chatPane.stopButton).not.toBeVisible();
     await expect(chatPane.thinkingIndicator).not.toBeVisible();
     // The partial text the agent had already streamed remains in the
