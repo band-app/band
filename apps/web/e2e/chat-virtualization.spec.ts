@@ -6,13 +6,9 @@
  * resident). The fix mounts only messages near the viewport via
  * `@tanstack/react-virtual` inside `<StickToBottom.Content>`.
  *
- * Doctrine references:
- *   - `docs/integration-testing.md` — the why behind real-server +
- *     Express-stub testing.
- *   - `.claude/skills/write-integration-test/SKILL.md` — the operational
- *     playbook this spec follows.
- *   - `.claude/testing-criteria.md` (TEST-1...TEST-35) — the
- *     reviewer-enforced rules.
+ * See `docs/integration-testing.md` for the doctrine this spec follows
+ * (real-server boot, Express stubs at the network boundary, page-object
+ * driving, no tRPC mocking).
  *
  * What this test proves:
  *
@@ -225,12 +221,12 @@ test.describe("Chat message-list virtualization", () => {
  * as a production user clicking the same buttons.
  */
 async function trpcMutate(procedure: string, input: unknown): Promise<void> {
-  const res = await fetch(`${server.url}/trpc/${procedure}`, {
+  // Query-string auth mirrors the established pattern in
+  // `apps/web/e2e/queue-ui.spec.ts` — keeps the test-helper auth idiom
+  // consistent across the suite.
+  const res = await fetch(`${server.url}/trpc/${procedure}?token=${TOKEN}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Cookie: `band_token=${TOKEN}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
   if (!res.ok) {

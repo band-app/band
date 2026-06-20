@@ -30,6 +30,7 @@
  */
 
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { type ReactNode, useCallback } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 export interface VirtualizedMessageListProps<T> {
@@ -41,7 +42,7 @@ export interface VirtualizedMessageListProps<T> {
    *  Returning `null` is allowed (e.g. for messages with no visible
    *  parts), and the wrapper row collapses to zero height so a skipped
    *  item doesn't contribute a visible gap. */
-  renderItem: (item: T, index: number) => React.ReactNode;
+  renderItem: (item: T, index: number) => ReactNode;
   /**
    * Rough average row height. Used only for not-yet-measured rows so
    * the scrollbar position is plausible on first paint. 220 px is a
@@ -67,10 +68,17 @@ export function VirtualizedMessageList<T>({
 }: VirtualizedMessageListProps<T>) {
   const { scrollRef } = useStickToBottomContext();
 
+  // Hoist the estimateSize callback so its identity is stable across
+  // re-renders — during streaming `ChatView` re-renders ~30×/sec and an
+  // inline arrow would allocate a fresh closure each time. The
+  // `useVirtualizer` options memoise on identity, so stable callbacks
+  // also keep the internal `getMeasurementOptions` memo valid.
+  const estimateSizeFn = useCallback(() => estimateSize, [estimateSize]);
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => estimateSize,
+    estimateSize: estimateSizeFn,
     overscan,
     // Stable key per item — important so React reuses the same DOM row
     // when items shift (e.g. a new message pushes earlier ones up).

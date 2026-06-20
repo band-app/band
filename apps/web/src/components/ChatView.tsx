@@ -300,15 +300,16 @@ export function ChatView({
   // from a child (which would couple the test to the use-stick-to-bottom
   // library's internal markup). `use-stick-to-bottom` doesn't expose a
   // prop for arbitrary attributes on the scroller, so we set it once via
-  // the same `contextRef` we use for programmatic scrolling. No
-  // dependency array — the ref is populated on first paint and the
-  // attribute survives subsequent renders.
+  // the same `contextRef` we use for programmatic scrolling. Empty deps
+  // because the attribute write is idempotent and only needs to happen
+  // when the underlying DOM element is created — re-firing on every
+  // render during streaming was needlessly busy.
   useEffect(() => {
     const el = stickyContextRef.current?.scrollRef?.current;
     if (el && !el.dataset.testid) {
       el.dataset.testid = "chat-pane__scroller";
     }
-  });
+  }, []);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
   // The scroll container may have had zero height while hidden, so StickToBottom
