@@ -721,80 +721,54 @@ export function ChatView({
   // length.
   const getMessageKey = useCallback((message: UIMessage) => message.id, []);
 
-  // Stabilise the `renderItem` closure too. Its deps (`messages`,
-  // `isStreaming`) DO change during streaming, so this only helps for
-  // the renders where they don't — chatQuery refetches, settings
-  // refetches, parent context refreshes etc. — but for those it cuts
-  // the per-render closure allocation entirely.
-  const renderMessageItem = useCallback(
-    (message: UIMessage, messageIndex: number) => {
-      const isLastMessage = messageIndex === messages.length - 1;
-      const isLastAssistant = message.role === "assistant" && isLastMessage;
-      const hasPendingInteractiveTool =
-        isLastAssistant &&
-        message.parts.some(
-          (p) =>
-            isToolUIPart(p) &&
-            IN_PROGRESS_STATES.has(p.state) &&
-            (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-        );
-      const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-
-      if (message.role !== "assistant") {
-        // User messages render normally
-        const userParts = groupMessageParts(message.parts);
-        if (userParts.length === 0) return null;
-        return (
-          <Message from="user">
-            <MessageContent>
-              {userParts.map((segment) => {
-                if (
-                  segment.type === "text" &&
-                  segment.part.type === "text" &&
-                  segment.part.text.trim()
-                ) {
-                  return (
-                    <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                      {segment.part.text}
-                    </MessageResponse>
-                  );
-                }
-                if (segment.type === "file") {
-                  return (
-                    <MessageFilePart
-                      key={`${message.id}-file-${segment.partIndex}`}
-                      part={segment.part}
-                    />
-                  );
-                }
-                return null;
-              })}
-            </MessageContent>
-          </Message>
-        );
-      }
-
-      // Assistant message — under the chat-events model every queued
-      // turn becomes its own user-role message, so we never need to
-      // split an assistant message at `data-prompt` boundaries.
-      const visibleParts = message.parts.filter(
-        (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+  // Stabilise the `renderItem` closure too. Read the variable deps
+  // (`messages`, `isStreaming`) through refs so the callback identity
+  // stays stable across ALL renders, including the streaming hot path
+  // (~30 text-delta events/sec where `messages` is a fresh array each
+  // time). Same pattern as `itemsRef` in `VirtualizedMessageList`.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+  const renderMessageItem = useCallback((message: UIMessage, messageIndex: number) => {
+    const currentMessages = messagesRef.current;
+    const currentIsStreaming = isStreamingRef.current;
+    const isLastMessage = messageIndex === currentMessages.length - 1;
+    const isLastAssistant = message.role === "assistant" && isLastMessage;
+    const hasPendingInteractiveTool =
+      isLastAssistant &&
+      message.parts.some(
+        (p) =>
+          isToolUIPart(p) &&
+          IN_PROGRESS_STATES.has(p.state) &&
+          (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
       );
-      if (visibleParts.length === 0 && !showThinking) return null;
+    const showThinking = isLastAssistant && currentIsStreaming && !hasPendingInteractiveTool;
+
+    // Compute the grouped segments ONCE per render — `groupMessageParts`
+    // allocates a fresh array, and the previous version called it twice
+    // per assistant render (once for the emptiness guard, once for the
+    // map). With N assistant messages and ~30 deltas/sec that's 60N
+    // redundant allocations/sec; one call cuts it in half.
+    const segments = groupMessageParts(message.parts);
+
+    if (message.role !== "assistant") {
+      // User messages render normally
+      if (segments.length === 0) return null;
       return (
-        <Message from="assistant">
+        <Message from="user">
           <MessageContent>
-            {groupMessageParts(message.parts).map((segment) => {
-              if (segment.type === "text") {
-                const { part, partIndex } = segment;
-                if (part.type === "text" && part.text.trim()) {
-                  return (
-                    <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                      {part.text}
-                    </MessageResponse>
-                  );
-                }
-                return null;
+            {segments.map((segment) => {
+              if (
+                segment.type === "text" &&
+                segment.part.type === "text" &&
+                segment.part.text.trim()
+              ) {
+                return (
+                  <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                    {segment.part.text}
+                  </MessageResponse>
+                );
               }
               if (segment.type === "file") {
                 return (
@@ -804,17 +778,49 @@ export function ChatView({
                   />
                 );
               }
-              const item = toolPartToItem(segment.part);
-              if (isTaskTool(item.toolName)) return null;
-              return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
+              return null;
             })}
-            {showThinking && <ThinkingIndicator />}
           </MessageContent>
         </Message>
       );
-    },
-    [messages, isStreaming],
-  );
+    }
+
+    // Assistant message — under the chat-events model every queued
+    // turn becomes its own user-role message, so we never need to
+    // split an assistant message at `data-prompt` boundaries.
+    if (segments.length === 0 && !showThinking) return null;
+    return (
+      <Message from="assistant">
+        <MessageContent>
+          {segments.map((segment) => {
+            if (segment.type === "text") {
+              const { part, partIndex } = segment;
+              if (part.type === "text" && part.text.trim()) {
+                return (
+                  <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                    {part.text}
+                  </MessageResponse>
+                );
+              }
+              return null;
+            }
+            if (segment.type === "file") {
+              return (
+                <MessageFilePart
+                  key={`${message.id}-file-${segment.partIndex}`}
+                  part={segment.part}
+                />
+              );
+            }
+            const item = toolPartToItem(segment.part);
+            if (isTaskTool(item.toolName)) return null;
+            return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
+          })}
+          {showThinking && <ThinkingIndicator />}
+        </MessageContent>
+      </Message>
+    );
+  }, []);
 
   const getLastUserMessage = useCallback((): string | undefined => {
     // Under the chat-events model, queued/drained user messages emit their

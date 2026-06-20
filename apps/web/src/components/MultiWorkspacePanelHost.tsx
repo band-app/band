@@ -237,23 +237,35 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             // cached entry divs would multiply-match the existing
             // `locator('[data-active="true"]')` queries other specs use.
             data-testid={`workspace-panel-host__cached-entry--${workspaceId}`}
-            // `content-visibility: hidden` instead of `opacity: 0` for the
-            // inactive entries. opacity-0 still pays the layout + paint
-            // cost for every cached chat on every frame (and Streamdown's
-            // syntax highlighting in particular keeps re-running its
-            // intersection observers); content-visibility:hidden lets the
-            // browser SKIP rendering work on the subtree entirely while
-            // preserving the React tree + DOM state. The element keeps
-            // its 100%×100% box from `absolute inset-0`, so when it
-            // flips back to `visible` the layout settles in one frame
-            // without re-mounting any of its content.
+            // Hide inactive entries with `visibility: hidden` (universal
+            // browser support) for the visual effect, AND
+            // `content-visibility: hidden` on top as a progressive perf
+            // enhancement on browsers that ship it. Safari hadn't yet
+            // shipped `content-visibility` as of 18.4, so using it
+            // alone would leave every cached panel visible on Safari
+            // and stack them on top of each other — flagged as a
+            // blocker on PR #562.
             //
-            // We also keep `pointer-events: none` as belt-and-suspenders
-            // — content-visibility:hidden already blocks hit-testing,
-            // but the explicit prop guarantees the same on legacy
-            // browsers that haven't shipped the spec.
+            // Why both:
+            //   • `visibility: hidden` is the cross-browser way to
+            //     hide a subtree while keeping it laid out and its
+            //     React state alive. Pointer events are also blocked
+            //     on the subtree automatically.
+            //   • `content-visibility: hidden` additionally tells the
+            //     browser to skip layout + paint work for the subtree
+            //     entirely. Where it's supported it's the per-frame
+            //     CPU win we originally chased (opacity-0 still paid
+            //     the full layout + paint cost). Where it isn't, it's
+            //     a harmless no-op.
+            //
+            // We also keep `pointer-events: none` as belt-and-suspenders.
+            // `visibility: hidden` already blocks hit-testing on every
+            // browser, but the explicit prop guarantees the same in
+            // case a future style override re-asserts visibility on a
+            // descendant.
             className="absolute inset-0"
             style={{
+              visibility: isActive ? "visible" : "hidden",
               contentVisibility: isActive ? "visible" : "hidden",
               pointerEvents: isActive ? undefined : "none",
             }}

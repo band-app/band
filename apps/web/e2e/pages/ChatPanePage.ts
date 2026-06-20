@@ -11,9 +11,16 @@
  *      (a constant prop in `ChatView.tsx`, not localised user copy).
  *   2. `getByTestId("page__element")` — used for the thinking indicator,
  *      where role alone is ambiguous (lots of decorative loaders in
- *      ai-elements).
- *   3. `getByText(value)` — used for assertions on values the TEST itself
- *      supplied (the user-message text we just typed).
+ *      ai-elements). Also used to ROLE-SCOPE the user/assistant message
+ *      bubble containers via
+ *      `getByTestId("chat-pane__user-message").filter({ hasText })` /
+ *      `getByTestId("chat-pane__assistant-message").filter({ hasText })`,
+ *      so a future change rendering user text inside an assistant
+ *      bubble (or vice versa) fails the locator instead of silently
+ *      passing.
+ *   3. `getByText(value)` — only when the value is genuinely
+ *      role-agnostic test data (rarely needed since the role-scoped
+ *      `.filter({ hasText: ... })` form above is preferred).
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";

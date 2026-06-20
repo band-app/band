@@ -30,6 +30,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { fakeAgentPath } from "./helpers/fake-agent";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -46,7 +47,7 @@ const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
+const FAKE_AGENT_PATH = fakeAgentPath();
 
 let server: ServerHandle;
 let tmpHome: string;
