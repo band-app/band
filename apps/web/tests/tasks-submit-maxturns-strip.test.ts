@@ -5,7 +5,7 @@
 // drops the unknown key rather than rejecting the request with a 400. This
 // file pins that contract end-to-end against the real production server.
 //
-// What we prove (TEST-6 — every user-observable change owns an integration test):
+// What we prove:
 //
 //   1. `tasks.submit` without `maxTurns` succeeds (baseline). Submitting
 //      `maxTurns: 5` returns the same shape — no 400, no error envelope,
@@ -15,24 +15,30 @@
 //      Submitting `maxTurns: 5` does the same — the legacy field is
 //      silently stripped and the workspace + task are created identically.
 //
-// Doctrine compliance (testing-criteria.md):
-//   • Real production server (`dist/start-server.mjs`) booted via the
-//     canonical `helpers/server.ts` (`startServer` / `createTmpHome` /
-//     `trpcMutate` / `trpcQuery`). No in-process route invocation, no
-//     tRPC mock (TEST-4, TEST-12, TEST-19).
-//   • Port 0 + tmp `$HOME` (TEST-10, TEST-11). Migrations run during boot,
-//     including the new `drop_tasks_max_turns` migration that removed
-//     the column the chat-path consumers used to write to.
-//   • Token-cookie auth via the shared trpcMutate helper (TEST-13).
-//   • External boundary (the Claude-Agent SDK subprocess) stubbed with
+//   3. Both endpoints reject requests without the `band_token` cookie
+//      with HTTP 401. The legacy-strip contract above is only meaningful
+//      for authenticated callers; pinning the auth gate here keeps a
+//      regression that drops the middleware (which would let any
+//      unauthenticated client trigger workspace/task creation) from
+//      shipping silently.
+//
+// How the test is wired:
+//   • The real production server (`dist/start-server.mjs`) is booted via
+//     `helpers/server.ts` so the test exercises the same handler chain a
+//     production request hits — no in-process route invocation, no tRPC
+//     mock layer.
+//   • The server gets its own port (port 0) and a tmp `$HOME`, so
+//     migrations (including the `drop_tasks_max_turns` migration that
+//     removed the chat-path's `max_turns` column) run against a fresh
+//     SQLite DB.
+//   • The Claude-Agent SDK subprocess boundary is stubbed with
 //     `fake-agent.mjs`, the project's shared protocol stub. A bare shell
 //     stub doesn't speak the Claude-Agent SDK protocol and hangs the
 //     subprocess on Linux CI; fake-agent emits a success scenario and
-//     exits cleanly. Same pattern as `workspace-create-via.test.ts`
-//     (TEST-27, TEST-30).
+//     exits cleanly. Same pattern as `workspace-create-via.test.ts`.
 //   • Tasks dispatch asynchronously after `tasks.submit` returns — we
-//     wait via the existing `tasks.list` polling helper rather than a
-//     wall-clock sleep (TEST-24).
+//     wait on the existing `tasks.list` query via the shared `waitFor`
+//     helper rather than a wall-clock sleep.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -47,6 +53,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
+import { waitFor } from "./helpers/wait-for";
 
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 
@@ -112,34 +119,6 @@ interface TaskListItem {
   workspaceId: string;
   prompt: string;
   status: string;
-}
-
-/**
- * Wait until the predicate returns a truthy value or the timeout fires.
- * Same shape as the helper in `workspace-create-via.test.ts` — kept inline
- * here rather than promoted to `helpers/` to avoid one more cross-file
- * dependency for a test that's otherwise self-contained.
- */
-async function waitFor<T>(
-  fn: () => Promise<T | undefined | null | false>,
-  {
-    timeoutMs = 10_000,
-    intervalMs = 50,
-    label = "condition",
-  }: { timeoutMs?: number; intervalMs?: number; label?: string } = {},
-): Promise<T> {
-  const start = Date.now();
-  const notDone = (v: T | undefined | null | false): v is undefined | null | false =>
-    v === undefined || v === null || v === false;
-  let value = await fn();
-  while (notDone(value)) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitFor(${label}) timed out after ${timeoutMs}ms`);
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-    value = await fn();
-  }
-  return value;
 }
 
 async function listTasksForWorkspace(
@@ -279,6 +258,26 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
     // on the static type.
     expect((found as unknown as Record<string, unknown>).maxTurns).toBeUndefined();
   });
+
+  it("rejects tasks.submit without the band_token cookie (401)", async () => {
+    // The strip contract above is only meaningful for authenticated
+    // callers — pin the auth gate here so a regression that drops the
+    // middleware can't ship silently and let any unauthenticated client
+    // create tasks. `trpcMutate` always sends the cookie, so we call
+    // `fetch` directly to omit it. Mirrors the 401 guard pattern used
+    // in `chat-lifecycle.test.ts` / `browsers.test.ts` /
+    // `workspace-create-via.test.ts`.
+    const res = await fetch(`${server.url}/trpc/tasks.submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: WORKSPACE_ID,
+        chatId: "strip-chat-unauth",
+        prompt: "should be rejected",
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -392,5 +391,23 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
     const found = tasks.find((t) => t.prompt === "legacy workspace prompt");
     expect(found).toBeDefined();
     expect((found as unknown as Record<string, unknown>).maxTurns).toBeUndefined();
+  });
+
+  it("rejects workspaces.create without the band_token cookie (401)", async () => {
+    // Mirror of the `tasks.submit` 401 guard above. The strip contract is
+    // worthless if an unauthenticated caller can drive workspace
+    // creation; pin it here so the auth middleware is part of the
+    // contract this file guards.
+    const res = await fetch(`${server.url}/trpc/workspaces.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: "wsproj",
+        branch: "feat/strip-unauth",
+        prompt: "should be rejected",
+        via: "chat",
+      }),
+    });
+    expect(res.status).toBe(401);
   });
 });
