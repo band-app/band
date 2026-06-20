@@ -135,7 +135,11 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // a second; the subsequent 30 s sleep keeps the Stop button on
     // screen until we click it.
     await expect(chatPane.stopButton).toBeVisible();
-    await expect(chatPane.userMessage("partial reply")).toBeVisible();
+    // "partial reply" is the agent's streamed text (fake-agent
+    // text-delta), so scope to the assistant role — the page object's
+    // locators distinguish user vs assistant after #562's role-scoping
+    // change.
+    await expect(chatPane.assistantMessage("partial reply")).toBeVisible();
     // While streaming, the inline thinking indicator IS rendered (the
     // trailing-assistant indicator's condition + the inline
     // `showThinking` branch both fire). We don't assert its absence
@@ -152,6 +156,6 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // The partial text the agent had already streamed remains in the
     // conversation — cancelling preserves what was rendered, doesn't
     // wipe it.
-    await expect(chatPane.userMessage("partial reply")).toBeVisible();
+    await expect(chatPane.assistantMessage("partial reply")).toBeVisible();
   });
 });
