@@ -1232,13 +1232,20 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   "gemini-2.5-flash": 1_000_000,
 };
 
+// Pre-sorted entries by descending key length so the prefix-match
+// branch in `getContextWindow` doesn't re-sort on every call. The
+// `MODEL_CONTEXT_WINDOWS` map is module-level and immutable so the
+// sort is correct at module init time.
+const SORTED_MODEL_CONTEXT_ENTRIES: ReadonlyArray<[string, number]> = Object.entries(
+  MODEL_CONTEXT_WINDOWS,
+).sort(([a], [b]) => b.length - a.length);
+
 function getContextWindow(model: string | undefined): number {
   if (!model) return 200_000;
   if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
   // Prefix match — sort by descending key length so longer/more specific
   // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
-  const entries = Object.entries(MODEL_CONTEXT_WINDOWS).sort(([a], [b]) => b.length - a.length);
-  for (const [key, value] of entries) {
+  for (const [key, value] of SORTED_MODEL_CONTEXT_ENTRIES) {
     if (model.startsWith(key)) return value;
   }
   return 200_000;

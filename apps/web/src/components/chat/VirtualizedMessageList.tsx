@@ -30,7 +30,7 @@
  */
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type ReactNode, useCallback } from "react";
+import { type ReactNode, useCallback, useRef } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 export interface VirtualizedMessageListProps<T> {
@@ -77,7 +77,18 @@ export function VirtualizedMessageList<T>({
   // `getItemKey` the cost grows linearly with conversation length, so
   // it's the highest-leverage one to stabilise.
   const estimateSizeFn = useCallback(() => estimateSize, [estimateSize]);
-  const getItemKeyFn = useCallback((index: number) => getKey(items[index], index), [items, getKey]);
+  // Ref-backed `items` reference so `getItemKeyFn`'s closure is
+  // stable across re-renders even though `items` itself is a fresh
+  // array on every text-delta. The ref stays attached to the latest
+  // value via the `.current = items` assignment-on-render; the
+  // closure reads through the ref so the virtualizer's internal
+  // `getMeasurementOptions` memo holds.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const getItemKeyFn = useCallback(
+    (index: number) => getKey(itemsRef.current[index], index),
+    [getKey],
+  );
   // `scrollRef` is a stable ref object from the StickToBottom context
   // — its `.current` may change but the ref identity does not — so
   // this callback never invalidates after mount.

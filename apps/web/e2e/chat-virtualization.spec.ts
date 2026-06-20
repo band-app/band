@@ -189,7 +189,10 @@ test.describe("Chat message-list virtualization", () => {
     // un-virtualized regression cleanly. `expect.poll` lets the bound
     // itself auto-retry — the visibility wait above already proves at
     // least one row mounted, so we don't need a separate "> 0" check.
-    await expect.poll(() => chatPane.messageRowCount()).toBeLessThan(100);
+    // Explicit `timeout: 15_000` so a slow CI runner replaying a
+    // 500-turn JSONL has time to settle (Playwright's default poll
+    // timeout is ~5 s).
+    await expect.poll(() => chatPane.messageRowCount(), { timeout: 15_000 }).toBeLessThan(100);
 
     // The very first seeded message must NOT be in the DOM right now —
     // the user is parked at the bottom of a 1000-message conversation,
@@ -213,7 +216,12 @@ test.describe("Chat message-list virtualization", () => {
     // After scrolling up, the bottom row is no longer mounted — the
     // window moved. This proves the renderer is genuinely swapping
     // rows in and out (not just rendering everything and scrolling).
-    await expect(chatPane.assistantMessage(lastAssistantTag)).toHaveCount(0);
+    // `expect.poll` so Playwright retries while the virtualizer
+    // catches up to the scroll-position change; a single synchronous
+    // sample could race the React commit on slow CI runners.
+    await expect
+      .poll(() => chatPane.assistantMessage(lastAssistantTag).count(), { timeout: 10_000 })
+      .toBe(0);
   });
 });
 
