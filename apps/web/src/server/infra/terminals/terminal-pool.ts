@@ -293,12 +293,14 @@ export class TerminalPool {
     let cmdFile: string;
     try {
       // Derive the temp filename from a FRESH server-side `randomUUID()`,
-      // NOT from the caller-supplied `terminalId`: that id reaches the
-      // pool unvalidated from both the tRPC `terminal.create` input and
-      // the `/terminal` WebSocket query string, and `path.join` collapses
-      // `../` segments — so keying the path on it would let a caller
-      // (`id: "../../etc/cron.d/evil"`) steer this write anywhere. A fresh
-      // UUID keeps the path unconditionally inside `tmpdir()`.
+      // NOT from the caller-supplied `terminalId`: the `/terminal`
+      // WebSocket spawn path takes that id straight from the query string
+      // without validation (the tRPC `terminal.create` input IS
+      // UUID-constrained, but the WS path is not), and `path.join`
+      // collapses `../` segments — so keying the path on it would let a
+      // caller (`terminalId=../../etc/cron.d/evil`) steer this write
+      // anywhere. A fresh UUID keeps the path unconditionally inside
+      // `tmpdir()`, which is why the unvalidated WS id is harmless here.
       cmdFile = join(tmpdir(), `band-autorun-${randomUUID()}.sh`);
       // Trailing newline so the final command in the file is a complete
       // line for the shell parser. UTF-8 bytes are preserved verbatim —
@@ -369,12 +371,16 @@ export class TerminalPool {
     });
     const timer = setTimeout(inject, 750);
     timer.unref();
+    let exitDisposed = false;
     const exitDisposable = pty.onExit(() => {
       done = true;
       clearTimeout(timer);
       disposeData();
-      // Self-remove so this listener doesn't outlive the one PTY exit it
-      // exists to catch.
+      // Self-remove (once) so this listener doesn't outlive the single PTY
+      // exit it exists to catch. Guarded like `disposeData` because
+      // node-pty's IDisposable doesn't promise idempotency.
+      if (exitDisposed) return;
+      exitDisposed = true;
       exitDisposable.dispose();
     });
   }

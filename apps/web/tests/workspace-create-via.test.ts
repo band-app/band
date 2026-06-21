@@ -859,7 +859,11 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     const output = await waitFor(
       async () => {
         const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
-        return out?.includes("ENV_BAND_SERVER_URL:") ? out : undefined;
+        // Require BOTH echoed lines so a split PTY flush can't resolve the
+        // poll before the second line is captured.
+        return out?.includes("ENV_BAND_DISPATCH:terminal|") && out.includes("ENV_BAND_SERVER_URL:")
+          ? out
+          : undefined;
       },
       { label: "stub echoed dispatch env" },
     );
