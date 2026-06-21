@@ -994,6 +994,11 @@ async function main() {
   // if a grandparent Band process exported its own `BAND_SERVER_URL`, our
   // children must still reach THIS server (and authenticate with the
   // token in THIS home's settings), not the grandparent's.
+  //
+  // Plain `http://` is intentional and safe: the URL is pinned to the
+  // `127.0.0.1` loopback (`listenWithFallback` always binds locally), so
+  // the band_token a child CLI sends never leaves the host — there is no
+  // network hop to encrypt.
   process.env.BAND_SERVER_URL = `http://127.0.0.1:${boundPort}`;
 
   console.log(`Web server listening on http://0.0.0.0:${boundPort}`);

@@ -97,18 +97,20 @@ function writeStubVendorCli(tmpHome: string, name: string): string {
 }
 
 /**
- * Stub vendor CLI that echoes the `BAND_DISPATCH` it was spawned with as
- * `ENV_BAND_DISPATCH:<value>|`. Used to prove that a process spawned
- * inside a terminal PTY inherits `BAND_DISPATCH=terminal` (the value
- * `terminal-pool` pins on the PTY env) — the terminal-side mirror of the
- * chat-side `FAKE_AGENT_ENV_LOG` assertion. Terminates immediately; the
- * pool drains stdout into its scrollback.
+ * Stub vendor CLI that echoes the dispatch-relevant env vars it was
+ * spawned with as `ENV_BAND_DISPATCH:<value>|` and
+ * `ENV_BAND_SERVER_URL:<value>|`. Used to prove that a process spawned
+ * inside a terminal PTY inherits `BAND_DISPATCH=terminal` (pinned by
+ * `terminal-pool`) and `BAND_SERVER_URL` (advertised by start-server) —
+ * the terminal-side mirror of the chat-side `FAKE_AGENT_ENV_LOG`
+ * assertion. Terminates immediately; the pool drains stdout into its
+ * scrollback.
  */
 function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
   const binPath = join(tmpHome, name);
   writeFileSync(
     binPath,
-    `#!/bin/sh\nprintf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\n`,
+    `#!/bin/sh\nprintf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\n`,
     "utf-8",
   );
   chmodSync(binPath, 0o755);
@@ -646,12 +648,12 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
       { label: "agent spawned with BAND_DISPATCH=chat" },
     );
 
-    // `waitFor` already gates on BAND_DISPATCH === "chat", so this line
-    // documents the contract rather than independently catching a
-    // regression — the substantive assertion is BAND_SERVER_URL below.
-    expect(record.BAND_DISPATCH).toBe("chat");
-    // The server advertises its own bound URL to every child process so a
-    // nested CLI call reaches it regardless of which port it claimed.
+    // The `waitFor` predicate above only resolves once a spawn recorded
+    // BAND_DISPATCH === "chat", so reaching here already proves the chat
+    // agent was spawned with the chat dispatch target. The remaining
+    // assertion pins the other half: the server advertised its own bound
+    // URL so a nested CLI call reaches it regardless of which port it
+    // claimed.
     expect(record.BAND_SERVER_URL).toBe(server.url);
   });
 });
@@ -816,18 +818,21 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     expect(data.via).toBe("terminal");
     expect(typeof data.terminalId).toBe("string");
 
-    // The stub printed the BAND_DISPATCH it inherited from the PTY env.
-    // `terminal` (not `chat`, not empty) proves the terminal pane pins the
-    // dispatch target for any nested `band` CLI call typed into it.
+    // The stub printed the env it inherited from the PTY. `terminal` (not
+    // `chat`, not empty) proves the terminal pane pins the dispatch target
+    // for any nested `band` CLI call typed into it.
     const output = await waitFor(
       async () => {
         const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
-        return out?.includes("ENV_BAND_DISPATCH:terminal|") ? out : undefined;
+        return out?.includes("ENV_BAND_SERVER_URL:") ? out : undefined;
       },
-      { label: "stub echoed BAND_DISPATCH=terminal" },
+      { label: "stub echoed dispatch env" },
     );
     expect(output).toContain("ENV_BAND_DISPATCH:terminal|");
     // Negative guard: it must not have leaked the chat value.
     expect(output).not.toContain("ENV_BAND_DISPATCH:chat|");
+    // Symmetric with the chat-path assertion: the PTY child also reaches
+    // THIS server, so a nested `band` CLI call resolves to the right port.
+    expect(output).toContain(`ENV_BAND_SERVER_URL:${server.url}|`);
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
 import { shellPath } from "../process/path";
@@ -141,8 +141,11 @@ export class TerminalPool {
     let cwd = workspaceRoot;
     if (options?.cwd) {
       const resolved = join(workspaceRoot, options.cwd);
-      // Security: ensure the resolved path stays within the workspace
-      if (!resolved.startsWith(workspaceRoot)) {
+      // Security: ensure the resolved path stays within the workspace.
+      // Append `sep` (with an equality carve-out for cwd === root) so a
+      // sibling like `<root>-evil` can't pass the prefix check — same
+      // shape as `serveWorkspaceFile` in start-server.ts.
+      if (resolved !== workspaceRoot && !resolved.startsWith(workspaceRoot + sep)) {
         log.warn(
           "Ignoring cwd %s — resolves outside workspace root %s",
           options.cwd,
@@ -311,12 +314,15 @@ export class TerminalPool {
       return;
     }
 
-    // Single-quote the path for the shell. The path is our own
-    // `tmpdir()`-rooted temp file, but escape any embedded single-quote
-    // (POSIX `'\''`) anyway so a `TMPDIR` containing a `'` can't break the
-    // quoting and inject into the interactive shell.
+    // Use the POSIX dot builtin (`. '<file>'`), NOT `source`: `source` is
+    // a bash/zsh-ism that dash (`/bin/sh` on most Linux hosts) doesn't
+    // recognise, so the injected line would silently fail there. `.` runs
+    // the file in the current interactive shell across sh/dash/bash/zsh.
+    // Single-quote the path and escape any embedded single-quote (POSIX
+    // `'\''`) so a `TMPDIR` containing a `'` can't break the quoting and
+    // inject into the shell.
     const quotedPath = cmdFile.replace(/'/g, `'\\''`);
-    const sourceLine = `source '${quotedPath}'\n`;
+    const sourceLine = `. '${quotedPath}'\n`;
 
     let done = false;
     const inject = () => {
@@ -327,8 +333,17 @@ export class TerminalPool {
       } catch (err) {
         // The PTY exited before we got to inject (e.g. the user closed the
         // pane during the cold-start window). Nothing left to run.
-        log.warn("autoRunCommand: failed to inject source line (%s)", err);
+        log.warn("autoRunCommand: failed to inject command line (%s)", err);
       }
+    };
+
+    // Dispose the readiness listener at most once — node-pty's IDisposable
+    // doesn't promise idempotency, so a double-dispose could throw.
+    let dataDisposed = false;
+    const disposeData = () => {
+      if (dataDisposed) return;
+      dataDisposed = true;
+      dataDisposable.dispose();
     };
 
     // The shell's first output (its prompt) is our readiness signal that
@@ -337,7 +352,7 @@ export class TerminalPool {
     // unref'd so it never keeps the process alive. An `onExit` listener
     // cancels both signals so a late timer can never write to a dead PTY.
     const dataDisposable = pty.onData(() => {
-      dataDisposable.dispose();
+      disposeData();
       inject();
     });
     const timer = setTimeout(inject, 750);
@@ -345,7 +360,7 @@ export class TerminalPool {
     pty.onExit(() => {
       done = true;
       clearTimeout(timer);
-      dataDisposable.dispose();
+      disposeData();
     });
   }
 
