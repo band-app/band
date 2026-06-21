@@ -15,6 +15,7 @@ import {
   getSessionInfo as sdkGetSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band-app/logger";
+import { AGENT_DISPATCH_ENV } from "../adapter-env.js";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { computeCost } from "../pricing.js";
@@ -232,7 +233,12 @@ export class ClaudeCodeAdapter implements CodingAgent {
     sessionId?: string,
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
-    const env = { ...process.env };
+    // Spread `AGENT_DISPATCH_ENV` (BAND_DISPATCH=chat) so a nested `band`
+    // CLI call from this agent dispatches back into a chat pane — see
+    // adapter-env.ts. `BAND_SERVER_URL` is already on `process.env`
+    // (advertised by start-server.ts at boot), so the nested CLI reaches
+    // this server even when it bound a non-default port.
+    const env = { ...process.env, ...AGENT_DISPATCH_ENV };
     env.CLAUDECODE = undefined;
     env.CLAUDE_CODE_ENTRYPOINT = undefined;
     env.ANTHROPIC_CUSTOM_HEADERS = undefined;

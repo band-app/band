@@ -8,6 +8,7 @@ import { createLogger } from "@band-app/logger";
 import type { ThreadEvent, ThreadItem, TodoListItem } from "@openai/codex-sdk";
 import { Codex } from "@openai/codex-sdk";
 import { z } from "zod";
+import { AGENT_DISPATCH_ENV } from "../adapter-env.js";
 import type { CodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { computeCost } from "../pricing.js";
@@ -149,6 +150,9 @@ export class CodexAdapter implements CodingAgent {
       }
       cleanEnv[key] = value;
     }
+    // BAND_DISPATCH=chat so a nested `band` CLI call from this agent
+    // dispatches back into a chat pane (see adapter-env.ts).
+    Object.assign(cleanEnv, AGENT_DISPATCH_ENV);
 
     const codex = new Codex({
       ...(this.executablePath ? { codexPathOverride: this.executablePath } : {}),
