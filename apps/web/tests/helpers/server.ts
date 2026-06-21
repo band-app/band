@@ -144,9 +144,21 @@ export interface StartServerOptions {
 /**
  * Boot the production server bundle in a child process. Resolves
  * when the server logs `"listening"` to stdout; rejects if it exits
- * first or doesn't bind within 15 s. The returned `close()` sends
- * `SIGTERM` and falls back to `SIGKILL` after 5 s so a server stuck
- * in a DB lock can't hang `afterAll` indefinitely.
+ * first or doesn't bind within 15 s. The returned `close()` signals
+ * the whole process group with `SIGTERM` and falls back to `SIGKILL`
+ * after 5 s so a server stuck in a DB lock — or a grandchild stuck on
+ * a hung subprocess pipe — can't hang `afterAll` indefinitely.
+ *
+ * `detached: true` puts the child in its own process group so the
+ * teardown can target the whole tree via `process.kill(-pgid, …)`.
+ * Without this, grandchildren spawned by the server (terminal PTYs,
+ * `git`, `du`, and — since #559 — the Claude Code SDK's `claude`
+ * subprocess that `ModelRefreshService.refreshAll()` boots at startup)
+ * are re-parented to init when the direct child exits, keep holding
+ * pipes, and pile up across the suite. On macOS CI runners that
+ * accumulation actually killed the runner during `workspace-git-ops.test.ts`'
+ * 4-server startup burst, which is why this helper now mirrors the
+ * process-group teardown already used by `apps/web/e2e/helpers/server.ts`.
  */
 export async function startServer(opts: StartServerOptions): Promise<ServerHandle> {
   const { tmpHome, env: extraEnv } = opts;
@@ -163,7 +175,24 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
         ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
+
+    // Signal the whole process group, not just the direct child, so
+    // grandchildren spawned by the server (terminal PTYs, git, du, the
+    // Claude Code SDK's wedged `claude` subprocess) are torn down with
+    // the server. `process.kill(-pid, signal)` with a NEGATIVE pid
+    // targets the group. Wrapped in try/catch: a benign ESRCH means
+    // "group already gone" — fine to ignore.
+    const killGroup = (signal: NodeJS.Signals) => {
+      const pid = child.pid;
+      try {
+        if (typeof pid === "number") process.kill(-pid, signal);
+        else child.kill(signal);
+      } catch {
+        // group already torn down
+      }
+    };
 
     let stderr = "";
     let settled = false;
@@ -180,12 +209,12 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
           home: tmpHome,
           close: () =>
             new Promise<void>((r) => {
-              const fallback = setTimeout(() => child.kill("SIGKILL"), 5_000);
+              const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
               child.on("exit", () => {
                 clearTimeout(fallback);
                 r();
               });
-              child.kill("SIGTERM");
+              killGroup("SIGTERM");
             }),
         });
       }
@@ -208,7 +237,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill("SIGTERM");
+        killGroup("SIGTERM");
         reject(new Error(`server did not start within 15 s\nstderr: ${stderr}`));
       }
     }, 15_000);
