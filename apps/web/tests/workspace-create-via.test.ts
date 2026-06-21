@@ -37,7 +37,7 @@
 //     emits a success scenario and exits cleanly.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
@@ -520,5 +520,211 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
     // bookkeeping for the cases where a PTY *should* exist.
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 1 — band-start run from the webchat must dispatch the new
+// workspace's task to the CHAT, not a terminal.
+//
+// The mechanism: a chat-hosted coding agent is spawned with
+// `BAND_DISPATCH=chat` in its environment, so a NESTED `band workspaces
+// create --prompt …` it fires (the band-start skill) resolves to
+// `via: chat` — matching where the agent itself runs — instead of the
+// Rust CLI's built-in `terminal` default. `BAND_SERVER_URL` is injected
+// too so the nested CLI reaches THIS server rather than the hardcoded
+// `127.0.0.1:3456`.
+//
+// We can't drive the real Rust `band` binary through the Claude-Agent-SDK
+// stub (the stub speaks the SDK's stdin/stdout protocol; it can't also be
+// a shell that shells out to a CLI), so we assert the precondition the
+// nested CLI reads: the environment the server handed the spawned agent.
+// The CLI's `resolve_dispatch_target` (apps/cli/src/main.rs) consults
+// exactly `BAND_DISPATCH` then `BAND_SERVER_URL`, so pinning what the
+// agent received is what proves a nested create would resolve to chat.
+// ---------------------------------------------------------------------------
+
+interface AgentEnvRecord {
+  BAND_DISPATCH: string | null;
+  BAND_SERVER_URL: string | null;
+}
+
+describe("chat-hosted agent dispatch env (band-start nested create)", () => {
+  const TOKEN = "wc-dispatch-env-token";
+  let server: ServerHandle;
+  let tmpHome: string;
+  let scenarioPath: string;
+  let envLogPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-dispatch-env-");
+    const repoPath = createGitRepo(tmpHome, "dispproj");
+    scenarioPath = writeChatScenario(tmpHome, "dispatch-scenario.json");
+    envLogPath = join(tmpHome, "agent-env.jsonl");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "dispproj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        {
+          id: "claude-code",
+          type: "claude-code",
+          label: "Claude Code",
+          command: FAKE_AGENT_PATH,
+        },
+      ],
+    });
+    server = await startServer({
+      tmpHome,
+      env: { FAKE_AGENT_SCENARIO: scenarioPath, FAKE_AGENT_ENV_LOG: envLogPath },
+    });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("spawns the chat agent with BAND_DISPATCH=chat and BAND_SERVER_URL pointing at this server", async () => {
+    const createRes = await trpcMutate(
+      server.url,
+      "workspaces.create",
+      {
+        project: "dispproj",
+        branch: "feat/nested",
+        prompt: "kick off nested work",
+        via: "chat",
+      },
+      TOKEN,
+    );
+    const createBody = await createRes.text();
+    expect(createRes.status, createBody).toBe(200);
+
+    // Poll the env log until the TASK spawn's record appears (the one
+    // carrying BAND_DISPATCH=chat). The boot-time model-refresh probe may
+    // also spawn the stub and append a record with BAND_DISPATCH=null
+    // (refreshModels runs with the SDK's default env) — we look past that
+    // for the runSession spawn that dispatches the prompt.
+    const record = await waitFor<AgentEnvRecord>(
+      async () => {
+        if (!existsSync(envLogPath)) return undefined;
+        const records = readFileSync(envLogPath, "utf-8")
+          .split("\n")
+          .filter((l) => l.trim().length > 0)
+          .map((l) => JSON.parse(l) as AgentEnvRecord);
+        return records.find((r) => r.BAND_DISPATCH === "chat");
+      },
+      { label: "agent spawned with BAND_DISPATCH=chat" },
+    );
+
+    expect(record.BAND_DISPATCH).toBe("chat");
+    // The server advertises its own bound URL to every child process so a
+    // nested CLI call reaches it regardless of which port it claimed.
+    expect(record.BAND_SERVER_URL).toBe(server.url);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 2 — terminal dispatch must execute long, UTF-8-containing prompts
+// without truncation or corruption.
+//
+// Previously the server wrote the whole `'<agent-binary>' '<prompt>'`
+// line straight into a freshly spawned PTY. That raced the shell startup:
+// the trailing newline could be dropped (command typed but never run), a
+// line longer than the tty canonical buffer (~4 KB) could be truncated,
+// and a multi-byte UTF-8 sequence (em-dash U+2014) split across a buffer
+// boundary could be mangled. The fix stages the command in a temp file
+// and injects a short `source <file>` line after the shell is ready.
+//
+// This pins the end-to-end contract: a ~6 KB prompt peppered with
+// em-dashes is echoed back by the stub vendor CLI as a single argv token,
+// intact — proving it both EXECUTED and survived byte-for-byte.
+// ---------------------------------------------------------------------------
+
+describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
+  const TOKEN = "wc-via-longprompt-token";
+  let server: ServerHandle;
+  let tmpHome: string;
+  let stubBin: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-via-longprompt-");
+    const repoPath = createGitRepo(tmpHome, "longproj");
+    stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "longproj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
+      ],
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("executes the full prompt with em-dashes intact (no truncation/corruption)", async () => {
+    // ~6 KB — well past the tty canonical buffer (~4 KB) — with em-dashes
+    // (U+2014) scattered throughout, the exact character that came back
+    // mangled in the production report.
+    const segment = "implement the feature — carefully — and thoroughly ";
+    const longPrompt = `BEGIN—${segment.repeat(120)}—END`;
+    expect(longPrompt.length).toBeGreaterThan(5000);
+
+    const createRes = await trpcMutate(
+      server.url,
+      "workspaces.create",
+      {
+        project: "longproj",
+        branch: "feat/long",
+        prompt: longPrompt,
+        via: "terminal",
+      },
+      TOKEN,
+    );
+    const createBody = await createRes.text();
+    expect(createRes.status, createBody).toBe(200);
+    const data = (JSON.parse(createBody) as { result: { data: CreateResponse } }).result.data;
+
+    expect(data.via).toBe("terminal");
+    expect(typeof data.terminalId).toBe("string");
+
+    // The stub prints `ARGV:<arg0>|<arg1>|...`. Assert the FULL prompt
+    // came back as a single argv token terminated by the `|` the stub
+    // writes after each arg — proving nothing was clipped mid-line and
+    // the em-dashes round-tripped byte-for-byte. If the cold-PTY race had
+    // dropped the newline the command would never run and `ARGV:` would
+    // never appear; if it had truncated, the `${longPrompt}|` needle
+    // wouldn't match.
+    const output = await waitFor(
+      async () => {
+        const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
+        return out?.includes(`${longPrompt}|`) ? out : undefined;
+      },
+      { label: "full long prompt echoed by stub", timeoutMs: 15_000 },
+    );
+    expect(output).toContain(`${longPrompt}|`);
+    // Belt-and-suspenders: the em-dash survived as U+2014, not mojibake.
+    expect(output).toContain("—");
   });
 });

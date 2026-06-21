@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
@@ -37,6 +38,12 @@ export interface TerminalSession {
   pty: IPty;
   scrollback: string;
   workspaceId: string;
+  /**
+   * Path of the temp file staging an auto-run command, if any. Removed
+   * when the PTY exits (see {@link TerminalPool.autoRunCommand}). Kept on
+   * the session so cleanup doesn't depend on the command ever running.
+   */
+  autoRunFile?: string;
 }
 
 /**
@@ -109,6 +116,15 @@ export class TerminalPool {
     // Hint foreground/background colors so CLI tools (vim, bat, etc.) don't send
     // OSC 11 queries whose responses leak as visible garbage in the terminal.
     env.COLORFGBG = "15;0";
+    // Pin the dispatch target for any nested `band` CLI call typed into
+    // this pane to `terminal`, matching where it runs. The server's own
+    // process.env carries no `BAND_DISPATCH` today, so the Rust CLI would
+    // already fall through to its `terminal` default — but setting it
+    // explicitly keeps the terminal path correct even if a future change
+    // ever sets `BAND_DISPATCH` server-wide, and mirrors the
+    // `BAND_DISPATCH=chat` the coding-agent subprocesses inject (see
+    // packages/coding-agent/src/adapter-env.ts).
+    env.BAND_DISPATCH = "terminal";
     // Remove PORT so workspace dev servers don't inherit the Band server's port
     delete env.PORT;
 
@@ -180,9 +196,11 @@ export class TerminalPool {
     const session: TerminalSession = { pty: ptyProcess, scrollback: "", workspaceId };
     this.terminals.set(terminalId, session);
 
-    // Auto-run initial command if provided
+    // Auto-run initial command if provided. Robust against the cold-PTY
+    // race — see autoRunCommand for why a naive `pty.write` truncates and
+    // mangles long prompt-as-argv command lines.
     if (options?.command) {
-      ptyProcess.write(`${options.command}\n`);
+      this.autoRunCommand(session, terminalId, options.command);
     }
 
     // Register in reverse index
@@ -222,9 +240,93 @@ export class TerminalPool {
           this.workspaceTerminals.delete(workspaceId);
         }
       }
+      // Remove the staged auto-run command file, if any.
+      if (session.autoRunFile) {
+        try {
+          unlinkSync(session.autoRunFile);
+        } catch {
+          // Already gone / never written — nothing to clean up.
+        }
+      }
     });
 
     return session;
+  }
+
+  /**
+   * Auto-run the workspace's initial command inside a freshly spawned PTY,
+   * robustly.
+   *
+   * Writing a long command line straight into a cold PTY is racy on three
+   * fronts, all of which surfaced in production with `via=terminal`
+   * prompt-as-argv launches (`'<agent-binary>' '<entire-prompt>'`):
+   *
+   *   1. **Dropped newline.** The shell may not have finished sourcing its
+   *      rc files, and the tty can still be in its startup canonical-mode
+   *      window. A trailing `\n` written then is swallowed — the command
+   *      is typed at the prompt but never executed.
+   *   2. **Truncation.** A single input line longer than the tty's
+   *      canonical buffer (`MAX_CANON`, ~4 KB) is clipped. Long prompts
+   *      blow past that easily.
+   *   3. **UTF-8 corruption.** A multi-byte sequence split across a tty
+   *      buffer boundary is mangled (the classic em-dash → mojibake).
+   *
+   * Fix both layers: (1) stage the command's bytes in a temp file so they
+   * never traverse the tty's canonical input buffer — sidestepping the
+   * truncation and UTF-8-split failures entirely — and (2) wait for the
+   * shell to emit its first output (its prompt) before writing the
+   * *short* `source <file>` line. The short line is well under the
+   * canonical limit and lands after the cold-start window, so its newline
+   * survives. `source` runs the command in the current interactive shell,
+   * so the user keeps their session afterwards.
+   */
+  private autoRunCommand(session: TerminalSession, terminalId: string, command: string): void {
+    const pty = session.pty;
+    let cmdFile: string;
+    try {
+      cmdFile = join(tmpdir(), `band-autorun-${terminalId}.sh`);
+      // Trailing newline so the final command in the file is a complete
+      // line for the shell parser. UTF-8 bytes are preserved verbatim —
+      // the shell reads them from the file, not through the tty.
+      //
+      // `flag: "wx"` opens with O_CREAT|O_EXCL so the write REFUSES to
+      // follow a pre-existing file or symlink planted at this path —
+      // closing the classic predictable-temp-file symlink/TOCTOU hole on
+      // a multi-user host. `terminalId` is a random UUID so a collision is
+      // only realistic on a layout-restore re-spawn after an unclean
+      // shutdown left a stale file; in that case the EEXIST throw drops us
+      // to the catch's direct-write fallback, which is safe.
+      writeFileSync(cmdFile, `${command}\n`, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+      session.autoRunFile = cmdFile;
+    } catch (err) {
+      // If we can't stage a temp file, fall back to the naive write —
+      // better to risk the cold-PTY race than to silently not run the
+      // command at all.
+      log.warn("autoRunCommand: temp-file staging failed (%s); writing command directly", err);
+      pty.write(`${command}\n`);
+      return;
+    }
+
+    // Single-quote the path (our own temp path under tmpdir — no quotes
+    // to escape) so a tmpdir with spaces still resolves.
+    const sourceLine = `source '${cmdFile}'\n`;
+
+    let injected = false;
+    const inject = () => {
+      if (injected) return;
+      injected = true;
+      pty.write(sourceLine);
+    };
+
+    // The shell's first output (its prompt) is our readiness signal that
+    // the tty is past its cold-start window. Inject then. A fallback
+    // timer covers a shell that prints nothing, so the command still
+    // runs. The timer is unref'd so it never keeps the process alive.
+    const disposable = pty.onData(() => {
+      disposable.dispose();
+      inject();
+    });
+    setTimeout(inject, 750).unref();
   }
 
   /**

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createLogger } from "@band-app/logger";
+import { AGENT_DISPATCH_ENV } from "../adapter-env.js";
 import type { OpenCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { readSkillsFromDir } from "../skills.js";
@@ -108,7 +109,9 @@ export class OpenCodeAdapter implements CodingAgent {
       const child = spawn(this.executablePath, args, {
         cwd: this.workspaceDir,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
+        // BAND_DISPATCH=chat so a nested `band` CLI call from this agent
+        // dispatches back into a chat pane (see adapter-env.ts).
+        env: { ...process.env, ...AGENT_DISPATCH_ENV },
       });
       this.activeChild = child;
 

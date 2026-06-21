@@ -44,6 +44,35 @@ const exitCode = parseInt(process.env.FAKE_AGENT_EXIT_CODE || "0", 10);
 // after the task completes. Without it the prompt is black-box.
 const stdinLogPath = process.env.FAKE_AGENT_STDIN_LOG;
 
+// Optional: when FAKE_AGENT_ENV_LOG is set, append (one JSON object per
+// line) the subset of this process's environment that controls how a
+// NESTED `band` CLI call would dispatch — `BAND_DISPATCH` (chat vs
+// terminal) and `BAND_SERVER_URL` (which server to reach). Tests that
+// assert a chat-hosted agent's nested `band workspaces create --prompt`
+// would resolve to `via: chat` read this back: the Rust CLI's
+// `resolve_dispatch_target` consults exactly these env vars, so recording
+// what the spawned agent received proves the server injected them
+// correctly. Append (not overwrite) because the server may spawn this
+// stub more than once per boot — e.g. the model-refresh probe runs with
+// the SDK's default env (no BAND_DISPATCH) alongside the task spawn that
+// carries BAND_DISPATCH=chat — and the test looks for the task spawn's
+// record rather than racing the two writers. Best-effort, at startup.
+const envLogPath = process.env.FAKE_AGENT_ENV_LOG;
+if (envLogPath) {
+	try {
+		mkdirSync(dirname(envLogPath), { recursive: true });
+		appendFileSync(
+			envLogPath,
+			JSON.stringify({
+				BAND_DISPATCH: process.env.BAND_DISPATCH ?? null,
+				BAND_SERVER_URL: process.env.BAND_SERVER_URL ?? null,
+			}) + "\n",
+		);
+	} catch {
+		// best effort
+	}
+}
+
 if (stdinLogPath) {
 	try {
 		mkdirSync(dirname(stdinLogPath), { recursive: true });

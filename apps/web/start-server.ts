@@ -979,6 +979,23 @@ async function main() {
   // then was just a hint, not a guarantee.
   process.env.BAND_PORT = String(boundPort);
 
+  // Advertise this server's own URL to every child process we fork
+  // (coding-agent subprocesses, terminal PTYs, setup scripts). A nested
+  // `band` CLI invocation — e.g. the `band-start` skill running `band
+  // workspaces create --prompt …` from inside a chat-hosted agent, or a
+  // user typing `band …` in a terminal pane — reads `BAND_SERVER_URL`
+  // (see `apps/cli/src/api.rs`) to decide which server to call. Without
+  // it the CLI falls back to its hardcoded `127.0.0.1:3456`, which is
+  // wrong whenever this server bound a different port (dev runs on
+  // 3457/3458 when the desktop app owns 3456; integration tests bind a
+  // random port).
+  //
+  // Overwrite unconditionally rather than honouring an inherited value:
+  // if a grandparent Band process exported its own `BAND_SERVER_URL`, our
+  // children must still reach THIS server (and authenticate with the
+  // token in THIS home's settings), not the grandparent's.
+  process.env.BAND_SERVER_URL = `http://127.0.0.1:${boundPort}`;
+
   console.log(`Web server listening on http://0.0.0.0:${boundPort}`);
   if (boundPort !== initialPort) {
     console.log(
