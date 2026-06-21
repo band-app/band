@@ -995,10 +995,12 @@ async function main() {
   // children must still reach THIS server (and authenticate with the
   // token in THIS home's settings), not the grandparent's.
   //
-  // Plain `http://` is intentional and safe: the URL is pinned to the
-  // `127.0.0.1` loopback (`listenWithFallback` always binds locally), so
-  // the band_token a child CLI sends never leaves the host — there is no
-  // network hop to encrypt.
+  // Pin the host to the `127.0.0.1` loopback rather than the bound
+  // interface: the server listens on `0.0.0.0`, but child processes are
+  // always co-located on this host, so loopback is the correct (and
+  // narrowest) target. Plain `http://` is intentional and safe — a
+  // loopback request never leaves the machine, so the band_token a child
+  // CLI sends has no network hop to encrypt.
   process.env.BAND_SERVER_URL = `http://127.0.0.1:${boundPort}`;
 
   console.log(`Web server listening on http://0.0.0.0:${boundPort}`);

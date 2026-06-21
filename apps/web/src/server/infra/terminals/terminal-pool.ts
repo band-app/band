@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
@@ -207,7 +208,7 @@ export class TerminalPool {
     // race — see autoRunCommand for why a naive `pty.write` truncates and
     // mangles long prompt-as-argv command lines.
     if (options?.command) {
-      this.autoRunCommand(session, terminalId, options.command);
+      this.autoRunCommand(session, options.command);
     }
 
     // Register in reverse index
@@ -287,11 +288,18 @@ export class TerminalPool {
    * survives. `source` runs the command in the current interactive shell,
    * so the user keeps their session afterwards.
    */
-  private autoRunCommand(session: TerminalSession, terminalId: string, command: string): void {
+  private autoRunCommand(session: TerminalSession, command: string): void {
     const pty = session.pty;
     let cmdFile: string;
     try {
-      cmdFile = join(tmpdir(), `band-autorun-${terminalId}.sh`);
+      // Derive the temp filename from a FRESH server-side `randomUUID()`,
+      // NOT from the caller-supplied `terminalId`: that id reaches the
+      // pool unvalidated from both the tRPC `terminal.create` input and
+      // the `/terminal` WebSocket query string, and `path.join` collapses
+      // `../` segments — so keying the path on it would let a caller
+      // (`id: "../../etc/cron.d/evil"`) steer this write anywhere. A fresh
+      // UUID keeps the path unconditionally inside `tmpdir()`.
+      cmdFile = join(tmpdir(), `band-autorun-${randomUUID()}.sh`);
       // Trailing newline so the final command in the file is a complete
       // line for the shell parser. UTF-8 bytes are preserved verbatim —
       // the shell reads them from the file, not through the tty.
@@ -299,17 +307,21 @@ export class TerminalPool {
       // `flag: "wx"` opens with O_CREAT|O_EXCL so the write REFUSES to
       // follow a pre-existing file or symlink planted at this path —
       // closing the classic predictable-temp-file symlink/TOCTOU hole on
-      // a multi-user host. `terminalId` is a random UUID so a collision is
-      // only realistic on a layout-restore re-spawn after an unclean
-      // shutdown left a stale file; in that case the EEXIST throw drops us
-      // to the catch's direct-write fallback, which is safe.
+      // a multi-user host. With a fresh UUID a collision is effectively
+      // impossible; if one ever occurs the EEXIST throw drops us to the
+      // catch's direct-write fallback, which is safe.
       writeFileSync(cmdFile, `${command}\n`, { encoding: "utf-8", mode: 0o600, flag: "wx" });
       session.autoRunFile = cmdFile;
     } catch (err) {
       // If we can't stage a temp file, fall back to the naive write —
       // better to risk the cold-PTY race than to silently not run the
       // command at all.
-      log.warn("autoRunCommand: temp-file staging failed (%s); writing command directly", err);
+      // Log only the message, not the raw error — its serialisation can
+      // include the attempted filesystem path.
+      log.warn(
+        "autoRunCommand: temp-file staging failed (%s); writing command directly",
+        err instanceof Error ? err.message : String(err),
+      );
       pty.write(`${command}\n`);
       return;
     }
@@ -464,6 +476,9 @@ export class TerminalPool {
   kill(terminalId: string): void {
     const session = this.terminals.get(terminalId);
     if (session) {
+      // `pty.kill()` triggers the `onExit` handler registered in `spawn`,
+      // which is what unlinks `session.autoRunFile` — cleanup is delegated
+      // there rather than duplicated in every kill path.
       session.pty.kill();
       this.terminals.delete(terminalId);
       const set = this.workspaceTerminals.get(session.workspaceId);

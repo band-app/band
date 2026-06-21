@@ -767,6 +767,27 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
     // Belt-and-suspenders: the em-dash survived as U+2014, not mojibake.
     expect(output).toContain("—");
   });
+
+  it("rejects terminal.create with a path-traversal id", async () => {
+    // The auto-run staging file is keyed on a server-side randomUUID, but
+    // the `terminal.create` schema also constrains `id` to a UUID so a
+    // hostile value can never reach the pool in the first place. Pin that
+    // boundary: a `../`-laden id is rejected at the tRPC layer, so no PTY
+    // is spawned and `command` never runs.
+    const res = await trpcMutate(
+      server.url,
+      "terminal.create",
+      {
+        workspaceId: toWorkspaceId("longproj", "main"),
+        id: "../../../../tmp/band-evil",
+        command: "echo pwned",
+      },
+      TOKEN,
+    );
+    expect(res.status).toBe(400);
+    const body = await res.text();
+    expect(body).toMatch(/uuid/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

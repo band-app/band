@@ -13,6 +13,12 @@
  * The terminal-pane path deliberately sets `BAND_DISPATCH=terminal`
  * instead (see `terminal-pool.ts`), so a nested CLI call typed into a
  * terminal keeps resolving to `terminal`.
+ *
+ * `BAND_SERVER_URL` is intentionally NOT listed here: it is set on
+ * `process.env` by the web server only after it binds a port, and flows
+ * to agent subprocesses via normal `process.env` inheritance at spawn
+ * time. Capturing it as a constant at module load would freeze a stale
+ * (or undefined) value.
  */
 export const AGENT_DISPATCH_ENV: Readonly<Record<string, string>> = {
   BAND_DISPATCH: "chat",

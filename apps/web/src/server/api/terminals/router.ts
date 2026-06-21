@@ -31,7 +31,11 @@ const terminalRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string(),
-        id: z.string().optional(),
+        // Constrain to a UUID: every caller (the dashboard's
+        // `newTerminalId()` and the server's `randomUUID()` fallback)
+        // already sends one, and it stops a hostile id from being used
+        // anywhere the pool derives a filesystem path from it.
+        id: z.string().uuid().optional(),
         command: z.string().optional(),
         cwd: z.string().optional(),
         env: z.record(z.string()).optional(),
