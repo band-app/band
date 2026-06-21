@@ -357,10 +357,13 @@ export class TerminalPool {
     });
     const timer = setTimeout(inject, 750);
     timer.unref();
-    pty.onExit(() => {
+    const exitDisposable = pty.onExit(() => {
       done = true;
       clearTimeout(timer);
       disposeData();
+      // Self-remove so this listener doesn't outlive the one PTY exit it
+      // exists to catch.
+      exitDisposable.dispose();
     });
   }
 

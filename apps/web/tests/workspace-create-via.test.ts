@@ -77,6 +77,19 @@ function createGitRepo(parentDir: string, name: string): string {
 }
 
 /**
+ * Write an executable `/bin/sh` stub at `tmpHome/name` with the given
+ * body and return its path. Shared scaffold for the per-purpose stub
+ * vendor CLIs below — the only thing that varies between them is the
+ * script body.
+ */
+function writeVendorCliScript(tmpHome: string, name: string, body: string): string {
+  const binPath = join(tmpHome, name);
+  writeFileSync(binPath, `#!/bin/sh\n${body}`, "utf-8");
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
+
+/**
  * Stub vendor CLI for the `via=terminal` path. Prints
  * `ARGV:<arg0>|<arg1>|...` so the test can pin both the binary path the
  * adapter picked AND the prompt that was threaded through as positional
@@ -86,14 +99,11 @@ function createGitRepo(parentDir: string, name: string): string {
  * buffer; the test reads it back via `terminal.output`.
  */
 function writeStubVendorCli(tmpHome: string, name: string): string {
-  const binPath = join(tmpHome, name);
-  writeFileSync(
-    binPath,
-    `#!/bin/sh\nprintf 'ARGV:'\nfor arg in "$@"; do printf '%s|' "$arg"; done\nprintf '\\n'\n`,
-    "utf-8",
+  return writeVendorCliScript(
+    tmpHome,
+    name,
+    `printf 'ARGV:'\nfor arg in "$@"; do printf '%s|' "$arg"; done\nprintf '\\n'\n`,
   );
-  chmodSync(binPath, 0o755);
-  return binPath;
 }
 
 /**
@@ -107,14 +117,11 @@ function writeStubVendorCli(tmpHome: string, name: string): string {
  * scrollback.
  */
 function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
-  const binPath = join(tmpHome, name);
-  writeFileSync(
-    binPath,
-    `#!/bin/sh\nprintf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\n`,
-    "utf-8",
+  return writeVendorCliScript(
+    tmpHome,
+    name,
+    `printf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\n`,
   );
-  chmodSync(binPath, 0o755);
-  return binPath;
 }
 
 /**
@@ -563,6 +570,13 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
 // The CLI's `resolve_dispatch_target` (apps/cli/src/main.rs) consults
 // exactly `BAND_DISPATCH` then `BAND_SERVER_URL`, so pinning what the
 // agent received is what proves a nested create would resolve to chat.
+//
+// We exercise the claude-code adapter as the representative case rather
+// than all four: every adapter merges the SAME `AGENT_DISPATCH_ENV`
+// constant into its subprocess env (claude-code/codex/gemini-cli/opencode
+// in packages/coding-agent/src/adapters/), so one integration test plus
+// the shared constant covers the mechanism. The codex/gemini/opencode
+// stubs would each need a different protocol shim for no added signal.
 // ---------------------------------------------------------------------------
 
 describe("chat-hosted agent dispatch env (band-start nested create)", () => {
