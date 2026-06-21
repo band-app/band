@@ -97,6 +97,25 @@ function writeStubVendorCli(tmpHome: string, name: string): string {
 }
 
 /**
+ * Stub vendor CLI that echoes the `BAND_DISPATCH` it was spawned with as
+ * `ENV_BAND_DISPATCH:<value>|`. Used to prove that a process spawned
+ * inside a terminal PTY inherits `BAND_DISPATCH=terminal` (the value
+ * `terminal-pool` pins on the PTY env) — the terminal-side mirror of the
+ * chat-side `FAKE_AGENT_ENV_LOG` assertion. Terminates immediately; the
+ * pool drains stdout into its scrollback.
+ */
+function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
+  const binPath = join(tmpHome, name);
+  writeFileSync(
+    binPath,
+    `#!/bin/sh\nprintf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\n`,
+    "utf-8",
+  );
+  chmodSync(binPath, 0o755);
+  return binPath;
+}
+
+/**
  * Minimal fake-agent scenario: emit `system.init`, then a terminal
  * `result` event so `taskService.submitTask` records a completed task
  * and tears down the agent cleanly. Used by every test whose dispatch
@@ -625,6 +644,9 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
       { label: "agent spawned with BAND_DISPATCH=chat" },
     );
 
+    // `waitFor` already gates on BAND_DISPATCH === "chat", so this line
+    // documents the contract rather than independently catching a
+    // regression — the substantive assertion is BAND_SERVER_URL below.
     expect(record.BAND_DISPATCH).toBe("chat");
     // The server advertises its own bound URL to every child process so a
     // nested CLI call reaches it regardless of which port it claimed.
@@ -726,5 +748,84 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
     expect(output).toContain(`${longPrompt}|`);
     // Belt-and-suspenders: the em-dash survived as U+2014, not mojibake.
     expect(output).toContain("—");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 1 (terminal mirror) — a process spawned inside a terminal PTY must
+// inherit `BAND_DISPATCH=terminal`, so a nested `band` CLI call typed into
+// that pane keeps resolving to `terminal` (the symmetric counterpart to
+// the chat agent inheriting `BAND_DISPATCH=chat`). `terminal-pool` pins
+// the var on the PTY env; this proves the spawned vendor CLI actually sees
+// it. The stub echoes `ENV_BAND_DISPATCH:<value>|` — the terminal-side
+// equivalent of the chat path's `FAKE_AGENT_ENV_LOG`.
+// ---------------------------------------------------------------------------
+
+describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
+  const TOKEN = "wc-via-termenv-token";
+  let server: ServerHandle;
+  let tmpHome: string;
+  let stubBin: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-via-termenv-");
+    const repoPath = createGitRepo(tmpHome, "termenvproj");
+    stubBin = writeEnvEchoVendorCli(tmpHome, "stub-claude.sh");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "termenvproj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
+      ],
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("spawns the PTY vendor CLI with BAND_DISPATCH=terminal", async () => {
+    const createRes = await trpcMutate(
+      server.url,
+      "workspaces.create",
+      {
+        project: "termenvproj",
+        branch: "feat/termenv",
+        prompt: "run in terminal",
+        via: "terminal",
+      },
+      TOKEN,
+    );
+    const createBody = await createRes.text();
+    expect(createRes.status, createBody).toBe(200);
+    const data = (JSON.parse(createBody) as { result: { data: CreateResponse } }).result.data;
+
+    expect(data.via).toBe("terminal");
+    expect(typeof data.terminalId).toBe("string");
+
+    // The stub printed the BAND_DISPATCH it inherited from the PTY env.
+    // `terminal` (not `chat`, not empty) proves the terminal pane pins the
+    // dispatch target for any nested `band` CLI call typed into it.
+    const output = await waitFor(
+      async () => {
+        const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
+        return out?.includes("ENV_BAND_DISPATCH:terminal|") ? out : undefined;
+      },
+      { label: "stub echoed BAND_DISPATCH=terminal" },
+    );
+    expect(output).toContain("ENV_BAND_DISPATCH:terminal|");
+    // Negative guard: it must not have leaked the chat value.
+    expect(output).not.toContain("ENV_BAND_DISPATCH:chat|");
   });
 });
