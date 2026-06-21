@@ -116,15 +116,6 @@ export class TerminalPool {
     // Hint foreground/background colors so CLI tools (vim, bat, etc.) don't send
     // OSC 11 queries whose responses leak as visible garbage in the terminal.
     env.COLORFGBG = "15;0";
-    // Pin the dispatch target for any nested `band` CLI call typed into
-    // this pane to `terminal`, matching where it runs. The server's own
-    // process.env carries no `BAND_DISPATCH` today, so the Rust CLI would
-    // already fall through to its `terminal` default — but setting it
-    // explicitly keeps the terminal path correct even if a future change
-    // ever sets `BAND_DISPATCH` server-wide, and mirrors the
-    // `BAND_DISPATCH=chat` the coding-agent subprocesses inject (see
-    // packages/coding-agent/src/adapter-env.ts).
-    env.BAND_DISPATCH = "terminal";
     // Remove PORT so workspace dev servers don't inherit the Band server's port
     delete env.PORT;
 
@@ -132,6 +123,19 @@ export class TerminalPool {
     if (options?.env) {
       Object.assign(env, options.env);
     }
+
+    // Pin the dispatch target for any nested `band` CLI call typed into
+    // this pane to `terminal`, matching where it runs. The server's own
+    // process.env carries no `BAND_DISPATCH` today, so the Rust CLI would
+    // already fall through to its `terminal` default — but setting it
+    // explicitly keeps the terminal path correct even if a future change
+    // ever sets `BAND_DISPATCH` server-wide, and mirrors the
+    // `BAND_DISPATCH=chat` the coding-agent subprocesses inject (see
+    // packages/coding-agent/src/adapter-env.ts). Set AFTER the
+    // `options.env` merge so the pool-mandated value always wins — a
+    // caller can't accidentally (or deliberately) downgrade a terminal
+    // pane to `chat` dispatch.
+    env.BAND_DISPATCH = "terminal";
 
     // Resolve cwd: options.cwd is relative to workspace root
     let cwd = workspaceRoot;
@@ -307,26 +311,42 @@ export class TerminalPool {
       return;
     }
 
-    // Single-quote the path (our own temp path under tmpdir — no quotes
-    // to escape) so a tmpdir with spaces still resolves.
-    const sourceLine = `source '${cmdFile}'\n`;
+    // Single-quote the path for the shell. The path is our own
+    // `tmpdir()`-rooted temp file, but escape any embedded single-quote
+    // (POSIX `'\''`) anyway so a `TMPDIR` containing a `'` can't break the
+    // quoting and inject into the interactive shell.
+    const quotedPath = cmdFile.replace(/'/g, `'\\''`);
+    const sourceLine = `source '${quotedPath}'\n`;
 
-    let injected = false;
+    let done = false;
     const inject = () => {
-      if (injected) return;
-      injected = true;
-      pty.write(sourceLine);
+      if (done) return;
+      done = true;
+      try {
+        pty.write(sourceLine);
+      } catch (err) {
+        // The PTY exited before we got to inject (e.g. the user closed the
+        // pane during the cold-start window). Nothing left to run.
+        log.warn("autoRunCommand: failed to inject source line (%s)", err);
+      }
     };
 
     // The shell's first output (its prompt) is our readiness signal that
-    // the tty is past its cold-start window. Inject then. A fallback
-    // timer covers a shell that prints nothing, so the command still
-    // runs. The timer is unref'd so it never keeps the process alive.
-    const disposable = pty.onData(() => {
-      disposable.dispose();
+    // the tty is past its cold-start window. Inject then. A fallback timer
+    // covers a shell that prints nothing, so the command still runs; it's
+    // unref'd so it never keeps the process alive. An `onExit` listener
+    // cancels both signals so a late timer can never write to a dead PTY.
+    const dataDisposable = pty.onData(() => {
+      dataDisposable.dispose();
       inject();
     });
-    setTimeout(inject, 750).unref();
+    const timer = setTimeout(inject, 750);
+    timer.unref();
+    pty.onExit(() => {
+      done = true;
+      clearTimeout(timer);
+      dataDisposable.dispose();
+    });
   }
 
   /**

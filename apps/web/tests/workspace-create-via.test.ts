@@ -563,12 +563,14 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
 // agent received is what proves a nested create would resolve to chat.
 // ---------------------------------------------------------------------------
 
-interface AgentEnvRecord {
-  BAND_DISPATCH: string | null;
-  BAND_SERVER_URL: string | null;
-}
-
 describe("chat-hosted agent dispatch env (band-start nested create)", () => {
+  // One JSONL record per fake-agent spawn (see fake-agent.mjs
+  // FAKE_AGENT_ENV_LOG). Scoped to this block — it's the only consumer.
+  interface AgentEnvRecord {
+    BAND_DISPATCH: string | null;
+    BAND_SERVER_URL: string | null;
+  }
+
   const TOKEN = "wc-dispatch-env-token";
   let server: ServerHandle;
   let tmpHome: string;
@@ -770,7 +772,7 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-via-termenv-");
     const repoPath = createGitRepo(tmpHome, "termenvproj");
-    stubBin = writeEnvEchoVendorCli(tmpHome, "stub-claude.sh");
+    stubBin = writeEnvEchoVendorCli(tmpHome, "stub-env-echo.sh");
     seedState(tmpHome, {
       projects: [
         {
