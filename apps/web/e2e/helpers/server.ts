@@ -109,7 +109,7 @@ export async function startServer(
   // URL, so a fresh random port would orphan the connection. Used by the
   // stuck-thinking-indicator reconnect spec, which kills and re-spawns the
   // server to model a lost `task-completed` (in-memory buffer wiped on
-  // restart). Defaults to an OS-assigned random port (TEST-10).
+  // restart). Defaults to an OS-assigned random port for isolation.
   const port = opts.port ?? (await getRandomPort());
 
   return new Promise((resolve, reject) => {

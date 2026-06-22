@@ -169,14 +169,14 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
       // `server` would otherwise still hold the already-closed `beforeAll`
       // handle. `afterAll` would then call `close()` on a child that has
       // already exited and await an `exit` event that never re-fires —
-      // hanging teardown (TEST-14). Swap in a no-op handle so teardown
-      // always resolves promptly, then fail the test.
+      // hanging teardown. Swap in a no-op handle so teardown always
+      // resolves promptly, then fail the test.
       server = { url: "", home: tmpHome, close: () => Promise.resolve() };
       throw err;
     }
 
-    // Positive anchor (TEST-25): assert the alternate post-reconnect state
-    // rendered BEFORE the negatives. The conversation DOM survives the
+    // Positive anchor: assert the alternate post-reconnect state rendered
+    // BEFORE the negatives below. The conversation DOM survives the
     // restart — the partial text the agent streamed is preserved in the
     // reducer (React state outlives the EventSource reconnect) — so this
     // proves the pane re-rendered rather than blanked.
@@ -192,7 +192,7 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
     // slow CI it could lag the indicator's poll and spuriously time out.
     await expect(chatPane.stopButton).not.toBeVisible({ timeout: 30_000 });
 
-    // Positive anchor (TEST-25): the composer is genuinely back in the send
+    // Positive anchor: the composer is genuinely back in the send
     // state, not transiently flickering. A brand-new submission is accepted
     // and starts a fresh task. Two observable proofs that the task was SENT
     // (not queued):
