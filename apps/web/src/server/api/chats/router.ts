@@ -19,16 +19,12 @@
  * shape as the pre-migration legacy procedures.
  */
 
-import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { formatShellCommand } from "../../services/_utils/format-shell-command";
 import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { TaskConflictError, taskService } from "../../services/task-service";
-import { terminalService } from "../../services/terminal-service";
-import { emit } from "../../services/watcher-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -198,7 +194,10 @@ export const chatsRouter = t.router({
       z.object({
         workspaceId: z.string(),
         chatId: z.string(),
-        sessionId: z.string().optional(),
+        // Cap the length: this id is persisted as `activeSessionId` and later
+        // flows into the resume command line (`continueInTerminal` →
+        // `formatShellCommand` → PTY). Real provider ids are well under this.
+        sessionId: z.string().max(512).optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -255,7 +254,7 @@ export const chatsRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string(),
         message: z.string(),
-        sessionId: z.string().optional(),
+        sessionId: z.string().max(512).optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -315,48 +314,15 @@ export const chatsRouter = t.router({
   continueInTerminal: publicProcedure
     .input(z.object({ chatId: z.string() }))
     .mutation(async ({ input }) => {
-      const chat = chatService.get(input.chatId);
-      if (!chat) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Chat not found" });
+      const result = await workspaceService.continueChatInTerminal(input.chatId);
+      if (!result.ok) {
+        throw new TRPCError({ code: result.code, message: result.message });
       }
-      if (!chat.activeSessionId) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Chat has no active session to continue",
-        });
-      }
-
-      const workspace = workspaceService.resolve(chat.workspaceId);
-      if (!workspace) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-      }
-
-      const agent = await agentService.getOrCreateAgent(
-        input.chatId,
-        workspace.worktree.path,
-        chat.agent,
-      );
-      const invocation = agent.resumeCliInvocation?.(chat.activeSessionId);
-      if (!invocation || invocation.unsupported) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: invocation?.reason ?? "Agent does not support resuming in a terminal",
-        });
-      }
-
-      const command = formatShellCommand(invocation.command, invocation.args);
-      const terminalId = randomUUID();
-      await terminalService.spawn(chat.workspaceId, terminalId, { command });
-      // Broadcast so an already-open dashboard adds the pane to its terminal
-      // dockview without a reload — same pattern as `terminal.create` and the
-      // `via=terminal` workspace-create path.
-      emit({ kind: "terminal-created", workspaceId: chat.workspaceId, terminalId });
-
-      log.info(
-        { chatId: input.chatId, workspaceId: chat.workspaceId, terminalId },
-        "continue chat session in terminal",
-      );
-      return { terminalId, workspaceId: chat.workspaceId, sessionId: chat.activeSessionId };
+      return {
+        terminalId: result.terminalId,
+        workspaceId: result.workspaceId,
+        sessionId: result.sessionId,
+      };
     }),
 });
 

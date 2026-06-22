@@ -153,4 +153,17 @@ describe("OpenCode session-id-resolved persists the real ses_ id on the chat row
     // And it is NOT a bare UUID placeholder.
     expect(activeSessionId.startsWith("ses_")).toBe(true);
   });
+
+  it("rejects chats.send without the band_token cookie (401)", async () => {
+    // The shared `trpcMutate` always sends the cookie, so call `fetch`
+    // directly to omit it — this file drives `chats.send`, so it owns the
+    // baseline auth guard for that surface (TEST-13). Mirrors the auth
+    // checks in `chat-continue-in-terminal.test.ts` / `workspace-create-via`.
+    const res = await fetch(`${server.url}/trpc/chats.send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: WORKSPACE_ID, chatId: "chat_whatever", message: "x" }),
+    });
+    expect(res.status).toBe(401);
+  });
 });

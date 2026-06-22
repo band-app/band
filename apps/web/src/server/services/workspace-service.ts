@@ -123,6 +123,15 @@ export const workspaceRemoveInput = z.object({
 });
 export type WorkspaceRemoveInput = z.infer<typeof workspaceRemoveInput>;
 
+/**
+ * Result of {@link WorkspaceService.continueChatInTerminal}. A discriminated
+ * union so the (thin) tRPC router maps the failure `code` straight onto a
+ * `TRPCError` without owning the resolve / build / spawn business logic.
+ */
+export type ContinueChatInTerminalResult =
+  | { ok: true; terminalId: string; workspaceId: string; sessionId: string }
+  | { ok: false; code: "NOT_FOUND" | "PRECONDITION_FAILED" | "BAD_REQUEST"; message: string };
+
 export const workspaceSetPinnedInput = z.object({
   project: z.string(),
   branch: z.string(),
@@ -519,6 +528,64 @@ export class WorkspaceService {
       return { ok: true, path: worktreePath };
     }
     return { ok: true, path: worktreePath, via, terminalId };
+  }
+
+  /**
+   * Continue a chat's coding-agent session in a terminal pane.
+   *
+   * Resolves the chat's underlying session id + the adapter for whichever
+   * agent it ran, asks the adapter for the vendor CLI's *resume* invocation
+   * (`claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`),
+   * composes it into a shell-safe command, and spawns a fresh terminal pane
+   * running it — so the user keeps working in the very session the web chat
+   * was running. Shares the spawn + `terminal-created` emit shape with the
+   * `via=terminal` branch of {@link create} (issue #551).
+   *
+   * Returns a discriminated result rather than throwing so the tRPC router
+   * stays a thin mapping layer (CODE-8): `{ ok: false, code }` maps straight
+   * onto a `TRPCError`, `{ ok: true, … }` is echoed back to the client.
+   */
+  async continueChatInTerminal(chatId: string): Promise<ContinueChatInTerminalResult> {
+    const chat = chatService.get(chatId);
+    if (!chat) {
+      return { ok: false, code: "NOT_FOUND", message: "Chat not found" };
+    }
+    if (!chat.activeSessionId) {
+      return {
+        ok: false,
+        code: "PRECONDITION_FAILED",
+        message: "Chat has no active session to continue",
+      };
+    }
+
+    const workspace = this.resolve(chat.workspaceId);
+    if (!workspace) {
+      return { ok: false, code: "NOT_FOUND", message: "Workspace not found" };
+    }
+
+    const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, chat.agent);
+    const invocation = agent.resumeCliInvocation?.(chat.activeSessionId);
+    if (!invocation || invocation.unsupported) {
+      return {
+        ok: false,
+        code: "BAD_REQUEST",
+        message: invocation?.reason ?? "Agent does not support resuming in a terminal",
+      };
+    }
+
+    const command = formatShellCommand(invocation.command, invocation.args);
+    const terminalId = randomUUID();
+    await terminalService.spawn(chat.workspaceId, terminalId, { command });
+    // Broadcast so an already-open dashboard adds the pane to its terminal
+    // dockview without a reload — same pattern as `terminal.create` and the
+    // `via=terminal` create path.
+    emit({ kind: "terminal-created", workspaceId: chat.workspaceId, terminalId });
+
+    log.info(
+      { chatId, workspaceId: chat.workspaceId, terminalId },
+      "continue chat session in terminal",
+    );
+    return { ok: true, terminalId, workspaceId: chat.workspaceId, sessionId: chat.activeSessionId };
   }
 
   /**

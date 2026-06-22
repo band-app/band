@@ -147,7 +147,7 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
     await expect(workspace.continueInTerminalItem).toBeEnabled();
     await workspace.continueInTerminalItem.click();
 
-    await expect(workspace.tabContainer("terminal")).toHaveClass(/dv-active-tab/);
+    await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
     await workspace.waitForTerminalReady(75_000);
   });
 });

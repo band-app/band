@@ -877,7 +877,11 @@ export class WorkspacePage {
   // single-chat workspaces these tests use resolve to `.first()`.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The chat tab header (right-click target). */
+  /** The chat tab header (right-click target). The `data-testid` is
+   *  `chat-tab__trigger--<chatId>` where the chatId suffix is generated at
+   *  runtime, so a fixed `getByTestId(...)` can't address it — we match the
+   *  stable testid PREFIX via an attribute selector and take `.first()` (the
+   *  workspaces these tests seed have a single chat tab). */
   chatTabTrigger(): Locator {
     return this.page.locator('[data-testid^="chat-tab__trigger--"]').first();
   }

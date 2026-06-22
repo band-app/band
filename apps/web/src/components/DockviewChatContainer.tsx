@@ -81,6 +81,29 @@ function chatLayoutKey(workspaceId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared settings fetch (PERF-7)
+//
+// `settings.get` is global. When a workspace with several chat tabs loads,
+// each tab's mount would otherwise fire its own `settings.get` (N small
+// server-side file reads). A short-TTL shared promise collapses that burst
+// into a single fetch, while staying fresh enough that an agent change made
+// in the Settings UI is picked up on the next tab mount.
+// ---------------------------------------------------------------------------
+
+let sharedSettingsPromise: Promise<unknown> | null = null;
+let sharedSettingsAt = 0;
+const SHARED_SETTINGS_TTL_MS = 5_000;
+
+function getSharedSettings(): Promise<unknown> {
+  const now = Date.now();
+  if (!sharedSettingsPromise || now - sharedSettingsAt > SHARED_SETTINGS_TTL_MS) {
+    sharedSettingsAt = now;
+    sharedSettingsPromise = trpc.settings.get.query().catch(() => null);
+  }
+  return sharedSettingsPromise;
+}
+
+// ---------------------------------------------------------------------------
 // Debounced server persistence (500ms) — also updates React Query cache
 // so the next mount renders instantly from cached data.
 // ---------------------------------------------------------------------------
@@ -261,9 +284,7 @@ function writeCachedTabMeta(chatId: string, patch: { title?: string; agentType?:
  * Coding-agent types whose vendor CLI can resume a session by ID in an
  * interactive terminal (`resumeCliInvocation`). Used to disable the chat
  * tab's "Continue in terminal" item for agents that can't (gemini-cli has
- * no session model; cursor-cli is SDK-only). Kept in sync with the
- * adapters' `resumeCliInvocation` implementations in
- * `packages/coding-agent/src/adapters/`.
+ * no session model; cursor-cli is SDK-only).
  */
 const RESUME_CAPABLE_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
 
@@ -339,7 +360,7 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
   const refreshTabMeta = useCallback(() => {
     if (!chatId || !workspaceId) return;
     Promise.all([
-      trpc.settings.get.query().catch(() => null),
+      getSharedSettings(),
       trpc.chats.get.query({ chatId }).catch(() => ({ chat: null })),
     ]).then(([settings, chatResult]) => {
       if (!mountedRef.current) return;
