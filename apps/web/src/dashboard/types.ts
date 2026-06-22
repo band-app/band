@@ -42,6 +42,12 @@ export interface ProjectInfo {
 export interface WorktreeInfo {
   branch: string;
   path: string;
+  /**
+   * Stable workspace identity from the server. Frozen at worktree creation —
+   * does NOT change when the branch inside the worktree is switched. Always
+   * use this to identify a workspace; never recompute it from the branch.
+   */
+  workspaceId: string;
   head?: string;
   hasSetup?: boolean;
   hasTeardown?: boolean;

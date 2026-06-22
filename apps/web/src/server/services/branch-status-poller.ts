@@ -1,6 +1,5 @@
 import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
-import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "../infra/git/git-client";
@@ -87,7 +86,7 @@ function getWorkspaces(): WorkspaceInfo[] {
     if (project.kind === "plain") continue;
     for (const wt of project.worktrees) {
       workspaces.push({
-        workspaceId: toWorkspaceId(project.name, wt.branch),
+        workspaceId: wt.id,
         project: project.name,
         branch: wt.branch,
         defaultBranch: project.defaultBranch,

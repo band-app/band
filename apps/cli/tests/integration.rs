@@ -31,6 +31,15 @@ impl TestEnv {
         // Create .band dirs
         fs::create_dir_all(band_dir.join("status")).unwrap();
         fs::create_dir_all(band_dir.join("worktrees")).unwrap();
+        // Canonicalize the worktrees dir for the same reason repo_path is
+        // canonicalized below: `git worktree add` records git's canonical
+        // form (`/private/var/...` on macOS), and `projects.list` now
+        // intersects git's live worktrees against tracked rows by PATH
+        // (string equality). A worktreesDir that still carries the
+        // `/var/...` symlink form would never match git's report, so every
+        // created worktree would be filtered out of the list.
+        let worktrees_dir =
+            fs::canonicalize(band_dir.join("worktrees")).expect("canonicalize worktrees dir");
 
         // Create a real git repo. Canonicalize the path immediately so it
         // matches what `git worktree list --porcelain` reports — on
@@ -56,7 +65,7 @@ impl TestEnv {
         let settings = serde_json::json!({
             "tokenSecret": token,
             "webServerPort": port,
-            "worktreesDir": band_dir.join("worktrees").to_string_lossy(),
+            "worktreesDir": worktrees_dir.to_string_lossy(),
         });
 
         // Seed SQLite database with migrations, project data, and settings

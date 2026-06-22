@@ -1,5 +1,4 @@
-import { eq, sql } from "drizzle-orm";
-import { toWorkspaceId } from "@/dashboard";
+import { eq } from "drizzle-orm";
 import { getDb } from "../connection";
 import { branchStatuses as branchStatusesTable, worktrees as worktreesTable } from "../schema";
 
@@ -45,30 +44,15 @@ export interface WorkspaceIdentity {
 export class WorkspaceQueries {
   /**
    * Resolve a workspace ID back to its on-disk identity (project, branch,
-   * worktree path) by scanning the `worktrees` table.
+   * worktree path) with a single indexed lookup on the stored
+   * `worktrees.workspace_id` column.
    *
-   * The match expression mirrors `toWorkspaceId(project, branch)`:
-   *   `${project}-${branch.replaceAll("/", "-")}`
-   * SQLite's `REPLACE(str, "/", "-")` is also a replace-all, so this is
-   * bit-identical to the JS computation. Pushing the match down into SQL
-   * lets us read at most one row instead of fanning out the projects +
-   * worktrees tree just to find a single workspace (the previous
-   * `loadState()`-based implementation walked every project's worktree
-   * list to find the match in JS).
-   *
-   * Called from two places today: the workspace-status upsert path in
-   * `lib/state.ts::upsertWorkspaceStatus` (via the private
-   * `resolveWorkspaceIdentity` helper, which delegates here so the SQL
-   * lives in one place) and any future service caller that needs to map
-   * an opaque `workspaceId` back to its on-disk worktree without
-   * loading the full project tree.
-   *
-   * TODO: `toWorkspaceId`'s encoding is not injective — project `foo-bar` +
-   * branch `main` and project `foo` + branch `bar/main` both serialize to
-   * `foo-bar-main`. `.get()` returns whichever row SQLite finds first, and
-   * the sanity check below cannot disambiguate (both candidates satisfy
-   * it). Fixing this requires changing the workspace-id encoding, which is
-   * a cross-cutting change tracked separately from this refactor.
+   * `workspace_id` is the worktree's frozen identity (minted once at
+   * creation, never re-derived from the mutable branch), so this match is
+   * exact and unambiguous — it replaces the old `project || '-' ||
+   * REPLACE(branch, '/', '-')` expression, which collided whenever a
+   * project name contained a `-` (project `foo-bar` + branch `main` and
+   * project `foo` + branch `bar/main` both serialized to `foo-bar-main`).
    */
   findIdentity(workspaceId: string): WorkspaceIdentity | null {
     const db = getDb();
@@ -79,13 +63,9 @@ export class WorkspaceQueries {
         worktreePath: worktreesTable.path,
       })
       .from(worktreesTable)
-      .where(
-        sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.branch}, '/', '-') = ${workspaceId}`,
-      )
+      .where(eq(worktreesTable.workspaceId, workspaceId))
       .get();
-    // Use the `toWorkspaceId` helper as a runtime sanity check in case the
-    // helper's encoding ever evolves to disagree with the SQL above.
-    if (row && toWorkspaceId(row.project, row.branch) === workspaceId) {
+    if (row) {
       return { project: row.project, branch: row.branch, worktreePath: row.worktreePath };
     }
     return null;

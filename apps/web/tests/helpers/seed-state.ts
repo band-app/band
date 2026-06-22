@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { toWorkspaceId } from "../../src/dashboard";
 import * as schema from "../../src/server/infra/db/schema";
 
 const migrationsFolder = join(import.meta.dirname, "../../src/server/infra/db/migrations");
@@ -12,6 +13,14 @@ interface WorktreeData {
   path: string;
   head?: string;
   pinned?: boolean;
+  /**
+   * Stable workspace id. Defaults to the canonical `toWorkspaceId(project,
+   * branch)` value the server would mint at creation — matching the
+   * migration backfill — so existing seeds need no change. Set this
+   * explicitly to simulate a worktree whose branch was switched after
+   * creation (id frozen at the original branch, `branch` now different).
+   */
+  workspaceId?: string;
 }
 
 interface ProjectData {
@@ -64,6 +73,7 @@ export function seedState(tmpHome: string, state: StateData): void {
         tx.insert(schema.worktrees)
           .values({
             projectName: project.name,
+            workspaceId: wt.workspaceId ?? toWorkspaceId(project.name, wt.branch),
             branch: wt.branch,
             path: wt.path,
             head: wt.head ?? null,

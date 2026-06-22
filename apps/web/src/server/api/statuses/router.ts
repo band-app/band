@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { toWorkspaceId } from "@/dashboard";
 import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
 import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
@@ -80,7 +79,7 @@ export const statusesRouter = t.router({
     for (const proj of state.projects) {
       for (const wt of proj.worktrees) {
         if (input.cwd === wt.path || input.cwd.startsWith(`${wt.path}/`)) {
-          return { workspaceId: toWorkspaceId(proj.name, wt.branch) };
+          return { workspaceId: wt.id };
         }
       }
     }

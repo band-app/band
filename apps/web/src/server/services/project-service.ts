@@ -94,7 +94,7 @@ export class ProjectService {
     // just rely on the helper to mutate `project.kind` /
     // `project.worktrees` in place.
     for (const project of projects) {
-      reconcileKindForProject(project);
+      reconcileKindForProject(project, toWorkspaceId(project.name, "main"));
     }
 
     const result = await Promise.all(
@@ -115,20 +115,30 @@ export class ProjectService {
           // worktree. Without this filter, the list reads stale data from
           // `git worktree list` and shows just-deleted workspaces until the
           // background cleanup completes.
-          const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
-          // Map by branch so we can preserve metadata (e.g. `pinned`) that git
-          // doesn't know about when merging git's view with our tracked state.
-          const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
+          // Match git's view to our tracked rows by PATH, not branch. A
+          // worktree's path is its stable identity; its branch is a mutable
+          // label that a `git switch` (by the user, an agent, or a terminal)
+          // can change at any time. Keying on branch made a just-switched
+          // worktree vanish from the list until the next `syncWorktrees`
+          // rewrote state — see the disappearing-branch bug. Keying on path
+          // keeps the card present and lets us surface git's live branch.
+          const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
           try {
             const gitWorktrees = await this.git.listWorktrees(project.path);
             worktrees = gitWorktrees
-              .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
-              .map((wt) => ({
-                branch: wt.branch,
-                path: wt.path,
-                head: wt.head,
-                pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
-              }));
+              .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
+              .map((wt) => {
+                const tracked = trackedByPath.get(wt.path)!;
+                return {
+                  // Preserve the frozen workspace id + pin state from our
+                  // tracked row; take the live branch/head from git.
+                  id: tracked.id,
+                  branch: wt.branch,
+                  path: wt.path,
+                  head: wt.head,
+                  pinned: tracked.pinned,
+                };
+              });
           } catch {
             // Fall back to tracked worktrees
           }
@@ -141,7 +151,7 @@ export class ProjectService {
           label: project.label,
           kind: project.kind,
           worktrees: worktrees.map((wt) => {
-            const workspaceId = toWorkspaceId(project.name, wt.branch);
+            const workspaceId = wt.id;
             const status = statusMap.get(workspaceId);
             return {
               ...wt,
@@ -229,7 +239,13 @@ export class ProjectService {
         const gitWorktrees = await this.git.listWorktrees(resolvedPath);
         worktrees = gitWorktrees
           .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
+          .map((wt) => ({
+            id: toWorkspaceId(name, wt.branch),
+            branch: wt.branch,
+            path: wt.path,
+            head: wt.head,
+            pinned: false,
+          }));
       } catch {
         // No worktrees
       }
@@ -245,7 +261,9 @@ export class ProjectService {
       // the stored workspace path consistent with the `.git` probe and
       // with the implicit assumption elsewhere that workspace paths are
       // canonical.
-      worktrees = [{ branch: "main", path: resolvedPath, pinned: false }];
+      worktrees = [
+        { id: toWorkspaceId(name, "main"), branch: "main", path: resolvedPath, pinned: false },
+      ];
     }
 
     const project: ProjectState = {

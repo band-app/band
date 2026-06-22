@@ -88,9 +88,14 @@ db.prepare(
   "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
 ).run(projectName, projectPath, defaultBranch);
 
+// `workspace_id` is the worktree's stable, frozen identity (minted once at
+// creation in production). Seed it with the historical derived value
+// (`name-branch`, slashes → dashes) so resolve/findIdentity return the id the
+// tests expect (e.g. `my-project-main`).
+const workspaceId = `${projectName}-${defaultBranch.replace(/\//g, "-")}`;
 db.prepare(
-  "INSERT INTO worktrees (project_name, branch, path) VALUES (?, ?, ?)"
-).run(projectName, defaultBranch, projectPath);
+  "INSERT INTO worktrees (project_name, branch, path, workspace_id) VALUES (?, ?, ?, ?)"
+).run(projectName, defaultBranch, projectPath, workspaceId);
 
 db.close();
 

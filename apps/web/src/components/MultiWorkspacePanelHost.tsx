@@ -1,6 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { toWorkspaceId, useProjects, useSettingsQuery } from "@/dashboard";
+import { useProjects, useSettingsQuery } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
@@ -183,7 +183,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     const validIds = new Set<string>();
     for (const project of projects) {
       for (const worktree of project.worktrees) {
-        validIds.add(toWorkspaceId(project.name, worktree.branch));
+        validIds.add(worktree.workspaceId);
       }
     }
     setCache((prev) => {

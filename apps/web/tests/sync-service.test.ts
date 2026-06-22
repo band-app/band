@@ -17,6 +17,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { toWorkspaceId } from "../src/dashboard";
 import { closeDb } from "../src/server/infra/db/connection";
 import { loadState, saveState } from "../src/server/services/state";
 import { syncWorktrees } from "../src/server/services/sync-service";
@@ -103,8 +104,12 @@ describe("syncWorktrees", () => {
           path: repoPath,
           defaultBranch: "main",
           worktrees: [
-            { branch: "main", path: repoPath },
-            { branch: "gone", path: join(tmp, "nonexistent-wt") },
+            { id: toWorkspaceId("test-project", "main"), branch: "main", path: repoPath },
+            {
+              id: toWorkspaceId("test-project", "gone"),
+              branch: "gone",
+              path: join(tmp, "nonexistent-wt"),
+            },
           ],
         },
       ],
@@ -132,7 +137,9 @@ describe("syncWorktrees", () => {
           name: "test-project",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath, head }],
+          worktrees: [
+            { id: toWorkspaceId("test-project", "main"), branch: "main", path: repoPath, head },
+          ],
           hasOrigin: false,
         },
       ],
@@ -164,7 +171,7 @@ describe("syncWorktrees", () => {
           name: "with-origin",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
+          worktrees: [{ id: toWorkspaceId("with-origin", "main"), branch: "main", path: repoPath }],
           hasOrigin: false, // seeded false so we can prove the sync flips it
         },
       ],
@@ -187,7 +194,7 @@ describe("syncWorktrees", () => {
           name: "no-origin",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
+          worktrees: [{ id: toWorkspaceId("no-origin", "main"), branch: "main", path: repoPath }],
           hasOrigin: true,
         },
       ],
@@ -209,7 +216,13 @@ describe("syncWorktrees", () => {
           name: "broken-project",
           path: join(tmp, "does-not-exist"),
           defaultBranch: "main",
-          worktrees: [{ branch: "stale", path: join(tmp, "does-not-exist", "wt") }],
+          worktrees: [
+            {
+              id: toWorkspaceId("broken-project", "stale"),
+              branch: "stale",
+              path: join(tmp, "does-not-exist", "wt"),
+            },
+          ],
         },
         {
           name: "good-project",
@@ -248,7 +261,15 @@ describe("syncWorktrees", () => {
           name: "pin-test",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath, head, pinned: true }],
+          worktrees: [
+            {
+              id: toWorkspaceId("pin-test", "main"),
+              branch: "main",
+              path: repoPath,
+              head,
+              pinned: true,
+            },
+          ],
           hasOrigin: false,
         },
       ],
@@ -259,5 +280,48 @@ describe("syncWorktrees", () => {
     const state = loadState();
     expect(state.projects[0].worktrees.length).toBe(1);
     expect(state.projects[0].worktrees[0].pinned).toBe(true);
+  });
+
+  // Regression: switching the branch checked out inside a worktree (by an
+  // agent, a person, or a terminal) must NOT re-key the workspace. The
+  // worktree's path is its stable identity, so sync keys by path and carries
+  // the frozen `id` over even though the branch label changed. Before the
+  // path-based identity fix, the branch switch made the worktree look brand
+  // new and it vanished from the project's branch list until the next full
+  // state rewrite.
+  it("preserves the frozen workspace id when the worktree's branch is switched", async () => {
+    const repoPath = createRepo(tmp);
+    const wtPath = join(tmp, "wt-feature");
+    git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
+
+    const frozenId = toWorkspaceId("switch-test", "feature");
+    saveState({
+      projects: [
+        {
+          name: "switch-test",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { id: toWorkspaceId("switch-test", "main"), branch: "main", path: repoPath },
+            { id: frozenId, branch: "feature", path: wtPath },
+          ],
+          hasOrigin: false,
+        },
+      ],
+    });
+
+    // The branch the worktree sits on changes out from under Band.
+    git(wtPath, ["switch", "-c", "feature-renamed"]);
+
+    await syncWorktrees();
+
+    const worktrees = loadState().projects[0].worktrees;
+    // The worktree is still tracked (it did not vanish) ...
+    const switched = worktrees.find((wt) => wt.path === wtPath);
+    expect(switched).toBeDefined();
+    // ... its id is unchanged (frozen at creation) ...
+    expect(switched!.id).toBe(frozenId);
+    // ... and the branch label now reflects git's live value.
+    expect(switched!.branch).toBe("feature-renamed");
   });
 });

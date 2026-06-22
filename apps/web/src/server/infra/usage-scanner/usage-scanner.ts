@@ -1,6 +1,5 @@
 import type { CodingAgent, SessionUsageSnapshot } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@/dashboard";
 import { createWorkspaceAgent } from "../agents/agent-pool";
 import { ProjectQueries } from "../db/queries/projects";
 import { SettingsQueries } from "../db/queries/settings";
@@ -485,7 +484,7 @@ function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listW
   for (const project of projects) {
     for (const worktree of project.worktrees) {
       out.push({
-        workspaceId: toWorkspaceId(project.name, worktree.branch),
+        workspaceId: worktree.id,
         project: project.name,
         worktreePath: worktree.path,
       });

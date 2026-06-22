@@ -8,20 +8,15 @@ import { WorkspaceQueries } from "../src/server/infra/db/queries/workspaces";
 import { seedState } from "./helpers/seed-state";
 
 // ---------------------------------------------------------------------------
-// WorkspaceQueries.findIdentity — pins the SQL match expression and the
-// non-injective `toWorkspaceId` collision behaviour acknowledged in the
-// TODO on `findIdentity`. The encoding
+// WorkspaceQueries.findIdentity — pins the exact-id lookup contract.
 //
-//   ${project}-${branch.replaceAll("/", "-")}
-//
-// is lossy: project "foo-bar" + branch "main" and project "foo" + branch
-// "bar/main" both serialize to "foo-bar-main". The SQL match expression
-// (`project_name || '-' || REPLACE(branch, '/', '-')`) and the runtime
-// sanity-check guard (`toWorkspaceId(row.project, row.branch) ===
-// workspaceId`) both accept either row, so SQLite's `.get()` returns
-// whichever row it finds first. These tests lock that current contract
-// so a future SQL rewrite (or change to `toWorkspaceId`) can't silently
-// flip the behaviour.
+// `findIdentity` now matches on the stored, unique `worktrees.workspace_id`
+// column (the worktree's frozen identity) rather than re-deriving the id
+// from `project_name || '-' || REPLACE(branch, '/', '-')` at query time.
+// That kills the old non-injective-encoding ambiguity (project "foo-bar" +
+// branch "main" and project "foo" + branch "bar/main" both serialize to
+// "foo-bar-main"): the unique index makes two such rows impossible to store
+// at all, and lookups resolve to one exact row by id.
 // ---------------------------------------------------------------------------
 
 describe("WorkspaceQueries.findIdentity", () => {
@@ -105,50 +100,66 @@ describe("WorkspaceQueries.findIdentity", () => {
     expect(identity).toBeNull();
   });
 
-  it("returns ONE of the colliding rows when the workspace id is ambiguous", () => {
-    // Both ("foo-bar", "main") and ("foo", "bar/main") serialize to
-    // "foo-bar-main" via `toWorkspaceId`. Both SQL rows satisfy the
-    // match expression `project_name || '-' || REPLACE(branch, '/', '-')`
-    // and both satisfy the runtime sanity check
-    // `toWorkspaceId(row.project, row.branch) === workspaceId`, so
-    // SQLite's `.get()` returns whichever row it finds first. We don't
-    // assert which one wins — that's an implementation detail of the
-    // SQL engine — but we DO assert that:
-    //   1. some row is returned (the sanity check doesn't drop both), and
-    //   2. it's one of the two colliding rows verbatim (no field
-    //      mangling), and
-    //   3. it round-trips through `toWorkspaceId` to the same id
-    //      (sanity-check holds).
-    const wtPathA = join(tmp, "worktrees", "foo-bar", "main");
-    const wtPathB = join(tmp, "worktrees", "foo", "bar", "main");
-    const workspaceId = toWorkspaceId("foo-bar", "main");
-    expect(workspaceId).toBe("foo-bar-main");
-    expect(toWorkspaceId("foo", "bar/main")).toBe(workspaceId);
+  it("resolves each workspace by its exact stored id with no cross-talk", () => {
+    // Two worktrees whose ids share a prefix. The old query re-derived the
+    // id from (project, branch) and could mis-resolve; the column lookup is
+    // exact, so each id maps to exactly its own row.
+    const wtPathA = join(tmp, "worktrees", "alpha", "main");
+    const wtPathB = join(tmp, "worktrees", "alpha", "feature");
+    const idA = toWorkspaceId("alpha", "main");
+    const idB = toWorkspaceId("alpha", "feature");
 
     seedState(tmp, {
       projects: [
         {
-          name: "foo-bar",
-          path: join(tmp, "repos", "foo-bar"),
+          name: "alpha",
+          path: join(tmp, "repos", "alpha"),
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: wtPathA }],
-        },
-        {
-          name: "foo",
-          path: join(tmp, "repos", "foo"),
-          defaultBranch: "main",
-          worktrees: [{ branch: "bar/main", path: wtPathB }],
+          worktrees: [
+            { branch: "main", path: wtPathA },
+            { branch: "feature", path: wtPathB },
+          ],
         },
       ],
     });
 
-    const identity = queries.findIdentity(workspaceId);
-    expect(identity).not.toBeNull();
-    const candidates = [
-      { project: "foo-bar", branch: "main", worktreePath: wtPathA },
-      { project: "foo", branch: "bar/main", worktreePath: wtPathB },
-    ];
-    expect(candidates).toContainEqual(identity);
-    expect(toWorkspaceId(identity!.project, identity!.branch)).toBe(workspaceId);
+    expect(queries.findIdentity(idA)).toEqual({
+      project: "alpha",
+      branch: "main",
+      worktreePath: wtPathA,
+    });
+    expect(queries.findIdentity(idB)).toEqual({
+      project: "alpha",
+      branch: "feature",
+      worktreePath: wtPathB,
+    });
+  });
+
+  it("a switched branch still resolves via its frozen id, not the new branch", () => {
+    // The worktree was created on `feature` (id frozen as alpha-feature) but
+    // its branch was later switched to `feature-renamed`. Resolution must key
+    // on the frozen id; the live branch is just a label carried on the row.
+    const wtPath = join(tmp, "worktrees", "alpha", "feature");
+    const frozenId = toWorkspaceId("alpha", "feature");
+
+    seedState(tmp, {
+      projects: [
+        {
+          name: "alpha",
+          path: join(tmp, "repos", "alpha"),
+          defaultBranch: "main",
+          worktrees: [{ workspaceId: frozenId, branch: "feature-renamed", path: wtPath }],
+        },
+      ],
+    });
+
+    // The id derived from the *new* branch resolves to nothing ...
+    expect(queries.findIdentity(toWorkspaceId("alpha", "feature-renamed"))).toBeNull();
+    // ... while the frozen id resolves to the worktree, reporting its live branch.
+    expect(queries.findIdentity(frozenId)).toEqual({
+      project: "alpha",
+      branch: "feature-renamed",
+      worktreePath: wtPath,
+    });
   });
 });

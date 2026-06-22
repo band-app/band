@@ -22,7 +22,6 @@ import {
 import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
@@ -135,7 +134,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const removeWorkspaceMutation = useRemoveWorkspace();
   const isPinned = worktree.pinned;
 
-  const workspaceId = toWorkspaceId(projectName, worktree.branch);
+  const workspaceId = worktree.workspaceId;
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
@@ -182,9 +181,9 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     "data-active": isActive || undefined,
     "aria-current": isActive ? ("page" as const) : undefined,
     // Stable test hook keyed by workspaceId so integration tests can right-
-    // click the specific card (issue #508). Branches with `/` in them are
-    // collapsed to `-` by `toWorkspaceId` so the attribute value matches
-    // the canonical workspace id used everywhere else in the UI.
+    // click the specific card (issue #508). The id is the server-provided
+    // stable `worktree.workspaceId`, matching the canonical workspace id used
+    // everywhere else in the UI.
     "data-testid": `project-list__workspace-card--${workspaceId}`,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();

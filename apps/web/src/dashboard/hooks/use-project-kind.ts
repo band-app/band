@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { toWorkspaceId } from "../lib/workspace-id";
 import type { ProjectKind } from "../types";
 import { useProjects } from "./use-projects";
 
@@ -22,7 +21,7 @@ export function useProjectKindMap(): Map<string, ProjectKind> {
     const map = new Map<string, ProjectKind>();
     for (const p of projects) {
       for (const wt of p.worktrees) {
-        map.set(toWorkspaceId(p.name, wt.branch), p.kind);
+        map.set(wt.workspaceId, p.kind);
       }
     }
     return map;

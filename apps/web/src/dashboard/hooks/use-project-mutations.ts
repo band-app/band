@@ -140,6 +140,10 @@ export function useCreateWorkspace() {
     }) => adapter.createWorkspace(project, branch, base, prompt),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // The workspace was just created, so its frozen server id equals the id
+      // derived from the branch it was created on (the freeze happens AT
+      // creation). The new worktree isn't in the just-invalidated projects
+      // cache yet, so deriving it here is both correct and the only option.
       const workspaceId = toWorkspaceId(vars.project, vars.branch);
       openWorkspace(workspaceId);
     },
@@ -160,14 +164,23 @@ export function useRemoveWorkspace() {
     mutationFn: ({ project, branch }: { project: string; branch: string }) =>
       adapter.removeWorkspace(project, branch),
     onSuccess: (_data, { project, branch }) => {
+      // Read the still-cached (pre-invalidation) projects list to resolve the
+      // server's stable workspace ids. `invalidateQueries` only marks the
+      // query stale and schedules a refetch, so `getQueryData` still returns
+      // the snapshot that includes the worktree we just removed.
+      const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
-      const deletedWorkspaceId = toWorkspaceId(project, branch);
-      if (store.getState().activeWorkspaceId === deletedWorkspaceId) {
-        const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
-        const projectInfo = projects?.find((p) => p.name === project);
-        if (projectInfo) {
-          openWorkspace(toWorkspaceId(project, projectInfo.defaultBranch));
+      const projectInfo = projects?.find((p) => p.name === project);
+      const deletedWorkspaceId = projectInfo?.worktrees.find(
+        (wt) => wt.branch === branch,
+      )?.workspaceId;
+      if (deletedWorkspaceId && store.getState().activeWorkspaceId === deletedWorkspaceId) {
+        const fallback = projectInfo?.worktrees.find(
+          (wt) => wt.branch === projectInfo.defaultBranch,
+        )?.workspaceId;
+        if (fallback) {
+          openWorkspace(fallback);
         }
       }
     },

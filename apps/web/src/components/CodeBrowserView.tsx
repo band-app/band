@@ -51,7 +51,6 @@ import {
   serializeEditorState,
   toFileUri,
   toLspServerLang,
-  toWorkspaceId,
   useCapabilities,
   useEditorHistory,
   useProjects,
@@ -448,7 +447,7 @@ export function CodeBrowserView({
   const workspacePath = (() => {
     for (const proj of projects) {
       for (const wt of proj.worktrees) {
-        if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
+        if (wt.workspaceId === workspaceId) {
           return wt.path;
         }
       }

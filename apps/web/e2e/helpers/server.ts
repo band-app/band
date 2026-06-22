@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { toWorkspaceId } from "../../src/dashboard";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
@@ -48,7 +49,7 @@ interface SeedProject {
   path: string;
   defaultBranch: string;
   label?: string;
-  worktrees: { branch: string; path: string }[];
+  worktrees: { branch: string; path: string; workspaceId?: string }[];
 }
 
 export function seedState(tmpHome: string, state: { projects: SeedProject[] }): void {
@@ -74,10 +75,15 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
     for (const wt of project.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (project_name, branch, path)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO worktrees (project_name, workspace_id, branch, path)
+           VALUES (?, ?, ?, ?)`,
         )
-        .run(project.name, wt.branch, wt.path);
+        .run(
+          project.name,
+          wt.workspaceId ?? toWorkspaceId(project.name, wt.branch),
+          wt.branch,
+          wt.path,
+        );
     }
   }
   sqlite.close();
