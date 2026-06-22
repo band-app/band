@@ -600,4 +600,141 @@ describe("chatEventReducer", () => {
     expect(state.messages[1].id.startsWith("u-pending-")).toBe(true);
     expect(state.messages[0].id).not.toBe(state.messages[1].id);
   });
+
+  /**
+   * Regression: the "Thinking…" indicator spinning forever after a missed
+   * `task-completed` (issue — stuck thinking indicator).
+   *
+   * `task-completed` is a LIVE-ONLY broadcast: it's never written to the
+   * JSONL transcript and is evicted from the in-memory session buffer past
+   * MAX_BUFFER_SIZE (and wiped on server restart). So a client that was
+   * detached when the task finished (tab hidden > 1s, dockview pane
+   * deactivated, network blip, server restart) reconnects and never receives
+   * the completion. The server's `subscription-opened` correctly reports
+   * `taskRunning: false`, but the pre-fix reducer only ever upgraded
+   * false→true (`state.taskRunning || event.taskRunning`), so the client's
+   * `taskRunning` stayed true → `status` stayed `streaming` → the indicator
+   * spun until a full page reload reset the reducer.
+   *
+   * Under the fix, with no optimistic task pending, `subscription-opened` is
+   * authoritative in BOTH directions and settles a stale running belief to a
+   * terminal state.
+   */
+  it("real task-started then subscription-opened{taskRunning:false} clears the stuck running state", () => {
+    // A real (positive-eventId) task runs and streams an assistant reply,
+    // then the client detaches before `task-completed` arrives.
+    const running = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "do the thing" },
+        { type: "task-started", taskId: "t1" },
+        { type: "text-start", id: "p1" },
+        { type: "text-delta", id: "p1", delta: "working on it" },
+      ]),
+    );
+    expect(running.taskRunning).toBe(true);
+    expect(running.status).toBe("streaming");
+    expect(running.pendingOptimisticTask).toBe(false);
+
+    // Reconnect: server reports the task is no longer running.
+    const reconnected = chatEventReducer(running, {
+      type: "subscription-opened",
+      sessionId: "sess-1",
+      taskRunning: false,
+      eventId: -1,
+    });
+
+    expect(reconnected.taskRunning).toBe(false);
+    // There's an assistant reply to show, so settle to `completed` — and
+    // crucially NOT `submitting`/`streaming`, so `isStreaming` is false and
+    // the thinking indicator + composer recover.
+    expect(reconnected.status).toBe("completed");
+    expect(["submitting", "streaming"]).not.toContain(reconnected.status);
+  });
+
+  it("subscription-opened{taskRunning:false} settles to idle when there's no assistant reply yet", () => {
+    // Task started but produced no assistant output before the client missed
+    // the completion (e.g. an immediate abort). Nothing to "complete" — go idle.
+    const running = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "hi" },
+        { type: "task-started", taskId: "t1" },
+      ]),
+    );
+    expect(running.taskRunning).toBe(true);
+
+    const reconnected = chatEventReducer(running, {
+      type: "subscription-opened",
+      taskRunning: false,
+      eventId: -1,
+    });
+    expect(reconnected.taskRunning).toBe(false);
+    expect(reconnected.status).toBe("idle");
+  });
+
+  /**
+   * The protective counterpart: a `subscription-opened{taskRunning:false}`
+   * arriving in the tiny PRE-ACK window after `send()` dispatched its
+   * synthetic optimistic `task-started` (negative eventId) must NOT clear the
+   * optimistic indicator. The server reports false there only because the
+   * real task hasn't started yet; clearing would blink the indicator off then
+   * back on when the real `task-started` lands a few ms later.
+   */
+  it("optimistic task-started then subscription-opened{taskRunning:false} in the pre-ack window does NOT clear", () => {
+    // Mirror `send()`: optimistic user-message + task-started, both negative.
+    const optimistic = applyEvents(INITIAL_STATE, [
+      { type: "user-message", text: "ping", eventId: -1000 },
+      { type: "task-started", taskId: "pending-1000", eventId: -1001 },
+    ] as ChatEvent[]);
+    expect(optimistic.taskRunning).toBe(true);
+    expect(optimistic.status).toBe("submitting");
+    expect(optimistic.pendingOptimisticTask).toBe(true);
+
+    // A reconnect lands before the server acknowledges the task.
+    const midSend = chatEventReducer(optimistic, {
+      type: "subscription-opened",
+      taskRunning: false,
+      eventId: -1002,
+    });
+    // Still optimistically running — indicator stays up, no blink. Status is
+    // a streaming-equivalent (`submitting` or `streaming`), never a terminal
+    // one, so `isStreaming` stays true.
+    expect(midSend.taskRunning).toBe(true);
+    expect(["submitting", "streaming"]).toContain(midSend.status);
+    expect(midSend.pendingOptimisticTask).toBe(true);
+  });
+
+  /**
+   * Once the server's REAL `task-started` (positive eventId) acknowledges the
+   * optimistic send, the pending flag is cleared and a subsequent
+   * `subscription-opened{taskRunning:false}` becomes authoritative again — so
+   * a completion missed AFTER acknowledgement still recovers.
+   */
+  it("real task-started acknowledges the optimistic send, re-enabling authoritative downgrade", () => {
+    const optimistic = applyEvents(INITIAL_STATE, [
+      { type: "user-message", text: "ping", eventId: -1000 },
+      { type: "task-started", taskId: "pending-1000", eventId: -1001 },
+    ] as ChatEvent[]);
+    expect(optimistic.pendingOptimisticTask).toBe(true);
+
+    // Server echoes the real lifecycle: user-message echo + real task-started.
+    const acked = applyEvents(optimistic, [
+      { type: "user-message", text: "ping", eventId: 1 },
+      { type: "task-started", taskId: "t-real", eventId: 2 },
+      { type: "text-start", id: "p1", eventId: 3 },
+      { type: "text-delta", id: "p1", delta: "answer", eventId: 4 },
+    ] as ChatEvent[]);
+    expect(acked.pendingOptimisticTask).toBe(false);
+    expect(acked.taskRunning).toBe(true);
+
+    // Client detaches, misses task-completed, reconnects.
+    const reconnected = chatEventReducer(acked, {
+      type: "subscription-opened",
+      taskRunning: false,
+      eventId: -2,
+    });
+    expect(reconnected.taskRunning).toBe(false);
+    expect(reconnected.status).toBe("completed");
+  });
 });

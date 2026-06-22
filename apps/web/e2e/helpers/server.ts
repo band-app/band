@@ -101,10 +101,16 @@ export function getRandomPort(): Promise<number> {
 }
 
 export async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+  opts: { tmpHome?: string; env?: Record<string, string>; port?: number } = {},
 ): Promise<ServerHandle> {
   const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
+  // Allow pinning the port so a test can restart the server on the SAME
+  // address — the client's `EventSource` auto-reconnects to the original
+  // URL, so a fresh random port would orphan the connection. Used by the
+  // stuck-thinking-indicator reconnect spec, which kills and re-spawns the
+  // server to model a lost `task-completed` (in-memory buffer wiped on
+  // restart). Defaults to an OS-assigned random port (TEST-10).
+  const port = opts.port ?? (await getRandomPort());
 
   return new Promise((resolve, reject) => {
     // The production bundle runs under Node (see apps/web/README.md) and

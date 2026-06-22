@@ -54,6 +54,20 @@ export interface ChatSubscriptionState {
    *  session's `user-message` is eventId=2). React would complain about
    *  duplicate keys without this. */
   messageIdCounter: number;
+  /** Internal: true while the current `taskRunning: true` originated from an
+   *  UNACKNOWLEDGED optimistic `send()` (a synthetic `task-started` with a
+   *  negative eventId), and the server hasn't confirmed it yet with a real
+   *  (positive-eventId) `task-started` / `task-completed` / `task-error`.
+   *
+   *  This is the one window in which `subscription-opened` must NOT trust the
+   *  server's `taskRunning: false`: a reconnect landing in the tiny pre-ack
+   *  gap reports false simply because the server task hasn't started, and
+   *  clearing the optimistic indicator there causes a visible blink. Outside
+   *  this window the server is authoritative in both directions — which is
+   *  what recovers a stuck "Thinking…" indicator after a missed
+   *  `task-completed` (buffer eviction, server restart, or the completion
+   *  broadcast firing while this client was detached). */
+  pendingOptimisticTask: boolean;
 }
 
 export const INITIAL_STATE: ChatSubscriptionState = {
@@ -67,6 +81,7 @@ export const INITIAL_STATE: ChatSubscriptionState = {
   taskErrorMessage: undefined,
   currentAssistantId: undefined,
   messageIdCounter: 0,
+  pendingOptimisticTask: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -240,19 +255,50 @@ export function chatEventReducer(
 
   switch (event.type) {
     case "subscription-opened": {
-      // Don't downgrade an optimistic `taskRunning: true` set by `send()`'s
-      // synthetic task-started event. A reconnect mid-flight (visibility,
-      // workspace switch, network blip) can arrive with `taskRunning: false`
-      // because the server task hasn't started yet — that would clear the
-      // optimistic thinking indicator and cause a visible blink before the
-      // real `task-started` re-arrives. Only upgrade false→true.
-      const taskRunning = state.taskRunning || event.taskRunning;
+      if (state.pendingOptimisticTask) {
+        // Pre-ack window: `send()` just dispatched a synthetic optimistic
+        // task-started, but the server hasn't acknowledged it yet. A
+        // subscription-opened landing here reports `taskRunning: false`
+        // simply because the server task hasn't started — trusting it would
+        // clear the optimistic thinking indicator and blink before the real
+        // `task-started` arrives. Only upgrade false→true in this window.
+        const taskRunning = state.taskRunning || event.taskRunning;
+        return {
+          ...state,
+          lastEventId,
+          sessionId: event.sessionId ?? state.sessionId,
+          taskRunning,
+          status: taskRunning ? "streaming" : state.status,
+        };
+      }
+
+      // No optimistic task pending — the server's `taskRunning` is
+      // authoritative in BOTH directions. The server reports false for a
+      // task that completed (or was evicted) while we were detached, so
+      // honouring false is what clears a stuck "Thinking…" indicator after a
+      // missed `task-completed` (buffer eviction past MAX_BUFFER_SIZE, server
+      // restart, or the live-only completion broadcast firing while this
+      // client had no open EventSource). Previously this only ever upgraded
+      // false→true, so once the client believed a task was running no
+      // reconnect could ever clear it — the indicator spun until a full page
+      // reload reset the reducer.
+      const taskRunning = event.taskRunning;
+      let status = state.status;
+      if (taskRunning) {
+        status = "streaming";
+      } else if (state.taskRunning) {
+        // We believed a task was running; the server says it isn't. Settle to
+        // a terminal/idle state so the per-message indicator, the standalone
+        // indicator, and the composer Stop→Send affordance all recover.
+        // `completed` when there's an assistant reply to show, else `idle`.
+        status = state.messages.some((m) => m.role === "assistant") ? "completed" : "idle";
+      }
       return {
         ...state,
         lastEventId,
         sessionId: event.sessionId ?? state.sessionId,
         taskRunning,
-        status: taskRunning ? "streaming" : state.status,
+        status,
       };
     }
 
@@ -329,6 +375,10 @@ export function chatEventReducer(
         status: "submitting",
         taskErrorMessage: undefined,
         currentAssistantId: undefined,
+        // Negative eventId ⇒ this is `send()`'s synthetic pre-ack task-started.
+        // A real server task-started (positive eventId) acknowledges it and
+        // clears the pending flag, re-enabling authoritative downgrades.
+        pendingOptimisticTask: event.eventId < 0,
       };
 
     case "task-completed":
@@ -338,6 +388,7 @@ export function chatEventReducer(
         taskRunning: false,
         status: "completed",
         currentAssistantId: undefined,
+        pendingOptimisticTask: false,
       };
 
     case "task-error":
@@ -348,6 +399,7 @@ export function chatEventReducer(
         status: "error",
         taskErrorMessage: event.message,
         currentAssistantId: undefined,
+        pendingOptimisticTask: false,
       };
 
     case "text-start": {

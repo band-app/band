@@ -62,7 +62,10 @@ export interface UseChatSubscriptionOptions {
 }
 
 export interface UseChatSubscriptionResult
-  extends Omit<ChatSubscriptionState, "currentAssistantId" | "lastEventId" | "messageIdCounter"> {
+  extends Omit<
+    ChatSubscriptionState,
+    "currentAssistantId" | "lastEventId" | "messageIdCounter" | "pendingOptimisticTask"
+  > {
   /** True while the EventSource is connected to the server. */
   isConnected: boolean;
   /** Submit a new user message. Resolves once the server has accepted the
