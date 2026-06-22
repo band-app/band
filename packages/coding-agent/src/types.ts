@@ -262,4 +262,18 @@ export interface CodingAgent {
    * so the create call still succeeds.
    */
   cliInvocation?(prompt: string): CliInvocation;
+  /**
+   * Resolve the CLI invocation that *resumes* an existing agent session in
+   * an interactive terminal pane (`claude --resume <id>`, `codex resume
+   * <id>`, `opencode --session <id>`). Powers the chat tab's "Continue in
+   * terminal" action: the server composes the returned `command + args`
+   * into a shell line and spawns it inside the workspace's PTY so the user
+   * keeps working in the very session the web chat was running.
+   *
+   * Adapters whose vendor binary has no by-id resume affordance (Gemini
+   * CLI has no session model; Cursor CLI is SDK-only) return
+   * `{ unsupported: true, reason: "..." }`; callers surface the reason and
+   * leave the menu item disabled rather than spawning a useless terminal.
+   */
+  resumeCliInvocation?(sessionId: string): CliInvocation;
 }

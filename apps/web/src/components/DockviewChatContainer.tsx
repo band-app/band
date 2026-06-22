@@ -1,3 +1,4 @@
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -11,6 +12,7 @@ import {
 import { Columns2, Plus, Rows2, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon, useAdapter } from "@/dashboard";
+import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -25,6 +27,13 @@ import {
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
+// `crossPanelHandlers` is a module-level mutable registry exported from
+// SharedDockviewLayout. Importing it here closes an ESM cycle
+// (SharedDockviewLayout → DockviewChatContainer → SharedDockviewLayout),
+// but we only read it inside a click handler (call time, never module
+// eval), so the live binding is always populated by then — same pattern
+// `__root.tsx` uses to drive the dockview without a dockview API ref.
+import { crossPanelHandlers } from "./SharedDockviewLayout";
 
 // ---------------------------------------------------------------------------
 // Track chat IDs that were just created by an "add tab" action.
@@ -248,11 +257,22 @@ function writeCachedTabMeta(chatId: string, patch: { title?: string; agentType?:
   } catch {}
 }
 
+/**
+ * Coding-agent types whose vendor CLI can resume a session by ID in an
+ * interactive terminal (`resumeCliInvocation`). Used to disable the chat
+ * tab's "Continue in terminal" item for agents that can't (gemini-cli has
+ * no session model; cursor-cli is SDK-only). Kept in sync with the
+ * adapters' `resumeCliInvocation` implementations in
+ * `packages/coding-agent/src/adapters/`.
+ */
+const RESUME_CAPABLE_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
+
 function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
   const initialChatId = props.params.chatId;
   const initialCache = readCachedTabMeta(initialChatId);
   const [title, setTitle] = useState(initialCache.title ?? props.api.title ?? "Chat");
   const [agentType, setAgentType] = useState<string | undefined>(initialCache.agentType);
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [panelCount, setPanelCount] = useState(props.containerApi.panels.length);
 
   useEffect(() => {
@@ -276,34 +296,101 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
     };
   }, [props.containerApi]);
 
-  // Load agent type once for the icon
+  // Resolve agent type (for the icon) + active session id (for the
+  // context-menu actions). The global `settings` blob (agent id → type
+  // map) is fetched once on mount and cached in a ref; the per-menu-open
+  // refresh re-reads only the chat (for the active session id AND the
+  // agent, which often only resolves after the first message creates the
+  // chat record) and maps the agent through the cached settings — so a
+  // right-click never re-fetches the global settings blob.
   const chatId = props.params.chatId;
   const workspaceId = props.params.workspaceId;
 
+  const mountedRef = useRef(true);
   useEffect(() => {
-    if (!chatId || !workspaceId) return;
-    let cancelled = false;
-    Promise.all([
-      trpc.settings.get.query().catch(() => null),
-      trpc.chats.get.query({ chatId }).catch(() => ({ chat: null })),
-    ]).then(([settings, chatResult]) => {
-      if (cancelled) return;
-      const raw = (settings as Record<string, unknown> | null)?.codingAgents;
-      const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
-      const defaultAgentId = (settings as Record<string, unknown> | null)?.defaultCodingAgent as
-        | string
-        | undefined;
-      const agentId = chatResult.chat?.agent ?? defaultAgentId ?? "";
-      const found = codingAgents.find((a) => a.id === agentId);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Cached settings (populated on mount) so the per-open refresh can map a
+  // chat's agent id to its type without re-fetching the global blob.
+  const codingAgentsRef = useRef<CodingAgentDef[]>([]);
+  const defaultAgentIdRef = useRef<string | undefined>(undefined);
+
+  // Apply a `chats.get` result: update the active session id and (via the
+  // cached settings) the agent type. The chat record is created lazily on
+  // the first message, so the agent type frequently only resolves on a
+  // later refresh — recompute it here rather than only on mount.
+  const applyChatMeta = useCallback(
+    (chat: { agent?: string; activeSessionId?: string } | null | undefined) => {
+      if (!mountedRef.current) return;
+      setSessionId(chat?.activeSessionId ?? undefined);
+      const agentId = chat?.agent ?? defaultAgentIdRef.current ?? "";
+      const found = codingAgentsRef.current.find((a) => a.id === agentId);
       if (found) {
         setAgentType(found.type);
         writeCachedTabMeta(chatId, { agentType: found.type });
       }
+    },
+    [chatId],
+  );
+
+  const refreshTabMeta = useCallback(() => {
+    if (!chatId || !workspaceId) return;
+    Promise.all([
+      trpc.settings.get.query().catch(() => null),
+      trpc.chats.get.query({ chatId }).catch(() => ({ chat: null })),
+    ]).then(([settings, chatResult]) => {
+      if (!mountedRef.current) return;
+      const raw = (settings as Record<string, unknown> | null)?.codingAgents;
+      codingAgentsRef.current = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
+      defaultAgentIdRef.current = (settings as Record<string, unknown> | null)
+        ?.defaultCodingAgent as string | undefined;
+      applyChatMeta(chatResult.chat);
     });
-    return () => {
-      cancelled = true;
-    };
+  }, [chatId, workspaceId, applyChatMeta]);
+
+  // Lightweight refresh for the context-menu open path: re-reads only the
+  // chat (session id + agent), mapping the agent through the settings
+  // cached on mount — no redundant global `settings.get`.
+  const refreshChatMeta = useCallback(() => {
+    if (!chatId) return;
+    trpc.chats.get
+      .query({ chatId })
+      .then((res) => applyChatMeta(res.chat))
+      .catch(() => {});
+  }, [chatId, applyChatMeta]);
+
+  useEffect(() => {
+    refreshTabMeta();
+  }, [refreshTabMeta]);
+
+  const canResume = !!sessionId && !!agentType && RESUME_CAPABLE_AGENT_TYPES.has(agentType);
+
+  const handleContinueInTerminal = useCallback(() => {
+    trpc.chats.continueInTerminal
+      .mutate({ chatId })
+      .then(() => {
+        // Surface the Terminal panel so the user lands on the resumed
+        // session. The server already spawned the pane + emitted
+        // `terminal-created`; this just flips the outer panel switcher.
+        crossPanelHandlers.onActivateTerminalPanel(workspaceId);
+      })
+      .catch((err) => {
+        console.error("[ChatTab] continue in terminal failed:", err);
+      });
   }, [chatId, workspaceId]);
+
+  const handleCopySessionId = useCallback(() => {
+    if (!sessionId) return;
+    // Use the shared helper, not `navigator.clipboard` directly:
+    // `navigator.clipboard` is undefined in a non-secure context (Band
+    // served over plain HTTP on a LAN IP / non-HTTPS tunnel), so the raw
+    // API silently no-ops there. `writeClipboardText` falls back to the
+    // legacy execCommand path that works without a secure context.
+    void writeClipboardText(sessionId);
+  }, [sessionId]);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
@@ -316,37 +403,65 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
   const showClose = panelCount > 1;
 
   return (
-    <div className="dv-default-tab">
-      <div className="flex items-center gap-1.5 min-w-0">
-        {/* Reserve icon slot — opacity fades in once agentType resolves so
-            the icon does not pop in. Width is reserved either way. */}
-        <span
-          className="inline-flex size-3.5 shrink-0 items-center justify-center transition-opacity duration-150"
-          style={{ opacity: agentType ? 1 : 0 }}
+    <ContextMenu
+      onOpenChange={(open) => {
+        // Refresh the chat's session id + agent each time the menu opens so
+        // the items' enabled state reflects the latest values (both can
+        // change as the user works — the chat record itself is created
+        // lazily on the first message). Settings stay cached from mount.
+        if (open) refreshChatMeta();
+      }}
+    >
+      <ContextMenuTrigger asChild>
+        <div className="dv-default-tab" data-testid={`chat-tab__trigger--${chatId}`}>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {/* Reserve icon slot — opacity fades in once agentType resolves so
+                the icon does not pop in. Width is reserved either way. */}
+            <span
+              className="inline-flex size-3.5 shrink-0 items-center justify-center transition-opacity duration-150"
+              style={{ opacity: agentType ? 1 : 0 }}
+            >
+              {agentType && <AgentIcon type={agentType} className="size-3.5" />}
+            </span>
+            {/* Bounded width so chat tab does not reflow as title loads/changes. */}
+            <span className="truncate min-w-[6rem] max-w-[14rem]">{title}</span>
+          </div>
+          {/* Always render the close button slot — toggle visibility via opacity
+              instead of mounting/unmounting so panelCount swings (1 ↔ 2) do not
+              shift the tab width. */}
+          <button
+            type="button"
+            aria-hidden={!showClose}
+            tabIndex={showClose ? 0 : -1}
+            className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-opacity"
+            style={{
+              opacity: showClose ? undefined : 0,
+              pointerEvents: showClose ? undefined : "none",
+            }}
+            onClick={handleClose}
+            title="Close tab"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="chat-tab__context-menu">
+        <ContextMenuItem
+          disabled={!canResume}
+          onClick={handleContinueInTerminal}
+          data-testid="chat-tab__context-menu-item--continue-in-terminal"
         >
-          {agentType && <AgentIcon type={agentType} className="size-3.5" />}
-        </span>
-        {/* Bounded width so chat tab does not reflow as title loads/changes. */}
-        <span className="truncate min-w-[6rem] max-w-[14rem]">{title}</span>
-      </div>
-      {/* Always render the close button slot — toggle visibility via opacity
-          instead of mounting/unmounting so panelCount swings (1 ↔ 2) do not
-          shift the tab width. */}
-      <button
-        type="button"
-        aria-hidden={!showClose}
-        tabIndex={showClose ? 0 : -1}
-        className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-opacity"
-        style={{
-          opacity: showClose ? undefined : 0,
-          pointerEvents: showClose ? undefined : "none",
-        }}
-        onClick={handleClose}
-        title="Close tab"
-      >
-        <X className="size-3" />
-      </button>
-    </div>
+          Continue in terminal
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!sessionId}
+          onClick={handleCopySessionId}
+          data-testid="chat-tab__context-menu-item--copy-session-id"
+        >
+          Copy session ID
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

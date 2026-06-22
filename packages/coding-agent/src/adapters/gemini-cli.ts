@@ -226,6 +226,18 @@ export class GeminiCliAdapter implements CodingAgent {
       args: ["--", prompt],
     };
   }
+
+  /**
+   * The chat tab's "Continue in terminal" action has no Gemini equivalent:
+   * the Gemini CLI has no session model, so there's no session ID to resume
+   * by. Returning the `unsupported` sentinel keeps the menu item disabled.
+   */
+  resumeCliInvocation(_sessionId: string): CliInvocation {
+    return {
+      unsupported: true,
+      reason: "Gemini CLI has no session-resume invocation.",
+    };
+  }
 }
 
 /** Default executable name for the Gemini CLI. */

@@ -19,12 +19,16 @@
  * shape as the pre-migration legacy procedures.
  */
 
+import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { formatShellCommand } from "../../services/_utils/format-shell-command";
 import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { TaskConflictError, taskService } from "../../services/task-service";
+import { terminalService } from "../../services/terminal-service";
+import { emit } from "../../services/watcher-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -291,6 +295,69 @@ export const chatsRouter = t.router({
     chatService.updateStatus(input.chatId, "idle");
     return { ok: true };
   }),
+
+  /**
+   * Continue this chat's coding-agent session in a terminal pane.
+   *
+   * Resolves the chat's underlying agent session ID (`activeSessionId`) and
+   * the adapter for whichever coding agent it ran, asks the adapter for the
+   * vendor CLI's *resume* invocation (`claude --resume <id>`,
+   * `codex resume <id>`, `opencode --session <id>`), composes it into a
+   * shell-safe command, and spawns a fresh terminal pane running it — so the
+   * user keeps working in the very session the web chat was running.
+   *
+   * Mirrors the spawn+emit pair in `WorkspaceService.create`'s
+   * `via=terminal` branch (issue #551), and resolves the agent inline the
+   * same way `setActiveSession` above does. Errors surface to the client so
+   * the UI can keep the menu item disabled for agents that can't resume
+   * (Gemini CLI / Cursor CLI) or chats with no session yet.
+   */
+  continueInTerminal: publicProcedure
+    .input(z.object({ chatId: z.string() }))
+    .mutation(async ({ input }) => {
+      const chat = chatService.get(input.chatId);
+      if (!chat) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Chat not found" });
+      }
+      if (!chat.activeSessionId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Chat has no active session to continue",
+        });
+      }
+
+      const workspace = workspaceService.resolve(chat.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+      }
+
+      const agent = await agentService.getOrCreateAgent(
+        input.chatId,
+        workspace.worktree.path,
+        chat.agent,
+      );
+      const invocation = agent.resumeCliInvocation?.(chat.activeSessionId);
+      if (!invocation || invocation.unsupported) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: invocation?.reason ?? "Agent does not support resuming in a terminal",
+        });
+      }
+
+      const command = formatShellCommand(invocation.command, invocation.args);
+      const terminalId = randomUUID();
+      await terminalService.spawn(chat.workspaceId, terminalId, { command });
+      // Broadcast so an already-open dashboard adds the pane to its terminal
+      // dockview without a reload — same pattern as `terminal.create` and the
+      // `via=terminal` workspace-create path.
+      emit({ kind: "terminal-created", workspaceId: chat.workspaceId, terminalId });
+
+      log.info(
+        { chatId: input.chatId, workspaceId: chat.workspaceId, terminalId },
+        "continue chat session in terminal",
+      );
+      return { terminalId, workspaceId: chat.workspaceId, sessionId: chat.activeSessionId };
+    }),
 });
 
 export type ChatsRouter = typeof chatsRouter;
