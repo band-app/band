@@ -138,6 +138,10 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
     await expect
       .poll(async () => (await workspace.readCopied()).at(-1), {
         message: "session id copied to clipboard",
+        // The copy follows the on-open chats.get round-trip; give it room
+        // beyond Playwright's 5 s expect.poll default so a slow CI run
+        // doesn't flake.
+        timeout: 15_000,
       })
       .toBe(SESSION_ID);
 

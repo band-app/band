@@ -312,7 +312,7 @@ export const chatsRouter = t.router({
    * (Gemini CLI / Cursor CLI) or chats with no session yet.
    */
   continueInTerminal: publicProcedure
-    .input(z.object({ chatId: z.string() }))
+    .input(z.object({ chatId: z.string().max(512) }))
     .mutation(async ({ input }) => {
       const result = await workspaceService.continueChatInTerminal(input.chatId);
       if (!result.ok) {

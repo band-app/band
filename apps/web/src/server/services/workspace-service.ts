@@ -542,8 +542,9 @@ export class WorkspaceService {
    * `via=terminal` branch of {@link create} (issue #551).
    *
    * Returns a discriminated result rather than throwing so the tRPC router
-   * stays a thin mapping layer (CODE-8): `{ ok: false, code }` maps straight
-   * onto a `TRPCError`, `{ ok: true, … }` is echoed back to the client.
+   * stays a thin mapping layer — it validates input, delegates here, maps a
+   * `{ ok: false, code }` straight onto a `TRPCError`, and echoes
+   * `{ ok: true, … }` back to the client.
    */
   async continueChatInTerminal(chatId: string): Promise<ContinueChatInTerminalResult> {
     const chat = chatService.get(chatId);

@@ -81,7 +81,7 @@ function chatLayoutKey(workspaceId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared settings fetch (PERF-7)
+// Shared settings fetch
 //
 // `settings.get` is global. When a workspace with several chat tabs loads,
 // each tab's mount would otherwise fire its own `settings.get` (N small

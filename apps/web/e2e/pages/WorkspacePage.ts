@@ -879,11 +879,11 @@ export class WorkspacePage {
 
   /** The chat tab header (right-click target). The `data-testid` is
    *  `chat-tab__trigger--<chatId>` where the chatId suffix is generated at
-   *  runtime, so a fixed `getByTestId(...)` can't address it — we match the
-   *  stable testid PREFIX via an attribute selector and take `.first()` (the
-   *  workspaces these tests seed have a single chat tab). */
+   *  runtime, so we match the stable testid PREFIX with a regex (testid-first
+   *  locator priority) and take `.first()` — the workspaces these tests seed
+   *  have a single chat tab. */
   chatTabTrigger(): Locator {
-    return this.page.locator('[data-testid^="chat-tab__trigger--"]').first();
+    return this.page.getByTestId(/^chat-tab__trigger--/).first();
   }
 
   /** The opened chat-tab context menu content (portalled to body). */
