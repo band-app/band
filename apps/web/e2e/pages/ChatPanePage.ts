@@ -298,8 +298,12 @@ export class ChatPanePage {
       win.__flickerSamples = [];
       const MAX_SAMPLES = 1000;
       const sample = () => {
+        // Stop the loop once the buffer is full — otherwise the rAF tail
+        // call keeps walking the DOM every frame for the page's lifetime
+        // without recording anything.
+        if (win.__flickerSamples.length >= MAX_SAMPLES) return;
         const list = document.querySelector('[data-testid="chat-pane__virtual-list"]');
-        if (list && win.__flickerSamples.length < MAX_SAMPLES) {
+        if (list) {
           const visible = getComputedStyle(list).visibility !== "hidden";
           const rows = Array.from(list.querySelectorAll("[data-index]"))
             .map((el) => {

@@ -192,6 +192,12 @@ test.describe("Chat first-load flicker", () => {
     // generous against sub-row settling (under one message height) yet
     // far below the tens-of-thousands-of-px jump the regression shows.
     const visibleOffsets = samples.filter((s) => s.visible).map((s) => s.bottomOffset);
+    // Guard against a vacuous pass: with no visible samples
+    // `Math.max(...[])` is `-Infinity`, which would satisfy `< 64` and
+    // silently hide a regression. The poll above already proves visible
+    // frames exist; assert it explicitly so a future refactor can't
+    // erode it.
+    expect(visibleOffsets.length).toBeGreaterThan(0);
     expect(Math.max(...visibleOffsets)).toBeLessThan(64);
   });
 });

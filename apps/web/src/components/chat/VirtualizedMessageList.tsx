@@ -89,15 +89,16 @@ export function VirtualizedMessageList<T>({
   //
   // We keep the list `visibility:hidden` while the convergence runs, pin
   // it to the bottom every frame, and only reveal once the inner height
-  // has STOPPED changing and the scroller is actually at the bottom —
-  // then flip to visible. A blind "wait N frames" reveal is not enough:
-  // under load the windowed rows' ResizeObserver measurements can land
-  // several frames late, so a fixed-count reveal occasionally fires
-  // while `use-stick-to-bottom` is still mid-snap (the scroller momentary
-  // sits at the estimate-based top), flashing the very jump we're hiding.
-  // Waiting for a stable, pinned layout removes that race. `visibility`
-  // (not `display:none`) keeps the rows in layout so their
-  // ResizeObservers still fire and measurement completes off-screen.
+  // has STOPPED changing — then flip to visible. A blind "wait N frames"
+  // reveal is not enough: under load the windowed rows' ResizeObserver
+  // measurements can land several frames late, so a fixed-count reveal
+  // occasionally fires while the height is still converging, flashing the
+  // very jump we're hiding. Waiting for the height to hold steady across
+  // consecutive frames removes that race. Because we force `scrollTop` to
+  // the bottom on every one of those frames, a stable height also means a
+  // pinned scroller, so the reveal lands on the latest message with no
+  // jump. `visibility` (not `display:none`) keeps the rows in layout so
+  // their ResizeObservers still fire and measurement completes off-screen.
   //
   // This arms ONCE per component instance: `revealed` is instance state
   // and the effect has an empty dependency list, so streaming
@@ -115,27 +116,31 @@ export function VirtualizedMessageList<T>({
     // Hard cap (~24 frames ≈ 0.4 s at 60 Hz) so a layout that never
     // settles can't keep the list hidden forever — we reveal anyway.
     const MAX_FRAMES = 24;
-    // The latest message must be within this many px of the bottom for
-    // the scroller to count as "pinned". 4px absorbs sub-pixel rounding.
-    const PIN_TOLERANCE = 4;
-    // Consecutive pinned + unchanged-height frames required before
-    // revealing — proves the convergence cascade has finished, not just
-    // paused for a frame.
+    // Consecutive unchanged-height frames required before revealing —
+    // proves the convergence cascade has finished, not just paused for a
+    // single frame.
     const STABLE_FRAMES = 2;
+
+    const reveal = () => {
+      // Sync `use-stick-to-bottom`'s own state once, at reveal time, so it
+      // stays in "stick to bottom" mode for subsequent streaming. Per-frame
+      // calls during the hidden phase are unnecessary — the raw `scrollTop`
+      // write below already keeps us pinned, and `isAtBottom` stays true.
+      scrollToBottom("instant");
+      setRevealed(true);
+    };
 
     const tick = () => {
       frames += 1;
       const el = scrollRef.current;
       // Keep the scroller pinned to the bottom while hidden. The raw
-      // `scrollTop` write mirrors `ChatView`'s visibility-restore
-      // fallback and pins synchronously; `scrollToBottom` keeps
-      // `use-stick-to-bottom`'s own state in sync so it doesn't fight us.
-      scrollToBottom("instant");
+      // `scrollTop` write mirrors `ChatView`'s visibility-restore fallback
+      // and pins synchronously; the browser clamps it to the max, so we
+      // stay at the latest message as the height converges.
       if (el) el.scrollTop = el.scrollHeight;
 
       const height = el ? el.scrollHeight : 0;
-      const pinned = el ? el.scrollHeight - el.clientHeight - el.scrollTop <= PIN_TOLERANCE : true;
-      if (height === lastHeight && pinned) {
+      if (height === lastHeight) {
         stableFrames += 1;
       } else {
         stableFrames = 0;
@@ -143,7 +148,7 @@ export function VirtualizedMessageList<T>({
       lastHeight = height;
 
       if ((stableFrames >= STABLE_FRAMES && frames >= 2) || frames >= MAX_FRAMES) {
-        setRevealed(true);
+        reveal();
         return;
       }
       raf = requestAnimationFrame(tick);
