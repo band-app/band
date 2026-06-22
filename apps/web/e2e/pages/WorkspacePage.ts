@@ -868,6 +868,95 @@ export class WorkspacePage {
       }
     }, `band-open-tabs:${workspaceId}`);
   }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Chat tab context menu ("Continue in terminal" / "Copy session ID").
+  // The tab header is a dockview-rendered `.dv-default-tab`; we tag it with
+  // `chat-tab__trigger--<chatId>` in `DockviewChatContainer.tsx`. chatIds
+  // are client-generated, so the locator matches the testid PREFIX and the
+  // single-chat workspaces these tests use resolve to `.first()`.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The chat tab header (right-click target). The `data-testid` is
+   *  `chat-tab__trigger--<chatId>` where the chatId suffix is generated at
+   *  runtime, so we match the stable testid PREFIX with a regex (testid-first
+   *  locator priority) and take `.first()` — the workspaces these tests seed
+   *  have a single chat tab. */
+  chatTabTrigger(): Locator {
+    return this.page.getByTestId(/^chat-tab__trigger--/).first();
+  }
+
+  /** The opened chat-tab context menu content (portalled to body). */
+  get chatTabContextMenu(): Locator {
+    return this.page.getByTestId("chat-tab__context-menu");
+  }
+
+  /** "Continue in terminal" item. */
+  get continueInTerminalItem(): Locator {
+    return this.page.getByTestId("chat-tab__context-menu-item--continue-in-terminal");
+  }
+
+  /** "Copy session ID" item. */
+  get copySessionIdItem(): Locator {
+    return this.page.getByTestId("chat-tab__context-menu-item--copy-session-id");
+  }
+
+  /** Right-click the chat tab header to open its context menu. */
+  async openChatTabContextMenu(): Promise<void> {
+    await test.step("Right-click the chat tab to open its context menu", async () => {
+      await this.chatTabTrigger().click({ button: "right" });
+    });
+  }
+
+  /** Simulate a NON-secure context (`navigator.clipboard === undefined`,
+   *  the LAN-IP / non-HTTPS-tunnel case) and capture the `execCommand("copy")`
+   *  fallback's payload into `window.__copied`. Must run BEFORE `goto` (uses
+   *  `addInitScript`) — same instrumentation pattern as
+   *  `ChatPanePage.installOpenFileCapture`.
+   *
+   *  This deliberately removes `navigator.clipboard` so the test is a real
+   *  regression guard: code that calls `navigator.clipboard.writeText`
+   *  directly (instead of the shared `writeClipboardText` helper) silently
+   *  no-ops here and leaves `__copied` empty, failing the assertion. The
+   *  helper's `document.execCommand("copy")` fallback — the only path that
+   *  works without a secure context — is what we record. */
+  async installClipboardCapture(): Promise<void> {
+    await this.page.addInitScript(() => {
+      const w = window as unknown as { __copied: string[] };
+      w.__copied = [];
+      // No `navigator.clipboard` — forces the execCommand fallback path.
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+      // Capture the value the fallback copies. `writeClipboardText`'s legacy
+      // path sets a textarea's value, calls `.select()` on it, then runs
+      // `execCommand("copy")`. We record the selected textarea's value (the
+      // `.select()` receiver, reliable regardless of headless focus quirks)
+      // and push it when the matching `copy` command fires.
+      let lastSelected = "";
+      const originalSelect = HTMLTextAreaElement.prototype.select;
+      HTMLTextAreaElement.prototype.select = function select(this: HTMLTextAreaElement) {
+        lastSelected = this.value;
+        return originalSelect.call(this);
+      };
+      const originalExec = document.execCommand.bind(document);
+      document.execCommand = (commandId: string, ...rest: unknown[]): boolean => {
+        if (commandId === "copy") {
+          w.__copied.push(lastSelected);
+          return true;
+        }
+        return (originalExec as (c: string, ...r: unknown[]) => boolean)(commandId, ...rest);
+      };
+    });
+  }
+
+  /** Read the strings captured by `installClipboardCapture()`. */
+  async readCopied(): Promise<string[]> {
+    return await this.page.evaluate(
+      () => (window as unknown as { __copied?: string[] }).__copied ?? [],
+    );
+  }
 }
 
 /** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of

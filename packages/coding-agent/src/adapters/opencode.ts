@@ -353,6 +353,19 @@ export class OpenCodeAdapter implements CodingAgent {
     };
   }
 
+  /**
+   * Resume CLI invocation for the chat tab's "Continue in terminal" action.
+   * `opencode --session <id>` launches the interactive TUI on that exact
+   * session (the same `--session` flag `runSession` uses for headless
+   * `opencode run`).
+   */
+  resumeCliInvocation(sessionId: string): CliInvocation {
+    return {
+      command: this.executablePath,
+      args: ["--session", sessionId],
+    };
+  }
+
   async listSessions(dir: string): Promise<SessionListItem[]> {
     // `opencode session list` already filters by CWD, so we just
     // pass `dir` as the working directory — no extra filtering needed.

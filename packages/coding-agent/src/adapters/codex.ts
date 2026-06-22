@@ -514,6 +514,18 @@ export class CodexAdapter implements CodingAgent {
     };
   }
 
+  /**
+   * Resume CLI invocation for the chat tab's "Continue in terminal" action.
+   * `codex resume <session-id>` reopens the interactive Codex TUI with that
+   * thread restored.
+   */
+  resumeCliInvocation(sessionId: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CODEX_DEFAULT_BINARY,
+      args: ["resume", sessionId],
+    };
+  }
+
   async listSessions(dir: string): Promise<SessionListItem[]> {
     log.info({ dir }, "listSessions");
     const sessions = await readCodexSessions();

@@ -143,6 +143,15 @@ interface CrossPanelHandlers {
    * doesn't hijack the panel switcher.
    */
   onActivateFilesPanel: (workspaceId: string) => void;
+  /**
+   * Bring the Terminal panel to the foreground. Used by the chat tab's
+   * "Continue in terminal" action: the server has already spawned the
+   * resume-command terminal pane (and emitted `terminal-created`), so the
+   * inner terminal dockview will add it; this just surfaces the outer
+   * Terminal panel so the user lands on the resumed session. Guarded on
+   * active-workspace, same as `onActivateFilesPanel`.
+   */
+  onActivateTerminalPanel: (workspaceId: string) => void;
 }
 
 // Mutable module-level handlers — SharedDockviewLayout writes them on every
@@ -156,6 +165,7 @@ export const crossPanelHandlers: CrossPanelHandlers = {
   onFileOpened: () => {},
   onFindInFile: () => {},
   onActivateFilesPanel: () => {},
+  onActivateTerminalPanel: () => {},
 };
 
 // ---------------------------------------------------------------------------
@@ -902,6 +912,20 @@ export function SharedDockviewLayout() {
     }
   }, []);
 
+  const handleActivateTerminalPanel = useCallback((workspaceId: string) => {
+    // Same active-workspace guard as `handleActivateFilesPanel`, plus the
+    // hidden-panel guard the Ctrl+` shortcut uses so we never try to
+    // activate a panel the user has removed from the layout. Mirror the
+    // shortcut's `band:focus-terminal` dispatch so the freshly-surfaced
+    // terminal grabs keyboard focus.
+    if (workspaceId !== activeWorkspaceIdRef.current) return;
+    if (hiddenPanelsRef.current.includes("terminal")) return;
+    apiRef.current?.getPanel("terminal")?.api.setActive();
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent("band:focus-terminal"));
+    });
+  }, []);
+
   // Mirror the handlers into the module-level registry so panel children
   // (which can't reach into a closure across the dockview boundary) can
   // call them.
@@ -910,6 +934,7 @@ export function SharedDockviewLayout() {
   crossPanelHandlers.onSelectFile = handleSelectFile;
   crossPanelHandlers.onFindInFile = handleSetFindInFile;
   crossPanelHandlers.onActivateFilesPanel = handleActivateFilesPanel;
+  crossPanelHandlers.onActivateTerminalPanel = handleActivateTerminalPanel;
 
   // ---------------------------------------------------------------------
   // Command palette

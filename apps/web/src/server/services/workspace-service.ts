@@ -17,6 +17,7 @@ import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
+import { formatShellCommand } from "./_utils/format-shell-command";
 import { clearQueuedMessages } from "./_utils/queued-message-store";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
 // `workspaceService` directly from this file (the `services/workspace.ts`
@@ -122,6 +123,15 @@ export const workspaceRemoveInput = z.object({
 });
 export type WorkspaceRemoveInput = z.infer<typeof workspaceRemoveInput>;
 
+/**
+ * Result of {@link WorkspaceService.continueChatInTerminal}. A discriminated
+ * union so the (thin) tRPC router maps the failure `code` straight onto a
+ * `TRPCError` without owning the resolve / build / spawn business logic.
+ */
+export type ContinueChatInTerminalResult =
+  | { ok: true; terminalId: string; workspaceId: string; sessionId: string }
+  | { ok: false; code: "NOT_FOUND" | "PRECONDITION_FAILED" | "BAD_REQUEST"; message: string };
+
 export const workspaceSetPinnedInput = z.object({
   project: z.string(),
   branch: z.string(),
@@ -225,54 +235,6 @@ export class PlainProjectError extends Error {
  */
 function isRebaseCollision(err: unknown): boolean {
   return String(err).includes("Cannot rebase onto multiple branches");
-}
-
-/**
- * Compose a `command + args[]` invocation into a single shell-safe command
- * string for the terminal pane's PTY (`terminalService.spawn` writes the
- * `command` option directly to the shell as text, see
- * `terminal-pool.ts::spawn`).
- *
- * Each token is:
- *
- *   1. **Stripped of C0/C1 control characters** (`\x00..\x1f`, `\x7f`,
- *      `\x80..\x9f`). The PTY driver interprets these *before* the shell
- *      tokenises the line — e.g. `\x03` becomes SIGINT, `\x04` is EOF,
- *      `\x1b[` opens a CSI sequence; some emulators also act on C1
- *      single-byte controls (`\x80..\x9f`) before the shell sees them.
- *      The user-controlled `prompt` field is `z.string()` so a malicious
- *      or malformed input could otherwise abort the vendor CLI before
- *      it ever started. The strip is per-token because the shell-quote
- *      dance only protects against shell metacharacters, not against
- *      control codes the PTY layer eats.
- *   2. **Wrapped in single quotes**, with any embedded `'` rewritten as
- *      `'\''` (POSIX-style — the only escape sequence single-quoted
- *      strings accept). This is the same algorithm `shell-quote` and
- *      `child_process`'s POSIX shell helpers use; inlined here to avoid
- *      the dependency.
- *
- * Empty `args` returns the bare command so an interactive REPL without
- * positional arguments still launches cleanly.
- */
-// Hoisted to module scope so the regex compiles once at load time
-// instead of on every `formatShellCommand` invocation. Matches the C0
-// range (`\x00..\x1f`), DEL (`\x7f`), and the C1 range (`\x80..\x9f`).
-// The character-class bounds are spelled with `String.fromCharCode` so
-// biome's `noControlCharactersInRegex` rule (which flags any literal
-// control-char in regex source) doesn't misread the intent.
-const PTY_CONTROL_CHAR_RANGE = new RegExp(
-  `[${String.fromCharCode(0)}-${String.fromCharCode(0x1f)}${String.fromCharCode(
-    0x7f,
-  )}-${String.fromCharCode(0x9f)}]`,
-  "g",
-);
-
-function formatShellCommand(command: string, args: string[]): string {
-  const stripControls = (s: string) => s.replace(PTY_CONTROL_CHAR_RANGE, "");
-  const quoted = [command, ...args].map(
-    (token) => `'${stripControls(token).replace(/'/g, "'\\''")}'`,
-  );
-  return quoted.join(" ");
 }
 
 export class WorkspaceService {
@@ -566,6 +528,65 @@ export class WorkspaceService {
       return { ok: true, path: worktreePath };
     }
     return { ok: true, path: worktreePath, via, terminalId };
+  }
+
+  /**
+   * Continue a chat's coding-agent session in a terminal pane.
+   *
+   * Resolves the chat's underlying session id + the adapter for whichever
+   * agent it ran, asks the adapter for the vendor CLI's *resume* invocation
+   * (`claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`),
+   * composes it into a shell-safe command, and spawns a fresh terminal pane
+   * running it — so the user keeps working in the very session the web chat
+   * was running. Shares the spawn + `terminal-created` emit shape with the
+   * `via=terminal` branch of {@link create} (issue #551).
+   *
+   * Returns a discriminated result rather than throwing so the tRPC router
+   * stays a thin mapping layer — it validates input, delegates here, maps a
+   * `{ ok: false, code }` straight onto a `TRPCError`, and echoes
+   * `{ ok: true, … }` back to the client.
+   */
+  async continueChatInTerminal(chatId: string): Promise<ContinueChatInTerminalResult> {
+    const chat = chatService.get(chatId);
+    if (!chat) {
+      return { ok: false, code: "NOT_FOUND", message: "Chat not found" };
+    }
+    if (!chat.activeSessionId) {
+      return {
+        ok: false,
+        code: "PRECONDITION_FAILED",
+        message: "Chat has no active session to continue",
+      };
+    }
+
+    const workspace = this.resolve(chat.workspaceId);
+    if (!workspace) {
+      return { ok: false, code: "NOT_FOUND", message: "Workspace not found" };
+    }
+
+    const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, chat.agent);
+    const invocation = agent.resumeCliInvocation?.(chat.activeSessionId);
+    if (!invocation || invocation.unsupported) {
+      return {
+        ok: false,
+        code: "BAD_REQUEST",
+        message: invocation?.reason ?? "Agent does not support resuming in a terminal",
+      };
+    }
+
+    const command = formatShellCommand(invocation.command, invocation.args);
+    const terminalId = randomUUID();
+    await terminalService.spawn(chat.workspaceId, terminalId, { command });
+    // Broadcast so an already-open dashboard adds the pane to its terminal
+    // dockview without a reload — same pattern as `terminal.create` and the
+    // `via=terminal` create path.
+    emit({ kind: "terminal-created", workspaceId: chat.workspaceId, terminalId });
+
+    log.info(
+      { chatId, workspaceId: chat.workspaceId, terminalId },
+      "continue chat session in terminal",
+    );
+    return { ok: true, terminalId, workspaceId: chat.workspaceId, sessionId: chat.activeSessionId };
   }
 
   /**

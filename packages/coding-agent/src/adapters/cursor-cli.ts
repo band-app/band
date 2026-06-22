@@ -186,6 +186,19 @@ export class CursorCliAdapter implements CodingAgent {
       reason: "Cursor CLI has no interactive prompt-loading invocation; falling back to chat.",
     };
   }
+
+  /**
+   * The chat tab's "Continue in terminal" action has no Cursor equivalent:
+   * the agent runs over the SDK's managed JSON subprocess, with no
+   * interactive by-id resume CLI. Returning the `unsupported` sentinel
+   * keeps the menu item disabled.
+   */
+  resumeCliInvocation(_sessionId: string): CliInvocation {
+    return {
+      unsupported: true,
+      reason: "Cursor CLI has no interactive session-resume invocation.",
+    };
+  }
 }
 
 /**

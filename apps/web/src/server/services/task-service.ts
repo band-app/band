@@ -924,6 +924,27 @@ async function runTask(chatId: string, task: InternalTask) {
             task.sessionId = event.resolvedSessionId;
             persistTask(task);
           }
+
+          // Persist the resolved id on the chat row too. `session-start`
+          // stored the placeholder id (OpenCode emits a UUID up front, then
+          // resolves its real `ses_…` id after the run). Without this the
+          // chat row keeps that placeholder forever — which breaks resume /
+          // "Continue in terminal" (OpenCode's `--session` rejects a
+          // non-`ses_` id) and any reload that reads the persisted
+          // `activeSessionId`. Guard on the placeholder still being the
+          // chat's active session so we never clobber a session the user
+          // switched to mid-run; preserve the cached summary so the tab
+          // title doesn't flicker (the next `chats.get` re-resolves it
+          // against the now-correct id).
+          const resolvedChat = chatService.get(chatId);
+          if (resolvedChat?.activeSessionId === event.previousSessionId) {
+            chatService.updateActiveSession(chatId, {
+              activeSessionId: event.resolvedSessionId,
+              summary: resolvedChat.activeSessionSummary,
+              lastModified: resolvedChat.activeSessionLastModified ?? Date.now(),
+            });
+          }
+
           // Notify the client so it can update its local session reference
           broadcast(chatId, {
             type: "data-session" as UIMessageChunk["type"],

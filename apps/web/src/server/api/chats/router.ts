@@ -194,7 +194,10 @@ export const chatsRouter = t.router({
       z.object({
         workspaceId: z.string(),
         chatId: z.string(),
-        sessionId: z.string().optional(),
+        // Cap the length: this id is persisted as `activeSessionId` and later
+        // flows into the resume command line (`continueInTerminal` →
+        // `formatShellCommand` → PTY). Real provider ids are well under this.
+        sessionId: z.string().max(512).optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -251,7 +254,7 @@ export const chatsRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string(),
         message: z.string(),
-        sessionId: z.string().optional(),
+        sessionId: z.string().max(512).optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -291,6 +294,36 @@ export const chatsRouter = t.router({
     chatService.updateStatus(input.chatId, "idle");
     return { ok: true };
   }),
+
+  /**
+   * Continue this chat's coding-agent session in a terminal pane.
+   *
+   * Resolves the chat's underlying agent session ID (`activeSessionId`) and
+   * the adapter for whichever coding agent it ran, asks the adapter for the
+   * vendor CLI's *resume* invocation (`claude --resume <id>`,
+   * `codex resume <id>`, `opencode --session <id>`), composes it into a
+   * shell-safe command, and spawns a fresh terminal pane running it — so the
+   * user keeps working in the very session the web chat was running.
+   *
+   * Mirrors the spawn+emit pair in `WorkspaceService.create`'s
+   * `via=terminal` branch (issue #551), and resolves the agent inline the
+   * same way `setActiveSession` above does. Errors surface to the client so
+   * the UI can keep the menu item disabled for agents that can't resume
+   * (Gemini CLI / Cursor CLI) or chats with no session yet.
+   */
+  continueInTerminal: publicProcedure
+    .input(z.object({ chatId: z.string().max(512) }))
+    .mutation(async ({ input }) => {
+      const result = await workspaceService.continueChatInTerminal(input.chatId);
+      if (!result.ok) {
+        throw new TRPCError({ code: result.code, message: result.message });
+      }
+      return {
+        terminalId: result.terminalId,
+        workspaceId: result.workspaceId,
+        sessionId: result.sessionId,
+      };
+    }),
 });
 
 export type ChatsRouter = typeof chatsRouter;

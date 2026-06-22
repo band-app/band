@@ -775,6 +775,19 @@ export class ClaudeCodeAdapter implements CodingAgent {
   }
 
   /**
+   * Resume CLI invocation for the chat tab's "Continue in terminal" action.
+   * `claude --resume <session-id>` reopens the interactive REPL with that
+   * exact conversation restored (session-ID lookup is scoped to the
+   * project directory + its worktrees, which is where we spawn the PTY).
+   */
+  resumeCliInvocation(sessionId: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CLAUDE_CODE_DEFAULT_BINARY,
+      args: ["--resume", sessionId],
+    };
+  }
+
+  /**
    * No static fallback. The live `supportedModels()` SDK call is the
    * single source of truth; `refreshModels()` populates
    * `~/.band/settings.json` at boot and on user request, and the
