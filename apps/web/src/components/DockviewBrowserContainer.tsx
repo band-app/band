@@ -221,7 +221,6 @@ function BrowserTabPanel({ params, api }: IDockviewPanelProps<BrowserTabParams>)
 
 function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
   const [title, setTitle] = useState(props.api.title ?? "New Tab");
-  const [panelCount, setPanelCount] = useState(props.containerApi.panels.length);
   const [faviconError, setFaviconError] = useState(false);
 
   const browserId = props.params.browserId;
@@ -239,18 +238,6 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
     return () => d.dispose();
   }, [props.api]);
 
-  // Track panel count reactively for close button visibility
-  useEffect(() => {
-    const cApi = props.containerApi;
-    const update = () => setPanelCount(cApi.panels.length);
-    const d1 = cApi.onDidAddPanel(update);
-    const d2 = cApi.onDidRemovePanel(update);
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
-  }, [props.containerApi]);
-
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -258,8 +245,6 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
     },
     [browserId],
   );
-
-  const showClose = panelCount > 1;
 
   const showFavicon = faviconUrl && !faviconError;
 
@@ -278,16 +263,14 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
         )}
         <span className="truncate">{title}</span>
       </div>
-      {showClose && (
-        <button
-          type="button"
-          className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-colors"
-          onClick={handleClose}
-          title="Close tab"
-        >
-          <X className="size-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-colors"
+        onClick={handleClose}
+        title="Close tab"
+      >
+        <X className="size-3" />
+      </button>
     </div>
   );
 }
@@ -571,32 +554,42 @@ export function DockviewBrowserContainer({
     [workspaceId],
   );
 
-  const closeTab = useCallback((browserId: string) => {
-    const api = apiRef.current;
-    if (!api || api.panels.length <= 1) return; // don't close last tab
+  const closeTab = useCallback(
+    (browserId: string) => {
+      const api = apiRef.current;
+      if (!api) return;
 
-    selectNeighbourBeforeRemove(api, browserId);
-    const panel = api.getPanel(browserId);
-    if (panel) {
-      api.removePanel(panel);
-    }
+      selectNeighbourBeforeRemove(api, browserId);
+      const panel = api.getPanel(browserId);
+      if (panel) {
+        api.removePanel(panel);
+      }
 
-    // After closing, focus the address bar in the newly active panel so the
-    // section-scoped keydown handler still sees Cmd+W on the next press.
-    requestAnimationFrame(() => {
-      const activePanel = api.activePanel;
-      if (!activePanel) return;
-      activePanel.view.content.element
-        .querySelector<HTMLInputElement>("[data-band-address-input]")
-        ?.focus();
-    });
+      // Closing the last tab would leave an empty pane — spawn a fresh
+      // blank tab so the browser section is never a dead end (matches the
+      // self-heal in the `browser-removed` status-event handler).
+      if (api.panels.length === 0) {
+        createDefaultPanel(api, workspaceId);
+      }
 
-    // Delete the server-side browser record so closed tabs don't linger.
-    trpc.browsers.remove.mutate({ browserId }).catch((err) => {
-      console.error("[DockviewBrowserContainer] failed to remove browser:", err);
-    });
-    // Layout change listeners will auto-persist
-  }, []);
+      // After closing, focus the address bar in the newly active panel so the
+      // section-scoped keydown handler still sees Cmd+W on the next press.
+      requestAnimationFrame(() => {
+        const activePanel = api.activePanel;
+        if (!activePanel) return;
+        activePanel.view.content.element
+          .querySelector<HTMLInputElement>("[data-band-address-input]")
+          ?.focus();
+      });
+
+      // Delete the server-side browser record so closed tabs don't linger.
+      trpc.browsers.remove.mutate({ browserId }).catch((err) => {
+        console.error("[DockviewBrowserContainer] failed to remove browser:", err);
+      });
+      // Layout change listeners will auto-persist
+    },
+    [workspaceId],
+  );
 
   // Keyboard shortcuts (capture phase, scoped to this section's focus):
   // - Cmd/Ctrl+T              → open a new browser tab
@@ -681,7 +674,7 @@ export function DockviewBrowserContainer({
         });
       } else if (key === "w" && !e.shiftKey) {
         const api = apiRef.current;
-        if (!api || api.panels.length <= 1) return;
+        if (!api) return;
         e.preventDefault();
         e.stopPropagation();
         const active = api.activePanel;

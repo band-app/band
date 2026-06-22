@@ -136,8 +136,19 @@ export function useBrowserPaneFreeze(args: UseBrowserPaneFreezeArgs): UseBrowser
         desktopInvoke("browser_hide", ipcKey).catch(() => {});
       })();
     } else {
-      if (freezeAppliedRef.current) {
-        freezeAppliedRef.current = false;
+      const wasApplied = freezeAppliedRef.current;
+      freezeAppliedRef.current = false;
+      // Only surface the native view if we hid it AND this pane is
+      // still the one the user is looking at. If the pane went hidden
+      // between freeze and unfreeze — the user switched workspaces or
+      // dockview tabs while the overlay was open — calling
+      // `browser_show` here would float this workspace's
+      // `WebContentsView` (an OS-compositor layer that ignores CSS
+      // opacity/z-index) on top of whatever workspace is now active,
+      // stuck until app restart. When the pane becomes visible again
+      // the `wsActive` effect in `BrowserPanel` re-shows it; we don't
+      // need to here.
+      if (wasApplied && visible) {
         const ipcKey = ipcKeyRef.current;
         desktopInvoke("browser_show", ipcKey).catch(() => {});
         // Resume after show so the page is visible by the time
