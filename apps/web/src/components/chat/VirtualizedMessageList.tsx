@@ -27,10 +27,17 @@
  * to space messages; with absolute positioning that descendant selector
  * no longer applies. The inter-message gap is baked into each row's
  * `pb-4` instead, so the measured `size` already includes it.
+ *
+ * First-paint reveal gate. The same absolute positioning that makes
+ * windowing possible also makes the dynamic-height convergence visible
+ * as a flicker on the first load of a long conversation — see the
+ * `revealed` effect below. We hide the list for the first two animation
+ * frames after mount so the measurement cascade runs off-screen, then
+ * reveal it pinned to the bottom.
  */
 
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { memo, type ReactNode, useCallback, useRef } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 export interface VirtualizedMessageListProps<T> {
@@ -66,7 +73,84 @@ export function VirtualizedMessageList<T>({
   estimateSize = 220,
   overscan = 5,
 }: VirtualizedMessageListProps<T>) {
-  const { scrollRef } = useStickToBottomContext();
+  const { scrollRef, scrollToBottom } = useStickToBottomContext();
+
+  // First-paint reveal gate — fixes the flickery first load of long
+  // conversations. A dynamic-height virtualizer mounts every windowed
+  // row at the `estimateSize` guess, then rewrites each row's
+  // `translateY(start)` as TanStack's `measureElement` ResizeObserver
+  // reports real heights. Because rows are `position:absolute`, the
+  // frames where some offsets still use the 220px estimate while others
+  // use real measurements briefly OVERLAP (text rendered on top of text);
+  // each measurement also bumps the inner height, which the
+  // `use-stick-to-bottom` ResizeObserver reads as "content grew" and
+  // re-runs its instant scroll-to-bottom — a multi-frame convergence
+  // cascade the user otherwise watches live.
+  //
+  // We keep the list `visibility:hidden` while the convergence runs, pin
+  // it to the bottom every frame, and only reveal once the inner height
+  // has STOPPED changing and the scroller is actually at the bottom —
+  // then flip to visible. A blind "wait N frames" reveal is not enough:
+  // under load the windowed rows' ResizeObserver measurements can land
+  // several frames late, so a fixed-count reveal occasionally fires
+  // while `use-stick-to-bottom` is still mid-snap (the scroller momentary
+  // sits at the estimate-based top), flashing the very jump we're hiding.
+  // Waiting for a stable, pinned layout removes that race. `visibility`
+  // (not `display:none`) keeps the rows in layout so their
+  // ResizeObservers still fire and measurement completes off-screen.
+  //
+  // This arms ONCE per component instance: `revealed` is instance state
+  // and the effect has an empty dependency list, so streaming
+  // text-deltas (which re-render this component ~30×/sec without
+  // remounting it) never re-gate. A session switch remounts `ChatView`
+  // and therefore this component, which re-arms the gate for the next
+  // freshly-loaded conversation.
+  const [revealed, setRevealed] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only gate — must arm exactly once per instance, never on `scrollToBottom`/`scrollRef` identity changes
+  useEffect(() => {
+    let raf = 0;
+    let frames = 0;
+    let stableFrames = 0;
+    let lastHeight = -1;
+    // Hard cap (~24 frames ≈ 0.4 s at 60 Hz) so a layout that never
+    // settles can't keep the list hidden forever — we reveal anyway.
+    const MAX_FRAMES = 24;
+    // The latest message must be within this many px of the bottom for
+    // the scroller to count as "pinned". 4px absorbs sub-pixel rounding.
+    const PIN_TOLERANCE = 4;
+    // Consecutive pinned + unchanged-height frames required before
+    // revealing — proves the convergence cascade has finished, not just
+    // paused for a frame.
+    const STABLE_FRAMES = 2;
+
+    const tick = () => {
+      frames += 1;
+      const el = scrollRef.current;
+      // Keep the scroller pinned to the bottom while hidden. The raw
+      // `scrollTop` write mirrors `ChatView`'s visibility-restore
+      // fallback and pins synchronously; `scrollToBottom` keeps
+      // `use-stick-to-bottom`'s own state in sync so it doesn't fight us.
+      scrollToBottom("instant");
+      if (el) el.scrollTop = el.scrollHeight;
+
+      const height = el ? el.scrollHeight : 0;
+      const pinned = el ? el.scrollHeight - el.clientHeight - el.scrollTop <= PIN_TOLERANCE : true;
+      if (height === lastHeight && pinned) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+      }
+      lastHeight = height;
+
+      if ((stableFrames >= STABLE_FRAMES && frames >= 2) || frames >= MAX_FRAMES) {
+        setRevealed(true);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   // Hoist the virtualizer callbacks so their identity is stable across
   // re-renders — during streaming `ChatView` re-renders ~30×/sec and
@@ -117,6 +201,10 @@ export function VirtualizedMessageList<T>({
         height: `${totalSize}px`,
         width: "100%",
         position: "relative",
+        // First-paint reveal gate (see the effect above). Hidden rows
+        // still occupy layout — their ResizeObservers keep firing — so
+        // the height/offset convergence completes off-screen.
+        visibility: revealed ? undefined : "hidden",
       }}
     >
       {virtualItems.map((virtualRow) => {

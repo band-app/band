@@ -260,4 +260,95 @@ export class ChatPanePage {
       () => (window as unknown as { __dispatchedOpenFile?: unknown[] }).__dispatchedOpenFile ?? [],
     );
   }
+
+  /** Install a per-animation-frame sampler that records, from page load,
+   *  whether the virtualized message list is visually shown and whether
+   *  its mounted rows overlap on screen. Must run BEFORE `goto`
+   *  (`addInitScript` runs before any page script on every navigation),
+   *  so it captures the very first frames the list paints — exactly the
+   *  window where the first-load flicker would otherwise be visible.
+   *
+   *  Each frame samples:
+   *    - `visible`: the list's computed `visibility` is not `hidden`
+   *      (the first-paint reveal gate sets `visibility:hidden` until the
+   *      dynamic-height convergence settles).
+   *    - `overlap`: any two mounted rows' bounding boxes overlap
+   *      vertically by more than 1px — the on-screen symptom of rows
+   *      laid out at a mix of estimated and measured offsets.
+   *    - `bottomOffset`: how far the scroller is from the bottom, in px
+   *      (`scrollHeight - clientHeight - scrollTop`, rounded). 0 means
+   *      pinned to the latest message; a large value means the viewport
+   *      jumped away from the bottom (the visible-scroll-thrash symptom).
+   *    - `rowCount`: number of non-zero-height mounted rows.
+   *
+   *  The sampler is deliberately framework-agnostic — it only reads the
+   *  `chat-pane__virtual-list` / `chat-pane__scroller` testids and
+   *  `data-index` rows, all of which predate the reveal-gate fix — so the
+   *  spec also fails on the pre-fix build (where the list is visible
+   *  during the overlapping frames). */
+  async installFirstPaintObserver(): Promise<void> {
+    await this.page.addInitScript(() => {
+      interface FlickerSample {
+        visible: boolean;
+        overlap: boolean;
+        bottomOffset: number;
+        rowCount: number;
+      }
+      const win = window as unknown as { __flickerSamples: FlickerSample[] };
+      win.__flickerSamples = [];
+      const MAX_SAMPLES = 1000;
+      const sample = () => {
+        const list = document.querySelector('[data-testid="chat-pane__virtual-list"]');
+        if (list && win.__flickerSamples.length < MAX_SAMPLES) {
+          const visible = getComputedStyle(list).visibility !== "hidden";
+          const rows = Array.from(list.querySelectorAll("[data-index]"))
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { top: r.top, bottom: r.bottom, height: r.height };
+            })
+            .filter((r) => r.height > 0)
+            .sort((a, b) => a.top - b.top);
+          let overlap = false;
+          for (let i = 1; i < rows.length; i++) {
+            // >1px tolerance absorbs sub-pixel rounding; contiguous rows
+            // satisfy rows[i].top === rows[i-1].bottom, so a genuine
+            // overlap is the only thing that trips this.
+            if (rows[i].top < rows[i - 1].bottom - 1) {
+              overlap = true;
+              break;
+            }
+          }
+          const scroller = document.querySelector(
+            '[data-testid="chat-pane__scroller"]',
+          ) as HTMLElement | null;
+          const bottomOffset = scroller
+            ? Math.round(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop)
+            : Number.POSITIVE_INFINITY;
+          win.__flickerSamples.push({ visible, overlap, bottomOffset, rowCount: rows.length });
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  }
+
+  /** Read the per-frame samples recorded by `installFirstPaintObserver()`.
+   *  Returns an empty array if the observer wasn't installed. */
+  async readFirstPaintSamples(): Promise<
+    { visible: boolean; overlap: boolean; bottomOffset: number; rowCount: number }[]
+  > {
+    return await this.page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __flickerSamples?: {
+              visible: boolean;
+              overlap: boolean;
+              bottomOffset: number;
+              rowCount: number;
+            }[];
+          }
+        ).__flickerSamples ?? [],
+    );
+  }
 }
