@@ -151,7 +151,11 @@ test.describe("Chat tab context menu — continue in terminal / copy session id"
     await expect(workspace.continueInTerminalItem).toBeEnabled();
     await workspace.continueInTerminalItem.click();
 
-    await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
+    // Explicit timeout: the dockview setActive effect can be starved under
+    // parallel-worker CI contention (mirrors workspace-maximize-state.spec.ts).
+    await expect(workspace.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/, {
+      timeout: 15_000,
+    });
     await workspace.waitForTerminalReady(75_000);
   });
 });

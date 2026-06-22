@@ -289,7 +289,9 @@ describe("chats.continueInTerminal — unsupported agent", () => {
     const res = await trpcMutate(server.url, "chats.continueInTerminal", { chatId }, TOKEN);
     const body = await res.text();
     expect(res.status, body).toBe(400);
-    expect(body).toContain("Gemini CLI");
+    // Pin the full reason (the literal from gemini-cli.ts) so a partial
+    // rename of the message still trips this.
+    expect(body).toContain("Gemini CLI has no session-resume invocation");
 
     // No terminal was spawned for the workspace.
     const terminals = await listTerminals(server.url, WORKSPACE_ID, TOKEN);

@@ -98,7 +98,13 @@ function getSharedSettings(): Promise<unknown> {
   const now = Date.now();
   if (!sharedSettingsPromise || now - sharedSettingsAt > SHARED_SETTINGS_TTL_MS) {
     sharedSettingsAt = now;
-    sharedSettingsPromise = trpc.settings.get.query().catch(() => null);
+    sharedSettingsPromise = trpc.settings.get.query().catch(() => {
+      // Don't cache a failed fetch for the whole TTL — a transient error
+      // would otherwise leave every tab mount in the window with null
+      // settings. Reset so the next mount retries.
+      sharedSettingsPromise = null;
+      return null;
+    });
   }
   return sharedSettingsPromise;
 }
@@ -362,14 +368,19 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
     Promise.all([
       getSharedSettings(),
       trpc.chats.get.query({ chatId }).catch(() => ({ chat: null })),
-    ]).then(([settings, chatResult]) => {
-      if (!mountedRef.current) return;
-      const raw = (settings as Record<string, unknown> | null)?.codingAgents;
-      codingAgentsRef.current = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
-      defaultAgentIdRef.current = (settings as Record<string, unknown> | null)
-        ?.defaultCodingAgent as string | undefined;
-      applyChatMeta(chatResult.chat);
-    });
+    ])
+      .then(([settings, chatResult]) => {
+        if (!mountedRef.current) return;
+        const raw = (settings as Record<string, unknown> | null)?.codingAgents;
+        codingAgentsRef.current = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
+        defaultAgentIdRef.current = (settings as Record<string, unknown> | null)
+          ?.defaultCodingAgent as string | undefined;
+        applyChatMeta(chatResult.chat);
+      })
+      // Defensive: both inputs catch internally today, but guard the chain
+      // so a future change that drops one can't surface an unhandled
+      // rejection from this fire-and-forget mount effect.
+      .catch(() => {});
   }, [chatId, workspaceId, applyChatMeta]);
 
   // Lightweight refresh for the context-menu open path: re-reads only the
