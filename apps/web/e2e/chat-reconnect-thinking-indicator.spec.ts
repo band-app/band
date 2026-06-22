@@ -162,7 +162,18 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
     // task-completed is gone for good — the client never sees it. The
     // EventSource auto-reconnects and gets subscription-opened{taskRunning:false}.
     await server.close();
-    server = await startServer({ tmpHome, port, env: { FAKE_AGENT_SCENARIO: scenarioPath } });
+    try {
+      server = await startServer({ tmpHome, port, env: { FAKE_AGENT_SCENARIO: scenarioPath } });
+    } catch (err) {
+      // If the re-bind fails (e.g. the OS hasn't released the port yet),
+      // `server` would otherwise still hold the already-closed `beforeAll`
+      // handle. `afterAll` would then call `close()` on a child that has
+      // already exited and await an `exit` event that never re-fires —
+      // hanging teardown (TEST-14). Swap in a no-op handle so teardown
+      // always resolves promptly, then fail the test.
+      server = { url: "", home: tmpHome, close: () => Promise.resolve() };
+      throw err;
+    }
 
     // Positive anchor (TEST-25): assert the alternate post-reconnect state
     // rendered BEFORE the negatives. The conversation DOM survives the
@@ -176,7 +187,10 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
     // reducer (`state.taskRunning || event.taskRunning`) they never would,
     // and these auto-retrying polls would time out.
     await expect(chatPane.thinkingIndicator).not.toBeVisible({ timeout: 30_000 });
-    await expect(chatPane.stopButton).not.toBeVisible();
+    // Explicit 30 s timeout (not the 5 s config default): the Stop button
+    // clears from the same reducer transition as the indicator, but under
+    // slow CI it could lag the indicator's poll and spuriously time out.
+    await expect(chatPane.stopButton).not.toBeVisible({ timeout: 30_000 });
 
     // Positive anchor (TEST-25): the composer is genuinely back in the send
     // state, not transiently flickering. A brand-new submission is accepted
