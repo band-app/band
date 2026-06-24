@@ -1105,11 +1105,12 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
 
 /// The CLI is intentionally a dumb forwarder: it pipes the raw hook payload to
 /// the server, which resolves the workspace and dispatches to the coding-agent
-/// adapter to derive the status. We assert the end-to-end wiring here (cwd
-/// resolution + forward + server-side mapping). The exhaustive event→status
-/// matrix lives in the web server's tests (`apps/web/tests/needs-attention.test.ts`),
-/// next to the adapter that owns the mapping — so adding a new agent never
-/// touches the CLI or these tests.
+/// adapter to derive the status. This test verifies ONLY forwarding integrity
+/// (cwd resolution + forward + that the server actually maps something) — it is
+/// a wiring smoke-test, NOT a behaviour contract. The event-specific contract
+/// (which event maps to which status) is owned entirely by the web server's
+/// tests (`apps/web/tests/needs-attention.test.ts`), next to the adapter that
+/// owns the mapping — so adding a new agent never touches the CLI or these tests.
 #[test]
 fn notify_forwards_payload_to_server() {
     let env = TestEnv::new();

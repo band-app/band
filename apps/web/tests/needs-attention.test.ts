@@ -627,7 +627,11 @@ describe("statuses.notify — agent hook mapping", () => {
 
   async function notifyStatus(payload: Record<string, unknown>): Promise<string | undefined> {
     const res = await trpcMutate(server.url, "statuses.notify", { cwd: repoPath, payload });
-    expect(res.status).toBe(200);
+    // Surface a server-side failure at its root cause rather than letting it
+    // masquerade as a wrong-status assertion failure at the call site.
+    if (res.status !== 200) {
+      throw new Error(`statuses.notify failed: HTTP ${res.status} — ${await res.text()}`);
+    }
     const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
     const data = await trpcData<{ agent?: { status: string } } | null>(getRes);
     return data?.agent?.status;
