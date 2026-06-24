@@ -1,27 +1,13 @@
-import { mapHookPayloadToStatus } from "@band-app/coding-agent";
 import { z } from "zod";
-import { toWorkspaceId } from "@/dashboard";
-import { settingsService } from "../../services/settings-service";
-import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
+import {
+  applyHookNotification,
+  getWorkspaceStatus,
+  resolveWorkspaceIdByCwd,
+  upsertWorkspaceStatus,
+} from "../../services/state";
 import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
-
-/**
- * Map a working directory to the workspace it belongs to, or `null` if no
- * known worktree contains it. Shared by `resolve` and `notify`.
- */
-function resolveWorkspaceIdByCwd(cwd: string): string | null {
-  const state = loadState();
-  for (const proj of state.projects) {
-    for (const wt of proj.worktrees) {
-      if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
-        return toWorkspaceId(proj.name, wt.branch);
-      }
-    }
-  }
-  return null;
-}
 
 /**
  * Status sub-routers — migrated into the 3-tier architecture as part of
@@ -111,18 +97,8 @@ export const statusesRouter = t.router({
   notify: publicProcedure
     .input(z.object({ cwd: z.string(), payload: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ input }) => {
-      const workspaceId = resolveWorkspaceIdByCwd(input.cwd);
-      if (!workspaceId) return { ok: true };
-
-      const existing = getWorkspaceStatus(workspaceId);
-      const agentDef = settingsService.getAgentDefinition(existing?.agent?.codingAgentId);
-      const status = await mapHookPayloadToStatus(agentDef.type, input.payload);
-
-      const updated = upsertWorkspaceStatus(workspaceId, {
-        status,
-        lastActivity: new Date().toISOString(),
-      });
-      emit({ kind: "update", status: updated });
+      const status = await applyHookNotification(input.cwd, input.payload);
+      if (status) emit({ kind: "update", status });
       return { ok: true };
     }),
 });

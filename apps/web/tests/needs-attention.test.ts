@@ -676,10 +676,14 @@ describe("statuses.notify — agent hook mapping", () => {
     const data = await trpcData<{ agent?: { lastActivity: string } } | null>(getRes);
     const stamped = data?.agent?.lastActivity;
     expect(typeof stamped).toBe("string");
-    // The endpoint writes `new Date().toISOString()` on every call.
+    // The endpoint writes `new Date().toISOString()` during the call, so the
+    // stamp must fall between when we started and now (bounded both sides so a
+    // stale or far-future value can't slip through). `before - 50` absorbs
+    // sub-millisecond cross-process clock jitter.
     const stampedMs = Date.parse(stamped as string);
     expect(Number.isNaN(stampedMs)).toBe(false);
-    expect(stampedMs).toBeGreaterThanOrEqual(before - 1000);
+    expect(stampedMs).toBeGreaterThanOrEqual(before - 50);
+    expect(stampedMs).toBeLessThanOrEqual(Date.now() + 1000);
   });
 
   it("is a no-op for an unresolvable cwd", async () => {

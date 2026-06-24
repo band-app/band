@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -225,17 +225,58 @@ export function resolveAgentDefinition(
  * a JSON file the right backing store; placing the class alongside the
  * relational queries keeps the Infra-tier shape uniform for callers.
  */
+/**
+ * Process-lifetime cache of the parsed settings document, keyed by absolute
+ * file path and validated against the file's mtime.
+ *
+ * `settings.json` is read on hot paths — every agent hook event routes through
+ * `statuses.notify` → `SettingsService.getAgentDefinition` → `load()`, and
+ * `agent-pool` calls `load()` on every agent resolution — but the file changes
+ * rarely (only when the user edits settings). Re-reading + re-parsing it
+ * synchronously on every call needlessly parks the event loop. Caching by
+ * mtime makes the steady state a single `statSync` with no `readFileSync`/
+ * `JSON.parse`. A write through `save()` bumps the mtime *and* clears the entry
+ * directly, so the cache is self-invalidating — there is no stale-read window.
+ *
+ * The cached value is treated as read-only by callers (settings are an
+ * immutable on-disk snapshot; mutations go through `save()`), so returning the
+ * shared reference is safe and avoids a clone.
+ */
+interface CachedSettings {
+  mtimeMs: number;
+  value: Settings;
+}
+const settingsCache = new Map<string, CachedSettings>();
+
 export class SettingsQueries {
   /**
    * Read the current settings document. Returns an empty object if the file
    * does not exist or fails to parse — callers treat an absent file as
    * "no settings yet" rather than an error.
+   *
+   * Backed by an mtime-keyed cache (see `settingsCache`): the steady-state
+   * cost is a single `statSync`, not a `readFileSync` + `JSON.parse`.
    */
   load(): Settings {
+    const filePath = settingsFile();
+    let mtimeMs: number;
     try {
-      const data = readFileSync(settingsFile(), "utf-8");
-      return JSON.parse(data) as Settings;
+      mtimeMs = statSync(filePath).mtimeMs;
     } catch {
+      // File absent (or unstatable) — drop any stale entry and report empty.
+      settingsCache.delete(filePath);
+      return {};
+    }
+    const cached = settingsCache.get(filePath);
+    if (cached && cached.mtimeMs === mtimeMs) {
+      return cached.value;
+    }
+    try {
+      const value = JSON.parse(readFileSync(filePath, "utf-8")) as Settings;
+      settingsCache.set(filePath, { mtimeMs, value });
+      return value;
+    } catch {
+      settingsCache.delete(filePath);
       return {};
     }
   }
@@ -270,6 +311,9 @@ export class SettingsQueries {
     const tmpPath = `${filePath}.tmp.${process.pid}`;
     writeFileSync(tmpPath, data, "utf-8");
     renameSync(tmpPath, filePath);
+    // Drop the cache entry directly so a load() in the same coarse mtime tick
+    // (some filesystems have 1s mtime resolution) can never read stale data.
+    settingsCache.delete(filePath);
   }
 
   /**
