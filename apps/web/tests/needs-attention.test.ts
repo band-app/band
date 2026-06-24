@@ -585,3 +585,129 @@ describe("needs_attention — status stream via WebSocket", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: statuses.notify — agent hook → status mapping
+//
+// The CLI's `band notify` forwards the raw hook payload here; the server
+// dispatches to the workspace's coding-agent adapter to derive the status.
+// This is the authoritative test for the Claude Code event→status matrix
+// (the mapping lives in packages/coding-agent's claude-code adapter).
+// ---------------------------------------------------------------------------
+
+describe("statuses.notify — agent hook mapping", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let repoPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    repoPath = createGitRepo(tmpHome, "myrepo");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "myrepo",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  async function notifyStatus(payload: Record<string, unknown>): Promise<string | undefined> {
+    const res = await trpcMutate(server.url, "statuses.notify", { cwd: repoPath, payload });
+    expect(res.status).toBe(200);
+    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const data = await trpcData<{ agent?: { status: string } } | null>(getRes);
+    return data?.agent?.status;
+  }
+
+  it("maps Stop → needs_attention", async () => {
+    expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("needs_attention");
+  });
+
+  it("maps PermissionRequest → needs_attention", async () => {
+    expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Bash" })).toBe(
+      "needs_attention",
+    );
+  });
+
+  it("maps PreToolUse + ExitPlanMode → needs_attention", async () => {
+    expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "ExitPlanMode" })).toBe(
+      "needs_attention",
+    );
+  });
+
+  it("maps PreToolUse + AskUserQuestion → needs_attention", async () => {
+    expect(
+      await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion" }),
+    ).toBe("needs_attention");
+  });
+
+  it("maps PreToolUse + regular tool → working", async () => {
+    expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "Read" })).toBe(
+      "working",
+    );
+  });
+
+  it("maps PostToolUse → working", async () => {
+    // Drive to needs_attention first, then confirm PostToolUse restores working.
+    await notifyStatus({ hook_event_name: "Stop" });
+    expect(await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" })).toBe(
+      "working",
+    );
+  });
+
+  it("stamps a recent lastActivity timestamp", async () => {
+    const before = Date.now();
+    await notifyStatus({ hook_event_name: "Stop" });
+    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const data = await trpcData<{ agent?: { lastActivity: string } } | null>(getRes);
+    const stamped = data?.agent?.lastActivity;
+    expect(typeof stamped).toBe("string");
+    // The endpoint writes `new Date().toISOString()` on every call.
+    const stampedMs = Date.parse(stamped as string);
+    expect(Number.isNaN(stampedMs)).toBe(false);
+    expect(stampedMs).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  it("is a no-op for an unresolvable cwd", async () => {
+    const res = await trpcMutate(server.url, "statuses.notify", {
+      cwd: "/no/such/workspace",
+      payload: { hook_event_name: "Stop" },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean }>(res);
+    expect(data.ok).toBe(true);
+
+    // Anchor the no-op claim: the bogus cwd resolves to no workspace, so
+    // nothing could have been written for it.
+    const resolveRes = await trpcQuery(server.url, "statuses.resolve", {
+      cwd: "/no/such/workspace",
+    });
+    const resolved = await trpcData<{ workspaceId: string | null }>(resolveRes);
+    expect(resolved.workspaceId).toBeNull();
+  });
+
+  it("rejects statuses.notify without the band_token cookie (401)", async () => {
+    // The shared `trpcMutate` always sends the cookie, so we call `fetch`
+    // directly to omit it. Mirrors the 401 guard in sibling endpoint suites.
+    const res = await fetch(`${server.url}/trpc/statuses.notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: repoPath, payload: { hook_event_name: "Stop" } }),
+    });
+    expect(res.status).toBe(401);
+  });
+});

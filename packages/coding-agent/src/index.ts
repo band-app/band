@@ -18,6 +18,7 @@ export type {
   ToolUseEvent,
 } from "./events.js";
 export { createCodingAgent } from "./factory.js";
+export { mapHookPayloadToStatus } from "./hook-status.js";
 export {
   getAgentConfigDir,
   getDefaultAgentBinary,
@@ -33,6 +34,7 @@ export {
   type ModelRates,
 } from "./pricing.js";
 export type {
+  AgentHookStatus,
   AgentMode,
   AgentModel,
   CliInvocation,

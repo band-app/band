@@ -73,9 +73,13 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
   <pre><code set:html={`echo '{"hook_event_name":"Stop","cwd":"/path/to/worktree"}' | band notify`}></code></pre>
   <p>
-    The Band server processes these notifications and updates the agent status for the
-    corresponding workspace. Status changes are broadcast to the dashboard in real-time
-    via server-sent events (SSE).
+    The <code>band notify</code> command is agent-agnostic: it simply forwards the raw hook
+    payload (plus the working directory) to the Band server. The server resolves which
+    workspace the directory belongs to, then dispatches to that workspace's coding-agent
+    adapter to translate the payload into a status — so the event→status mapping lives next
+    to each agent's logic and adding a new agent never requires changing the CLI. The
+    resulting status change is broadcast to the dashboard in real-time via server-sent
+    events (SSE).
   </p>
 
   <h3>Hook Events</h3>
@@ -86,7 +90,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ul>
     <li><strong>UserPromptSubmit</strong> &mdash; A new prompt has been sent. Transitions to <em>working</em>.</li>
     <li><strong>PreToolUse</strong> &mdash; A tool call is about to run. Stays <em>working</em> in general; switches to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>, since both require a human reply.</li>
-    <li><strong>PermissionRequest</strong> &mdash; The agent needs permission to proceed (e.g. an unapproved tool). Stays <em>working</em>; the dashboard surfaces the request inline.</li>
+    <li><strong>PermissionRequest</strong> &mdash; The agent needs permission to proceed (e.g. plan approval or an unapproved tool). Transitions to <em>needs attention</em>, since the agent is blocked until the user approves or denies. This event fires after <code>PreToolUse</code>, so it must also resolve to <em>needs attention</em> &mdash; otherwise it would overwrite the value set by <code>PreToolUse</code> for plan-approval and question flows.</li>
     <li><strong>PostToolUse</strong> &mdash; A tool call has finished. Stays <em>working</em>.</li>
     <li><strong>Stop</strong> &mdash; The agent has stopped (task completed or exited). Transitions to <em>needs attention</em>.</li>
   </ul>
