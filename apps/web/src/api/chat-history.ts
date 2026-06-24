@@ -49,6 +49,11 @@ const log = createLogger("chat-history");
  *  and the page size the client requests. */
 const DEFAULT_PAGE_LIMIT = 50;
 
+/** Hard cap on a client-supplied `limit`. Without it a caller could request
+ *  `?limit=1000000` and force the server to read, translate, and JSON-stringify
+ *  the entire transcript into one synchronous response buffer. */
+const MAX_PAGE_LIMIT = 200;
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
@@ -72,7 +77,10 @@ export async function handleChatHistory(
   }
 
   const parsedLimit = limitRaw != null ? Number.parseInt(limitRaw, 10) : NaN;
-  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_PAGE_LIMIT;
+  const limit =
+    Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, MAX_PAGE_LIMIT)
+      : DEFAULT_PAGE_LIMIT;
 
   const offset = Math.max(0, before - limit);
   const pageLimit = before - offset;
@@ -127,7 +135,13 @@ export async function handleChatHistory(
       oldestOffset: result.firstOffset,
     });
   } catch (err) {
-    log.warn({ chatId, sessionId, err }, "chat-history: failed to read older page");
+    // Log only the message — the full error embeds internal filesystem paths
+    // (e.g. the JSONL path in an ENOENT), which don't belong in logs alongside
+    // the session id.
+    log.warn(
+      { chatId, err: err instanceof Error ? err.message : String(err) },
+      "chat-history: failed to read older page",
+    );
     sendJson(res, 500, { error: "Internal server error" });
   }
 }

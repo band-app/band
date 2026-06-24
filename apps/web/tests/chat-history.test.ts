@@ -93,7 +93,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  // Retry on ENOTEMPTY — background server subprocesses may still be writing to
+  // the tree as cleanup walks it (mirrors e2e/helpers/server.ts::cleanupTmpHome).
+  rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 interface HistoryResponse {
@@ -184,7 +186,35 @@ describe("GET /api/chats/:chatId/history", () => {
     const res = await getHistory(CHAT_ID, { before: 70, limit: 50 }, null);
     expect(res.status).toBe(401);
   });
+
+  it("returns an empty page (not a 5xx) for an unknown chatId", async () => {
+    // An unknown chat resolves no session → empty page, same as the
+    // no-session branch. Pins the error-path contract so it can't regress to a
+    // 500 (or an unhandled throw).
+    const res = await getHistory("hist-chat-does-not-exist", { before: 70, limit: 50 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as HistoryResponse;
+    expect(body).toEqual({ events: [], hasOlder: false, oldestOffset: 0 });
+  });
+
+  it("handles an oversized limit safely (clamped server-side, no error, bounded page)", async () => {
+    // A hostile `limit=10_000_000` is clamped to MAX_PAGE_LIMIT server-side, so
+    // the endpoint responds 200 with a bounded page instead of trying to read,
+    // translate, and stringify the whole transcript. (This 120-message session
+    // is shorter than the cap, so the page is the full [0, 70) range; the guard
+    // here is that the oversized request is handled without a 5xx or a hang.)
+    const res = await getHistory(CHAT_ID, { before: 70, limit: 10_000_000 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as HistoryResponse;
+    expect(body.oldestOffset).toBe(0);
+    expect(body.events.length).toBeLessThanOrEqual(MAX_PAGE_LIMIT_EVENTS);
+    expect(userTextsOf(body)).toContain(userText(0));
+  });
 });
+
+// The endpoint caps `limit` at 200 messages; each message folds to ≥1 event, so
+// a bounded page never exceeds a few hundred events for these text-only turns.
+const MAX_PAGE_LIMIT_EVENTS = 300;
 
 // ---------------------------------------------------------------------------
 // Helpers — mirror the JSONL shape the Claude Code SDK persists.
