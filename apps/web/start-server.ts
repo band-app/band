@@ -7,6 +7,7 @@ import sirv from "sirv";
 import { WebSocketServer } from "ws";
 import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
+import { handleChatHistory } from "./src/api/chat-history.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/server/api/context.ts";
@@ -725,6 +726,21 @@ async function main() {
           }
         }
         console.error("[chat-events] handler error", err);
+      });
+      return;
+    }
+
+    // Older-page fetch for chat scroll-back pagination (issue #572). Returns a
+    // JSON page of older messages translated to ChatEvents; the client folds
+    // them in isolation and prepends. Sister of /events + /messages.
+    const chatHistoryMatch = req.url?.match(/^\/api\/chats\/([^/]+)\/history(?:\?|$)/);
+    if (chatHistoryMatch && req.method === "GET") {
+      void handleChatHistory(req, res, decodeURIComponent(chatHistoryMatch[1])).catch((err) => {
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        }
+        console.error("[chat-history] handler error", err);
       });
       return;
     }

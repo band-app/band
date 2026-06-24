@@ -21,6 +21,15 @@ import type {
 const log = createLogger("chat-events");
 
 /**
+ * Number of most-recent messages replayed on a cold subscribe. The client
+ * fetches older pages on demand via `GET /api/chats/:id/history` when the user
+ * scrolls to the top (issue #572). Keep in sync with the default `limit` of the
+ * history endpoint and the page size the client requests in
+ * `use-chat-subscription.ts::loadOlder`.
+ */
+const COLD_REPLAY_LIMIT = 50;
+
+/**
  * Unified chat event log endpoint.
  *
  * `GET /api/chats/:chatId/events`
@@ -347,10 +356,15 @@ async function replayPast(opts: {
         if (!payload) continue;
         writer.write({ ...payload, eventId: c.eventId ?? 0 } as ChatEvent);
       }
+      // Buffer holds the session from event 1 — nothing older on disk beyond
+      // what we just replayed.
+      writer.write({ type: "history-meta", hasOlder: false, oldestOffset: 0, eventId: -999_999 });
       return;
     }
 
     let jsonlEmittedAny = false;
+    let historyHasOlder = false;
+    let historyOldestOffset = 0;
     if (chatWorkspaceId) {
       try {
         const workspace = workspaceService.resolve(chatWorkspaceId);
@@ -361,8 +375,16 @@ async function replayPast(opts: {
             agentTypeHint,
           );
           if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-            const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
+            // Windowed cold subscribe (issue #572): replay only the most
+            // recent `COLD_REPLAY_LIMIT` messages instead of the full JSONL.
+            // `hasMore` / `firstOffset` drive the client's scroll-back
+            // pagination — surfaced below via a `history-meta` event.
+            const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {
+              tail: COLD_REPLAY_LIMIT,
+            });
             const messages = result.messages;
+            historyHasOlder = result.hasMore;
+            historyOldestOffset = result.firstOffset;
             // Synthetic ids sort below any live buffer ids (-1000-N..-1000),
             // so subsequent live events the client receives keep their
             // monotonic order. They DO leave `state.lastEventId` at 0 on
@@ -396,6 +418,16 @@ async function replayPast(opts: {
         writer.write({ ...payload, eventId: c.eventId ?? 0 } as ChatEvent);
       }
     }
+    // Always emit a definitive history marker on cold subscribe so the client
+    // never has to infer "no older history" from the absence of an event. The
+    // id is the most-negative in this batch so it sorts before every replayed
+    // event; the reducer reads only `hasOlder`/`oldestOffset` off it.
+    writer.write({
+      type: "history-meta",
+      hasOlder: historyHasOlder,
+      oldestOffset: historyOldestOffset,
+      eventId: -999_999,
+    });
     return;
   }
 

@@ -176,6 +176,52 @@ export class ChatPanePage {
     });
   }
 
+  /** Scroll the chat container to the bottom — used to verify stick-to-bottom
+   *  still reaches the latest message after older pages have prepended. */
+  async scrollToBottom(): Promise<void> {
+    await test.step("Scroll chat to bottom", async () => {
+      await this.scroller.evaluate((el) => {
+        (el as HTMLDivElement).scrollTop = (el as HTMLDivElement).scrollHeight;
+      });
+    });
+  }
+
+  /** Install a per-animation-frame sampler that records the on-screen `top`
+   *  (viewport px) of the message row containing `anchorText`, until the row
+   *  unmounts or the buffer fills. Drives the scroll-back "no jump" assertion:
+   *  a correctly-anchored prepend keeps the anchor row's screen position stable
+   *  (a few px of measurement jitter), while a broken prepend moves it by the
+   *  full height of the inserted page (thousands of px). Install it AFTER the
+   *  anchor row is on screen and BEFORE triggering `loadOlder`. Read the
+   *  samples back with `readAnchorTopSamples()`. */
+  async installAnchorTopSampler(anchorText: string): Promise<void> {
+    await this.page.evaluate((text) => {
+      const win = window as unknown as { __anchorTops: number[] };
+      win.__anchorTops = [];
+      const MAX_SAMPLES = 600;
+      const findRow = (): HTMLElement | null => {
+        const rows = Array.from(
+          document.querySelectorAll('[data-testid="chat-pane__message-row"]'),
+        ) as HTMLElement[];
+        return rows.find((r) => r.innerText.includes(text)) ?? null;
+      };
+      const sample = () => {
+        if (win.__anchorTops.length >= MAX_SAMPLES) return;
+        const row = findRow();
+        if (row) win.__anchorTops.push(Math.round(row.getBoundingClientRect().top));
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, anchorText);
+  }
+
+  /** Read the anchor-row `top` samples recorded by `installAnchorTopSampler()`. */
+  async readAnchorTopSamples(): Promise<number[]> {
+    return await this.page.evaluate(
+      () => (window as unknown as { __anchorTops?: number[] }).__anchorTops ?? [],
+    );
+  }
+
   /** Click the Stop button to cancel the in-flight task. The button is
    *  only rendered while `status === "streaming"`. */
   async clickStop(): Promise<void> {

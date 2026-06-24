@@ -37,7 +37,15 @@
  */
 
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 
 export interface VirtualizedMessageListProps<T> {
@@ -192,6 +200,32 @@ export function VirtualizedMessageList<T>({
     // when items shift (e.g. a new message pushes earlier ones up).
     getItemKey: getItemKeyFn,
   });
+
+  // Scroll-anchor on prepend (issue #572). When older messages are prepended,
+  // the previously-first item shifts down by the inserted count and the
+  // viewport would jump. We re-pin it to the top via the virtualizer's native
+  // `scrollToIndex`, which computes the target offset from its own size cache
+  // (measured + estimated) and then keeps converging as the inserted rows
+  // measure — so we don't fight TanStack's built-in dynamic-measurement
+  // anchoring with a parallel scrollTop writer (that double-counts and drifts).
+  //
+  // Detection is purely structural: a prepend is the only thing that changes
+  // `items[0]`'s key. Streaming deltas append at the END and leave the first
+  // key untouched, so this no-ops on the hot path. The mount transition
+  // (null → first key) is skipped so we never fight the first-paint reveal gate.
+  const prevFirstKeyRef = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on `items`; getKey/virtualizer are stable refs
+  useLayoutEffect(() => {
+    const firstKey = items.length > 0 ? getKey(items[0], 0) : null;
+    const prevFirstKey = prevFirstKeyRef.current;
+    prevFirstKeyRef.current = firstKey;
+    if (prevFirstKey == null || firstKey === prevFirstKey) return;
+    // The previously-first item moved to this index ⇒ that many were prepended.
+    const newIndex = items.findIndex((item, i) => getKey(item, i) === prevFirstKey);
+    if (newIndex > 0) {
+      virtualizer.scrollToIndex(newIndex, { align: "start" });
+    }
+  }, [items]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
