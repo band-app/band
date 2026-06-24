@@ -145,6 +145,20 @@ export type CliInvocation =
       reason: string;
     };
 
+/**
+ * Workspace status an agent's lifecycle notification resolves to.
+ *
+ *   - `working`         → the agent is actively making progress.
+ *   - `needs_attention` → the ball is in the user's court: the agent finished
+ *                         its turn or is blocked waiting for the user to act.
+ *
+ * Each adapter owns the translation from its own notification/hook payload to
+ * one of these values (see e.g. `mapClaudeCodeHookStatus` in
+ * `adapters/claude-code.ts`), so adding a new agent never requires touching
+ * the Band CLI — only the adapter.
+ */
+export type AgentHookStatus = "working" | "needs_attention";
+
 export interface CodingAgent {
   readonly name: string;
   readonly supportedFeatures: CodingAgentFeatures;

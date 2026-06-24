@@ -71,7 +71,7 @@ enum Commands {
         #[arg(long = "no-focus")]
         no_focus: bool,
     },
-    /// Receive hook notifications from Claude Code (reads JSON from stdin)
+    /// Receive coding-agent hook notifications (reads JSON from stdin)
     Notify,
     /// Show command schemas as JSON
     Schema {
@@ -2546,6 +2546,18 @@ fn cmd_open(
 fn cmd_notify() -> Result<CommandResult, String> {
     use std::io::Read;
 
+    // The CLI is intentionally agent-agnostic: it forwards the raw hook
+    // payload to the server and lets the server dispatch to the relevant
+    // coding-agent adapter to decide the workspace status. Adding hook
+    // support for a new agent therefore never requires changing this command.
+
+    let ok = || {
+        Ok(CommandResult {
+            text: String::new(),
+            json: serde_json::json!({"ok": true}),
+        })
+    };
+
     let mut input = String::new();
     std::io::stdin()
         .read_to_string(&mut input)
@@ -2554,24 +2566,9 @@ fn cmd_notify() -> Result<CommandResult, String> {
     let payload: serde_json::Value = serde_json::from_str(&input)
         .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
 
-    let hook_event = payload
-        .get("hook_event_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let tool_name = payload
-        .get("tool_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let agent_status = match hook_event {
-        "Stop" => "needs_attention",
-        "PreToolUse" if tool_name == "AskUserQuestion" || tool_name == "ExitPlanMode" => {
-            "needs_attention"
-        }
-        _ => "working",
-    };
-
+    // `cwd` tells the server which workspace this notification is for — that's
+    // about routing, not about interpreting the agent's behavior. Prefer the
+    // payload's cwd (agents include it), falling back to the process cwd.
     let cwd = payload
         .get("cwd")
         .and_then(|v| v.as_str())
@@ -2584,52 +2581,20 @@ fn cmd_notify() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     // All API calls for notify are fire-and-forget — fail silently
-    // because this runs from git hooks and must not break git workflows
+    // because this runs from agent hooks and must not break the agent.
     let Ok(client) = api::ApiClient::from_settings() else {
-        return Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        });
+        return ok();
     };
 
-    // Resolve CWD to workspace ID
-    let resolve_result = client.trpc_query("statuses.resolve", &serde_json::json!({ "cwd": cwd }));
-    let workspace_id = match resolve_result {
-        Ok(data) => data
-            .get("workspaceId")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        Err(_) => {
-            return Ok(CommandResult {
-                text: String::new(),
-                json: serde_json::json!({"ok": true}),
-            });
-        }
-    };
-
-    let Some(workspace_id) = workspace_id else {
-        return Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        });
-    };
-
-    // Update status via API
     let _ = client.trpc_mutate(
-        "statuses.update",
+        "statuses.notify",
         &serde_json::json!({
-            "workspaceId": workspace_id,
-            "agent": {
-                "status": agent_status,
-                "lastActivity": chrono_now(),
-            },
+            "cwd": cwd,
+            "payload": payload,
         }),
     );
 
-    Ok(CommandResult {
-        text: String::new(),
-        json: serde_json::json!({"ok": true}),
-    })
+    ok()
 }
 
 // --- Table formatting ---
@@ -2998,9 +2963,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "notify",
-            "description": "Receive hook notifications from Claude Code (reads JSON from stdin)",
+            "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
             "parameters": [],
-            "notes": "Not called directly — registered as a Claude Code hook by the Band dashboard."
+            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard. Forwards the raw payload to the server, which dispatches to the agent's adapter to derive the workspace status."
         }),
         serde_json::json!({
             "name": "schema",
@@ -3037,13 +3002,4 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
     } else {
         Ok(serde_json::json!({"commands": commands}))
     }
-}
-
-/// Simple Unix timestamp without pulling in chrono crate.
-pub(crate) fn chrono_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", dur.as_secs())
 }

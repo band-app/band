@@ -21,6 +21,7 @@ import type { AgentEvent } from "../events.js";
 import { computeCost } from "../pricing.js";
 import { readSkillsFromDir } from "../skills.js";
 import type {
+  AgentHookStatus,
   AgentMode,
   AgentModel,
   CliInvocation,
@@ -1274,6 +1275,47 @@ function* mapClaudeCodeEvent(
  * the binary the SDK shells out to (`claude` on PATH).
  */
 export const CLAUDE_CODE_DEFAULT_BINARY = "claude";
+
+/**
+ * Translate a Claude Code hook payload (the JSON Claude Code pipes to
+ * `band notify` on stdin via the hooks Band registers in
+ * `~/.claude/settings.json`) into a Band workspace status.
+ *
+ * `needs_attention` means the ball is in the user's court — the agent either
+ * finished its turn or is blocked waiting for the user to act:
+ *
+ *   - `Stop`              → the agent finished/exited; it's the user's turn.
+ *   - `PermissionRequest` → the agent is blocked awaiting approval (plan
+ *                           approval, a question, or a gated tool like Bash).
+ *                           This hook fires *after* `PreToolUse`, so it must
+ *                           also resolve to needs_attention — otherwise it
+ *                           would overwrite the PreToolUse value back to
+ *                           "working" while the agent is actually waiting.
+ *   - `PreToolUse` for the interactive tools (`AskUserQuestion`/`ExitPlanMode`)
+ *                           → the agent is about to block on the user.
+ *
+ * Everything else (UserPromptSubmit, PostToolUse, regular PreToolUse) means
+ * the agent is actively making progress → `working`.
+ *
+ * Owning this mapping here (rather than in the Band CLI) keeps the CLI
+ * agent-agnostic: it forwards the raw payload and the server dispatches to
+ * the right adapter.
+ */
+export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): AgentHookStatus {
+  const hookEvent = typeof payload.hook_event_name === "string" ? payload.hook_event_name : "";
+  const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
+
+  if (hookEvent === "Stop" || hookEvent === "PermissionRequest") {
+    return "needs_attention";
+  }
+  if (
+    hookEvent === "PreToolUse" &&
+    (toolName === "AskUserQuestion" || toolName === "ExitPlanMode")
+  ) {
+    return "needs_attention";
+  }
+  return "working";
+}
 
 /**
  * Where freshly-shipped skills (e.g. the band CLI's bundled SKILL.md files,

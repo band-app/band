@@ -1103,111 +1103,48 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
     json["status"].as_str().map(String::from)
 }
 
+/// The CLI is intentionally a dumb forwarder: it pipes the raw hook payload to
+/// the server, which resolves the workspace and dispatches to the coding-agent
+/// adapter to derive the status. This test verifies ONLY forwarding integrity
+/// (cwd resolution + forward + that the server actually maps something) — it is
+/// a wiring smoke-test, NOT a behaviour contract. The event-specific contract
+/// (which event maps to which status) is owned entirely by the web server's
+/// tests (`apps/web/tests/needs-attention.test.ts`), next to the adapter that
+/// owns the mapping — so adding a new agent never touches the CLI or these tests.
 #[test]
-fn notify_pre_tool_use_ask_user_question_sets_needs_attention() {
+fn notify_forwards_payload_to_server() {
     let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("needs_attention"),
-        "PreToolUse+AskUserQuestion should set needs_attention"
+    // A "Stop" hook → the agent finished its turn → needs_attention.
+    let output = band_notify(
+        &env,
+        &serde_json::json!({
+            "hook_event_name": "Stop",
+            "cwd": env.repo_path.to_string_lossy()
+        }),
     );
-}
-
-#[test]
-fn notify_pre_tool_use_exit_plan_mode_sets_needs_attention() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("needs_attention"),
-        "PreToolUse+ExitPlanMode should set needs_attention"
-    );
-}
-
-#[test]
-fn notify_pre_tool_use_regular_tool_stays_working() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Read",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("working"),
-        "PreToolUse+Read should set working, not needs_attention"
-    );
-}
-
-#[test]
-fn notify_post_tool_use_after_ask_user_restores_working() {
-    let env = TestEnv::new();
-
-    // First, AskUserQuestion triggers needs_attention
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success());
     assert_eq!(
         query_agent_status(&env.band_dir, "my-project-main").as_deref(),
-        Some("needs_attention")
+        Some("needs_attention"),
+        "Stop hook should be forwarded and mapped to needs_attention by the server"
     );
 
-    // Then PostToolUse fires after user responds → back to working
-    let payload = serde_json::json!({
-        "hook_event_name": "PostToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success());
+    // A regular tool-use hook → the agent is making progress → working. Proves
+    // the CLI forwards the full payload rather than hardcoding a single status.
+    let output = band_notify(
+        &env,
+        &serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "cwd": env.repo_path.to_string_lossy()
+        }),
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-project-main").as_deref(),
         Some("working"),
-        "PostToolUse should restore working status"
-    );
-}
-
-#[test]
-fn notify_permission_request_sets_working() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PermissionRequest",
-        "tool_name": "Bash",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("working"),
-        "PermissionRequest should set working (not needs_attention)"
+        "PreToolUse+Read should be forwarded and mapped to working by the server"
     );
 }
 

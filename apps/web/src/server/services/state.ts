@@ -1,3 +1,5 @@
+import { mapHookPayloadToStatus } from "@band-app/coding-agent";
+import { toWorkspaceId } from "@/dashboard";
 import {
   type ProjectKind,
   ProjectQueries,
@@ -254,6 +256,51 @@ export function upsertWorkspaceStatus(
       codingAgentId: mergedAgent.codingAgentId ?? undefined,
     },
   };
+}
+
+/**
+ * Map a working directory to the workspace it belongs to, or `null` if no
+ * known worktree contains it. Used by the `statuses.resolve` and
+ * `statuses.notify` procedures.
+ */
+export function resolveWorkspaceIdByCwd(cwd: string): string | null {
+  const state = loadState();
+  for (const proj of state.projects) {
+    for (const wt of proj.worktrees) {
+      if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
+        return toWorkspaceId(proj.name, wt.branch);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Apply a coding-agent lifecycle notification (e.g. a Claude Code hook piped
+ * through `band notify`) to the workspace that owns `cwd`.
+ *
+ * Resolves the workspace, looks up its configured coding agent, and dispatches
+ * to that agent's adapter (`mapHookPayloadToStatus`) to translate the raw hook
+ * payload into a status — keeping the per-agent mapping in the adapter so the
+ * CLI stays agent-agnostic. Returns the updated status snapshot, or `null` when
+ * `cwd` maps to no known workspace (a no-op, matching the fire-and-forget hook
+ * contract). The caller is responsible for broadcasting the returned snapshot.
+ */
+export async function applyHookNotification(
+  cwd: string,
+  payload: Record<string, unknown>,
+): Promise<WorkspaceStatus | null> {
+  const workspaceId = resolveWorkspaceIdByCwd(cwd);
+  if (!workspaceId) return null;
+
+  const existing = getWorkspaceStatus(workspaceId);
+  const agentDef = settingsService.getAgentDefinition(existing?.agent?.codingAgentId);
+  const status = await mapHookPayloadToStatus(agentDef.type, payload);
+
+  return upsertWorkspaceStatus(workspaceId, {
+    status,
+    lastActivity: new Date().toISOString(),
+  });
 }
 
 /**

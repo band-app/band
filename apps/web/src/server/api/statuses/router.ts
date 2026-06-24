@@ -1,6 +1,10 @@
 import { z } from "zod";
-import { toWorkspaceId } from "@/dashboard";
-import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
+import {
+  applyHookNotification,
+  getWorkspaceStatus,
+  resolveWorkspaceIdByCwd,
+  upsertWorkspaceStatus,
+} from "../../services/state";
 import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
@@ -76,16 +80,27 @@ export const statusesRouter = t.router({
     }),
 
   resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
-    const state = loadState();
-    for (const proj of state.projects) {
-      for (const wt of proj.worktrees) {
-        if (input.cwd === wt.path || input.cwd.startsWith(`${wt.path}/`)) {
-          return { workspaceId: toWorkspaceId(proj.name, wt.branch) };
-        }
-      }
-    }
-    return { workspaceId: null };
+    return { workspaceId: resolveWorkspaceIdByCwd(input.cwd) };
   }),
+
+  /**
+   * Agent-agnostic entry point for coding-agent lifecycle notifications
+   * (e.g. Claude Code hooks piped through `band notify`). The CLI forwards
+   * the raw payload plus the agent's cwd; the server resolves the workspace,
+   * looks up its configured agent, and dispatches to that agent's adapter to
+   * translate the payload into a status. Keeping the mapping in the adapter
+   * means adding hook support for a new agent never touches the CLI.
+   *
+   * Fire-and-forget semantics: unknown cwd → no-op `{ ok: true }` (matches the
+   * CLI hook contract, which must never fail and break the agent).
+   */
+  notify: publicProcedure
+    .input(z.object({ cwd: z.string(), payload: z.record(z.string(), z.unknown()) }))
+    .mutation(async ({ input }) => {
+      const status = await applyHookNotification(input.cwd, input.payload);
+      if (status) emit({ kind: "update", status });
+      return { ok: true };
+    }),
 });
 
 export const statusRouter = t.router({
