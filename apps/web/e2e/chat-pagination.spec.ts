@@ -194,6 +194,13 @@ test.describe("Chat scroll-back pagination", () => {
     //   2. Bulk stability — only a tiny number of frames may deviate. The
     //      prepend-commit frame can show a single sub-perceptible transient
     //      before the virtualizer settles; a real jump moves MANY frames.
+    // Threshold derivation: a correctly anchored row only jitters by sub-pixel
+    // measurement rounding (< a few px). The failure mode it must catch is the
+    // inserted page (~25 turns × ~40px row ≈ 1000px, or up to 11000px at the
+    // 220px estimate) shoving the row — orders of magnitude larger. 30px (net)
+    // and 40px (per-frame) sit comfortably between real jitter and a real jump,
+    // and ≤5 deviating frames tolerates the single prepend-commit transient
+    // (one frame) while still failing a sustained multi-frame jump.
     const first = samples[0];
     const last = samples[samples.length - 1];
     expect(Math.abs(last - first)).toBeLessThan(30);

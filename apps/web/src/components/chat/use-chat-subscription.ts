@@ -433,9 +433,11 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
+      // Only the cursor is sent. The server resolves session + workspace from
+      // the chat row (never a client param) to avoid a path-traversal sink —
+      // see `chat-history.ts`. The `state.sessionId` guard above just gates the
+      // fetch until a session has actually resolved.
       const params = new URLSearchParams();
-      params.set("sessionId", state.sessionId);
-      params.set("workspaceId", optsRef.current.workspaceId);
       params.set("before", String(before));
       params.set("limit", String(OLDER_PAGE_LIMIT));
       const res = await fetch(
