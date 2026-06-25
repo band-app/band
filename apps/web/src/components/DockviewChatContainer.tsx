@@ -974,6 +974,11 @@ export function DockviewChatContainer({
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
+      // Defensive double-onReady guard (mirrors the disposer guards below):
+      // if onReady fires again with a fresh api, drop the previous registry
+      // entry so it doesn't orphan — unmount only deletes the last-seen id.
+      const prevApi = apiRef.current;
+      if (prevApi && prevApi.id !== event.api.id) panelActionsByApiId.delete(prevApi.id);
       apiRef.current = event.api;
       // Register this instance's handlers under the inner dockview's id so the
       // header/tab components resolve to the correct workspace (see registry).

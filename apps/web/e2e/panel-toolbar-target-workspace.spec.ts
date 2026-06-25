@@ -189,19 +189,17 @@ async function mountBothAndSettle(
   await expect(workspacePage.chatAddTabButton(visible).first()).toBeVisible();
 
   // Settle both persisted baselines (each defaults to a single chat tab).
-  let baseVisible = 0;
-  let baseCached = 0;
+  // Two sequential polls so the actual counts surface in the Playwright
+  // reporter on failure, then read the stabilised values once.
   await expect
-    .poll(
-      async () => {
-        baseVisible = await workspacePage.countChatPanels(visible);
-        baseCached = await workspacePage.countChatPanels(cached);
-        return baseVisible >= 1 && baseCached >= 1;
-      },
-      { timeout: 10_000 },
-    )
-    .toBe(true);
+    .poll(() => workspacePage.countChatPanels(visible), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(() => workspacePage.countChatPanels(cached), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
 
+  const baseVisible = await workspacePage.countChatPanels(visible);
+  const baseCached = await workspacePage.countChatPanels(cached);
   return { baseVisible, baseCached };
 }
 
@@ -237,19 +235,17 @@ async function mountBothTerminalsAndSettle(
   // button is actionable. Positive anchor for the click target.
   await expect(workspacePage.terminalAddTabButton(visible).first()).toBeVisible();
 
-  let baseVisible = 0;
-  let baseCached = 0;
+  // Two sequential polls so the actual counts surface in the Playwright
+  // reporter on failure, then read the stabilised values once.
   await expect
-    .poll(
-      async () => {
-        baseVisible = await workspacePage.countTerminalPanels(visible);
-        baseCached = await workspacePage.countTerminalPanels(cached);
-        return baseVisible >= 1 && baseCached >= 1;
-      },
-      { timeout: 10_000 },
-    )
-    .toBe(true);
+    .poll(() => workspacePage.countTerminalPanels(visible), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(() => workspacePage.countTerminalPanels(cached), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(1);
 
+  const baseVisible = await workspacePage.countTerminalPanels(visible);
+  const baseCached = await workspacePage.countTerminalPanels(cached);
   return { baseVisible, baseCached };
 }
 
