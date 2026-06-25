@@ -740,7 +740,9 @@ async function main() {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Internal server error" }));
         }
-        console.error("[chat-history] handler error", err);
+        // Log only the message — a raw error may embed internal filesystem
+        // paths / stack traces (matches the handler's own inner catch).
+        console.error("[chat-history] handler error", err instanceof Error ? err.message : err);
       });
       return;
     }

@@ -436,11 +436,12 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     oldestOffset: state.oldestOffset,
     sessionId: state.sessionId,
   });
-  paginationRef.current = {
-    hasOlder: state.hasOlder,
-    oldestOffset: state.oldestOffset,
-    sessionId: state.sessionId,
-  };
+  // Field writes, not a fresh object literal — this runs on every render,
+  // including the ~30/sec streaming text-delta renders, so avoid the per-render
+  // allocation on the hot path.
+  paginationRef.current.hasOlder = state.hasOlder;
+  paginationRef.current.oldestOffset = state.oldestOffset;
+  paginationRef.current.sessionId = state.sessionId;
   const loadOlder = useCallback(async (): Promise<void> => {
     // The IntersectionObserver fires repeatedly while the sentinel is in
     // view; the ref guard collapses those into a single in-flight fetch.

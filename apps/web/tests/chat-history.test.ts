@@ -37,6 +37,9 @@ const SESSION_ID = "33333333-4444-5555-6666-777777777777";
 // pages exist and the offsets are large enough to page through.
 const TURNS = 60;
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
+// The endpoint caps `limit` at 200 messages; each message folds to ≥1 event, so
+// a bounded page never exceeds a few hundred events for these text-only turns.
+const MAX_PAGE_LIMIT_EVENTS = 300;
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -207,14 +210,14 @@ describe("GET /api/chats/:chatId/history", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as HistoryResponse;
     expect(body.oldestOffset).toBe(0);
+    // The page covers [0, 70) and starts at the very beginning, so there is
+    // nothing older — a regression that flipped this true would slip past the
+    // length check alone.
+    expect(body.hasOlder).toBe(false);
     expect(body.events.length).toBeLessThanOrEqual(MAX_PAGE_LIMIT_EVENTS);
     expect(userTextsOf(body)).toContain(userText(0));
   });
 });
-
-// The endpoint caps `limit` at 200 messages; each message folds to ≥1 event, so
-// a bounded page never exceeds a few hundred events for these text-only turns.
-const MAX_PAGE_LIMIT_EVENTS = 300;
 
 // ---------------------------------------------------------------------------
 // Helpers — mirror the JSONL shape the Claude Code SDK persists.

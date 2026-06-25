@@ -232,9 +232,13 @@ test.describe("Chat scroll-back pagination", () => {
       timeout: 30_000,
     });
 
-    // Page in some older history. Scrolling to the top swaps the bottom rows
-    // out — proof we genuinely moved up and the window changed.
+    // Page in some older history. First a POSITIVE anchor that the scrolled-up
+    // window actually rendered (the oldest in-window row is now on screen)...
     await chatPane.scrollToTop();
+    await expect(chatPane.userMessage(userText(OLDEST_WINDOW_TURN))).toBeVisible({
+      timeout: 10_000,
+    });
+    // ...then the negative: the bottom row swapped out, proving the window moved.
     await expect
       .poll(() => chatPane.assistantMessage(assistantText(TURNS - 1)).count(), { timeout: 10_000 })
       .toBe(0);
