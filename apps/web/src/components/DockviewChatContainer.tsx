@@ -556,10 +556,6 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // Resolve the owning dockview at click time so the action always targets the
   // workspace that owns THIS group, never a last-writer-wins global.
   const apiId = props.containerApi.id;
-  const onAdd: ChatPanelActions["onAdd"] = (agentId, groupIdArg) =>
-    panelActionsByApiId.get(apiId)?.current?.onAdd(agentId, groupIdArg);
-  const onSplit: ChatPanelActions["onSplit"] = (groupIdArg, direction) =>
-    panelActionsByApiId.get(apiId)?.current?.onSplit(groupIdArg, direction);
   const groupId = props.group.id;
   // `w-full justify-center` keeps the "+" centered horizontally inside
   // the vertical (left/right) edge action strip, which dockview sizes
@@ -569,13 +565,19 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // resolves to the same content width and the button row looks
   // identical to before.
   return (
-    <div className="flex h-full w-full items-center justify-center">
+    // `data-testid` on grid-group toolbars only (edge groups get no testid)
+    // gives integration tests a stable hook for the central action row
+    // without the fragile CSS `:has(button[title=...])` workaround.
+    <div
+      className="flex h-full w-full items-center justify-center"
+      data-testid={isGridGroup ? "dockview-chat__toolbar" : undefined}
+    >
       {isGridGroup && (
         <>
           <button
             type="button"
             className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => onSplit(groupId, "right")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "right")}
             title="Split right"
           >
             <Columns2 className="size-3.5" />
@@ -583,7 +585,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
           <button
             type="button"
             className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => onSplit(groupId, "below")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "below")}
             title="Split down"
           >
             <Rows2 className="size-3.5" />
@@ -593,7 +595,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => onAdd(undefined, groupId)}
+        onClick={() => panelActionsByApiId.get(apiId)?.current?.onAdd(undefined, groupId)}
         title="New chat tab"
       >
         <Plus className="size-4" />

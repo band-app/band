@@ -223,12 +223,12 @@ async function mountBothTerminalsAndSettle(
 ): Promise<{ baseVisible: number; baseCached: number }> {
   await workspacePage.goto(visible);
   await workspacePage.waitForReady();
-  await workspacePage.tab("terminal").click();
+  await workspacePage.openTerminalTab();
   await expect(workspacePage.terminalTabVisibilityMarker(visible, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(cached);
   await workspacePage.waitForReady();
-  await workspacePage.tab("terminal").click();
+  await workspacePage.openTerminalTab();
   await expect(workspacePage.terminalTabVisibilityMarker(cached, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(visible);

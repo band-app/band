@@ -430,46 +430,42 @@ export class WorkspacePage {
   // ──────────────────────────────────────────────────────────────────────
 
   /** The central (grid) group's header toolbar for a given inner container in
-   *  a workspace's panel host. Only grid groups render the split buttons (edge
-   *  groups render just the "+"), so anchoring on a toolbar that contains BOTH
-   *  a "Split right" button AND the container-specific add button
-   *  (`addTitle`) isolates the central group's action row from the collapsed
-   *  edge groups' "+"-only rows — whose buttons can overlap content and steal
-   *  the click. The `addTitle` anchor also disambiguates the chat toolbar from
-   *  the terminal toolbar when both inner dockviews are visible at once
-   *  (default outer layout shows Chat in one group and the active right-group
-   *  tab in another). Scoped to the workspace's cached entry + filtered to
-   *  visible so it never resolves the OTHER (hidden) workspace's header. */
-  private centralToolbar(workspaceId: string, addTitle: string): Locator {
+   *  a workspace's panel host. Each container's `RightHeaderActions` tags its
+   *  GRID-group toolbar with `dockview-<container>__toolbar` (edge groups get
+   *  no testid), so `getByTestId` resolves only the central action row — never
+   *  the collapsed edge groups' "+"-only rows whose buttons can overlap
+   *  content and steal a click. The container-specific testid also keeps the
+   *  chat toolbar distinct from the terminal toolbar when both inner dockviews
+   *  are visible at once (default outer layout shows Chat in one group and the
+   *  active right-group tab in another). Scoped to the workspace's cached
+   *  entry + filtered to visible so it never resolves the OTHER (hidden)
+   *  workspace's header. */
+  private centralToolbar(workspaceId: string, container: "chat" | "terminal" | "browser"): Locator {
     return this.cachedPanelEntries(workspaceId)
-      .locator(`div:has(> button[title="Split right"]):has(> button[title="${addTitle}"])`)
+      .getByTestId(`dockview-${container}__toolbar`)
       .filter({ visible: true });
   }
 
   /** The visible "New chat tab" ("+") button for a workspace's chat host. */
   chatAddTabButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "New chat tab").getByRole("button", {
-      name: "New chat tab",
-    });
+    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "New chat tab" });
   }
 
   /** The visible chat "Split right" button for a workspace's chat host. */
   chatSplitRightButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "New chat tab").getByRole("button", {
-      name: "Split right",
-    });
+    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "Split right" });
   }
 
   /** The visible "New terminal" ("+") button for a workspace's terminal host. */
   terminalAddTabButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "New terminal").getByRole("button", {
+    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
       name: "New terminal",
     });
   }
 
   /** The visible terminal "Split right" button for a workspace's terminal host. */
   terminalSplitRightButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "New terminal").getByRole("button", {
+    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
       name: "Split right",
     });
   }

@@ -347,7 +347,12 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // resolves to the same content width and the button row looks
   // identical to before.
   return (
-    <div className="flex h-full w-full items-center justify-center">
+    // `data-testid` on grid-group toolbars only (edge groups get no testid)
+    // gives integration tests a stable hook for the central action row.
+    <div
+      className="flex h-full w-full items-center justify-center"
+      data-testid={isGridGroup ? "dockview-browser__toolbar" : undefined}
+    >
       {isGridGroup && (
         <>
           <button
