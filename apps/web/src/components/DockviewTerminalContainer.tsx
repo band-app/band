@@ -225,12 +225,16 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TerminalTabParams>) {
     };
   }, [props.containerApi]);
 
+  const containerApi = props.containerApi;
+  const terminalId = props.params.terminalId;
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      closeTabRef.current?.(props.params.terminalId);
+      // Route to the handlers owned by THIS tab's dockview (keyed by
+      // `containerApi.id`) so closing a tab never hits a cached workspace.
+      panelActionsByApiId.get(containerApi.id)?.current?.onClose(terminalId);
     },
-    [props.params.terminalId],
+    [containerApi, terminalId],
   );
 
   const showClose = panelCount > 1;
@@ -256,21 +260,31 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TerminalTabParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared refs for stable Dockview components
+// Per-instance action registry for stable Dockview components
+//
+// dockview's `rightHeaderActionsComponent` and tab header components must be
+// STABLE references, but the handlers they invoke are per-container-instance
+// (each mounted DockviewTerminalContainer has its own `workspaceId` + inner
+// dockview api). MultiWorkspacePanelHost keeps up to 3 workspaces mounted at
+// once (inactive ones only `visibility: hidden`), so a module-level handler
+// ref suffered last-writer-wins: a hidden instance's handlers would handle a
+// click made in the visible workspace, creating the terminal in the wrong
+// (cached) workspace.
+//
+// Fix: key the handlers by the owning dockview's `api.id`. dockview passes the
+// owning `containerApi` into header-action + tab-header props; every wrapper
+// shares the same underlying component `id` even though the DockviewApi object
+// differs per group. The value is the instance's `useRef` holder so clicks
+// always read the latest closures via `.current`.
 // ---------------------------------------------------------------------------
 
-const addTabRef: {
-  current: {
-    onAdd: (groupId?: string) => void;
-    onSplit: (groupId: string, direction: "right" | "below") => void;
-  };
-} = {
-  current: { onAdd: () => {}, onSplit: () => {} },
-};
+interface TerminalPanelActions {
+  onAdd: (groupId?: string) => void;
+  onSplit: (groupId: string, direction: "right" | "below") => void;
+  onClose: (terminalId: string) => void;
+}
 
-const closeTabRef: { current: ((terminalId: string) => void) | null } = {
-  current: null,
-};
+const panelActionsByApiId = new Map<string, { current: TerminalPanelActions }>();
 
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
@@ -282,6 +296,9 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // edge group; only the split buttons are hidden. Defaults to "grid"
   // when `location` is missing (older dockview versions / tests).
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  // Resolve the owning dockview at click time so the action always targets the
+  // workspace that owns THIS group, never a last-writer-wins global.
+  const apiId = props.containerApi.id;
   const groupId = props.group.id;
   // `w-full justify-center` keeps the "+" centered horizontally inside
   // the vertical (left/right) edge action strip, which dockview sizes
@@ -297,7 +314,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
           <button
             type="button"
             className="inline-flex size-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => addTabRef.current.onSplit(groupId, "right")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "right")}
             title="Split right"
           >
             <Columns2 className="size-3.5" />
@@ -305,7 +322,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
           <button
             type="button"
             className="inline-flex size-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => addTabRef.current.onSplit(groupId, "below")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "below")}
             title="Split down"
           >
             <Rows2 className="size-3.5" />
@@ -315,7 +332,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       <button
         type="button"
         className="inline-flex size-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onAdd(groupId)}
+        onClick={() => panelActionsByApiId.get(apiId)?.current?.onAdd(groupId)}
         title="New terminal"
       >
         <Plus className="size-4" />
@@ -726,14 +743,23 @@ export function DockviewTerminalContainer({
     });
   }, [adapter, workspaceId]);
 
-  // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
-  closeTabRef.current = closeTab;
+  // Per-instance action handlers for the stable Dockview header/tab
+  // components. Registered in `panelActionsByApiId` (keyed by this inner
+  // dockview's `api.id`) from `onReady`; mutated every render so the registry
+  // always holds this instance's latest closures.
+  const actionsRef = useRef<TerminalPanelActions>({
+    onAdd: () => {},
+    onSplit: () => {},
+    onClose: () => {},
+  });
+  actionsRef.current = { onAdd: handleAddTab, onSplit: handleSplit, onClose: closeTab };
 
   // Detach edge-group drag-visibility listeners + inner-dockview
-  // registration on unmount.
+  // registration, and drop this instance's action handlers, on unmount.
   useEffect(() => {
     return () => {
+      const api = apiRef.current;
+      if (api) panelActionsByApiId.delete(api.id);
       edgeDragDisposerRef.current?.();
       edgeDragDisposerRef.current = null;
       innerRegisterDisposerRef.current?.();
@@ -757,6 +783,9 @@ export function DockviewTerminalContainer({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
+      // Register this instance's handlers under the inner dockview's id so the
+      // header/tab components resolve to the correct workspace (see registry).
+      panelActionsByApiId.set(event.api.id, actionsRef);
       const savedLayout = initialLayoutRef.current;
       const knownTerminalIds = initialTerminalIdsRef.current;
 

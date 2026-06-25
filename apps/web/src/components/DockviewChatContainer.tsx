@@ -424,12 +424,16 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
     void writeClipboardText(sessionId);
   }, [sessionId]);
 
+  const containerApi = props.containerApi;
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      closeTabRef.current?.(chatId);
+      // Route to the handlers owned by THIS tab's dockview (keyed by
+      // `containerApi.id`) so closing a tab in the visible workspace never
+      // operates on a cached, hidden workspace's dockview.
+      panelActionsByApiId.get(containerApi.id)?.current?.onClose(chatId);
     },
-    [chatId],
+    [containerApi, chatId],
   );
 
   const showClose = panelCount > 1;
@@ -498,27 +502,46 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared refs for stable Dockview components
+// Per-instance action registry for stable Dockview components
+//
+// dockview's `rightHeaderActionsComponent` and tab header components must be
+// STABLE references — a closure-capturing component can't be passed directly
+// (see the comment on `RightHeaderActions`). The handlers those components
+// invoke, however, are per-container-instance: each mounted
+// DockviewChatContainer has its own `workspaceId` and inner dockview api.
+//
+// MultiWorkspacePanelHost keeps up to `DEFAULT_MAX_CACHED_WORKSPACES` (3)
+// workspaces mounted at once — inactive ones are only `visibility: hidden`,
+// so several DockviewChatContainer instances are live simultaneously and all
+// keep re-rendering. A single module-level handler ref therefore suffered
+// last-writer-wins: whichever hidden instance rendered most recently left ITS
+// handlers in the global, and clicking "+" / split in the VISIBLE workspace
+// created the chat in the wrong (cached, hidden) workspace.
+//
+// Fix: key the handlers by the owning dockview's `api.id`. dockview passes the
+// owning `containerApi` into both header-action props and tab-header props, so
+// the visible group always resolves to its own workspace's handlers. We key by
+// `api.id` (not the DockviewApi object): dockview hands out a fresh
+// `DockviewApi` *wrapper* per group, so `props.containerApi !== onReadyApi` by
+// reference — but every wrapper exposes the same underlying component `id`.
+// The value is the instance's `useRef` holder, so clicks always read the
+// latest closures via `.current`.
 // ---------------------------------------------------------------------------
 
-const addTabRef: {
-  current: {
-    onAdd: (agentId?: string, groupId?: string) => void;
-    onSplit: (groupId: string, direction: "right" | "below") => void;
-  };
-} = {
-  current: { onAdd: () => {}, onSplit: () => {} },
-};
+interface ChatPanelActions {
+  onAdd: (agentId?: string, groupId?: string) => void;
+  onSplit: (groupId: string, direction: "right" | "below") => void;
+  onClose: (chatId: string) => void;
+}
 
-/** Shared ref for the close-tab action — used by ChatTab's close button. */
-const closeTabRef: { current: ((chatId: string) => void) | null } = {
-  current: null,
-};
+const panelActionsByApiId = new Map<string, { current: ChatPanelActions }>();
 
 /**
  * Stable component for DockviewReact's rightHeaderActionsComponent.
- * Reads callback from the module-level ref to avoid the
- * "only React.memo/forwardRef/function components accepted" error.
+ * Resolves the per-instance handlers from `panelActionsByApiId` keyed by the
+ * owning `containerApi.id` (see the registry comment above) to avoid the
+ * "only React.memo/forwardRef/function components accepted" error while still
+ * routing each click to the workspace that owns the clicked group.
  */
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
@@ -530,7 +553,13 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // edge group; only the split buttons are hidden. Defaults to "grid"
   // when `location` is missing (older dockview versions / tests).
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
-  const { onAdd, onSplit } = addTabRef.current;
+  // Resolve the owning dockview at click time so the action always targets the
+  // workspace that owns THIS group, never a last-writer-wins global.
+  const apiId = props.containerApi.id;
+  const onAdd: ChatPanelActions["onAdd"] = (agentId, groupIdArg) =>
+    panelActionsByApiId.get(apiId)?.current?.onAdd(agentId, groupIdArg);
+  const onSplit: ChatPanelActions["onSplit"] = (groupIdArg, direction) =>
+    panelActionsByApiId.get(apiId)?.current?.onSplit(groupIdArg, direction);
   const groupId = props.group.id;
   // `w-full justify-center` keeps the "+" centered horizontally inside
   // the vertical (left/right) edge action strip, which dockview sizes
@@ -910,14 +939,24 @@ export function DockviewChatContainer({
   // Visibility is now propagated via PanelVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
-  // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
-  closeTabRef.current = closeTab;
+  // Per-instance action handlers for the stable Dockview header/tab
+  // components. Registered in `panelActionsByApiId` (keyed by this inner
+  // dockview's `api.id`) from `onReady`; mutated every render so the registry
+  // always holds this instance's latest closures. See the registry comment
+  // for why a module-level singleton was wrong.
+  const actionsRef = useRef<ChatPanelActions>({
+    onAdd: () => {},
+    onSplit: () => {},
+    onClose: () => {},
+  });
+  actionsRef.current = { onAdd: handleAddTab, onSplit: handleSplit, onClose: closeTab };
 
   // Detach edge-group drag-visibility listeners + inner-dockview
-  // registration on unmount.
+  // registration, and drop this instance's action handlers, on unmount.
   useEffect(() => {
     return () => {
+      const api = apiRef.current;
+      if (api) panelActionsByApiId.delete(api.id);
       edgeDragDisposerRef.current?.();
       edgeDragDisposerRef.current = null;
       innerRegisterDisposerRef.current?.();
@@ -934,6 +973,9 @@ export function DockviewChatContainer({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
+      // Register this instance's handlers under the inner dockview's id so the
+      // header/tab components resolve to the correct workspace (see registry).
+      panelActionsByApiId.set(event.api.id, actionsRef);
       const savedLayout = initialLayoutRef.current;
       const knownChatIds = initialChatIdsRef.current;
 
