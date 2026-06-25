@@ -3,6 +3,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
   Dialog,
   DialogContent,
@@ -11,11 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, ClipboardCopy, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { writeClipboardText } from "../../lib/clipboard";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
+import { joinWorkspacePath } from "../lib/workspace-path";
 import type { FileStatus } from "../types";
 import { FileStatusBadge } from "./FileStatusBadge";
 
@@ -30,6 +33,12 @@ interface ChangesFileTreeProps {
    * (or leave the prop unset) to hide the menu item entirely.
    */
   onRevertPaths?: (paths: string[]) => void | Promise<void>;
+  /**
+   * Absolute filesystem path of the workspace root. When provided, the
+   * right-click menu offers "Copy absolute path"; when omitted (e.g. still
+   * loading) that item is hidden but "Copy relative path" remains.
+   */
+  workspacePath?: string;
 }
 
 interface ChangesTreeNodeProps {
@@ -40,6 +49,7 @@ interface ChangesTreeNodeProps {
   onSelectFile: (filePath: string) => void;
   onRequestReset: (node: FileTreeNode) => void;
   canReset: boolean;
+  workspacePath?: string;
   activeFile?: string | null;
 }
 
@@ -62,6 +72,7 @@ function ChangesTreeNode({
   onSelectFile,
   onRequestReset,
   canReset,
+  workspacePath,
   activeFile,
 }: ChangesTreeNodeProps) {
   const isDir = node.children !== undefined;
@@ -98,6 +109,7 @@ function ChangesTreeNode({
       // ⇧⌘G "focus Changes" handler can target it from outside the
       // file tree.
       data-band-active={isActive ? "true" : undefined}
+      data-testid={`changes-tree__row--${node.path}`}
       onClick={handleClick}
       // Suppress the iOS text-selection / callout that fires on
       // long-press alongside the Radix contextmenu event.
@@ -143,22 +155,43 @@ function ChangesTreeNode({
 
   return (
     <>
-      {canReset ? (
-        <ContextMenu>
-          <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
-          <ContextMenuContent onCloseAutoFocus={menu.flush}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        <ContextMenuContent onCloseAutoFocus={menu.flush}>
+          <ContextMenuItem
+            data-testid="changes-tree__copy-relative-path"
+            onSelect={() => menu.queue(() => void writeClipboardText(node.path))}
+          >
+            <ClipboardCopy className="size-4" />
+            Copy relative path
+          </ContextMenuItem>
+          {workspacePath && (
             <ContextMenuItem
-              variant="destructive"
-              onSelect={() => menu.queue(() => onRequestReset(node))}
+              data-testid="changes-tree__copy-absolute-path"
+              onSelect={() =>
+                menu.queue(
+                  () => void writeClipboardText(joinWorkspacePath(workspacePath, node.path)),
+                )
+              }
             >
-              <RotateCcw className="size-4" />
-              Reset changes
+              <ClipboardCopy className="size-4" />
+              Copy absolute path
             </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      ) : (
-        button
-      )}
+          )}
+          {canReset && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={() => menu.queue(() => onRequestReset(node))}
+              >
+                <RotateCcw className="size-4" />
+                Reset changes
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
 
       {/* Children — rendered when directory is expanded */}
       {isExpanded &&
@@ -172,6 +205,7 @@ function ChangesTreeNode({
             onSelectFile={onSelectFile}
             onRequestReset={onRequestReset}
             canReset={canReset}
+            workspacePath={workspacePath}
             activeFile={activeFile}
           />
         ))}
@@ -198,6 +232,7 @@ export function ChangesFileTree({
   onSelectFile,
   activeFile,
   onRevertPaths,
+  workspacePath,
 }: ChangesFileTreeProps) {
   const tree = useMemo(() => buildFileTree(fileStatuses), [fileStatuses]);
 
@@ -320,6 +355,7 @@ export function ChangesFileTree({
           onSelectFile={onSelectFile}
           onRequestReset={handleRequestReset}
           canReset={canReset}
+          workspacePath={workspacePath}
           activeFile={activeFile}
         />
       ))}

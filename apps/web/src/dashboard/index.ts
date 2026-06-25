@@ -72,6 +72,7 @@ export {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
+export { useWorkspacePath } from "./hooks/use-workspace-path";
 export {
   buildLspWsUrl,
   createLspExtension,

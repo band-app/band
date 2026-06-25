@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  ClipboardCopy,
   ClipboardPaste,
   Copy as CopyIcon,
   File as FileIconLucide,
@@ -26,13 +27,21 @@ import {
   Trash2,
 } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { writeClipboardText } from "../../lib/clipboard";
 import { useAdapter } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
+import { joinWorkspacePath } from "../lib/workspace-path";
 import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
   workspaceId: string;
+  /**
+   * Absolute filesystem path of the workspace root. When provided, each row's
+   * right-click menu offers "Copy absolute path"; when omitted (e.g. still
+   * loading) that item is hidden but "Copy relative path" remains.
+   */
+  workspacePath?: string;
   /**
    * Called on single-click on a file. The caller decides whether this
    * opens as a preview or pinned tab (this component just emits the
@@ -290,6 +299,8 @@ interface TreeNodeProps {
   canCut: boolean;
   canCopy: boolean;
   canPaste: boolean;
+  /** Absolute workspace root path, used to build the "Copy absolute path" value. */
+  workspacePath?: string;
   compact?: boolean;
   /** Single source of truth for the currently-highlighted tree row. */
   treeSelection: { path: string; kind: "file" | "directory" } | null;
@@ -332,6 +343,7 @@ function TreeNode({
   canCut,
   canCopy,
   canPaste,
+  workspacePath,
   compact,
   treeSelection,
   clipboard,
@@ -390,6 +402,7 @@ function TreeNode({
       // FileBrowser without depending on the brittle Tailwind class
       // pair below.
       data-band-active={isSelected ? "true" : undefined}
+      data-testid={`file-tree__row--${entryPath}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       // Stop the events Radix uses to detect a context-menu open from
@@ -535,9 +548,32 @@ function TreeNode({
             Paste
           </ContextMenuItem>
         )}
-        {(canCut || canCopy || (isDir && canPaste)) && (canRename || canDelete) && (
-          <ContextMenuSeparator />
+        {/* Copy-path actions are always available (relative path is derivable
+            from the row alone; absolute path needs the workspace root). Only
+            add a leading separator when there are Cut/Copy/Paste items
+            directly above — a directory's New File/New Folder block already
+            renders its own trailing separator, so gating on `isDir` here would
+            produce two consecutive separators for a read-only directory row. */}
+        {(canCut || canCopy || (isDir && canPaste)) && <ContextMenuSeparator />}
+        <ContextMenuItem
+          data-testid="file-tree__copy-relative-path"
+          onSelect={() => menu.queue(() => void writeClipboardText(entryPath))}
+        >
+          <ClipboardCopy className="size-4" />
+          Copy relative path
+        </ContextMenuItem>
+        {workspacePath && (
+          <ContextMenuItem
+            data-testid="file-tree__copy-absolute-path"
+            onSelect={() =>
+              menu.queue(() => void writeClipboardText(joinWorkspacePath(workspacePath, entryPath)))
+            }
+          >
+            <ClipboardCopy className="size-4" />
+            Copy absolute path
+          </ContextMenuItem>
         )}
+        {(canRename || canDelete) && <ContextMenuSeparator />}
         {canRename && (
           <ContextMenuItem onSelect={() => menu.queue(() => onRequestRename(entryPath))}>
             <Pencil className="size-4" />
@@ -603,6 +639,7 @@ function TreeNode({
               canCut={canCut}
               canCopy={canCopy}
               canPaste={canPaste}
+              workspacePath={workspacePath}
               compact={compact}
               treeSelection={treeSelection}
               clipboard={clipboard}
@@ -671,6 +708,7 @@ function TreeNode({
 export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser(
   {
     workspaceId,
+    workspacePath,
     onOpenFile,
     onOpenFilePinned,
     compact,
@@ -1433,6 +1471,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                   canCut={canCutCopy}
                   canCopy={canCopyOp}
                   canPaste={canPaste}
+                  workspacePath={workspacePath}
                   compact={compact}
                   treeSelection={treeSelection}
                   clipboard={clipboard}
