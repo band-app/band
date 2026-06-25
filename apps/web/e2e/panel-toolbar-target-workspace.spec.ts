@@ -269,8 +269,11 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
 
     // ...and the hidden, cached workspace was NOT touched. On the buggy
     // module-level-singleton code the panel landed in the cached workspace
-    // instead, so this is the assertion that fails on the regression.
-    expect(await workspacePage.countChatPanels(ADD_CACHED)).toBe(baseCached);
+    // instead. Poll (not a bare read) so a debounce-delayed wrong-workspace
+    // persist can't slip in after a stale baseline read and pass falsely.
+    await expect
+      .poll(() => workspacePage.countChatPanels(ADD_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
   });
 
   test("clicking the chat 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
@@ -290,8 +293,11 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
       .poll(() => workspacePage.countChatPanels(SPLIT_VISIBLE), { timeout: 10_000 })
       .toBe(baseVisible + 1);
 
-    // ...and leaves the cached workspace untouched.
-    expect(await workspacePage.countChatPanels(SPLIT_CACHED)).toBe(baseCached);
+    // ...and leaves the cached workspace untouched (poll to absorb a
+    // debounce-delayed wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.countChatPanels(SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
   });
 
   test("clicking the terminal '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
@@ -314,8 +320,10 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
     // ...and the hidden, cached workspace was NOT touched. The buggy
     // module-level singleton resolved the cached workspace's handler at
     // click time, creating the terminal there — this assertion fails on
-    // the broken code.
-    expect(await workspacePage.countTerminalPanels(TERM_ADD_CACHED)).toBe(baseCached);
+    // the broken code. Poll to absorb a debounce-delayed persist.
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_ADD_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
   });
 
   test("clicking the terminal 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
@@ -335,7 +343,10 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
       .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
       .toBe(baseVisible + 1);
 
-    // ...and leaves the cached workspace untouched.
-    expect(await workspacePage.countTerminalPanels(TERM_SPLIT_CACHED)).toBe(baseCached);
+    // ...and leaves the cached workspace untouched (poll to absorb a
+    // debounce-delayed wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
   });
 });
