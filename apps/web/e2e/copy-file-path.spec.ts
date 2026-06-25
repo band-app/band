@@ -97,7 +97,7 @@ test.afterAll(async () => {
 test.describe("Copy file path from the tree context menus", () => {
   test("Files view copies relative and absolute paths", async ({ page }) => {
     const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const trees = new FileTreesPage(page);
+    const trees = new FileTreesPage(page, workspace);
 
     await workspace.installClipboardCapture();
     await workspace.goto(workspaceId);
@@ -106,7 +106,7 @@ test.describe("Copy file path from the tree context menus", () => {
     // The Files tree lazy-loads directory contents, so expand `src` before
     // the nested file row exists.
     await trees.openFilesTab(DIR_PATH);
-    await trees.expandFileTreeFolder(DIR_PATH);
+    await trees.expandFileTreeFolder(DIR_PATH, FILE_PATH);
 
     // Copy relative path → the workspace-relative file path.
     await trees.openFileTreeMenu(FILE_PATH);
@@ -133,7 +133,7 @@ test.describe("Copy file path from the tree context menus", () => {
 
   test("Changes view copies relative and absolute paths", async ({ page }) => {
     const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const trees = new FileTreesPage(page);
+    const trees = new FileTreesPage(page, workspace);
 
     await workspace.installClipboardCapture();
     await workspace.goto(workspaceId);

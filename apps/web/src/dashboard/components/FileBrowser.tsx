@@ -549,8 +549,12 @@ function TreeNode({
           </ContextMenuItem>
         )}
         {/* Copy-path actions are always available (relative path is derivable
-            from the row alone; absolute path needs the workspace root). */}
-        {(isDir || canCut || canCopy) && <ContextMenuSeparator />}
+            from the row alone; absolute path needs the workspace root). Only
+            add a leading separator when there are Cut/Copy/Paste items
+            directly above — a directory's New File/New Folder block already
+            renders its own trailing separator, so gating on `isDir` here would
+            produce two consecutive separators for a read-only directory row. */}
+        {(canCut || canCopy || (isDir && canPaste)) && <ContextMenuSeparator />}
         <ContextMenuItem
           data-testid="file-tree__copy-relative-path"
           onSelect={() => menu.queue(() => void writeClipboardText(entryPath))}

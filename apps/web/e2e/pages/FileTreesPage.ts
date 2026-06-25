@@ -11,22 +11,20 @@
  * copy menu item carries a stable `data-testid` — so the test body never
  * depends on the localisable menu copy or on CSS structure.
  *
- * Navigation and clipboard capture live on `WorkspacePage`; this object
- * only owns the tree-specific locators and the open-menu/click actions, so
- * it needs the `page` alone (URL construction stays on `WorkspacePage`).
+ * Outer-dockview tab navigation and clipboard capture live on `WorkspacePage`
+ * (the suite's single owner of the `workspace__tab--*` locators), so this
+ * object takes a `WorkspacePage` and delegates tab switching to it rather than
+ * re-deriving the tab testids.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
+import type { WorkspacePage } from "./WorkspacePage";
 
 export class FileTreesPage {
-  constructor(private readonly page: Page) {}
-
-  /** The outer dockview tab for the given panel. Mirrors
-   *  `WorkspacePage.tab()` — the `workspace__tab--*` testid is set by
-   *  `DefaultTab` / `BadgeTab` in `SharedDockviewLayout.tsx`. */
-  private tab(panel: "files" | "changes"): Locator {
-    return this.page.getByTestId(`workspace__tab--${panel}`);
-  }
+  constructor(
+    private readonly page: Page,
+    private readonly workspace: WorkspacePage,
+  ) {}
 
   /** A row in the Files tree (`FileBrowser`), keyed by its
    *  workspace-relative path. */
@@ -64,7 +62,7 @@ export class FileTreesPage {
   /** Activate the Files tab and wait for the given row to render. */
   async openFilesTab(path: string): Promise<void> {
     await test.step("Open the Files tab", async () => {
-      await this.tab("files").click();
+      await this.workspace.tab("files").click();
       await this.fileTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
@@ -73,16 +71,20 @@ export class FileTreesPage {
    *  changes sidebar tree. */
   async openChangesTab(path: string): Promise<void> {
     await test.step("Open the Changes tab", async () => {
-      await this.tab("changes").click();
+      await this.workspace.tab("changes").click();
       await this.changesTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
 
-  /** Expand a directory row in the Files tree (lazy-loads its children).
-   *  Clicking a directory row toggles its expansion in `FileBrowser`. */
-  async expandFileTreeFolder(path: string): Promise<void> {
+  /** Expand a directory row in the Files tree (lazy-loads its children) and
+   *  wait for the expected child row to appear. Clicking a directory row
+   *  toggles its expansion in `FileBrowser`; the load is async, so callers
+   *  pass the child they're about to act on so the right-click can't race
+   *  the lazy fetch. */
+  async expandFileTreeFolder(path: string, awaitChild: string): Promise<void> {
     await test.step(`Expand Files-tree folder ${path}`, async () => {
       await this.fileTreeRow(path).click();
+      await this.fileTreeRow(awaitChild).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
 
