@@ -54,7 +54,15 @@ const DEFAULT_PAGE_LIMIT = 50;
  *  the entire transcript into one synchronous response buffer. */
 const MAX_PAGE_LIMIT = 200;
 
+/** Defensive bound on the route param. `chatId` is only ever a generated slug
+ *  (and the route regex already excludes `/`), so anything longer is malformed
+ *  input we reject at the boundary rather than pass to the service layer. */
+const MAX_CHAT_ID_LENGTH = 200;
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  // The response page is bounded by MAX_PAGE_LIMIT (200 messages), so this
+  // synchronous JSON.stringify stays well under ~1 MB. Raising MAX_PAGE_LIMIT
+  // beyond ~500 would warrant streaming the array incrementally instead.
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
@@ -64,6 +72,11 @@ export async function handleChatHistory(
   res: ServerResponse,
   chatId: string,
 ): Promise<void> {
+  if (!chatId || chatId.length > MAX_CHAT_ID_LENGTH) {
+    sendJson(res, 400, { error: "Invalid chatId" });
+    return;
+  }
+
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const beforeRaw = url.searchParams.get("before");
   const limitRaw = url.searchParams.get("limit");
@@ -139,7 +152,7 @@ export async function handleChatHistory(
     // (e.g. the JSONL path in an ENOENT), which don't belong in logs alongside
     // the session id.
     log.warn(
-      { chatId, err: err instanceof Error ? err.message : String(err) },
+      { chatId: chatId.slice(0, 8), err: err instanceof Error ? err.message : String(err) },
       "chat-history: failed to read older page",
     );
     sendJson(res, 500, { error: "Internal server error" });

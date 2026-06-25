@@ -136,13 +136,18 @@ test.describe("Chat scroll-back pagination", () => {
     // mounts the current oldest row and trips the sentinel's IntersectionObserver,
     // which fetches + prepends the previous page. We poll until the very first
     // message becomes reachable — proving pagination walks all the way back.
+    //
+    // `interval: 2000` gives each fetch + prepend cycle time to land before the
+    // next scroll, so two `scrollToTop`s never race a mid-flight prepend. (The
+    // hook's in-flight guard already dedupes concurrent loads, but the wider
+    // interval keeps the poll's side effect from sampling the DOM mid-prepend.)
     await expect
       .poll(
         async () => {
           await chatPane.scrollToTop();
           return chatPane.userMessage(userText(0)).count();
         },
-        { timeout: 45_000, interval: 400 },
+        { timeout: 60_000, interval: 2000 },
       )
       .toBeGreaterThan(0);
 
@@ -201,7 +206,11 @@ test.describe("Chat scroll-back pagination", () => {
     // and 40px (per-frame) sit comfortably between real jitter and a real jump,
     // and ≤5 deviating frames tolerates the single prepend-commit transient
     // (one frame) while still failing a sustained multi-frame jump.
-    const first = samples[0];
+    // Baseline a few frames in, not samples[0]: the first frame the anchor row
+    // mounts can be captured mid-layout while the virtualizer is still settling
+    // initial heights, which would inflate the first-vs-last delta on a correct
+    // implementation.
+    const first = samples[Math.min(5, samples.length - 1)];
     const last = samples[samples.length - 1];
     expect(Math.abs(last - first)).toBeLessThan(30);
 

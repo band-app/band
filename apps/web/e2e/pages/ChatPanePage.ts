@@ -191,9 +191,10 @@ export class ChatPanePage {
    *  unmounts or the buffer fills. Drives the scroll-back "no jump" assertion:
    *  a correctly-anchored prepend keeps the anchor row's screen position stable
    *  (a few px of measurement jitter), while a broken prepend moves it by the
-   *  full height of the inserted page (thousands of px). Install it AFTER the
-   *  anchor row is on screen and BEFORE triggering `loadOlder`. Read the
-   *  samples back with `readAnchorTopSamples()`. */
+   *  full height of the inserted page (thousands of px). May be installed BEFORE
+   *  the anchor row is on screen — recording begins only once the row mounts
+   *  (`findRow()` returns non-null) — and before triggering `loadOlder`. Read
+   *  the samples back with `readAnchorTopSamples()`. */
   async installAnchorTopSampler(anchorText: string): Promise<void> {
     await this.page.evaluate((text) => {
       const win = window as unknown as { __anchorTops: number[] };

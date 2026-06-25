@@ -423,12 +423,27 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
   // ---------------------------------------------------------------------
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
+  // The pagination cursor is read through a ref so `loadOlder`'s identity stays
+  // stable across page loads. If it depended on `state.oldestOffset`/`hasOlder`
+  // directly, every `prepend-messages` dispatch would mint a new callback and
+  // tear down + re-attach the IntersectionObserver in `ChatView` on each load.
+  const paginationRef = useRef({
+    hasOlder: state.hasOlder,
+    oldestOffset: state.oldestOffset,
+    sessionId: state.sessionId,
+  });
+  paginationRef.current = {
+    hasOlder: state.hasOlder,
+    oldestOffset: state.oldestOffset,
+    sessionId: state.sessionId,
+  };
   const loadOlder = useCallback(async (): Promise<void> => {
     // The IntersectionObserver fires repeatedly while the sentinel is in
     // view; the ref guard collapses those into a single in-flight fetch.
     if (loadingOlderRef.current) return;
-    const before = state.oldestOffset;
-    if (!state.hasOlder || before == null || before <= 0 || !state.sessionId) return;
+    const { hasOlder, oldestOffset, sessionId } = paginationRef.current;
+    const before = oldestOffset;
+    if (!hasOlder || before == null || before <= 0 || !sessionId) return;
 
     loadingOlderRef.current = true;
     setLoadingOlder(true);
@@ -474,7 +489,9 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [chatId, state.hasOlder, state.oldestOffset, state.sessionId]);
+    // Cursor + session read via `paginationRef`, so the only real dependency is
+    // `chatId` — keeps the callback identity stable across page loads.
+  }, [chatId]);
 
   return {
     messages: state.messages,
