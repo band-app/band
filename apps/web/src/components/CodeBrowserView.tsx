@@ -51,12 +51,11 @@ import {
   serializeEditorState,
   toFileUri,
   toLspServerLang,
-  toWorkspaceId,
   useCapabilities,
   useEditorHistory,
-  useProjects,
   useSearch,
   useSettingsQuery,
+  useWorkspacePath,
 } from "@/dashboard";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -444,17 +443,7 @@ export function CodeBrowserView({
   const removeFileRef = useRef(tabState.removeFile);
   removeFileRef.current = tabState.removeFile;
   const { settings } = useSettingsQuery();
-  const { projects } = useProjects();
-  const workspacePath = (() => {
-    for (const proj of projects) {
-      for (const wt of proj.worktrees) {
-        if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
-          return wt.path;
-        }
-      }
-    }
-    return undefined;
-  })();
+  const workspacePath = useWorkspacePath(workspaceId);
   const [viewFilePath, setViewFilePath] = useState(() => {
     if (file) return parseFileLocation(file).filePath;
     // No file in route — restore the active tab from localStorage so the
@@ -2009,6 +1998,7 @@ export function CodeBrowserView({
               <FileBrowser
                 ref={fileBrowserRef}
                 workspaceId={workspaceId}
+                workspacePath={workspacePath}
                 onOpenFile={handleSelectFile}
                 onOpenFilePinned={handleSelectFilePinned}
                 selectedFile={viewFilePath}
@@ -2051,6 +2041,7 @@ export function CodeBrowserView({
                 <FileBrowser
                   ref={fileBrowserRef}
                   workspaceId={workspaceId}
+                  workspacePath={workspacePath}
                   onOpenFile={handleSelectFile}
                   onOpenFilePinned={handleSelectFilePinned}
                   compact

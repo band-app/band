@@ -43,6 +43,7 @@ import { readStoredCompareBranch, useDiffTarget } from "../hooks/use-diff-target
 import { useIsDark } from "../hooks/use-is-dark";
 import { useProjectKindForWorkspace } from "../hooks/use-project-kind";
 import { useSearch } from "../hooks/use-search";
+import { useWorkspacePath } from "../hooks/use-workspace-path";
 import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import {
@@ -1227,6 +1228,10 @@ export function DiffView({
   // skips the diff fetch in that window. See #427.
   const projectKind = useProjectKindForWorkspace(workspaceId);
   const isPlain = projectKind === "plain";
+  // Absolute worktree path, used by the Changes tree's "Copy absolute path"
+  // context-menu action. `undefined` while projects load — the menu hides
+  // that item until it resolves.
+  const workspacePath = useWorkspacePath(workspaceId);
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const summaryRef = useRef<WorkspaceDiffSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -2610,6 +2615,7 @@ export function DiffView({
               onSelectFile={handleScrollToFile}
               activeFile={activeFile}
               onRevertPaths={adapter.revertFile ? handleRevertPaths : undefined}
+              workspacePath={workspacePath}
             />
           </div>
         </div>
