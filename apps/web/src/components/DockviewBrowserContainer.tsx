@@ -238,12 +238,15 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
     return () => d.dispose();
   }, [props.api]);
 
+  const containerApi = props.containerApi;
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      closeTabRef.current?.(browserId);
+      // Route to the handlers owned by THIS tab's dockview (keyed by
+      // `containerApi.id`) so closing a tab never hits a cached workspace.
+      panelActionsByApiId.get(containerApi.id)?.current?.onClose(browserId);
     },
-    [browserId],
+    [containerApi, browserId],
   );
 
   const showFavicon = faviconUrl && !faviconError;
@@ -276,20 +279,26 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared refs for stable Dockview components
+// Per-instance action registry for stable Dockview components
+//
+// dockview's `rightHeaderActionsComponent` and tab header components must be
+// STABLE references, but the handlers they invoke are per-container-instance
+// (each mounted DockviewBrowserContainer has its own `workspaceId` + inner
+// dockview api). MultiWorkspacePanelHost keeps up to 3 workspaces mounted at
+// once (inactive ones only `visibility: hidden`), so a module-level handler
+// ref suffered last-writer-wins: a hidden instance's handlers would handle a
+// click made in the visible workspace, creating the browser tab in the wrong
+// (cached) workspace.
+//
+// Fix: key the handlers by the owning dockview's `api.id`. dockview passes the
+// owning `containerApi` into header-action + tab-header props; every wrapper
+// shares the same underlying component `id` even though the DockviewApi object
+// differs per group. The value is the instance's `useRef` holder so clicks
+// always read the latest closures via `.current`.
 // ---------------------------------------------------------------------------
 
-const addTabRef: {
-  current: {
-    onAdd: (groupId?: string, options?: AddTabOptions) => void;
-    onSplit: (groupId: string, direction: "right" | "below") => void;
-  };
-} = {
-  current: { onAdd: () => {}, onSplit: () => {} },
-};
-
 /**
- * Options for `handleAddTab` and `addTabRef.current.onAdd`.
+ * Options for `handleAddTab` and `BrowserPanelActions.onAdd`.
  *
  * `initialUrl` lets callers materialize a tab that loads a specific
  * URL on mount — used by the `browser-open-window` listener (issue
@@ -301,15 +310,20 @@ interface AddTabOptions {
   initialUrl?: string;
 }
 
-/** Shared ref for the close-tab action — used by BrowserTab's close button. */
-const closeTabRef: { current: ((browserId: string) => void) | null } = {
-  current: null,
-};
+interface BrowserPanelActions {
+  onAdd: (groupId?: string, options?: AddTabOptions) => void;
+  onSplit: (groupId: string, direction: "right" | "below") => void;
+  onClose: (browserId: string) => void;
+}
+
+const panelActionsByApiId = new Map<string, { current: BrowserPanelActions }>();
 
 /**
  * Stable component for DockviewReact's rightHeaderActionsComponent.
- * Reads callback from the module-level ref to avoid the
- * "only React.memo/forwardRef/function components accepted" error.
+ * Resolves the per-instance handlers from `panelActionsByApiId` keyed by the
+ * owning `containerApi.id` (see the registry comment above) to avoid the
+ * "only React.memo/forwardRef/function components accepted" error while still
+ * routing each click to the workspace that owns the clicked group.
  */
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
@@ -321,6 +335,9 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // edge group; only the split buttons are hidden. Defaults to "grid"
   // when `location` is missing (older dockview versions / tests).
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  // Resolve the owning dockview at click time so the action always targets the
+  // workspace that owns THIS group, never a last-writer-wins global.
+  const apiId = props.containerApi.id;
   const groupId = props.group.id;
   // `w-full justify-center` keeps the "+" centered horizontally inside
   // the vertical (left/right) edge action strip, which dockview sizes
@@ -330,13 +347,18 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // resolves to the same content width and the button row looks
   // identical to before.
   return (
-    <div className="flex h-full w-full items-center justify-center">
+    // `data-testid` on grid-group toolbars only (edge groups get no testid)
+    // gives integration tests a stable hook for the central action row.
+    <div
+      className="flex h-full w-full items-center justify-center"
+      data-testid={isGridGroup ? "dockview-browser__toolbar" : undefined}
+    >
       {isGridGroup && (
         <>
           <button
             type="button"
             className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => addTabRef.current.onSplit(groupId, "right")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "right")}
             title="Split right"
           >
             <Columns2 className="size-3.5" />
@@ -344,7 +366,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
           <button
             type="button"
             className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-            onClick={() => addTabRef.current.onSplit(groupId, "below")}
+            onClick={() => panelActionsByApiId.get(apiId)?.current?.onSplit(groupId, "below")}
             title="Split down"
           >
             <Rows2 className="size-3.5" />
@@ -354,7 +376,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onAdd(groupId)}
+        onClick={() => panelActionsByApiId.get(apiId)?.current?.onAdd(groupId)}
         title="New browser tab"
       >
         <Plus className="size-4" />
@@ -1024,14 +1046,23 @@ export function DockviewBrowserContainer({
   // Visibility is now propagated via PanelVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
-  // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
-  closeTabRef.current = closeTab;
+  // Per-instance action handlers for the stable Dockview header/tab
+  // components. Registered in `panelActionsByApiId` (keyed by this inner
+  // dockview's `api.id`) from `onReady`; mutated every render so the registry
+  // always holds this instance's latest closures.
+  const actionsRef = useRef<BrowserPanelActions>({
+    onAdd: () => {},
+    onSplit: () => {},
+    onClose: () => {},
+  });
+  actionsRef.current = { onAdd: handleAddTab, onSplit: handleSplit, onClose: closeTab };
 
   // Detach edge-group drag-visibility listeners + inner-dockview
-  // registration on unmount.
+  // registration, and drop this instance's action handlers, on unmount.
   useEffect(() => {
     return () => {
+      const api = apiRef.current;
+      if (api) panelActionsByApiId.delete(api.id);
       edgeDragDisposerRef.current?.();
       edgeDragDisposerRef.current = null;
       innerRegisterDisposerRef.current?.();
@@ -1054,7 +1085,15 @@ export function DockviewBrowserContainer({
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
+      // Defensive double-onReady guard (mirrors the disposer guards below):
+      // if onReady fires again with a fresh api, drop the previous registry
+      // entry so it doesn't orphan — unmount only deletes the last-seen id.
+      const prevApi = apiRef.current;
+      if (prevApi && prevApi.id !== event.api.id) panelActionsByApiId.delete(prevApi.id);
       apiRef.current = event.api;
+      // Register this instance's handlers under the inner dockview's id so the
+      // header/tab components resolve to the correct workspace (see registry).
+      panelActionsByApiId.set(event.api.id, actionsRef);
       const savedLayout = initialLayoutRef.current;
       const knownBrowserIds = initialBrowserIdsRef.current;
       const knownUrls = initialUrlsRef.current;

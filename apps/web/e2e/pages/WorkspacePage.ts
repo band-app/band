@@ -416,6 +416,111 @@ export class WorkspacePage {
     return this.page.locator(`.dv-tab:has([data-testid="workspace__tab--${panelComponent}"])`);
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Inner-dockview header toolbar actions ("+" / split). These live in each
+  // inner container's `rightHeaderActionsComponent` (`RightHeaderActions` in
+  // DockviewChatContainer.tsx etc.). The buttons carry no visible text — the
+  // accessible name comes from the `title` attribute ("New chat tab",
+  // "Split right", "Split down"), so `getByRole("button", { name })` resolves
+  // them. We scope to a workspace's cached panel host and filter to the
+  // visible button so the locator picks the active workspace's CENTRAL group
+  // toolbar, not the collapsed edge groups' hidden buttons nor the OTHER
+  // (hidden) cached workspace's chat header. This is the surface the
+  // wrong-workspace-panel regression test drives.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The central (grid) group's header toolbar for a given inner container in
+   *  a workspace's panel host. Each container's `RightHeaderActions` tags its
+   *  GRID-group toolbar with `dockview-<container>__toolbar` (edge groups get
+   *  no testid), so `getByTestId` resolves only the central action row — never
+   *  the collapsed edge groups' "+"-only rows whose buttons can overlap
+   *  content and steal a click. The container-specific testid also keeps the
+   *  chat toolbar distinct from the terminal toolbar when both inner dockviews
+   *  are visible at once (default outer layout shows Chat in one group and the
+   *  active right-group tab in another). Scoped to the workspace's cached
+   *  entry + filtered to visible so it never resolves the OTHER (hidden)
+   *  workspace's header. */
+  private centralToolbar(workspaceId: string, container: "chat" | "terminal" | "browser"): Locator {
+    return this.cachedPanelEntries(workspaceId)
+      .getByTestId(`dockview-${container}__toolbar`)
+      .filter({ visible: true });
+  }
+
+  /** The visible "New chat tab" ("+") button for a workspace's chat host. */
+  chatAddTabButton(workspaceId: string): Locator {
+    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "New chat tab" });
+  }
+
+  /** The visible chat "Split right" button for a workspace's chat host. */
+  chatSplitRightButton(workspaceId: string): Locator {
+    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "Split right" });
+  }
+
+  /** The visible "New terminal" ("+") button for a workspace's terminal host. */
+  terminalAddTabButton(workspaceId: string): Locator {
+    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
+      name: "New terminal",
+    });
+  }
+
+  /** The visible terminal "Split right" button for a workspace's terminal host. */
+  terminalSplitRightButton(workspaceId: string): Locator {
+    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
+      name: "Split right",
+    });
+  }
+
+  /** Click the chat "+" (add tab) button in the given workspace's host. */
+  async clickChatAddTab(workspaceId: string): Promise<void> {
+    await test.step(`Click chat "+" in workspace ${workspaceId}`, async () => {
+      await this.chatAddTabButton(workspaceId).first().click();
+    });
+  }
+
+  /** Click the chat "Split right" button in the given workspace's host. */
+  async clickChatSplitRight(workspaceId: string): Promise<void> {
+    await test.step(`Click chat "Split right" in workspace ${workspaceId}`, async () => {
+      await this.chatSplitRightButton(workspaceId).first().click();
+    });
+  }
+
+  /** Click the terminal "+" (add tab) button in the given workspace's host. */
+  async clickTerminalAddTab(workspaceId: string): Promise<void> {
+    await test.step(`Click terminal "+" in workspace ${workspaceId}`, async () => {
+      await this.terminalAddTabButton(workspaceId).first().click();
+    });
+  }
+
+  /** Click the terminal "Split right" button in the given workspace's host. */
+  async clickTerminalSplitRight(workspaceId: string): Promise<void> {
+    await test.step(`Click terminal "Split right" in workspace ${workspaceId}`, async () => {
+      await this.terminalSplitRightButton(workspaceId).first().click();
+    });
+  }
+
+  /** Count the panels in a workspace's persisted inner layout for the given
+   *  container. Returns 0 when no layout has been persisted yet. Reads the
+   *  server-side layout (via `readInnerLayout`) so it reflects which
+   *  workspace's dockview an add/split actually mutated — the crux of the
+   *  wrong-workspace regression. */
+  async countInnerPanels(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<number> {
+    const tree = await this.readInnerLayout(container, workspaceId);
+    return tree ? Object.keys(tree.panels).length : 0;
+  }
+
+  /** Convenience: panel count for a workspace's persisted chat layout. */
+  async countChatPanels(workspaceId: string): Promise<number> {
+    return this.countInnerPanels("chat", workspaceId);
+  }
+
+  /** Convenience: panel count for a workspace's persisted terminal layout. */
+  async countTerminalPanels(workspaceId: string): Promise<number> {
+    return this.countInnerPanels("terminal", workspaceId);
+  }
+
   /** Navigate to the given workspace. The workspace URL no longer carries a
    *  sub-path for the active tab — see issue #467 for the route unification
    *  that folded `/changes`, `/code`, `/terminal` into `/workspace/:id`. */
