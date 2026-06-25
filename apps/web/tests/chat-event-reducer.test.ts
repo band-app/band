@@ -3,7 +3,7 @@
  * that mirror what the server actually emits. Pure, no I/O.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   applyEvents,
   type ChatSubscriptionState,
@@ -415,47 +415,36 @@ describe("chatEventReducer", () => {
 
   /**
    * Edge case: `tool-output-available` arriving with no message that
-   * owns its `toolCallId` (no prior `tool-input-available`). Real-world
-   * trigger is a malformed JSONL transcript with an orphan `tool_result`
-   * block. The reducer must drop the event (no message corruption) but
-   * log a console.warn so silent drops can't hide future regressions
-   * (issue #509 — the silent return was half of why that bug went
-   * undetected for so long).
+   * owns its `toolCallId` (no prior `tool-input-available`). Triggers:
+   * a windowed cold subscribe (issue #572) whose replay includes a
+   * `tool_result` whose `tool_use` is in an older, not-yet-loaded page;
+   * or a reconnect that reorders the two. The reducer must NOT drop the
+   * event (that was issue #509 — the dropped output left the tool stuck
+   * in `input-available` forever once the input did arrive). Instead it
+   * BUFFERS the output keyed by `toolCallId`; a later `tool-input-available`
+   * or `prepend-messages` binds it. No message corruption, no warn.
    */
-  it("orphan tool-output-available (no owner) is dropped with a warn, lastEventId advances", () => {
-    // try/finally so an assertion failure can't leak the spy into the
-    // next test — vitest does not auto-restore inline spies. Without
-    // this any subsequent test that calls `console.warn` would see the
-    // mocked no-op instead of the real implementation and debug output
-    // would silently disappear.
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const before: ChatSubscriptionState = {
-        ...INITIAL_STATE,
-        lastEventId: 5,
-        messages: [],
-      };
-      const after = chatEventReducer(before, {
-        type: "tool-output-available",
-        toolCallId: "orphan-id",
-        output: "this should not show up",
-        isError: false,
-        eventId: 6,
-      });
-      // No new messages, no new tool part anywhere.
-      expect(after.messages).toEqual([]);
-      expect(after.currentAssistantId).toBeUndefined();
-      // Cursor still advances — we processed the event, we just had
-      // nothing to attach it to.
-      expect(after.lastEventId).toBe(6);
-      // Loud warning so silent drops never hide a regression again.
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("tool-output-available for unknown toolCallId"),
-        "orphan-id",
-      );
-    } finally {
-      warnSpy.mockRestore();
-    }
+  it("orphan tool-output-available (no owner) is buffered, not dropped, lastEventId advances", () => {
+    const before: ChatSubscriptionState = {
+      ...INITIAL_STATE,
+      lastEventId: 5,
+      messages: [],
+    };
+    const after = chatEventReducer(before, {
+      type: "tool-output-available",
+      toolCallId: "orphan-id",
+      output: "buffered until its tool_use loads",
+      isError: false,
+      eventId: 6,
+    });
+    // No new messages, no new tool part anywhere yet.
+    expect(after.messages).toEqual([]);
+    expect(after.currentAssistantId).toBeUndefined();
+    // Cursor still advances — we processed the event.
+    expect(after.lastEventId).toBe(6);
+    // The output is parked, not lost.
+    expect(after.pendingToolOutputs["orphan-id"]).toBeTruthy();
+    expect(after.pendingToolOutputs["orphan-id"].output).toBe("buffered until its tool_use loads");
   });
 
   /**
@@ -738,3 +727,146 @@ describe("chatEventReducer", () => {
     expect(reconnected.status).toBe("completed");
   });
 });
+
+describe("chatEventReducer — scroll-back pagination (#572)", () => {
+  it("history-meta records hasOlder + oldestOffset", () => {
+    const state = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "recent" },
+        { type: "history-meta", hasOlder: true, oldestOffset: 950 },
+      ]),
+    );
+    expect(state.hasOlder).toBe(true);
+    expect(state.oldestOffset).toBe(950);
+    // Default before any history-meta: nothing older.
+    expect(INITIAL_STATE.hasOlder).toBe(false);
+    expect(INITIAL_STATE.oldestOffset).toBeUndefined();
+  });
+
+  it("prepend-messages adds older messages to the FRONT and updates the cursor", () => {
+    // Current (windowed) state: one recent user turn + history-meta cursor.
+    const base = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "newest" },
+        { type: "history-meta", hasOlder: true, oldestOffset: 50 },
+      ]),
+    );
+    const firstIdBefore = base.messages[0].id;
+
+    // An older page, folded in isolation and id-namespaced exactly as the hook
+    // does, then prepended.
+    const older = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "older-1" },
+        { type: "user-message", text: "older-2" },
+      ]),
+    ).messages.map((m) => ({ ...m, id: `o50-${m.id}` }));
+
+    const next = chatEventReducer(base, {
+      type: "prepend-messages",
+      messages: older,
+      hasOlder: false,
+      oldestOffset: 0,
+    });
+
+    // Older messages are now at the front, in order, ahead of the existing one.
+    expect(next.messages).toHaveLength(3);
+    expect(textOf(next.messages[0])).toBe("older-1");
+    expect(textOf(next.messages[1])).toBe("older-2");
+    expect(textOf(next.messages[2])).toBe("newest");
+    // The previously-first message keeps its identity (DOM rows stay stable).
+    expect(next.messages[2].id).toBe(firstIdBefore);
+    // Cursor advanced to the start of history.
+    expect(next.hasOlder).toBe(false);
+    expect(next.oldestOffset).toBe(0);
+  });
+
+  it("buffers a tool-output whose tool_use isn't loaded yet, then resolves it on tool-input-available", () => {
+    // Windowed window replays a tool_result whose tool_use is in an older page:
+    // the output arrives with no owner.
+    const buffered = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "tool-output-available", toolCallId: "call-1", output: "RESULT", isError: false },
+      ]),
+    );
+    // Nothing rendered yet — the output is parked, not dropped.
+    expect(buffered.messages).toHaveLength(0);
+    expect(buffered.pendingToolOutputs["call-1"]).toBeTruthy();
+
+    // The owning tool_use arrives (live, or via a later prepend folded as text).
+    const resolved = applyEvents(buffered, [
+      { type: "text-start", id: "p1", eventId: 10 },
+      { type: "text-delta", id: "p1", delta: "thinking", eventId: 11 },
+      {
+        type: "tool-input-available",
+        toolCallId: "call-1",
+        toolName: "Bash",
+        input: { command: "ls" },
+        eventId: 12,
+      },
+    ] as ChatEvent[]);
+
+    // The buffer drained and the tool part now carries the output.
+    expect(resolved.pendingToolOutputs["call-1"]).toBeUndefined();
+    const toolPart = resolved.messages
+      .flatMap((m) => m.parts)
+      .find((p) => (p as { toolCallId?: string }).toolCallId === "call-1") as
+      | { state?: string; output?: unknown }
+      | undefined;
+    expect(toolPart?.state).toBe("output-available");
+    expect(toolPart?.output).toBe("RESULT");
+  });
+
+  it("prepend resolves a buffered output whose tool_use the older page introduces", () => {
+    // The current window holds only the tool_result (orphan output buffered).
+    const windowState = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "tool-output-available", toolCallId: "call-9", output: "OUT", isError: false },
+        { type: "history-meta", hasOlder: true, oldestOffset: 10 },
+      ]),
+    );
+    expect(windowState.pendingToolOutputs["call-9"]).toBeTruthy();
+
+    // The older page (folded in isolation) contains the assistant tool_use.
+    const olderFold = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "text-start", id: "p9" },
+        { type: "text-delta", id: "p9", delta: "calling tool" },
+        { type: "tool-input-available", toolCallId: "call-9", toolName: "Bash", input: {} },
+      ]),
+    );
+    const older = olderFold.messages.map((m) => ({ ...m, id: `o10-${m.id}` }));
+
+    const next = chatEventReducer(windowState, {
+      type: "prepend-messages",
+      messages: older,
+      hasOlder: false,
+      oldestOffset: 0,
+      pendingToolOutputs: olderFold.pendingToolOutputs,
+    });
+
+    // The buffered output binds to the just-prepended tool_use.
+    expect(next.pendingToolOutputs["call-9"]).toBeUndefined();
+    const toolPart = next.messages
+      .flatMap((m) => m.parts)
+      .find((p) => (p as { toolCallId?: string }).toolCallId === "call-9") as
+      | { state?: string; output?: unknown }
+      | undefined;
+    expect(toolPart?.state).toBe("output-available");
+    expect(toolPart?.output).toBe("OUT");
+  });
+});
+
+/** Concatenated text of a message's text parts. */
+function textOf(msg: { parts: Array<unknown> }): string {
+  return (msg.parts as Array<{ type: string; text?: string }>)
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
+}

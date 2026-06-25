@@ -54,6 +54,23 @@ export interface ChatSubscriptionState {
    *  session's `user-message` is eventId=2). React would complain about
    *  duplicate keys without this. */
   messageIdCounter: number;
+  /** True when the session has messages on disk OLDER than the ones currently
+   *  loaded — drives the scroll-back sentinel in `ChatView`. Set from the
+   *  `history-meta` event on cold subscribe and updated by `prepend-messages`
+   *  as older pages load. */
+  hasOlder: boolean;
+  /** Absolute index (into the agent's filtered message list) of the FIRST
+   *  message currently held. The older-page endpoint fetches the page before
+   *  this cursor. `undefined` until the first `history-meta` arrives. */
+  oldestOffset: number | undefined;
+  /** Tool outputs whose `tool-input-available` hasn't been seen yet, keyed by
+   *  `toolCallId`. Windowed cold subscribe (issue #572) can replay a
+   *  `tool-output-available` (from a tool_result user-frame inside the window)
+   *  whose matching `tool_use` lives in an older, not-yet-loaded page. Rather
+   *  than drop the output, we stash it here and apply it when the owning
+   *  `tool-input-available` arrives — either live, or when an older page
+   *  prepends the `tool_use`. Also hardens against reconnect/ordering races. */
+  pendingToolOutputs: Record<string, ToolOutputAvailableEvent>;
   /** Internal: true while the current `taskRunning: true` originated from an
    *  UNACKNOWLEDGED optimistic `send()` (a synthetic `task-started` with a
    *  negative eventId), and the server hasn't confirmed it yet with a real
@@ -81,8 +98,34 @@ export const INITIAL_STATE: ChatSubscriptionState = {
   taskErrorMessage: undefined,
   currentAssistantId: undefined,
   messageIdCounter: 0,
+  hasOlder: false,
+  oldestOffset: undefined,
+  pendingToolOutputs: {},
   pendingOptimisticTask: false,
 };
+
+/**
+ * Internal (non-wire) action: prepend an already-built batch of OLDER messages
+ * to the front of the conversation. Dispatched by `useChatSubscription.loadOlder`
+ * after it fetches `/api/chats/:id/history`, folds the page through a fresh
+ * reducer (`applyEvents(INITIAL_STATE, events)`) and re-namespaces the message
+ * ids so they can't collide with the live set. The reducer concatenates the
+ * batch ahead of `state.messages`, updates the older-history cursor, and
+ * resolves any buffered tool outputs whose `tool_use` the batch just introduced.
+ */
+export interface PrependMessagesAction {
+  type: "prepend-messages";
+  messages: UIMessage[];
+  hasOlder: boolean;
+  oldestOffset: number;
+  /** Tool outputs left orphaned by the isolated fold of this page — their
+   *  `tool_use` lives in an even-older page not yet loaded. Merged into the
+   *  reducer's buffer so a later older page resolves them. */
+  pendingToolOutputs?: Record<string, ToolOutputAvailableEvent>;
+}
+
+/** Everything the reducer accepts: wire events plus internal actions. */
+export type ChatReducerAction = ChatEvent | PrependMessagesAction;
 
 // ---------------------------------------------------------------------------
 // Helpers — pure, no allocation of state objects until needed
@@ -235,6 +278,50 @@ function makeToolOutputPart(
   };
 }
 
+/**
+ * Apply any buffered tool outputs whose owning `tool_use` part now exists in
+ * `messages`. Returns the (possibly) updated messages plus the remaining
+ * still-orphaned buffer. Pure — allocates new arrays only when something
+ * resolves. Used both when a `tool-input-available` arrives and when an older
+ * page prepends `tool_use` parts whose results already streamed in the window.
+ */
+function drainPendingToolOutputs(
+  messages: UIMessage[],
+  pending: Record<string, ToolOutputAvailableEvent>,
+): { messages: UIMessage[]; pending: Record<string, ToolOutputAvailableEvent> } {
+  const ids = Object.keys(pending);
+  if (ids.length === 0) return { messages, pending };
+  let nextMessages = messages;
+  let nextPending: Record<string, ToolOutputAvailableEvent> | undefined;
+  for (const toolCallId of ids) {
+    let ownerId: string | undefined;
+    let prevPart: AssistantToolPart | undefined;
+    for (let i = nextMessages.length - 1; i >= 0; i--) {
+      const msg = nextMessages[i];
+      if (msg.role !== "assistant") continue;
+      const part = msg.parts.find((p) => {
+        const pp = p as unknown as { toolCallId?: string };
+        return pp.toolCallId === toolCallId;
+      });
+      if (part) {
+        ownerId = msg.id;
+        prevPart = part as unknown as AssistantToolPart;
+        break;
+      }
+    }
+    if (!ownerId) continue; // still orphan — keep buffered
+    nextMessages = replaceToolPart(
+      nextMessages,
+      ownerId,
+      toolCallId,
+      makeToolOutputPart(prevPart, pending[toolCallId]),
+    );
+    if (!nextPending) nextPending = { ...pending };
+    delete nextPending[toolCallId];
+  }
+  return { messages: nextMessages, pending: nextPending ?? pending };
+}
+
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
@@ -248,8 +335,31 @@ function makeToolOutputPart(
  */
 export function chatEventReducer(
   state: ChatSubscriptionState,
-  event: ChatEvent,
+  action: ChatReducerAction,
 ): ChatSubscriptionState {
+  // Internal (non-wire) action: prepend an older page. Handled before the
+  // event path because it carries no `eventId` and must not advance the cursor.
+  if (action.type === "prepend-messages") {
+    const merged = [...action.messages, ...state.messages];
+    // Merge any outputs the page's isolated fold left orphaned (their tool_use
+    // is in an even-older page) with the existing buffer, then resolve every
+    // output whose tool_use now exists — covering both the window-boundary case
+    // (output buffered earlier, tool_use in this batch) and this page's own
+    // outputs whose tool_use is in an already-loaded newer message.
+    const mergedPending = action.pendingToolOutputs
+      ? { ...state.pendingToolOutputs, ...action.pendingToolOutputs }
+      : state.pendingToolOutputs;
+    const drained = drainPendingToolOutputs(merged, mergedPending);
+    return {
+      ...state,
+      messages: drained.messages,
+      pendingToolOutputs: drained.pending,
+      hasOlder: action.hasOlder,
+      oldestOffset: action.oldestOffset,
+    };
+  }
+
+  const event = action;
   // Always advance the cursor.
   const lastEventId = Math.max(state.lastEventId ?? 0, event.eventId);
 
@@ -463,6 +573,10 @@ export function chatEventReducer(
         messages = [...messages, { id: assistantId, role: "assistant", parts: [] }];
       }
       messages = appendPart(messages, assistantId, makeToolInputPart(event));
+      // Apply a buffered output that arrived before this input (windowed cold
+      // subscribe can replay the tool_result inside the window while its
+      // tool_use is in an older page — or a reconnect can reorder the two).
+      const drained = drainPendingToolOutputs(messages, state.pendingToolOutputs);
       return {
         ...state,
         lastEventId,
@@ -472,7 +586,8 @@ export function chatEventReducer(
         status: state.taskRunning ? "streaming" : state.status,
         currentAssistantId: assistantId,
         messageIdCounter: nextCounter,
-        messages,
+        messages: drained.messages,
+        pendingToolOutputs: drained.pending,
       };
     }
 
@@ -504,14 +619,17 @@ export function chatEventReducer(
         }
       }
       if (!ownerId) {
-        // Genuinely unknown toolCallId — log loudly. Silent drops are how
-        // this bug went undetected for so long; a visible warning lets
-        // future regressions surface in normal usage.
-        console.warn(
-          "[chat] tool-output-available for unknown toolCallId — dropping",
-          event.toolCallId,
-        );
-        return { ...state, lastEventId };
+        // No owning `tool_use` yet. Under windowed cold subscribe (issue #572)
+        // this is expected: the tool_result can fall inside the replayed window
+        // while its tool_use lives in an older, not-yet-loaded page. Buffer the
+        // output keyed by toolCallId; `tool-input-available` / `prepend-messages`
+        // applies it once the owning part appears. (Also absorbs reconnect
+        // reordering that previously caused #509-style stuck `input-available`.)
+        return {
+          ...state,
+          lastEventId,
+          pendingToolOutputs: { ...state.pendingToolOutputs, [event.toolCallId]: event },
+        };
       }
       const messages = replaceToolPart(
         state.messages,
@@ -595,6 +713,16 @@ export function chatEventReducer(
 
     case "queue-updated":
       return { ...state, lastEventId, queuedMessages: event.messages };
+
+    case "history-meta":
+      // Cold-subscribe marker: whether older history exists on disk and the
+      // cursor to fetch it from. Drives the scroll-back sentinel in ChatView.
+      return {
+        ...state,
+        lastEventId,
+        hasOlder: event.hasOlder,
+        oldestOffset: event.oldestOffset,
+      };
 
     default: {
       // Exhaustiveness check — TypeScript will flag unhandled members of the

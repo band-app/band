@@ -21,6 +21,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -194,6 +195,17 @@ async function setActiveSession(
   body: { workspaceId: string; chatId: string; sessionId?: string },
 ): Promise<Response> {
   return fetch(`${url}/trpc/chats.setActiveSession`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...defaultHeaders },
+    body: JSON.stringify(body),
+  });
+}
+
+async function createChat(
+  url: string,
+  body: { workspaceId: string; id: string; agent?: string },
+): Promise<Response> {
+  return fetch(`${url}/trpc/chats.create`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...defaultHeaders },
     body: JSON.stringify(body),
@@ -1786,3 +1798,172 @@ describe("chat-events — cold subscribe + reconnect: no duplication on the work
  *   half of the implementation as the part we can guard
  *   deterministically in the vitest harness today.
  */
+
+// ---------------------------------------------------------------------------
+// Windowed cold subscribe + history-meta (#572)
+// ---------------------------------------------------------------------------
+
+describe("chat-events — windowed cold subscribe + history-meta (#572)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let repoDir: string;
+
+  beforeAll(async () => {
+    // Realpath the home so the worktree path persisted in the DB matches the
+    // symlink-resolved path the agent SDK encodes the session project dir from
+    // (macOS `/var` → `/private/var`). Without this, the seeded JSONL lands in a
+    // dir the SDK never reads and `getSessionMessages` comes back empty — the
+    // shared `tests/helpers/server.ts::createTmpHome` realpaths for this reason.
+    tmpHome = realpathSync(createTmpHome());
+    repoDir = join(tmpHome, "repo");
+    mkdirSync(repoDir, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "testproject",
+          path: repoDir,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoDir }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, defaultSettings());
+    server = await startServer({ tmpHome });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  async function seedSessionChat(sessionId: string, turns: number, chatId: string): Promise<void> {
+    // `tmpHome`/`repoDir` are already symlink-resolved (see beforeAll), so the
+    // encoded project dir matches what the SDK looks up.
+    const encoded = repoDir.replace(/[^a-zA-Z0-9]/g, "-");
+    const projectDir = join(tmpHome, ".claude", "projects", encoded);
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, `${sessionId}.jsonl`), buildLongSessionJsonl(sessionId, turns));
+    await createChat(server.url, {
+      workspaceId: "testproject-main",
+      id: chatId,
+      agent: "claude-code",
+    });
+    await setActiveSession(server.url, {
+      workspaceId: "testproject-main",
+      chatId,
+      sessionId,
+    });
+  }
+
+  function historyMetaOf(events: ParsedEvent[]): { hasOlder: boolean; oldestOffset: number } {
+    const evt = events.find((e) => e.type === "history-meta");
+    if (!evt) throw new Error("no history-meta frame in replay");
+    return evt.data as unknown as { hasOlder: boolean; oldestOffset: number };
+  }
+
+  function userTextsOf(events: ParsedEvent[]): string[] {
+    return events
+      .filter((e) => e.type === "user-message")
+      .map((e) => (e.data as unknown as { text: string }).text);
+  }
+
+  it("cold subscribe to a long session replays only the recent window and reports hasOlder", async () => {
+    const chatId = newChatId("windowed-long");
+    // 60 turns = 120 messages; cold window is 50 → firstOffset 70, hasOlder true.
+    // Session id must be UUID-shaped — the agent SDK only resolves UUID-named
+    // session files on disk.
+    await seedSessionChat("44444444-5555-6666-7777-888888888888", 60, chatId);
+
+    const replay = await collectEvents(server.url, chatId, {
+      workspaceId: "testproject-main",
+      until: (e) => e.type === "history-meta",
+      timeoutMs: 10_000,
+    });
+
+    const meta = historyMetaOf(replay);
+    expect(meta.hasOlder).toBe(true);
+    expect(meta.oldestOffset).toBe(70);
+
+    // Only the last 50 messages (turns 35..59) replayed — older ones are paged
+    // in on demand via /history, not on cold subscribe.
+    const texts = userTextsOf(replay);
+    expect(texts).toContain(jsonlUserText(59));
+    expect(texts).toContain(jsonlUserText(35));
+    expect(texts).not.toContain(jsonlUserText(34));
+    expect(texts).not.toContain(jsonlUserText(0));
+  }, 25_000);
+
+  it("cold subscribe to a short session replays everything and reports hasOlder:false", async () => {
+    const chatId = newChatId("windowed-short");
+    // 5 turns = 10 messages, well under the 50-message window.
+    await seedSessionChat("55555555-6666-7777-8888-999999999999", 5, chatId);
+
+    const replay = await collectEvents(server.url, chatId, {
+      workspaceId: "testproject-main",
+      until: (e) => e.type === "history-meta",
+      timeoutMs: 10_000,
+    });
+
+    const meta = historyMetaOf(replay);
+    expect(meta.hasOlder).toBe(false);
+    expect(meta.oldestOffset).toBe(0);
+
+    const texts = userTextsOf(replay);
+    expect(texts).toContain(jsonlUserText(0));
+    expect(texts).toContain(jsonlUserText(4));
+  }, 25_000);
+});
+
+function buildLongSessionJsonl(sessionId: string, turns: number): string {
+  const lines: string[] = [];
+  let parentUuid: string | null = null;
+  for (let i = 0; i < turns; i++) {
+    lines.push(
+      JSON.stringify({
+        type: "user",
+        uuid: jsonlUuid(i * 2 + 1),
+        parentUuid,
+        sessionId,
+        isSidechain: false,
+        userType: "external",
+        message: { role: "user", content: [{ type: "text", text: jsonlUserText(i) }] },
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2)).toISOString(),
+      }),
+    );
+    lines.push(
+      JSON.stringify({
+        type: "assistant",
+        uuid: jsonlUuid(i * 2 + 2),
+        parentUuid: jsonlUuid(i * 2 + 1),
+        sessionId,
+        isSidechain: false,
+        message: { role: "assistant", content: [{ type: "text", text: jsonlAssistantText(i) }] },
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2 + 1)).toISOString(),
+      }),
+    );
+    parentUuid = jsonlUuid(i * 2 + 2);
+  }
+  lines.push(
+    JSON.stringify({
+      type: "last-prompt",
+      sessionId,
+      lastPrompt: jsonlUserText(turns - 1),
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, turns * 2)).toISOString(),
+      uuid: jsonlUuid(turns * 2 + 1),
+      parentUuid: null,
+    }),
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+function jsonlUuid(n: number): string {
+  return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
+}
+
+function jsonlUserText(turn: number): string {
+  return `cold-prompt-${turn}-marker`;
+}
+
+function jsonlAssistantText(turn: number): string {
+  return `cold-reply-${turn}-marker`;
+}

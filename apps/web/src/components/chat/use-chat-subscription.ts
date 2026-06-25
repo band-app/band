@@ -35,8 +35,18 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
-import { CHAT_EVENT_TYPES, type ChatEvent, type ChatEventFile } from "../../shared/chat-events";
-import { type ChatSubscriptionState, chatEventReducer, INITIAL_STATE } from "./chat-event-reducer";
+import {
+  CHAT_EVENT_TYPES,
+  type ChatEvent,
+  type ChatEventFile,
+  HISTORY_PAGE_SIZE,
+} from "../../shared/chat-events";
+import {
+  applyEvents,
+  type ChatSubscriptionState,
+  chatEventReducer,
+  INITIAL_STATE,
+} from "./chat-event-reducer";
 
 export interface UseChatSubscriptionOptions {
   workspaceId: string;
@@ -64,7 +74,12 @@ export interface UseChatSubscriptionOptions {
 export interface UseChatSubscriptionResult
   extends Omit<
     ChatSubscriptionState,
-    "currentAssistantId" | "lastEventId" | "messageIdCounter" | "pendingOptimisticTask"
+    | "currentAssistantId"
+    | "lastEventId"
+    | "messageIdCounter"
+    | "pendingOptimisticTask"
+    | "oldestOffset"
+    | "pendingToolOutputs"
   > {
   /** True while the EventSource is connected to the server. */
   isConnected: boolean;
@@ -74,7 +89,16 @@ export interface UseChatSubscriptionResult
   send: (text: string, files?: File[]) => Promise<void>;
   /** Abort the currently running task. No-op if nothing is running. */
   cancel: () => Promise<void>;
+  /** Fetch the page of messages immediately older than the ones currently
+   *  held and prepend them. No-op when there's nothing older or a fetch is
+   *  already in flight. Drives scroll-back pagination (issue #572). */
+  loadOlder: () => Promise<void>;
+  /** True while a `loadOlder()` fetch is in flight. */
+  loadingOlder: boolean;
 }
+
+/** Older-page size requested by `loadOlder` — the shared window size. */
+const OLDER_PAGE_LIMIT = HISTORY_PAGE_SIZE;
 
 // Max backoff for reconnect attempts. Native EventSource does its own
 // retry; this kicks in when we close-and-reopen manually (server
@@ -389,6 +413,91 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     }
   }, [workspaceId, chatId]);
 
+  // ---------------------------------------------------------------------
+  // Scroll-back pagination (issue #572)
+  //
+  // The cold subscribe replays only the most recent window and emits a
+  // `history-meta` event recording `hasOlder` + `oldestOffset`. When the
+  // user scrolls to the top, `ChatView` calls `loadOlder()`, which fetches
+  // the page immediately preceding what we hold, folds it through a FRESH
+  // reducer in isolation (so the page's tool pairs resolve internally), then
+  // dispatches a `prepend-messages` action. Folding in isolation + id
+  // re-namespacing is what keeps existing message ids — and therefore the
+  // virtualizer's measured DOM rows — stable across the prepend.
+  // ---------------------------------------------------------------------
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  // The pagination cursor is read through a ref so `loadOlder`'s identity stays
+  // stable across page loads. If it depended on `state.oldestOffset`/`hasOlder`
+  // directly, every `prepend-messages` dispatch would mint a new callback and
+  // tear down + re-attach the IntersectionObserver in `ChatView` on each load.
+  const paginationRef = useRef({
+    hasOlder: state.hasOlder,
+    oldestOffset: state.oldestOffset,
+    sessionId: state.sessionId,
+  });
+  // Field writes, not a fresh object literal — this runs on every render,
+  // including the ~30/sec streaming text-delta renders, so avoid the per-render
+  // allocation on the hot path.
+  paginationRef.current.hasOlder = state.hasOlder;
+  paginationRef.current.oldestOffset = state.oldestOffset;
+  paginationRef.current.sessionId = state.sessionId;
+  const loadOlder = useCallback(async (): Promise<void> => {
+    // The IntersectionObserver fires repeatedly while the sentinel is in
+    // view; the ref guard collapses those into a single in-flight fetch.
+    if (loadingOlderRef.current) return;
+    const { hasOlder, oldestOffset, sessionId } = paginationRef.current;
+    const before = oldestOffset;
+    if (!hasOlder || before == null || before <= 0 || !sessionId) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      // Only the cursor is sent. The server resolves session + workspace from
+      // the chat row (never a client param) to avoid a path-traversal sink —
+      // see `chat-history.ts`. The `state.sessionId` guard above just gates the
+      // fetch until a session has actually resolved.
+      const params = new URLSearchParams();
+      params.set("before", String(before));
+      params.set("limit", String(OLDER_PAGE_LIMIT));
+      const res = await fetch(
+        `/api/chats/${encodeURIComponent(chatId)}/history?${params.toString()}`,
+        { credentials: "include" },
+      );
+      if (!res.ok) throw new Error(`history fetch failed: HTTP ${res.status}`);
+      const data = (await res.json()) as {
+        events: ChatEvent[];
+        hasOlder: boolean;
+        oldestOffset: number;
+      };
+
+      // Fold the page in isolation to build its UIMessages, then namespace the
+      // top-level message ids so they can't collide with the live set or with
+      // an earlier page (`before` strictly decreases per page). `toolCallId`s
+      // and text-part ids are left intact so the reducer's orphan-output buffer
+      // still matches across the page boundary.
+      const folded = applyEvents(INITIAL_STATE, data.events);
+      const namespaced = folded.messages.map((m) => ({ ...m, id: `o${before}-${m.id}` }));
+
+      dispatch({
+        type: "prepend-messages",
+        messages: namespaced,
+        hasOlder: data.hasOlder,
+        oldestOffset: data.oldestOffset,
+        // Carry forward any outputs the page couldn't resolve internally (their
+        // tool_use is in an even-older page) so a later load resolves them.
+        pendingToolOutputs: folded.pendingToolOutputs,
+      });
+    } catch (err) {
+      console.error("[chat-sub] loadOlder failed", err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+    // Cursor + session read via `paginationRef`, so the only real dependency is
+    // `chatId` — keeps the callback identity stable across page loads.
+  }, [chatId]);
+
   return {
     messages: state.messages,
     status: state.status,
@@ -397,8 +506,11 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     usage: state.usage,
     taskRunning: state.taskRunning,
     taskErrorMessage: state.taskErrorMessage,
+    hasOlder: state.hasOlder,
     isConnected,
     send,
     cancel,
+    loadOlder,
+    loadingOlder,
   };
 }

@@ -298,6 +298,10 @@ export function ChatView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const prevVisibleRef = useRef(visible);
+  // Resolved StickToBottom scroll element, surfaced as state so the
+  // scroll-back IntersectionObserver effect re-runs once it's available
+  // (the ref is null until after the first commit — see the attach effect).
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
   // Attach a stable `data-testid` to the StickToBottom scroll element so
   // integration tests can locate the scroller without walking up the DOM
@@ -327,6 +331,7 @@ export function ChatView({
       const el = stickyContextRef.current?.scrollRef?.current;
       if (el) {
         if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
+        setScrollEl(el);
         return;
       }
       if (attempts >= 10) {
@@ -528,7 +533,8 @@ export function ChatView({
     // factors in `document.visibilityState` internally.
     enabled: wsActive !== false,
   });
-  const { messages, status, sessionId, queuedMessages, usage, send, cancel } = subscription;
+  const { messages, status, sessionId, queuedMessages, usage, send, cancel, loadOlder } =
+    subscription;
 
   const isStreaming = status === "submitting" || status === "streaming";
 
@@ -584,15 +590,14 @@ export function ChatView({
   // Drop the SDK-reported `maxContextTokens` already covered by the hook
   // via reducer state — handled below where `usage` is consumed.
 
-  // No older-messages pagination on the first cut. The subscription's
-  // initial replay loads the recent window from the buffer + JSONL.
-  // Scroll-up pagination can be added back as a follow-up by paginating
-  // the chat-events subscription with `Last-Event-ID` from below the
-  // current replay window — see `docs/experiments/chat-event-log.md`.
-  const hasMore = false;
+  // Scroll-back pagination (issue #572). The cold subscribe replays only the
+  // recent window and reports `hasOlder` + `oldestOffset` via `history-meta`;
+  // `loadOlder()` fetches + prepends the previous page on demand. The top
+  // sentinel below wires an IntersectionObserver to it.
+  const hasMore = subscription.hasOlder;
   const loadingHistory =
     !isStreaming && messages.length === 0 && !!initialSessionId && !subscription.isConnected;
-  const loadingOlder = false;
+  const loadingOlder = subscription.loadingOlder;
 
   const handleStop = useCallback(() => {
     void cancel();
@@ -769,6 +774,39 @@ export function ChatView({
   // per-message indicator observe it.)
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+
+  // ---------------------------------------------------------------------
+  // Scroll-back pagination — top sentinel observer.
+  //
+  // Prepending older messages grows content ABOVE the viewport. The actual
+  // scroll-anchoring (keeping the previously-top row pinned as the inserted
+  // rows measure their variable heights) lives in `VirtualizedMessageList`,
+  // where the virtualizer's native `scrollToIndex` can integrate with its own
+  // dynamic-measurement model. Here we only detect "user reached the top" and
+  // kick off the fetch. The other scroll writers don't fight us:
+  //   • `use-stick-to-bottom` only auto-scrolls when `isAtBottom`; load-older
+  //     fires at the TOP, so it never yanks to bottom.
+  //   • The first-paint reveal gate arms once per mount; pagination is later.
+  //   • The loading indicator is an absolute overlay, so toggling
+  //     `loadingOlder` doesn't shift content.
+  // ---------------------------------------------------------------------
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !scrollEl || !hasMore || loadingHistory) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) void loadOlder();
+        }
+      },
+      // Pre-fetch slightly before the sentinel is fully on-screen so the older
+      // page is usually ready by the time the user reaches the very top.
+      { root: scrollEl, rootMargin: "150px 0px 0px 0px" },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [scrollEl, hasMore, loadingHistory, loadOlder]);
+
   const renderMessageItem = useCallback(
     (message: UIMessage, messageIndex: number) => {
       const currentMessages = messagesRef.current;
@@ -898,24 +936,29 @@ export function ChatView({
     <FileLinkWorkspaceProvider workspaceId={workspaceId}>
       <div className="flex min-h-0 flex-1 flex-col">
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
+          {/* Older-messages loading indicator — ABSOLUTELY positioned so it
+              never contributes to scroll height. A skeleton in the scroll flow
+              would shift content above the viewport the instant `loadingOlder`
+              flips true (before the prepend even lands), fighting the scroll
+              anchor and producing exactly the visible jump #572 set out to
+              eliminate. An overlay spinner stays out of the layout entirely. */}
+          {loadingOlder && (
+            <output
+              className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center"
+              aria-busy="true"
+              aria-label="Loading older messages"
+              data-testid="chat-pane__loading-older"
+            >
+              <span className="flex items-center gap-2 rounded-full bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                <Loader2 className="size-3.5 animate-spin" />
+                Loading earlier messages…
+              </span>
+            </output>
+          )}
           <ConversationContent>
             {/* Sentinel for scroll-back pagination */}
             {hasMore && !loadingHistory && (
               <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
-            )}
-
-            {/* Loading indicator for older messages — skeleton row matching
-              the bubble layout so the prepended history doesn't pop. */}
-            {loadingOlder && (
-              <output
-                className="flex animate-pulse flex-col gap-2 py-3"
-                aria-busy="true"
-                aria-label="Loading older messages"
-              >
-                <SkeletonBar widthClass="w-2/3" />
-                <SkeletonBar widthClass="w-3/4" />
-                <SkeletonBar widthClass="w-1/2" />
-              </output>
             )}
 
             {/*

@@ -73,6 +73,10 @@ const SESSION_ID = "11111111-2222-3333-4444-555555555555";
 // a few dozen rows mounted) without ballooning test cost.
 const TURNS = 500;
 
+// Cold-subscribe replay window (messages). Mirrors `COLD_REPLAY_LIMIT` in
+// `apps/web/src/api/chat-events.ts` (50 messages = 25 user/assistant turns).
+const WINDOW_TURNS = 25;
+
 // Wide viewport so useIsDesktop() reports true and the shared dockview
 // renders the chat pane in its desktop layout (mobile layout has a
 // different DOM structure).
@@ -205,20 +209,25 @@ test.describe("Chat message-list virtualization", () => {
 
     // The very first seeded message must NOT be in the DOM right now —
     // the user is parked at the bottom of a 1000-message conversation,
-    // there's no way the row at position 0 is mounted. The positive
-    // anchor proving the virtualizer has settled is the
-    // `assistantMessage(lastAssistantTag).toBeVisible()` assertion
-    // above plus the bounded-row poll — once those two hold the
-    // viewport has stabilised at the end of the list, so this
-    // negative assertion is safe (the alternate state has rendered).
+    // there's no way the row at position 0 is mounted. Under windowed
+    // cold subscribe (issue #572) it isn't even loaded into the reducer:
+    // only the most recent COLD_REPLAY_LIMIT (50) messages replay. Full
+    // scroll-back pagination to message 0 is exercised by
+    // `chat-pagination.spec.ts`.
     const firstUserTag = userText(0);
     await expect(chatPane.userMessage(firstUserTag)).toHaveCount(0);
 
+    // The OLDEST message in the initial 50-message window is turn
+    // `TURNS - WINDOW_TURNS` (50 messages = 25 user/assistant turns). It is
+    // off-screen at the bottom but loaded; scrolling to the top mounts it.
+    const oldestWindowTag = userText(TURNS - WINDOW_TURNS);
+
     // Scroll to the top of the chat container via the page-object
     // helper — drives the virtualizer's on-demand mount path so the
-    // earliest rows enter the DOM.
+    // oldest windowed row enters the DOM (and triggers the scroll-back
+    // sentinel, which prepends the next older page).
     await chatPane.scrollToTop();
-    await expect(chatPane.userMessage(firstUserTag)).toBeVisible({
+    await expect(chatPane.userMessage(oldestWindowTag)).toBeVisible({
       timeout: 10_000,
     });
 

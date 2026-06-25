@@ -21,6 +21,15 @@
  *   • `apps/web/tests/chat-events.test.ts`         — integration tests
  */
 
+/**
+ * Number of messages in one chat-history page. Single source of truth shared by
+ * the three sites that must agree for scroll-back pagination to line up:
+ *   • cold-subscribe replay window (`chat-events.ts`),
+ *   • the older-page endpoint's default page size (`chat-history.ts`),
+ *   • the client's `loadOlder` request size (`use-chat-subscription.ts`).
+ */
+export const HISTORY_PAGE_SIZE = 50;
+
 // ---------------------------------------------------------------------------
 // Common shapes
 // ---------------------------------------------------------------------------
@@ -180,6 +189,30 @@ export interface SubscriptionOpenedEvent {
   taskRunning: boolean;
 }
 
+/**
+ * Windowed-history marker. Emitted once per cold subscribe, right after the
+ * recent-window JSONL replay, so the client knows whether older pages exist on
+ * disk and the offset cursor to fetch them from.
+ *
+ *   • `hasOlder` — true when the session has messages BEFORE the replayed
+ *     window. Drives the scroll-back sentinel + IntersectionObserver in
+ *     `ChatView`.
+ *   • `oldestOffset` — absolute index (into the agent's filtered message list)
+ *     of the FIRST message the client currently holds. The older-page endpoint
+ *     (`GET /api/chats/:id/history?before=<oldestOffset>`) returns the page
+ *     immediately preceding it.
+ *
+ * Only the cold-subscribe JSONL path emits a meaningful `hasOlder: true`; every
+ * other replay path (buffer-covers-start, hot reconnect) emits
+ * `hasOlder: false` so the client always receives a definitive signal rather
+ * than inferring "no older history" from the absence of an event.
+ */
+export interface HistoryMetaEvent {
+  type: "history-meta";
+  hasOlder: boolean;
+  oldestOffset: number;
+}
+
 // ---------------------------------------------------------------------------
 // Discriminated union
 // ---------------------------------------------------------------------------
@@ -200,7 +233,8 @@ export type ChatEventPayload =
   | ErrorEvent
   | FileEvent
   | QueueUpdatedEvent
-  | SubscriptionOpenedEvent;
+  | SubscriptionOpenedEvent
+  | HistoryMetaEvent;
 
 /** A ChatEventPayload tagged with its monotonic event id. The `eventId` lives
  *  on the SSE `id:` line; it's surfaced in the JSON payload too as a
@@ -242,4 +276,5 @@ export const CHAT_EVENT_TYPES: ReadonlyArray<ChatEventType> = [
   "file",
   "queue-updated",
   "subscription-opened",
+  "history-meta",
 ] as const;
