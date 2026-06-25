@@ -11,11 +11,12 @@ import { agentService } from "../server/services/agent-service";
 import { chatService } from "../server/services/chat-service";
 import { type StreamChunk, taskService } from "../server/services/task-service";
 import { workspaceService } from "../server/services/workspace-service";
-import type {
-  ChatEvent,
-  ChatEventPayload,
-  ChatEventUsage,
-  ToolInputAvailableEvent,
+import {
+  type ChatEvent,
+  type ChatEventPayload,
+  type ChatEventUsage,
+  HISTORY_PAGE_SIZE,
+  type ToolInputAvailableEvent,
 } from "../shared/chat-events";
 
 const log = createLogger("chat-events");
@@ -23,11 +24,10 @@ const log = createLogger("chat-events");
 /**
  * Number of most-recent messages replayed on a cold subscribe. The client
  * fetches older pages on demand via `GET /api/chats/:id/history` when the user
- * scrolls to the top (issue #572). Keep in sync with the default `limit` of the
- * history endpoint and the page size the client requests in
- * `use-chat-subscription.ts::loadOlder`.
+ * scrolls to the top (issue #572). Shares `HISTORY_PAGE_SIZE` with the history
+ * endpoint and the client so the windows line up.
  */
-const COLD_REPLAY_LIMIT = 50;
+const COLD_REPLAY_LIMIT = HISTORY_PAGE_SIZE;
 
 /**
  * Unified chat event log endpoint.
@@ -479,7 +479,21 @@ async function replayPast(opts: {
           agentTypeHint,
         );
         if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-          const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
+          // Bound the read to the gap being filled, not the whole transcript
+          // (PERF-4). The gap `(afterEventId, bufferFirstId)` is at the TAIL of
+          // the JSONL (the messages just before the buffer's oldest event), and
+          // holds at most `bufferFirstId - afterEventId` events — so a tail of
+          // that many messages is a safe upper bound that always covers the gap
+          // (messages ≤ events) without a hole, while collapsing the common
+          // small-gap reconnect to a tiny read. `bufferFirstId` is finite here
+          // (`needJsonl` requires `buf.events.length > 0`); guard the malformed
+          // no-eventId case by falling back to the standard window.
+          const gapTail = Number.isFinite(bufferFirstId)
+            ? Math.max(0, bufferFirstId - afterEventId)
+            : COLD_REPLAY_LIMIT;
+          const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {
+            tail: gapTail,
+          });
           const messages = result.messages;
           // Synthetic ids must sit strictly in the gap `(afterEventId,
           // bufferFirstId)` so they (a) survive the `<= afterEventId` filter

@@ -41,13 +41,12 @@ import { agentService } from "../server/services/agent-service";
 import { chatService } from "../server/services/chat-service";
 import { taskService } from "../server/services/task-service";
 import { workspaceService } from "../server/services/workspace-service";
-import type { ChatEvent } from "../shared/chat-events";
+import { type ChatEvent, HISTORY_PAGE_SIZE } from "../shared/chat-events";
 
 const log = createLogger("chat-history");
 
-/** Default page size — kept in sync with `COLD_REPLAY_LIMIT` in chat-events.ts
- *  and the page size the client requests. */
-const DEFAULT_PAGE_LIMIT = 50;
+/** Default page size when the client omits `limit` — the shared window size. */
+const DEFAULT_PAGE_LIMIT = HISTORY_PAGE_SIZE;
 
 /** Hard cap on a client-supplied `limit`. Without it a caller could request
  *  `?limit=1000000` and force the server to read, translate, and JSON-stringify
@@ -82,9 +81,10 @@ export async function handleChatHistory(
   const limitRaw = url.searchParams.get("limit");
 
   const before = beforeRaw != null ? Number.parseInt(beforeRaw, 10) : NaN;
-  if (!Number.isFinite(before) || before <= 0) {
-    // `before <= 0` means there's nothing older to fetch — return an empty page
-    // rather than an error so the client's guard stays simple.
+  // `before <= 0` means there's nothing older to fetch; the upper bound rejects
+  // absurd cursors so a bogus value never reaches the adapter as an `offset`
+  // (no real session approaches a billion messages).
+  if (!Number.isFinite(before) || before <= 0 || before > 1_000_000_000) {
     sendJson(res, 200, { events: [], hasOlder: false, oldestOffset: 0 });
     return;
   }

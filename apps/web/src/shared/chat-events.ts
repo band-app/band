@@ -21,6 +21,15 @@
  *   • `apps/web/tests/chat-events.test.ts`         — integration tests
  */
 
+/**
+ * Number of messages in one chat-history page. Single source of truth shared by
+ * the three sites that must agree for scroll-back pagination to line up:
+ *   • cold-subscribe replay window (`chat-events.ts`),
+ *   • the older-page endpoint's default page size (`chat-history.ts`),
+ *   • the client's `loadOlder` request size (`use-chat-subscription.ts`).
+ */
+export const HISTORY_PAGE_SIZE = 50;
+
 // ---------------------------------------------------------------------------
 // Common shapes
 // ---------------------------------------------------------------------------

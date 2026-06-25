@@ -35,7 +35,12 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { trpc } from "../../lib/trpc-client";
-import { CHAT_EVENT_TYPES, type ChatEvent, type ChatEventFile } from "../../shared/chat-events";
+import {
+  CHAT_EVENT_TYPES,
+  type ChatEvent,
+  type ChatEventFile,
+  HISTORY_PAGE_SIZE,
+} from "../../shared/chat-events";
 import {
   applyEvents,
   type ChatSubscriptionState,
@@ -92,9 +97,8 @@ export interface UseChatSubscriptionResult
   loadingOlder: boolean;
 }
 
-/** Older-page size requested by `loadOlder`. Kept in sync with the server's
- *  `COLD_REPLAY_LIMIT` and the history endpoint's default. */
-const OLDER_PAGE_LIMIT = 50;
+/** Older-page size requested by `loadOlder` — the shared window size. */
+const OLDER_PAGE_LIMIT = HISTORY_PAGE_SIZE;
 
 // Max backoff for reconnect attempts. Native EventSource does its own
 // retry; this kicks in when we close-and-reopen manually (server

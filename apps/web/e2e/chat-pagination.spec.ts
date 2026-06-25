@@ -152,7 +152,9 @@ test.describe("Chat scroll-back pagination", () => {
       .toBeGreaterThan(0);
 
     // Even after paging in the entire history, the DOM stays windowed.
-    expect(await chatPane.messageRowCount()).toBeLessThan(100);
+    // `expect.poll` auto-retries while the virtualizer's React commit settles
+    // after the final scroll, avoiding a transient high-count flake.
+    await expect.poll(() => chatPane.messageRowCount(), { timeout: 5_000 }).toBeLessThan(100);
   });
 
   test("prepending an older page does not jump the scroll position", async ({ page }) => {
@@ -243,6 +245,49 @@ test.describe("Chat scroll-back pagination", () => {
     await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
       timeout: 10_000,
     });
+  });
+});
+
+// Issue #572 acceptance criterion: "verified on both desktop and mobile
+// viewports." The mobile layout has a different DOM shell than the desktop
+// dockview, so re-run the core windowing + pagination + stick-to-bottom path at
+// a phone viewport to prove the data-layer behaviour is layout-independent.
+test.describe("Chat scroll-back pagination — mobile viewport", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("windowed cold load, scroll-back paging, and stick-to-bottom all work on mobile", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(WORKSPACE);
+    await chatPane.waitForReady();
+    await chatPane.waitForVirtualList(15_000);
+
+    // Cold load lands at the bottom on mobile too.
+    await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
+      timeout: 30_000,
+    });
+    // The first message is outside the window — not loaded on cold subscribe.
+    await expect(chatPane.userMessage(userText(0))).toHaveCount(0);
+
+    // Scrolling to the top pages older history in, all the way to message 0.
+    await expect
+      .poll(
+        async () => {
+          await chatPane.scrollToTop();
+          return chatPane.userMessage(userText(0)).count();
+        },
+        { timeout: 60_000, interval: 2000 },
+      )
+      .toBeGreaterThan(0);
+
+    // Stick-to-bottom still reaches the latest message after paging.
+    await chatPane.scrollToBottom();
+    await expect(chatPane.assistantMessage(assistantText(TURNS - 1))).toBeVisible({
+      timeout: 10_000,
+    });
+    // DOM stays windowed on mobile.
+    await expect.poll(() => chatPane.messageRowCount(), { timeout: 5_000 }).toBeLessThan(100);
   });
 });
 
