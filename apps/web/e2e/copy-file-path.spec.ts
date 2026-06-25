@@ -111,7 +111,7 @@ test.describe("Copy file path from the tree context menus", () => {
     // Copy relative path → the workspace-relative file path.
     await trees.openFileTreeMenu(FILE_PATH);
     await expect(trees.fileTreeCopyRelative).toBeVisible();
-    await trees.fileTreeCopyRelative.click();
+    await trees.clickFileCopyRelative();
     await expect
       .poll(async () => (await workspace.readCopied()).at(-1), {
         message: "relative path copied to clipboard",
@@ -122,7 +122,7 @@ test.describe("Copy file path from the tree context menus", () => {
     // Copy absolute path → worktree root joined with the relative path.
     await trees.openFileTreeMenu(FILE_PATH);
     await expect(trees.fileTreeCopyAbsolute).toBeVisible();
-    await trees.fileTreeCopyAbsolute.click();
+    await trees.clickFileCopyAbsolute();
     await expect
       .poll(async () => (await workspace.readCopied()).at(-1), {
         message: "absolute path copied to clipboard",
@@ -143,7 +143,7 @@ test.describe("Copy file path from the tree context menus", () => {
 
     await trees.openChangesTreeMenu(FILE_PATH);
     await expect(trees.changesTreeCopyRelative).toBeVisible();
-    await trees.changesTreeCopyRelative.click();
+    await trees.clickChangesCopyRelative();
     await expect
       .poll(async () => (await workspace.readCopied()).at(-1), {
         message: "relative path copied to clipboard",
@@ -153,7 +153,7 @@ test.describe("Copy file path from the tree context menus", () => {
 
     await trees.openChangesTreeMenu(FILE_PATH);
     await expect(trees.changesTreeCopyAbsolute).toBeVisible();
-    await trees.changesTreeCopyAbsolute.click();
+    await trees.clickChangesCopyAbsolute();
     await expect
       .poll(async () => (await workspace.readCopied()).at(-1), {
         message: "absolute path copied to clipboard",

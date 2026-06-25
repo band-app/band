@@ -11,10 +11,12 @@
  * copy menu item carries a stable `data-testid` — so the test body never
  * depends on the localisable menu copy or on CSS structure.
  *
- * Outer-dockview tab navigation and clipboard capture live on `WorkspacePage`
- * (the suite's single owner of the `workspace__tab--*` locators), so this
- * object takes a `WorkspacePage` and delegates tab switching to it rather than
- * re-deriving the tab testids.
+ * This is a SECONDARY page object: it owns no routes and constructs no URLs,
+ * so it intentionally does NOT follow the `(page, baseUrl, …)` + `goto()`
+ * convention of primary page objects. All navigation (URL construction,
+ * `goto`) and clipboard capture live on `WorkspacePage` — the suite's single
+ * owner of the `workspace__tab--*` locators — which is passed in and delegated
+ * to for tab switching rather than re-deriving the tab testids here.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
@@ -99,6 +101,31 @@ export class FileTreesPage {
   async openChangesTreeMenu(path: string): Promise<void> {
     await test.step(`Right-click Changes-tree row ${path}`, async () => {
       await this.changesTreeRow(path).click({ button: "right" });
+    });
+  }
+
+  /** Named action methods for the copy menu items, so the test body drives
+   *  interactions through the page object rather than clicking raw locators.
+   *  The matching getters above remain for `expect(...).toBeVisible()`
+   *  assertions. */
+  async clickFileCopyRelative(): Promise<void> {
+    await test.step("Click Files-tree Copy relative path", async () => {
+      await this.fileTreeCopyRelative.click();
+    });
+  }
+  async clickFileCopyAbsolute(): Promise<void> {
+    await test.step("Click Files-tree Copy absolute path", async () => {
+      await this.fileTreeCopyAbsolute.click();
+    });
+  }
+  async clickChangesCopyRelative(): Promise<void> {
+    await test.step("Click Changes-tree Copy relative path", async () => {
+      await this.changesTreeCopyRelative.click();
+    });
+  }
+  async clickChangesCopyAbsolute(): Promise<void> {
+    await test.step("Click Changes-tree Copy absolute path", async () => {
+      await this.changesTreeCopyAbsolute.click();
     });
   }
 }
