@@ -623,8 +623,17 @@ export class WorkspacePage {
    *  `DockviewTerminalContainer` mounts and (on cold start) seeds a
    *  default terminal panel, which boots a real PTY server-side. */
   async openTerminalTab(): Promise<void> {
-    await test.step("Activate the Terminal tab", async () => {
-      await this.tab("terminal").click();
+    await this.activateTab("terminal");
+  }
+
+  /** Activate an outer shared-dockview tab by its panel component id. Wraps the
+   *  raw tab click in a `test.step` so spec bodies switch tabs through the page
+   *  object instead of touching the `tab(...)` locator directly. */
+  async activateTab(
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
+  ): Promise<void> {
+    await test.step(`Activate the ${panelComponent} tab`, async () => {
+      await this.tab(panelComponent).click();
     });
   }
 

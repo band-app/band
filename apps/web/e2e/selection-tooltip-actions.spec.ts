@@ -128,7 +128,7 @@ test.describe("Diff selection tooltip — copy reference / add to chat / add to 
     // tooltip. The terminal stays mounted as a hidden tab with its socket open.
     await workspace.openTerminalTab();
     await workspace.waitForTerminalReady();
-    await workspace.tab("changes").click();
+    await workspace.activateTab("changes");
 
     // ── All three actions are present on a selection ──────────────────────
     await changes.selectWordInDiff(FIRST_LINE);
@@ -151,7 +151,7 @@ test.describe("Diff selection tooltip — copy reference / add to chat / add to 
     await tooltip.waitVisible();
     await tooltip.clickAddToChat();
     await expect
-      .poll(async () => chat.promptValue(), {
+      .poll(async () => await chat.promptValue(), {
         message: "file reference appended to chat input",
         timeout: 15_000,
       })

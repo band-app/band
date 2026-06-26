@@ -172,6 +172,10 @@ export function TerminalPanel({
   const searchBarRef = useRef<SearchBarHandle>(null);
   // Stable ref for the xterm key-event closure (which is captured once at mount).
   const openSearchRef = useRef<() => void>(() => {});
+  // Stable ref so the WebSocket `onopen` closure (captured once at mount) can
+  // flush an "Add to Terminal" reference that was buffered while the socket was
+  // reconnecting. Kept in sync with the latest `flushPendingInsert` below.
+  const flushPendingInsertRef = useRef<() => void>(() => {});
 
   // ---- iOS keyboard accessory toolbar state ----
   // `terminalReady` flips once the dynamic-imported xterm.js instance is
@@ -744,6 +748,11 @@ export function TerminalPanel({
 
           stopHeartbeat();
           heartbeatTimer = setInterval(probeConnection, HEARTBEAT_INTERVAL_MS);
+
+          // Flush any "Add to Terminal" reference that was buffered while the
+          // socket was down (the user clicked during a reconnect gap), so it
+          // isn't silently dropped now that the PTY connection is back.
+          flushPendingInsertRef.current();
         };
 
         ws.onmessage = (event) => {
@@ -1101,10 +1110,17 @@ export function TerminalPanel({
     if (!reference) return;
     const ws = wsRef.current;
     if (ws?.readyState !== WebSocket.OPEN) return;
+    // `reference` is typed-keystroke-only input: it is written verbatim to the
+    // PTY's stdin exactly like a user typing, NOT executed in a shell. It must
+    // never contain a trailing newline (that would submit it) — the dispatcher
+    // guarantees a single trailing space and no newline. Do not promote this to
+    // a shell-execution path or escape it; it is raw terminal input by design.
     ws.send(reference);
     pendingInsertRef.current = null;
     terminalRef.current?.focus();
   }, []);
+  // Keep the mount-captured `onopen` closure pointed at the latest flush.
+  flushPendingInsertRef.current = flushPendingInsert;
 
   useEffect(() => {
     if (visible) {

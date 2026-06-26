@@ -8,8 +8,8 @@
  * This is a SECONDARY page object: it owns no route and constructs no URL, so
  * it intentionally does not follow the `(page, baseUrl, …)` + `goto()`
  * convention. Selecting text (which surfaces the tooltip) lives on
- * `ChangesPanelPage.selectDiffLine` since that's where the CodeMirror knowledge
- * lives; this object only drives the tooltip buttons.
+ * `ChangesPanelPage.selectWordInDiff` since that's where the CodeMirror
+ * knowledge lives; this object only drives the tooltip buttons.
  *
  * The buttons are CodeMirror tooltip DOM (plain DOM built by the extension, not
  * React), and their click handler runs on `mousedown` + `preventDefault` so a

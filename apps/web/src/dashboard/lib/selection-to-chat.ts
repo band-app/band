@@ -25,7 +25,12 @@ export interface SelectionToChatDetail {
  * decoupled from the formatting logic.
  */
 export interface AddToTerminalDetail {
-  /** The file reference to type into the terminal (e.g. `src/foo.ts:10-20 `). */
+  /**
+   * The file reference to type into the terminal. The dispatcher appends a
+   * trailing space to the bare `buildLineReference` output (so the result is
+   * e.g. `"src/foo.ts:10-20 "`) to separate it from the next keystroke; the
+   * builder itself never emits the space.
+   */
   reference: string;
 }
 
@@ -38,7 +43,11 @@ export interface AddToTerminalDetail {
  * background workspace's terminal.
  */
 export interface TerminalInsertDetail {
-  /** The file reference to type into the terminal (e.g. `src/foo.ts:10-20 `). */
+  /**
+   * The file reference to type into the terminal, carried through verbatim from
+   * {@link AddToTerminalDetail.reference} (already includes the dispatcher's
+   * trailing space, e.g. `"src/foo.ts:10-20 "`).
+   */
   reference: string;
   /** The workspace whose terminal should receive the reference. */
   workspaceId: string;
@@ -188,8 +197,12 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
 
       return {
         pos: sel.head,
+        // Prefer rendering below the selection so the buttons don't cover the
+        // selected text. `strictSide: false` lets CodeMirror flip back above
+        // when there isn't enough room below (e.g. a selection near the bottom
+        // edge of the editor) instead of clipping the tooltip.
         above: false,
-        strictSide: true,
+        strictSide: false,
         arrow: false,
         create(view: EditorView) {
           const dom = document.createElement("div");
