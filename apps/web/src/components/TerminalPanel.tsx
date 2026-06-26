@@ -3,7 +3,13 @@ import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SearchBar, type SearchBarHandle, type SearchOptions, useSettingsQuery } from "@/dashboard";
+import {
+  SearchBar,
+  type SearchBarHandle,
+  type SearchOptions,
+  type TerminalInsertDetail,
+  useSettingsQuery,
+} from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
 import {
@@ -1073,6 +1079,55 @@ export function TerminalPanel({
     window.addEventListener("band:focus-terminal", handler);
     return () => window.removeEventListener("band:focus-terminal", handler);
   }, [visible]);
+
+  // Deliver an "Add to Terminal" reference from the selection tooltip in the
+  // diff/file viewers. The shared dockview layout owns the `band:add-to-terminal`
+  // intent event: it surfaces this workspace's terminal panel (so it becomes
+  // visible) and re-dispatches the scoped `band:terminal-insert` event handled
+  // here. Many TerminalPanel instances may exist (one per terminal session ×
+  // one per cached workspace), so we react only when the delivery targets this
+  // panel's workspace AND this panel is the visible one.
+  //
+  // Surfacing the terminal flips `visible` on a later React render, which can
+  // land after the delivery event fires. To bridge that gap the reference is
+  // held in `pendingRef` and flushed once this panel is visible with an open
+  // socket; it's dropped when the panel is hidden so a stale reference can't
+  // surface later. The reference is written to the PTY as typed input (no
+  // newline) the same way keystrokes are, so a terminal-based agent receives it
+  // just like the chat agent does.
+  const pendingInsertRef = useRef<string | null>(null);
+  const flushPendingInsert = useCallback(() => {
+    const reference = pendingInsertRef.current;
+    if (!reference) return;
+    const ws = wsRef.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    ws.send(reference);
+    pendingInsertRef.current = null;
+    terminalRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (visible) {
+      flushPendingInsert();
+    } else {
+      // Hidden panels must not hold a reference that would flush the next time
+      // the user surfaces them.
+      pendingInsertRef.current = null;
+    }
+  }, [visible, flushPendingInsert]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
+      if (!detail?.reference || detail.workspaceId !== workspaceId) return;
+      pendingInsertRef.current = detail.reference;
+      // Send immediately when already visible; otherwise the `visible` effect
+      // above flushes once the layout finishes surfacing this terminal.
+      if (visible) flushPendingInsert();
+    };
+    window.addEventListener("band:terminal-insert", handler);
+    return () => window.removeEventListener("band:terminal-insert", handler);
+  }, [visible, workspaceId, flushPendingInsert]);
 
   // ---- Find-in-terminal handlers ----
   const handleOpenSearch = useCallback(() => {

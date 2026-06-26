@@ -11,7 +11,7 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { SelectionToChatDetail } from "@/dashboard";
+import { buildLineReference, type SelectionToChatDetail } from "@/dashboard";
 
 let fileIdCounter = 0;
 
@@ -230,10 +230,10 @@ export const PromptInput = ({
       if (wsActiveRef.current === false) return;
       const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
 
-      const lineRef =
-        startLine === endLine ? `${filePath}:${startLine}` : `${filePath}:${startLine}-${endLine}`;
-
-      const reference = `\`${lineRef}\` `;
+      // Trailing space keeps the reference separated from any text the user
+      // types next. Shares the bare-reference builder with the terminal/copy
+      // options so all three produce an identical reference string.
+      const reference = `${buildLineReference(filePath, startLine, endLine)} `;
 
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";

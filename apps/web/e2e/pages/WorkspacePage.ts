@@ -1062,6 +1062,48 @@ export class WorkspacePage {
       () => (window as unknown as { __copied?: string[] }).__copied ?? [],
     );
   }
+
+  /** Patch `WebSocket.prototype.send` to record every STRING frame the page
+   *  writes to a terminal socket (`/terminal?…`) into `window.__terminalSent`.
+   *  Must run BEFORE `goto` (uses `addInitScript`). This is the deterministic
+   *  proof surface for "Add to Terminal": the production path is
+   *  `ws.send(reference)` → server → `pty.write`, and the terminal renders via
+   *  a WebGL canvas whose text the DOM can't read, so capturing the outgoing
+   *  frame is how the suite already asserts terminal I/O (cf.
+   *  `installTerminalSocketInstrumentation`). Control frames (init/resize/ping)
+   *  are JSON strings; the reference is a bare `path:line` string, so the two
+   *  are trivially distinguishable in assertions. */
+  async installTerminalSendCapture(): Promise<void> {
+    await this.page.addInitScript(() => {
+      const w = window as unknown as { __terminalSent: string[] };
+      w.__terminalSent = [];
+      const origSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function patchedSend(
+        this: WebSocket,
+        data: string | ArrayBufferLike | Blob | ArrayBufferView,
+      ) {
+        try {
+          if (
+            typeof this.url === "string" &&
+            this.url.includes("/terminal?") &&
+            typeof data === "string"
+          ) {
+            w.__terminalSent.push(data);
+          }
+        } catch {
+          // Ignore — never let instrumentation break the real send.
+        }
+        return origSend.call(this, data as never);
+      };
+    });
+  }
+
+  /** Read the frames captured by `installTerminalSendCapture()`. */
+  async readTerminalSent(): Promise<string[]> {
+    return await this.page.evaluate(
+      () => (window as unknown as { __terminalSent?: string[] }).__terminalSent ?? [],
+    );
+  }
 }
 
 /** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of

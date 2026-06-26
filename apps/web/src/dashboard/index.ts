@@ -113,7 +113,12 @@ export {
   type SupportedLanguage,
 } from "./lib/language-map";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
-export type { SelectionToChatDetail } from "./lib/selection-to-chat";
+export {
+  type AddToTerminalDetail,
+  buildLineReference,
+  type SelectionToChatDetail,
+  type TerminalInsertDetail,
+} from "./lib/selection-to-chat";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";

@@ -1,5 +1,6 @@
 import { type Extension, StateEffect, StateField } from "@codemirror/state";
 import { EditorView, showTooltip, type Tooltip, ViewPlugin } from "@codemirror/view";
+import { writeClipboardText } from "../../lib/clipboard";
 
 /**
  * Payload dispatched via the `band:add-to-chat` window CustomEvent when the
@@ -14,6 +15,44 @@ export interface SelectionToChatDetail {
   endLine: number;
 }
 
+/**
+ * Payload dispatched via the `band:add-to-terminal` window CustomEvent when the
+ * user clicks "Add to Terminal" on a text selection. This is the *intent*
+ * event: the selection tooltip doesn't know which workspace it belongs to, so
+ * the shared dockview layout (which does) listens, surfaces the terminal panel
+ * for the active workspace, and re-dispatches the scoped `band:terminal-insert`
+ * delivery event below. The reference string is pre-built so consumers stay
+ * decoupled from the formatting logic.
+ */
+export interface AddToTerminalDetail {
+  /** The file reference to type into the terminal (e.g. `src/foo.ts:10-20 `). */
+  reference: string;
+}
+
+/**
+ * Payload dispatched via the `band:terminal-insert` window CustomEvent by the
+ * shared dockview layout after it has surfaced the active workspace's terminal.
+ * Carries the resolved `workspaceId` so each mounted `TerminalPanel` (one per
+ * terminal session × one per cached workspace) only reacts when the delivery
+ * targets its own workspace — preventing a reference from leaking into a cached
+ * background workspace's terminal.
+ */
+export interface TerminalInsertDetail {
+  /** The file reference to type into the terminal (e.g. `src/foo.ts:10-20 `). */
+  reference: string;
+  /** The workspace whose terminal should receive the reference. */
+  workspaceId: string;
+}
+
+/**
+ * Build a bare file reference for a line range, e.g. `src/foo.ts:10-20` (or
+ * `src/foo.ts:10` when the range is a single line). Shared by the chat,
+ * terminal, and copy actions so every option produces an identical reference.
+ */
+export function buildLineReference(filePath: string, startLine: number, endLine: number): string {
+  return startLine === endLine ? `${filePath}:${startLine}` : `${filePath}:${startLine}-${endLine}`;
+}
+
 /** Minimum number of characters selected before showing the button. */
 const MIN_SELECTION_LENGTH = 1;
 
@@ -22,6 +61,60 @@ const SHOW_DELAY_MS = 500;
 
 /** Effect used by the debounce plugin to set/clear the tooltip. */
 const setSelectionTooltip = StateEffect.define<Tooltip | null>();
+
+/** SVG `<path d>`/`<line>`/`<polyline>` definitions for each button's icon. */
+type IconChild =
+  | { tag: "path"; d: string }
+  | { tag: "line"; x1: string; y1: string; x2: string; y2: string }
+  | { tag: "polyline"; points: string }
+  | { tag: "rect"; x: string; y: string; width: string; height: string; rx: string };
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Build a 14×14 Lucide-style stroke icon from child element definitions. */
+function makeIcon(children: IconChild[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  for (const child of children) {
+    const el = document.createElementNS(SVG_NS, child.tag);
+    if (child.tag === "path") el.setAttribute("d", child.d);
+    else if (child.tag === "polyline") el.setAttribute("points", child.points);
+    else if (child.tag === "line") {
+      el.setAttribute("x1", child.x1);
+      el.setAttribute("y1", child.y1);
+      el.setAttribute("x2", child.x2);
+      el.setAttribute("y2", child.y2);
+    } else {
+      el.setAttribute("x", child.x);
+      el.setAttribute("y", child.y);
+      el.setAttribute("width", child.width);
+      el.setAttribute("height", child.height);
+      el.setAttribute("rx", child.rx);
+    }
+    svg.appendChild(el);
+  }
+  return svg;
+}
+
+// Lucide icon path data (https://lucide.dev).
+const ICON_CHAT: IconChild[] = [
+  { tag: "path", d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
+];
+const ICON_TERMINAL: IconChild[] = [
+  { tag: "polyline", points: "4 17 10 11 4 5" },
+  { tag: "line", x1: "12", y1: "19", x2: "20", y2: "19" },
+];
+const ICON_COPY: IconChild[] = [
+  { tag: "rect", x: "8", y: "8", width: "14", height: "14", rx: "2" },
+  { tag: "path", d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" },
+];
 
 /**
  * CodeMirror extension that shows a floating "Add to Chat" button when the
@@ -64,6 +157,30 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
       }
     }
 
+    /**
+     * Read the current selection and resolve it to a file reference, applying
+     * the optional line-number map (e.g. diff view with trimmed content) so the
+     * reported lines match the real file. Returns null when nothing is selected.
+     */
+    function readSelection(): SelectionToChatDetail | null {
+      const { from, to } = view.state.selection.main;
+      if (from === to) return null;
+
+      const selectedText = view.state.sliceDoc(from, to);
+      const docStartLine = view.state.doc.lineAt(from).number;
+      const docEndLine = view.state.doc.lineAt(to).number;
+      const startLine =
+        lineNumberMap && docStartLine >= 1 && docStartLine <= lineNumberMap.length
+          ? lineNumberMap[docStartLine - 1]
+          : docStartLine;
+      const endLine =
+        lineNumberMap && docEndLine >= 1 && docEndLine <= lineNumberMap.length
+          ? lineNumberMap[docEndLine - 1]
+          : docEndLine;
+
+      return { filePath, selectedText, startLine, endLine };
+    }
+
     /** Build a Tooltip for the current selection, or null to hide. */
     function buildTooltip(): Tooltip | null {
       const sel = view.state.selection.main;
@@ -71,76 +188,91 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
 
       return {
         pos: sel.head,
-        above: true,
+        above: false,
         strictSide: true,
         arrow: false,
         create(view: EditorView) {
           const dom = document.createElement("div");
           dom.className = "cm-add-to-chat-tooltip";
 
-          const btn = document.createElement("button");
-          btn.className = "cm-add-to-chat-btn";
-          btn.setAttribute("type", "button");
+          /**
+           * Create a tooltip button. `onActivate` receives the resolved
+           * selection; after it runs the selection is collapsed and the
+           * tooltip hidden. Uses mousedown + preventDefault so clicking the
+           * button doesn't deselect the text or blur the editor before we can
+           * read it.
+           */
+          function makeButton(
+            label: string,
+            icon: IconChild[],
+            testId: string,
+            onActivate: (detail: SelectionToChatDetail) => void,
+          ): HTMLButtonElement {
+            const btn = document.createElement("button");
+            btn.className = "cm-add-to-chat-btn";
+            btn.setAttribute("type", "button");
+            btn.setAttribute("data-testid", testId);
+            btn.appendChild(makeIcon(icon));
 
-          // Chat bubble icon (Lucide MessageSquare, 14×14)
-          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          svg.setAttribute("width", "14");
-          svg.setAttribute("height", "14");
-          svg.setAttribute("viewBox", "0 0 24 24");
-          svg.setAttribute("fill", "none");
-          svg.setAttribute("stroke", "currentColor");
-          svg.setAttribute("stroke-width", "2");
-          svg.setAttribute("stroke-linecap", "round");
-          svg.setAttribute("stroke-linejoin", "round");
-          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          path.setAttribute("d", "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z");
-          svg.appendChild(path);
-          btn.appendChild(svg);
+            const span = document.createElement("span");
+            span.textContent = label;
+            btn.appendChild(span);
 
-          const label = document.createElement("span");
-          label.textContent = "Add to Chat";
-          btn.appendChild(label);
+            btn.addEventListener("mousedown", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
 
-          // Use mousedown + preventDefault so clicking the button doesn't
-          // deselect the text or blur the editor before we can read it.
-          btn.addEventListener("mousedown", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+              const detail = readSelection();
+              if (!detail) return;
 
-            const { from, to } = view.state.selection.main;
-            if (from === to) return;
+              onActivate(detail);
 
-            const selectedText = view.state.sliceDoc(from, to);
-            const docStartLine = view.state.doc.lineAt(from).number;
-            const docEndLine = view.state.doc.lineAt(to).number;
-            // When a line number map is provided (e.g. diff view with trimmed
-            // content), translate document line numbers to actual file lines.
-            const startLine =
-              lineNumberMap && docStartLine >= 1 && docStartLine <= lineNumberMap.length
-                ? lineNumberMap[docStartLine - 1]
-                : docStartLine;
-            const endLine =
-              lineNumberMap && docEndLine >= 1 && docEndLine <= lineNumberMap.length
-                ? lineNumberMap[docEndLine - 1]
-                : docEndLine;
-
-            const detail: SelectionToChatDetail = {
-              filePath,
-              selectedText,
-              startLine,
-              endLine,
-            };
-
-            window.dispatchEvent(new CustomEvent("band:add-to-chat", { detail }));
-
-            // Collapse selection and hide tooltip
-            view.dispatch({
-              selection: { anchor: from },
-              effects: setSelectionTooltip.of(null),
+              // Collapse selection and hide tooltip
+              view.dispatch({
+                selection: { anchor: view.state.selection.main.from },
+                effects: setSelectionTooltip.of(null),
+              });
             });
-          });
+            return btn;
+          }
 
-          dom.appendChild(btn);
+          dom.appendChild(
+            makeButton("Add to Chat", ICON_CHAT, "selection-tooltip__add-to-chat", (detail) => {
+              window.dispatchEvent(new CustomEvent("band:add-to-chat", { detail }));
+            }),
+          );
+
+          dom.appendChild(
+            makeButton(
+              "Add to Terminal",
+              ICON_TERMINAL,
+              "selection-tooltip__add-to-terminal",
+              (detail) => {
+                // Trailing space mirrors the chat reference's typing ergonomics;
+                // no newline so the terminal agent decides when to submit.
+                const reference = `${buildLineReference(detail.filePath, detail.startLine, detail.endLine)} `;
+                window.dispatchEvent(
+                  new CustomEvent<AddToTerminalDetail>("band:add-to-terminal", {
+                    detail: { reference },
+                  }),
+                );
+              },
+            ),
+          );
+
+          dom.appendChild(
+            makeButton(
+              "Copy reference",
+              ICON_COPY,
+              "selection-tooltip__copy-reference",
+              (detail) => {
+                void writeClipboardText(
+                  buildLineReference(detail.filePath, detail.startLine, detail.endLine),
+                );
+              },
+            ),
+          );
+
           return { dom };
         },
       };
@@ -184,6 +316,8 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
       backgroundColor: "transparent",
       border: "none",
       zIndex: "100",
+      display: "flex",
+      gap: "4px",
     },
     ".cm-add-to-chat-btn": {
       display: "inline-flex",
