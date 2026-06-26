@@ -171,6 +171,29 @@ export class WorkspacePage {
     });
   }
 
+  /** Zoom the app in by one step via the real production keyboard shortcut
+   *  (Ctrl/Cmd+=). In browser mode `useZoom` (mounted in `__root.tsx`) handles
+   *  this keydown and calls `zoomIn()` → `applyZoomLevel()`, which dispatches
+   *  the `band:zoom-changed` event that every mounted `TerminalPanel` reacts to
+   *  (re-measuring + re-attaching its WebGL surface). Unlike `applyAppZoom`,
+   *  which only mutates CSS for the menu-positioning regression, this drives
+   *  the subscriber path — the one that touches even hidden background
+   *  terminals.
+   *
+   *  Routes the keypress through the project-list root (focusable, non-
+   *  editable) — the same stable anchor `pressLabelShortcut` and the
+   *  workspace-picker shortcuts use — so an editable focus target (chat
+   *  textarea / terminal) can't swallow the key. Uses the "Equal" physical key
+   *  so `e.key` resolves to "=" (the literal the handler matches),
+   *  unambiguously separated from the modifier. */
+  async zoomInViaShortcut(): Promise<void> {
+    await test.step("Zoom in via Ctrl+= keyboard shortcut", async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press("Control+Equal");
+    });
+  }
+
   /** Click the collapse/expand item via a normal left click. */
   async clickCollapseMenuItem(): Promise<void> {
     await test.step("Click the collapse/expand menu item", async () => {
