@@ -1,6 +1,6 @@
 /**
  * Regression coverage for the "terminal renders garbled until you resize the
- * window" bug (branch `fix/terminal-garbled-until-resize`).
+ * window" bug.
  *
  * The bug
  * -------
@@ -100,19 +100,23 @@ test.use({
   },
 });
 
-let server: ServerHandle;
-let tmpHome: string;
-let workdirA: string;
-let workdirB: string;
+// Definite-assignment: all four are set in `beforeAll`. The `!` lets
+// `afterAll` reference them while still guarding `server` (the only one
+// that can be left unassigned if `startServer` throws mid-boot).
+let server!: ServerHandle;
+let tmpHome!: string;
+let workdirA!: string;
+let workdirB!: string;
 
 /** Hermetic git environment: an explicit allowlist (no `process.env`
  *  spread) with `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` pointed at
  *  /dev/null so a contributor's host git config (templates, signing-key
  *  prompts, hooks) can't leak in and hang or skew the setup. Mirrors the
  *  pattern in `workspace-cache-eviction.spec.ts`. */
-function makeGitEnv(): NodeJS.ProcessEnv {
+function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH,
+    HOME: home,
     GIT_AUTHOR_NAME: "Test",
     GIT_AUTHOR_EMAIL: "test@example.com",
     GIT_COMMITTER_NAME: "Test",
@@ -130,9 +134,9 @@ function makeGitEnv(): NodeJS.ProcessEnv {
  *  runner) whose git defaults to `master` would make the worktree-sync
  *  poller rewrite the seeded `main` worktree to `master`, and the
  *  `--<project>-main` card testid the test clicks would never appear. */
-function makeGitWorkdir(prefix: string): string {
+function makeGitWorkdir(prefix: string, home: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  const env = makeGitEnv();
+  const env = makeGitEnv(home);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
   execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env });
   return dir;
@@ -140,8 +144,8 @@ function makeGitWorkdir(prefix: string): string {
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  workdirA = makeGitWorkdir("band-bg-repaint-a-");
-  workdirB = makeGitWorkdir("band-bg-repaint-b-");
+  workdirA = makeGitWorkdir("band-bg-repaint-a-", tmpHome);
+  workdirB = makeGitWorkdir("band-bg-repaint-b-", tmpHome);
   seedState(tmpHome, {
     projects: [
       {
@@ -163,10 +167,12 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await server.close();
-  cleanupTmpHome(tmpHome);
-  rmSync(workdirA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  rmSync(workdirB, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // Guard `server`: if `startServer` threw mid-boot it's unassigned, and a
+  // bare `server.close()` would mask the real boot failure with a TypeError.
+  if (server) await server.close();
+  if (tmpHome) cleanupTmpHome(tmpHome);
+  if (workdirA) rmSync(workdirA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (workdirB) rmSync(workdirB, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test.describe("Terminal background-workspace first paint", () => {
@@ -238,11 +244,19 @@ test.describe("Terminal background-workspace first paint", () => {
     // now-visible container — its WebGL backing store matches the
     // `.xterm-screen` rect (× devicePixelRatio). This is the user-observable
     // "the terminal grid matches the visible container size" guarantee; a
-    // surface left sized to the hidden layout would mismatch here.
+    // surface left sized to the hidden layout would mismatch here. Poll
+    // until the screen rect has settled to a non-zero size before asserting,
+    // so a snapshot taken mid-layout can't read a transient 0×0.
+    await expect
+      .poll(
+        async () => {
+          const s = await workspacePage.readTerminalSurface(WORKSPACE_A);
+          return s.canvasCount > 0 && s.screen.w > 0 && s.screen.h > 0;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
     const surface = await workspacePage.readTerminalSurface(WORKSPACE_A);
-    expect(surface.canvasCount).toBeGreaterThan(0);
-    expect(surface.screen.w).toBeGreaterThan(0);
-    expect(surface.screen.h).toBeGreaterThan(0);
     for (const backing of surface.backing) {
       expect(Math.abs(backing.w - surface.screen.w * surface.dpr)).toBeLessThanOrEqual(2);
       expect(Math.abs(backing.h - surface.screen.h * surface.dpr)).toBeLessThanOrEqual(2);
