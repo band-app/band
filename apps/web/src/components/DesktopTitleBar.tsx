@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, Menu, PanelTop } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsUpDown, Menu, PanelTop } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
@@ -39,6 +39,11 @@ interface DesktopTitleBarProps {
   workspacePath?: string;
   /** Callback to copy the workspace path to clipboard. */
   onCopyPath?: () => void;
+  /** When provided alongside a `workspaceName`, the name renders as a button
+   *  (with a chevron) that invokes this on click — opens the workspace picker,
+   *  mirroring the mobile header's tap-to-switch affordance. When omitted, the
+   *  name stays a non-interactive label. */
+  onWorkspaceNameClick?: () => void;
   /** Panel definitions for the panel switcher dropdown. */
   panelItems?: PanelItem[];
   /** Panel IDs that are currently hidden from the layout. */
@@ -65,6 +70,7 @@ export function DesktopTitleBar({
   workspaceName,
   workspacePath,
   onCopyPath,
+  onWorkspaceNameClick,
   panelItems,
   hiddenPanels,
   onTogglePanelVisibility,
@@ -180,9 +186,38 @@ export function DesktopTitleBar({
       )}
 
       {workspaceName ? (
-        <span className="text-sm font-semibold text-foreground select-none pointer-events-none truncate max-w-[50%]">
-          {workspaceName}
-        </span>
+        onWorkspaceNameClick ? (
+          // Interactive: clicking opens the workspace picker (mirrors the
+          // mobile header). Lives inside the drag region, so it must reapply
+          // NO_DRAG_STYLE and keep pointer events enabled, like the other
+          // interactive title-bar children (back/forward, dropdown triggers).
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onWorkspaceNameClick}
+                aria-haspopup="dialog"
+                aria-label="Switch workspace"
+                data-testid="desktop-title-bar__workspace-name"
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 max-w-[50%] text-sm font-semibold text-foreground hover:bg-accent/50 transition-colors pointer-events-auto"
+                style={NO_DRAG_STYLE}
+              >
+                <span className="truncate">{workspaceName}</span>
+                <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Switch Workspace{" "}
+              <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                ⌘K
+              </kbd>
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="text-sm font-semibold text-foreground select-none pointer-events-none truncate max-w-[50%]">
+            {workspaceName}
+          </span>
+        )
       ) : (
         <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
           {appTitle}

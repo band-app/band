@@ -39,7 +39,8 @@ const WS_ALPHA = toWorkspaceId(PROJECT_ALPHA, "main");
 const WS_BETA = toWorkspaceId(PROJECT_BETA, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
-// owns the Ctrl+Shift+R picker shortcut and the project-list sidebar) mounts.
+// owns the ⌘K picker shortcut and the project-list sidebar) mounts, along with
+// the desktop title bar whose workspace name opens the same picker.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -70,6 +71,36 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await server.close();
   cleanupTmpHome(tmpHome);
+});
+
+test.describe("Workspace picker — open affordances", () => {
+  test("⌘K opens the picker", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+
+    await expect(picker.dialog).toBeVisible();
+  });
+
+  test("clicking the desktop title-bar workspace name opens the picker", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    // The title-bar name is the desktop analogue of the mobile header tap.
+    await expect(workspacePage.desktopTitleWorkspaceNameButton).toBeVisible();
+    await workspacePage.openWorkspacePickerViaTitleBar();
+    await picker.waitVisible();
+
+    await expect(picker.dialog).toBeVisible();
+  });
 });
 
 test.describe("Workspace picker — pin is separate from select", () => {

@@ -663,7 +663,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // Reveal the active workspace in the tree by auto-expanding the project
   // and label group it belongs to. This should run ONLY when
   // activeWorkspaceId changes — i.e. when the user switches workspaces via
-  // the Ctrl+Shift+R picker, URL nav, notifications, etc. After the initial
+  // the ⌘K picker, URL nav, notifications, etc. After the initial
   // reveal we deliberately leave the collapse state alone so the user can
   // collapse the ancestors of the active workspace (via the "Collapse all"
   // toolbar button or by clicking a header) without this effect fighting
@@ -682,7 +682,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   //
   // We also clear keyboardNavRef so the focusedIndex effect above can
   // re-run and move the highlight ring to the freshly-revealed workspace.
-  // Without that reset, arrow-key navigation followed by a Ctrl+Shift+R switch
+  // Without that reset, arrow-key navigation followed by a ⌘K switch
   // would leave the highlight stuck on the old position.
   //
   // Pinned workspaces are rendered exclusively in the Pinned section at

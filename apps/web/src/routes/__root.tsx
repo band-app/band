@@ -429,6 +429,14 @@ function AppShell() {
           workspaceName={activeWorkspaceId ?? undefined}
           workspacePath={activeWorkspaceId ? workspacePath : undefined}
           onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+          // Clicking the title-bar workspace name opens the same picker as ⌘K.
+          // The picker state lives in SharedDockviewLayout (a sibling), so we
+          // signal it via the window event it listens for.
+          onWorkspaceNameClick={
+            activeWorkspaceId
+              ? () => window.dispatchEvent(new CustomEvent("band:open-workspace-picker"))
+              : undefined
+          }
           panelItems={activeWorkspaceId ? panelItems : undefined}
           hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
           onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}

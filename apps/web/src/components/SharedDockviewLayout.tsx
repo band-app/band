@@ -993,9 +993,13 @@ export function SharedDockviewLayout() {
       const ws = activeWorkspaceIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // Ctrl+Shift+R → workspace picker — skip when terminal focused
-      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && e.shiftKey) {
-        if (terminalFocused) return;
+      // ⌘K → workspace picker. Cmd is a meta key, so we deliberately do NOT
+      // bail on `terminalFocused`: the general handler's terminal guard below
+      // is `terminalFocused && !e.metaKey`, which already lets meta shortcuts
+      // through — so the picker now works even while typing in a focused
+      // terminal (long-standing complaint). preventDefault/stopPropagation
+      // keep the keystroke from leaking into xterm.
+      if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
         setWorkspacePickerOpen(true);
@@ -1202,15 +1206,22 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:open-file", handler);
   }, [activeWorkspaceId]);
 
-  // File-tree toolbar window-event triggers
+  // File-tree toolbar window-event triggers, plus the workspace picker opener.
+  // The picker state lives here, but the desktop title bar (rendered as a
+  // sibling in __root.tsx, where it has no access to this state) opens it by
+  // dispatching `band:open-workspace-picker` — same cross-component pattern as
+  // the file-tree toolbar events above.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
+    const openPicker = () => setWorkspacePickerOpen(true);
     window.addEventListener("band:open-quick-open", openQO);
     window.addEventListener("band:open-search-files", openSF);
+    window.addEventListener("band:open-workspace-picker", openPicker);
     return () => {
       window.removeEventListener("band:open-quick-open", openQO);
       window.removeEventListener("band:open-search-files", openSF);
+      window.removeEventListener("band:open-workspace-picker", openPicker);
     };
   }, []);
 

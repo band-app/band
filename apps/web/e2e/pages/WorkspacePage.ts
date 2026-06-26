@@ -590,17 +590,35 @@ export class WorkspacePage {
     });
   }
 
-  /** Open the workspace picker on desktop via its Ctrl+Shift+R shortcut. The
-   *  handler lives on a window keydown listener in
-   *  `SharedDockviewLayout.tsx`; it ignores the shortcut while the
-   *  terminal is focused, so we route the keypress through the project
-   *  list root (focusable, non-editable) — the same anchor the label
-   *  shortcut test uses. */
+  /** Open the workspace picker on desktop via its ⌘K shortcut. The handler
+   *  lives on a window keydown listener in `SharedDockviewLayout.tsx`.
+   *  Because ⌘ is a meta key the shortcut fires regardless of focus
+   *  (including from inside a focused terminal), but we still route the
+   *  keypress through the project list root (focusable, non-editable) —
+   *  the same stable anchor the label shortcut test uses. */
   async openWorkspacePickerViaShortcut(): Promise<void> {
-    await test.step("Open workspace picker (Ctrl+Shift+R)", async () => {
+    await test.step("Open workspace picker (⌘K)", async () => {
       const root = this.projectListRoot();
       await root.waitFor({ state: "visible" });
-      await root.press("Control+Shift+R");
+      await root.press("Meta+k");
+    });
+  }
+
+  /** The desktop title-bar workspace-name button. On a wide viewport
+   *  `useDesktopLayout` is true, so __root.tsx mounts the DesktopTitleBar
+   *  with `onWorkspaceNameClick` wired — the name renders as a button that
+   *  opens the same picker as ⌘K. Targeted by its BEM testid rather than
+   *  the shared "Switch workspace" aria-label so it never collides with the
+   *  mobile header button of the same name. */
+  get desktopTitleWorkspaceNameButton(): Locator {
+    return this.page.getByTestId("desktop-title-bar__workspace-name");
+  }
+
+  /** Open the workspace picker by clicking the desktop title-bar workspace
+   *  name (mirrors the mobile header's tap-to-switch). */
+  async openWorkspacePickerViaTitleBar(): Promise<void> {
+    await test.step("Click the desktop title-bar workspace name", async () => {
+      await this.desktopTitleWorkspaceNameButton.click();
     });
   }
 
