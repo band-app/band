@@ -59,7 +59,7 @@
  *  - Driven entirely through `WorkspacePage`.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,21 +105,36 @@ let tmpHome: string;
 let workdirA: string;
 let workdirB: string;
 
+/** Hermetic git environment: an explicit allowlist (no `process.env`
+ *  spread) with `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` pointed at
+ *  /dev/null so a contributor's host git config (templates, signing-key
+ *  prompts, hooks) can't leak in and hang or skew the setup. Mirrors the
+ *  pattern in `workspace-cache-eviction.spec.ts`. */
+function makeGitEnv(): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+  };
+}
+
 /** A `git init`-ed temp dir: real on disk (so the PTY can spawn with it as
  *  cwd) and containing a `.git` (so the project classifies as "git" and the
- *  sidebar renders a clickable workspace card for its default branch). */
+ *  sidebar renders a clickable workspace card for its default branch).
+ *
+ *  `init -b main` forces the initial branch name: without it, a host (or CI
+ *  runner) whose git defaults to `master` would make the worktree-sync
+ *  poller rewrite the seeded `main` worktree to `master`, and the
+ *  `--<project>-main` card testid the test clicks would never appear. */
 function makeGitWorkdir(prefix: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  execSync("git init -q && git commit -q --allow-empty -m init", {
-    cwd: dir,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Test",
-      GIT_AUTHOR_EMAIL: "test@example.com",
-      GIT_COMMITTER_NAME: "Test",
-      GIT_COMMITTER_EMAIL: "test@example.com",
-    },
-  });
+  const env = makeGitEnv();
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env });
   return dir;
 }
 
