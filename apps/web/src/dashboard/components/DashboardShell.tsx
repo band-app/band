@@ -163,7 +163,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   //   - `setLabelFilter` does an imperative save of the outgoing label
   //     so the user's most recent selection is captured even when they
   //     never explicitly clicked the workspace card after navigating to
-  //     it (e.g. direct URL / Cmd+R picker / page reload).
+  //     it (e.g. direct URL / Ctrl+Shift+R picker / page reload).
   const lastSeenActiveRef = useRef<string | null>(activeWorkspaceId);
   useEffect(() => {
     if (!activeWorkspaceId) {
@@ -195,7 +195,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   //   1. Saves only happen when the outgoing label is non-null (ALL has no
   //      per-label memory) AND the active workspace's project is actually
   //      labelled with the outgoing label. If the user navigated to a
-  //      workspace under a different label via the Cmd+R picker, we don't
+  //      workspace under a different label via the Ctrl+Shift+R picker, we don't
   //      want to record that workspace as Personal's "last" just because
   //      the filter happened to be Personal at the time.
   //   2. Restores only happen when the saved workspace still exists AND its

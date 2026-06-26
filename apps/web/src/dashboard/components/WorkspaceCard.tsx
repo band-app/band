@@ -43,7 +43,7 @@ import { SetupStatusIndicator } from "./SetupStatusIndicator";
 //
 // The active card auto-scrolls into view ONLY when the navigation came from
 // OUTSIDE the project list — direct URL navigation, browser back/forward,
-// or the Ctrl+R workspace picker. When the user clicked a card or pressed
+// or the Ctrl+Shift+R workspace picker. When the user clicked a card or pressed
 // Enter on a focused card inside the list, the card is already where their
 // cursor / keyboard focus is, so the scroll is unwanted.
 //
@@ -140,7 +140,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
   // Scroll this card into view when it becomes the active workspace via
-  // OUTSIDE-the-list navigation (direct URL, browser back/forward, Ctrl+R
+  // OUTSIDE-the-list navigation (direct URL, browser back/forward, Ctrl+Shift+R
   // workspace picker). The in-list paths (click or keyboard Enter) mark
   // the workspaceId via `markRecentActivation` before they navigate, and
   // we consume that marker here to bail out — the card is already where
