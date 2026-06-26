@@ -993,8 +993,25 @@ export function SharedDockviewLayout() {
       const ws = activeWorkspaceIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // Ctrl+Shift+R → workspace picker — skip when terminal focused
-      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && e.shiftKey) {
+      // ⌘K → workspace picker. We deliberately omit the `terminalFocused`
+      // guard here so the picker opens even while a terminal is focused
+      // (long-standing complaint) — preventDefault/stopPropagation keep the
+      // keystroke from leaking into xterm. (The Ctrl+K branch below DOES bail
+      // on a focused terminal, since Ctrl+K is a terminal editing key.)
+      if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        setWorkspacePickerOpen(true);
+        return;
+      }
+
+      // Ctrl+K → workspace picker on non-macOS. `SharedDockviewLayout` also
+      // mounts for wide-viewport web users on Windows/Linux, where ⌘ doesn't
+      // exist and Ctrl is the platform-native modifier. Unlike the ⌘ branch we
+      // DO bail when the terminal is focused: Ctrl+K is "kill to end of line"
+      // in most shells, so hijacking it inside xterm would break a common
+      // editing keystroke.
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         if (terminalFocused) return;
         e.preventDefault();
         e.stopPropagation();
@@ -1202,15 +1219,22 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:open-file", handler);
   }, [activeWorkspaceId]);
 
-  // File-tree toolbar window-event triggers
+  // File-tree toolbar window-event triggers, plus the workspace picker opener.
+  // The picker state lives here, but the desktop title bar (rendered as a
+  // sibling in __root.tsx, where it has no access to this state) opens it by
+  // dispatching `band:open-workspace-picker` — same cross-component pattern as
+  // the file-tree toolbar events above.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
+    const openPicker = () => setWorkspacePickerOpen(true);
     window.addEventListener("band:open-quick-open", openQO);
     window.addEventListener("band:open-search-files", openSF);
+    window.addEventListener("band:open-workspace-picker", openPicker);
     return () => {
       window.removeEventListener("band:open-quick-open", openQO);
       window.removeEventListener("band:open-search-files", openSF);
+      window.removeEventListener("band:open-workspace-picker", openPicker);
     };
   }, []);
 

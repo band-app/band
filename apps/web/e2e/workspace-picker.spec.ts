@@ -1,4 +1,12 @@
 /**
+ * Coverage for the WorkspacePickerDialog, in two groups:
+ *
+ * 1. "open affordances" — the ways a user opens the picker on desktop: the
+ *    ⌘K shortcut (macOS), the Ctrl+K shortcut (Windows/Linux wide-viewport
+ *    web), and clicking the desktop title-bar workspace-name button.
+ * 2. "pin is separate from select" — the pin/select separation regression
+ *    described below.
+ *
  * Regression coverage for the WorkspacePickerDialog pin/select separation
  * (PR #553). Tapping a row's pin button must toggle the pinned state WITHOUT
  * selecting the workspace — the dialog stays open and the URL doesn't change.
@@ -39,7 +47,8 @@ const WS_ALPHA = toWorkspaceId(PROJECT_ALPHA, "main");
 const WS_BETA = toWorkspaceId(PROJECT_BETA, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
-// owns the Ctrl+Shift+R picker shortcut and the project-list sidebar) mounts.
+// owns the ⌘K picker shortcut and the project-list sidebar) mounts, along with
+// the desktop title bar whose workspace name opens the same picker.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -70,6 +79,46 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await server.close();
   cleanupTmpHome(tmpHome);
+});
+
+test.describe("Workspace picker — open affordances", () => {
+  test("⌘K opens the picker", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    await workspacePage.openWorkspacePickerViaShortcut();
+    // waitVisible asserts the dialog reached `state: "visible"` (it throws on
+    // timeout), so it is the assertion — no redundant expect needed.
+    await picker.waitVisible();
+  });
+
+  test("Ctrl+K opens the picker (non-macOS path)", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    // Distinct code branch from ⌘K, with its own terminal-focus guard.
+    await workspacePage.openWorkspacePickerViaCtrlShortcut();
+    await picker.waitVisible();
+  });
+
+  test("clicking the desktop title-bar workspace name opens the picker", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    // The title-bar name is the desktop analogue of the mobile header tap.
+    await workspacePage.assertTitleBarWorkspaceNameVisible();
+    await workspacePage.openWorkspacePickerViaTitleBar();
+    await picker.waitVisible();
+  });
 });
 
 test.describe("Workspace picker — pin is separate from select", () => {
