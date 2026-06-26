@@ -993,12 +993,11 @@ export function SharedDockviewLayout() {
       const ws = activeWorkspaceIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // ⌘K → workspace picker. Cmd is a meta key, so we deliberately do NOT
-      // bail on `terminalFocused`: the general handler's terminal guard below
-      // is `terminalFocused && !e.metaKey`, which already lets meta shortcuts
-      // through — so the picker now works even while typing in a focused
-      // terminal (long-standing complaint). preventDefault/stopPropagation
-      // keep the keystroke from leaking into xterm.
+      // ⌘K → workspace picker. We deliberately omit the `terminalFocused`
+      // guard here so the picker opens even while a terminal is focused
+      // (long-standing complaint) — preventDefault/stopPropagation keep the
+      // keystroke from leaking into xterm. (The Ctrl+K branch below DOES bail
+      // on a focused terminal, since Ctrl+K is a terminal editing key.)
       if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
