@@ -203,6 +203,13 @@ test.describe("Terminal zoom while in a cached background workspace", () => {
     // inactive (`wsActive=false`), so A's terminal flips visible → hidden. In-
     // app navigation (sidebar click), not `goto()`, is what keeps A cached.
     await workspacePage.switchWorkspace(WORKSPACE_B);
+    // Positive anchor (TEST-25): confirm B is actually active/visible before
+    // proceeding — a sidebar click can land on B's route before B's panels
+    // finish rendering, and we don't want to zoom/re-tag while B's layout is
+    // still settling. Pair it with the A-hidden assertion below.
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
+      timeout: 20_000,
+    });
     await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, false)).toBeAttached({
       timeout: 20_000,
     });
@@ -259,6 +266,10 @@ test.describe("Terminal zoom while in a cached background workspace", () => {
       )
       .toBe(true);
     const surface = await workspacePage.readTerminalSurface(WORKSPACE_A);
+    // Guard against a vacuous pass: if this snapshot caught the surface
+    // mid-relayout with zero canvases, the `for` loop below would make zero
+    // assertions and pass silently. Assert there's a backing store to check.
+    expect(surface.backing.length).toBeGreaterThan(0);
     for (const backing of surface.backing) {
       expect(Math.abs(backing.w - surface.screen.w * surface.dpr)).toBeLessThanOrEqual(2);
       expect(Math.abs(backing.h - surface.screen.h * surface.dpr)).toBeLessThanOrEqual(2);
