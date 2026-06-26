@@ -1,4 +1,12 @@
 /**
+ * Coverage for the WorkspacePickerDialog, in two groups:
+ *
+ * 1. "open affordances" — the ways a user opens the picker on desktop: the
+ *    ⌘K shortcut (macOS), the Ctrl+K shortcut (Windows/Linux wide-viewport
+ *    web), and clicking the desktop title-bar workspace-name button.
+ * 2. "pin is separate from select" — the pin/select separation regression
+ *    described below.
+ *
  * Regression coverage for the WorkspacePickerDialog pin/select separation
  * (PR #553). Tapping a row's pin button must toggle the pinned state WITHOUT
  * selecting the workspace — the dialog stays open and the URL doesn't change.
