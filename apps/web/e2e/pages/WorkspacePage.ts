@@ -590,17 +590,17 @@ export class WorkspacePage {
     });
   }
 
-  /** Open the workspace picker on desktop via its Ctrl+R shortcut. The
+  /** Open the workspace picker on desktop via its Ctrl+Shift+R shortcut. The
    *  handler lives on a window keydown listener in
    *  `SharedDockviewLayout.tsx`; it ignores the shortcut while the
    *  terminal is focused, so we route the keypress through the project
    *  list root (focusable, non-editable) — the same anchor the label
    *  shortcut test uses. */
   async openWorkspacePickerViaShortcut(): Promise<void> {
-    await test.step("Open workspace picker (Ctrl+R)", async () => {
+    await test.step("Open workspace picker (Ctrl+Shift+R)", async () => {
       const root = this.projectListRoot();
       await root.waitFor({ state: "visible" });
-      await root.press("Control+r");
+      await root.press("Control+Shift+R");
     });
   }
 

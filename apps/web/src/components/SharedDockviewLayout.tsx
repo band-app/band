@@ -992,8 +992,8 @@ export function SharedDockviewLayout() {
       const ws = activeWorkspaceIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // Ctrl+R → workspace picker — skip when terminal focused
-      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && !e.shiftKey) {
+      // Ctrl+Shift+R → workspace picker — skip when terminal focused
+      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && e.shiftKey) {
         if (terminalFocused) return;
         e.preventDefault();
         e.stopPropagation();

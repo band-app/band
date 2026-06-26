@@ -2,7 +2,7 @@
  * Component object for the WorkspacePickerDialog
  * (`apps/web/src/dashboard/components/WorkspacePickerDialog.tsx`) — the
  * command-palette-style "Switch Workspace" dialog reachable on desktop via
- * Ctrl+R and on mobile by tapping the workspace header title.
+ * Ctrl+Shift+R and on mobile by tapping the workspace header title.
  *
  * Locators key off `data-testid` hooks the component sets:
  *   - `workspace-picker`                       — the dialog content

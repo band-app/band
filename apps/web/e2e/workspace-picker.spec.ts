@@ -39,7 +39,7 @@ const WS_ALPHA = toWorkspaceId(PROJECT_ALPHA, "main");
 const WS_BETA = toWorkspaceId(PROJECT_BETA, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
-// owns the Ctrl+R picker shortcut and the project-list sidebar) mounts.
+// owns the Ctrl+Shift+R picker shortcut and the project-list sidebar) mounts.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
