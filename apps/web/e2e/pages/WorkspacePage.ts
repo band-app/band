@@ -643,6 +643,82 @@ export class WorkspacePage {
     await this.terminalInput.first().waitFor({ state: "attached", timeout: timeoutMs });
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Terminal WebGL render-surface probing (terminal-garbled-until-resize).
+  //
+  // These read xterm.js's own internal DOM (`.xterm-screen > canvas`). That
+  // DOM belongs to the xterm library, not to our code, so there is no
+  // `data-testid` to hook and a class selector is the only option — the
+  // locator-priority "no CSS selectors" rule applies to elements WE own.
+  // We scope every query to the terminal panel host for a specific
+  // workspace (one `workspace-panel-host__cached-entry--<id>` per panel
+  // kind; the terminal one is the entry that contains a
+  // `dockview-terminal-tab__*` marker) so a cached background workspace's
+  // surface can be inspected independently of the active one.
+  //
+  // The WebGL renderer is the production default (`useWebGLTerminalRenderer
+  // ?? true`) and the corruption this fix addresses is a GPU-canvas
+  // artifact, so these helpers assume the WebGL addon attached a <canvas>.
+  // Tests force the SwiftShader WebGL path on via Chromium launch flags
+  // and assert `webglCanvasCount > 0` as a precondition.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Stamp a `data-band-probe` marker on every canvas currently inside the
+   *  given workspace's terminal render surface. Lets a later read detect
+   *  whether the surface was rebuilt (markers gone = the WebGL addon was
+   *  disposed + re-attached, i.e. a brand-new backing store) or merely
+   *  resized in place (markers survive on the same elements). Returns the
+   *  number of canvases stamped. */
+  async tagTerminalCanvases(workspaceId: string): Promise<number> {
+    return await test.step(`Tag terminal canvases for ${workspaceId}`, async () =>
+      await this.page.evaluate((id) => {
+        const hosts = Array.from(
+          document.querySelectorAll(`[data-testid="workspace-panel-host__cached-entry--${id}"]`),
+        );
+        const host = hosts.find((h) => h.querySelector('[data-testid^="dockview-terminal-tab__"]'));
+        const canvases = host
+          ? Array.from(host.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+          : [];
+        canvases.forEach((c, i) => {
+          c.dataset.bandProbe = `tagged-${i}`;
+        });
+        return canvases.length;
+      }, workspaceId));
+  }
+
+  /** Read the state of the given workspace's terminal render surface:
+   *  total canvas count, how many still carry the `tagTerminalCanvases`
+   *  marker (i.e. were NOT rebuilt), and each canvas's backing-store size
+   *  alongside the `.xterm-screen` CSS size. A rebuilt surface reports
+   *  `survivingTags: 0`; a correctly-sized surface reports backing sizes
+   *  matching the screen rect (× devicePixelRatio). */
+  async readTerminalSurface(workspaceId: string): Promise<{
+    canvasCount: number;
+    survivingTags: number;
+    screen: { w: number; h: number };
+    backing: { w: number; h: number }[];
+    dpr: number;
+  }> {
+    return await this.page.evaluate((id) => {
+      const hosts = Array.from(
+        document.querySelectorAll(`[data-testid="workspace-panel-host__cached-entry--${id}"]`),
+      );
+      const host = hosts.find((h) => h.querySelector('[data-testid^="dockview-terminal-tab__"]'));
+      const screenEl = host?.querySelector(".xterm-screen") as HTMLElement | null;
+      const canvases = host
+        ? Array.from(host.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+        : [];
+      const rect = screenEl?.getBoundingClientRect();
+      return {
+        canvasCount: canvases.length,
+        survivingTags: canvases.filter((c) => c.dataset.bandProbe).length,
+        screen: { w: Math.round(rect?.width ?? 0), h: Math.round(rect?.height ?? 0) },
+        backing: canvases.map((c) => ({ w: c.width, h: c.height })),
+        dpr: window.devicePixelRatio,
+      };
+    }, workspaceId);
+  }
+
   /** Type a line into the focused terminal and submit it with Enter.
    *  Routes the keystrokes through the real xterm input (which calls
    *  `terminal.onData` → `ws.send`), exactly as a user typing would.
