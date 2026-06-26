@@ -230,10 +230,12 @@ export const PromptInput = ({
       if (wsActiveRef.current === false) return;
       const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
 
-      // Trailing space keeps the reference separated from any text the user
-      // types next. Shares the bare-reference builder with the terminal/copy
-      // options so all three produce an identical reference string.
-      const reference = `${buildLineReference(filePath, startLine, endLine)} `;
+      // Wrap the shared bare reference in a markdown code span so the chat
+      // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
+      // in file-link-components.tsx — it only links paths inside inline `<code>`).
+      // The terminal/copy actions intentionally use the bare form instead.
+      // Trailing space keeps it separated from any text the user types next.
+      const reference = `\`${buildLineReference(filePath, startLine, endLine)}\` `;
 
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";

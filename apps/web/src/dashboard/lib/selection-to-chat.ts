@@ -204,7 +204,10 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
         above: false,
         strictSide: false,
         arrow: false,
-        create(view: EditorView) {
+        // Named `tooltipView` to avoid shadowing the outer `view` that
+        // `readSelection` closes over (same instance, but the distinct name
+        // keeps the data flow clear).
+        create(tooltipView: EditorView) {
           const dom = document.createElement("div");
           dom.className = "cm-add-to-chat-tooltip";
 
@@ -241,8 +244,8 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
               onActivate(detail);
 
               // Collapse selection and hide tooltip
-              view.dispatch({
-                selection: { anchor: view.state.selection.main.from },
+              tooltipView.dispatch({
+                selection: { anchor: tooltipView.state.selection.main.from },
                 effects: setSelectionTooltip.of(null),
               });
             });

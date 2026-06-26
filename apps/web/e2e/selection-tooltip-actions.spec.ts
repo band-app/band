@@ -155,9 +155,10 @@ test.describe("Diff selection tooltip — copy reference / add to chat / add to 
         message: "file reference appended to chat input",
         timeout: 15_000,
       })
-      // Chat appends a trailing space so the reference is separated from
+      // Chat wraps the reference in a markdown code span (so it renders as a
+      // clickable file link) and appends a trailing space to separate it from
       // whatever the user types next.
-      .toBe(`${EXPECTED_REFERENCE} `);
+      .toBe(`\`${EXPECTED_REFERENCE}\` `);
 
     // ── Add to Terminal → reference typed into the PTY session ────────────
     await changes.selectWordInDiff(FIRST_LINE);
