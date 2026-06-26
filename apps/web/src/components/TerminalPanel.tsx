@@ -974,6 +974,20 @@ export function TerminalPanel({
           attachWebGL();
         }
         fitAddon.fit();
+        // App-zoom (and DPR) events fire on EVERY mounted terminal, including
+        // those in cached, hidden background workspaces. When this dance runs
+        // while the panel is hidden, the WebGL surface we just re-attached and
+        // the `fit()` we just computed are sized against a hidden/degenerate
+        // layout — the exact hazard the become-visible repair below was built
+        // for (band-app/band#580). The one-shot repair flag is already `true`
+        // from the initial visible mount, so without this re-arm the next
+        // become-visible would only call a bare `fit()`, which early-returns
+        // when cols/rows are unchanged and leaves a stale frame (notably a
+        // missing scrollbar) until a manual resize. Re-arm so the next
+        // become-visible does a full re-measure + re-attach instead.
+        if (!visibleRef.current) {
+          firstVisiblePaintDoneRef.current = false;
+        }
       };
       // Expose to the visibility-change effect so a terminal that first
       // painted while hidden can force a clean re-measure + repaint when
