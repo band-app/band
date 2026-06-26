@@ -87,6 +87,18 @@ test.describe("Workspace picker — open affordances", () => {
     await picker.waitVisible();
   });
 
+  test("Ctrl+K opens the picker (non-macOS path)", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    // Distinct code branch from ⌘K, with its own terminal-focus guard.
+    await workspacePage.openWorkspacePickerViaCtrlShortcut();
+    await picker.waitVisible();
+  });
+
   test("clicking the desktop title-bar workspace name opens the picker", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     const picker = new WorkspacePicker(page);

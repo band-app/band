@@ -604,6 +604,19 @@ export class WorkspacePage {
     });
   }
 
+  /** Open the workspace picker via the non-macOS Ctrl+K shortcut. Distinct
+   *  from the ⌘K branch: Ctrl+K bails when a terminal is focused (it's
+   *  kill-to-end-of-line in most shells), so we route the keypress through
+   *  the project-list root — a focusable, non-terminal element — to exercise
+   *  the non-terminal path. */
+  async openWorkspacePickerViaCtrlShortcut(): Promise<void> {
+    await test.step("Open workspace picker (Ctrl+K)", async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press("Control+k");
+    });
+  }
+
   /** The desktop title-bar workspace-name button. On a wide viewport
    *  `useDesktopLayout` is true, so __root.tsx mounts the DesktopTitleBar
    *  with `onWorkspaceNameClick` wired — the name renders as a button that

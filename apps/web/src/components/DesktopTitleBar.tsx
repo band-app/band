@@ -207,9 +207,12 @@ export function DesktopTitleBar({
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
+              {/* Both modifiers are shown: SharedDockviewLayout binds ⌘K on
+                  macOS and Ctrl+K on Windows/Linux (where this title bar also
+                  renders in the wide-viewport web layout). */}
               Switch Workspace{" "}
               <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                ⌘K
+                ⌘K / Ctrl+K
               </kbd>
             </TooltipContent>
           </Tooltip>
