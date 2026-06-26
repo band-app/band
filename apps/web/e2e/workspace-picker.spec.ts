@@ -82,9 +82,9 @@ test.describe("Workspace picker — open affordances", () => {
     await workspacePage.waitForReady();
 
     await workspacePage.openWorkspacePickerViaShortcut();
+    // waitVisible asserts the dialog reached `state: "visible"` (it throws on
+    // timeout), so it is the assertion — no redundant expect needed.
     await picker.waitVisible();
-
-    await expect(picker.dialog).toBeVisible();
   });
 
   test("clicking the desktop title-bar workspace name opens the picker", async ({ page }) => {
@@ -95,11 +95,9 @@ test.describe("Workspace picker — open affordances", () => {
     await workspacePage.waitForReady();
 
     // The title-bar name is the desktop analogue of the mobile header tap.
-    await expect(workspacePage.desktopTitleWorkspaceNameButton).toBeVisible();
+    await workspacePage.assertTitleBarWorkspaceNameVisible();
     await workspacePage.openWorkspacePickerViaTitleBar();
     await picker.waitVisible();
-
-    await expect(picker.dialog).toBeVisible();
   });
 });
 

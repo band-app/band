@@ -1006,6 +1006,20 @@ export function SharedDockviewLayout() {
         return;
       }
 
+      // Ctrl+K → workspace picker on non-macOS. `SharedDockviewLayout` also
+      // mounts for wide-viewport web users on Windows/Linux, where ⌘ doesn't
+      // exist and Ctrl is the platform-native modifier. Unlike the ⌘ branch we
+      // DO bail when the terminal is focused: Ctrl+K is "kill to end of line"
+      // in most shells, so hijacking it inside xterm would break a common
+      // editing keystroke.
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+        if (terminalFocused) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setWorkspacePickerOpen(true);
+        return;
+      }
+
       // Ctrl+` → Terminal panel
       if (e.ctrlKey && !e.metaKey && e.key === "`") {
         e.preventDefault();

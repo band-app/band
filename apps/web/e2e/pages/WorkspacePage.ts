@@ -614,6 +614,15 @@ export class WorkspacePage {
     return this.page.getByTestId("desktop-title-bar__workspace-name");
   }
 
+  /** Assert the desktop title-bar workspace-name button is visible — the
+   *  desktop affordance that opens the picker. Routed through a page-object
+   *  method so the test body never touches the raw locator. */
+  async assertTitleBarWorkspaceNameVisible(): Promise<void> {
+    await test.step("Assert the desktop title-bar workspace name is visible", async () => {
+      await expect(this.desktopTitleWorkspaceNameButton).toBeVisible();
+    });
+  }
+
   /** Open the workspace picker by clicking the desktop title-bar workspace
    *  name (mirrors the mobile header's tap-to-switch). */
   async openWorkspacePickerViaTitleBar(): Promise<void> {
