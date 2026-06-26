@@ -11,7 +11,7 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { SelectionToChatDetail } from "@/dashboard";
+import { buildLineReference, type SelectionToChatDetail } from "@/dashboard";
 
 let fileIdCounter = 0;
 
@@ -230,10 +230,12 @@ export const PromptInput = ({
       if (wsActiveRef.current === false) return;
       const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
 
-      const lineRef =
-        startLine === endLine ? `${filePath}:${startLine}` : `${filePath}:${startLine}-${endLine}`;
-
-      const reference = `\`${lineRef}\` `;
+      // Wrap the shared bare reference in a markdown code span so the chat
+      // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
+      // in file-link-components.tsx — it only links paths inside inline `<code>`).
+      // The terminal/copy actions intentionally use the bare form instead.
+      // Trailing space keeps it separated from any text the user types next.
+      const reference = `\`${buildLineReference(filePath, startLine, endLine)}\` `;
 
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";

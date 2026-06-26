@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AddToTerminalDetail,
   buildCommands,
   CommandPaletteDialog,
   DashboardShell,
@@ -1223,6 +1224,32 @@ export function SharedDockviewLayout() {
     };
     window.addEventListener("band:activate-panel", handler);
     return () => window.removeEventListener("band:activate-panel", handler);
+  }, []);
+
+  // "Add to Terminal" from the diff/file selection tooltip. The tooltip can't
+  // know which workspace it lives in, so it dispatches the workspace-agnostic
+  // `band:add-to-terminal` intent; here we resolve the active workspace,
+  // surface its terminal panel (changes/files/terminal share one group by
+  // default, so the terminal is usually a hidden tab), then re-dispatch the
+  // scoped `band:terminal-insert` delivery so only that workspace's visible
+  // terminal types the reference. Mirrors the Ctrl+` / "Continue in terminal"
+  // surfacing pattern (`setActive` + microtask dispatch) so the terminal is
+  // visible by the time the panel flushes the reference.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const reference = (e as CustomEvent<AddToTerminalDetail>).detail?.reference;
+      const workspaceId = activeWorkspaceIdRef.current;
+      if (!reference || !workspaceId) return;
+      if (hiddenPanelsRef.current.includes("terminal")) return;
+      apiRef.current?.getPanel("terminal")?.api.setActive();
+      queueMicrotask(() => {
+        window.dispatchEvent(
+          new CustomEvent("band:terminal-insert", { detail: { reference, workspaceId } }),
+        );
+      });
+    };
+    window.addEventListener("band:add-to-terminal", handler);
+    return () => window.removeEventListener("band:add-to-terminal", handler);
   }, []);
 
   // ---------------------------------------------------------------------

@@ -185,6 +185,32 @@ export class ChangesPanelPage {
     return await this.cmEditors.count();
   }
 
+  /** Double-click the diff line whose rendered text contains `text` to select
+   *  a WORD on that line in the first rendered CodeMirror editor. A non-empty
+   *  selection fires CodeMirror's `selectionSet`, which is what surfaces the
+   *  floating "Add to Chat / Add to Terminal / Copy reference" selection
+   *  tooltip (`selectionToChatExtension`).
+   *
+   *  Word-select (double-click) rather than line-select (triple-click) keeps
+   *  the selection within a single line: CodeMirror's line gesture extends the
+   *  selection to the start of the NEXT line (the trailing newline), which
+   *  makes `doc.lineAt(to)` resolve one line further and yields a `1-2` range
+   *  for a visually single-line selection. Pass a single-word line so the
+   *  double-click deterministically selects that word regardless of where in
+   *  the line the click lands.
+   *
+   *  `.cm-line` is a CodeMirror-owned class (same FRAGILITY caveat as
+   *  `cmEditors` / `cmScrollers` above) — centralised here so a CM upgrade
+   *  flows through one file. Scoped to `cmEditors.first()` so it targets the
+   *  single unified-mode editor for the expanded file. */
+  async selectWordInDiff(text: string): Promise<void> {
+    await test.step(`Select a word in diff line containing "${text}"`, async () => {
+      const line = this.cmEditors.first().locator(".cm-line", { hasText: text }).first();
+      await line.waitFor({ state: "visible", timeout: 15_000 });
+      await line.dblclick();
+    });
+  }
+
   /** Click the "Split view" / "Unified view" toggle. The buttons are
    *  rendered with aria-name "Split view" / "Unified view" by
    *  `DiffViewModeToggle`, so the role-name locator is the doctrine-

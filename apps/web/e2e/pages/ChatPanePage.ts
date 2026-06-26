@@ -113,6 +113,12 @@ export class ChatPanePage {
     });
   }
 
+  /** Read the current value of the prompt textarea. Used to assert that an
+   *  "Add to Chat" file reference was appended to the chat input. */
+  async promptValue(): Promise<string> {
+    return await this.promptInput.inputValue();
+  }
+
   /** Clear the prompt textarea. Most submit paths empty the textarea
    *  already, but the draft-persistence logic in `PromptInput` can
    *  leave whitespace behind — call this before tests that need a
