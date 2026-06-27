@@ -19,9 +19,31 @@ describe("mapHookPayloadToStatus — claude-code", () => {
     assert.equal(await map({ hook_event_name: "Stop" }), "needs_attention");
   });
 
-  it("maps PermissionRequest → needs_attention (blocked on approval)", async () => {
+  // Regression (#571): PermissionRequest fires after PreToolUse for every
+  // gated tool (Bash/Write/Edit/…). Band auto-approves those — they don't
+  // block the user — so they must stay `working`. Mapping PermissionRequest
+  // to needs_attention unconditionally chimed the attention sound per tool.
+  it("maps PermissionRequest + Bash → working (auto-approved, does not block)", async () => {
+    assert.equal(await map({ hook_event_name: "PermissionRequest", tool_name: "Bash" }), "working");
+  });
+
+  it("maps PermissionRequest + Write → working (auto-approved, does not block)", async () => {
     assert.equal(
-      await map({ hook_event_name: "PermissionRequest", tool_name: "Bash" }),
+      await map({ hook_event_name: "PermissionRequest", tool_name: "Write" }),
+      "working",
+    );
+  });
+
+  it("maps PermissionRequest + AskUserQuestion → needs_attention", async () => {
+    assert.equal(
+      await map({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }),
+      "needs_attention",
+    );
+  });
+
+  it("maps PermissionRequest + ExitPlanMode → needs_attention", async () => {
+    assert.equal(
+      await map({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode" }),
       "needs_attention",
     );
   });
@@ -42,6 +64,10 @@ describe("mapHookPayloadToStatus — claude-code", () => {
 
   it("maps PreToolUse + regular tool → working", async () => {
     assert.equal(await map({ hook_event_name: "PreToolUse", tool_name: "Read" }), "working");
+  });
+
+  it("maps PreToolUse + Bash → working", async () => {
+    assert.equal(await map({ hook_event_name: "PreToolUse", tool_name: "Bash" }), "working");
   });
 
   it("maps PostToolUse → working", async () => {

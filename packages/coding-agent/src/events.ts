@@ -29,6 +29,15 @@ export interface ToolUseEvent {
   /** Human-readable display title (e.g. "Bash(git status)"). */
   displayTitle?: string;
   input: Record<string, unknown>;
+  /**
+   * Set by the adapter when this tool blocks on the user and its
+   * tool-input-available broadcast is owned by the adapter's
+   * `onUserInputNeeded` path (which enriches the input). The agent-agnostic
+   * task-runner reads this to suppress its own generic broadcast, rather than
+   * hard-coding any single agent's interactive tool names. Adapters with no
+   * interactive tools leave it unset (falsy → broadcast normally).
+   */
+  interactive?: boolean;
 }
 
 export interface ToolResultEvent {

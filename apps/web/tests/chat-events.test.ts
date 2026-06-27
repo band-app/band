@@ -230,6 +230,10 @@ async function collectEvents(
     lastEventId?: number;
     workspaceId?: string;
     until: (evt: ParsedEvent, all: ParsedEvent[]) => boolean;
+    /** Side-effect hook fired for every parsed event before the `until` check.
+     * Lets a test react to a mid-stream event (e.g. answer a pending tool
+     * approval) without tearing down the live subscription. */
+    onEvent?: (evt: ParsedEvent) => void;
     maxEvents?: number;
     timeoutMs?: number;
   },
@@ -290,6 +294,7 @@ async function collectEvents(
               events.push(evt);
               currentId = undefined;
               currentType = undefined;
+              opts.onEvent?.(evt);
               if (opts.until(evt, events) || events.length >= max) {
                 clearTimeout(timeout);
                 ac.abort();
@@ -495,6 +500,129 @@ describe("chat-events — submit + observe via subscription", () => {
         expect(evt.id).toBeGreaterThan(cursor);
       }
     }
+  });
+});
+
+describe("chat-events — interactive tool broadcast is owned by onUserInputNeeded (#585)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  // Stable ids so the test can answer the pending input by a known approvalId.
+  // The adapter passes the SDK's `tool_use_id` straight through as the
+  // approvalId, so the value we inject into the `can_use_tool` control_request
+  // is exactly what `chat.answer` expects.
+  const SESSION = "events-interactive";
+  const TOOL_USE_ID = "askq-tool-1";
+  const QUESTION = "Pick a side";
+
+  // Scenario: the assistant calls the interactive `AskUserQuestion` tool, then
+  // the agent process drives the SDK's permission round-trip via a
+  // `can_use_tool` control_request. That makes the adapter invoke
+  // `onUserInputNeeded`, which broadcasts the single enriched
+  // `tool-input-available`. The task parks on `_wait_for_stdin` until the SDK
+  // writes back its control_response (which it does once `chat.answer`
+  // resolves the pending input), then completes.
+  function interactiveScenario() {
+    const input = { questions: [{ question: QUESTION, options: ["A", "B"] }] };
+    return [
+      { type: "system", subtype: "init", session_id: SESSION },
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Let me check with you." },
+            { type: "tool_use", id: TOOL_USE_ID, name: "AskUserQuestion", input },
+          ],
+        },
+      },
+      {
+        type: "control_request",
+        request_id: "askq-req-1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "AskUserQuestion",
+          input,
+          tool_use_id: TOOL_USE_ID,
+        },
+      },
+      { _wait_for_stdin: true },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: SESSION,
+        duration_ms: 10,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+      },
+    ];
+  }
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+    const scenario = writeScenario(tmpHome, interactiveScenario());
+    server = await startServer({ tmpHome, scenarioPath: scenario });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // Resolve the agent's pending input. Retries because the generic-broadcast
+  // regression would surface a tool-input-available *before* the adapter
+  // registers the pending input, so a single early call could 404.
+  async function answerPending(): Promise<void> {
+    for (let i = 0; i < 50; i++) {
+      const res = await fetch(`${server.url}/trpc/chat.answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...defaultHeaders },
+        body: JSON.stringify({ approvalId: TOOL_USE_ID, answers: { [QUESTION]: "A" } }),
+      });
+      if (res.status === 200) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("chat.answer never resolved a pending input");
+  }
+
+  it("emits exactly one tool-input-available for an interactive tool (no generic duplicate)", async () => {
+    const chatId = newChatId();
+
+    // Open the subscription first so the whole stream is observed on one live
+    // connection — the only way to prove *exactly* one broadcast (a count of
+    // the first match alone could not distinguish one from two).
+    let answered = false;
+    const subscriptionPromise = collectEvents(server.url, chatId, {
+      workspaceId: "testproject-main",
+      onEvent: (e) => {
+        if (!answered && e.type === "tool-input-available") {
+          answered = true;
+          void answerPending();
+        }
+      },
+      until: (e) => e.type === "task-completed" || e.type === "task-error",
+      timeoutMs: 15_000,
+    });
+
+    const submitRes = await submitMessage(server.url, chatId, {
+      workspaceId: "testproject-main",
+      text: "need your input",
+    });
+    expect(submitRes.status).toBe(200);
+
+    const events = await subscriptionPromise;
+
+    // The generic tool-use broadcast must be suppressed for interactive tools
+    // (adapter stamps `interactive`), leaving only onUserInputNeeded's enriched
+    // broadcast. If the flag were dropped/misset there would be two.
+    const toolInputs = events.filter(
+      (e) =>
+        e.type === "tool-input-available" &&
+        (e.data as { toolCallId?: string }).toolCallId === TOOL_USE_ID,
+    );
+    expect(toolInputs).toHaveLength(1);
+    expect(events.some((e) => e.type === "task-completed")).toBe(true);
   });
 });
 

@@ -40,6 +40,21 @@ import type {
 const log = createLogger("coding-agent:claude-code");
 
 /**
+ * Tools that actually block on the user — Claude Code surfaces these through
+ * `canUseTool`, and Band routes them to `onUserInputNeeded` so the user can
+ * answer/approve. Every other tool is auto-allowed and never blocks.
+ *
+ * This is the single in-adapter source of truth for everything that keys off
+ * "is this tool interactive": the `canUseTool` callback in `runSession`, the
+ * per-tool attention decision in `mapClaudeCodeHookStatus`, and the
+ * `interactive` flag stamped onto emitted `tool-use` events. Keeping it here
+ * is deliberate — agent-agnostic consumers (e.g. the task-runner) must learn a
+ * tool is interactive from the event stream, not by hard-coding Claude Code's
+ * tool names.
+ */
+const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+
+/**
  * Read the most recently modified plan file from the workspace.
  *
  * Claude Code writes plans into `<workspaceDir>/.claude/plans/`.
@@ -256,8 +271,6 @@ export class ClaudeCodeAdapter implements CodingAgent {
       },
       "runSession starting",
     );
-
-    const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       if (!INTERACTIVE_TOOLS.has(toolName) || !this.onUserInputNeeded) {
@@ -1155,6 +1168,7 @@ function* mapClaudeCodeEvent(
               toolName,
               displayTitle: formatToolTitle(toolName, input),
               input,
+              interactive: INTERACTIVE_TOOLS.has(toolName),
             };
             processedUpTo = i + 1;
           } else {
@@ -1285,17 +1299,22 @@ export const CLAUDE_CODE_DEFAULT_BINARY = "claude";
  * finished its turn or is blocked waiting for the user to act:
  *
  *   - `Stop`              → the agent finished/exited; it's the user's turn.
- *   - `PermissionRequest` → the agent is blocked awaiting approval (plan
- *                           approval, a question, or a gated tool like Bash).
- *                           This hook fires *after* `PreToolUse`, so it must
- *                           also resolve to needs_attention — otherwise it
- *                           would overwrite the PreToolUse value back to
- *                           "working" while the agent is actually waiting.
- *   - `PreToolUse` for the interactive tools (`AskUserQuestion`/`ExitPlanMode`)
- *                           → the agent is about to block on the user.
+ *                           Tool-agnostic; fires once per turn.
+ *   - `PreToolUse` / `PermissionRequest` for an interactive tool
+ *                           (`INTERACTIVE_TOOLS`: `AskUserQuestion` /
+ *                           `ExitPlanMode`) → the agent is about to block on
+ *                           the user.
  *
- * Everything else (UserPromptSubmit, PostToolUse, regular PreToolUse) means
- * the agent is actively making progress → `working`.
+ * The attention signal is the TOOL, not the hook event. `PermissionRequest`
+ * fires *after* `PreToolUse` for every gated tool (Bash/Write/Edit/…), but
+ * Band auto-approves those — they don't block the user — so they must stay
+ * `working`. Mapping `PermissionRequest` to `needs_attention` unconditionally
+ * (the previous behaviour) chimed the "needs attention" sound on every tool
+ * call. Scoping attention to `INTERACTIVE_TOOLS` fixes that regression.
+ *
+ * Everything else (UserPromptSubmit, PostToolUse, and PreToolUse /
+ * PermissionRequest for non-interactive tools) means the agent is actively
+ * making progress → `working`.
  *
  * Owning this mapping here (rather than in the Band CLI) keeps the CLI
  * agent-agnostic: it forwards the raw payload and the server dispatches to
@@ -1305,12 +1324,12 @@ export function mapClaudeCodeHookStatus(payload: Record<string, unknown>): Agent
   const hookEvent = typeof payload.hook_event_name === "string" ? payload.hook_event_name : "";
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
 
-  if (hookEvent === "Stop" || hookEvent === "PermissionRequest") {
+  if (hookEvent === "Stop") {
     return "needs_attention";
   }
   if (
-    hookEvent === "PreToolUse" &&
-    (toolName === "AskUserQuestion" || toolName === "ExitPlanMode")
+    (hookEvent === "PreToolUse" || hookEvent === "PermissionRequest") &&
+    INTERACTIVE_TOOLS.has(toolName)
   ) {
     return "needs_attention";
   }

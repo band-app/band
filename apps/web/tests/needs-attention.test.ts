@@ -638,28 +638,72 @@ describe("statuses.notify — agent hook mapping", () => {
   }
 
   it("maps Stop → needs_attention", async () => {
+    // Pre-drive to a working baseline so the assertion proves Stop raises
+    // needs_attention from a non-attention state, consistent with the
+    // self-contained pattern used by every other test in this block.
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("needs_attention");
   });
 
-  it("maps PermissionRequest → needs_attention", async () => {
+  // Regression (#571): PermissionRequest fires after PreToolUse for every
+  // gated tool (Bash/Write/Edit/…). Band auto-approves those — they don't
+  // block the user — so they must stay `working`. Mapping PermissionRequest
+  // to needs_attention unconditionally chimed the attention sound per tool
+  // call. We drive to needs_attention via Stop first so a `working` result
+  // proves the gated tool actively cleared attention rather than the status
+  // having been `working` already.
+  it("maps PermissionRequest + Bash → working (auto-approved, does not block)", async () => {
+    await notifyStatus({ hook_event_name: "Stop" });
     expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Bash" })).toBe(
-      "needs_attention",
+      "working",
     );
   });
 
+  it("maps PermissionRequest + Write → working (auto-approved, does not block)", async () => {
+    await notifyStatus({ hook_event_name: "Stop" });
+    expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Write" })).toBe(
+      "working",
+    );
+  });
+
+  // Each interactive-tool case drives the status to `working` first (via a
+  // non-interactive PostToolUse) so the assertion proves the hook raises
+  // needs_attention from a working baseline, rather than passing on a
+  // pre-existing needs_attention left by the previous test. notify always
+  // writes the freshly-mapped status, so the pre-drive keeps each test
+  // self-contained and order-independent.
+  it("maps PermissionRequest + AskUserQuestion → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
+    expect(
+      await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }),
+    ).toBe("needs_attention");
+  });
+
+  it("maps PermissionRequest + ExitPlanMode → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
+    expect(
+      await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode" }),
+    ).toBe("needs_attention");
+  });
+
   it("maps PreToolUse + ExitPlanMode → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "ExitPlanMode" })).toBe(
       "needs_attention",
     );
   });
 
   it("maps PreToolUse + AskUserQuestion → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion" }),
     ).toBe("needs_attention");
   });
 
   it("maps PreToolUse + regular tool → working", async () => {
+    // Pre-drive to needs_attention so a `working` result proves the regular
+    // tool actively cleared attention, matching the rest of the block.
+    await notifyStatus({ hook_event_name: "Stop" });
     expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "Read" })).toBe(
       "working",
     );
