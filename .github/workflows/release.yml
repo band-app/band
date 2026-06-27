@@ -111,7 +111,7 @@ jobs:
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       # Build the CLI before running the JS tests. Some tests (e.g.
-      # `apps/web/tests/cli-skills.test.ts`) shell out to `band generate-skills`
+      # `apps/web/tests/cli-skills.test.ts`) shell out to `band skills install`
       # to verify the production sync path against the real binary. The cargo
       # cache key only hashes `apps/cli/Cargo.lock`, so a source-only change
       # (skill templates, command surface) restores a stale binary that
