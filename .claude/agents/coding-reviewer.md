@@ -34,7 +34,7 @@ While reading files in your scope, also flag:
 3. **Band-specific checks** that touch your scope:
    - **Web vs desktop** — `apps/web` must not invoke macOS-only shell helpers. New `child_process` calls to `open`, `osascript`, or anything macOS-specific in `apps/web/src/**` belong in `apps/desktop/src/main/ipc/macos-shell.ts` behind the IPC bridge.
    - **No `--no-verify`** — any source code or script in scope that adds `--no-verify` to a `git push` / `git commit` invocation, or overrides `core.hooksPath`, is a blocker.
-   - **Skills sync** — changes to `apps/cli/skills/*.md` should be paired with `band generate-skills` output if the schema-driven skills are affected. Changes to `packages/coding-agent/src/install-skills.ts` need to keep `SUPPORTED_AGENT_TYPES` in sync (cursor-cli intentionally excluded).
+   - **Skills sync** — each `apps/cli/skills/<name>/SKILL.md` is the hand-authored source of truth (baked into the Rust binary via `include_str!`; no generation step). When a diff changes the CLI command surface, the affected skill's `## Commands` section should be updated to match. Changes to `packages/coding-agent/src/install-skills.ts` need to keep `SUPPORTED_AGENT_TYPES` in sync (cursor-cli intentionally excluded).
 
 ## Output
 

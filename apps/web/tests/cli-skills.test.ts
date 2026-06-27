@@ -54,25 +54,30 @@ const SKILL_NAMES = [
 let bandBinary: string | null = null;
 
 /**
- * Snapshot of what `band generate-skills` would emit *right now*. Computed
- * once in `beforeAll` and reused across tests so we can assert that the sync
- * step's output matches the CLI's output byte-for-byte.
+ * Snapshot of the SKILL.md bytes the CLI installs *right now*. Computed once
+ * in `beforeAll` by running `band skills install` into a throwaway staging
+ * home and reading the shared files it wrote. Reused across tests so we can
+ * assert the boot-time sync produces the exact same canonical content as the
+ * CLI's own install path (both go through the binary's `include_str!`
+ * templates, so this also pins "what shipped == what's on disk").
  */
 let expectedSkills: Map<(typeof SKILL_NAMES)[number], Buffer> | null = null;
 
 beforeAll(async () => {
   bandBinary = await findBandBinary();
   if (!bandBinary) return;
-  const stagingDir = mkdtempSync(join(tmpdir(), "band-skills-expected-"));
+  // Staging home with no agent config dirs → install writes the shared
+  // `<home>/.agents/skills/<name>/SKILL.md` files and creates no symlinks.
+  const stagingHome = mkdtempSync(join(tmpdir(), "band-skills-expected-"));
   try {
-    execFileSync(bandBinary, ["generate-skills", "--output-dir", stagingDir], {
+    execFileSync(bandBinary, ["--output", "json", "skills", "install", "--home", stagingHome], {
       encoding: "utf-8",
     });
     const map = new Map<(typeof SKILL_NAMES)[number], Buffer>();
     for (const name of SKILL_NAMES) {
-      const path = join(stagingDir, name, "SKILL.md");
+      const path = join(stagingHome, ".agents", "skills", name, "SKILL.md");
       if (!existsSync(path)) {
-        // The resolved binary is reachable but doesn't emit one of the
+        // The resolved binary is reachable but doesn't install one of the
         // expected SKILL.md files — almost always means a stale build is
         // sitting on the host. Treat this exactly like "no binary found"
         // so the suite skips cleanly instead of the whole test file
@@ -86,7 +91,7 @@ beforeAll(async () => {
     }
     expectedSkills = map;
   } finally {
-    rmSync(stagingDir, { recursive: true, force: true });
+    rmSync(stagingHome, { recursive: true, force: true });
   }
 });
 
@@ -135,10 +140,9 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const bandDir = join(home, ".band");
     mkdirSync(bandDir, { recursive: true });
 
-    // Pre-create the Claude Code config dir so detection in
-    // `resolveSkillTargets` sees it as installed. We don't need a real
-    // `claude` binary on PATH — the new detection strategy is
-    // filesystem-based.
+    // Pre-create the Claude Code config dir so the CLI's filesystem-based
+    // agent detection (in `band skills install`) sees it as installed. We
+    // don't need a real `claude` binary on PATH.
     mkdirSync(join(home, ".claude"), { recursive: true });
 
     // Pre-seed an empty settings.json so `loadSettings` doesn't blow up
@@ -188,9 +192,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
 
       const actual = readFileSync(path);
       const expected = expectedSkills!.get(name)!;
-      expect(actual.equals(expected), `${name} content matches \`band generate-skills\``).toBe(
-        true,
-      );
+      expect(actual.equals(expected), `${name} content matches \`band skills install\``).toBe(true);
     }
   });
 

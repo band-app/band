@@ -4,7 +4,6 @@ version: 0.1.0
 description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band workspace. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane".
 allowed-tools: Bash
 argument-hint: terminals [list|create|send|output|kill|attach] [args...]
-commands: terminals
 ---
 
 # Band Terminal Sessions

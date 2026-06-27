@@ -37,7 +37,7 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  *   1. The CLI install gates `ensureClaudeHooks` and `ensureSkillsInstalled`
  *      because both need `band` resolvable on PATH (the hooks register a
  *      `band notify …` command; the skills install spawns
- *      `band generate-skills`). `ensureSettingsDefaults` doesn't strictly
+ *      `band skills install`). `ensureSettingsDefaults` doesn't strictly
  *      need the CLI, but it's grouped here for code clarity and the cost
  *      is negligible on warm boots.
  *   2. `ensureProjectStateInSync` (DB + `git worktree list`) doesn't touch

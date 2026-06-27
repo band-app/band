@@ -4,7 +4,6 @@ version: 0.1.0
 description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, remove, or label agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "label chat", "tag chat", "submit prompt to workspace".
 allowed-tools: Bash
 argument-hint: chats [args...]
-commands: chats
 ---
 
 # Band Chats

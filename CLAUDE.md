@@ -58,16 +58,16 @@ The web server (`apps/web`) handles **data, state, and background processes** on
 
 ## Band CLI Skills
 
-The Band CLI ships **six domain-specific skills**, each generated from its own template in `apps/cli/skills/` plus the CLI schema:
+The Band CLI ships **six domain-specific skills**, each authored directly as `apps/cli/skills/<name>/SKILL.md` — that file is the single source of truth and is baked into the Rust binary via `include_str!`:
 
-- `band.md` → `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, generate-skills.
-- `band-chat.md` → `band-chat/SKILL.md` — chat panes (`band chats ...`).
-- `band-terminal.md` → `band-terminal/SKILL.md` — terminal sessions (`band terminals ...`).
-- `band-browser.md` → `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
-- `band-start.md` → `band-start/SKILL.md` — kickoff flow: create a workspace and submit the first agent task (`band workspaces create --prompt ...`) with Jira/GitHub ticket auto-detection and branch-name generation.
-- `band-loop.md` → `band-loop/SKILL.md` — schedule a recurring agent prompt against a workspace via `band cronjobs`, with an optional self-deleting "stop when criteria is met" wrapper. Native answer for users who would otherwise reach for Claude Code's `/loop`.
+- `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, skills install.
+- `band-chat/SKILL.md` — chat panes (`band chats ...`).
+- `band-terminal/SKILL.md` — terminal sessions (`band terminals ...`).
+- `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
+- `band-start/SKILL.md` — kickoff flow: create a workspace and submit the first agent task (`band workspaces create --prompt ...`) with Jira/GitHub ticket auto-detection and branch-name generation.
+- `band-loop/SKILL.md` — schedule a recurring agent prompt against a workspace via `band cronjobs`, with an optional self-deleting "stop when criteria is met" wrapper. Native answer for users who would otherwise reach for Claude Code's `/loop`.
 
-Reference-shaped templates (e.g. `band`, `band-chat`, `band-terminal`, `band-browser`) have a `commands:` frontmatter field listing comma-separated CLI command-name prefixes, plus a `<!-- COMMANDS -->` placeholder in the body; the generator filters the schema by those prefixes and splices the rendered Commands section into the placeholder. Workflow-shaped templates (e.g. `band-start`, `band-loop`) are self-contained recipes — they omit both `commands:` and the placeholder, and the generator emits the template body verbatim. The split improves trigger precision and keeps each generated SKILL.md scoped to one task type (issue #331).
+Each `SKILL.md` is self-contained: the per-skill `## Commands` reference is written out in the file itself, not rendered from the CLI schema. (Earlier these were generated from the live schema by a `band generate-skills` command via a `<!-- COMMANDS -->` placeholder + `commands:` frontmatter; that command and the whole rendering pipeline were removed in favour of authoring the files directly — issue #331.) The split into one skill per task type improves trigger precision and keeps each SKILL.md scoped to one domain. When you change the CLI surface, update the affected skill's `## Commands` section by hand so it stays accurate.
 
 ### Installed skill layout (shared + symlinks)
 
@@ -96,12 +96,13 @@ Editing a `SKILL.md` in `~/.agents/skills/` is reflected in every linked agent w
 
 `cursor-cli` is deliberately excluded — Cursor has no documented user-scope skills directory.
 
-The list of supported agents lives in `packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES` (a single place to update when a new agent adds skills support). The sync logic lives in `apps/web/src/lib/cli-skills.ts::installSkills` and runs on every server boot from `runFirstTimeSetup` — idempotent: an existing symlink pointing at the right shared dir is left alone, an existing symlink pointing elsewhere (or a real directory occupying the path) is reported as a conflict rather than overwritten.
+The list of supported agents lives in `packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES` (a single place to update when a new agent adds skills support). The write/symlink logic lives in the Rust CLI (`apps/cli/src/skills.rs::install_skills`); the web server's `apps/web/src/server/services/cli-skills-service.ts::installSkills` shells out to `band skills install` on every boot from `runFirstTimeSetup`. It's idempotent: an existing symlink pointing at the right shared dir is left alone, an existing symlink pointing elsewhere (or a real directory occupying the path) is reported as a conflict rather than overwritten.
 
-### Manual regeneration & install
+### Install
 
-- `band generate-skills --output-dir apps/cli/skills` — regenerate the six in-repo skill templates from the live CLI schema (used in development to keep the source-controlled SKILL.md files current).
-- `band skills install` — render the templates against the current schema and install them into `~/.agents/skills/`, then symlink each detected coding agent's skills directory. Idempotent. Useful for users running the CLI outside the Band dashboard, or for forcing a re-sync without rebooting the web server. The Band web server invokes the same install logic on every boot from `runFirstTimeSetup`, so most users never need to call it directly.
+- `band skills install` — write the six embedded SKILL.md files into `~/.agents/skills/`, then symlink each detected coding agent's skills directory. Idempotent. Useful for users running the CLI outside the Band dashboard, or for forcing a re-sync without rebooting the web server. The Band web server invokes this same subcommand on every boot from `runFirstTimeSetup`, so most users never need to call it directly.
+
+To change a skill's content, edit `apps/cli/skills/<name>/SKILL.md` directly and rebuild the CLI — there is no generation step.
 
 Optional flags on `band skills install`:
 

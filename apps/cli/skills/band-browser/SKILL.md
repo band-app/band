@@ -4,7 +4,6 @@ version: 0.1.0
 description: Manage Band browser tabs via the CLI. Use when the user wants to create, list, navigate, inspect, or remove a browser tab inside a Band workspace. Triggers include "open browser", "navigate to URL", "browser tab", "browser pane", "remove browser tab".
 allowed-tools: Bash
 argument-hint: browsers [list|create|navigate|get|remove] [args...]
-commands: browsers
 ---
 
 # Band Browser Tabs

@@ -78,15 +78,6 @@ enum Commands {
         /// Command name (omit to list all commands)
         command: Option<String>,
     },
-    /// Generate SKILL.md files from schema and registry
-    GenerateSkills {
-        /// Output directory for generated skills (default: skills/)
-        #[arg(long, default_value = "skills")]
-        output_dir: String,
-        /// Filter skills by name (substring match)
-        #[arg(long)]
-        filter: Option<String>,
-    },
     /// Manage CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
     /// `band-browser`, `band-start`, `band-loop`)
     Skills {
@@ -629,9 +620,6 @@ fn main() {
         } => cmd_open(&file_path, workspace.as_deref(), !no_focus),
         Commands::Notify => cmd_notify(),
         Commands::Schema { .. } => unreachable!(),
-        Commands::GenerateSkills { output_dir, filter } => {
-            skills::generate_skills(&output_dir, filter.as_deref())
-        }
         Commands::Skills { cmd } => match cmd {
             SkillsCmd::Install { home, filter } => {
                 skills::install_skills(home.as_deref(), filter.as_deref())
@@ -2972,14 +2960,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Show command schemas as JSON",
             "parameters": [
                 {"name": "command", "type": "string", "required": false, "positional": true, "description": "Command name (omit to list all commands)"},
-            ]
-        }),
-        serde_json::json!({
-            "name": "generate-skills",
-            "description": "Generate SKILL.md files from schema and registry",
-            "parameters": [
-                {"name": "--output-dir", "type": "string", "required": false, "description": "Output directory for generated skills (default: skills/)"},
-                {"name": "--filter", "type": "string", "required": false, "description": "Filter skills by name (substring match)"},
             ]
         }),
         serde_json::json!({

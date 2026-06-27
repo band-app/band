@@ -1,11 +1,13 @@
 # Band CLI
 
-The CLI is split into four domain-specific skills, each with its own command reference:
+The CLI is split into six domain-specific skills, each authored as its own `SKILL.md` with its own command reference:
 
-- [`apps/cli/skills/band.md`](../apps/cli/skills/band.md) — workspaces, projects, cronjobs, tunnel, settings, schema, notify, generate-skills.
-- [`apps/cli/skills/band-chat.md`](../apps/cli/skills/band-chat.md) — chat panes (`band chats ...`), including label management.
-- [`apps/cli/skills/band-terminal.md`](../apps/cli/skills/band-terminal.md) — terminal sessions (`band terminals ...`).
-- [`apps/cli/skills/band-browser.md`](../apps/cli/skills/band-browser.md) — browser tabs (`band browsers ...`).
+- [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — workspaces, projects, cronjobs, tunnel, settings, schema, notify, skills install.
+- [`apps/cli/skills/band-chat/SKILL.md`](../apps/cli/skills/band-chat/SKILL.md) — chat panes (`band chats ...`), including label management.
+- [`apps/cli/skills/band-terminal/SKILL.md`](../apps/cli/skills/band-terminal/SKILL.md) — terminal sessions (`band terminals ...`).
+- [`apps/cli/skills/band-browser/SKILL.md`](../apps/cli/skills/band-browser/SKILL.md) — browser tabs (`band browsers ...`).
+- [`apps/cli/skills/band-start/SKILL.md`](../apps/cli/skills/band-start/SKILL.md) — kickoff flow (`band workspaces create --prompt ...`).
+- [`apps/cli/skills/band-loop/SKILL.md`](../apps/cli/skills/band-loop/SKILL.md) — recurring agent prompts (`band cronjobs ...`).
 
 Run `band schema` for live introspection of every command, or `band <command> --help` for inline help.
 
