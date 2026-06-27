@@ -20,6 +20,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
+import { FILE_VIEWER_ROOT_TESTID } from "./FileViewerPage";
 import type { WorkspacePage } from "./WorkspacePage";
 
 export class FileTreesPage {
@@ -87,6 +88,28 @@ export class FileTreesPage {
     await test.step(`Expand Files-tree folder ${path}`, async () => {
       await this.fileTreeRow(path).click();
       await this.fileTreeRow(awaitChild).waitFor({ state: "visible", timeout: 15_000 });
+    });
+  }
+
+  /** Click a file row in the Files tree to open it in the file viewer, and
+   *  wait for the viewer to mount. Clicking a *file* row (as opposed to a
+   *  directory row, which `expandFileTreeFolder` toggles) drives
+   *  `FileBrowser`'s `onSelectRow(..., "file")`, which opens the tab and
+   *  mounts `FileViewer`. */
+  async openFile(path: string): Promise<void> {
+    await test.step(`Open file ${path} in the viewer`, async () => {
+      await this.fileTreeRow(path).click();
+      await this.page
+        .getByTestId(FILE_VIEWER_ROOT_TESTID)
+        .waitFor({ state: "visible", timeout: 15_000 });
+    });
+  }
+
+  /** Wait for a Files-tree row to appear (e.g. after an external file was
+   *  created and the watcher-driven tree refresh should surface it). */
+  async waitForFileTreeRow(path: string): Promise<void> {
+    await test.step(`Wait for Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
 

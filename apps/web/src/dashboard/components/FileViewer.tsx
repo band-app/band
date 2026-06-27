@@ -138,6 +138,20 @@ function getExtension(path: string): string {
   return dot >= 0 ? name.slice(dot).toLowerCase() : "";
 }
 
+/**
+ * Workspace-relative parent directory of a path, matching the semantics
+ * of the server-side file watcher (`file-watcher.ts::parentDirOf`): a
+ * top-level file ("README.md") has parent `""`, a nested file
+ * ("src/app.ts") has parent "src". The `fileChanges` subscription emits
+ * the parent directory of any touched path, so a viewer auto-refreshes
+ * when the changed directory equals its own file's parent.
+ */
+function parentDirOf(path: string): string {
+  const normalised = path.split(/[\\/]+/).join("/");
+  const idx = normalised.lastIndexOf("/");
+  return idx === -1 ? "" : normalised.slice(0, idx);
+}
+
 function detectLanguage(filePath: string, serverHint?: string): string {
   if (serverHint) return serverHint;
   const ext = getExtension(filePath);
@@ -264,6 +278,12 @@ export function FileViewer({
   // pairs above so a reader sees all of them in one place.
   const onLoadErrorRef = useRef(onLoadError);
   onLoadErrorRef.current = onLoadError;
+  // Latest `filePath`, mirrored so `reloadFromDisk` can detect that the
+  // user switched files mid-fetch and bail before writing one file's
+  // bytes into another file's editor (the FileViewer instance is reused
+  // across file→file navigation — see the `key="file"` in CodeBrowserView).
+  const filePathRef = useRef(filePath);
+  filePathRef.current = filePath;
 
   // Untitled tabs are "dirty" whenever they have any content typed in —
   // there's no on-disk baseline to compare against. An empty buffer
@@ -674,6 +694,96 @@ export function FileViewer({
     [onEditorView],
   );
 
+  // ---- Auto-refresh on external disk changes -----------------------------
+  //
+  // Re-read the file from disk and reflect the new bytes in the viewer,
+  // but ONLY when the buffer is clean. If the user has unsaved edits
+  // (`editedContentRef.current !== null`) we leave the buffer untouched so
+  // a background change (a teammate's `git pull`, the agent rewriting the
+  // file) can't silently clobber what they're typing. The dirty check is
+  // re-evaluated after the async read because the user may start typing
+  // during the round-trip.
+  const reloadFromDisk = useCallback(async () => {
+    // Untitled buffers have no backing file; external files aren't covered
+    // by the workspace watcher. Both are out of scope for auto-refresh.
+    if (untitled || external) return;
+    if (!adapter.getWorkspaceFile) return;
+    // Don't clobber unsaved edits.
+    if (editedContentRef.current !== null) return;
+
+    let result: FileContentResult;
+    try {
+      result = await adapter.getWorkspaceFile(workspaceId, filePath);
+    } catch {
+      // The file may have just been deleted/renamed, or the read raced a
+      // write. Leave the current view as-is — the file tree handles
+      // removal, and the next change event will retry.
+      return;
+    }
+
+    // The user switched files while the read was in flight — this result
+    // belongs to the previously-viewed file. Dropping it here prevents the
+    // stale bytes from being dispatched into the now-current file's editor
+    // (the FileViewer instance is reused across file→file navigation).
+    if (filePathRef.current !== filePath) return;
+    // The user may have started editing while the read was in flight.
+    if (editedContentRef.current !== null) return;
+    // The read succeeded, so a prior load error (e.g. the file was missing
+    // and has since been created) is now stale — clear it so the content
+    // area isn't left gated behind the old error banner.
+    setError(null);
+    // The open file's own bytes are unchanged — typically a sibling file in
+    // the same directory triggered the event. (The O(1) size check
+    // short-circuits the O(n) content comparison in the common case where
+    // the file genuinely changed.) Only re-render when the server metadata
+    // actually drifted; otherwise a stream of sibling-file events would each
+    // force a gratuitous re-render of the editor for no visible change.
+    if (result.size === dataRef.current?.size && result.content === dataRef.current?.content) {
+      if (result.language !== dataRef.current?.language) setData(result);
+      return;
+    }
+
+    // Update the on-disk baseline first so the editor's change listener
+    // (`handleContentChange`) sees the new content and keeps the buffer
+    // marked clean rather than flipping it to dirty.
+    dataRef.current = result;
+    setData(result);
+
+    // The editable CodeMirror intentionally ignores `content` prop changes
+    // after creation (it owns its document), so drive the swap through the
+    // live EditorView — the same mechanism `handleFormat` uses. The
+    // read-only viewer and markdown preview key off `data`/`displayContent`
+    // and re-render from `setData` alone. We reach this only when the buffer
+    // is clean and the content genuinely changed, so the live doc already
+    // equals the old baseline — replacing it unconditionally avoids an
+    // O(file_size) `doc.toString()` just to confirm what we already know.
+    const view = editorViewRef.current;
+    if (view && typeof result.content === "string") {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: result.content },
+        userEvent: "band.reload",
+      });
+    }
+  }, [adapter, workspaceId, filePath, untitled, external]);
+
+  // Subscribe to the workspace file watcher and reload when the directory
+  // containing this file reports a change. The server coalesces events per
+  // parent directory, so we match on `parentDirOf(filePath)`. Image/PDF
+  // previews render straight off the raw file URL (no in-memory content to
+  // refresh), and untitled/external tabs have no watcher path — skip all
+  // of them.
+  useEffect(() => {
+    if (untitled || external) return;
+    if (previewType === "image" || previewType === "pdf") return;
+    if (!adapter.subscribeFileChanges) return;
+    const watchedDir = parentDirOf(filePath);
+    const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedDir) => {
+      if (changedDir !== watchedDir) return;
+      void reloadFromDisk();
+    });
+    return unsubscribe;
+  }, [adapter, workspaceId, filePath, untitled, external, previewType, reloadFromDisk]);
+
   const handleBack = useCallback(() => {
     if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
       return;
@@ -712,7 +822,7 @@ export function FileViewer({
     // lines, in particular) from forcing this box wider than its allocated
     // flex slot, which would propagate up and shove neighbouring layout
     // (e.g. the right-edge tab strip) off-screen.
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+    <div data-testid="file-viewer__root" className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* Title bar — full version (mobile / non-tab views) */}
       {!hideTitleBar && (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
