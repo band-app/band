@@ -662,25 +662,35 @@ describe("statuses.notify — agent hook mapping", () => {
     );
   });
 
+  // Each interactive-tool case drives the status to `working` first (via a
+  // non-interactive PostToolUse) so the assertion proves the hook raises
+  // needs_attention from a working baseline, rather than passing on a
+  // pre-existing needs_attention left by the previous test. notify always
+  // writes the freshly-mapped status, so the pre-drive keeps each test
+  // self-contained and order-independent.
   it("maps PermissionRequest + AskUserQuestion → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }),
     ).toBe("needs_attention");
   });
 
   it("maps PermissionRequest + ExitPlanMode → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode" }),
     ).toBe("needs_attention");
   });
 
   it("maps PreToolUse + ExitPlanMode → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "ExitPlanMode" })).toBe(
       "needs_attention",
     );
   });
 
   it("maps PreToolUse + AskUserQuestion → needs_attention", async () => {
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(
       await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion" }),
     ).toBe("needs_attention");
