@@ -697,6 +697,9 @@ describe("statuses.notify — agent hook mapping", () => {
   });
 
   it("maps PreToolUse + regular tool → working", async () => {
+    // Pre-drive to needs_attention so a `working` result proves the regular
+    // tool actively cleared attention, matching the rest of the block.
+    await notifyStatus({ hook_event_name: "Stop" });
     expect(await notifyStatus({ hook_event_name: "PreToolUse", tool_name: "Read" })).toBe(
       "working",
     );
