@@ -638,6 +638,10 @@ describe("statuses.notify — agent hook mapping", () => {
   }
 
   it("maps Stop → needs_attention", async () => {
+    // Pre-drive to a working baseline so the assertion proves Stop raises
+    // needs_attention from a non-attention state, consistent with the
+    // self-contained pattern used by every other test in this block.
+    await notifyStatus({ hook_event_name: "PostToolUse", tool_name: "Read" });
     expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("needs_attention");
   });
 
