@@ -560,10 +560,6 @@ async function runTask(chatId: string, task: InternalTask) {
   const sharedDir = join(bandHome(), "shared", task.workspaceId);
   mkdirSync(sharedDir, { recursive: true });
 
-  /** Tools that require user interaction — their tool-input-available broadcast
-   * is handled exclusively by onUserInputNeeded (which enriches the input). */
-  const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
-
   let textPartId = "";
   let textStarted = false;
   let finished = false;
@@ -707,11 +703,13 @@ async function runTask(chatId: string, task: InternalTask) {
         case "tool-use": {
           endText();
           announcedToolCalls.add(event.toolCallId);
-          // Interactive tools (ExitPlanMode, AskUserQuestion) are broadcast
-          // from onUserInputNeeded which has the enriched input. Skip here
-          // to avoid broadcasting with raw/empty input that would either
-          // race with or overwrite the enriched broadcast.
-          if (!INTERACTIVE_TOOLS.has(event.toolName)) {
+          // Interactive tool calls are broadcast from onUserInputNeeded, which
+          // has the enriched input. Skip here to avoid broadcasting with
+          // raw/empty input that would either race with or overwrite the
+          // enriched broadcast. The adapter flags which tools are interactive
+          // (`event.interactive`) so this stays agent-agnostic — the
+          // task-runner never hard-codes any agent's tool names.
+          if (!event.interactive) {
             broadcast(chatId, {
               type: "tool-input-available",
               toolCallId: event.toolCallId,

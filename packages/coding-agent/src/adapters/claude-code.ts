@@ -44,17 +44,15 @@ const log = createLogger("coding-agent:claude-code");
  * `canUseTool`, and Band routes them to `onUserInputNeeded` so the user can
  * answer/approve. Every other tool is auto-allowed and never blocks.
  *
- * Within this adapter this is the source of truth for both the `canUseTool`
- * callback in `runSession` and the per-tool attention decision in
- * `mapClaudeCodeHookStatus`: a tool raises "needs attention" only when it is
- * one of these, regardless of which hook event fired.
- *
- * Exported so the set is shareable rather than re-declared. NOTE: a parallel
- * copy currently lives in `apps/web/src/server/services/task-service.ts` (it
- * decides which tool-use broadcasts `onUserInputNeeded` owns). Until that copy
- * is switched to import this constant, the two sets must be kept in sync.
+ * This is the single in-adapter source of truth for everything that keys off
+ * "is this tool interactive": the `canUseTool` callback in `runSession`, the
+ * per-tool attention decision in `mapClaudeCodeHookStatus`, and the
+ * `interactive` flag stamped onto emitted `tool-use` events. Keeping it here
+ * is deliberate — agent-agnostic consumers (e.g. the task-runner) must learn a
+ * tool is interactive from the event stream, not by hard-coding Claude Code's
+ * tool names.
  */
-export const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
+const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /**
  * Read the most recently modified plan file from the workspace.
@@ -1170,6 +1168,7 @@ function* mapClaudeCodeEvent(
               toolName,
               displayTitle: formatToolTitle(toolName, input),
               input,
+              interactive: INTERACTIVE_TOOLS.has(toolName),
             };
             processedUpTo = i + 1;
           } else {
