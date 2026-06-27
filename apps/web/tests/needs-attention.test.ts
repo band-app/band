@@ -641,10 +641,37 @@ describe("statuses.notify — agent hook mapping", () => {
     expect(await notifyStatus({ hook_event_name: "Stop" })).toBe("needs_attention");
   });
 
-  it("maps PermissionRequest → needs_attention", async () => {
+  // Regression (#571): PermissionRequest fires after PreToolUse for every
+  // gated tool (Bash/Write/Edit/…). Band auto-approves those — they don't
+  // block the user — so they must stay `working`. Mapping PermissionRequest
+  // to needs_attention unconditionally chimed the attention sound per tool
+  // call. We drive to needs_attention via Stop first so a `working` result
+  // proves the gated tool actively cleared attention rather than the status
+  // having been `working` already.
+  it("maps PermissionRequest + Bash → working (auto-approved, does not block)", async () => {
+    await notifyStatus({ hook_event_name: "Stop" });
     expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Bash" })).toBe(
-      "needs_attention",
+      "working",
     );
+  });
+
+  it("maps PermissionRequest + Write → working (auto-approved, does not block)", async () => {
+    await notifyStatus({ hook_event_name: "Stop" });
+    expect(await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "Write" })).toBe(
+      "working",
+    );
+  });
+
+  it("maps PermissionRequest + AskUserQuestion → needs_attention", async () => {
+    expect(
+      await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }),
+    ).toBe("needs_attention");
+  });
+
+  it("maps PermissionRequest + ExitPlanMode → needs_attention", async () => {
+    expect(
+      await notifyStatus({ hook_event_name: "PermissionRequest", tool_name: "ExitPlanMode" }),
+    ).toBe("needs_attention");
   });
 
   it("maps PreToolUse + ExitPlanMode → needs_attention", async () => {
