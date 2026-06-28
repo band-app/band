@@ -4,7 +4,6 @@ version: 0.1.0
 description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: "[command] [args...]"
-commands: projects, workspaces, cronjobs, tunnel, settings, open, notify, schema, generate-skills, skills
 ---
 
 # Band CLI
@@ -38,7 +37,194 @@ band schema
 band schema "workspaces create"
 ```
 
-<!-- COMMANDS -->
+## Commands
+
+### List registered projects
+
+```sh
+band projects list
+```
+
+Text output: `name\tpath\tN worktree(s)` (tab-separated).
+JSON output: `{"projects": [{"name": "...", "path": "...", "worktreeCount": N}]}`
+
+### Register an existing repository as a project
+
+```sh
+band projects add <path> [--label <string>]
+```
+
+Registers an existing git repository. Detects the default branch automatically. Returns the project name.
+
+### Unregister a project
+
+```sh
+band projects remove <name>
+```
+
+Removes the project from Band's registry (does not delete the repository).
+
+### List workspaces, optionally filtered by project
+
+```sh
+band workspaces list [project]
+```
+
+Text output: `project\tbranch\tpath` (tab-separated, one per line).
+JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}]}`
+
+### Create a new workspace (git worktree + state registration)
+
+```sh
+band workspaces create <project> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>]
+```
+
+Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
+
+**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.
+
+**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:
+- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude "<prompt>"`, `codex "<prompt>"`, …). Returns a `terminalId` in the JSON output.
+- `chat` — submits a streaming task to the workspace's chat pane (the web UI default).
+
+Precedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.
+
+When to use `--prompt` (most cases):
+```sh
+# User says "create a workspace and implement X" or "start working on X"
+band workspaces create my-app feat/auth --prompt "Implement GitHub issue #42: Add JWT authentication"
+
+# User says "create a workspace for issue #99 and start implementing"
+band workspaces create my-app fix/bug-99 --prompt "Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99"
+
+# Force chat dispatch when terminal is the user-level default
+band workspaces create my-app feat/auth --prompt "..." --via chat
+```
+
+When to omit `--prompt` (rare — user explicitly wants no task):
+```sh
+# User says "just create a workspace, I'll work on it myself"
+band workspaces create my-app feat/experiment
+```
+
+**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
+
+### Remove a workspace (git worktree + state cleanup)
+
+```sh
+band workspaces remove <project> <branch>
+```
+
+Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files.
+
+### Show current settings
+
+```sh
+band settings
+```
+
+Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON.
+
+### Show tunnel status
+
+```sh
+band tunnel status
+```
+
+Shows whether the tunnel is running and its URL.
+
+### Start the remote tunnel
+
+```sh
+band tunnel start
+```
+
+Starts the remote tunnel. Returns the tunnel URL.
+
+### Stop the remote tunnel
+
+```sh
+band tunnel stop
+```
+
+Stops the remote tunnel.
+
+### List cronjobs, optionally filtered by project or workspace
+
+```sh
+band cronjobs list [--project <string>] [--workspace <string>]
+```
+
+### Create a new scheduled cronjob
+
+```sh
+band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--workspace-id <string>] [--disabled]
+```
+
+### Update an existing cronjob
+
+```sh
+band cronjobs update <key> <id> [--name <string>] [--prompt <string>] [--cron <string>] [--enable] [--disable]
+```
+
+### Delete a cronjob
+
+```sh
+band cronjobs delete <key> <id>
+```
+
+### Manually trigger a cronjob now
+
+```sh
+band cronjobs trigger <key> <id>
+```
+
+### Open a file in the active Band workspace's editor pane
+
+```sh
+band open <file_path> [--workspace <string>] [--no-focus]
+```
+
+Opens the file in the dashboard's currently focused workspace. When `--workspace` is omitted, the server uses the workspace most recently focused in the Band dashboard — exits non-zero if no workspace is active. Relative paths are resolved against the current working directory. Paths inside the workspace open as normal editor tabs; paths outside any workspace root open as external tabs (same surface as desktop Cmd+O / "Open File…"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.
+
+Example:
+```sh
+# Open the file in whichever workspace the dashboard is currently focused on
+band open src/main.rs
+
+# Jump to line 42, column 5
+band open src/main.rs:42:5
+
+# Override the active-workspace fallback
+band open src/main.rs --workspace my-app/feat/auth
+
+# An out-of-workspace file opens as an external tab (workspace-relative
+# routing is bypassed; the FileViewer reads via the server's
+# readExternalFile capability).
+band open ~/Downloads/v3.js
+```
+
+### Receive coding-agent hook notifications (reads JSON from stdin)
+
+```sh
+band notify
+```
+
+Not called directly — registered as a coding-agent hook by the Band dashboard. Forwards the raw payload to the server, which dispatches to the agent's adapter to derive the workspace status.
+
+### Show command schemas as JSON
+
+```sh
+band schema [command]
+```
+
+### Install (or refresh) skills into ~/.agents/skills and symlink each detected coding agent's skills/ folder
+
+```sh
+band skills install [--home <string>] [--filter <string>]
+```
+
+Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir).
 
 ## Workflows
 

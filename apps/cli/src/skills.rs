@@ -4,30 +4,33 @@ use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Skill templates rendered by `band generate-skills`.
+/// The CLI-shipped skills, baked into the binary at compile time.
 ///
-/// Two shapes are supported:
+/// Each entry's `SKILL.md` is the single source of truth: the file is
+/// installed verbatim into `~/.agents/skills/<name>/SKILL.md` and symlinked
+/// into every detected coding agent's skills directory. There is no
+/// schema-driven rendering step — the Commands sections are authored
+/// directly in the SKILL.md files. (Previously these were generated from
+/// the live CLI schema by a `band generate-skills` command; that command
+/// and its `<!-- COMMANDS -->` placeholder / `commands:` frontmatter
+/// machinery were removed in favour of self-contained files — issue #331.)
 ///
-/// 1. **Reference-shaped** (e.g. `band`, `band-chat`) — the template body
-///    contains a `<!-- COMMANDS -->` placeholder, and the `commands:`
-///    frontmatter field lists the comma-separated command-name prefixes from
-///    the CLI schema that should be embedded into that skill's auto-generated
-///    Commands section.
-/// 2. **Workflow-shaped** (e.g. `band-start`, `band-loop`) — the template
-///    body contains no `<!-- COMMANDS -->` placeholder; the skill is a
-///    self-contained recipe rather than a command reference. Such templates
-///    may omit the `commands:` frontmatter field entirely.
-///
-/// Splitting the monolithic skill into focused per-domain skills improves
-/// trigger precision and keeps each generated SKILL.md scoped to one task
-/// type (issue #331).
+/// The tuple key is the canonical skill name and determines the output
+/// directory name; it must match the `name:` field in each file's
+/// frontmatter and the directory the file lives in under `apps/cli/skills/`.
 const SKILL_TEMPLATES: &[(&str, &str)] = &[
-    ("band", include_str!("../skills/band.md")),
-    ("band-chat", include_str!("../skills/band-chat.md")),
-    ("band-terminal", include_str!("../skills/band-terminal.md")),
-    ("band-browser", include_str!("../skills/band-browser.md")),
-    ("band-start", include_str!("../skills/band-start.md")),
-    ("band-loop", include_str!("../skills/band-loop.md")),
+    ("band", include_str!("../skills/band/SKILL.md")),
+    ("band-chat", include_str!("../skills/band-chat/SKILL.md")),
+    (
+        "band-terminal",
+        include_str!("../skills/band-terminal/SKILL.md"),
+    ),
+    (
+        "band-browser",
+        include_str!("../skills/band-browser/SKILL.md"),
+    ),
+    ("band-start", include_str!("../skills/band-start/SKILL.md")),
+    ("band-loop", include_str!("../skills/band-loop/SKILL.md")),
 ];
 
 /// Supported coding agents that get a per-skill symlink under their
@@ -37,145 +40,37 @@ const SKILL_TEMPLATES: &[(&str, &str)] = &[
 /// user-scope skills directory.
 const SUPPORTED_AGENTS: &[&str] = &["claude-code", "codex", "gemini-cli", "opencode"];
 
-/// A single rendered skill ready to be written to disk.
-struct RenderedSkill {
-    name: String,
-    description: String,
-    command_count: usize,
-    content: String,
-    prefixes: Vec<String>,
+/// A single skill template ready to be written to disk.
+struct SkillTemplate {
+    name: &'static str,
+    content: &'static str,
 }
 
-/// Render every (filter-matched) skill template against the live CLI
-/// schema. Used by both `generate-skills` and `skills install` so the
-/// rendering logic is defined once.
-fn render_skills(filter: Option<&str>) -> Result<Vec<RenderedSkill>, String> {
-    let schema = crate::build_schema(None)?;
-    let commands = schema["commands"]
-        .as_array()
-        .ok_or("Schema has no commands array")?;
-
-    let mut rendered: Vec<RenderedSkill> = Vec::new();
-
-    for (default_name, template) in SKILL_TEMPLATES {
-        let name = parse_frontmatter_field(template, "name")
-            .unwrap_or_else(|| (*default_name).to_string());
-        let description = parse_frontmatter_field(template, "description").unwrap_or_default();
-        let prefixes = parse_command_prefixes(template);
-        let has_placeholder = template.contains(COMMANDS_PLACEHOLDER);
-
+/// Collect the (filter-matched) skill templates, validating each one's
+/// YAML frontmatter before it's handed to the writer.
+///
+/// Validation runs for *every* template (before the filter check) so a
+/// regressed sibling still fast-fails `band skills install --filter chat`
+/// even though it isn't being installed this run — mirroring the
+/// pre-install safety the old renderer provided.
+fn collect_skills(filter: Option<&str>) -> Result<Vec<SkillTemplate>, String> {
+    let mut out: Vec<SkillTemplate> = Vec::new();
+    for (name, content) in SKILL_TEMPLATES {
         // Defense in depth: parse the YAML frontmatter with a strict parser
-        // before we ship the rendered file. A bad template (e.g. an
-        // unquoted `argument-hint: [foo] [bar]` that YAML reads as a
-        // malformed flow sequence) would otherwise serialise to disk and
-        // only surface at agent-load time as "Skipped loading N skill(s)
-        // due to invalid SKILL.md files". Fail the build instead.
-        //
-        // Runs *before* the filter check so `band skills install
-        // --filter chat` still fast-fails if any other template has
-        // regressed, even though it isn't being rendered this run.
-        validate_frontmatter(&name, template)?;
+        // before we ship the file. A bad template (e.g. an unquoted
+        // `argument-hint: [foo] [bar]` that YAML reads as a malformed flow
+        // sequence) would otherwise install to disk and only surface at
+        // agent-load time as "Skipped loading N skill(s) due to invalid
+        // SKILL.md files". Fail the install instead.
+        validate_frontmatter(name, content)?;
 
-        if !matches_filter(&name, filter) {
+        if !matches_filter(name, filter) {
             continue;
         }
 
-        // `commands:` frontmatter and the `<!-- COMMANDS -->` placeholder are
-        // a pair: reference-shaped skills need both, workflow-shaped skills
-        // need neither. Reject mismatches so a template can't silently lose
-        // its rendered Commands section through a typo.
-        match (has_placeholder, prefixes.is_empty()) {
-            (true, true) => {
-                return Err(format!(
-                    "Skill template '{name}' has '<!-- COMMANDS -->' placeholder but is missing a non-empty 'commands:' frontmatter field"
-                ));
-            }
-            (false, false) => {
-                return Err(format!(
-                    "Skill template '{name}' declares 'commands:' frontmatter ({prefixes:?}) but has no '<!-- COMMANDS -->' placeholder in the body"
-                ));
-            }
-            _ => {}
-        }
-
-        let matched: Vec<&serde_json::Value> = if prefixes.is_empty() {
-            Vec::new()
-        } else {
-            commands
-                .iter()
-                .filter(|c| {
-                    c["name"]
-                        .as_str()
-                        .is_some_and(|cn| matches_any_prefix(cn, &prefixes))
-                })
-                .collect()
-        };
-
-        if has_placeholder && matched.is_empty() {
-            return Err(format!(
-                "Skill template '{name}' matched no commands from the schema (prefixes: {prefixes:?})"
-            ));
-        }
-
-        let content = generate_skill_content(template, &matched);
-        rendered.push(RenderedSkill {
-            name,
-            description,
-            command_count: matched.len(),
-            content,
-            prefixes,
-        });
+        out.push(SkillTemplate { name, content });
     }
-
-    Ok(rendered)
-}
-
-pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<CommandResult, String> {
-    let output_path = Path::new(output_dir);
-    fs::create_dir_all(output_path)
-        .map_err(|e| format!("Failed to create output directory {output_dir}: {e}"))?;
-
-    let rendered = render_skills(filter)?;
-
-    let mut generated: Vec<serde_json::Value> = Vec::new();
-    for skill in &rendered {
-        let dir_path = output_path.join(&skill.name);
-        fs::create_dir_all(&dir_path)
-            .map_err(|e| format!("Failed to create directory {}: {e}", dir_path.display()))?;
-        fs::write(dir_path.join("SKILL.md"), &skill.content)
-            .map_err(|e| format!("Failed to write {}/SKILL.md: {e}", skill.name))?;
-
-        generated.push(serde_json::json!({
-            "name": skill.name,
-            "description": skill.description,
-            "commandPrefixes": skill.prefixes,
-            "commandCount": skill.command_count,
-            "path": format!("{}/SKILL.md", skill.name),
-        }));
-    }
-
-    let mut text = String::new();
-    let _ = writeln!(
-        text,
-        "Generated {} skill(s) in {output_dir}/",
-        generated.len()
-    );
-    for entry in &generated {
-        let _ = writeln!(
-            text,
-            "  {} ({} command(s))",
-            entry["name"].as_str().unwrap_or(""),
-            entry["commandCount"].as_u64().unwrap_or(0),
-        );
-    }
-
-    Ok(CommandResult {
-        text,
-        json: serde_json::json!({
-            "outputDir": output_dir,
-            "skills": generated,
-        }),
-    })
+    Ok(out)
 }
 
 /// Outcome of attempting to write a single shared SKILL.md.
@@ -212,11 +107,11 @@ struct SymlinkSummary {
 
 fn write_shared_skills(
     shared_dir: &Path,
-    rendered: &[RenderedSkill],
+    skills: &[SkillTemplate],
 ) -> Result<SharedWriteSummary, String> {
     let mut summary = SharedWriteSummary::default();
-    for skill in rendered {
-        let dest_dir = shared_dir.join(&skill.name);
+    for skill in skills {
+        let dest_dir = shared_dir.join(skill.name);
         let dest_path = dest_dir.join("SKILL.md");
         fs::create_dir_all(&dest_dir).map_err(|e| {
             format!(
@@ -238,7 +133,7 @@ fn write_shared_skills(
 
 fn create_agent_symlinks(
     shared_dir: &Path,
-    rendered: &[RenderedSkill],
+    skills: &[SkillTemplate],
     targets: &[(&'static str, PathBuf)],
 ) -> Result<SymlinkSummary, String> {
     let mut summary = SymlinkSummary::default();
@@ -249,9 +144,9 @@ fn create_agent_symlinks(
                 skills_dir.display()
             )
         })?;
-        for skill in rendered {
-            let target = shared_dir.join(&skill.name);
-            let link = skills_dir.join(&skill.name);
+        for skill in skills {
+            let target = shared_dir.join(skill.name);
+            let link = skills_dir.join(skill.name);
             let outcome = ensure_symlink(&link, &target);
             let link_str = link.to_string_lossy().into_owned();
             match outcome {
@@ -272,7 +167,7 @@ fn create_agent_symlinks(
 
 fn render_install_text(
     shared_dir: &Path,
-    rendered: &[RenderedSkill],
+    skills: &[SkillTemplate],
     shared: &SharedWriteSummary,
     targets: &[(&'static str, PathBuf)],
     symlinks: &SymlinkSummary,
@@ -281,7 +176,7 @@ fn render_install_text(
     let _ = writeln!(
         text,
         "Installed {} skill(s) into {}",
-        rendered.len(),
+        skills.len(),
         shared_dir.display()
     );
     let _ = writeln!(
@@ -339,7 +234,7 @@ pub fn install_skills(
     let home = resolve_home(home_override)?;
     let shared_dir = home.join(".agents").join("skills");
 
-    let rendered = render_skills(filter)?;
+    let skills = collect_skills(filter)?;
 
     fs::create_dir_all(&shared_dir).map_err(|e| {
         format!(
@@ -348,11 +243,11 @@ pub fn install_skills(
         )
     })?;
 
-    let shared = write_shared_skills(&shared_dir, &rendered)?;
+    let shared = write_shared_skills(&shared_dir, &skills)?;
     let targets = detect_agent_targets(&home);
-    let symlinks = create_agent_symlinks(&shared_dir, &rendered, &targets)?;
+    let symlinks = create_agent_symlinks(&shared_dir, &skills, &targets)?;
 
-    let text = render_install_text(&shared_dir, &rendered, &shared, &targets, &symlinks);
+    let text = render_install_text(&shared_dir, &skills, &shared, &targets, &symlinks);
 
     let agents_json: Vec<serde_json::Value> = targets
         .iter()
@@ -369,9 +264,8 @@ pub fn install_skills(
         json: serde_json::json!({
             "home": home.to_string_lossy(),
             "sharedDir": shared_dir.to_string_lossy(),
-            "skills": rendered.iter().map(|s| serde_json::json!({
+            "skills": skills.iter().map(|s| serde_json::json!({
                 "name": s.name,
-                "commandCount": s.command_count,
             })).collect::<Vec<_>>(),
             "shared": {
                 "written": shared.written,
@@ -543,29 +437,6 @@ fn matches_filter(name: &str, filter: Option<&str>) -> bool {
     }
 }
 
-/// Returns true when `command_name` matches any of the prefixes.
-///
-/// A "match" is either exact equality or `command_name` starting with
-/// `prefix + " "` so that `terminal` matches `terminal list` but not
-/// `terminal-something-else`.
-fn matches_any_prefix(command_name: &str, prefixes: &[String]) -> bool {
-    prefixes
-        .iter()
-        .any(|p| command_name == p || command_name.starts_with(&format!("{p} ")))
-}
-
-/// Parse the `commands:` frontmatter field as a list of comma-separated prefixes.
-fn parse_command_prefixes(content: &str) -> Vec<String> {
-    parse_frontmatter_field(content, "commands")
-        .map(|raw| {
-            raw.split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// Extract the YAML frontmatter block (without the `---` delimiters) from a
 /// skill template. Returns `None` if the template doesn't open with `---`
 /// or doesn't have a closing `---` line — those templates are also invalid,
@@ -587,8 +458,8 @@ fn extract_frontmatter_block(content: &str) -> Option<&str> {
 }
 
 /// Parse the skill template's YAML frontmatter with a strict parser to
-/// catch malformed values before we write the rendered file. Returns
-/// an error string of the form
+/// catch malformed values before we write the file. Returns an error
+/// string of the form
 /// `skill '<name>': invalid YAML frontmatter at line N: <msg>`.
 fn validate_frontmatter(name: &str, template: &str) -> Result<(), String> {
     let block = extract_frontmatter_block(template).ok_or_else(|| {
@@ -607,89 +478,6 @@ fn validate_frontmatter(name: &str, template: &str) -> Result<(), String> {
         }
     })?;
     Ok(())
-}
-
-/// Parse a single field from YAML frontmatter delimited by `---`.
-fn parse_frontmatter_field(content: &str, key: &str) -> Option<String> {
-    let mut in_frontmatter = false;
-    for line in content.lines() {
-        if line.trim() == "---" {
-            if in_frontmatter {
-                break;
-            }
-            in_frontmatter = true;
-            continue;
-        }
-        if in_frontmatter {
-            if let Some(rest) = line.strip_prefix(key) {
-                if let Some(value) = rest.strip_prefix(':') {
-                    return Some(value.trim().to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-const COMMANDS_PLACEHOLDER: &str = "<!-- COMMANDS -->";
-
-fn generate_skill_content(template: &str, commands: &[&serde_json::Value]) -> String {
-    let mut cmds = String::new();
-    let _ = writeln!(cmds, "## Commands");
-    let _ = writeln!(cmds);
-
-    for cmd in commands {
-        let desc = cmd["description"].as_str().unwrap_or("");
-        let usage = format_usage_line(cmd);
-
-        let _ = writeln!(cmds, "### {desc}");
-        let _ = writeln!(cmds);
-        let _ = writeln!(cmds, "```sh");
-        let _ = writeln!(cmds, "{usage}");
-        let _ = writeln!(cmds, "```");
-        let _ = writeln!(cmds);
-
-        if let Some(notes) = cmd.get("notes").and_then(|v| v.as_str()) {
-            let _ = writeln!(cmds, "{notes}");
-            let _ = writeln!(cmds);
-        }
-    }
-
-    template.replace(COMMANDS_PLACEHOLDER, cmds.trim_end())
-}
-
-fn format_usage_line(cmd: &serde_json::Value) -> String {
-    let name = cmd["name"].as_str().unwrap_or("");
-    let mut parts = vec![format!("band {name}")];
-
-    if let Some(params) = cmd["parameters"].as_array() {
-        for param in params {
-            let pname = param["name"].as_str().unwrap_or("");
-            let ptype = param["type"].as_str().unwrap_or("string");
-            let required = param["required"].as_bool().unwrap_or(false);
-            let positional = param["positional"].as_bool().unwrap_or(false);
-
-            if positional {
-                if required {
-                    parts.push(format!("<{pname}>"));
-                } else {
-                    parts.push(format!("[{pname}]"));
-                }
-            } else if ptype == "boolean" {
-                if required {
-                    parts.push(pname.to_string());
-                } else {
-                    parts.push(format!("[{pname}]"));
-                }
-            } else if required {
-                parts.push(format!("{pname} <{ptype}>"));
-            } else {
-                parts.push(format!("[{pname} <{ptype}>]"));
-            }
-        }
-    }
-
-    parts.join(" ")
 }
 
 #[cfg(test)]
@@ -728,8 +516,8 @@ mod tests {
     /// Every checked-in skill template under `apps/cli/skills/` must have
     /// strictly-parseable YAML frontmatter. Catches the regression that
     /// shipped `argument-hint: [command] [args...]` (parsed as a malformed
-    /// flow sequence) at `cargo test` time, before the build ever
-    /// generates files for a user's coding agent.
+    /// flow sequence) at `cargo test` time, before the binary ever installs
+    /// files for a user's coding agent.
     #[test]
     fn checked_in_templates_have_valid_yaml_frontmatter() {
         for (name, template) in SKILL_TEMPLATES {
@@ -778,7 +566,7 @@ mod tests {
     }
 
     /// A template with no frontmatter at all is invalid — surface a clear
-    /// message instead of silently rendering a file with no header.
+    /// message instead of silently installing a file with no header.
     #[test]
     fn validate_frontmatter_rejects_missing_block() {
         let no_fm = "# just a markdown body, no frontmatter at all\n";
