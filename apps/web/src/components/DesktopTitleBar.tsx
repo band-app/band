@@ -10,7 +10,6 @@ import {
 } from "@band-app/ui";
 import { ChevronLeft, ChevronRight, ChevronsUpDown, Menu, PanelLeft, PanelTop } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { EditorPicker } from "./EditorPicker";
@@ -54,11 +53,20 @@ interface NavControlsProps {
   canGoForward?: boolean;
 }
 
+/** The traffic-light gutter class: on macOS desktop (outside fullscreen) the
+ *  window controls occupy the top-left ~80px, so whichever title-bar half sits
+ *  at the window's left edge must clear that space. Computed once in `AppShell`
+ *  (a single `useIsFullscreen` subscription) and passed to both halves. */
+interface TitleBarOffsetProps {
+  /** Left-padding class to apply when the bar is at the window's left edge. */
+  offsetClass: string;
+}
+
 /** The sidebar half takes the shared nav-control props verbatim;
  *  `sidebarVisible` (inherited from NavControlsProps) gates the cluster. */
-type SidebarTitleBarProps = NavControlsProps;
+type SidebarTitleBarProps = NavControlsProps & TitleBarOffsetProps;
 
-interface WorkspaceTitleBarProps extends NavControlsProps {
+interface WorkspaceTitleBarProps extends NavControlsProps, TitleBarOffsetProps {
   /** Static title. If omitted, fetches the app title from the desktop shell. */
   title?: string;
   /** Active workspace name to display prominently. */
@@ -78,14 +86,6 @@ interface WorkspaceTitleBarProps extends NavControlsProps {
   hiddenPanels?: string[];
   /** Callback to toggle a panel's visibility on/off. */
   onTogglePanelVisibility?: (panelId: string) => void;
-}
-
-/** The traffic-light gutter: on macOS desktop (outside fullscreen) the window
- *  controls occupy the top-left ~80px, so whichever title-bar half sits at the
- *  window's left edge must clear that space before its first control. */
-function useTrafficLightOffsetClass(): string {
-  const isFullscreen = useIsFullscreen();
-  return isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
 }
 
 /** Sidebar toggle + hamburger menu + back/forward arrows. Shared by both
@@ -204,8 +204,7 @@ function NavControls({
  *  cluster (sidebar toggle, menu, back/forward) while the list is visible.
  *  Painted with the sidebar surface so it reads as one panel with the list
  *  below it, visually separated from the workspace layout to its right. */
-export function SidebarTitleBar({ sidebarVisible, ...nav }: SidebarTitleBarProps) {
-  const offsetClass = useTrafficLightOffsetClass();
+export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: SidebarTitleBarProps) {
   return (
     <div
       className={`h-[38px] shrink-0 flex items-center gap-0.5 border-b border-border bg-sidebar pr-2 ${offsetClass}`}
@@ -235,10 +234,10 @@ export function WorkspaceTitleBar({
   hiddenPanels,
   onTogglePanelVisibility,
   sidebarVisible,
+  offsetClass,
   ...nav
 }: WorkspaceTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
-  const offsetClass = useTrafficLightOffsetClass();
 
   useEffect(() => {
     if (title) return;

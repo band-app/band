@@ -146,17 +146,18 @@ test("the menu and back/forward relocate into the workspace bar when the sidebar
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
 
-  // The cluster left the (now-collapsed) sidebar column...
-  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
-  // ...and the controls are still visible (now in the workspace title bar).
+  // Assert the settled new state first (TEST-25): the controls are visible,
+  // now hosted by the workspace title bar...
   await expect(wp.menuTrigger).toBeVisible();
   await expect(wp.backButton).toBeVisible();
   await expect(wp.forwardButton).toBeVisible();
+  // ...and they've left the (now-collapsed) sidebar column.
+  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
 
   // The relocated menu is still wired: clicking it opens the dropdown.
   await wp.openTitleBarMenu();
-  await expect(wp.menuDropdown).toBeVisible();
-  await wp.dismissMenu();
+  await expect(wp.contextMenu).toBeVisible();
+  await wp.pressEscape();
 });
 
 test("the collapsed state persists across a reload", async ({ page }) => {

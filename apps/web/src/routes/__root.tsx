@@ -32,6 +32,7 @@ import { type PanelItem, SidebarTitleBar, WorkspaceTitleBar } from "../component
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
@@ -390,6 +391,14 @@ function AppShell() {
     navigator.clipboard.writeText(workspacePath).catch(() => {});
   }, [workspacePath]);
 
+  // Clicking the title-bar workspace name opens the same picker as ⌘K. The
+  // picker state lives in SharedDockviewLayout (a sibling), so we signal it via
+  // the window event it listens for. Stable identity so the title bar can
+  // bail out of re-renders if ever memoized.
+  const handleWorkspaceNameClick = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("band:open-workspace-picker"));
+  }, []);
+
   // Toggle panel visibility on/off (persisted in settings)
   const handleTogglePanelVisibility = useCallback(
     (panelId: string) => {
@@ -578,6 +587,13 @@ function AppShell() {
     ],
   );
 
+  // Single source for the macOS traffic-light gutter: compute it once here (one
+  // `useIsFullscreen` subscription) and pass to both title-bar halves, rather
+  // than each bar instantiating its own hook. The offset applies to whichever
+  // bar sits at the window's left edge.
+  const isFullscreen = useIsFullscreen();
+  const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
+
   if (!useDesktopLayout) {
     return <Outlet />;
   }
@@ -609,7 +625,7 @@ function AppShell() {
                 className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
                 data-testid="app-shell__sidebar"
               >
-                <SidebarTitleBar {...navControlProps} />
+                <SidebarTitleBar {...navControlProps} offsetClass={titleBarOffset} />
                 <div className="flex-1 min-h-0">
                   <DashboardShell hideMenu hideTitleBar />
                 </div>
@@ -622,17 +638,11 @@ function AppShell() {
               <div className="h-full flex flex-col min-w-0 overflow-hidden">
                 <WorkspaceTitleBar
                   {...navControlProps}
+                  offsetClass={titleBarOffset}
                   workspaceName={activeWorkspaceId ?? undefined}
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}
                   onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-                  // Clicking the title-bar workspace name opens the same picker
-                  // as ⌘K. The picker state lives in SharedDockviewLayout (a
-                  // sibling), so we signal it via the window event it listens for.
-                  onWorkspaceNameClick={
-                    activeWorkspaceId
-                      ? () => window.dispatchEvent(new CustomEvent("band:open-workspace-picker"))
-                      : undefined
-                  }
+                  onWorkspaceNameClick={activeWorkspaceId ? handleWorkspaceNameClick : undefined}
                   panelItems={activeWorkspaceId ? panelItems : undefined}
                   hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
                   onTogglePanelVisibility={

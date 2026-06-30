@@ -445,24 +445,12 @@ export class WorkspacePage {
     return this.sidebar.getByRole("button", { name: "Menu" });
   }
 
-  /** The open hamburger dropdown (Radix sets `role="menu"`). Used to prove the
-   *  relocated menu trigger is still wired/clickable, without asserting on
-   *  localisable item copy. */
-  get menuDropdown(): Locator {
-    return this.page.getByRole("menu");
-  }
-
-  /** Open the hamburger menu from wherever the cluster currently lives. */
+  /** Open the hamburger menu from wherever the cluster currently lives. The
+   *  open dropdown is exposed via the existing `contextMenu` getter (both are
+   *  Radix `role="menu"`). */
   async openTitleBarMenu(): Promise<void> {
     await test.step("Open the title-bar hamburger menu", async () => {
       await this.menuTrigger.click();
-    });
-  }
-
-  /** Dismiss any open menu/dropdown. */
-  async dismissMenu(): Promise<void> {
-    await test.step("Dismiss the open menu", async () => {
-      await this.page.keyboard.press("Escape");
     });
   }
 
@@ -1161,13 +1149,19 @@ export class WorkspacePage {
     return this.page.getByTestId("quick-open__root");
   }
 
-  /** Dismiss the QuickOpenDialog via the Escape key — same path a
-   *  real user would take. Encapsulated here so test bodies don't
-   *  reach for `page.keyboard.*` directly. */
-  async closeQuickOpenDialog(): Promise<void> {
-    await test.step("Press Escape to close Quick Open dialog", async () => {
+  /** Press Escape — the user's universal "dismiss" gesture. Encapsulated so
+   *  test bodies (and the helpers below) don't reach for `page.keyboard.*`
+   *  directly (TEST-21). */
+  async pressEscape(): Promise<void> {
+    await test.step("Press Escape", async () => {
       await this.page.keyboard.press("Escape");
     });
+  }
+
+  /** Dismiss the QuickOpenDialog via the Escape key — same path a
+   *  real user would take. */
+  async closeQuickOpenDialog(): Promise<void> {
+    await this.pressEscape();
   }
 
   /** Dispatch a synthetic `band:open-file` window event into the page
