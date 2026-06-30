@@ -304,10 +304,10 @@ export class WorkspacePage {
    *  issue #505 — so this is the right path for tests that need the
    *  full click→restore behaviour.
    *
-   *  Only the SharedDockviewLayout's DashboardShell is mounted on
-   *  desktop (see `apps/web/src/routes/index.tsx` and the comment in
-   *  `SharedDockviewLayout` § ProjectsPanelComponent), so a single
-   *  trigger / item pair is in the DOM at any time. The Radix
+   *  Only one DashboardShell is mounted on desktop — it now lives in the
+   *  sidebar `Panel` inside `AppShell` (`apps/web/src/routes/__root.tsx`),
+   *  separate from the dockview — so a single trigger / item pair is in the
+   *  DOM at any time. The Radix
    *  DropdownMenu portals its content to `document.body` with a fade
    *  animation on close, so a back-to-back reopen can briefly see the
    *  previous portal animating out while the new one mounts. Waiting
@@ -388,6 +388,70 @@ export class WorkspacePage {
    *  not editable. */
   projectListRoot(): Locator {
     return this.page.getByTestId("project-list__root");
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Project-list sidebar (lives left of the dockview, outside it) + its
+  // header toggle button. The sidebar is a collapsible resizable-panel:
+  // collapsing shrinks its width to ~0 rather than unmounting, so the
+  // user-observable signal for hidden/shown is its rendered width.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The project-list sidebar wrapper. `data-testid` set in `__root.tsx`
+   *  (`AppShell`). */
+  get sidebar(): Locator {
+    return this.page.getByTestId("app-shell__sidebar");
+  }
+
+  /** The header button that toggles the sidebar (⌘B). `data-testid` set in
+   *  `DesktopTitleBar.tsx`; its `aria-pressed` reflects current visibility. */
+  get sidebarToggle(): Locator {
+    return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.
+   *  The geometric, user-observable signal for show/hide (a collapsed Panel
+   *  shrinks its width rather than unmounting). */
+  async sidebarWidth(): Promise<number> {
+    return (await this.sidebar.boundingBox())?.width ?? 0;
+  }
+
+  /** Click the header sidebar-toggle button. */
+  async toggleSidebarViaButton(): Promise<void> {
+    await test.step("Toggle the sidebar via the header button", async () => {
+      await this.sidebarToggle.click();
+    });
+  }
+
+  /** Toggle the sidebar via the ⌘B keyboard shortcut. The keydown is caught
+   *  by a window listener in `SharedDockviewLayout.tsx` and re-dispatched as
+   *  `band:toggle-sidebar`; the actual panel collapse/expand is handled in
+   *  `AppShell` (`__root.tsx`). ⌘ is a meta key so it fires regardless of
+   *  focus. Anchored on the always-present toggle button so the key press has
+   *  a stable, non-editable focus target. */
+  async toggleSidebarViaShortcut(): Promise<void> {
+    await test.step("Toggle the sidebar via ⌘B", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Meta+b");
+    });
+  }
+
+  /** Read the persisted sidebar-collapsed flag (`band:sidebar-collapsed`)
+   *  from localStorage. */
+  async readSidebarCollapsed(): Promise<boolean> {
+    return await this.page.evaluate(() => localStorage.getItem("band:sidebar-collapsed") === "1");
+  }
+
+  /** Trigger the ⌃0 "Focus Projects" shortcut, which reveals the sidebar
+   *  (`band:show-sidebar`) and focuses the list (`band:focus-projects`). The
+   *  keydown is caught by the window listener in `SharedDockviewLayout.tsx`.
+   *  Anchored on the always-present toggle button so the key press has a
+   *  stable focus target even when the sidebar (and its list) is collapsed. */
+  async focusProjectsViaShortcut(): Promise<void> {
+    await test.step("Trigger ⌃0 (Focus Projects)", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Control+0");
+    });
   }
 
   /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
