@@ -403,10 +403,57 @@ export class WorkspacePage {
     return this.page.getByTestId("app-shell__sidebar");
   }
 
-  /** The header button that toggles the sidebar (⌘B). `data-testid` set in
-   *  `DesktopTitleBar.tsx`; its `aria-pressed` reflects current visibility. */
+  /** The header button that toggles the sidebar (⌘B). Rendered by
+   *  `NavControls` in `DesktopTitleBar.tsx`, hosted by `SidebarTitleBar` while
+   *  the sidebar is visible and by `WorkspaceTitleBar` while it's collapsed
+   *  (the cluster relocates so the controls stay reachable). Its `aria-pressed`
+   *  reflects current visibility. */
   get sidebarToggle(): Locator {
     return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** The hamburger menu trigger (Tasks / Cronjobs / Settings …). Rendered by
+   *  `NavControls`, so it relocates between the two title-bar halves with the
+   *  rest of the cluster. Targeted by its system-controlled ARIA name. */
+  get menuTrigger(): Locator {
+    return this.page.getByRole("button", { name: "Menu" });
+  }
+
+  /** The workspace-history back arrow (⌘[). Part of the relocating
+   *  `NavControls` cluster. Targeted by testid: the "Back"/"Forward" ARIA
+   *  names aren't unique app-wide (ScreencastPanel's address bar reuses them). */
+  get backButton(): Locator {
+    return this.page.getByTestId("desktop-title-bar__back");
+  }
+
+  /** The workspace-history forward arrow (⌘]). Part of the relocating
+   *  `NavControls` cluster. Targeted by testid for the same uniqueness reason
+   *  as `backButton`. */
+  get forwardButton(): Locator {
+    return this.page.getByTestId("desktop-title-bar__forward");
+  }
+
+  /** The sidebar-toggle button scoped to the project-list column — proves the
+   *  nav cluster is hosted in `SidebarTitleBar` (not the workspace bar) while
+   *  the sidebar is visible. */
+  get sidebarToggleWithinSidebar(): Locator {
+    return this.sidebar.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** The hamburger menu trigger scoped to the project-list column. Count drops
+   *  to 0 once the sidebar collapses and the cluster relocates to the workspace
+   *  bar — the signal that the relocation actually happened. */
+  get menuTriggerWithinSidebar(): Locator {
+    return this.sidebar.getByRole("button", { name: "Menu" });
+  }
+
+  /** Open the hamburger menu from wherever the cluster currently lives. The
+   *  open dropdown is exposed via the existing `contextMenu` getter (both are
+   *  Radix `role="menu"`). */
+  async openTitleBarMenu(): Promise<void> {
+    await test.step("Open the title-bar hamburger menu", async () => {
+      await this.menuTrigger.click();
+    });
   }
 
   /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.
@@ -705,11 +752,11 @@ export class WorkspacePage {
   }
 
   /** The desktop title-bar workspace-name button. On a wide viewport
-   *  `useDesktopLayout` is true, so __root.tsx mounts the DesktopTitleBar
-   *  with `onWorkspaceNameClick` wired — the name renders as a button that
-   *  opens the same picker as ⌘K. Targeted by its BEM testid rather than
-   *  the shared "Switch workspace" aria-label so it never collides with the
-   *  mobile header button of the same name. */
+   *  `useDesktopLayout` is true, so __root.tsx mounts the WorkspaceTitleBar
+   *  (in `DesktopTitleBar.tsx`) with `onWorkspaceNameClick` wired — the name
+   *  renders as a button that opens the same picker as ⌘K. Targeted by its
+   *  BEM testid rather than the shared "Switch workspace" aria-label so it
+   *  never collides with the mobile header button of the same name. */
   get desktopTitleWorkspaceNameButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__workspace-name");
   }
@@ -1104,13 +1151,19 @@ export class WorkspacePage {
     return this.page.getByTestId("quick-open__root");
   }
 
-  /** Dismiss the QuickOpenDialog via the Escape key — same path a
-   *  real user would take. Encapsulated here so test bodies don't
-   *  reach for `page.keyboard.*` directly. */
-  async closeQuickOpenDialog(): Promise<void> {
-    await test.step("Press Escape to close Quick Open dialog", async () => {
+  /** Press Escape — the user's universal "dismiss" gesture. Encapsulated so
+   *  test bodies (and the helpers below) don't reach for `page.keyboard.*`
+   *  directly; keyboard interactions belong on the page object. */
+  async pressEscape(): Promise<void> {
+    await test.step("Press Escape", async () => {
       await this.page.keyboard.press("Escape");
     });
+  }
+
+  /** Dismiss the QuickOpenDialog via the Escape key — same path a
+   *  real user would take. */
+  async closeQuickOpenDialog(): Promise<void> {
+    await this.pressEscape();
   }
 
   /** Dispatch a synthetic `band:open-file` window event into the page

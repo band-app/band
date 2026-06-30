@@ -325,8 +325,11 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
     <div
       ref={rootRef}
       className={cn(
-        "w-full overflow-hidden flex flex-col bg-background text-foreground p-0",
-        hideTitleBar && "h-full",
+        "w-full overflow-hidden flex flex-col text-foreground p-0",
+        // Embedded as the project-list sidebar (hideTitleBar): paint the
+        // `--sidebar` surface so the list reads as a panel distinct from the
+        // workspace layout. Standalone (mobile / narrow web): plain background.
+        hideTitleBar ? "h-full bg-sidebar" : "bg-background",
         !isDesktop && "pt-[env(safe-area-inset-top)]",
       )}
       // CSS `zoom` does not scale viewport units (vh, dvh, svh, lvh) per
