@@ -1021,8 +1021,8 @@ export function SharedDockviewLayout() {
       }
 
       // Ctrl+0 → reveal the project-list sidebar and focus it. The sidebar
-      // lives outside the dockview now (see __root.tsx AppShell), so we reveal
-      // it via the `band:show-sidebar` window event and let DashboardShell's
+      // lives outside the dockview now, so we reveal it via the
+      // `band:show-sidebar` window event and let the sidebar's
       // `band:focus-projects` listener move keyboard focus into the list.
       if (e.ctrlKey && !e.metaKey && e.key === "0") {
         e.preventDefault();
@@ -1134,7 +1134,8 @@ export function SharedDockviewLayout() {
         // ⌘B → toggle the project-list sidebar. Focus-aware: if an inner
         // dockview (terminal / chat / browser) is focused AND has panels on
         // its left edge, toggle that inner edge; otherwise toggle the
-        // sidebar that lives outside the dockview (see __root.tsx AppShell).
+        // sidebar that lives outside the dockview, reached via the
+        // `band:toggle-sidebar` window event.
         //
         // The inner branch is driven by `toggleEdgeGroup`'s return value
         // (`true` when it acted on a non-empty edge, `false` when there was

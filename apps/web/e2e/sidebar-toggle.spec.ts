@@ -71,6 +71,7 @@ test("the sidebar is visible by default and the toggle button reads pressed", as
   await wp.waitForReady();
 
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toBeVisible();
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -100,6 +101,20 @@ test("the ⌘B shortcut toggles the sidebar", async ({ page }) => {
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "false");
 
   await wp.toggleSidebarViaShortcut();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("⌃0 (Focus Projects) reveals a collapsed sidebar", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Hide first, then prove ⌃0 brings it back.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+
+  await wp.focusProjectsViaShortcut();
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
 });

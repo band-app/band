@@ -442,6 +442,18 @@ export class WorkspacePage {
     return await this.page.evaluate(() => localStorage.getItem("band:sidebar-collapsed") === "1");
   }
 
+  /** Trigger the ⌃0 "Focus Projects" shortcut, which reveals the sidebar
+   *  (`band:show-sidebar`) and focuses the list (`band:focus-projects`). The
+   *  keydown is caught by the window listener in `SharedDockviewLayout.tsx`.
+   *  Anchored on the always-present toggle button so the key press has a
+   *  stable focus target even when the sidebar (and its list) is collapsed. */
+  async focusProjectsViaShortcut(): Promise<void> {
+    await test.step("Trigger ⌃0 (Focus Projects)", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Control+0");
+    });
+  }
+
   /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
    *  Uses `projectListRoot.press(...)` so Playwright moves focus there
    *  before dispatching the key, bypassing the chat textarea autofocus

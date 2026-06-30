@@ -519,6 +519,16 @@ function AppShell() {
     };
   }, [toggleSidebar, sidebarPanelRef]);
 
+  // Cancel a pending sidebar-width RAF on unmount so it can't fire (and write
+  // localStorage) after the component is gone — matches the cleanup discipline
+  // of the other effects in this file.
+  useEffect(
+    () => () => {
+      if (sidebarWidthRafRef.current != null) cancelAnimationFrame(sidebarWidthRafRef.current);
+    },
+    [],
+  );
+
   if (!useDesktopLayout) {
     return <Outlet />;
   }
