@@ -111,7 +111,7 @@ test("the collapsed state persists across a reload", async ({ page }) => {
 
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
-  expect(await wp.readSidebarCollapsed()).toBe(true);
+  await expect.poll(() => wp.readSidebarCollapsed()).toBe(true);
 
   await wp.reload();
   await wp.waitForReady();

@@ -452,6 +452,10 @@ function AppShell() {
   // Skip the first layout callback: it fires during mount with the restored
   // layout, which we don't want to re-persist.
   const skipFirstSidebarLayout = useRef(true);
+  // `onLayoutChanged` fires for every distinct layout during a drag (~60/s),
+  // so coalesce the persist to at most one localStorage write per frame.
+  const pendingSidebarWidthRef = useRef<number | null>(null);
+  const sidebarWidthRafRef = useRef<number | null>(null);
   const handleSidebarLayoutChanged = useCallback((layout: Record<string, number>) => {
     if (skipFirstSidebarLayout.current) {
       skipFirstSidebarLayout.current = false;
@@ -460,9 +464,15 @@ function AppShell() {
     // Only persist a real (visible) width — a 0 here means the panel is
     // collapsed, and storing that would lose the user's chosen width on the
     // next expand.
-    if (layout.sidebar != null && layout.sidebar > 0) {
-      saveSidebarWidth(layout.sidebar);
-    }
+    if (layout.sidebar == null || layout.sidebar <= 0) return;
+    pendingSidebarWidthRef.current = layout.sidebar;
+    if (sidebarWidthRafRef.current != null) return;
+    sidebarWidthRafRef.current = requestAnimationFrame(() => {
+      sidebarWidthRafRef.current = null;
+      if (pendingSidebarWidthRef.current != null) {
+        saveSidebarWidth(pendingSidebarWidthRef.current);
+      }
+    });
   }, []);
 
   // Single source of truth for the toggle button's pressed state + the

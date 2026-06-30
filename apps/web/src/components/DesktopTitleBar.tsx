@@ -125,7 +125,7 @@ export function DesktopTitleBar({
                   type="button"
                   onClick={onToggleSidebar}
                   aria-label="Toggle sidebar"
-                  aria-pressed={sidebarVisible}
+                  aria-pressed={sidebarVisible ?? false}
                   data-testid="desktop-title-bar__sidebar-toggle"
                   className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-accent/50 hover:text-foreground ${sidebarVisible ? "text-foreground" : "text-muted-foreground"}`}
                 >
