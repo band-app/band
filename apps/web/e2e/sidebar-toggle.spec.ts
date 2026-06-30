@@ -146,8 +146,8 @@ test("the menu and back/forward relocate into the workspace bar when the sidebar
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
 
-  // Assert the settled new state first (TEST-25): the controls are visible,
-  // now hosted by the workspace title bar...
+  // Assert the settled new state first — prove the controls rendered in their
+  // new home (the workspace title bar) before asserting the old node is gone...
   await expect(wp.menuTrigger).toBeVisible();
   await expect(wp.backButton).toBeVisible();
   await expect(wp.forwardButton).toBeVisible();

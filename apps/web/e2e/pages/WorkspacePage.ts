@@ -420,15 +420,17 @@ export class WorkspacePage {
   }
 
   /** The workspace-history back arrow (⌘[). Part of the relocating
-   *  `NavControls` cluster. */
+   *  `NavControls` cluster. Targeted by testid: the "Back"/"Forward" ARIA
+   *  names aren't unique app-wide (ScreencastPanel's address bar reuses them). */
   get backButton(): Locator {
-    return this.page.getByRole("button", { name: "Back" });
+    return this.page.getByTestId("desktop-title-bar__back");
   }
 
   /** The workspace-history forward arrow (⌘]). Part of the relocating
-   *  `NavControls` cluster. */
+   *  `NavControls` cluster. Targeted by testid for the same uniqueness reason
+   *  as `backButton`. */
   get forwardButton(): Locator {
-    return this.page.getByRole("button", { name: "Forward" });
+    return this.page.getByTestId("desktop-title-bar__forward");
   }
 
   /** The sidebar-toggle button scoped to the project-list column — proves the
@@ -1151,7 +1153,7 @@ export class WorkspacePage {
 
   /** Press Escape — the user's universal "dismiss" gesture. Encapsulated so
    *  test bodies (and the helpers below) don't reach for `page.keyboard.*`
-   *  directly (TEST-21). */
+   *  directly; keyboard interactions belong on the page object. */
   async pressEscape(): Promise<void> {
     await test.step("Press Escape", async () => {
       await this.page.keyboard.press("Escape");

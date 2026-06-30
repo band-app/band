@@ -163,6 +163,7 @@ function NavControls({
                 onClick={onGoBack}
                 disabled={!canGoBack}
                 aria-label="Back"
+                data-testid="desktop-title-bar__back"
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
               >
                 <ChevronLeft className="size-5" />
@@ -182,6 +183,7 @@ function NavControls({
                 onClick={onGoForward}
                 disabled={!canGoForward}
                 aria-label="Forward"
+                data-testid="desktop-title-bar__forward"
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
               >
                 <ChevronRight className="size-5" />
