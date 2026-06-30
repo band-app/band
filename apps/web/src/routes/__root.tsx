@@ -437,11 +437,17 @@ function AppShell() {
   // panel starts collapsed.
   const [sidebarVisible, setSidebarVisible] = useState(() => !sidebarInit.current.collapsed);
 
-  const sidebarDefaultLayout = sidebarInit.current.collapsed
-    ? { sidebar: 0, main: 100 }
-    : sidebarInit.current.width
-      ? { sidebar: sidebarInit.current.width, main: 100 - sidebarInit.current.width }
-      : undefined;
+  // Memoized at mount — values come from an immutable ref, and `<Group>`
+  // only reads `defaultLayout` on its first render.
+  const sidebarDefaultLayout = useMemo(
+    () =>
+      sidebarInit.current.collapsed
+        ? { sidebar: 0, main: 100 }
+        : sidebarInit.current.width
+          ? { sidebar: sidebarInit.current.width, main: 100 - sidebarInit.current.width }
+          : undefined,
+    [],
+  );
 
   // Skip the first layout callback: it fires during mount with the restored
   // layout, which we don't want to re-persist.
@@ -470,11 +476,13 @@ function AppShell() {
     (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
       if (prev === undefined) return;
       const visible = size.asPercentage > 0;
+      // Bail unless the open/closed state actually flips — `onResize` fires
+      // on every drag pixel, so this avoids both a redundant re-render and a
+      // redundant localStorage write per pixel.
+      if (visible === lastSidebarVisibleRef.current) return;
+      lastSidebarVisibleRef.current = visible;
       setSidebarVisible(visible);
-      if (visible !== lastSidebarVisibleRef.current) {
-        lastSidebarVisibleRef.current = visible;
-        saveSidebarCollapsed(!visible);
-      }
+      saveSidebarCollapsed(!visible);
     },
     [],
   );

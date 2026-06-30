@@ -70,7 +70,7 @@ test("the sidebar is visible by default and the toggle button reads pressed", as
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
 
-  expect(await wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
 });
 

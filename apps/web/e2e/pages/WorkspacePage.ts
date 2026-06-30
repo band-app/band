@@ -423,10 +423,12 @@ export class WorkspacePage {
     });
   }
 
-  /** Toggle the sidebar via the ⌘B keyboard shortcut. The handler is a window
-   *  keydown listener in `SharedDockviewLayout.tsx`; ⌘ is a meta key so it
-   *  fires regardless of focus. Anchored on the always-present toggle button
-   *  so the key press has a stable, non-editable focus target. */
+  /** Toggle the sidebar via the ⌘B keyboard shortcut. The keydown is caught
+   *  by a window listener in `SharedDockviewLayout.tsx` and re-dispatched as
+   *  `band:toggle-sidebar`; the actual panel collapse/expand is handled in
+   *  `AppShell` (`__root.tsx`). ⌘ is a meta key so it fires regardless of
+   *  focus. Anchored on the always-present toggle button so the key press has
+   *  a stable, non-editable focus target. */
   async toggleSidebarViaShortcut(): Promise<void> {
     await test.step("Toggle the sidebar via ⌘B", async () => {
       await this.sidebarToggle.focus();
