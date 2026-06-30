@@ -4,10 +4,11 @@ import { findTerminalFileLinks } from "../src/lib/terminal-file-links";
 // ---------------------------------------------------------------------------
 // `findTerminalFileLinks` carves a line of terminal text into clickable file
 // references. The combinatorial surface — which tokens become links and which
-// are rejected as false positives — is exactly what these unit cases pin; the
-// click-through-to-Quick-Open behaviour is covered by the Playwright spec in
-// `e2e/terminal-file-links.spec.ts` (per TEST-6, the integration test is the
-// proof of the user-observable behaviour; this guards the detection details).
+// are rejected as false positives — is exactly what these unit cases pin. The
+// user-observable click-through (clicking a terminal link opens the file in
+// the browser) is covered by the Playwright spec in
+// `e2e/terminal-file-links.spec.ts`; these unit cases pin the detection
+// combinatorics that an end-to-end click can't exhaustively exercise.
 // ---------------------------------------------------------------------------
 
 /** Convenience: just the matched path strings for a line. */

@@ -140,16 +140,6 @@ const KNOWN_FILENAMES = new Set([
   ".env.production",
 ]);
 
-function getExtension(filePath: string): string {
-  const name = filePath.split("/").pop() ?? filePath;
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
-
-function getBasename(filePath: string): string {
-  return (filePath.split("/").pop() ?? filePath).toLowerCase();
-}
-
 /**
  * Checks if a string looks like a file path that should be linked.
  *
@@ -171,8 +161,11 @@ export function isFilePath(text: string): boolean {
   // Must not be empty after parsing
   if (!filePath) return false;
 
-  const ext = getExtension(filePath);
-  const basename = getBasename(filePath);
+  // Derive the basename once (one split), then the extension from it.
+  const name = filePath.split("/").pop() ?? filePath;
+  const basename = name.toLowerCase();
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
   const hasKnownExtension = KNOWN_EXTENSIONS.has(ext);
   const isKnownFilename = KNOWN_FILENAMES.has(basename);
 
