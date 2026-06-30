@@ -29,32 +29,30 @@ export interface TerminalFileMatch {
   endIndex: number;
 }
 
-// A maximal run of path-shaped characters, optionally followed by a
-// `:line`, `:line:col`, or `:line-end` suffix. The character class
-// deliberately excludes `:` (except as the line-suffix separator) so a URL
-// like `http://host` breaks into `http` + `//host` candidates — both of
-// which `isFilePath` rejects — rather than matching as one token. The second
-// separator may be `:` (column) or `-` (line range) so `src/main.rs:42:5`
-// and `app.tsx:10-20` each stay a single candidate, matching the chat
-// renderer's file-path grammar.
-const CANDIDATE_RE = /[A-Za-z0-9._/@~+-]+(?::\d+(?:[-:]\d+)?)?/g;
-
 /**
  * Find file-path references in one line of terminal text.
  *
  * Pure and dependency-light so it can be unit-tested without a DOM or a live
  * xterm instance.
+ *
+ * The candidate pattern is a maximal run of path-shaped characters, optionally
+ * followed by a `:line`, `:line:col`, or `:line-end` suffix. The character
+ * class deliberately excludes `:` (except as the line-suffix separator) so a
+ * URL like `http://host` breaks into `http` + `//host` candidates — both of
+ * which `isFilePath` rejects — rather than matching as one token. The second
+ * separator may be `:` (column) or `-` (line range) so `src/main.rs:42:5` and
+ * `app.tsx:10-20` each stay a single candidate, matching the chat renderer's
+ * file-path grammar. The regex is declared locally (not a module singleton)
+ * so its `g`-flag `lastIndex` state stays scoped to this call.
  */
 export function findTerminalFileLinks(lineText: string): TerminalFileMatch[] {
+  const candidateRe = /[A-Za-z0-9._/@~+-]+(?::\d+(?:[-:]\d+)?)?/g;
   const matches: TerminalFileMatch[] = [];
-  CANDIDATE_RE.lastIndex = 0;
-  let match: RegExpExecArray | null = CANDIDATE_RE.exec(lineText);
-  while (match !== null) {
+  for (const match of lineText.matchAll(candidateRe)) {
     const text = match[0];
     if (isFilePath(text)) {
       matches.push({ text, startIndex: match.index, endIndex: match.index + text.length });
     }
-    match = CANDIDATE_RE.exec(lineText);
   }
   return matches;
 }
@@ -71,8 +69,9 @@ function readLineColumns(
   terminal: Terminal,
   line: IBufferLine,
 ): { text: string; columnForIndex: number[] } {
-  let text = "";
+  const parts: string[] = [];
   const columnForIndex: number[] = [];
+  let length = 0; // running string length == index of the next character
   let cell: IBufferCell | undefined;
   for (let x = 0; x < terminal.cols; x++) {
     cell = line.getCell(x, cell);
@@ -81,10 +80,12 @@ function readLineColumns(
     // own, so skip it (its glyph was emitted by the preceding cell).
     if (cell.getWidth() === 0) continue;
     const chars = cell.getChars();
-    columnForIndex[text.length] = x + 1; // xterm columns are 1-based
-    text += chars.length > 0 ? chars : " ";
+    const ch = chars.length > 0 ? chars : " ";
+    columnForIndex[length] = x + 1; // xterm columns are 1-based
+    parts.push(ch);
+    length += ch.length;
   }
-  return { text, columnForIndex };
+  return { text: parts.join(""), columnForIndex };
 }
 
 /**

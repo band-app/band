@@ -104,7 +104,10 @@ test.describe("Terminal file links", () => {
     await workspacePage.waitForTerminalReady(75_000);
 
     // Positive anchor: no file is open in the browser before the click.
-    expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(REL_PATH);
+    // Poll so we assert against settled state, not a pre-hydration read.
+    await expect
+      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .not.toContain(REL_PATH);
 
     // Print the path on its own line. `runInTerminal` types the command and
     // submits it; the shell echoes `LINK_PATH` as a bare output line at

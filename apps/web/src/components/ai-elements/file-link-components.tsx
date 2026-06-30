@@ -11,10 +11,6 @@ import {
 import { isFilePath } from "../../lib/file-path-detection";
 import { openExternalUrl } from "../../lib/open-external-url";
 
-// Re-exported so existing importers of `isFilePath` from this module keep
-// working; the canonical home is now the shared, React-free detection module.
-export { isFilePath };
-
 // ---------------------------------------------------------------------------
 // Workspace context — scopes `band:open-file` dispatches to the workspace
 // that owns the chat dispatching the click.
