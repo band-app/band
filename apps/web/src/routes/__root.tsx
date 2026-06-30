@@ -28,7 +28,7 @@ import {
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
+import { type PanelItem, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -533,46 +533,38 @@ function AppShell() {
     return <Outlet />;
   }
 
+  // The hamburger menu and back/forward arrows belong to the project-list
+  // region: they ride in the SidebarTitleBar while the list is visible, and
+  // relocate into the WorkspaceTitleBar (far left) when the list is collapsed
+  // so they stay reachable. Both bars receive the same nav props; each renders
+  // the cluster only in the appropriate state (keyed off `sidebarVisible`).
+  const menuItems = (
+    <>
+      <ToolbarOverflowMenuItems />
+      <DropdownMenuItem
+        onClick={() => {
+          const fn = (window as unknown as { __bandOpenSettings?: () => void }).__bandOpenSettings;
+          fn?.();
+        }}
+      >
+        <SettingsIcon className="size-4" />
+        Settings
+      </DropdownMenuItem>
+    </>
+  );
+  const navControlProps = {
+    menuItems,
+    onGoBack: navigationHistory.goBack,
+    onGoForward: navigationHistory.goForward,
+    canGoBack: navigationHistory.canGoBack,
+    canGoForward: navigationHistory.canGoForward,
+    onToggleSidebar: toggleSidebar,
+    sidebarVisible,
+  };
+
   return (
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
-        <DesktopTitleBar
-          menuItems={
-            <>
-              <ToolbarOverflowMenuItems />
-              <DropdownMenuItem
-                onClick={() => {
-                  const fn = (window as unknown as { __bandOpenSettings?: () => void })
-                    .__bandOpenSettings;
-                  fn?.();
-                }}
-              >
-                <SettingsIcon className="size-4" />
-                Settings
-              </DropdownMenuItem>
-            </>
-          }
-          workspaceName={activeWorkspaceId ?? undefined}
-          workspacePath={activeWorkspaceId ? workspacePath : undefined}
-          onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-          // Clicking the title-bar workspace name opens the same picker as ⌘K.
-          // The picker state lives in SharedDockviewLayout (a sibling), so we
-          // signal it via the window event it listens for.
-          onWorkspaceNameClick={
-            activeWorkspaceId
-              ? () => window.dispatchEvent(new CustomEvent("band:open-workspace-picker"))
-              : undefined
-          }
-          panelItems={activeWorkspaceId ? panelItems : undefined}
-          hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
-          onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
-          onGoBack={navigationHistory.goBack}
-          onGoForward={navigationHistory.goForward}
-          canGoBack={navigationHistory.canGoBack}
-          canGoForward={navigationHistory.canGoForward}
-          onToggleSidebar={toggleSidebar}
-          sidebarVisible={sidebarVisible}
-        />
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"
@@ -590,21 +582,50 @@ function AppShell() {
               collapsedSize="0%"
               onResize={handleSidebarResize}
             >
+              {/* The whole sidebar column (its title-bar half + the project
+                  list) is painted with the `--sidebar` surface so it reads as a
+                  distinct panel from the workspace layout to its right. */}
               <div
-                className="h-full overflow-hidden border-r border-border"
+                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
                 data-testid="app-shell__sidebar"
               >
-                <DashboardShell hideMenu hideTitleBar />
+                <SidebarTitleBar {...navControlProps} />
+                <div className="flex-1 min-h-0">
+                  <DashboardShell hideMenu hideTitleBar />
+                </div>
               </div>
             </Panel>
             <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
             <Panel id="main" minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              <div className="h-full min-w-0 overflow-hidden relative">
-                <Outlet />
-                <SharedDockviewLayout />
-                <BrowserHostBridge />
+              <div className="h-full flex flex-col min-w-0 overflow-hidden">
+                <WorkspaceTitleBar
+                  {...navControlProps}
+                  workspaceName={activeWorkspaceId ?? undefined}
+                  workspacePath={activeWorkspaceId ? workspacePath : undefined}
+                  onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+                  // Clicking the title-bar workspace name opens the same picker
+                  // as ⌘K. The picker state lives in SharedDockviewLayout (a
+                  // sibling), so we signal it via the window event it listens for.
+                  onWorkspaceNameClick={
+                    activeWorkspaceId
+                      ? () => window.dispatchEvent(new CustomEvent("band:open-workspace-picker"))
+                      : undefined
+                  }
+                  panelItems={activeWorkspaceId ? panelItems : undefined}
+                  hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
+                  onTogglePanelVisibility={
+                    activeWorkspaceId ? handleTogglePanelVisibility : undefined
+                  }
+                />
+                {/* `relative` anchors SharedDockviewLayout's `absolute inset-0`
+                    overlay to the area BELOW the title bar. */}
+                <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
+                  <Outlet />
+                  <SharedDockviewLayout />
+                  <BrowserHostBridge />
+                </div>
               </div>
             </Panel>
           </Group>

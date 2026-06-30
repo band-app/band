@@ -705,11 +705,11 @@ export class WorkspacePage {
   }
 
   /** The desktop title-bar workspace-name button. On a wide viewport
-   *  `useDesktopLayout` is true, so __root.tsx mounts the DesktopTitleBar
-   *  with `onWorkspaceNameClick` wired — the name renders as a button that
-   *  opens the same picker as ⌘K. Targeted by its BEM testid rather than
-   *  the shared "Switch workspace" aria-label so it never collides with the
-   *  mobile header button of the same name. */
+   *  `useDesktopLayout` is true, so __root.tsx mounts the WorkspaceTitleBar
+   *  (in `DesktopTitleBar.tsx`) with `onWorkspaceNameClick` wired — the name
+   *  renders as a button that opens the same picker as ⌘K. Targeted by its
+   *  BEM testid rather than the shared "Switch workspace" aria-label so it
+   *  never collides with the mobile header button of the same name. */
   get desktopTitleWorkspaceNameButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__workspace-name");
   }
