@@ -1287,25 +1287,38 @@ export class WorkspacePage {
   async clickTerminalFileLink(text: string): Promise<void> {
     await test.step(`Click terminal file link "${text}"`, async () => {
       const rect = await this.waitForTerminalRowRect(text);
-      const x = rect.x + 4;
       const y = rect.y + rect.height / 2;
-      // Hover first: xterm computes link ranges on mousemove (async, via its
-      // linkifier) and only activates the link under the pointer on click. It
-      // toggles `xterm-cursor-pointer` on the terminal element once a link is
-      // hovered, so poll for that class — a real "link is now active" signal —
-      // before clicking, rather than racing the linkifier with an immediate
-      // click. A nudge move guarantees a mousemove delta even if the pointer
-      // already sat at the target from a previous step.
-      await this.page.mouse.move(x + 1, y);
-      await this.page.mouse.move(x, y);
-      await expect
-        .poll(
-          async () =>
-            await this.page.evaluate(() => !!document.querySelector(".xterm-cursor-pointer")),
-          { timeout: 10_000 },
-        )
-        .toBe(true);
-      await this.page.mouse.click(x, y);
+      // xterm paints the link to a surface with no per-link DOM node, so we
+      // hover the row to make its linkifier resolve the link, then click.
+      // The path is printed at column 0, but the exact cell width varies with
+      // the monospace font (CI's Linux fallback differs from local), so rather
+      // than assume a fixed pixel offset we sweep x across the left of the row
+      // and click the first point xterm reports as a link hover — it toggles
+      // `xterm-cursor-pointer` on the terminal element while the pointer sits
+      // over a link cell. Sweeping also absorbs any small offset between the
+      // row's bounding box and xterm's internal hit-test grid. A fixed offset
+      // is what made this flaky in CI while passing locally.
+      const maxDx = Math.min(rect.width - 2, 200);
+      for (let dx = 3; dx <= maxDx; dx += 6) {
+        const x = rect.x + dx;
+        await this.page.mouse.move(x, y);
+        const hovered = await this.page
+          .locator(".xterm-cursor-pointer")
+          .first()
+          .waitFor({ state: "attached", timeout: 500 })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (hovered) {
+          await this.page.mouse.click(x, y);
+          return;
+        }
+      }
+      // No hover registered anywhere along the row — click the left edge so
+      // the spec's outcome assertion fails against the real (un-opened) state
+      // rather than this helper swallowing the miss.
+      await this.page.mouse.click(rect.x + 4, y);
     });
   }
 
