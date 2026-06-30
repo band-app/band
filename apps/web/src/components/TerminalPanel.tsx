@@ -12,6 +12,7 @@ import {
 } from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
+import { createTerminalFileLinkProvider } from "../lib/terminal-file-links";
 import {
   type ArrowDirection,
   applySelection,
@@ -355,6 +356,24 @@ export function TerminalPanel({
       const fitAddon = new XFitAddon();
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
+
+      // File-path links: detect references like `src/main.rs:42` in the
+      // terminal output and, on click, dispatch the same workspace-scoped
+      // `band:open-file` event chat file links use — routing the path into
+      // Quick Open so the file opens in the file browser. The WebLinksAddon
+      // above only matches real URLs (with a scheme), so the two providers
+      // never compete for the same token. `workspaceId` is captured from the
+      // panel's props (stable for its lifetime) so the file always opens
+      // against the workspace that owns this terminal, not whichever tab is
+      // active when the listener fires. See file-link-components.tsx / #539.
+      const fileLinkProviderDisposable = terminal.registerLinkProvider(
+        createTerminalFileLinkProvider(terminal, (filename) => {
+          window.dispatchEvent(
+            new CustomEvent("band:open-file", { detail: { filename, workspaceId } }),
+          );
+        }),
+      );
+
       terminal.open(containerRef.current!);
 
       // Swap the default DOM renderer for the GPU-accelerated WebGL renderer
@@ -1086,6 +1105,7 @@ export function TerminalPanel({
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
         selectionResizeDisposable.dispose();
+        fileLinkProviderDisposable.dispose();
         if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
         webglContextLossDisposable?.dispose();
         dprMql?.removeEventListener("change", onDprMediaChange);

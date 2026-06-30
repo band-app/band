@@ -1369,6 +1369,100 @@ export class WorkspacePage {
       () => (window as unknown as { __terminalSent?: string[] }).__terminalSent ?? [],
     );
   }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Terminal file links → file browser
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Read the workspace-relative paths of the file tabs the file browser
+   *  has open, from the `band-open-tabs:<workspaceId>` localStorage entry
+   *  `useFileTabs` persists. Returns `[]` when nothing is open yet. Used to
+   *  prove a clicked terminal link actually opened its file in the browser.
+   *  Delegates to `readOpenTabsState` so the persisted-tab parse lives in one
+   *  place. */
+  async readOpenTabPaths(workspaceId: string): Promise<string[]> {
+    return (await this.readOpenTabsState(workspaceId))?.tabs ?? [];
+  }
+
+  /** Click a file-path link rendered in the terminal output.
+   *
+   *  xterm paints to a `<canvas>` under the WebGL renderer (no hittable DOM
+   *  text), so tests that need to click rendered glyphs force the DOM
+   *  renderer via `seedSettings({ useWebGLTerminalRenderer: false })`. With
+   *  that renderer the visible buffer lives as real text in `.xterm-rows >
+   *  div` — library-owned DOM with no `data-testid`, so a class selector is
+   *  the only hook (same carve-out the WebGL-surface probes above rely on).
+   *
+   *  We locate the output row whose trimmed text exactly equals `text`
+   *  (the bare path printed on its own line — distinct from the echoed
+   *  command line that carries an `echo `/prompt prefix), then click a few
+   *  pixels in from its left edge. The path starts at column 0, so that
+   *  point lands on its first character — inside the link range the file
+   *  link provider registered — regardless of cell width. A `mouse.move`
+   *  precedes the click so xterm's link layer resolves the hovered line
+   *  before activation. */
+  async clickTerminalFileLink(text: string): Promise<void> {
+    await test.step(`Click terminal file link "${text}"`, async () => {
+      const rect = await this.waitForTerminalRowRect(text);
+      const y = rect.y + rect.height / 2;
+      // xterm paints the link to a surface with no per-link DOM node, so we
+      // hover the row to make its linkifier resolve the link, then click.
+      // The path is printed at column 0, but the exact cell width varies with
+      // the monospace font (CI's Linux fallback differs from local), so rather
+      // than assume a fixed pixel offset we sweep x across the left of the row
+      // and click the first point xterm reports as a link hover — it toggles
+      // `xterm-cursor-pointer` on the terminal element while the pointer sits
+      // over a link cell. Sweeping also absorbs any small offset between the
+      // row's bounding box and xterm's internal hit-test grid. A fixed offset
+      // is what made this flaky in CI while passing locally.
+      const maxDx = Math.min(rect.width - 2, 200);
+      for (let dx = 3; dx <= maxDx; dx += 6) {
+        const x = rect.x + dx;
+        await this.page.mouse.move(x, y);
+        const hovered = await this.page
+          .locator(".xterm-cursor-pointer")
+          .first()
+          .waitFor({ state: "attached", timeout: 500 })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (hovered) {
+          await this.page.mouse.click(x, y);
+          return;
+        }
+      }
+      // No hover registered anywhere along the row — click the left edge so
+      // the spec's outcome assertion fails against the real (un-opened) state
+      // rather than this helper swallowing the miss.
+      await this.page.mouse.click(rect.x + 4, y);
+    });
+  }
+
+  /** Poll the DOM-renderer rows until one whose trimmed text equals `text`
+   *  is painted, returning its viewport rectangle. */
+  private async waitForTerminalRowRect(
+    text: string,
+  ): Promise<{ x: number; y: number; width: number; height: number }> {
+    let rect: { x: number; y: number; width: number; height: number } | null = null;
+    await expect
+      .poll(
+        async () => {
+          rect = await this.page.evaluate((target) => {
+            const rows = Array.from(document.querySelectorAll<HTMLElement>(".xterm-rows > div"));
+            const row = rows.find((r) => (r.textContent ?? "").trim() === target);
+            if (!row) return null;
+            const r = row.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+          }, text);
+          return rect;
+        },
+        { timeout: 15_000 },
+      )
+      .not.toBeNull();
+    // `rect` is set on the last (passing) poll iteration.
+    return rect!;
+  }
 }
 
 /** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of
