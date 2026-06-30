@@ -529,38 +529,58 @@ function AppShell() {
     [],
   );
 
-  if (!useDesktopLayout) {
-    return <Outlet />;
-  }
-
   // The hamburger menu and back/forward arrows belong to the project-list
   // region: they ride in the SidebarTitleBar while the list is visible, and
   // relocate into the WorkspaceTitleBar (far left) when the list is collapsed
   // so they stay reachable. Both bars receive the same nav props; each renders
   // the cluster only in the appropriate state (keyed off `sidebarVisible`).
-  const menuItems = (
-    <>
-      <ToolbarOverflowMenuItems />
-      <DropdownMenuItem
-        onClick={() => {
-          const fn = (window as unknown as { __bandOpenSettings?: () => void }).__bandOpenSettings;
-          fn?.();
-        }}
-      >
-        <SettingsIcon className="size-4" />
-        Settings
-      </DropdownMenuItem>
-    </>
+  //
+  // Memoized so both bars get a stable prop reference across the frequent
+  // AppShell re-renders (route changes, workspace switches, sidebar toggles).
+  // Hooks must run unconditionally, so these sit above the narrow/mobile early
+  // return below.
+  const menuItems = useMemo(
+    () => (
+      <>
+        <ToolbarOverflowMenuItems />
+        <DropdownMenuItem
+          onClick={() => {
+            const fn = (window as unknown as { __bandOpenSettings?: () => void })
+              .__bandOpenSettings;
+            fn?.();
+          }}
+        >
+          <SettingsIcon className="size-4" />
+          Settings
+        </DropdownMenuItem>
+      </>
+    ),
+    [],
   );
-  const navControlProps = {
-    menuItems,
-    onGoBack: navigationHistory.goBack,
-    onGoForward: navigationHistory.goForward,
-    canGoBack: navigationHistory.canGoBack,
-    canGoForward: navigationHistory.canGoForward,
-    onToggleSidebar: toggleSidebar,
-    sidebarVisible,
-  };
+  const navControlProps = useMemo(
+    () => ({
+      menuItems,
+      onGoBack: navigationHistory.goBack,
+      onGoForward: navigationHistory.goForward,
+      canGoBack: navigationHistory.canGoBack,
+      canGoForward: navigationHistory.canGoForward,
+      onToggleSidebar: toggleSidebar,
+      sidebarVisible,
+    }),
+    [
+      menuItems,
+      navigationHistory.goBack,
+      navigationHistory.goForward,
+      navigationHistory.canGoBack,
+      navigationHistory.canGoForward,
+      toggleSidebar,
+      sidebarVisible,
+    ],
+  );
+
+  if (!useDesktopLayout) {
+    return <Outlet />;
+  }
 
   return (
     <ToolbarOverflowProvider>

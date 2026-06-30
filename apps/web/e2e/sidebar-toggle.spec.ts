@@ -119,6 +119,46 @@ test("⌃0 (Focus Projects) reveals a collapsed sidebar", async ({ page }) => {
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
 });
 
+test("the nav cluster is hosted in the sidebar title bar while the sidebar is visible", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // The split title bar puts the toggle + hamburger menu inside the
+  // project-list column (SidebarTitleBar) when the list is shown.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggleWithinSidebar).toBeVisible();
+  await expect(wp.menuTriggerWithinSidebar).toBeVisible();
+});
+
+test("the menu and back/forward relocate into the workspace bar when the sidebar collapses", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Precondition: while visible, the menu lives in the sidebar column.
+  await expect(wp.menuTriggerWithinSidebar).toBeVisible();
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+
+  // The cluster left the (now-collapsed) sidebar column...
+  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
+  // ...and the controls are still visible (now in the workspace title bar).
+  await expect(wp.menuTrigger).toBeVisible();
+  await expect(wp.backButton).toBeVisible();
+  await expect(wp.forwardButton).toBeVisible();
+
+  // The relocated menu is still wired: clicking it opens the dropdown.
+  await wp.openTitleBarMenu();
+  await expect(wp.menuDropdown).toBeVisible();
+  await wp.dismissMenu();
+});
+
 test("the collapsed state persists across a reload", async ({ page }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);

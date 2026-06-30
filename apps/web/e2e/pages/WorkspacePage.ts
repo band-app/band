@@ -403,10 +403,67 @@ export class WorkspacePage {
     return this.page.getByTestId("app-shell__sidebar");
   }
 
-  /** The header button that toggles the sidebar (⌘B). `data-testid` set in
-   *  `DesktopTitleBar.tsx`; its `aria-pressed` reflects current visibility. */
+  /** The header button that toggles the sidebar (⌘B). Rendered by
+   *  `NavControls` in `DesktopTitleBar.tsx`, hosted by `SidebarTitleBar` while
+   *  the sidebar is visible and by `WorkspaceTitleBar` while it's collapsed
+   *  (the cluster relocates so the controls stay reachable). Its `aria-pressed`
+   *  reflects current visibility. */
   get sidebarToggle(): Locator {
     return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** The hamburger menu trigger (Tasks / Cronjobs / Settings …). Rendered by
+   *  `NavControls`, so it relocates between the two title-bar halves with the
+   *  rest of the cluster. Targeted by its system-controlled ARIA name. */
+  get menuTrigger(): Locator {
+    return this.page.getByRole("button", { name: "Menu" });
+  }
+
+  /** The workspace-history back arrow (⌘[). Part of the relocating
+   *  `NavControls` cluster. */
+  get backButton(): Locator {
+    return this.page.getByRole("button", { name: "Back" });
+  }
+
+  /** The workspace-history forward arrow (⌘]). Part of the relocating
+   *  `NavControls` cluster. */
+  get forwardButton(): Locator {
+    return this.page.getByRole("button", { name: "Forward" });
+  }
+
+  /** The sidebar-toggle button scoped to the project-list column — proves the
+   *  nav cluster is hosted in `SidebarTitleBar` (not the workspace bar) while
+   *  the sidebar is visible. */
+  get sidebarToggleWithinSidebar(): Locator {
+    return this.sidebar.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** The hamburger menu trigger scoped to the project-list column. Count drops
+   *  to 0 once the sidebar collapses and the cluster relocates to the workspace
+   *  bar — the signal that the relocation actually happened. */
+  get menuTriggerWithinSidebar(): Locator {
+    return this.sidebar.getByRole("button", { name: "Menu" });
+  }
+
+  /** The open hamburger dropdown (Radix sets `role="menu"`). Used to prove the
+   *  relocated menu trigger is still wired/clickable, without asserting on
+   *  localisable item copy. */
+  get menuDropdown(): Locator {
+    return this.page.getByRole("menu");
+  }
+
+  /** Open the hamburger menu from wherever the cluster currently lives. */
+  async openTitleBarMenu(): Promise<void> {
+    await test.step("Open the title-bar hamburger menu", async () => {
+      await this.menuTrigger.click();
+    });
+  }
+
+  /** Dismiss any open menu/dropdown. */
+  async dismissMenu(): Promise<void> {
+    await test.step("Dismiss the open menu", async () => {
+      await this.page.keyboard.press("Escape");
+    });
   }
 
   /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.

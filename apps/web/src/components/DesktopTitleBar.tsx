@@ -54,13 +54,9 @@ interface NavControlsProps {
   canGoForward?: boolean;
 }
 
-interface SidebarTitleBarProps extends NavControlsProps {
-  /** When false, the bar renders empty (no nav cluster) — the cluster moves
-   *  to the WorkspaceTitleBar. The bar itself is clipped to 0px by the
-   *  collapsed sidebar Panel, but gating the cluster keeps it out of the DOM
-   *  so there's never a duplicate (e.g. two `…__sidebar-toggle` elements). */
-  sidebarVisible?: boolean;
-}
+/** The sidebar half takes the shared nav-control props verbatim;
+ *  `sidebarVisible` (inherited from NavControlsProps) gates the cluster. */
+type SidebarTitleBarProps = NavControlsProps;
 
 interface WorkspaceTitleBarProps extends NavControlsProps {
   /** Static title. If omitted, fetches the app title from the desktop shell. */
@@ -166,6 +162,7 @@ function NavControls({
                 type="button"
                 onClick={onGoBack}
                 disabled={!canGoBack}
+                aria-label="Back"
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
               >
                 <ChevronLeft className="size-5" />
@@ -184,6 +181,7 @@ function NavControls({
                 type="button"
                 onClick={onGoForward}
                 disabled={!canGoForward}
+                aria-label="Forward"
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
               >
                 <ChevronRight className="size-5" />
@@ -213,6 +211,10 @@ export function SidebarTitleBar({ sidebarVisible, ...nav }: SidebarTitleBarProps
       className={`h-[38px] shrink-0 flex items-center gap-0.5 border-b border-border bg-sidebar pr-2 ${offsetClass}`}
       style={DRAG_STYLE}
     >
+      {/* Gate the cluster on visibility: when the list is collapsed the bar is
+          clipped to 0px but stays mounted, so rendering the cluster here would
+          duplicate it (the WorkspaceTitleBar shows it while collapsed) and put
+          two `…__sidebar-toggle` / `dashboard__menu-trigger` nodes in the DOM. */}
       {sidebarVisible && <NavControls sidebarVisible={sidebarVisible} {...nav} />}
     </div>
   );
