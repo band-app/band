@@ -11,7 +11,6 @@ import {
 } from "dockview";
 import {
   FolderOpen,
-  Folders,
   GitCompare,
   Globe,
   Maximize2,
@@ -24,7 +23,6 @@ import {
   type AddToTerminalDetail,
   buildCommands,
   CommandPaletteDialog,
-  DashboardShell,
   DiffView,
   parseFileLocation,
   QuickOpenDialog,
@@ -74,7 +72,6 @@ const bandTheme: DockviewTheme = {
 // ---------------------------------------------------------------------------
 
 const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  projects: Folders,
   chat: MessageSquare,
   changes: GitCompare,
   files: FolderOpen,
@@ -184,17 +181,6 @@ function NoWorkspaceMessage({ Icon }: { Icon: React.FC<{ className?: string }> }
       </div>
     </div>
   );
-}
-
-function ProjectsPanelComponent() {
-  // DashboardShell is workspace-agnostic — it shows the global project list.
-  // With the shared layout, only ONE DashboardShell is mounted (one project
-  // list), so its useStatusWatcher / useBranchStatusWatcher /
-  // useSetupStatusWatcher subscriptions run exactly once.
-  // hideMenu suppresses the in-shell hamburger overflow menu — the global
-  // DesktopTitleBar in __root.tsx already exposes the same Tasks / Cronjobs
-  // / Settings entries via its own dropdown.
-  return <DashboardShell hideTitleBar={isDesktop} hideMenu />;
 }
 
 function ChatPanelComponent({ api }: IDockviewPanelProps) {
@@ -443,7 +429,6 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 
 // biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
-  projects: ProjectsPanelComponent,
   chat: ChatPanelComponent,
   changes: ChangesPanelComponent,
   files: FilesPanelComponent,
@@ -543,7 +528,7 @@ function useDiffFileCount(workspaceId: string | null): number {
 // Required panel definitions & layout persistence
 // ---------------------------------------------------------------------------
 
-const REQUIRED_PANEL_IDS = ["projects", "chat", "changes", "files", "terminal", "browser"] as const;
+const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
 
 /**
  * Panel ids that USED to be required and may live in saved layouts. We strip
@@ -551,7 +536,10 @@ const REQUIRED_PANEL_IDS = ["projects", "chat", "changes", "files", "terminal", 
  */
 const REMOVED_PANEL_IDS = ["screencast"] as const;
 
-const GLOBAL_LAYOUT_KEY = "band:dockview-layout-v6";
+// Bumped v6 → v7 when the project list moved out of the dockview into a
+// standalone sidebar: old saved layouts still contain the `projects` edge
+// panel, so we discard them and rebuild without it.
+const GLOBAL_LAYOUT_KEY = "band:dockview-layout-v7";
 const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
 
 const EDGE_GROUP_IDS = {
@@ -1032,15 +1020,14 @@ export function SharedDockviewLayout() {
         return;
       }
 
-      // Ctrl+0 → focus Projects in the left edge group.
+      // Ctrl+0 → reveal the project-list sidebar and focus it. The sidebar
+      // lives outside the dockview now (see __root.tsx AppShell), so we reveal
+      // it via the `band:show-sidebar` window event and let DashboardShell's
+      // `band:focus-projects` listener move keyboard focus into the list.
       if (e.ctrlKey && !e.metaKey && e.key === "0") {
         e.preventDefault();
         e.stopPropagation();
-        const dvApi = apiRef.current;
-        if (!dvApi) return;
-        const left = dvApi.groups.find((g) => g.id === EDGE_GROUP_IDS.left);
-        if (left?.api.isCollapsed()) left.api.expand();
-        dvApi.getPanel("projects")?.api.setActive();
+        window.dispatchEvent(new CustomEvent("band:show-sidebar"));
         queueMicrotask(() => {
           window.dispatchEvent(new CustomEvent("band:focus-projects"));
         });
@@ -1144,21 +1131,20 @@ export function SharedDockviewLayout() {
           });
         }
       } else if (key === "b" && !e.shiftKey && !e.altKey && api) {
-        // ⌘B → toggle LEFT edge. Focus-aware: if an inner dockview
-        // (terminal / chat / browser) is focused AND has panels on
-        // its left edge, toggle that inner edge; otherwise fall back
-        // to the main layout's left edge (Projects).
+        // ⌘B → toggle the project-list sidebar. Focus-aware: if an inner
+        // dockview (terminal / chat / browser) is focused AND has panels on
+        // its left edge, toggle that inner edge; otherwise toggle the
+        // sidebar that lives outside the dockview (see __root.tsx AppShell).
         //
-        // The fallback is driven by `toggleEdgeGroup`'s return value
-        // (`true` when it acted on a non-empty edge, `false` when
-        // there was nothing to act on) — so empty inner edges
-        // transparently delegate to the main layout. See
-        // `dockview-edge-groups.ts` for the registry that makes the
-        // focus lookup possible.
+        // The inner branch is driven by `toggleEdgeGroup`'s return value
+        // (`true` when it acted on a non-empty edge, `false` when there was
+        // nothing to act on) — so empty inner edges transparently delegate
+        // to the sidebar. See `dockview-edge-groups.ts` for the registry
+        // that makes the focus lookup possible.
         e.preventDefault();
         const inner = findFocusedInnerDockview();
         if (inner && toggleEdgeGroup(inner, "left")) return;
-        toggleEdgeGroup(api, "left");
+        window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
       } else if (e.code === "KeyB" && e.altKey && !e.shiftKey && api) {
         // ⌥⌘B → toggle RIGHT edge. Uses `e.code === "KeyB"` instead
         // of `key === "b"` because macOS substitutes Alt-layer
@@ -1291,7 +1277,6 @@ export function SharedDockviewLayout() {
       api.getPanel("chat");
 
     const titleMap: Record<string, string> = {
-      projects: "Projects",
       chat: "Chat",
       changes: "Changes",
       files: "Files",
@@ -1309,18 +1294,6 @@ export function SharedDockviewLayout() {
 
     if (panelId === "changes") {
       opts.tabComponent = "badge";
-    }
-
-    if (panelId === "projects") {
-      try {
-        if (!api.groups.some((g) => g.id === "edge-left")) {
-          api.addEdgeGroup("left", { id: "edge-left" });
-        }
-      } catch {}
-      opts.position = { referenceGroup: "edge-left", direction: "within" };
-      // biome-ignore lint/suspicious/noExplicitAny: dynamic panel options
-      api.addPanel(opts as any);
-      return;
     }
 
     if (panelId === "chat" && anyExisting) {
@@ -1426,19 +1399,6 @@ export function SharedDockviewLayout() {
     try {
       api.getPanel("chat")?.api.setSize({ width: api.width * 0.5 });
     } catch {}
-
-    try {
-      if (!api.groups.some((g) => g.id === "edge-left")) {
-        api.addEdgeGroup("left", { id: "edge-left", initialSize: 240 });
-      }
-    } catch {}
-    api.addPanel({
-      id: "projects",
-      component: "projects",
-      title: "Projects",
-      params: {},
-      position: { referenceGroup: "edge-left", direction: "within" },
-    });
   }, []);
 
   // onReady: restore or create the layout, heal missing panels, wire up
@@ -1643,13 +1603,11 @@ export function SharedDockviewLayout() {
   // AND that belong to a tab group with siblings. Every `setActive()` call
   // triggers a dockview focus dance: dockview tears down the previously
   // active panel content, mounts the new one, and calls .focus() on the
-  // new panel's content area WITHOUT `preventScroll`. Calling it on the
-  // projects edge group (which only has one tab — Projects) re-focuses the
-  // DashboardShell container and scrolls the project-list ScrollArea back
-  // to scrollTop=0; calling it on the already-active panel in the center
-  // group has the same effect for its content. Skipping both no-ops keeps
-  // the project list scroll + the user's keyboard focus intact when they
-  // navigate back to a previously-visited workspace.
+  // new panel's content area WITHOUT `preventScroll`. Calling it on an
+  // already-active panel in the center group re-focuses its content and can
+  // jump its scroll position. Skipping these no-ops keeps the user's
+  // keyboard focus + scroll intact when they navigate back to a
+  // previously-visited workspace.
   useEffect(() => {
     if (!initializedRef.current) return;
     const api = apiRef.current;
@@ -1677,12 +1635,10 @@ export function SharedDockviewLayout() {
     // accurate.
     if (activeState) {
       // Intentionally do NOT activate `activeState.activeGroup` here.
-      // The previous code activated the first panel of the saved
-      // active group to focus that group, which on the edge-left
-      // (projects) group meant re-focusing the DashboardShell
-      // container and resetting the project list scroll. The helper
-      // skips no-op activations + single-panel groups for the same
-      // reason.
+      // The previous code activated the first panel of the saved active
+      // group to focus that group, which re-focused that group's content
+      // and could reset its scroll. The helper skips no-op activations +
+      // single-panel groups for the same reason.
       applyGroupActiveViewsToApi(api, activeState);
     }
     // Apply (or clear) the maximize last. Even when the workspace has

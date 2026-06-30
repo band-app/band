@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, ChevronsUpDown, Menu, PanelTop } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsUpDown, Menu, PanelLeft, PanelTop } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
@@ -62,6 +62,12 @@ interface DesktopTitleBarProps {
    *  Pass DropdownMenu items (Tasks, Cronjobs, Settings, …). When undefined,
    *  the hamburger button is not rendered. */
   menuItems?: ReactNode;
+  /** Toggle the project-list sidebar's visibility (⌘B). When undefined, the
+   *  sidebar toggle button is not rendered. */
+  onToggleSidebar?: () => void;
+  /** Whether the sidebar is currently visible — drives the toggle button's
+   *  pressed state. */
+  sidebarVisible?: boolean;
 }
 
 /** Draggable desktop title bar that works with external-URL Electron webviews. */
@@ -79,6 +85,8 @@ export function DesktopTitleBar({
   canGoBack,
   canGoForward,
   menuItems,
+  onToggleSidebar,
+  sidebarVisible,
 }: DesktopTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
   // macOS native fullscreen hides the traffic lights — used below to drop
@@ -103,13 +111,35 @@ export function DesktopTitleBar({
       className="h-[38px] shrink-0 flex items-center justify-center relative border-b border-border"
       style={DRAG_STYLE}
     >
-      {(onGoBack || onGoForward || menuItems) && (
+      {(onGoBack || onGoForward || menuItems || onToggleSidebar) && (
         <div
           // Desktop: leave 80px clear for the macOS traffic lights.
           // Web: no traffic lights exist, so park the controls near the edge.
           className={`absolute ${isDesktop && !isFullscreen ? "left-[80px]" : "left-2"} top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-auto`}
           style={NO_DRAG_STYLE}
         >
+          {onToggleSidebar && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggleSidebar}
+                  aria-label="Toggle sidebar"
+                  aria-pressed={sidebarVisible}
+                  data-testid="desktop-title-bar__sidebar-toggle"
+                  className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-accent/50 hover:text-foreground ${sidebarVisible ? "text-foreground" : "text-muted-foreground"}`}
+                >
+                  <PanelLeft className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Toggle Sidebar{" "}
+                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                  ⌘B
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+          )}
           {menuItems && (
             <DropdownMenu>
               <Tooltip>

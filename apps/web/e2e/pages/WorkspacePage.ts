@@ -390,6 +390,56 @@ export class WorkspacePage {
     return this.page.getByTestId("project-list__root");
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Project-list sidebar (lives left of the dockview, outside it) + its
+  // header toggle button. The sidebar is a collapsible resizable-panel:
+  // collapsing shrinks its width to ~0 rather than unmounting, so the
+  // user-observable signal for hidden/shown is its rendered width.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The project-list sidebar wrapper. `data-testid` set in `__root.tsx`
+   *  (`AppShell`). */
+  get sidebar(): Locator {
+    return this.page.getByTestId("app-shell__sidebar");
+  }
+
+  /** The header button that toggles the sidebar (⌘B). `data-testid` set in
+   *  `DesktopTitleBar.tsx`; its `aria-pressed` reflects current visibility. */
+  get sidebarToggle(): Locator {
+    return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
+  }
+
+  /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.
+   *  The geometric, user-observable signal for show/hide (a collapsed Panel
+   *  shrinks its width rather than unmounting). */
+  async sidebarWidth(): Promise<number> {
+    return (await this.sidebar.boundingBox())?.width ?? 0;
+  }
+
+  /** Click the header sidebar-toggle button. */
+  async toggleSidebarViaButton(): Promise<void> {
+    await test.step("Toggle the sidebar via the header button", async () => {
+      await this.sidebarToggle.click();
+    });
+  }
+
+  /** Toggle the sidebar via the ⌘B keyboard shortcut. The handler is a window
+   *  keydown listener in `SharedDockviewLayout.tsx`; ⌘ is a meta key so it
+   *  fires regardless of focus. Anchored on the always-present toggle button
+   *  so the key press has a stable, non-editable focus target. */
+  async toggleSidebarViaShortcut(): Promise<void> {
+    await test.step("Toggle the sidebar via ⌘B", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Meta+b");
+    });
+  }
+
+  /** Read the persisted sidebar-collapsed flag (`band:sidebar-collapsed`)
+   *  from localStorage. */
+  async readSidebarCollapsed(): Promise<boolean> {
+    return await this.page.evaluate(() => localStorage.getItem("band:sidebar-collapsed") === "1");
+  }
+
   /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
    *  Uses `projectListRoot.press(...)` so Playwright moves focus there
    *  before dispatching the key, bypassing the chat textarea autofocus

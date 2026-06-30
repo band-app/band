@@ -203,17 +203,15 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => activatePanel(deps, "browser"),
     },
     {
-      // ⌃0 — focuses keyboard into the Projects list. The direct
-      // keyboard handler in DockviewWorkspaceLayout also expands the
-      // left edge group if it's collapsed; this palette path just
-      // activates the panel and dispatches the focus event. If the
-      // sidebar happens to be collapsed when invoked from the palette,
-      // press ⌘B first.
+      // ⌃0 — reveal the project-list sidebar (which lives outside the
+      // dockview) and move keyboard focus into the list. `band:show-sidebar`
+      // expands the sidebar if it's collapsed; DashboardShell's
+      // `band:focus-projects` listener then focuses the list.
       id: "focus-projects",
       label: "Focus Projects",
       shortcut: "Ctrl+0",
       action: () => {
-        activatePanel(deps, "projects");
+        window.dispatchEvent(new CustomEvent("band:show-sidebar"));
         queueMicrotask(() => {
           window.dispatchEvent(new CustomEvent("band:focus-projects"));
         });

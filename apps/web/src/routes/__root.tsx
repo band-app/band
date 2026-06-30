@@ -16,9 +16,11 @@ import {
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resizable-panels";
 import {
   DashboardProvider,
+  DashboardShell,
   useDashboardStore,
   useSettingsQuery,
   useUpdateSettings,
@@ -36,6 +38,14 @@ import { getElectronBridge } from "../lib/desktop-ipc";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import {
+  loadSidebarCollapsed,
+  loadSidebarWidth,
+  SIDEBAR_MAX_SIZE,
+  SIDEBAR_MIN_SIZE,
+  saveSidebarCollapsed,
+  saveSidebarWidth,
+} from "../lib/sidebar-width";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -403,6 +413,84 @@ function AppShell() {
     [settings, updateSettings],
   );
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Project-list sidebar (separate from the dockview). Collapsing/expanding
+  // the sidebar Panel via its imperative handle hides/shows the list WITHOUT
+  // unmounting the sibling Panel that holds <SharedDockviewLayout /> — so the
+  // dockview (and every cached workspace's chat/terminal/browser + live PTYs)
+  // survives a toggle. Width is persisted as a percentage; the last-left
+  // visibility is persisted separately.
+  // ──────────────────────────────────────────────────────────────────────
+  const sidebarPanelRef = usePanelRef();
+
+  // Seed the initial visibility from the persisted collapsed flag directly
+  // into the Group's `defaultLayout`, rather than collapsing imperatively
+  // after mount — the Group applies `defaultLayout` during its own
+  // post-mount measurement, which would race (and override) an effect-driven
+  // `collapse()`. A sidebar size of 0 is below `minSize`, so a collapsible
+  // panel starts collapsed.
+  const sidebarInitiallyCollapsed = loadSidebarCollapsed();
+  const [sidebarVisible, setSidebarVisible] = useState(() => !sidebarInitiallyCollapsed);
+
+  const savedSidebarWidth = loadSidebarWidth();
+  const sidebarDefaultLayout = sidebarInitiallyCollapsed
+    ? { sidebar: 0, main: 100 }
+    : savedSidebarWidth
+      ? { sidebar: savedSidebarWidth, main: 100 - savedSidebarWidth }
+      : undefined;
+
+  // Skip the first layout callback: it fires during mount with the restored
+  // layout, which we don't want to re-persist.
+  const skipFirstSidebarLayout = useRef(true);
+  const handleSidebarLayoutChanged = useCallback((layout: Record<string, number>) => {
+    if (skipFirstSidebarLayout.current) {
+      skipFirstSidebarLayout.current = false;
+      return;
+    }
+    // Only persist a real (visible) width — a 0 here means the panel is
+    // collapsed, and storing that would lose the user's chosen width on the
+    // next expand.
+    if (layout.sidebar != null && layout.sidebar > 0) {
+      saveSidebarWidth(layout.sidebar);
+    }
+  }, []);
+
+  // Single source of truth for the toggle button's pressed state + the
+  // persisted visibility. Fires for the toggle button, ⌘B, and drag-to-
+  // collapse alike. `prevPanelSize === undefined` is the mount fire — skip
+  // it so it can't clobber a stored "collapsed" before the effect below
+  // collapses the panel.
+  const handleSidebarResize = useCallback(
+    (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+      if (prev === undefined) return;
+      const visible = size.asPercentage > 0;
+      setSidebarVisible(visible);
+      saveSidebarCollapsed(!visible);
+    },
+    [],
+  );
+
+  const toggleSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [sidebarPanelRef]);
+
+  // ⌃0 / "Focus Projects" reveal the sidebar before focusing the list.
+  useEffect(() => {
+    const onToggle = () => toggleSidebar();
+    const onShow = () => {
+      if (sidebarPanelRef.current?.isCollapsed()) sidebarPanelRef.current.expand();
+    };
+    window.addEventListener("band:toggle-sidebar", onToggle);
+    window.addEventListener("band:show-sidebar", onShow);
+    return () => {
+      window.removeEventListener("band:toggle-sidebar", onToggle);
+      window.removeEventListener("band:show-sidebar", onShow);
+    };
+  }, [toggleSidebar, sidebarPanelRef]);
+
   if (!useDesktopLayout) {
     return <Outlet />;
   }
@@ -444,13 +532,44 @@ function AppShell() {
           onGoForward={navigationHistory.goForward}
           canGoBack={navigationHistory.canGoBack}
           canGoForward={navigationHistory.canGoForward}
+          onToggleSidebar={toggleSidebar}
+          sidebarVisible={sidebarVisible}
         />
         <div className="flex-1 min-h-0 overflow-hidden">
-          <div className="h-full min-w-0 overflow-hidden relative">
-            <Outlet />
-            <SharedDockviewLayout />
-            <BrowserHostBridge />
-          </div>
+          <Group
+            orientation="horizontal"
+            defaultLayout={sidebarDefaultLayout}
+            onLayoutChanged={handleSidebarLayoutChanged}
+            className="h-full w-full"
+          >
+            <Panel
+              id="sidebar"
+              panelRef={sidebarPanelRef}
+              defaultSize={SIDEBAR_MIN_SIZE}
+              minSize={SIDEBAR_MIN_SIZE}
+              maxSize={SIDEBAR_MAX_SIZE}
+              collapsible
+              collapsedSize="0%"
+              onResize={handleSidebarResize}
+            >
+              <div
+                className="h-full overflow-hidden border-r border-border"
+                data-testid="app-shell__sidebar"
+              >
+                <DashboardShell hideMenu hideTitleBar />
+              </div>
+            </Panel>
+            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+            <Panel id="main" minSize="20%">
+              {/* Stays mounted across sidebar toggles — never unmount this
+                  subtree or the dockview tears down all cached workspaces. */}
+              <div className="h-full min-w-0 overflow-hidden relative">
+                <Outlet />
+                <SharedDockviewLayout />
+                <BrowserHostBridge />
+              </div>
+            </Panel>
+          </Group>
         </div>
       </div>
     </ToolbarOverflowProvider>
