@@ -423,20 +423,24 @@ function AppShell() {
   // ──────────────────────────────────────────────────────────────────────
   const sidebarPanelRef = usePanelRef();
 
+  // Read the persisted sidebar state ONCE at mount (these `<Group>`/`useState`
+  // seeds are only consumed on the first render). Stashing them in a ref keeps
+  // the localStorage reads off the re-render path, matching the `sidebarVisible`
+  // lazy initializer below.
+  const sidebarInit = useRef({ collapsed: loadSidebarCollapsed(), width: loadSidebarWidth() });
+
   // Seed the initial visibility from the persisted collapsed flag directly
   // into the Group's `defaultLayout`, rather than collapsing imperatively
   // after mount — the Group applies `defaultLayout` during its own
   // post-mount measurement, which would race (and override) an effect-driven
   // `collapse()`. A sidebar size of 0 is below `minSize`, so a collapsible
   // panel starts collapsed.
-  const sidebarInitiallyCollapsed = loadSidebarCollapsed();
-  const [sidebarVisible, setSidebarVisible] = useState(() => !sidebarInitiallyCollapsed);
+  const [sidebarVisible, setSidebarVisible] = useState(() => !sidebarInit.current.collapsed);
 
-  const savedSidebarWidth = loadSidebarWidth();
-  const sidebarDefaultLayout = sidebarInitiallyCollapsed
+  const sidebarDefaultLayout = sidebarInit.current.collapsed
     ? { sidebar: 0, main: 100 }
-    : savedSidebarWidth
-      ? { sidebar: savedSidebarWidth, main: 100 - savedSidebarWidth }
+    : sidebarInit.current.width
+      ? { sidebar: sidebarInit.current.width, main: 100 - sidebarInit.current.width }
       : undefined;
 
   // Skip the first layout callback: it fires during mount with the restored
@@ -458,14 +462,19 @@ function AppShell() {
   // Single source of truth for the toggle button's pressed state + the
   // persisted visibility. Fires for the toggle button, ⌘B, and drag-to-
   // collapse alike. `prevPanelSize === undefined` is the mount fire — skip
-  // it so it can't clobber a stored "collapsed" before the effect below
-  // collapses the panel.
+  // it so it can't clobber a stored "collapsed". `onResize` fires on every
+  // pixel of a drag, so only write localStorage when the collapsed/expanded
+  // state actually flips (not on every intermediate width).
+  const lastSidebarVisibleRef = useRef(!sidebarInit.current.collapsed);
   const handleSidebarResize = useCallback(
     (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
       if (prev === undefined) return;
       const visible = size.asPercentage > 0;
       setSidebarVisible(visible);
-      saveSidebarCollapsed(!visible);
+      if (visible !== lastSidebarVisibleRef.current) {
+        lastSidebarVisibleRef.current = visible;
+        saveSidebarCollapsed(!visible);
+      }
     },
     [],
   );
@@ -477,7 +486,8 @@ function AppShell() {
     else panel.collapse();
   }, [sidebarPanelRef]);
 
-  // ⌃0 / "Focus Projects" reveal the sidebar before focusing the list.
+  // ⌘B toggles the sidebar; ⌃0 / "Focus Projects" reveal it before focusing
+  // the list.
   useEffect(() => {
     const onToggle = () => toggleSidebar();
     const onShow = () => {

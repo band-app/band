@@ -759,10 +759,10 @@ function loadLayout(workspaceId: string | null): unknown | null {
  * dockview instance for the whole app; per-workspace content is cached
  * inside each panel via `MultiWorkspacePanelHost`.
  *
- * Layout structure (panel positions, tab order, hidden panels, the project
- * list) is shared across all workspaces and persisted to
- * `band:dockview-layout-v6`. Per-workspace ACTIVE TAB state is persisted
- * separately under `band:dockview-active:${workspaceId}`.
+ * Layout structure (panel positions, tab order, hidden panels) is shared
+ * across all workspaces and persisted to `band:dockview-layout-v7`.
+ * Per-workspace ACTIVE TAB state is persisted separately under
+ * `band:dockview-active:${workspaceId}`.
  */
 export function SharedDockviewLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });

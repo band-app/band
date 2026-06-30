@@ -304,10 +304,10 @@ export class WorkspacePage {
    *  issue #505 — so this is the right path for tests that need the
    *  full click→restore behaviour.
    *
-   *  Only the SharedDockviewLayout's DashboardShell is mounted on
-   *  desktop (see `apps/web/src/routes/index.tsx` and the comment in
-   *  `SharedDockviewLayout` § ProjectsPanelComponent), so a single
-   *  trigger / item pair is in the DOM at any time. The Radix
+   *  Only one DashboardShell is mounted on desktop — it now lives in the
+   *  sidebar `Panel` inside `AppShell` (`apps/web/src/routes/__root.tsx`),
+   *  separate from the dockview — so a single trigger / item pair is in the
+   *  DOM at any time. The Radix
    *  DropdownMenu portals its content to `document.body` with a fade
    *  animation on close, so a back-to-back reopen can briefly see the
    *  previous portal animating out while the new one mounts. Waiting
