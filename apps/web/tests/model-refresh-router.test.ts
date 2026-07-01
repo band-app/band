@@ -129,7 +129,7 @@ describe("models router — read path (boot-refresh-populated cache)", () => {
   beforeAll(async () => {
     let stubCodex = "";
     const booted = await bootWithSettings(
-      (home) => ({
+      (_home) => ({
         tokenSecret: TOKEN,
         codingAgents: [
           // No preseeded cachedModels — we let the boot refresh populate
