@@ -169,7 +169,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
   // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
   // drops the 300ms double-tap delay so taps register immediately.
-  const className = `@container group flex flex-row items-center justify-between pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden cursor-pointer select-none touch-manipulation transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden cursor-pointer select-none touch-manipulation transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,

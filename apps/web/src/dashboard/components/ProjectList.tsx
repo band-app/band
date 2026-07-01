@@ -212,12 +212,10 @@ function SortableProject({
   // mouse the row stays compact. `touch-pan-y` (not `touch-manipulation`) is
   // kept because dnd-kit needs vertical panning to scroll the list mid-drag.
   const headerClassName = isPlain
-    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2.5 ${
-        plainIsActive ? "bg-primary/15 hover:bg-primary/15 border-l-2 border-l-primary" : ""
-      } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
-    : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 ${
-        gitHeaderIsActive ? "bg-primary/15 hover:bg-primary/15 border-l-2 border-l-primary" : ""
-      }`;
+    ? `group flex items-center justify-between mb-0.5 rounded-md pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2.5 ${
+        plainIsActive ? "bg-primary/15 hover:bg-primary/15" : plainIsFocused ? "bg-accent" : ""
+      }`
+    : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11`;
 
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
@@ -392,11 +390,10 @@ function SortableProject({
       {/* Nested workspaces section — only meaningful for git projects.
           Plain projects are flat: the header above IS the workspace. */}
       {!isPlain && !collapsed && (
-        // `ml-3 border-l` draws a thin tree rail down the left of the branch
-        // list so the workspaces read as children of the project header above,
-        // not as sibling rows. The header sits at `pl-1`; the rail lands just
-        // under its folder icon so the hierarchy is obvious at a glance.
-        <div className="flex flex-col gap-0.5 overflow-hidden ml-3 border-l border-border/50">
+        // `ml-3` indents the branch list so the workspaces read as children of
+        // the project header above, not as sibling rows. The indentation alone
+        // (no divider rail) conveys the hierarchy, keeping the list uncluttered.
+        <div className="flex flex-col gap-0.5 overflow-hidden ml-3">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
               <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
@@ -444,7 +441,7 @@ function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: Droppable
       onClick={onToggle}
       aria-expanded={!collapsed}
       className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
-        isOver ? "bg-primary/20" : "bg-accent"
+        isOver ? "bg-primary/20" : ""
       }`}
     >
       <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
@@ -472,7 +469,7 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
       onClick={onToggle}
       aria-expanded={!collapsed}
       className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
-        isOver ? "bg-primary/20" : "bg-accent"
+        isOver ? "bg-primary/20" : ""
       }`}
     >
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
@@ -893,7 +890,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               type="button"
               onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
               aria-expanded={!pinnedSectionCollapsed}
-              className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 bg-accent"
+              className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
             >
               <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
               <span className="text-sm font-semibold text-foreground/80">Pinned</span>
@@ -959,14 +956,10 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                     ))}
                   {!groupCollapsed &&
                     group.projects.map((project) => (
-                      // Thin divider between consecutive projects in a label
-                      // group (skipped on the first row, which sits flush under
-                      // the label header) so project blocks are visually
-                      // separated without a heavy border.
-                      <div
-                        key={project.name}
-                        className="border-border/40 pt-1 first:pt-0 not-first:border-t"
-                      >
+                      // Consecutive projects in a label group are separated by
+                      // spacing alone (no divider line); the first row sits
+                      // flush under the label header.
+                      <div key={project.name} className="pt-1 first:pt-0">
                         <SortableProject
                           project={project}
                           statuses={statuses}
