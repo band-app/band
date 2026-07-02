@@ -119,20 +119,30 @@ test.describe("Add to Chat — routes to the last-focused chat pane", () => {
     await workspace.clickChatSplitRight(workspaceId);
     await expect.poll(() => chat.promptCount(), { timeout: 15_000 }).toBe(2);
 
+    // Focus pane 0 first and capture the chat id the server records for it.
     await chat.focusPromptAt(0);
     await chat.fillPromptAt(0, "AAA");
-    await chat.focusPromptAt(1);
-    await chat.fillPromptAt(1, "BBB");
-
-    // Barrier: wait until the server has recorded a chat focus (the last report
-    // was pane 1's). "Add to Chat" reads this exactly once, so it must settle
-    // before we trigger the action.
     await expect
       .poll(() => workspace.readServerPanelFocus(workspaceId).then((f) => f.chat), {
-        message: "server records the last-focused chat",
+        message: "pane 0 recorded as the focused chat",
         timeout: 15_000,
       })
       .toBeTruthy();
+    const pane0ChatId = (await workspace.readServerPanelFocus(workspaceId)).chat;
+
+    // Focus pane 1 and wait until the server focus actually FLIPS away from
+    // pane 0 — the barrier that matters, since "Add to Chat" reads the focus
+    // exactly once (a mere truthy poll could pass on pane 0's earlier report
+    // and route the reference into the wrong pane, which the one-shot read
+    // can't self-heal). Mirrors the terminal spec's `.toBe(...)` barrier.
+    await chat.focusPromptAt(1);
+    await chat.fillPromptAt(1, "BBB");
+    await expect
+      .poll(() => workspace.readServerPanelFocus(workspaceId).then((f) => f.chat), {
+        message: "focus flips to pane 1 (the last-focused chat)",
+        timeout: 15_000,
+      })
+      .not.toBe(pane0ChatId);
 
     // Trigger "Add to Chat" from the diff selection tooltip.
     await workspace.activateTab("changes");
