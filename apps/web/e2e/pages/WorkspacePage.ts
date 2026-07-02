@@ -1386,6 +1386,65 @@ export class WorkspacePage {
     );
   }
 
+  /** Like `installTerminalSendCapture`, but records each STRING frame together
+   *  with the socket URL it was written to (`/terminal?…&terminalId=<id>`) so a
+   *  test with several open terminals can prove WHICH terminal received a
+   *  reference. Must run BEFORE `goto` (uses `addInitScript`). */
+  async installTerminalSendUrlCapture(): Promise<void> {
+    await this.page.addInitScript(() => {
+      const w = window as unknown as { __terminalSentUrls: { url: string; data: string }[] };
+      w.__terminalSentUrls = [];
+      const origSend = WebSocket.prototype.send;
+      WebSocket.prototype.send = function patchedSend(
+        this: WebSocket,
+        data: string | ArrayBufferLike | Blob | ArrayBufferView,
+      ) {
+        try {
+          if (
+            typeof this.url === "string" &&
+            this.url.includes("/terminal?") &&
+            typeof data === "string"
+          ) {
+            w.__terminalSentUrls.push({ url: this.url, data });
+          }
+        } catch {
+          // Ignore — never let instrumentation break the real send.
+        }
+        return origSend.call(this, data as never);
+      };
+    });
+  }
+
+  /** The terminalIds whose socket received a frame containing `needle`. Reads
+   *  the `{url, data}` pairs captured by `installTerminalSendUrlCapture()` and
+   *  extracts each matching frame's `terminalId` query param. Used to assert a
+   *  reference reached exactly the last-focused terminal and no sibling. */
+  async terminalIdsThatReceived(needle: string): Promise<string[]> {
+    return await this.page.evaluate((n) => {
+      const frames =
+        (window as unknown as { __terminalSentUrls?: { url: string; data: string }[] })
+          .__terminalSentUrls ?? [];
+      const ids = new Set<string>();
+      for (const f of frames) {
+        if (!f.data.includes(n)) continue;
+        const id = new URL(f.url).searchParams.get("terminalId");
+        if (id) ids.add(id);
+      }
+      return [...ids];
+    }, needle);
+  }
+
+  /** Click into the Nth terminal pane's render surface so it becomes the active
+   *  (focused) terminal — what the container reports to the server as the
+   *  workspace's last-focused terminal. `.xterm-screen` is xterm-owned DOM (no
+   *  testid to hook; same FRAGILITY carve-out as the other xterm probes here),
+   *  and clicking it routes focus through xterm → dockview's focusin tracking. */
+  async focusTerminalPane(index: number): Promise<void> {
+    await test.step(`Focus terminal pane #${index}`, async () => {
+      await this.page.locator(".xterm-screen").nth(index).click();
+    });
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // Terminal file links → file browser
   // ──────────────────────────────────────────────────────────────────────
