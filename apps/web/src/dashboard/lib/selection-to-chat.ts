@@ -51,6 +51,40 @@ export interface TerminalInsertDetail {
   reference: string;
   /** The workspace whose terminal should receive the reference. */
   workspaceId: string;
+  /**
+   * The specific terminal that should receive the reference — the workspace's
+   * last-focused terminal, resolved by `SharedDockviewLayout` from the server's
+   * panel-focus record. When absent (no focus recorded yet), each mounted
+   * `TerminalPanel` falls back to accepting the reference if it's the currently
+   * *visible* terminal, preserving the pre-focus-tracking behavior.
+   */
+  terminalId?: string;
+}
+
+/**
+ * Payload dispatched via the `band:chat-insert` window CustomEvent by
+ * `SharedDockviewLayout` after it has resolved the workspace's last-focused
+ * chat and surfaced the Chat panel. The chat mirror of
+ * {@link TerminalInsertDetail}: each mounted `PromptInput` (one per chat pane ×
+ * one per cached workspace) only appends the reference when the delivery
+ * targets its own workspace AND its own chat, so a reference never leaks into
+ * a sibling pane or a cached background workspace.
+ */
+export interface ChatInsertDetail {
+  /** The workspace-relative file path shown in the reference. */
+  filePath: string;
+  /** 1-based start line of the selection. */
+  startLine: number;
+  /** 1-based end line of the selection. */
+  endLine: number;
+  /** The workspace whose chat should receive the reference. */
+  workspaceId: string;
+  /**
+   * The specific chat pane that should receive the reference — the workspace's
+   * last-focused chat. When absent (no focus recorded yet), the currently
+   * *visible* chat pane accepts it instead.
+   */
+  chatId?: string;
 }
 
 /**

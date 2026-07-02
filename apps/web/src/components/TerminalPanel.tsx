@@ -1253,14 +1253,22 @@ export function TerminalPanel({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
       if (!detail?.reference || detail.workspaceId !== workspaceId) return;
+      // When the delivery names a specific terminal (the workspace's
+      // last-focused one, resolved server-side), only that terminal accepts —
+      // so a split-visible sibling doesn't also receive the reference. When no
+      // terminalId is set (no focus recorded yet), fall back to the pre-focus
+      // behavior: the currently visible terminal takes it.
+      if (detail.terminalId && detail.terminalId !== terminalId) return;
       pendingInsertRef.current = detail.reference;
       // Send immediately when already visible; otherwise the `visible` effect
-      // above flushes once the layout finishes surfacing this terminal.
+      // above flushes once the layout finishes surfacing this terminal. The
+      // terminal container activates the target inner tab in parallel, so a
+      // targeted (non-visible) terminal becomes visible and flushes shortly.
       if (visible) flushPendingInsert();
     };
     window.addEventListener("band:terminal-insert", handler);
     return () => window.removeEventListener("band:terminal-insert", handler);
-  }, [visible, workspaceId, flushPendingInsert]);
+  }, [visible, workspaceId, terminalId, flushPendingInsert]);
 
   // ---- Find-in-terminal handlers ----
   const handleOpenSearch = useCallback(() => {

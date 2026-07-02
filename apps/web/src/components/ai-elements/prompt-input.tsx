@@ -11,7 +11,7 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { buildLineReference, type SelectionToChatDetail } from "@/dashboard";
+import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
 
 let fileIdCounter = 0;
 
@@ -54,6 +54,14 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
    *  Used to accept "Add to Chat" events from sibling panels (Changes, Files)
    *  when the Chat tab isn't in front. Falls back to `visible` if not set. */
   wsActive?: boolean;
+  /** The workspace this chat pane belongs to. Used to scope `band:chat-insert`
+   *  delivery so a reference never leaks into another workspace's chat. */
+  workspaceId?: string;
+  /** The chat pane this input belongs to. When a `band:chat-insert` names a
+   *  specific `chatId` (the workspace's last-focused chat), only the matching
+   *  input appends the reference — fixing the old behavior where every open
+   *  chat pane received it. */
+  chatId?: string;
 };
 
 function readDraft(key: string | null): string {
@@ -71,6 +79,8 @@ export const PromptInput = ({
   draftKey,
   visible,
   wsActive,
+  workspaceId,
+  chatId,
   children,
   ...props
 }: PromptInputProps) => {
@@ -126,6 +136,12 @@ export const PromptInput = ({
   // (Changes, Files) are still processed.
   const wsActiveRef = useRef(wsActive ?? visible);
   wsActiveRef.current = wsActive ?? visible;
+  // Mirror workspace/chat identity for the stable `band:chat-insert` handler
+  // (registered once with `[]` deps) so it always matches against current props.
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -219,23 +235,32 @@ export const PromptInput = ({
     textarea.selectionStart = textarea.selectionEnd = value.length;
   }, []);
 
-  // Listen for "Add to Chat" events from CodeMirror editors.
-  // Only process the event when this workspace is active — with workspace
-  // show/hide, multiple PromptInput instances are mounted simultaneously
-  // and we must not modify hidden workspaces' textareas.  We gate on
-  // wsActive (not visible) so that events from sibling panels like
-  // Changes or Files are still processed even when the Chat tab isn't focused.
+  // Deliver an "Add to Chat" reference from the CodeMirror selection tooltip.
+  // SharedDockviewLayout owns the workspace-agnostic `band:add-to-chat` intent:
+  // it resolves the active workspace's last-focused chat and re-dispatches the
+  // scoped `band:chat-insert` handled here. Many PromptInput instances are
+  // mounted at once (one per chat pane × one per cached workspace), so we only
+  // append when the delivery targets this pane:
+  //   - workspace must match (skip cached background workspaces), and
+  //   - when the delivery names a chatId, it must be *this* chat; when it
+  //     doesn't (no focus recorded yet), only the visible pane accepts.
   useEffect(() => {
     const handler = (e: Event) => {
-      if (wsActiveRef.current === false) return;
-      const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
+      const detail = (e as CustomEvent<ChatInsertDetail>).detail;
+      if (!detail) return;
+      if (workspaceIdRef.current && detail.workspaceId !== workspaceIdRef.current) return;
+      if (detail.chatId) {
+        if (detail.chatId !== chatIdRef.current) return;
+      } else if (wsActiveRef.current === false || visibleRef.current === false) {
+        return;
+      }
 
       // Wrap the shared bare reference in a markdown code span so the chat
       // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
       // in file-link-components.tsx — it only links paths inside inline `<code>`).
       // The terminal/copy actions intentionally use the bare form instead.
       // Trailing space keeps it separated from any text the user types next.
-      const reference = `\`${buildLineReference(filePath, startLine, endLine)}\` `;
+      const reference = `\`${buildLineReference(detail.filePath, detail.startLine, detail.endLine)}\` `;
 
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";
@@ -258,8 +283,8 @@ export const PromptInput = ({
       }
     };
 
-    window.addEventListener("band:add-to-chat", handler);
-    return () => window.removeEventListener("band:add-to-chat", handler);
+    window.addEventListener("band:chat-insert", handler);
+    return () => window.removeEventListener("band:chat-insert", handler);
   }, []);
 
   return (

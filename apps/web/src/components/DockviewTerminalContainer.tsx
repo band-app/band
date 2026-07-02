@@ -19,7 +19,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useAdapter } from "@/dashboard";
+import { type TerminalInsertDetail, useAdapter } from "@/dashboard";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -384,6 +384,11 @@ export function DockviewTerminalContainer({
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Mirror `wsActive` for use inside stable closures (onReady, effects) so
+  // focus reporting only fires for the workspace the user is looking at — never
+  // for the cached, hidden workspaces MultiWorkspacePanelHost keeps alive.
+  const wsActiveRef = useRef(wsActive);
+  wsActiveRef.current = wsActive;
   // Tracks the cleanup function returned by `attachEdgeGroupDragVisibility`
   // so the drag-visibility listeners can be detached on unmount (or on a
   // hypothetical re-`onReady`).
@@ -419,6 +424,17 @@ export function DockviewTerminalContainer({
     const api = apiRef.current;
     if (!api) return;
     persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
+  }, [workspaceId]);
+
+  // Report the active terminal tab to the server as the workspace's last-focused
+  // terminal — the target "Add to Terminal" routes references to. Gated on
+  // `wsActive` and skipped during layout restore. Fire-and-forget.
+  const reportTerminalFocus = useCallback(() => {
+    if (isRestoringRef.current) return;
+    if (wsActiveRef.current === false) return;
+    const panelId = apiRef.current?.activePanel?.id;
+    if (!panelId) return;
+    trpc.panelFocus.set.mutate({ workspaceId, panelType: "terminal", panelId }).catch(() => {});
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -707,9 +723,27 @@ export function DockviewTerminalContainer({
       panel.view.content.element
         .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
         ?.focus();
+      // Record a baseline last-focused terminal as soon as the section is shown,
+      // so "Add to Terminal" has a target even if the user never switches tabs.
+      reportTerminalFocus();
     });
     return () => cancelAnimationFrame(id);
-  }, [visible]);
+  }, [visible, reportTerminalFocus]);
+
+  // Bring the last-focused terminal tab forward when "Add to Terminal" targets
+  // it. SharedDockviewLayout resolves the workspace's last-focused terminal and
+  // dispatches the scoped `band:terminal-insert` with that id; activating the
+  // matching inner tab makes it visible so `TerminalPanel` flushes the pending
+  // reference into it. Mirrors the chat container's `band:chat-insert` handler.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
+      if (!detail?.terminalId || detail.workspaceId !== workspaceId) return;
+      apiRef.current?.getPanel(detail.terminalId)?.api.setActive();
+    };
+    window.addEventListener("band:terminal-insert", handler);
+    return () => window.removeEventListener("band:terminal-insert", handler);
+  }, [workspaceId]);
 
   // Sync dockview panels when terminals are created/killed externally (e.g. CLI).
   useEffect(() => {
@@ -876,7 +910,10 @@ export function DockviewTerminalContainer({
       event.api.onDidLayoutChange(persist);
       event.api.onDidAddPanel(persist);
       event.api.onDidRemovePanel(persist);
-      event.api.onDidActivePanelChange(persist);
+      event.api.onDidActivePanelChange(() => {
+        persist();
+        reportTerminalFocus();
+      });
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
 
@@ -896,7 +933,7 @@ export function DockviewTerminalContainer({
         }
       }
     },
-    [workspaceId, schedulePersist],
+    [workspaceId, schedulePersist, reportTerminalFocus],
   );
 
   const visibilityValue = useMemo(

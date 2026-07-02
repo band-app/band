@@ -11,7 +11,7 @@ import {
 } from "dockview";
 import { Columns2, Plus, Rows2, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentIcon, useAdapter } from "@/dashboard";
+import { AgentIcon, type ChatInsertDetail, useAdapter } from "@/dashboard";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -642,6 +642,11 @@ export function DockviewChatContainer({
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Mirror `wsActive` for use inside stable closures (onReady, event handlers)
+  // so focus reporting only fires for the workspace the user is looking at —
+  // never for the cached, hidden workspaces MultiWorkspacePanelHost keeps alive.
+  const wsActiveRef = useRef(wsActive);
+  wsActiveRef.current = wsActive;
   // Tracks the cleanup function returned by `attachEdgeGroupDragVisibility`
   // so the drag-visibility listeners can be detached on unmount (or on a
   // hypothetical re-`onReady`).
@@ -677,6 +682,18 @@ export function DockviewChatContainer({
     const api = apiRef.current;
     if (!api) return;
     persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
+  }, [workspaceId]);
+
+  // Report the active chat tab to the server as the workspace's last-focused
+  // chat. Gated on `wsActive` (skip cached/hidden workspaces) and skipped while
+  // restoring the saved layout (fromJSON fires spurious activePanelChange).
+  // Fire-and-forget — this is a best-effort hint for "Add to Chat" routing.
+  const reportChatFocus = useCallback(() => {
+    if (isRestoringRef.current) return;
+    if (wsActiveRef.current === false) return;
+    const panelId = apiRef.current?.activePanel?.id;
+    if (!panelId) return;
+    trpc.panelFocus.set.mutate({ workspaceId, panelType: "chat", panelId }).catch(() => {});
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -893,9 +910,27 @@ export function DockviewChatContainer({
       const group = apiRef.current?.activeGroup;
       if (!group) return;
       group.model.focusContent();
+      // Record a baseline last-focused chat as soon as the section is shown,
+      // so "Add to Chat" has a target even if the user never switches tabs.
+      reportChatFocus();
     });
     return () => cancelAnimationFrame(id);
-  }, [visible]);
+  }, [visible, reportChatFocus]);
+
+  // Bring the last-focused chat tab forward when "Add to Chat" targets it.
+  // SharedDockviewLayout resolves the workspace's last-focused chat, surfaces
+  // the outer Chat panel, and dispatches the scoped `band:chat-insert`; here we
+  // activate the matching inner tab so the pane that receives the reference is
+  // the one the user sees. PromptInput does the actual text insertion.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<ChatInsertDetail>).detail;
+      if (!detail?.chatId || detail.workspaceId !== workspaceId) return;
+      apiRef.current?.getPanel(detail.chatId)?.api.setActive();
+    };
+    window.addEventListener("band:chat-insert", handler);
+    return () => window.removeEventListener("band:chat-insert", handler);
+  }, [workspaceId]);
 
   // Sync dockview panels when chats are created/removed externally (e.g. CLI).
   // Mirrors the `browser-created` / `terminal-created` subscription in the
@@ -1071,11 +1106,14 @@ export function DockviewChatContainer({
       event.api.onDidLayoutChange(persist);
       event.api.onDidAddPanel(persist);
       event.api.onDidRemovePanel(persist);
-      event.api.onDidActivePanelChange(persist);
+      event.api.onDidActivePanelChange(() => {
+        persist();
+        reportChatFocus();
+      });
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
     },
-    [workspaceId, schedulePersist],
+    [workspaceId, schedulePersist, reportChatFocus],
   );
 
   const visibilityValue = useMemo(

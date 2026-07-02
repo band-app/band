@@ -1051,6 +1051,8 @@ export function ChatView({
             draftKey={workspaceId}
             visible={visible}
             wsActive={wsActive}
+            workspaceId={workspaceId}
+            chatId={chatId}
           >
             <SlashCommandSuggestions skills={skills} />
             <FileMentionSuggestions workspaceId={workspaceId} />
