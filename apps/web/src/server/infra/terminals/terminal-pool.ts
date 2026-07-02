@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
-import { shellPath } from "../process/path";
+import { defaultShell, shellPath } from "../process/path";
 
 const log = createLogger("terminal-pool");
 
@@ -95,7 +95,7 @@ export class TerminalPool {
     workspaceRoot: string,
     options?: SpawnOptions,
   ): Promise<TerminalSession> {
-    const shell = process.env.SHELL || "/bin/zsh";
+    const shell = defaultShell();
     const resolvedPath = await shellPath();
 
     // Filter env to only string values — posix_spawnp fails on undefined/null

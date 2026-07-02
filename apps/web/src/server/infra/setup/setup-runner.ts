@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { emit } from "../events/status-event-bus";
+import { prependBinDirs } from "../process/path";
 import { loadProjectConfig } from "./project-config";
 
 /**
@@ -49,7 +50,7 @@ export function runSetup(
     cwd: worktreePath,
     env: {
       ...parentEnv,
-      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+      PATH: prependBinDirs(process.env.PATH),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
