@@ -15,6 +15,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
+import { prependBinDirs } from "../infra/process/path";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
@@ -752,7 +753,7 @@ export class WorkspaceService {
               cwd: worktreePath,
               env: {
                 ...process.env,
-                PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                PATH: prependBinDirs(process.env.PATH),
               },
               encoding: "utf-8",
               timeout: 60_000,

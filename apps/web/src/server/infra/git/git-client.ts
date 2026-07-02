@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
+import { prependBinDirs } from "../process/path";
 
 /**
  * Git infrastructure client — Phase 2 of the 3-tier refactor
@@ -173,15 +174,14 @@ async function resolveDetachedBranch(worktreePath: string): Promise<string> {
 }
 
 /**
- * Build the `{ command, env }` pair used to invoke git. Prepends Homebrew
- * paths to `PATH` so a desktop launch (which inherits a barebones PATH on
- * macOS) still finds the system `git` binary.
+ * Build the `{ command, env }` pair used to invoke git. Prepends the
+ * platform's extra bin dirs (Homebrew on macOS, `/usr/local/bin` +
+ * Linuxbrew-if-present on Linux) to `PATH` so a desktop/service launch
+ * (which inherits a barebones PATH) still finds the system `git` binary.
  */
 export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
   const env = { ...process.env };
-  if (env.PATH) {
-    env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-  }
+  env.PATH = prependBinDirs(env.PATH);
   return { command: "git", env };
 }
 
@@ -213,9 +213,7 @@ export function execGit(args: string[], cwd: string): Promise<string> {
  */
 export function execGh(args: string[], cwd: string): Promise<string> {
   const env = { ...process.env };
-  if (env.PATH) {
-    env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-  }
+  env.PATH = prependBinDirs(env.PATH);
   return new Promise((resolve, reject) => {
     execFile("gh", args, { cwd, env, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
       if (err) {
