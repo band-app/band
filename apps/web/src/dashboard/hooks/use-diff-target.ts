@@ -8,7 +8,7 @@ import type { DiffMode } from "../types";
 // first time a user opened B in a new session; per-workspace keys keep the
 // state symmetric with `compareBranch` and match the principle of least
 // surprise. Users who had a stored `diffMode` under the previous global key
-// will fall back to the default ("branch") once after the upgrade, then
+// will fall back to the default ("uncommitted") once after the upgrade, then
 // their per-workspace pick will persist normally.
 const DIFF_MODE_KEY_PREFIX = "band:diff-mode:";
 const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
@@ -39,7 +39,7 @@ function readStoredDiffMode(workspaceId: string): DiffMode {
     const v = localStorage.getItem(DIFF_MODE_KEY_PREFIX + workspaceId);
     if (v === "uncommitted" || v === "branch") return v;
   } catch {}
-  return "branch";
+  return "uncommitted";
 }
 
 export function readStoredCompareBranch(workspaceId: string): string | null {

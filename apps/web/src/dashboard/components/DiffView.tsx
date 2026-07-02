@@ -92,6 +92,23 @@ function storeViewMode(mode: ViewMode) {
 
 const UNCOMMITTED_VALUE = "__uncommitted__";
 
+// Integration/staging branches to float to the top of the diff-target picker,
+// right after Uncommitted. Matched case-insensitively against the exact branch
+// name; the array order is the pin priority (develop before staging, etc.).
+// These are the branches a user most often diffs against, so keeping them one
+// click below Uncommitted saves scrolling past feature branches.
+const STAGING_BRANCH_PRIORITY = [
+  "develop",
+  "dev",
+  "development",
+  "stage",
+  "staging",
+  "integration",
+  "release",
+  "qa",
+  "uat",
+];
+
 const EXPAND_ALL_KEY = "band:diff-expand-all";
 
 /**
@@ -1234,6 +1251,9 @@ export function DiffView({
   const workspacePath = useWorkspacePath(workspaceId);
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const summaryRef = useRef<WorkspaceDiffSummary | null>(null);
+  // Last known head-branch name, kept sticky so the toolbar's `<head> →`
+  // label doesn't blank during a diff-target refetch (which nulls `summary`).
+  const lastHeadBranchRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchSummaryRef = useRef<((force?: boolean) => void) | null>(null);
@@ -2168,10 +2188,11 @@ export function DiffView({
 
   // ---------------------------------------------------------------------------
   // Diff target dropdown — combines diff mode + branch selection into one menu.
-  // Top section: target branch (current pick), then the project's default
-  // branch (if different from target), then Uncommitted. Below the separator
-  // we list every other branch alphabetically. Pinning both target + default
-  // to the top keeps the two most common compare targets one click away.
+  // Uncommitted renders first (it's the default target). Then, pinned above the
+  // separator: staging-style integration branches (in STAGING_BRANCH_PRIORITY
+  // order), then the project's default branch. Below the separator we list every
+  // other branch alphabetically. Pinning the most common compare targets keeps
+  // them one click below Uncommitted.
   // ---------------------------------------------------------------------------
   const summaryCompareBranch = summary?.compareBranch ?? null;
   const defaultBranch = summary?.defaultBranch ?? availableDefaultBranch ?? null;
@@ -2183,12 +2204,17 @@ export function DiffView({
         : [];
   const targetBranch = compareBranch ?? branchOptions[0] ?? summaryCompareBranch;
 
-  // Branches pinned above the separator. Order matters in the rendered list.
-  const topSectionBranches: string[] = [];
-  if (targetBranch) {
-    topSectionBranches.push(targetBranch);
-  }
-  if (defaultBranch && defaultBranch !== targetBranch && branchOptions.includes(defaultBranch)) {
+  // Branches pinned above the separator. Order matters in the rendered list:
+  // staging-style branches first (in priority order), then the default branch.
+  const stagingBranches = STAGING_BRANCH_PRIORITY.map((name) =>
+    branchOptions.find((b) => b.toLowerCase() === name),
+  ).filter((b): b is string => b != null);
+  const topSectionBranches: string[] = [...stagingBranches];
+  if (
+    defaultBranch &&
+    branchOptions.includes(defaultBranch) &&
+    !topSectionBranches.includes(defaultBranch)
+  ) {
     topSectionBranches.push(defaultBranch);
   }
   const otherBranches = branchOptions
@@ -2209,16 +2235,24 @@ export function DiffView({
 
   const renderDiffSelect = () => (
     <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
-      <SelectTrigger className="h-6 w-auto max-w-[300px] gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:truncate [&>[data-slot=select-value]]:block">
+      <SelectTrigger
+        data-testid="diff-view__target-select"
+        // Stable, non-localised anchor for the selected diff mode so tests
+        // don't assert on the "Uncommitted" UI copy.
+        data-diff-mode={diffMode}
+        className="h-6 w-auto max-w-[300px] gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:truncate [&>[data-slot=select-value]]:block"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value={UNCOMMITTED_VALUE} data-testid="diff-view__target-option-uncommitted">
+          Uncommitted
+        </SelectItem>
         {topSectionBranches.map((branch) => (
           <SelectItem key={branch} value={branch}>
             {branch}
           </SelectItem>
         ))}
-        <SelectItem value={UNCOMMITTED_VALUE}>Uncommitted</SelectItem>
         {otherBranches.length > 0 && <SelectSeparator />}
         {otherBranches.map((branch) => (
           <SelectItem key={branch} value={branch}>
@@ -2263,6 +2297,19 @@ export function DiffView({
   // type narrowing on every `summary.stats.*` access. (TypeScript can't
   // narrow through the stored boolean.)
   const stats = hasChanges ? summary!.stats : null;
+
+  // Sticky head-branch label for the toolbar's `<head> → <picker>` indicator.
+  // The summary is reset to `null` on every diff-target refetch (see the
+  // summary fetch effect's `setSummary(null)`), which would blank
+  // `summary.headBranch` mid-load and collapse the label — reflowing the
+  // toolbar and shifting the compare picker left, then back, on every change.
+  // Since a given DiffView instance is pinned to one workspace (the panel host
+  // renders one child per workspace), the head branch is effectively stable, so
+  // remember the last known value and keep showing it across refetches. The
+  // picker itself never unmounts; this just stops the label beside it from
+  // popping in and out.
+  if (summary?.headBranch) lastHeadBranchRef.current = summary.headBranch;
+  const headBranchLabel = summary?.headBranch ?? lastHeadBranchRef.current;
 
   // Active-file detection: every row is in the DOM (LazyFileRow only
   // lazy-mounts its CodeMirror editor, not the row wrapper itself), so we
@@ -2634,7 +2681,7 @@ export function DiffView({
         <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border pl-2 pr-3">
           <div className="flex min-w-0 items-center gap-1.5">
             {renderSidebarToggle()}
-            {renderBranchIndicator(summary?.headBranch)}
+            {renderBranchIndicator(headBranchLabel)}
           </div>
           {/* When there are no changes the toolbar collapses to the
               pull / push + reload controls. The commit / search / expand /

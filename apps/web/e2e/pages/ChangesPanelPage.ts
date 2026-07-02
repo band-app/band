@@ -53,6 +53,16 @@ export class ChangesPanelPage {
    *  cardinality as `cmEditors`, same FRAGILITY caveat against
    *  CodeMirror class-name renames in major upgrades. */
   readonly cmScrollers: Locator;
+  /** The diff-target `<Select>` trigger (mode + compare-branch picker).
+   *  `data-testid="diff-view__target-select"` is set on the shadcn
+   *  `SelectTrigger` in DiffView.tsx — the system-controlled anchor the
+   *  doctrine prefers. Its rendered text is the currently-selected
+   *  target (e.g. "Uncommitted" or a branch name). */
+  readonly diffTargetTrigger: Locator;
+  /** First option in the open diff-target dropdown. Used to assert (via its
+   *  stable testid, not the localisable "Uncommitted" copy) that the
+   *  Uncommitted entry sits at the top of the list. */
+  readonly firstDiffTargetOption: Locator;
 
   constructor(
     private readonly page: Page,
@@ -62,6 +72,8 @@ export class ChangesPanelPage {
     this.scroller = page.getByTestId("diff-view__scroller");
     this.cmEditors = page.locator(".cm-editor");
     this.cmScrollers = page.locator(".cm-scroller");
+    this.diffTargetTrigger = page.getByTestId("diff-view__target-select");
+    this.firstDiffTargetOption = page.getByRole("option").first();
   }
 
   /** Factory method that bundles the common "open the Changes panel
@@ -209,6 +221,38 @@ export class ChangesPanelPage {
       await line.waitFor({ state: "visible", timeout: 15_000 });
       await line.dblclick();
     });
+  }
+
+  /** The selected diff mode, read from the trigger's `data-diff-mode`
+   *  attribute — a stable enum value (`"uncommitted"` | `"branch"`), not the
+   *  localisable trigger label. On a fresh workspace with no stored pick this
+   *  is `"uncommitted"` (the default). */
+  async diffMode(): Promise<string | null> {
+    return await this.diffTargetTrigger.getAttribute("data-diff-mode");
+  }
+
+  /** Open the diff-target dropdown. Radix renders the open listbox into a
+   *  portal; the branch list arrives asynchronously (via `listBranches`)
+   *  and Radix re-renders the still-open listbox as options appear, so
+   *  callers open ONCE here and then poll `visibleDiffTargetOptions()` —
+   *  re-clicking the trigger in a poll loop would toggle it shut. */
+  async openDiffTargetDropdown(): Promise<void> {
+    await test.step("Open diff-target dropdown", async () => {
+      await this.diffTargetTrigger.click();
+      await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
+    });
+  }
+
+  /** Every currently-rendered option label in the open diff-target
+   *  dropdown, in DOM order. Each `<SelectItem>` carries `role="option"`,
+   *  so `getByRole("option")` returns them top-to-bottom (the
+   *  `<SelectSeparator>` is a `role="separator"` and is excluded).
+   *  Callers assert on the ordering — Uncommitted first, then pinned
+   *  staging branches, then the default branch, then the alphabetical
+   *  remainder. Does not click, so it's safe to call inside `expect.poll`
+   *  while the branch list settles. */
+  async visibleDiffTargetOptions(): Promise<string[]> {
+    return (await this.page.getByRole("option").allTextContents()).map((t) => t.trim());
   }
 
   /** Click the "Split view" / "Unified view" toggle. The buttons are
