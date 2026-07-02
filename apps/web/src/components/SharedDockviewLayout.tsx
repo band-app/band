@@ -22,12 +22,14 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import {
   type AddToTerminalDetail,
   buildCommands,
+  type ChatInsertDetail,
   CommandPaletteDialog,
   DiffView,
   parseFileLocation,
   QuickOpenDialog,
   recordWorkspaceAccess,
   SearchFilesDialog,
+  type SelectionToChatDetail,
   useDiffTarget,
   useSettingsQuery,
   WorkspacePickerDialog,
@@ -1253,14 +1255,66 @@ export function SharedDockviewLayout() {
       if (!reference || !workspaceId) return;
       if (hiddenPanelsRef.current.includes("terminal")) return;
       apiRef.current?.getPanel("terminal")?.api.setActive();
-      queueMicrotask(() => {
+      // Resolve the workspace's last-focused terminal so the reference lands in
+      // the one the user was actually using (not just whichever tab is visible).
+      // The awaited query naturally defers the dispatch past the `setActive`
+      // render, so the target terminal is surfaced by the time it flushes. Falls
+      // back to an undefined terminalId (visible-terminal behavior) on error or
+      // when no focus has been recorded yet.
+      void (async () => {
+        let terminalId: string | undefined;
+        try {
+          const focus = await trpc.panelFocus.get.query({ workspaceId });
+          terminalId = focus.terminal;
+        } catch {
+          // best-effort — fall back to visible-terminal delivery
+        }
         window.dispatchEvent(
-          new CustomEvent("band:terminal-insert", { detail: { reference, workspaceId } }),
+          new CustomEvent("band:terminal-insert", {
+            detail: { reference, workspaceId, terminalId },
+          }),
         );
-      });
+      })();
     };
     window.addEventListener("band:add-to-terminal", handler);
     return () => window.removeEventListener("band:add-to-terminal", handler);
+  }, []);
+
+  // "Add to Chat" from the diff/file selection tooltip. Symmetric to the
+  // terminal handler above: the tooltip dispatches the workspace-agnostic
+  // `band:add-to-chat` intent; here we resolve the active workspace and its
+  // last-focused chat, surface the Chat panel, and re-dispatch the scoped
+  // `band:chat-insert` delivery so only that specific chat pane appends the
+  // reference. Previously every mounted PromptInput in the active workspace
+  // listened to `band:add-to-chat` directly, so the reference was appended to
+  // *all* open chat panes; scoping by chatId fixes that.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<SelectionToChatDetail>).detail;
+      const workspaceId = activeWorkspaceIdRef.current;
+      if (!detail || !workspaceId) return;
+      if (hiddenPanelsRef.current.includes("chat")) return;
+      apiRef.current?.getPanel("chat")?.api.setActive();
+      void (async () => {
+        let chatId: string | undefined;
+        try {
+          const focus = await trpc.panelFocus.get.query({ workspaceId });
+          chatId = focus.chat;
+        } catch {
+          // best-effort — fall back to visible-chat delivery
+        }
+        const insert: ChatInsertDetail = {
+          filePath: detail.filePath,
+          startLine: detail.startLine,
+          endLine: detail.endLine,
+          workspaceId,
+          chatId,
+        };
+        window.dispatchEvent(new CustomEvent("band:chat-insert", { detail: insert }));
+      })();
+    };
+    window.addEventListener("band:add-to-chat", handler);
+    return () => window.removeEventListener("band:add-to-chat", handler);
   }, []);
 
   // ---------------------------------------------------------------------

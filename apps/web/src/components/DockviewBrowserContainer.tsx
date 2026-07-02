@@ -423,6 +423,11 @@ export function DockviewBrowserContainer({
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Mirror `wsActive` for use inside stable closures so focus reporting only
+  // fires for the workspace the user is looking at — never for the cached,
+  // hidden workspaces MultiWorkspacePanelHost keeps alive.
+  const wsActiveRef = useRef(wsActive);
+  wsActiveRef.current = wsActive;
   // Tracks the cleanup function returned by `attachEdgeGroupDragVisibility`
   // so the drag-visibility listeners can be detached on unmount (or on a
   // hypothetical re-`onReady`).
@@ -466,6 +471,17 @@ export function DockviewBrowserContainer({
     const api = apiRef.current;
     if (!api) return;
     persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
+  }, [workspaceId]);
+
+  // Report the active browser tab to the server as the workspace's last-focused
+  // browser. Gated on `wsActive` and skipped during layout restore.
+  // Fire-and-forget — tracked for symmetry with chat/terminal focus.
+  const reportBrowserFocus = useCallback(() => {
+    if (isRestoringRef.current) return;
+    if (wsActiveRef.current === false) return;
+    const panelId = apiRef.current?.activePanel?.id;
+    if (!panelId) return;
+    trpc.panelFocus.set.mutate({ workspaceId, panelType: "browser", panelId }).catch(() => {});
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -1180,7 +1196,10 @@ export function DockviewBrowserContainer({
       event.api.onDidLayoutChange(persist);
       event.api.onDidAddPanel(persist);
       event.api.onDidRemovePanel(persist);
-      event.api.onDidActivePanelChange(persist);
+      event.api.onDidActivePanelChange(() => {
+        persist();
+        reportBrowserFocus();
+      });
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
 
@@ -1196,7 +1215,7 @@ export function DockviewBrowserContainer({
         }
       }
     },
-    [workspaceId, schedulePersist],
+    [workspaceId, schedulePersist, reportBrowserFocus],
   );
 
   const visibilityValue = useMemo(

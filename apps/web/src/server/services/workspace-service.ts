@@ -40,6 +40,7 @@ import { chatService } from "./chat-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { panelFocusService } from "./panel-focus-service";
 import { SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
@@ -687,6 +688,9 @@ export class WorkspaceService {
     // Kill any running terminal PTY sessions + layout
     terminalService.killWorkspace(workspaceId);
     terminalService.deleteLayout(workspaceId);
+
+    // Drop the last-focused-panel record so it doesn't outlive the workspace.
+    panelFocusService.remove(workspaceId);
 
     // Kill any running language server processes
     killWorkspaceServers(workspaceId);

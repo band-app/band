@@ -116,6 +116,7 @@ export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-wor
 export {
   type AddToTerminalDetail,
   buildLineReference,
+  type ChatInsertDetail,
   type SelectionToChatDetail,
   type TerminalInsertDetail,
 } from "./lib/selection-to-chat";

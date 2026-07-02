@@ -811,6 +811,22 @@ export class WorkspacePage {
     });
   }
 
+  /** Read the server's recorded last-focused panel ids for a workspace via the
+   *  `panelFocus.get` tRPC query. Used as a synchronisation barrier: focus is
+   *  reported fire-and-forget, so a test polls this until the pane it just
+   *  focused is recorded before triggering an "Add to …" action that reads it.
+   *  Auth is the `band_token` cookie, matching the tRPC HTTP helpers. */
+  async readServerPanelFocus(
+    workspaceId: string,
+  ): Promise<{ chat?: string; terminal?: string; browser?: string }> {
+    const input = encodeURIComponent(JSON.stringify({ workspaceId }));
+    const res = await this.page.request.get(`${this.baseUrl}/trpc/panelFocus.get?input=${input}`, {
+      headers: { Cookie: `band_token=${this.token}` },
+    });
+    const body = (await res.json()) as { result?: { data?: Record<string, string> } };
+    return body.result?.data ?? {};
+  }
+
   /** Wait for the terminal's xterm input to be attached — the DOM-level
    *  signal that the xterm instance mounted. xterm keeps its input as an
    *  offscreen "helper" textarea (Playwright reports it as hidden, never

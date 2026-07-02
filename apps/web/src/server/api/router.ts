@@ -49,6 +49,7 @@ import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
+import { panelFocusRouter } from "./panel-focus/router";
 import { prereqsRouter } from "./prereqs/router";
 import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
@@ -76,6 +77,7 @@ export const appRouter = t.router({
   chat: chatRouter,
   browsers: browsersRouter,
   browserLayout: browserLayoutRouter,
+  panelFocus: panelFocusRouter,
   tasks: tasksRouter,
   sessions: sessionsRouter,
   ...terminalsRouters,

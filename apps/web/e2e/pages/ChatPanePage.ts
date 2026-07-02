@@ -119,6 +119,44 @@ export class ChatPanePage {
     return await this.promptInput.inputValue();
   }
 
+  /** All prompt textareas currently mounted for the active workspace — one per
+   *  open chat pane. Used by the last-focused-routing test, where a split
+   *  produces two panes and the reference must land in exactly one of them. */
+  get promptInputs(): Locator {
+    return this.page.getByPlaceholder("Type a message...");
+  }
+
+  /** Number of open chat panes (prompt textareas) in the active workspace. */
+  async promptCount(): Promise<number> {
+    return await this.promptInputs.count();
+  }
+
+  /** Click into the Nth chat pane's prompt so it becomes the focused (active)
+   *  pane — this is what the container reports to the server as the workspace's
+   *  last-focused chat. Click (not `focus()`) so dockview's focusin tracking
+   *  fires and the active panel actually switches. */
+  async focusPromptAt(index: number): Promise<void> {
+    await test.step(`Focus chat pane #${index}`, async () => {
+      await this.promptInputs.nth(index).click();
+    });
+  }
+
+  /** Type text into the Nth chat pane's prompt (replacing its content). */
+  async fillPromptAt(index: number, text: string): Promise<void> {
+    await test.step(`Fill chat pane #${index} with "${text}"`, async () => {
+      await this.promptInputs.nth(index).fill(text);
+    });
+  }
+
+  /** Snapshot every open pane's prompt value. Order-independent assertions
+   *  (which pane received the reference) sort these rather than depending on
+   *  dockview's DOM ordering of split groups. */
+  async allPromptValues(): Promise<string[]> {
+    return await this.promptInputs.evaluateAll((els) =>
+      els.map((el) => (el as HTMLTextAreaElement).value),
+    );
+  }
+
   /** Clear the prompt textarea. Most submit paths empty the textarea
    *  already, but the draft-persistence logic in `PromptInput` can
    *  leave whitespace behind — call this before tests that need a
