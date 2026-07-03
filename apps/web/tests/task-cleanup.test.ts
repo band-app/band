@@ -246,8 +246,8 @@ describe("workspace task cleanup on removal (issue #416)", () => {
           path: repoPath,
           defaultBranch: "main",
           worktrees: [
-            { branch: "main", path: repoPath },
-            { branch: "feature", path: join(tmpHome, "proj-feature") },
+            { name: "main", branch: "main", path: repoPath },
+            { name: "feature", branch: "feature", path: join(tmpHome, "proj-feature") },
           ],
         },
       ],

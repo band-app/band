@@ -369,13 +369,16 @@ export class WorkspaceService {
       );
     }
 
-    // Idempotency + identity-collision guard. Match on `name` as well as the
-    // live `branch`: a fresh create seeds `name === branch`, but if an
-    // existing worktree was branch-switched so `name != branch`, creating a
-    // new worktree whose branch equals that old `name` would mint a second
-    // row with a colliding `name` (both serialize to the same workspace id).
-    // Returning the existing path keeps create idempotent and preserves the
-    // immutable-name invariant.
+    // Idempotency + identity-collision guard, matching on both fields:
+    //   - `wt.name === input.branch`: the requested branch collides with an
+    //     existing workspace's immutable identity — creating here would mint a
+    //     second row with a duplicate `name` (both serialize to the same
+    //     workspace id). Return the existing path instead.
+    //   - `wt.branch === input.branch`: the plain idempotent case — a workspace
+    //     whose live branch already matches the request (always true for a
+    //     never-switched workspace, where `name === branch`).
+    // Either way we return the existing path, keeping create idempotent and
+    // preserving the immutable-name invariant.
     const existing = project.worktrees.find(
       (wt) => wt.name === input.branch || wt.branch === input.branch,
     );

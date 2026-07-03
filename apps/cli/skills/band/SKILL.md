@@ -112,8 +112,10 @@ band workspaces create my-app feat/experiment
 ### Remove a workspace (git worktree + state cleanup)
 
 ```sh
-band workspaces remove <project> <branch>
+band workspaces remove <project> <name>
 ```
+
+`<name>` is the workspace's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
 
 Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files.
 

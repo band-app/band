@@ -2618,3 +2618,110 @@ describe("tRPC — auth enforcement", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Workspace identity is the immutable `name`, not the live git branch
+// ---------------------------------------------------------------------------
+//
+// Black-box HTTP coverage for the crux of the `name` feature: once a
+// worktree's git branch is switched away from the branch it was created on,
+// the workspace id (and everything keyed by it) must stay stable and the
+// projects-list label must keep showing the original `name`, while the
+// reported `branch` tracks git. Complements the white-box `sync-service`
+// unit test with the real server + tRPC surface (issue: workspace-name-field
+// review feedback [13]).
+describe("tRPC — workspace identity survives a git branch switch", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let featureWorktreePath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+
+    // Real repo + a real second worktree on `feature`, whose branch we then
+    // switch to `feature-renamed` — so on disk the worktree's live branch
+    // diverges from the `name` it was created under.
+    const repoPath = join(tmpHome, "proj");
+    mkdirSync(repoPath, { recursive: true });
+    git(repoPath, ["init", "-b", "main"]);
+    writeFileSync(join(repoPath, "README.md"), "# proj\n");
+    git(repoPath, ["add", "."]);
+    git(repoPath, ["commit", "-m", "initial commit"]);
+
+    featureWorktreePath = join(tmpHome, ".band", "worktrees", "proj", "feature");
+    mkdirSync(join(tmpHome, ".band", "worktrees", "proj"), { recursive: true });
+    git(repoPath, ["worktree", "add", "-b", "feature", featureWorktreePath]);
+    // Switch the live branch away from the creation branch.
+    git(featureWorktreePath, ["switch", "-c", "feature-renamed"]);
+
+    // Seed the divergent state directly: identity `name: "feature"` frozen at
+    // creation, live `branch: "feature-renamed"`. The seed helper supports an
+    // explicit `name` distinct from `branch` for exactly this scenario.
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "proj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { name: "main", branch: "main", path: repoPath },
+            { name: "feature", branch: "feature-renamed", path: featureWorktreePath },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    try {
+      git(join(tmpHome, "proj"), ["worktree", "remove", "--force", featureWorktreePath]);
+    } catch {
+      // best-effort — fine if already removed by the test
+    }
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  it("projects.list keys the workspace id on `name` while reporting the live branch", async () => {
+    const res = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{
+        name: string;
+        worktrees: Array<{ name: string; branch: string; workspaceId: string }>;
+      }>;
+    }>(res);
+
+    const proj = data.projects.find((p) => p.name === "proj");
+    expect(proj).toBeDefined();
+
+    const feature = proj!.worktrees.find((wt) => wt.name === "feature");
+    expect(feature).toBeDefined();
+    // Id is derived from the immutable `name`, so it stays `proj-feature`…
+    expect(feature!.workspaceId).toBe("proj-feature");
+    // …even though the live git branch has moved on.
+    expect(feature!.branch).toBe("feature-renamed");
+    // The id must NOT have followed the branch to `proj-feature-renamed`.
+    const ids = proj!.worktrees.map((wt) => wt.workspaceId);
+    expect(ids).not.toContain("proj-feature-renamed");
+  });
+
+  it("workspaces.remove resolves by `name` even when the branch was switched", async () => {
+    const res = await trpcMutate(server.url, "workspaces.remove", {
+      project: "proj",
+      name: "feature",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>(listRes);
+    const proj = data.projects.find((p) => p.name === "proj");
+    expect(proj!.worktrees.map((wt) => wt.name)).not.toContain("feature");
+  });
+});

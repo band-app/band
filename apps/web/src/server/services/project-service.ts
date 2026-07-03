@@ -129,15 +129,19 @@ export class ProjectService {
             const gitWorktrees = await this.git.listWorktrees(project.path);
             worktrees = gitWorktrees
               .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
-              .map((wt) => ({
-                // Carry the stable identity from the tracked row; fall back to
-                // the branch for worktrees git knows about but state doesn't.
-                name: trackedByPath.get(wt.path)?.name ?? wt.branch,
-                branch: wt.branch,
-                path: wt.path,
-                head: wt.head,
-                pinned: trackedByPath.get(wt.path)?.pinned ?? false,
-              }));
+              .map((wt) => {
+                const tracked = trackedByPath.get(wt.path);
+                return {
+                  // Carry the stable identity from the tracked row; fall back
+                  // to the branch for worktrees git knows about but state
+                  // doesn't.
+                  name: tracked?.name ?? wt.branch,
+                  branch: wt.branch,
+                  path: wt.path,
+                  head: wt.head,
+                  pinned: tracked?.pinned ?? false,
+                };
+              });
           } catch {
             // Fall back to tracked worktrees
           }

@@ -127,13 +127,16 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     const existingByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
     diskWorktrees = gitWorktrees
       .filter((wt) => !wt.isBare)
-      .map((wt) => ({
-        name: existingByPath.get(wt.path)?.name ?? wt.branch,
-        branch: wt.branch,
-        path: wt.path,
-        head: wt.head,
-        pinned: existingByPath.get(wt.path)?.pinned ?? false,
-      }));
+      .map((wt) => {
+        const existing = existingByPath.get(wt.path);
+        return {
+          name: existing?.name ?? wt.branch,
+          branch: wt.branch,
+          path: wt.path,
+          head: wt.head,
+          pinned: existing?.pinned ?? false,
+        };
+      });
   } catch {
     // If git fails for this project (e.g. path was deleted, NFS mount is
     // gone), it has no usable origin — clear `hasOrigin` so the CI poller
