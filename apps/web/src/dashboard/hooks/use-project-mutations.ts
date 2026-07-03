@@ -167,7 +167,17 @@ export function useRemoveWorkspace() {
         const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
         const projectInfo = projects?.find((p) => p.name === project);
         if (projectInfo) {
-          openWorkspace(toWorkspaceId(project, projectInfo.defaultBranch));
+          // Navigate to the project's main workspace by its immutable `name`.
+          // `defaultBranch` is the git remote's default (synced, may drift),
+          // so resolve the surviving worktree whose identity or live branch
+          // matches it and use that row's `name` — falling back to
+          // `defaultBranch` if no row matches (best-effort, matches prior
+          // behavior).
+          const mainWt = projectInfo.worktrees.find(
+            (wt) =>
+              wt.name === projectInfo.defaultBranch || wt.branch === projectInfo.defaultBranch,
+          );
+          openWorkspace(toWorkspaceId(project, mainWt?.name ?? projectInfo.defaultBranch));
         }
       }
     },

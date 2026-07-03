@@ -2684,7 +2684,7 @@ describe("tRPC — workspace identity survives a git branch switch", () => {
     } catch {
       // best-effort — fine if already removed by the test
     }
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("projects.list keys the workspace id on `name` while reporting the live branch", async () => {

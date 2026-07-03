@@ -237,15 +237,16 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 </span>
               </div>
             </TooltipTrigger>
-            {/* Always show the full `project/branch` name in the
-                tooltip. The visible label is `truncate`-ellipsised when
-                the sidebar is narrow, so spelling out the full thing on
-                hover is the one thing a tooltip is actually useful for
-                — the worktree's absolute path was clutter (and it
-                exposed `$HOME` paths that the user doesn't typically
-                care about while scanning the list).
+            {/* Always show the full `project/name` identity in the
+                tooltip (the stable workspace name, matching the visible
+                label — not the live git branch). The visible label is
+                `truncate`-ellipsised when the sidebar is narrow, so
+                spelling out the full thing on hover is the one thing a
+                tooltip is actually useful for — the worktree's absolute
+                path was clutter (and it exposed `$HOME` paths that the
+                user doesn't typically care about while scanning the list).
                 Anchored to the right of the card (was top) so a long
-                project/branch string doesn't cover the next card down
+                project/name string doesn't cover the next card down
                 — fans out into open viewport space instead of
                 overlapping siblings. */}
             <TooltipContent side="right">{`${projectName}/${worktree.name}`}</TooltipContent>
