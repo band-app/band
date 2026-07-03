@@ -370,7 +370,7 @@ export class OpenCodeAdapter implements CodingAgent {
     // `opencode session list` already filters by CWD, so we just
     // pass `dir` as the working directory — no extra filtering needed.
     const sessions = await fetchOpenCodeSessions(this.executablePath, dir);
-    log.info({ dir, count: sessions.length }, "listSessions");
+    log.debug({ dir, count: sessions.length }, "listSessions");
     return sessions
       .map((s) => ({
         sessionId: s.id,

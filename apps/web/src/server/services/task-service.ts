@@ -333,7 +333,7 @@ function broadcast(chatId: string, chunk: UIMessageChunk) {
 
   const subs = listeners.get(chatId);
   if (!subs || subs.size === 0) {
-    log.warn({ chatId, chunkType: (chunk as { type?: string }).type }, "broadcast: no listeners");
+    log.debug({ chatId, chunkType: (chunk as { type?: string }).type }, "broadcast: no listeners");
     return;
   }
   for (const listener of subs) {

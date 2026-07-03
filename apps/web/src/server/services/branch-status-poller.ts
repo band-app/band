@@ -77,6 +77,21 @@ const pollerState = {
   activity: "active" as ActivityLevel,
 };
 
+/**
+ * Per-host throttle for CI-poll GraphQL failures. Keyed by the GitHub
+ * host (the same key `getBatchedCIStatuses` batches by), the value is the
+ * last error message logged for that host.
+ *
+ * The CI query for a host can fail persistently — e.g. a `gh` schema
+ * mismatch (`Field 'repository' doesn't exist on type 'Query'`). The
+ * poller runs every ~5–60 s, so logging unconditionally on every tick
+ * buries the log in thousands of identical lines/hour. Instead we log a
+ * host's failure only when it first appears or changes, and reset the
+ * entry when that host next succeeds (recovery re-arms logging) or drops
+ * out of the polled set (no state leak for hosts that disappear).
+ */
+const lastCIPollErrorByHost = new Map<string, string>();
+
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
   const workspaces: WorkspaceInfo[] = [];
@@ -168,7 +183,9 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
  * misbehaving) and is logged at `warn` — `syncWorktrees` will rewrite
  * `hasOrigin` on the next sync tick and the noise stops on its own.
  */
-async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
+export async function getBatchedCIStatuses(
+  workspaces: WorkspaceInfo[],
+): Promise<Map<string, CIStatus>> {
   // Dedupe `getRepoInfo` calls by project path. A project with N
   // worktrees produces N `WorkspaceInfo` entries that all share the
   // same `projectPath`; without this, each tick fans out to N
@@ -209,8 +226,11 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
     }
   }
 
-  // If no workspaces have repo info, return empty
+  // If no workspaces have repo info, return empty. No host is being
+  // queried this tick, so any remembered failures are stale — clear them
+  // so a host re-arms logging if it comes back.
   if (resolved.length === 0) {
+    lastCIPollErrorByHost.clear();
     const results = new Map<string, CIStatus>();
     for (const ws of workspaces) {
       results.set(ws.workspaceId, { state: "none" });
@@ -272,12 +292,31 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
           allResults.set(g.ws.workspaceId, status);
         }
       }
+
+      // Host recovered — reset the throttle so the next distinct failure
+      // for this host logs again.
+      lastCIPollErrorByHost.delete(host);
     } catch (err) {
-      console.error(
-        `CI poll: GraphQL query failed for host (${group.length} workspaces):`,
-        err instanceof Error ? err.message : err,
-      );
+      // Log only when this host's error is new or changed since the last
+      // tick; suppress identical repeats so a persistent failure doesn't
+      // spam the log on every poll. Same message/prefix as before so log
+      // greppers keep matching.
+      const message = err instanceof Error ? err.message : String(err);
+      if (lastCIPollErrorByHost.get(host) !== message) {
+        lastCIPollErrorByHost.set(host, message);
+        console.error(
+          `CI poll: GraphQL query failed for host (${group.length} workspaces):`,
+          message,
+        );
+      }
     }
+  }
+
+  // Drop throttle state for hosts that dropped out of the polled set, so
+  // it doesn't leak as projects/workspaces come and go — and a host that
+  // returns re-arms logging.
+  for (const host of [...lastCIPollErrorByHost.keys()]) {
+    if (!byHost.has(host)) lastCIPollErrorByHost.delete(host);
   }
 
   // Fill in "none" for workspaces that couldn't resolve repo info

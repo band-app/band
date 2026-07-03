@@ -537,7 +537,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
   }
 
   async listSessions(dir: string): Promise<SessionListItem[]> {
-    log.info({ dir }, "listSessions");
+    log.debug({ dir }, "listSessions");
     const sessions = await listSessions({ dir });
     const filtered = sessions.filter((s) => s.cwd === dir);
     // Fan out the per-session JSONL tail reads. Sequential fs calls
