@@ -17,9 +17,13 @@
  * desktop e2e coverage this spec can't provide (same shape and
  * rationale as the browser-panel / macOS-shell IPC surfaces). We do
  * assert the negative below (`electronCard` has zero DOM nodes) so the
- * self-gate has an empirical check on the web path; the positive
- * behaviour is covered by the pure `mapAppMetrics` unit test in
- * `apps/desktop/tests/app-metrics.test.ts`.
+ * self-gate has an empirical check on the web path.
+ *
+ * Only the data-mapping layer is unit-tested (`mapAppMetrics` in
+ * `apps/desktop/tests/app-metrics.test.ts`). The IPC channel
+ * registration (`register.ts`), the preload allowlist entry
+ * (`index.cts`), and the `ElectronCard` React rendering remain
+ * uncovered, pending desktop e2e infrastructure.
  */
 
 import { execFileSync } from "node:child_process";

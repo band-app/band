@@ -7,9 +7,14 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, test } from "node:test";
+import { before, describe, test } from "node:test";
 import type { ProcessMetric } from "electron";
 
+// `mapAppMetrics` is a deliberately-exported pure seam: `getAppMetrics()` in
+// the same module touches `app` / `webContents`, which throw outside the
+// Electron runtime, so the mapping logic is split out and exported so it can
+// be exercised under `node:test`. This is an intentional TEST-1 exception
+// (same spirit as the CLAUDE.md carve-outs), not accidental pattern drift.
 import { mapAppMetrics } from "../src/main/ipc/app-metrics.ts";
 
 /** Minimal `ProcessMetric` factory — only the fields the mapper reads. */
@@ -77,7 +82,12 @@ describe("mapAppMetrics", () => {
     metric({ pid: 104, type: "Zygote", memory: { workingSetSize: 2_000, peakWorkingSetSize: 0 } }),
   ];
 
-  const result = mapAppMetrics(raw, pidLabels);
+  // Computed in `before` (not at describe scope) so a throw surfaces as a
+  // clean hook failure instead of aborting the whole describe block.
+  let result: ReturnType<typeof mapAppMetrics>;
+  before(() => {
+    result = mapAppMetrics(raw, pidLabels);
+  });
 
   test("labels each process by type and pidLabels lookup", () => {
     const byPid = new Map(result.processes.map((p) => [p.pid, p.label]));

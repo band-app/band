@@ -285,16 +285,28 @@ export function ResourcesPage() {
   // zero-byte project; both end up at the bottom of the
   // size-known group. We treat that as acceptable because errors
   // are also surfaced inline (the size cell renders "error").
-  const sortedProjects = [...projects].sort((a, b) => {
-    const sa = sizes.get(a.project);
-    const sb = sizes.get(b.project);
-    if (sa && sb) return sb.sizeBytes - sa.sizeBytes;
-    if (sa && !sb) return -1;
-    if (!sa && sb) return 1;
-    return 0;
-  });
+  const sortedProjects = useMemo(
+    () =>
+      [...projects].sort((a, b) => {
+        const sa = sizes.get(a.project);
+        const sb = sizes.get(b.project);
+        if (sa && sb) return sb.sizeBytes - sa.sizeBytes;
+        if (sa && !sb) return -1;
+        if (!sa && sb) return 1;
+        return 0;
+      }),
+    [projects, sizes],
+  );
 
-  const knownTotalBytes = Array.from(sizes.values()).reduce((sum, s) => sum + s.sizeBytes, 0);
+  const knownTotalBytes = useMemo(
+    () => Array.from(sizes.values()).reduce((sum, s) => sum + s.sizeBytes, 0),
+    [sizes],
+  );
+  // Total worktree count across all projects — shown in the table footer.
+  const totalWorktreeCount = useMemo(
+    () => projects.reduce((sum, p) => sum + p.worktrees.length, 0),
+    [projects],
+  );
   // "All sizes accounted for" — true when every project has either
   // a known size or there are no projects at all. The latter case
   // matters because the user with zero tracked repos would
@@ -570,7 +582,7 @@ export function ResourcesPage() {
                             <tr className="border-t-2 border-border font-medium">
                               <td className="py-2 pr-3">Total{allLoaded ? "" : " (partial)"}</td>
                               <td className="py-2 pr-3 text-right tabular-nums">
-                                {projects.reduce((sum, p) => sum + p.worktrees.length, 0)}
+                                {totalWorktreeCount}
                               </td>
                               <td
                                 className="py-2 pr-3 text-right tabular-nums"
