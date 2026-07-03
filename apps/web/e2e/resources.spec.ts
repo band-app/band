@@ -98,15 +98,25 @@ test.describe("Resources dialog (issue #506)", () => {
     await resources.open();
     await resources.waitForReady();
 
-    // Server card: numeric PID present.
+    // Cards start collapsed: the body content (server PID, project
+    // table) is not mounted, and each card shows its headline total
+    // next to the title instead.
+    await expect(resources.serverPid).not.toBeVisible();
+    await expect(resources.projectsTable).not.toBeVisible();
+    await expect(resources.serverTotal).toBeVisible();
+    await expect(resources.worktreesTotal).toBeVisible();
+
+    // Server card: expand it, then assert a numeric PID is present.
+    await resources.expandServer();
     const pid = await resources.getServerPidValue();
     expect(Number.isFinite(pid)).toBe(true);
     expect(pid).toBeGreaterThan(0);
 
-    // Worktrees card: the project row appears immediately on open
-    // (no Refresh click needed). The per-project size cell starts
-    // as a "measuring…" spinner and resolves to MB-class output
-    // when the server's `du` finishes.
+    // Worktrees card: expand it, then the project row appears (no
+    // Refresh click needed). The per-project size cell starts as a
+    // "measuring…" spinner and resolves to MB-class output when the
+    // server's `du` finishes.
+    await resources.expandWorktrees();
     const projectRow = resources.getProjectRow(PROJECT);
     await expect(projectRow).toBeVisible({ timeout: 15_000 });
     const sizeCell = resources.getProjectSize(PROJECT);
