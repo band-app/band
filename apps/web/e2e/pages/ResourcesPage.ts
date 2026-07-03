@@ -1,7 +1,7 @@
 /**
- * Page object for the Resources dialog opened from the dashboard
- * title-bar menu (no dedicated route — the page renders inside a
- * shared Dialog managed by `ToolbarOverflowProvider`).
+ * Page object for the Resources dialog opened from the Resources icon in
+ * the project-list bottom action bar (no dedicated route — the page renders
+ * inside a shared Dialog managed by `ToolbarOverflowProvider`).
  *
  * Owns the locators for the server snapshot card and the worktree
  * usage table, plus an `open()` that walks the user flow:

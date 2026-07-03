@@ -137,7 +137,9 @@ function NavControls({
                   // list's bottom action bar (`DashboardShell.tsx`), and
                   // `AppShell` (`__root.tsx`) only passes `menuItems` to the
                   // WorkspaceTitleBar — so this renders once the list
-                  // collapses. Keeps the historical testid for page-objects.
+                  // collapses. Retains the historical testid for any direct
+                  // `page.getByTestId` spec use (page objects target the
+                  // bottom-bar buttons now).
                   data-testid="dashboard__menu-trigger"
                 >
                   <Menu className="size-5" />

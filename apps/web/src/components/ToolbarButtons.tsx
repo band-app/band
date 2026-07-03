@@ -168,7 +168,10 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Menu items for the dashboard's overflow ("3 dots") dropdown.
+ * Menu items for the title-bar hamburger dropdown shown when the project-list
+ * sidebar is collapsed (the `WorkspaceTitleBar` fallback). While the sidebar
+ * is visible these actions live in the project-list bottom action bar
+ * (`ToolbarActionBar`) instead.
  *
  * Must be rendered inside a <ToolbarOverflowProvider>. Returns a fragment of
  * DropdownMenuItem so it can be embedded directly in a DropdownMenuContent.
