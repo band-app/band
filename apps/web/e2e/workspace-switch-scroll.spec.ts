@@ -55,14 +55,14 @@ function makeProjects(): {
   path: string;
   defaultBranch: string;
   kind: "git";
-  worktrees: { branch: string; path: string; pinned: boolean }[];
+  worktrees: { name: string; branch: string; path: string; pinned: boolean }[];
 }[] {
   return Array.from({ length: PROJECT_COUNT }, (_, i) => ({
     name: `project-${String(i).padStart(2, "0")}`,
     path: `/tmp/fake/project-${i}`,
     defaultBranch: "main",
     kind: "git",
-    worktrees: [{ branch: "main", path: `/tmp/fake/project-${i}`, pinned: false }],
+    worktrees: [{ name: "main", branch: "main", path: `/tmp/fake/project-${i}`, pinned: false }],
   }));
 }
 
