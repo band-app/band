@@ -8,22 +8,23 @@
 
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
+import type { ProcessMetric } from "electron";
 
 import { mapAppMetrics } from "../src/main/ipc/app-metrics.ts";
 
 /** Minimal `ProcessMetric` factory — only the fields the mapper reads. */
 function metric(
-  overrides: Partial<Electron.ProcessMetric> & {
+  overrides: Partial<ProcessMetric> & {
     pid: number;
-    type: Electron.ProcessMetric["type"];
+    type: ProcessMetric["type"];
   },
-): Electron.ProcessMetric {
+): ProcessMetric {
   return {
     creationTime: 0,
     cpu: { percentCPUUsage: 0, idleWakeupsPerSecond: 0 },
     memory: { workingSetSize: 0, peakWorkingSetSize: 0 },
     ...overrides,
-  } as Electron.ProcessMetric;
+  } as ProcessMetric;
 }
 
 describe("mapAppMetrics", () => {
@@ -32,7 +33,7 @@ describe("mapAppMetrics", () => {
     [202, "Browser tab: Example Domain"],
   ]);
 
-  const raw: Electron.ProcessMetric[] = [
+  const raw: ProcessMetric[] = [
     metric({
       pid: 100,
       type: "Browser",
@@ -113,7 +114,7 @@ describe("mapAppMetrics", () => {
   });
 
   test("falls back to defaults when cpu/memory are absent", () => {
-    const out = mapAppMetrics([{ pid: 1, type: "Utility" } as Electron.ProcessMetric], new Map());
+    const out = mapAppMetrics([{ pid: 1, type: "Utility" } as ProcessMetric], new Map());
     assert.equal(out.processes[0].cpuPercent, 0);
     assert.equal(out.processes[0].memoryKB, 0);
     assert.equal(out.processes[0].label, "Utility");
@@ -125,5 +126,15 @@ describe("mapAppMetrics", () => {
       new Map(),
     );
     assert.equal(out.processes[0].label, "Foo Service");
+  });
+
+  test("empty-string Utility serviceName falls back to the localised name", () => {
+    // Guards the `&&`→`??` edge: an empty (but defined) serviceName is falsy
+    // but not nullish, so it must not produce a blank label.
+    const out = mapAppMetrics(
+      [metric({ pid: 3, type: "Utility", serviceName: "", name: "Fallback Service" })],
+      new Map(),
+    );
+    assert.equal(out.processes[0].label, "Fallback Service");
   });
 });

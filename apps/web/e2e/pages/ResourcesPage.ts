@@ -26,6 +26,10 @@ export class ResourcesPage {
   readonly dialog: Locator;
   /** Outer server snapshot card (PID, uptime, memory, CPU). */
   readonly serverCard: Locator;
+  /** Desktop-only "Desktop app (Electron)" card. Never rendered in the
+   *  web-build harness (self-gates on `isDesktop`) — used only to assert
+   *  its absence. */
+  readonly electronCard: Locator;
   /** Title-row trigger that expands/collapses the server card. */
   readonly serverToggle: Locator;
   /** Headline total shown next to the server title while collapsed
@@ -60,6 +64,7 @@ export class ResourcesPage {
   ) {
     this.dialog = page.getByTestId("resources-dialog");
     this.serverCard = page.getByTestId("resources-server-card");
+    this.electronCard = page.getByTestId("resources-electron-card");
     this.serverToggle = page.getByTestId("resources-server-toggle");
     this.serverTotal = page.getByTestId("resources-server-total");
     this.serverPid = page.getByTestId("resources-server-pid");

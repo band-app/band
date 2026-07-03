@@ -93,7 +93,9 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.getAppTitle, () => getAppTitle());
   handle(Channels.getWindowFullscreen, () => opts.mainWindow.isFullScreen());
   // Per-process Electron/Chromium resource metrics for the Resources page.
-  handle(Channels.getAppMetrics, () => getAppMetrics());
+  // Pass the dashboard window's webContents id so the mapper can label its
+  // renderer "Dashboard" and not confuse it with other top-level windows.
+  handle(Channels.getAppMetrics, () => getAppMetrics(opts.mainWindow.webContents.id));
 
   // ---- macOS shell ----
   // Args are camelCase because they're forwarded to the handlers as typed
