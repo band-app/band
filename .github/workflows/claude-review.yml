@@ -115,20 +115,25 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            You run Band's CI PR review end-to-end IN THIS AGENT: read the
-            orchestration spec, gather context, dispatch the four specialist
-            reviewers directly, aggregate their findings, and post the result
-            as a PR comment.
+            You run Band's CI PR review IN THIS AGENT: read the orchestration
+            spec, gather context, dispatch the four specialist reviewers
+            directly, aggregate their findings, and WRITE the final report to a
+            file. You do NOT post the PR comment yourself — a separate,
+            deterministic workflow step reads your file and posts it. Building a
+            `gh` call whose body is arbitrary review text (backticks, `$(...)`,
+            emojis) from inside the model is fragile and flakily failed, which
+            is exactly why posting is now a plain-bash step outside this agent.
 
             CRITICAL — do NOT delegate the orchestration to a nested
             `general-purpose` subagent (or any single "run the review" agent).
             An agent that itself spawns agents is launched as a background /
             async task, and this action runs `claude -p` one-shot: after that
             async launch the run reaches a terminal state and ENDS before the
-            background review finishes, so no comment is ever posted. The four
+            background review finishes, so nothing is produced. The four
             specialists below are leaf agents (they spawn nothing) and run
             synchronously — so you must dispatch them yourself, from this
-            agent, and keep this agent alive until the comment is posted.
+            agent, and keep this agent alive until you have written the report
+            file.
 
             Step 1 — Read the orchestration spec.
 
@@ -149,10 +154,10 @@ jobs:
 
             Gather the diff via `gh pr diff ${{ github.event.pull_request.number }}`
             (do NOT truncate) and metadata via `gh pr view`. Keep the diff in
-            your context — do NOT save it to a file (writes under `.git/` and
-            most repo paths are denied and only waste turns). Discover linked
-            issues by extracting `closes #N`, `fixes #N`, or `resolves #N`
-            from the PR body and commit messages:
+            your context — do NOT save the diff to a file. The only file you
+            create in this whole run is the report file in Step 4. Discover
+            linked issues by extracting `closes #N`, `fixes #N`, or
+            `resolves #N` from the PR body and commit messages:
 
               gh pr view ${{ github.event.pull_request.number }} --json body --jq .body
               git log origin/${{ github.event.pull_request.base.ref }}..${{ github.event.pull_request.head.sha }} --format='%s%n%b'
@@ -183,107 +188,87 @@ jobs:
             status, `👍 / 👎` for verdict). Do not paraphrase, filter, or
             "improve" the specialists' findings — forward them verbatim.
 
-            Step 4 — Post the aggregated report as a PR comment, idempotently.
+            Step 4 — Write the aggregated report to the output file.
 
-            Do NOT use the `Write` tool or shell redirection to stage the body
-            (or the diff) into a file — the `Write` tool is not permitted and
-            paths under `.git/` are blocked, so those attempts are denied and
-            waste your turn budget. Keep the report in your context and pass it
-            INLINE via a quoted heredoc, e.g.:
+            Using the `Write` tool, write the report to EXACTLY this path:
 
-              gh pr comment ${{ github.event.pull_request.number }} --body "$(cat <<'EOF'
-              <full body>
-              EOF
-              )"
+              ${{ github.workspace }}/.claude-review-body.md
 
-            The comment body is exactly:
+            The file contents are exactly:
               `<!-- claude-review-summary -->` + newline + the aggregated
-              report, unchanged (no headers, footers, signatures, or
-              "Posted by" notes around it).
+              report, unchanged (no headers, footers, signatures, "Posted by"
+              notes, or Markdown code fences wrapping it).
 
-            On subsequent workflow runs (e.g. when the author pushes a new
-            commit), UPDATE the same comment in place — do not post a new one
-            each time:
-
-              (a) Search for the existing marker comment:
-                  gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-                    --jq '.[] | select(.body | contains("<!-- claude-review-summary -->")) | .id' \
-                    | head -1
-
-              (b) If an ID is returned, UPDATE it in place:
-                  gh api "repos/${{ github.repository }}/issues/comments/<id>" \
-                    -X PATCH -f body="<full body>"
-
-              (c) If nothing is returned, CREATE a new comment:
-                  gh pr comment ${{ github.event.pull_request.number }} --body "<full body>"
-                  Pass the body as the `--body` argument directly; do not try
-                  to pipe via `--body-file -` (your allowlist does not include
-                  the upstream command needed to pipe).
+            That `Write` is your FINAL action. Do NOT run `gh`, do NOT try to
+            post or update the comment, and do NOT write to any other path. A
+            deterministic "Post review comment" workflow step reads that exact
+            file and posts it (creating or idempotently updating the marker
+            comment) — all the gh/posting logic lives there, not here. Writing
+            the file correctly is your entire job.
           # allowedTools notes for maintainers:
+          # - The review agent does NOT post the comment. It gathers context,
+          #   dispatches the four specialists, and Writes the report to
+          #   `${{ github.workspace }}/.claude-review-body.md`; the
+          #   deterministic "Post review comment" step below reads that file
+          #   and posts it. This keeps the fragile part — building a gh call
+          #   whose body is arbitrary review text (backticks, $(...), emojis) —
+          #   OUT of the LLM, where it flakily failed (~half of runs posted
+          #   nothing: the model mis-built the heredoc or gave up staging the
+          #   body to a file). So the allowlist is read-only tools plus
+          #   `Write`, and drops `gh api`, `gh pr comment`, `cat`, `head`.
           # - `Skill` is omitted. The claude-code-action@v1 runtime does NOT
           #   auto-discover project-defined skills under .claude/skills/, so
-          #   Skill(skill="review-changes") returns "Unknown skill" in CI.
-          #   The top-level review agent Reads the SKILL.md file directly and
-          #   follows its instructions inline. It must NOT delegate to a
-          #   nested general-purpose subagent — see the CRITICAL note in the
-          #   prompt above: a nesting agent gets launched async and the
-          #   one-shot `claude -p` run ends before it posts.
-          # - `Bash(gh api:*)` is the broad form. We tested narrower patterns
-          #   (single-`*` `repos/*/issues/*`, two-`*` `repos/*/*/issues/*`,
-          #   and even hardcoded `repos/band-app/band/issues/*`) on the
-          #   review agent; none match the actual call
-          #   shape inside the action's Bash-allowlist matcher, and the
-          #   idempotent-update PATCH gets silently denied so the agent
-          #   falls back to creating a fresh comment per push. The broad
-          #   form is bounded by the workflow's GITHUB_TOKEN scope
-          #   (`pull-requests: write`), so the practical blast radius is
-          #   the same as the narrow forms would have provided.
-          # - `Bash(git:*)` (broad) replaces the earlier narrow
-          #   `Bash(git diff:*)` + `Bash(git log:*)`. The review agent
-          #   naturally issues `git -C <path> log ...`, whose token
-          #   prefix is `git -C`, NOT `git log`, so the narrow patterns never
-          #   matched and every such call was denied. The agent then burned
-          #   its turn budget retrying variants and gave up before posting
-          #   (observed on PR #600: permission_denials_count=11, no comment,
-          #   yet the action still exited success). `Bash(cat:*)` and
-          #   `Bash(head:*)` are added for the same reason: the post step uses
-          #   `gh pr comment --body "$(cat <<EOF ...)"` and the marker lookup
-          #   pipes `gh api ... | head -1`; the compound-command matcher
-          #   denies the whole line when `cat`/`head` aren't allowlisted.
-          #   All are read-only or bounded by the GITHUB_TOKEN scope.
+          #   Skill(skill="review-changes") returns "Unknown skill" in CI. The
+          #   agent Reads SKILL.md directly and follows it inline. It must NOT
+          #   delegate to a nested general-purpose subagent — see the CRITICAL
+          #   note in the prompt: a nesting agent is launched async and the
+          #   one-shot `claude -p` run ends before it produces anything.
+          # - `Write` is allowed ONLY so the agent can emit the report file.
+          #   The prompt pins the exact output path; the token is
+          #   `contents: read` and the runner is ephemeral and author-gated, so
+          #   a stray write lands on a throwaway VM and never reaches git.
+          # - `Bash(git:*)` (broad) replaces narrow `Bash(git diff:*)` +
+          #   `Bash(git log:*)`: the agent issues `git -C <path> log ...` for
+          #   linked-issue commit messages, whose token prefix is `git -C`,
+          #   NOT `git log`, so the narrow patterns never matched and every
+          #   such call was denied. Bounded by the `contents: read` token.
           claude_args: |-
-            --allowedTools "Agent,Bash(git:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*),Bash(cat:*),Bash(head:*)"
+            --allowedTools "Agent,Bash(git:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Write"
 
-      # Structural guard against silent no-ops. The claude-code-action returns
-      # success even when the review agent finishes without posting — e.g. a
-      # nested subagent got launched async and the one-shot run ended first, or
-      # the agent burned its turns on denied tool calls. A green "Claude review"
-      # check therefore does NOT by itself mean a review was produced. Assert
-      # the marker comment actually landed on the PR and fail the job otherwise,
-      # so a no-op review is never reported as green. Runs even if the previous
-      # step failed.
-      - name: Verify a fresh review comment was posted
+      # Deterministic post. The review agent writes its report to
+      # .claude-review-body.md (prompt Step 4); this plain-bash step reads that
+      # file and posts it as the PR comment, idempotently. Keeping the gh call
+      # in bash — not in the model — is what makes posting reliable: the body is
+      # arbitrary review text (backticks, $(...), emojis) that flakily broke
+      # when the model built the shell command itself (~half of runs posted
+      # nothing). It also doubles as the no-op guard: if the agent produced no
+      # report file, this step fails, so a green check always means a review was
+      # actually produced AND posted. Runs even if the review step reported
+      # failure (its exit code is unreliable).
+      - name: Post review comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY_FILE: ${{ github.workspace }}/.claude-review-body.md
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          # Require a marker comment that THIS run created or updated — not just
-          # one that exists. An existing-but-stale comment from a previous run
-          # must NOT satisfy the guard, or a review agent that finishes without
-          # posting would false-pass on the leftover comment. The idempotent
-          # post path refreshes updated_at every run, so a real post is seconds
-          # old by the time this step runs; anything older than the job's own
-          # window means this run did not (re)post.
-          updated=$(gh api \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- claude-review-summary -->"))] | max_by(.updated_at) | .updated_at // empty')
-          if [ -z "$updated" ]; then
-            echo "::error title=No Claude review posted::No <!-- claude-review-summary --> comment on PR #${{ github.event.pull_request.number }}. Open 'Run Claude review': check for an async subagent launch that ended the run early (num_turns low, no specialists completed) or permission_denials_count > 0."
+          set -euo pipefail
+          if [ ! -s "$BODY_FILE" ]; then
+            echo "::error title=No Claude review produced::The review agent wrote no report to .claude-review-body.md. Open the 'Run Claude review' step: check for an async subagent launch that ended the run early (num_turns low, no specialists completed) or permission_denials_count > 0."
             exit 1
           fi
-          age=$(( $(date -u +%s) - $(date -u -d "$updated" +%s) ))
-          if [ "$age" -gt 1200 ]; then
-            echo "::error title=Stale Claude review::Newest review comment on PR #${{ github.event.pull_request.number }} is ${age}s old (updated ${updated}); THIS run did not (re)post it. The review agent likely finished without posting — check the 'Run Claude review' step."
+          if ! grep -q '<!-- claude-review-summary -->' "$BODY_FILE"; then
+            echo "::error title=Malformed review::.claude-review-body.md is missing the <!-- claude-review-summary --> marker; refusing to post."
             exit 1
           fi
-          echo "✓ Fresh review comment present (updated ${updated}, ${age}s ago)."
+          # Idempotent: update the existing marker comment in place, else create.
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 --jq 'map(select(.body | contains("<!-- claude-review-summary -->"))) | (.[0].id // empty)')
+          if [ -n "$id" ]; then
+            gh api "repos/$REPO/issues/comments/$id" -X PATCH -f body="$(cat "$BODY_FILE")" >/dev/null
+            echo "Updated existing review comment ($id)."
+          else
+            gh pr comment "$PR" --body-file "$BODY_FILE"
+            echo "Created review comment."
+          fi
