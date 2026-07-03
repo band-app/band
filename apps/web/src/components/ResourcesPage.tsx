@@ -1,7 +1,9 @@
 import { Button, ScrollArea, Spinner } from "@band-app/ui";
-import { useQuery } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { invoke } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
 interface ServerSnapshot {
@@ -21,6 +23,25 @@ interface ServerSnapshot {
     userMicros: number;
     systemMicros: number;
   };
+}
+
+// Mirrors the mapper output in
+// apps/desktop/src/main/ipc/app-metrics.ts. Defined inline (not imported)
+// so the web app never gains a build-time dependency on desktop types —
+// same pattern as `ServerSnapshot` above.
+interface AppProcessMetric {
+  pid: number;
+  label: string;
+  type: string;
+  cpuPercent: number;
+  memoryKB: number;
+}
+
+interface AppMetrics {
+  processCount: number;
+  totalMemoryKB: number;
+  totalCpuPercent: number;
+  processes: AppProcessMetric[];
 }
 
 interface ProjectListing {
@@ -137,6 +158,15 @@ export function ResourcesPage() {
   const serverQuery = useQuery<ServerSnapshot>({
     queryKey: ["resources", "server"],
     queryFn: () => trpc.services.resourcesServer.query(),
+  });
+
+  // Electron/Chromium process metrics — desktop shell only. The web app
+  // never launches Electron, so this stays disabled (and the card below
+  // returns null) outside the desktop shell.
+  const appMetricsQuery = useQuery<AppMetrics>({
+    queryKey: ["resources", "app-metrics"],
+    queryFn: () => invoke<AppMetrics>("get_app_metrics"),
+    enabled: isDesktop,
   });
 
   // Cheap query — just `git worktree list --porcelain` per project,
@@ -328,6 +358,8 @@ export function ResourcesPage() {
           )}
         </section>
 
+        <ElectronCard query={appMetricsQuery} />
+
         <section data-testid="resources-worktrees-card" className="space-y-3">
           <div className="flex flex-row items-start justify-between gap-2">
             <div className="space-y-1">
@@ -506,6 +538,109 @@ export function ResourcesPage() {
         </section>
       </div>
     </ScrollArea>
+  );
+}
+
+/**
+ * "Desktop app (Electron)" card — a per-process breakdown of the Electron
+ * main process, GPU process, Chromium renderers (dashboard + browser tabs),
+ * and Utility helpers, via `app.getAppMetrics()`.
+ *
+ * Self-gating: renders nothing outside the Electron shell (the web-server
+ * build has no `get_app_metrics` handler and no Electron processes to
+ * report), so the whole card is desktop-only.
+ */
+function ElectronCard({ query }: { query: UseQueryResult<AppMetrics> }) {
+  if (!isDesktop) return null;
+
+  const metrics = query.data;
+
+  return (
+    <section data-testid="resources-electron-card" className="space-y-3">
+      <div className="flex flex-row items-start justify-between gap-2">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold leading-none">Desktop app (Electron)</h2>
+          <p className="text-sm text-muted-foreground">
+            Per-process CPU and memory for the Electron main process, GPU process, Chromium
+            renderers (the dashboard and each browser tab), and utility helpers.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="resources-refresh-electron"
+          onClick={() => query.refetch()}
+          disabled={query.isFetching}
+        >
+          {query.isFetching ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}
+          Refresh
+        </Button>
+      </div>
+      {query.isError ? (
+        <p className="text-sm text-destructive">
+          Failed to load Electron metrics: {String(query.error)}
+        </p>
+      ) : !metrics ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          Loading…
+        </div>
+      ) : (
+        <div className="relative overflow-x-auto">
+          <table data-testid="resources-electron-table" className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <th className="py-2 pr-3">Process</th>
+                <th className="py-2 pr-3">Type</th>
+                <th className="py-2 pr-3 text-right">PID</th>
+                <th className="py-2 pr-3 text-right">CPU</th>
+                <th className="py-2 pr-3 text-right">Memory</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.processes.map((p) => (
+                <tr
+                  key={p.pid}
+                  data-testid={`resources-electron-row-${p.pid}`}
+                  className="border-b border-border/60 last:border-0 hover:bg-muted/40"
+                >
+                  <td className="py-1.5 pr-3">{p.label}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground">{p.type}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{p.pid}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {p.cpuPercent.toFixed(1)}%
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">
+                    {formatBytes(p.memoryKB * 1024)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-border font-medium">
+                <td className="py-2 pr-3" data-testid="resources-electron-total-count">
+                  Total ({metrics.processCount})
+                </td>
+                <td className="py-2 pr-3" />
+                <td className="py-2 pr-3" />
+                <td
+                  className="py-2 pr-3 text-right tabular-nums"
+                  data-testid="resources-electron-total-cpu"
+                >
+                  {metrics.totalCpuPercent.toFixed(1)}%
+                </td>
+                <td
+                  className="py-2 pr-3 text-right tabular-nums"
+                  data-testid="resources-electron-total-memory"
+                >
+                  {formatBytes(metrics.totalMemoryKB * 1024)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -39,6 +39,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "webserver_stop",
   "get_app_title",
   "get_window_fullscreen",
+  "get_app_metrics",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "pick_file",
