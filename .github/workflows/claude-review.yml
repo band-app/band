@@ -111,6 +111,14 @@ jobs:
           # claude[bot] GitHub App. Avoids the App-install requirement;
           # comments post as github-actions[bot]. See permissions comment.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # TEMPORARY — DEBUGGING ONLY (remove after diagnosis). Streams the full
+          # agent transcript into the job log so we can see which turn the nested
+          # general-purpose→specialist dispatch short-circuits on. Registered
+          # secrets (CLAUDE_CODE_OAUTH_TOKEN, GITHUB_TOKEN) are masked by Actions
+          # and the model never receives them, but this is a public repo, so DO
+          # NOT leave this on: it widens the surface for an unmasked transformed
+          # secret to appear in world-readable logs.
+          show_full_output: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
