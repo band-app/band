@@ -1075,7 +1075,34 @@ function LazyFileRow({
         />
       )}
       {isOpen && (
-        <div className="border-t border-border/20 bg-muted/30">
+        <div
+          className="border-t border-border/20 bg-muted/30"
+          // Skip layout + paint of this diff body while it's scrolled
+          // off-screen, even though its CodeMirror editor stays mounted
+          // (the mount-once policy keeps up to MAX_MOUNTED_EDITORS alive).
+          // Each editor runs in `naturalHeight` mode (no internal line
+          // virtualization) and DiffView has no outer row virtualizer, so
+          // every mounted editor's full height normally sits in the layout
+          // tree. When the whole Changes panel un-hides on a workspace
+          // switch (MultiWorkspacePanelHost flips `content-visibility`),
+          // the browser would re-lay-out every mounted editor in a single
+          // frame — measured at ~44 ms + an >50 ms long task for a ~10-file
+          // diff. Marking each body `content-visibility: auto` lets the
+          // browser lay out only the rows actually near the viewport on
+          // reveal. `containIntrinsicBlockSize` feeds the cached body height
+          // (`placeholderHeight` = measured height, or the line-count
+          // estimate) so skipped rows keep the scrollbar stable instead of
+          // collapsing. Guarded on a known height so a still-loading row
+          // (height 0) doesn't collapse and jump the scroll position.
+          style={
+            placeholderHeight > 0
+              ? ({
+                  contentVisibility: "auto",
+                  containIntrinsicBlockSize: `${placeholderHeight}px`,
+                } as React.CSSProperties)
+              : undefined
+          }
+        >
           {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
           {diff !== null &&
             (shouldRender ? (
