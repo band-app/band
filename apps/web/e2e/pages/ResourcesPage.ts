@@ -4,18 +4,16 @@
  * shared Dialog managed by `ToolbarOverflowProvider`).
  *
  * Owns the locators for the server snapshot card and the worktree
- * usage table, plus a `goto()` that walks the user flow:
- * dashboard → Menu → Resources.
+ * usage table, plus an `open()` that walks the user flow:
+ * dashboard → Resources icon (project-list bottom action bar).
  *
  * Locator priority:
  *
- *   - `getByRole({ name })` for the dashboard title bar Menu trigger
- *     (the `aria-label="Menu"` value is system-controlled and not
- *     localisable user copy).
  *   - `getByTestId(...)` for owned card / button / table elements,
  *     using the BEM-style `resources-*` prefix the page component sets
- *     in `ResourcesPage.tsx`, plus `menu__resources` for the menu item
- *     and `resources-dialog` for the dialog body itself.
+ *     in `ResourcesPage.tsx`, plus `project-list__resources-button` for
+ *     the Resources icon button and `resources-dialog` for the dialog
+ *     body itself.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -39,10 +37,8 @@ export class ResourcesPage {
   readonly projectsTable: Locator;
   /** Grand-total cell inside the per-project rollup's footer. */
   readonly projectsTotal: Locator;
-  /** Menu trigger button in the desktop title bar. */
-  readonly menuTrigger: Locator;
-  /** Resources entry inside the dashboard menu. */
-  readonly resourcesMenuItem: Locator;
+  /** Resources icon button in the project-list bottom action bar. */
+  readonly resourcesButton: Locator;
 
   constructor(
     private readonly page: Page,
@@ -56,37 +52,33 @@ export class ResourcesPage {
     this.refreshWorktreesButton = page.getByTestId("resources-refresh-worktrees");
     this.projectsTable = page.getByTestId("resources-projects-table");
     this.projectsTotal = page.getByTestId("resources-projects-total");
-    // The desktop title bar exposes its hamburger trigger with
-    // `aria-label="Menu"` (see DesktopTitleBar.tsx). System-controlled
-    // ARIA name — getByRole is the preferred locator.
-    this.menuTrigger = page.getByRole("button", { name: "Menu" });
-    this.resourcesMenuItem = page.getByTestId("menu__resources");
+    // Resources is a standalone icon button in the project-list bottom
+    // action bar, testid `project-list__resources-button` (set in
+    // `ToolbarButtons.tsx::ToolbarActionBar`). Distinct from the overflow
+    // menu's `menu__resources` item so a collapsed-sidebar fallback menu
+    // can't put two same-testid nodes in the DOM.
+    this.resourcesButton = page.getByTestId("project-list__resources-button");
   }
 
-  /** Navigate to the dashboard root, then open the title-bar Menu and
-   *  click Resources. Mirrors the user flow described in the issue.
-   *
-   *  Radix's DropdownMenuTrigger sometimes swallows the first click
-   *  that lands on it inside `asChild` button wrappers during a fast
-   *  Playwright run — the trigger's mousedown handler fires before
-   *  the click's pointerdown bubbles back up, and the dropdown closes
-   *  again. Polling the menu item's visibility via `expect.poll` lets
-   *  us re-click the trigger until the dropdown stays open. */
+  /** Navigate to the dashboard root, then click the Resources icon in the
+   *  project-list bottom action bar. The button is wrapped in a Radix Tooltip
+   *  trigger whose hover/pointer handling can swallow the first click during a
+   *  fast run, so re-click until the dialog actually opens. */
   async open(): Promise<void> {
-    await test.step("Open Resources via dashboard menu", async () => {
+    await test.step("Open Resources via the bottom action bar", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
-      await expect(this.menuTrigger).toBeVisible();
+      await this.page.waitForLoadState("networkidle");
+      await expect(this.resourcesButton).toBeVisible();
       await expect
         .poll(
           async () => {
-            await this.menuTrigger.click();
-            return await this.resourcesMenuItem.isVisible().catch(() => false);
+            if (await this.dialog.isVisible().catch(() => false)) return true;
+            await this.resourcesButton.click();
+            return await this.dialog.isVisible().catch(() => false);
           },
           { timeout: 10_000 },
         )
         .toBe(true);
-      await this.resourcesMenuItem.click();
-      await expect(this.dialog).toBeVisible();
     });
   }
 

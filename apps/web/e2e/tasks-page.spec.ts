@@ -91,16 +91,16 @@ function deleteTask(tmpHome: string, taskId: string): void {
 }
 
 /**
- * Open the Tasks dialog from the dashboard's hamburger ("Menu") toolbar
- * dropdown. Returns the dialog locator for further interaction. Use after
- * `page.goto` has loaded the dashboard.
+ * Open the Tasks dialog from the project-list bottom action bar's 3-dot
+ * overflow menu. Returns the dialog locator for further interaction. Use
+ * after `page.goto` has loaded the dashboard.
  */
 async function openTasksDialog(page: Page) {
   // The dashboard React app fetches projects via tRPC on mount, so the
-  // toolbar's React click handlers may not be bound by the time `load`
+  // action bar's React click handlers may not be bound by the time `load`
   // fires. Wait for the network to settle before driving the dropdown.
   await page.waitForLoadState("networkidle");
-  const trigger = page.locator('button[aria-label="Menu"]');
+  const trigger = page.getByTestId("project-list__overflow-trigger");
   // Retry the open until the menu actually appears — covers any remaining
   // hydration race between the click reaching the DOM and React binding
   // the dropdown's onClick.

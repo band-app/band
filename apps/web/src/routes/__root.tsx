@@ -30,7 +30,11 @@ import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { type PanelItem, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
-import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
+import {
+  ToolbarActionBar,
+  ToolbarOverflowMenuItems,
+  ToolbarOverflowProvider,
+} from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -625,9 +629,18 @@ function AppShell() {
                 className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
                 data-testid="app-shell__sidebar"
               >
-                <SidebarTitleBar {...navControlProps} offsetClass={titleBarOffset} />
+                {/* The hamburger menu is dropped here: while the list is
+                    visible its actions live in DashboardShell's bottom action
+                    bar. Only the sidebar toggle + back/forward arrows ride in
+                    the SidebarTitleBar. The menu stays in the WorkspaceTitleBar
+                    (below) as the fallback for the collapsed-list state. */}
+                <SidebarTitleBar
+                  {...navControlProps}
+                  menuItems={undefined}
+                  offsetClass={titleBarOffset}
+                />
                 <div className="flex-1 min-h-0">
-                  <DashboardShell hideMenu hideTitleBar />
+                  <DashboardShell hideTitleBar bottomActions={<ToolbarActionBar />} />
                 </div>
               </div>
             </Panel>

@@ -412,11 +412,19 @@ export class WorkspacePage {
     return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
   }
 
-  /** The hamburger menu trigger (Tasks / Cronjobs / Settings …). Rendered by
-   *  `NavControls`, so it relocates between the two title-bar halves with the
-   *  rest of the cluster. Targeted by its system-controlled ARIA name. */
+  /** The hamburger menu trigger (Tasks / Cronjobs / Settings …). Now rendered
+   *  by `NavControls` only in the WorkspaceTitleBar as the fallback for the
+   *  collapsed-sidebar state — while the sidebar is visible those actions live
+   *  in the project-list bottom action bar instead. Targeted by its
+   *  system-controlled ARIA name. */
   get menuTrigger(): Locator {
     return this.page.getByRole("button", { name: "Menu" });
+  }
+
+  /** The project-list bottom action bar (Settings + Resources/Usage/overflow),
+   *  scoped to the sidebar column. Present whenever the list is visible. */
+  get actionBarWithinSidebar(): Locator {
+    return this.sidebar.getByTestId("project-list__action-bar");
   }
 
   /** The workspace-history back arrow (⌘[). Part of the relocating
@@ -440,9 +448,10 @@ export class WorkspacePage {
     return this.sidebar.getByTestId("desktop-title-bar__sidebar-toggle");
   }
 
-  /** The hamburger menu trigger scoped to the project-list column. Count drops
-   *  to 0 once the sidebar collapses and the cluster relocates to the workspace
-   *  bar — the signal that the relocation actually happened. */
+  /** The hamburger menu trigger scoped to the project-list column. The menu no
+   *  longer rides in the SidebarTitleBar (its actions moved to the bottom
+   *  action bar), so this is count 0 while the list is visible; the menu only
+   *  appears in the WorkspaceTitleBar once the sidebar collapses. */
   get menuTriggerWithinSidebar(): Locator {
     return this.sidebar.getByRole("button", { name: "Menu" });
   }

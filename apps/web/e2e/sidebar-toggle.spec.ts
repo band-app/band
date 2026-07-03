@@ -126,11 +126,14 @@ test("the nav cluster is hosted in the sidebar title bar while the sidebar is vi
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
 
-  // The split title bar puts the toggle + hamburger menu inside the
-  // project-list column (SidebarTitleBar) when the list is shown.
+  // The split title bar puts the sidebar toggle inside the project-list
+  // column (SidebarTitleBar) when the list is shown. The overflow actions
+  // no longer ride in a title-bar hamburger — they live in the project-list
+  // bottom action bar — so the sidebar menu trigger is absent here.
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
   await expect(wp.sidebarToggleWithinSidebar).toBeVisible();
-  await expect(wp.menuTriggerWithinSidebar).toBeVisible();
+  await expect(wp.actionBarWithinSidebar).toBeVisible();
+  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
 });
 
 test("the menu and back/forward relocate into the workspace bar when the sidebar collapses", async ({
@@ -140,8 +143,10 @@ test("the menu and back/forward relocate into the workspace bar when the sidebar
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
 
-  // Precondition: while visible, the menu lives in the sidebar column.
-  await expect(wp.menuTriggerWithinSidebar).toBeVisible();
+  // Precondition: while visible, the actions live in the project-list bottom
+  // action bar and no hamburger rides in the sidebar title bar.
+  await expect(wp.actionBarWithinSidebar).toBeVisible();
+  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
 
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);

@@ -18,7 +18,7 @@ import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
-import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
+import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext, useSessionListContext } from "../hooks/useSessionListContext";
@@ -430,7 +430,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
                 Browse projects and open a workspace
               </SheetDescription>
               <ToolbarOverflowProvider>
-                <DashboardShell toolbarMenuItems={<ToolbarOverflowMenuItems />} hideTitleBar />
+                <DashboardShell bottomActions={<ToolbarActionBar />} hideTitleBar />
               </ToolbarOverflowProvider>
             </SheetContent>
           </Sheet>

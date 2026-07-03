@@ -1,5 +1,18 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenuItem } from "@band-app/ui";
-import { Activity, BarChart3, Globe, ListTodo, Timer } from "lucide-react";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band-app/ui";
+import { Activity, BarChart3, Globe, ListTodo, MoreHorizontal, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
@@ -196,6 +209,97 @@ export function ToolbarOverflowMenuItems() {
         <Activity className="size-4" />
         Resources
       </DropdownMenuItem>
+    </>
+  );
+}
+
+/**
+ * Bottom action row cluster for the project list (right-hand side).
+ *
+ * Surfaces Resources and Usage as standalone icon buttons and tucks the
+ * remaining actions (Tasks, Cronjobs, tunnel) behind a 3-dot overflow menu.
+ * Rendered inside `DashboardShell`'s persistent footer; passed in as a
+ * `ReactNode` prop because the `dashboard/` module must not import from
+ * `components/`. Must be mounted inside a <ToolbarOverflowProvider>.
+ */
+export function ToolbarActionBar() {
+  const ctx = useContext(ToolbarOverflowContext);
+  if (!ctx) {
+    throw new Error("ToolbarActionBar must be used inside ToolbarOverflowProvider");
+  }
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-label="Resources"
+            data-testid="project-list__resources-button"
+            onClick={ctx.openResources}
+          >
+            <Activity className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Resources</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-label="Usage"
+            data-testid="project-list__usage-button"
+            onClick={ctx.openReports}
+          >
+            <BarChart3 className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Usage</TooltipContent>
+      </Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="More actions"
+                data-testid="project-list__overflow-trigger"
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">More</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={ctx.openTasks}>
+            <ListTodo className="size-4" />
+            Tasks
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openCronjobs}>
+            <Timer className="size-4" />
+            Cronjobs
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openTunnel}>
+            <Globe
+              className={
+                ctx.tunnelStatus === "error"
+                  ? "size-4 text-red-500"
+                  : ctx.tunnelStatus === "running"
+                    ? "size-4 text-green-500"
+                    : "size-4"
+              }
+            />
+            {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }
