@@ -111,10 +111,6 @@ jobs:
           # claude[bot] GitHub App. Avoids the App-install requirement;
           # comments post as github-actions[bot]. See permissions comment.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # TEMPORARY — DEBUGGING ONLY (remove after diagnosis). See prior note:
-          # tokens are masked and the model never receives them, but this is a
-          # public repo — do not leave this on.
-          show_full_output: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -152,7 +148,9 @@ jobs:
               HEAD   = ${{ github.event.pull_request.head.sha }}
 
             Gather the diff via `gh pr diff ${{ github.event.pull_request.number }}`
-            (do NOT truncate) and metadata via `gh pr view`. Discover linked
+            (do NOT truncate) and metadata via `gh pr view`. Keep the diff in
+            your context — do NOT save it to a file (writes under `.git/` and
+            most repo paths are denied and only waste turns). Discover linked
             issues by extracting `closes #N`, `fixes #N`, or `resolves #N`
             from the PR body and commit messages:
 
@@ -186,6 +184,17 @@ jobs:
             "improve" the specialists' findings — forward them verbatim.
 
             Step 4 — Post the aggregated report as a PR comment, idempotently.
+
+            Do NOT use the `Write` tool or shell redirection to stage the body
+            (or the diff) into a file — the `Write` tool is not permitted and
+            paths under `.git/` are blocked, so those attempts are denied and
+            waste your turn budget. Keep the report in your context and pass it
+            INLINE via a quoted heredoc, e.g.:
+
+              gh pr comment ${{ github.event.pull_request.number }} --body "$(cat <<'EOF'
+              <full body>
+              EOF
+              )"
 
             The comment body is exactly:
               `<!-- claude-review-summary -->` + newline + the aggregated
@@ -253,17 +262,28 @@ jobs:
       # the marker comment actually landed on the PR and fail the job otherwise,
       # so a no-op review is never reported as green. Runs even if the previous
       # step failed.
-      - name: Verify a review comment was posted
+      - name: Verify a fresh review comment was posted
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          found=$(gh api \
+          # Require a marker comment that THIS run created or updated — not just
+          # one that exists. An existing-but-stale comment from a previous run
+          # must NOT satisfy the guard, or a review agent that finishes without
+          # posting would false-pass on the leftover comment. The idempotent
+          # post path refreshes updated_at every run, so a real post is seconds
+          # old by the time this step runs; anything older than the job's own
+          # window means this run did not (re)post.
+          updated=$(gh api \
             "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --jq '[.[] | select(.body | contains("<!-- claude-review-summary -->"))] | length')
-          if [ "${found:-0}" -ge 1 ]; then
-            echo "✓ Review comment present (${found} marker comment(s))."
-          else
-            echo "::error title=No Claude review posted::The review agent produced no comment on PR #${{ github.event.pull_request.number }}. Open the 'Run Claude review' step: check for an async subagent launch that ended the run early (num_turns low, no specialists completed), or permission_denials_count > 0."
+            --jq '[.[] | select(.body | contains("<!-- claude-review-summary -->"))] | max_by(.updated_at) | .updated_at // empty')
+          if [ -z "$updated" ]; then
+            echo "::error title=No Claude review posted::No <!-- claude-review-summary --> comment on PR #${{ github.event.pull_request.number }}. Open 'Run Claude review': check for an async subagent launch that ended the run early (num_turns low, no specialists completed) or permission_denials_count > 0."
             exit 1
           fi
+          age=$(( $(date -u +%s) - $(date -u -d "$updated" +%s) ))
+          if [ "$age" -gt 1200 ]; then
+            echo "::error title=Stale Claude review::Newest review comment on PR #${{ github.event.pull_request.number }} is ${age}s old (updated ${updated}); THIS run did not (re)post it. The review agent likely finished without posting — check the 'Run Claude review' step."
+            exit 1
+          fi
+          echo "✓ Fresh review comment present (updated ${updated}, ${age}s ago)."
