@@ -111,8 +111,6 @@ jobs:
           # claude[bot] GitHub App. Avoids the App-install requirement;
           # comments post as github-actions[bot]. See permissions comment.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # TEMPORARY — DEBUGGING ONLY (remove before merge). Public repo.
-          show_full_output: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
