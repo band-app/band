@@ -527,7 +527,7 @@ export class CodexAdapter implements CodingAgent {
   }
 
   async listSessions(dir: string): Promise<SessionListItem[]> {
-    log.info({ dir }, "listSessions");
+    log.debug({ dir }, "listSessions");
     const sessions = await readCodexSessions();
     return sessions.filter((s) => s.cwd === dir).sort((a, b) => b.lastModified - a.lastModified);
   }

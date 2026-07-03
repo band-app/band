@@ -41,6 +41,7 @@ Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/
 ### Exceptions
 
 - `packages/coding-agent/tests/codex-adapter.test.ts` is an event-mapping unit test that mocks `@openai/codex-sdk` via a custom Node loader (`tests/register-mock-loader.mjs` + `tests/mocks/codex-sdk.mjs`). The Codex SDK communicates with a subprocess over stdin/stdout, so MSW does not apply, and exercising the real `codex` binary is impractical in CI. The test is allowed to remain as-is until the SDK exposes a network seam or a stub binary; do not extend this pattern to other adapters.
+- `apps/web/tests/branch-status-poller-ci-throttle.test.ts` drives the exported `getBatchedCIStatuses` directly instead of booting the full server. It covers an internal, non-user-observable throttle: the CI poller must log a persistent `gh` GraphQL failure only once per host until it recovers, rather than every ~5–60 s tick. The throttle state has no HTTP/DB projection to assert against, and a hermetic `gh` *success* (needed to observe the recovery reset) would require network + auth, so a full real-server test is impractical. Instead the test exercises the real batching function through its public surface with real `git` + real (offline-failing) `gh` subprocesses — the same direct-function style as `git.test.ts` — which is why `getBatchedCIStatuses` is exported. This is the allowed alternative to a mocked-out fake; do not add a tRPC/`console` mock layer or a `NODE_ENV` test branch to the poller.
 
 ## Git Hooks & CI
 
