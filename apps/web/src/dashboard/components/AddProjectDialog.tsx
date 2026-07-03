@@ -111,7 +111,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent variant="bottom-sheet" className="lg:max-w-[425px]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Register Project</DialogTitle>

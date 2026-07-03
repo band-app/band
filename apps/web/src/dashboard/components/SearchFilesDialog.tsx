@@ -133,7 +133,14 @@ export function SearchFilesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[640px]" showCloseButton={false}>
+      <DialogContent
+        data-testid="search-files__root"
+        // Mobile: bottom drawer (with a top safe-area gap). Desktop: the
+        // floating command-palette card — unchanged.
+        variant="bottom-sheet"
+        className="overflow-hidden p-0 lg:max-w-[640px]"
+        showCloseButton={false}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Search in Files</DialogTitle>
           <DialogDescription>Text search across workspace files</DialogDescription>
