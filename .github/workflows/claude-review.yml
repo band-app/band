@@ -252,5 +252,39 @@ jobs:
           #   form is bounded by the workflow's GITHUB_TOKEN scope
           #   (`pull-requests: write`), so the practical blast radius is
           #   the same as the narrow forms would have provided.
+          # - `Bash(git:*)` (broad) replaces the earlier narrow
+          #   `Bash(git diff:*)` + `Bash(git log:*)`. The general-purpose
+          #   subagent naturally issues `git -C <path> log ...`, whose token
+          #   prefix is `git -C`, NOT `git log`, so the narrow patterns never
+          #   matched and every such call was denied. The agent then burned
+          #   its turn budget retrying variants and gave up before posting
+          #   (observed on PR #600: permission_denials_count=11, no comment,
+          #   yet the action still exited success). `Bash(cat:*)` and
+          #   `Bash(head:*)` are added for the same reason: the post step uses
+          #   `gh pr comment --body "$(cat <<EOF ...)"` and the marker lookup
+          #   pipes `gh api ... | head -1`; the compound-command matcher
+          #   denies the whole line when `cat`/`head` aren't allowlisted.
+          #   All are read-only or bounded by the GITHUB_TOKEN scope.
           claude_args: |-
-            --allowedTools "Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*)"
+            --allowedTools "Agent,Bash(git:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*),Bash(cat:*),Bash(head:*)"
+
+      # Structural guard against silent no-ops. The claude-code-action returns
+      # success even when the dispatcher gives up before posting (e.g. it burned
+      # its turns on denied tool calls), so a green "Claude review" check does
+      # NOT by itself mean a review was produced. Assert the marker comment
+      # actually landed on the PR and fail the job otherwise, so a no-op review
+      # is never reported as green. Runs even if the previous step failed.
+      - name: Verify a review comment was posted
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          found=$(gh api \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq '[.[] | select(.body | contains("<!-- claude-review-summary -->"))] | length')
+          if [ "${found:-0}" -ge 1 ]; then
+            echo "✓ Review comment present (${found} marker comment(s))."
+          else
+            echo "::error title=No Claude review posted::The review dispatcher produced no comment on PR #${{ github.event.pull_request.number }}. It most likely hit tool-permission denials before posting — open the 'Run Claude review' step and check for permission_denials_count > 0."
+            exit 1
+          fi
