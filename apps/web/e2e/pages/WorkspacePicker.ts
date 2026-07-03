@@ -44,6 +44,19 @@ export class WorkspacePicker {
     });
   }
 
+  /** Bounding box of the picker surface. Used to assert the mobile
+   *  bottom-drawer geometry. Throws if the dialog isn't rendered. */
+  async dialogBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    // Wait for the open/slide animation to finish so the measured box is the
+    // settled position, not a mid-animation frame.
+    await this.dialog.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))),
+    );
+    const box = await this.dialog.boundingBox();
+    if (!box) throw new Error("Workspace picker has no bounding box (not visible)");
+    return box;
+  }
+
   /** Tap a row's pin/unpin button. This must NOT select the workspace —
    *  the dialog stays open and no navigation happens. */
   async togglePin(workspaceId: string): Promise<void> {

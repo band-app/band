@@ -1,7 +1,9 @@
-import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ChevronsUpDown } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { ChevronsUpDown, Menu } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  DashboardShell,
   DiffView,
   QuickOpenDialog,
   SearchFilesDialog,
@@ -16,6 +18,7 @@ import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
+import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext, useSessionListContext } from "../hooks/useSessionListContext";
@@ -175,7 +178,6 @@ interface CodingAgentDef {
 }
 
 function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
-  const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
   const diffFileCount = useDiffFileCount(workspaceId);
 
@@ -244,6 +246,13 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   // Esc) to stay on the current workspace if they change their mind.
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  // Project-list fly-out. The hamburger opens the full project list as a
+  // left-edge drawer *over* the current workspace. This is pure local state:
+  // opening or closing it never changes the route, so the workspace stays
+  // mounted underneath. Selecting a workspace inside the drawer navigates
+  // (remounting this keyed layout), which resets this back to closed.
+  const [projectListOpen, setProjectListOpen] = useState(false);
+
   // Quick Open state for file link clicks from chat
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
@@ -307,10 +316,6 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
     [workspaceId, currentAgentId],
   );
 
-  const handleBack = useCallback(() => {
-    navigate({ to: "/" });
-  }, [navigate]);
-
   const handleSetShowSessionList = useCallback((show: boolean) => {
     setShowSessionList(show);
   }, []);
@@ -344,13 +349,17 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
         >
           {isDesktop && <DesktopDragRegion />}
           <header className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]">
+            {/* Hamburger — opens the project list as a left fly-out drawer over
+                this workspace. Purely local state; the route never changes. */}
             <button
               type="button"
-              onClick={handleBack}
-              aria-label="Back to project list"
+              onClick={() => setProjectListOpen(true)}
+              aria-label="Open project list"
+              aria-haspopup="dialog"
+              data-testid="mobile-workspace__project-list-trigger"
               className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
             >
-              <ArrowLeft className="size-4" />
+              <Menu className="size-4" />
             </button>
             {/* Tapping the title opens the workspace switcher — the fast path
                 to jump to a recent/previous worktree without going back to the
@@ -411,6 +420,20 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             onOpenFile={handleOpenFile}
           />
           <WorkspacePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
+          <Sheet open={projectListOpen} onOpenChange={setProjectListOpen}>
+            {/* The project list fly-out reuses the exact same DashboardShell
+                the `/` home route renders, so labels, add-project, settings
+                and the full workspace tree are all available from here. */}
+            <SheetContent side="left" showCloseButton={false} data-testid="project-list-flyout">
+              <SheetTitle className="sr-only">Projects</SheetTitle>
+              <SheetDescription className="sr-only">
+                Browse projects and open a workspace
+              </SheetDescription>
+              <ToolbarOverflowProvider>
+                <DashboardShell toolbarMenuItems={<ToolbarOverflowMenuItems />} hideTitleBar />
+              </ToolbarOverflowProvider>
+            </SheetContent>
+          </Sheet>
         </div>
       </AgentSwitcherContext.Provider>
     </SessionListContext.Provider>

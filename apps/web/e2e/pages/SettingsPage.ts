@@ -104,6 +104,21 @@ export class SettingsPage {
     });
   }
 
+  /** Bounding box of the dialog surface. Used to assert the mobile
+   *  bottom-drawer geometry (anchored to the bottom edge, with a top
+   *  safe-area gap) versus the desktop centred card. Throws if the dialog
+   *  isn't rendered so a caller never silently asserts against `null`. */
+  async dialogBox(): Promise<{ x: number; y: number; width: number; height: number }> {
+    // Wait for the open/slide animation to finish so the measured box is the
+    // settled position, not a mid-animation frame.
+    await this.dialog.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))),
+    );
+    const box = await this.dialog.boundingBox();
+    if (!box) throw new Error("Settings dialog has no bounding box (not visible)");
+    return box;
+  }
+
   /** Locator for every SettingsSection card in the dialog. Anchored on the
    *  `data-testid="settings__section-card"` attribute set by
    *  `SettingsSection.tsx` (BEM convention). */

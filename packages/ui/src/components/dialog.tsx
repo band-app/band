@@ -37,26 +37,60 @@ function DialogOverlay({
   );
 }
 
+// Base positioning + entry/exit animation per DialogContent variant. The
+// `default` variant is the classic centred modal. `bottom-sheet` anchors to
+// the bottom edge as a drawer on mobile (slide up, rounded top, capped
+// height with a safe-area gap so the header clears the iOS notch), then
+// reverts to the centred modal at the `lg` breakpoint — desktop is left
+// exactly as the default variant.
+//
+// The breakpoint is `lg` (1024px), NOT `sm`, so it matches the app's own
+// mobile/desktop switch (`useIsDesktop` = `min-width: 1024px`): below 1024px
+// the app renders its mobile layout, so the dialogs must be bottom drawers
+// across that whole range. The `max-lg:`/`lg:` split keeps the slide
+// animation mobile-only and the zoom animation desktop-only.
+const DIALOG_CONTENT_VARIANTS = {
+  default:
+    "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+  "bottom-sheet": [
+    // Shared
+    "fixed z-50 flex flex-col bg-background shadow-lg duration-200 outline-none",
+    "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+    // Mobile (< lg): bottom drawer
+    "inset-x-0 bottom-0 w-full max-w-none rounded-t-2xl border border-b-0 p-6",
+    "max-h-[calc(100dvh-env(safe-area-inset-top)-1.5rem)]",
+    "max-lg:data-[state=open]:slide-in-from-bottom max-lg:data-[state=closed]:slide-out-to-bottom",
+    // Desktop (lg+): revert to the centred modal
+    "lg:inset-auto lg:top-[50%] lg:left-[50%] lg:bottom-auto lg:w-full lg:max-w-lg lg:max-h-[85vh] lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-lg lg:border-b",
+    "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
+  ].join(" "),
+} as const;
+
 function DialogContent({
   className,
   overlayClassName,
   children,
   showCloseButton = true,
+  variant = "default",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
   /** Extra classes for the backdrop overlay (e.g. `backdrop-blur-sm`). */
   overlayClassName?: string;
+  /**
+   * Layout variant. `default` is the centred modal; `bottom-sheet` renders a
+   * bottom drawer on mobile (with a top safe-area gap) that reverts to the
+   * centred modal on desktop (`lg`+, 1024px — matching `useIsDesktop`).
+   */
+  variant?: keyof typeof DIALOG_CONTENT_VARIANTS;
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
-        className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
-          className,
-        )}
+        data-variant={variant}
+        className={cn(DIALOG_CONTENT_VARIANTS[variant], className)}
         {...props}
       >
         {children}

@@ -701,10 +701,27 @@ export class WorkspacePage {
     return this.page.getByRole("button", { name: "Switch workspace" });
   }
 
-  /** The mobile header's back button — navigates (in-app) to the project
-   *  list at `/`. aria-label set in MobileWorkspaceLayout. */
-  get backToProjectListButton(): Locator {
-    return this.page.getByRole("button", { name: "Back to project list" });
+  /** The mobile header's hamburger button — opens the project-list fly-out
+   *  drawer *over* the current workspace (no route change). aria-label set in
+   *  MobileWorkspaceLayout. */
+  get projectListTrigger(): Locator {
+    return this.page.getByTestId("mobile-workspace__project-list-trigger");
+  }
+
+  /** The left project-list fly-out drawer (a `Sheet side="left"` wrapping the
+   *  DashboardShell). data-testid set in MobileWorkspaceLayout. */
+  get projectListFlyout(): Locator {
+    return this.page.getByTestId("project-list-flyout");
+  }
+
+  /** The active workspace card *scoped to the project-list fly-out* — proves
+   *  the card rendered inside the drawer (not elsewhere on the page) and
+   *  carries the `data-active` marker. Same `[data-active]` state-filter
+   *  rationale as `activeWorkspaceCard`. */
+  activeWorkspaceCardInFlyout(workspaceId: string): Locator {
+    return this.projectListFlyout
+      .getByTestId(`project-list__workspace-card--${workspaceId}`)
+      .and(this.page.locator("[data-active]"));
   }
 
   /** Open the workspace switcher from the mobile header title. */
@@ -714,13 +731,28 @@ export class WorkspacePage {
     });
   }
 
-  /** Tap the mobile header back button to return to the project list via
-   *  client-side navigation (not a full reload — so the in-memory
-   *  `activeWorkspaceId` store survives, which is the behaviour the
-   *  active-persistence test asserts). */
-  async goBackToProjectList(): Promise<void> {
-    await test.step("Tap back to project list", async () => {
-      await this.backToProjectListButton.click();
+  /** Tap the hamburger to open the project-list fly-out over this workspace.
+   *  Opening it must not change the route — the workspace stays mounted
+   *  underneath. */
+  async openProjectListFlyout(): Promise<void> {
+    await test.step("Open the project-list fly-out", async () => {
+      await this.projectListTrigger.click();
+      await this.projectListFlyout.waitFor({ state: "visible", timeout: 15_000 });
+    });
+  }
+
+  /** Dismiss the fly-out by clicking the backdrop overlay (tap-outside). The
+   *  overlay sits behind the drawer, so we click near the right edge of the
+   *  viewport where only the overlay is present. */
+  async dismissProjectListFlyoutViaBackdrop(): Promise<void> {
+    await test.step("Dismiss the project-list fly-out via the backdrop", async () => {
+      // The Radix overlay covers the full viewport; the drawer is on the left
+      // (max-w-sm). Click far right so the click lands on the overlay, not the
+      // drawer content.
+      const viewport = this.page.viewportSize();
+      const x = viewport ? viewport.width - 10 : 780;
+      const y = viewport ? Math.floor(viewport.height / 2) : 400;
+      await this.page.mouse.click(x, y);
     });
   }
 
@@ -1165,6 +1197,52 @@ export class WorkspacePage {
    *  cross-workspace event filtering (issue #539). */
   quickOpenDialog(): Locator {
     return this.page.getByTestId("quick-open__root");
+  }
+
+  /** The SearchFilesDialog content root. `data-testid` set on `DialogContent`
+   *  in `SearchFilesDialog.tsx` (BEM convention), so the locator survives
+   *  placeholder / visible-copy changes. */
+  searchFilesDialog(): Locator {
+    return this.page.getByTestId("search-files__root");
+  }
+
+  /** Dispatch the `band:open-quick-open` window event — the same event the
+   *  file-tree toolbar's "Quick Open" action fires (see `CodeBrowserView.tsx`).
+   *  MobileWorkspaceLayout listens for it and opens the QuickOpenDialog with an
+   *  empty query (unlike `band:open-file`, which pre-fills a query and can
+   *  auto-open a single match without ever showing the dialog). */
+  async dispatchOpenQuickOpen(): Promise<void> {
+    await test.step("Dispatch band:open-quick-open", async () => {
+      await this.page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("band:open-quick-open"));
+      });
+    });
+  }
+
+  /** Dispatch the `band:open-search-files` window event — the same event the
+   *  file-tree toolbar's "Search in Files" action fires (see
+   *  `CodeBrowserView.tsx`). MobileWorkspaceLayout listens for it and opens
+   *  the SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
+  async dispatchOpenSearchFiles(): Promise<void> {
+    await test.step("Dispatch band:open-search-files", async () => {
+      await this.page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("band:open-search-files"));
+      });
+    });
+  }
+
+  /** Bounding box of a locator once its open/slide animation has settled —
+   *  used to assert bottom-drawer geometry deterministically. Throws if the
+   *  element isn't rendered so a caller never asserts against `null`. */
+  async settledBoxOf(
+    locator: Locator,
+  ): Promise<{ x: number; y: number; width: number; height: number }> {
+    await locator.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))),
+    );
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("Locator has no bounding box (not visible)");
+    return box;
   }
 
   /** Press Escape — the user's universal "dismiss" gesture. Encapsulated so

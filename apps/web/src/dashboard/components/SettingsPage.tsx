@@ -466,16 +466,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={
-          // Mobile: take the full viewport — no margin, no rounded corners,
-          // top-anchored so the address-bar doesn't clip the footer.
-          // Desktop (sm+): float as a centered, capped-width card.
-          [
-            "inset-0 left-0 top-0 h-dvh w-full max-w-none translate-x-0 translate-y-0 rounded-none",
-            "sm:inset-auto sm:top-[50%] sm:left-[50%] sm:h-[80vh] sm:w-full sm:max-w-2xl sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg",
-            "overflow-hidden p-0 flex flex-col gap-0",
-          ].join(" ")
-        }
+        // Mobile: a bottom drawer that slides up and stops short of the top so
+        // the header + close button clear the iOS notch (the `bottom-sheet`
+        // variant caps height with env(safe-area-inset-top)). Desktop (sm+):
+        // the centered, capped-width card — unchanged.
+        variant="bottom-sheet"
+        className="flex flex-col gap-0 overflow-hidden p-0 lg:h-[80vh] lg:max-w-2xl"
       >
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
           <DialogTitle>Settings</DialogTitle>

@@ -8,12 +8,12 @@
  *     stay on the current workspace — the user is never forced to make a
  *     selection to get out of it.
  *
- *  2. The active workspace stays marked active after navigating back to the
- *     project-list menu route (`/`). This guards the removal of the
- *     `setActiveWorkspace(null)` unmount-clear effect in
- *     `workspace.$workspaceId.tsx`: on mobile the menu lives on a separate
- *     route from the workspace, so clearing the store on unmount would leave
- *     the menu unable to highlight the workspace the user just came from.
+ *  2. The active workspace stays marked active inside the project-list
+ *     fly-out. The hamburger opens the project list as a drawer *over* the
+ *     still-mounted workspace (no route change / no unmount), so the store
+ *     retains `activeWorkspaceId` and the card inside the drawer keeps its
+ *     `data-active` marker — the affordance the user relies on to see which
+ *     workspace they're currently in.
  *
  * A real git repo backs the project so it reconciles to kind "git" and its
  * branch renders as a WorkspaceCard (whose `data-active` attribute is the
@@ -44,8 +44,9 @@ const DEFAULT_BRANCH = "main";
 const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
 
 // Narrow viewport — `useIsDesktop()` reports false (threshold 1024 px), so the
-// mobile branch of `workspace.$workspaceId.tsx` mounts (header title button +
-// back button) and the `/` route renders the full-screen DashboardShell menu.
+// mobile branch of `workspace.$workspaceId.tsx` mounts: a header with the
+// title "Switch workspace" button and the hamburger that opens the
+// project-list fly-out.
 test.use({ viewport: { width: 800, height: 900 } });
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
@@ -121,18 +122,19 @@ test.describe("Mobile workspace switcher", () => {
     await expect(picker.dialog).toBeHidden();
   });
 
-  test("the workspace stays active after returning to the project-list menu", async ({ page }) => {
+  test("the current workspace is marked active in the project-list fly-out", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
     await workspacePage.goto(WORKSPACE);
     await workspacePage.waitForMobileReady();
 
-    await workspacePage.goBackToProjectList();
+    // Open the project-list fly-out over the workspace (no route change).
+    await workspacePage.openProjectListFlyout();
 
-    // On the menu route, the workspace we came from is still marked active
-    // (data-active) — the store retained `activeWorkspaceId` across the
-    // route change. Asserting on the active-scoped locator proves both that
-    // the card rendered and that it carries the active marker.
-    await expect(workspacePage.activeWorkspaceCard(WORKSPACE)).toBeVisible();
+    // Inside the fly-out the workspace we're viewing is still marked active
+    // (data-active) — the store retained `activeWorkspaceId`. The locator is
+    // scoped to the drawer, so it proves both that the card rendered *inside
+    // the fly-out* and that it carries the active marker.
+    await expect(workspacePage.activeWorkspaceCardInFlyout(WORKSPACE)).toBeVisible();
   });
 });
