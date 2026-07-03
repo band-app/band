@@ -115,36 +115,12 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            You run Band's CI PR review IN THIS AGENT: read the orchestration
-            spec, gather context, dispatch the four specialist reviewers
-            directly, aggregate their findings, and WRITE the final report to a
-            file. You do NOT post the PR comment yourself — a separate,
-            deterministic workflow step reads your file and posts it. Building a
-            `gh` call whose body is arbitrary review text (backticks, `$(...)`,
-            emojis) from inside the model is fragile and flakily failed, which
-            is exactly why posting is now a plain-bash step outside this agent.
+            You are a thin dispatcher running in GitHub Actions. You do
+            NOT review the PR yourself. You delegate the review to a
+            fresh general-purpose subagent and post that subagent's
+            output as a PR comment. Three steps only.
 
-            CRITICAL — do NOT delegate the orchestration to a nested
-            `general-purpose` subagent (or any single "run the review" agent).
-            An agent that itself spawns agents is launched as a background /
-            async task, and this action runs `claude -p` one-shot: after that
-            async launch the run reaches a terminal state and ENDS before the
-            background review finishes, so nothing is produced. The four
-            specialists below are leaf agents (they spawn nothing) and run
-            synchronously — so you must dispatch them yourself, from this
-            agent, and keep this agent alive until you have written the report
-            file.
-
-            Step 1 — Read the orchestration spec.
-
-            Read `.claude/skills/review-changes/SKILL.md` end-to-end. It
-            defines the four specialists, the context-bundle shape, the
-            aggregation rules, and the exact output format. (We Read the file
-            rather than call `Skill(skill="review-changes")` because the
-            action runtime does NOT auto-discover project skills under
-            `.claude/skills/` — the Skill tool returns "Unknown skill" here.)
-
-            Step 2 — Gather context.
+            Step 1 — Gather context.
 
             Resolve these values:
               REPO   = ${{ github.repository }}
@@ -152,123 +128,129 @@ jobs:
               BASE   = origin/${{ github.event.pull_request.base.ref }}
               HEAD   = ${{ github.event.pull_request.head.sha }}
 
-            Gather the diff via `gh pr diff ${{ github.event.pull_request.number }}`
-            (do NOT truncate) and metadata via `gh pr view`. Keep the diff in
-            your context — do NOT save the diff to a file. The only file you
-            create in this whole run is the report file in Step 4. Discover
-            linked issues by extracting `closes #N`, `fixes #N`, or
-            `resolves #N` from the PR body and commit messages:
+            Discover linked issues by extracting `closes #N`, `fixes #N`,
+            or `resolves #N` from the PR body and commit messages:
 
               gh pr view ${{ github.event.pull_request.number }} --json body --jq .body
               git log origin/${{ github.event.pull_request.base.ref }}..${{ github.event.pull_request.head.sha }} --format='%s%n%b'
 
-            For each linked issue run `gh issue view <N>` and include its body
-            in the context bundle. If none are found, use "none detected".
+            Collect any matches. If none found, use the literal string
+            "none detected".
 
-            Step 3 — Dispatch the four specialists directly, IN PARALLEL, via
-            FOUR `Agent` tool calls in a SINGLE message:
+            Step 2 — Dispatch ONE general-purpose subagent.
 
-              Agent(subagent_type="coding-reviewer",      prompt=<bundle>)
-              Agent(subagent_type="testing-reviewer",     prompt=<bundle>)
-              Agent(subagent_type="security-reviewer",    prompt=<bundle>)
-              Agent(subagent_type="performance-reviewer", prompt=<bundle>)
+            The subagent will follow the orchestration instructions in
+            the `review-changes` skill file directly. We Read the file
+            instead of going through the `Skill` tool because the GHA
+            action runtime does NOT auto-discover project-defined
+            skills under `.claude/skills/` — `Skill(skill="review-changes")`
+            returns "Unknown skill" in this environment.
 
-            The bundle prompt template is in the skill file under "Step 2 —
-            Dispatch four specialists in parallel." Wait for all four to
-            return (they run synchronously), then aggregate per the skill's
-            "Step 3" and emit per its "Step 4".
+            Make exactly one Agent call:
 
-            The aggregated report is fixed-format: four
-            `<Coding|Testing|Security|Performance> <emoji>` headers in that
-            exact order (emoji is one of 🚨 / ⚠️ / ✅ computed per the skill),
-            each followed by its findings in standard
-            `[N] severity:... <path>:<line>` format, ending with a single
-            `Verdict: <approved 👍 | request changes 👎>` line. Do not add
-            `## ` to the headers; do not swap the emojis (`🚨 / ⚠️ / ✅` for
-            status, `👍 / 👎` for verdict). Do not paraphrase, filter, or
-            "improve" the specialists' findings — forward them verbatim.
+              Agent(subagent_type="general-purpose", prompt=<see below>)
 
-            Step 4 — Write the aggregated report to the output file.
+            The subagent's prompt is exactly this (with values
+            substituted from Step 1):
 
-            Using the `Write` tool, write the report to EXACTLY this path:
+                You are running Band's CI PR review.
 
-              ${{ github.workspace }}/.claude-review-body.md
+                Step A — Read the orchestration spec:
+                    Read `.claude/skills/review-changes/SKILL.md` end-to-end.
+                    This file tells you the four specialists to dispatch,
+                    the context bundle shape, the aggregation rules, and
+                    the exact output format.
 
-            The file contents are exactly:
-              `<!-- claude-review-summary -->` + newline + the aggregated
-              report, unchanged (no headers, footers, signatures, "Posted by"
-              notes, or Markdown code fences wrapping it).
+                Step B — Run the orchestration the file describes, using
+                these inputs:
 
-            That `Write` is your FINAL action. Do NOT run `gh`, do NOT try to
-            post or update the comment, and do NOT write to any other path. A
-            deterministic "Post review comment" workflow step reads that exact
-            file and posts it (creating or idempotently updating the marker
-            comment) — all the gh/posting logic lives there, not here. Writing
-            the file correctly is your entire job.
+                    Review this change set.
+                    - Repo:   <REPO>
+                    - PR:     <PR>
+                    - Base:   <BASE>
+                    - Head:   <HEAD>
+                    - Issues: <linked-issue list, or "none detected">
+
+                Concretely: gather the diff via `gh pr diff <PR>`, fetch
+                any linked issue bodies via `gh issue view <N>`, then
+                dispatch the four specialist sub-agents IN PARALLEL via
+                FOUR `Agent` tool calls in a SINGLE message:
+
+                  Agent(subagent_type="coding-reviewer",      prompt=<bundle>)
+                  Agent(subagent_type="testing-reviewer",     prompt=<bundle>)
+                  Agent(subagent_type="security-reviewer",    prompt=<bundle>)
+                  Agent(subagent_type="performance-reviewer", prompt=<bundle>)
+
+                The bundle prompt template is in the skill file under
+                "Step 2 — Dispatch four specialists in parallel."
+
+                Step C — Aggregate per the skill's "Step 3" and emit
+                per the skill's "Step 4". The OUTPUT FORMAT is fixed:
+                four `<Coding|Testing|Security|Performance> <emoji>`
+                headers in that exact order (emoji is one of 🚨 / ⚠️ /
+                ✅ computed per the skill), each followed by its
+                findings in standard `[N] severity:... <path>:<line>`
+                format, ending with a single
+                `Verdict: <approved 👍 | request changes 👎>` line.
+
+                Step D — Your final message IS the report. The first
+                line must be `Coding <emoji>`. The last line must be
+                `Verdict: <emoji>`. Do not wrap, prefix, suffix, or
+                comment on the output. Do not add `## ` to the headers.
+                Do not swap the emojis — `🚨 / ⚠️ / ✅` for status,
+                `👍 / 👎` for verdict. Pass through verbatim from your
+                own aggregation step.
+
+            Wait for the subagent to return. Treat its return value as
+            opaque text — that IS the comment body content.
+
+            Step 3 — Post as a PR comment, idempotently.
+
+            The comment body is exactly:
+              `<!-- claude-review-summary -->` + newline + the subagent's
+              returned string, unchanged.
+
+            On subsequent workflow runs (e.g. when the author pushes a
+            new commit), the SAME comment must be UPDATED — do not post
+            a new comment each time. Strategy:
+
+              (a) Search for existing marker comment:
+                  gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+                    --jq '.[] | select(.body | contains("<!-- claude-review-summary -->")) | .id' \
+                    | head -1
+
+              (b) If the search returns a comment ID, UPDATE it in place:
+                  gh api "repos/${{ github.repository }}/issues/comments/<id>" \
+                    -X PATCH -f body="<full body>"
+
+              (c) If the search returns nothing, CREATE a new comment:
+                  gh pr comment ${{ github.event.pull_request.number }} --body "<full body>"
+                  Pass the body as the `--body` argument directly; do
+                  not try to pipe via `--body-file -` (your allowlist
+                  does not include the upstream command needed to pipe).
+
+            Hard bans on this dispatcher:
+            - Do NOT do any review work yourself.
+            - Do NOT Read criteria files or repo source.
+            - Do NOT add headers, footers, signatures, or "Posted by"
+              notes around the subagent's output.
+            - Do NOT reformat, decorate, paraphrase, or "improve" the
+              subagent's output. It is the comment body verbatim.
           # allowedTools notes for maintainers:
-          # - The review agent does NOT post the comment. It gathers context,
-          #   dispatches the four specialists, and Writes the report to
-          #   `${{ github.workspace }}/.claude-review-body.md`; the
-          #   deterministic "Post review comment" step below reads that file
-          #   and posts it. This keeps the fragile part — building a gh call
-          #   whose body is arbitrary review text (backticks, $(...), emojis) —
-          #   OUT of the LLM, where it flakily failed (~half of runs posted
-          #   nothing: the model mis-built the heredoc or gave up staging the
-          #   body to a file). So the allowlist is read-only tools plus
-          #   `Write`, and drops `gh api`, `gh pr comment`, `cat`, `head`.
           # - `Skill` is omitted. The claude-code-action@v1 runtime does NOT
           #   auto-discover project-defined skills under .claude/skills/, so
-          #   Skill(skill="review-changes") returns "Unknown skill" in CI. The
-          #   agent Reads SKILL.md directly and follows it inline. It must NOT
-          #   delegate to a nested general-purpose subagent — see the CRITICAL
-          #   note in the prompt: a nesting agent is launched async and the
-          #   one-shot `claude -p` run ends before it produces anything.
-          # - `Write` is allowed ONLY so the agent can emit the report file.
-          #   The prompt pins the exact output path; the token is
-          #   `contents: read` and the runner is ephemeral and author-gated, so
-          #   a stray write lands on a throwaway VM and never reaches git.
-          # - `Bash(git:*)` (broad) replaces narrow `Bash(git diff:*)` +
-          #   `Bash(git log:*)`: the agent issues `git -C <path> log ...` for
-          #   linked-issue commit messages, whose token prefix is `git -C`,
-          #   NOT `git log`, so the narrow patterns never matched and every
-          #   such call was denied. Bounded by the `contents: read` token.
+          #   Skill(skill="review-changes") returns "Unknown skill" in CI.
+          #   The dispatcher Reads the SKILL.md file directly instead and
+          #   the subagent follows its instructions inline.
+          # - `Bash(gh api:*)` is the broad form. We tested narrower patterns
+          #   (single-`*` `repos/*/issues/*`, two-`*` `repos/*/*/issues/*`,
+          #   and even hardcoded `repos/band-app/band/issues/*`) on the
+          #   working subagent architecture; none match the actual call
+          #   shape inside the action's Bash-allowlist matcher, and the
+          #   idempotent-update PATCH gets silently denied so the agent
+          #   falls back to creating a fresh comment per push. The broad
+          #   form is bounded by the workflow's GITHUB_TOKEN scope
+          #   (`pull-requests: write`), so the practical blast radius is
+          #   the same as the narrow forms would have provided.
           claude_args: |-
-            --allowedTools "Agent,Bash(git:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Write"
-
-      # Deterministic post. The review agent writes its report to
-      # .claude-review-body.md (prompt Step 4); this plain-bash step reads that
-      # file and posts it as the PR comment, idempotently. Keeping the gh call
-      # in bash — not in the model — is what makes posting reliable: the body is
-      # arbitrary review text (backticks, $(...), emojis) that flakily broke
-      # when the model built the shell command itself (~half of runs posted
-      # nothing). It also doubles as the no-op guard: if the agent produced no
-      # report file, this step fails, so a green check always means a review was
-      # actually produced AND posted. Runs even if the review step reported
-      # failure (its exit code is unreliable).
-      - name: Post review comment
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BODY_FILE: ${{ github.workspace }}/.claude-review-body.md
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          if [ ! -s "$BODY_FILE" ]; then
-            echo "::error title=No Claude review produced::The review agent wrote no report to .claude-review-body.md. Open the 'Run Claude review' step: check for an async subagent launch that ended the run early (num_turns low, no specialists completed) or permission_denials_count > 0."
-            exit 1
-          fi
-          if ! grep -q '<!-- claude-review-summary -->' "$BODY_FILE"; then
-            echo "::error title=Malformed review::.claude-review-body.md is missing the <!-- claude-review-summary --> marker; refusing to post."
-            exit 1
-          fi
-          # Idempotent: update the existing marker comment in place, else create.
-          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-                 --jq 'map(select(.body | contains("<!-- claude-review-summary -->"))) | (.[0].id // empty)')
-          if [ -n "$id" ]; then
-            gh api "repos/$REPO/issues/comments/$id" -X PATCH -f body="$(cat "$BODY_FILE")" >/dev/null
-            echo "Updated existing review comment ($id)."
-          else
-            gh pr comment "$PR" --body-file "$BODY_FILE"
-            echo "Created review comment."
-          fi
+            --allowedTools "Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*)"
