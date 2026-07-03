@@ -13,6 +13,9 @@ export const Channels = {
   webserverStop: "webserver_stop",
   getAppTitle: "get_app_title",
   getWindowFullscreen: "get_window_fullscreen",
+  // Per-process Electron/Chromium resource metrics (app.getAppMetrics()).
+  // Surfaced on the Resources page's "Desktop app (Electron)" card.
+  getAppMetrics: "get_app_metrics",
 
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",

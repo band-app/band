@@ -26,9 +26,22 @@ export class ResourcesPage {
   readonly dialog: Locator;
   /** Outer server snapshot card (PID, uptime, memory, CPU). */
   readonly serverCard: Locator;
+  /** Desktop-only "Desktop app (Electron)" card. Never rendered in the
+   *  web-build harness (self-gates on `isDesktop`) — used only to assert
+   *  its absence. */
+  readonly electronCard: Locator;
+  /** Title-row trigger that expands/collapses the server card. */
+  readonly serverToggle: Locator;
+  /** Headline total shown next to the server title while collapsed
+   *  (the process RSS). Absent from the DOM once the card is open. */
+  readonly serverTotal: Locator;
   /** PID cell inside the server card — primary "the snapshot loaded"
-   *  assertion target. */
+   *  assertion target. Only mounted while the card is expanded. */
   readonly serverPid: Locator;
+  /** Title-row trigger that expands/collapses the worktrees card. */
+  readonly worktreesToggle: Locator;
+  /** Headline total shown next to the worktrees title while collapsed. */
+  readonly worktreesTotal: Locator;
   /** Refresh button on the server card. */
   readonly refreshServerButton: Locator;
   /** Refresh button on the worktrees card. */
@@ -51,7 +64,12 @@ export class ResourcesPage {
   ) {
     this.dialog = page.getByTestId("resources-dialog");
     this.serverCard = page.getByTestId("resources-server-card");
+    this.electronCard = page.getByTestId("resources-electron-card");
+    this.serverToggle = page.getByTestId("resources-server-toggle");
+    this.serverTotal = page.getByTestId("resources-server-total");
     this.serverPid = page.getByTestId("resources-server-pid");
+    this.worktreesToggle = page.getByTestId("resources-worktrees-toggle");
+    this.worktreesTotal = page.getByTestId("resources-worktrees-total");
     this.refreshServerButton = page.getByTestId("resources-refresh-server");
     this.refreshWorktreesButton = page.getByTestId("resources-refresh-worktrees");
     this.projectsTable = page.getByTestId("resources-projects-table");
@@ -90,11 +108,31 @@ export class ResourcesPage {
     });
   }
 
-  /** Wait for the initial server card render. The card mounts with a
-   *  Spinner before the query resolves; the pid testid only appears
-   *  once the query data lands. */
+  /** Wait for the initial page render. All cards start collapsed, so
+   *  the server card's header (its expand trigger) is the first
+   *  reliable "the page mounted" anchor — the PID cell only mounts
+   *  once the card is expanded. */
   async waitForReady(): Promise<void> {
-    await expect(this.serverPid).toBeVisible({ timeout: 15_000 });
+    await expect(this.serverToggle).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** Expand the (collapsed-by-default) server card and wait for its
+   *  body to mount. The PID cell only renders once the snapshot query
+   *  has resolved, so this doubles as the "snapshot loaded" wait. */
+  async expandServer(): Promise<void> {
+    await test.step("Expand the server card", async () => {
+      await this.serverToggle.click();
+      await expect(this.serverPid).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Expand the (collapsed-by-default) worktrees card and wait for its
+   *  table to mount. */
+  async expandWorktrees(): Promise<void> {
+    await test.step("Expand the worktrees card", async () => {
+      await this.worktreesToggle.click();
+      await expect(this.projectsTable).toBeVisible({ timeout: 15_000 });
+    });
   }
 
   /** Trigger a server-card refresh. */

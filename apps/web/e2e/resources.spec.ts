@@ -6,6 +6,24 @@
  * the React UI through `ResourcesPage` (page-object model). The page
  * is no longer a separate route — it lives inside a Radix Dialog
  * opened from the dashboard's overflow menu.
+ *
+ * Out of scope: the "Desktop app (Electron)" card
+ * ------------------------------------------------
+ * `ElectronCard` in `ResourcesPage.tsx` self-gates on `isDesktop`
+ * (`if (!isDesktop) return null`) and pulls its data over the Electron
+ * IPC bridge (`invoke("get_app_metrics")`). This web-build harness
+ * never boots Electron, so `window.__BAND_DESKTOP__` is absent and the
+ * card is never rendered — a runtime regression catch for it requires
+ * desktop e2e coverage this spec can't provide (same shape and
+ * rationale as the browser-panel / macOS-shell IPC surfaces). We do
+ * assert the negative below (`electronCard` has zero DOM nodes) so the
+ * self-gate has an empirical check on the web path.
+ *
+ * Only the data-mapping layer is unit-tested (`mapAppMetrics` in
+ * `apps/desktop/tests/app-metrics.test.ts`). The IPC channel
+ * registration (`register.ts`), the preload allowlist entry
+ * (`index.cts`), and the `ElectronCard` React rendering remain
+ * uncovered, pending desktop e2e infrastructure.
  */
 
 import { execFileSync } from "node:child_process";
@@ -98,15 +116,31 @@ test.describe("Resources dialog (issue #506)", () => {
     await resources.open();
     await resources.waitForReady();
 
-    // Server card: numeric PID present.
+    // Cards start collapsed. Prove the collapsed-state UI rendered
+    // first — each card shows its headline total next to the title —
+    // then assert the expanded-state body content (server PID, project
+    // table) is not mounted.
+    await expect(resources.serverTotal).toBeVisible();
+    await expect(resources.worktreesTotal).toBeVisible();
+    await expect(resources.serverPid).not.toBeVisible();
+    await expect(resources.projectsTable).not.toBeVisible();
+
+    // The Electron card is desktop-only (self-gates on isDesktop) and
+    // never renders in this web-build harness — see the scope note at
+    // the top of this file.
+    await expect(resources.electronCard).toHaveCount(0);
+
+    // Server card: expand it, then assert a numeric PID is present.
+    await resources.expandServer();
     const pid = await resources.getServerPidValue();
     expect(Number.isFinite(pid)).toBe(true);
     expect(pid).toBeGreaterThan(0);
 
-    // Worktrees card: the project row appears immediately on open
-    // (no Refresh click needed). The per-project size cell starts
-    // as a "measuring…" spinner and resolves to MB-class output
-    // when the server's `du` finishes.
+    // Worktrees card: expand it, then the project row appears (no
+    // Refresh click needed). The per-project size cell starts as a
+    // "measuring…" spinner and resolves to MB-class output when the
+    // server's `du` finishes.
+    await resources.expandWorktrees();
     const projectRow = resources.getProjectRow(PROJECT);
     await expect(projectRow).toBeVisible({ timeout: 15_000 });
     const sizeCell = resources.getProjectSize(PROJECT);

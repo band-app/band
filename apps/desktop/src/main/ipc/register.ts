@@ -28,6 +28,7 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
+import { getAppMetrics } from "./app-metrics.js";
 import { browserHandlers } from "./browser.js";
 import {
   checkAppExists,
@@ -91,6 +92,10 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   handle(Channels.getAppTitle, () => getAppTitle());
   handle(Channels.getWindowFullscreen, () => opts.mainWindow.isFullScreen());
+  // Per-process Electron/Chromium resource metrics for the Resources page.
+  // Pass the dashboard window's webContents id so the mapper can label its
+  // renderer "Dashboard" and not confuse it with other top-level windows.
+  handle(Channels.getAppMetrics, () => getAppMetrics(opts.mainWindow.webContents.id));
 
   // ---- macOS shell ----
   // Args are camelCase because they're forwarded to the handlers as typed
