@@ -485,7 +485,7 @@ function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listW
   for (const project of projects) {
     for (const worktree of project.worktrees) {
       out.push({
-        workspaceId: toWorkspaceId(project.name, worktree.branch),
+        workspaceId: toWorkspaceId(project.name, worktree.name),
         project: project.name,
         worktreePath: worktree.path,
       });

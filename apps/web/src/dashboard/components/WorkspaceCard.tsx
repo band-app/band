@@ -107,7 +107,7 @@ interface Props {
    * each card stays inert to changes in the projects-query cache —
    * otherwise every pin/unpin re-renders every WorkspaceCard on the page.
    */
-  onTogglePinned: (project: string, branch: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (project: string, name: string, currentlyPinned: boolean) => void;
 }
 
 export const WorkspaceCard = memo(function WorkspaceCard({
@@ -135,7 +135,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const removeWorkspaceMutation = useRemoveWorkspace();
   const isPinned = worktree.pinned;
 
-  const workspaceId = toWorkspaceId(projectName, worktree.branch);
+  const workspaceId = toWorkspaceId(projectName, worktree.name);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
@@ -205,11 +205,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
-      removeWorkspaceMutation.mutate({ project: projectName, branch: worktree.branch });
+      removeWorkspaceMutation.mutate({ project: projectName, name: worktree.name });
     } else {
       onShowDeleteDialog({
         projectName,
-        branch: worktree.branch,
+        name: worktree.name,
         isUnmerged: hasUnmergedPR,
         isDirty,
         hasUnpushedCommits,
@@ -233,7 +233,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 <span
                   className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
                 >
-                  {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
+                  {showProjectName ? `${projectName}/${worktree.name}` : worktree.name}
                 </span>
               </div>
             </TooltipTrigger>
@@ -248,7 +248,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 project/branch string doesn't cover the next card down
                 — fans out into open viewport space instead of
                 overlapping siblings. */}
-            <TooltipContent side="right">{`${projectName}/${worktree.branch}`}</TooltipContent>
+            <TooltipContent side="right">{`${projectName}/${worktree.name}`}</TooltipContent>
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
             <SetupStatusIndicator setup={setupStatus} />
@@ -261,7 +261,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.branch, isPinned)}>
+        <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.name, isPinned)}>
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin workspace" : "Pin workspace"}
         </ContextMenuItem>
@@ -291,13 +291,13 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPull(projectName, worktree.branch)}>
+          <ContextMenuItem onClick={() => gitPull(projectName, worktree.name)}>
             <ArrowDownToLine />
             Git pull
           </ContextMenuItem>
         )}
         {!isPlain && (
-          <ContextMenuItem onClick={() => gitPush(projectName, worktree.branch)}>
+          <ContextMenuItem onClick={() => gitPush(projectName, worktree.name)}>
             <ArrowUpFromLine />
             Git push
           </ContextMenuItem>
@@ -305,7 +305,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         {/* Plain projects have a single implicit workspace; removing it
             would orphan the project, so the user is steered toward
             removing the project itself instead. */}
-        {!isPlain && worktree.branch !== defaultBranch && (
+        {!isPlain && worktree.name !== defaultBranch && (
           <ContextMenuItem variant="destructive" onClick={handleDelete}>
             <Trash2 />
             Delete workspace

@@ -102,7 +102,7 @@ interface SortableProjectProps {
    * when all worktrees are pinned and shown in the Pinned section instead.
    */
   hasPinnedSiblings?: boolean;
-  onTogglePinned: (project: string, branch: string, currentlyPinned: boolean) => void;
+  onTogglePinned: (project: string, name: string, currentlyPinned: boolean) => void;
 }
 
 function SortableProject({
@@ -159,10 +159,10 @@ function SortableProject({
   // Plain projects are guaranteed to have exactly one worktree (the
   // implicit `main` synthesized by projects.add and re-synthesized by
   // `reconcileKindForProject` on any git → plain flip). Read
-  // `worktrees[0].branch` directly rather than `?.branch ?? "main"`;
+  // `worktrees[0].name` directly rather than `?.name ?? "main"`;
   // the optional chain would mask a real state-corruption bug.
-  const plainBranch = isPlain ? project.worktrees[0].branch : "";
-  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainBranch) : "";
+  const plainName = isPlain ? project.worktrees[0].name : "";
+  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainName) : "";
   const plainIsActive = useDashboardStore(
     (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
   );
@@ -181,7 +181,7 @@ function SortableProject({
   const gitHeaderIsActive = useMemo(
     () =>
       !isPlain &&
-      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId),
+      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId),
     [isPlain, project.worktrees, project.name, activeWorkspaceId],
   );
 
@@ -400,11 +400,11 @@ function SortableProject({
             )
           ) : (
             project.worktrees.map((wt) => {
-              const wsId = toWorkspaceId(project.name, wt.branch);
+              const wsId = toWorkspaceId(project.name, wt.name);
               const currentIndex = workspaceIndex++;
               return (
                 <WorkspaceCard
-                  key={wt.branch}
+                  key={wt.name}
                   worktree={wt}
                   projectName={project.name}
                   defaultBranch={project.defaultBranch}
@@ -614,7 +614,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
       return g.projects.flatMap((p) => {
         if (projectCollapse.isCollapsed(p.name)) return [];
-        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.branch));
+        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.name));
       });
     });
     return [...pinnedPart, ...rest];
@@ -719,7 +719,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     for (const group of groups) {
       for (const project of group.projects) {
         const containsActive = project.worktrees.some(
-          (wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId,
+          (wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId,
         );
         if (!containsActive) continue;
         if (labelFilter && group.labelId !== labelFilter) return;
@@ -1017,12 +1017,12 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           if (deleteDialog) {
             removeWorkspaceMutation.mutate({
               project: deleteDialog.projectName,
-              branch: deleteDialog.branch,
+              name: deleteDialog.name,
             });
             setDeleteDialog(null);
           }
         }}
-        branchName={deleteDialog?.branch ?? ""}
+        branchName={deleteDialog?.name ?? ""}
         isUnmerged={deleteDialog?.isUnmerged ?? false}
         isDirty={deleteDialog?.isDirty ?? false}
         hasUnpushedCommits={deleteDialog?.hasUnpushedCommits ?? false}

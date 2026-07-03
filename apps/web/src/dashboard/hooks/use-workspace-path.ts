@@ -16,7 +16,7 @@ export function useWorkspacePath(workspaceId: string): string | undefined {
   return useMemo(() => {
     for (const proj of projects) {
       for (const wt of proj.worktrees) {
-        if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
+        if (toWorkspaceId(proj.name, wt.name) === workspaceId) {
           return wt.path;
         }
       }

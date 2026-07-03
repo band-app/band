@@ -183,7 +183,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     const validIds = new Set<string>();
     for (const project of projects) {
       for (const worktree of project.worktrees) {
-        validIds.add(toWorkspaceId(project.name, worktree.branch));
+        validIds.add(toWorkspaceId(project.name, worktree.name));
       }
     }
     setCache((prev) => {

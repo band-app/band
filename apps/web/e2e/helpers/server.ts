@@ -48,7 +48,10 @@ interface SeedProject {
   path: string;
   defaultBranch: string;
   label?: string;
-  worktrees: { branch: string; path: string }[];
+  // `name` is the immutable workspace identity — defaults to `branch` (the
+  // create-time invariant). Pass it explicitly to simulate a workspace
+  // whose git branch was switched after creation.
+  worktrees: { name?: string; branch: string; path: string }[];
 }
 
 export function seedState(tmpHome: string, state: { projects: SeedProject[] }): void {
@@ -74,10 +77,10 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
     for (const wt of project.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (project_name, branch, path)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO worktrees (project_name, name, branch, path)
+           VALUES (?, ?, ?, ?)`,
         )
-        .run(project.name, wt.branch, wt.path);
+        .run(project.name, wt.name ?? wt.branch, wt.branch, wt.path);
     }
   }
   sqlite.close();

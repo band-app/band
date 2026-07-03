@@ -1022,11 +1022,15 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
     validate::validate_name(branch, "Branch name")?;
 
     let client = api::ApiClient::from_settings()?;
+    // The server identifies a workspace by its immutable `name` (the branch it
+    // was created on), not the live git branch — see the `worktrees.name`
+    // column. For a CLI-created workspace the two match, so the positional
+    // `branch` arg is the right value to send as `name`.
     client.trpc_mutate(
         "workspaces.remove",
         &serde_json::json!({
             "project": project,
-            "branch": branch,
+            "name": branch,
         }),
     )?;
 
@@ -2689,7 +2693,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Remove a workspace (git worktree + state cleanup)",
             "parameters": [
                 {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
-                {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
+                {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Workspace name (the branch it was created on — its stable identity)"},
             ],
             "notes": "Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files."
         }),

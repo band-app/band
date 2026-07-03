@@ -126,7 +126,7 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     const res = await trpcMutate(
       server.url,
       "workspaces.remove",
-      { project: "proj", branch: detachedBranch },
+      { project: "proj", name: detachedBranch },
       DEFAULT_TOKEN,
     );
     const body = await res.text();

@@ -103,8 +103,8 @@ describe("syncWorktrees", () => {
           path: repoPath,
           defaultBranch: "main",
           worktrees: [
-            { branch: "main", path: repoPath },
-            { branch: "gone", path: join(tmp, "nonexistent-wt") },
+            { name: "main", branch: "main", path: repoPath },
+            { name: "gone", branch: "gone", path: join(tmp, "nonexistent-wt") },
           ],
         },
       ],
@@ -132,7 +132,7 @@ describe("syncWorktrees", () => {
           name: "test-project",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath, head }],
+          worktrees: [{ name: "main", branch: "main", path: repoPath, head }],
           hasOrigin: false,
         },
       ],
@@ -164,7 +164,7 @@ describe("syncWorktrees", () => {
           name: "with-origin",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
+          worktrees: [{ name: "main", branch: "main", path: repoPath }],
           hasOrigin: false, // seeded false so we can prove the sync flips it
         },
       ],
@@ -187,7 +187,7 @@ describe("syncWorktrees", () => {
           name: "no-origin",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
+          worktrees: [{ name: "main", branch: "main", path: repoPath }],
           hasOrigin: true,
         },
       ],
@@ -209,7 +209,7 @@ describe("syncWorktrees", () => {
           name: "broken-project",
           path: join(tmp, "does-not-exist"),
           defaultBranch: "main",
-          worktrees: [{ branch: "stale", path: join(tmp, "does-not-exist", "wt") }],
+          worktrees: [{ name: "stale", branch: "stale", path: join(tmp, "does-not-exist", "wt") }],
         },
         {
           name: "good-project",
@@ -248,7 +248,7 @@ describe("syncWorktrees", () => {
           name: "pin-test",
           path: repoPath,
           defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath, head, pinned: true }],
+          worktrees: [{ name: "main", branch: "main", path: repoPath, head, pinned: true }],
           hasOrigin: false,
         },
       ],
@@ -259,5 +259,48 @@ describe("syncWorktrees", () => {
     const state = loadState();
     expect(state.projects[0].worktrees.length).toBe(1);
     expect(state.projects[0].worktrees[0].pinned).toBe(true);
+  });
+
+  // Regression (workspace `name` field): the immutable `name` identity must
+  // survive a git branch switch inside the worktree — that is the whole
+  // point of decoupling identity from `branch`. Sync reconciles the live
+  // `branch` to match git but leaves `name` (and thus the workspace id)
+  // untouched, so panels/chats/labels keyed by the id are not orphaned when
+  // the user switches branches. `pinned` rides along on the same path-keyed
+  // merge.
+  it("preserves name (and pinned) but updates branch when the git branch is switched", async () => {
+    const repoPath = createRepo(tmp);
+    const wtPath = join(tmp, "wt-feature");
+    git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
+
+    saveState({
+      projects: [
+        {
+          name: "switch-test",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { name: "main", branch: "main", path: repoPath },
+            { name: "feature", branch: "feature", path: wtPath, pinned: true },
+          ],
+          hasOrigin: false,
+        },
+      ],
+    });
+
+    // Switch the branch checked out in the feature worktree. The path is
+    // stable; only the branch changes.
+    git(wtPath, ["switch", "-c", "feature-renamed"]);
+
+    await syncWorktrees();
+
+    const wt = loadState().projects[0].worktrees.find((w) => w.path === wtPath);
+    expect(wt).toBeDefined();
+    // Identity frozen at creation…
+    expect(wt!.name).toBe("feature");
+    // …while the live branch tracks git.
+    expect(wt!.branch).toBe("feature-renamed");
+    // Dashboard-only metadata survives the path-keyed merge too.
+    expect(wt!.pinned).toBe(true);
   });
 });

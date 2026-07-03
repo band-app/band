@@ -36,7 +36,7 @@ export function usePinnedWorkspaces() {
           list.push({
             project,
             worktree: wt,
-            workspaceId: toWorkspaceId(project.name, wt.branch),
+            workspaceId: toWorkspaceId(project.name, wt.name),
           });
         }
       }
@@ -50,14 +50,14 @@ export function usePinnedWorkspaces() {
   const mutation = useMutation({
     mutationFn: ({
       project,
-      branch,
+      name,
       pinned: nextPinned,
     }: {
       project: string;
-      branch: string;
+      name: string;
       pinned: boolean;
-    }) => adapter.setWorkspacePinned(project, branch, nextPinned),
-    onMutate: async ({ project, branch, pinned: nextPinned }) => {
+    }) => adapter.setWorkspacePinned(project, name, nextPinned),
+    onMutate: async ({ project, name, pinned: nextPinned }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.projects });
       const previous = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
       if (previous) {
@@ -66,7 +66,7 @@ export function usePinnedWorkspaces() {
             ? {
                 ...p,
                 worktrees: p.worktrees.map((w) =>
-                  w.branch === branch ? { ...w, pinned: nextPinned } : w,
+                  w.name === name ? { ...w, pinned: nextPinned } : w,
                 ),
               }
             : p,
@@ -90,8 +90,8 @@ export function usePinnedWorkspaces() {
   // `mutation` object itself, which `useMutation` re-creates every render
   // and would defeat the memoisation here.
   const toggle = useCallback(
-    (project: string, branch: string, currentlyPinned: boolean) =>
-      mutation.mutate({ project, branch, pinned: !currentlyPinned }),
+    (project: string, name: string, currentlyPinned: boolean) =>
+      mutation.mutate({ project, name, pinned: !currentlyPinned }),
     [mutation.mutate],
   );
 

@@ -488,7 +488,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
   it("workspaces.remove rejects removing the implicit workspace", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "scratch",
-      branch: "main",
+      name: "main",
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
@@ -498,7 +498,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
   it("workspaces.gitPull rejects on a plain project", async () => {
     const res = await trpcMutate(server.url, "workspaces.gitPull", {
       project: "scratch",
-      branch: "main",
+      name: "main",
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
@@ -508,7 +508,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
   it("workspaces.gitPush rejects on a plain project", async () => {
     const res = await trpcMutate(server.url, "workspaces.gitPush", {
       project: "scratch",
-      branch: "main",
+      name: "main",
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
@@ -522,7 +522,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
     // the project tree because `displayProjects` filtered the row out.
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "scratch",
-      branch: "main",
+      name: "main",
       pinned: true,
     });
     expect(res.status).toBe(400);

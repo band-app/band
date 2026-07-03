@@ -318,7 +318,7 @@ describe("workspace task cleanup on removal (issue #416)", () => {
 
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "proj",
-      branch: "feature",
+      name: "feature",
     });
     expect(res.status).toBe(200);
 

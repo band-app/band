@@ -102,7 +102,7 @@ function getWorkspaces(): WorkspaceInfo[] {
     if (project.kind === "plain") continue;
     for (const wt of project.worktrees) {
       workspaces.push({
-        workspaceId: toWorkspaceId(project.name, wt.branch),
+        workspaceId: toWorkspaceId(project.name, wt.name),
         project: project.name,
         branch: wt.branch,
         defaultBranch: project.defaultBranch,

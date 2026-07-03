@@ -8,6 +8,13 @@ import * as schema from "../../src/server/infra/db/schema";
 const migrationsFolder = join(import.meta.dirname, "../../src/server/infra/db/migrations");
 
 interface WorktreeData {
+  /**
+   * Immutable workspace identity. Optional in tests — defaults to `branch`,
+   * matching the create-time invariant. Pass an explicit value distinct
+   * from `branch` to simulate a workspace whose git branch was switched
+   * after creation.
+   */
+  name?: string;
   branch: string;
   path: string;
   head?: string;
@@ -64,6 +71,7 @@ export function seedState(tmpHome: string, state: StateData): void {
         tx.insert(schema.worktrees)
           .values({
             projectName: project.name,
+            name: wt.name ?? wt.branch,
             branch: wt.branch,
             path: wt.path,
             head: wt.head ?? null,

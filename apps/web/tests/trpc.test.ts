@@ -540,7 +540,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove deletes a worktree and its branch", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-2",
+      name: "feature-2",
     });
     expect(res.status).toBe(200);
 
@@ -553,10 +553,10 @@ describe("tRPC — workspace operations", () => {
     expect(branches).not.toContain("feature-2");
   });
 
-  it("workspaces.remove returns error for unknown branch", async () => {
+  it("workspaces.remove returns error for unknown workspace name", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "nonexistent",
+      name: "nonexistent",
     });
     expect(res.status).toBe(500);
   });
@@ -1689,7 +1689,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove cleans up feature-1", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-1",
+      name: "feature-1",
     });
     expect(res.status).toBe(200);
   });
@@ -1697,7 +1697,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove cleans up feature-3", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-3",
+      name: "feature-3",
     });
     expect(res.status).toBe(200);
   });
@@ -1779,7 +1779,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned pins a workspace and projects.list reflects it", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1794,7 +1794,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned unpins a previously pinned workspace", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: false,
     });
     expect(res.status).toBe(200);
@@ -1804,7 +1804,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned returns an error for unknown project", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "no-such-project",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(500);
@@ -1815,7 +1815,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned returns an error for unknown branch", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "no-such-branch",
+      name: "no-such-branch",
       pinned: true,
     });
     expect(res.status).toBe(500);
@@ -1830,7 +1830,7 @@ describe("tRPC — pinned workspaces", () => {
     // through `WorktreeState` correctly.
     let res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1847,19 +1847,19 @@ describe("tRPC — pinned workspaces", () => {
     // Clean up: unpin and remove the sibling so the next test starts clean.
     await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: false,
     });
     await trpcMutate(server.url, "workspaces.remove", {
       project: "pin-repo",
-      branch: "sibling",
+      name: "sibling",
     });
   });
 
   it("pinned state persists across server restart", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1879,14 +1879,14 @@ describe("tRPC — pinned workspaces", () => {
     // and doesn't depend on prior tests in the describe block.
     let res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
 
     res = await trpcMutate(server.url, "workspaces.remove", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
     });
     expect(res.status).toBe(200);
 

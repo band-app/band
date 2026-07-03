@@ -122,7 +122,9 @@ export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
 
 export const workspaceRemoveInput = z.object({
   project: z.string(),
-  branch: z.string(),
+  // Workspace identity (the immutable `name`), NOT the live git branch. The
+  // live branch to delete is resolved from the worktree row.
+  name: z.string(),
 });
 export type WorkspaceRemoveInput = z.infer<typeof workspaceRemoveInput>;
 
@@ -137,14 +139,16 @@ export type ContinueChatInTerminalResult =
 
 export const workspaceSetPinnedInput = z.object({
   project: z.string(),
-  branch: z.string(),
+  // Workspace identity (immutable `name`), not the live git branch.
+  name: z.string(),
   pinned: z.boolean(),
 });
 export type WorkspaceSetPinnedInput = z.infer<typeof workspaceSetPinnedInput>;
 
 export const workspaceGitInput = z.object({
   project: z.string(),
-  branch: z.string(),
+  // Workspace identity (immutable `name`), not the live git branch.
+  name: z.string(),
 });
 export type WorkspaceGitInput = z.infer<typeof workspaceGitInput>;
 
@@ -274,7 +278,9 @@ export class WorkspaceService {
     const state = loadState();
     for (const project of state.projects) {
       for (const worktree of project.worktrees) {
-        if (toWorkspaceId(project.name, worktree.branch) === workspaceId) {
+        // Identity is by the immutable `name`, so the resolve keeps working
+        // after a git branch switch (which moves `worktree.branch`).
+        if (toWorkspaceId(project.name, worktree.name) === workspaceId) {
           return { project, worktree };
         }
       }
@@ -363,7 +369,16 @@ export class WorkspaceService {
       );
     }
 
-    const existing = project.worktrees.find((wt) => wt.branch === input.branch);
+    // Idempotency + identity-collision guard. Match on `name` as well as the
+    // live `branch`: a fresh create seeds `name === branch`, but if an
+    // existing worktree was branch-switched so `name != branch`, creating a
+    // new worktree whose branch equals that old `name` would mint a second
+    // row with a colliding `name` (both serialize to the same workspace id).
+    // Returning the existing path keeps create idempotent and preserves the
+    // immutable-name invariant.
+    const existing = project.worktrees.find(
+      (wt) => wt.name === input.branch || wt.branch === input.branch,
+    );
     if (existing) {
       return { ok: true, path: existing.path };
     }
@@ -401,7 +416,14 @@ export class WorkspaceService {
       throw new Error(e instanceof Error ? e.message : String(e));
     }
 
-    project.worktrees.push({ branch: input.branch, path: worktreePath, pinned: false });
+    // `name` == `branch` at creation and is frozen from here on — sync will
+    // update `branch` to track git but never `name`, keeping the id stable.
+    project.worktrees.push({
+      name: input.branch,
+      branch: input.branch,
+      path: worktreePath,
+      pinned: false,
+    });
     saveState(state);
 
     const workspaceId = toWorkspaceId(input.project, input.branch);
@@ -637,16 +659,25 @@ export class WorkspaceService {
       );
     }
 
+    // Resolve the workspace by its immutable `name`. The live git branch
+    // (what we actually delete) comes from the row, since it may have been
+    // switched away from `name` since creation.
+    const wtRow = project.worktrees.find((wt) => wt.name === input.name);
+    if (!wtRow) {
+      throw new WorkspaceNotFoundError(input.name);
+    }
+    const currentBranch = wtRow.branch;
+
     const { command, env: gitEnv } = gitCmd();
 
     // Resolve the worktree path via `listWorktrees` rather than re-parsing
     // porcelain inline — it applies the detached-HEAD → `detached-<sha>`
     // fallback that the rest of the app sees in `project.worktrees`, so
-    // the dashboard's `input.branch` matches.
+    // the live branch matches.
     const worktrees = await listWorktrees(project.path);
-    const match = worktrees.find((wt) => wt.branch === input.branch);
+    const match = worktrees.find((wt) => wt.branch === currentBranch);
     if (!match) {
-      throw new WorkspaceNotFoundError(input.branch);
+      throw new WorkspaceNotFoundError(input.name);
     }
     const worktreePath = match.path;
 
@@ -663,10 +694,10 @@ export class WorkspaceService {
     }
 
     // ── Fast path: update state and emit immediately ──
-    project.worktrees = project.worktrees.filter((wt) => wt.branch !== input.branch);
+    project.worktrees = project.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
 
-    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const workspaceId = toWorkspaceId(input.project, input.name);
     try {
       unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
     } catch {
@@ -746,7 +777,7 @@ export class WorkspaceService {
     // found") — the catch below swallows it cleanly, but skipping the
     // call up front keeps the background logs free of noise that's hard
     // to distinguish from a genuine problem.
-    const branchToDelete = match.branch.startsWith(DETACHED_BRANCH_PREFIX) ? null : input.branch;
+    const branchToDelete = match.branch.startsWith(DETACHED_BRANCH_PREFIX) ? null : currentBranch;
     setImmediate(() => {
       (async () => {
         // Run teardown script before removing worktree so it can access
@@ -834,9 +865,9 @@ export class WorkspaceService {
         `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
       );
     }
-    const worktree = project.worktrees.find((w) => w.branch === input.branch);
+    const worktree = project.worktrees.find((w) => w.name === input.name);
     if (!worktree) {
-      throw new WorkspaceNotFoundError(input.branch);
+      throw new WorkspaceNotFoundError(input.name);
     }
     worktree.pinned = input.pinned;
     saveState(state);
@@ -852,10 +883,10 @@ export class WorkspaceService {
    * case and a thrown error would surface as a red toast.
    */
   async gitPull(input: WorkspaceGitInput): Promise<{ ok: true }> {
-    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const workspaceId = toWorkspaceId(input.project, input.name);
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
-      throw new WorkspaceNotFoundError(input.branch);
+      throw new WorkspaceNotFoundError(input.name);
     }
     if (workspace.project.kind === "plain") {
       throw new PlainProjectError(
@@ -883,10 +914,10 @@ export class WorkspaceService {
    * a second failing push.
    */
   async gitPush(input: WorkspaceGitInput): Promise<{ ok: true }> {
-    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const workspaceId = toWorkspaceId(input.project, input.name);
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
-      throw new WorkspaceNotFoundError(input.branch);
+      throw new WorkspaceNotFoundError(input.name);
     }
     if (workspace.project.kind === "plain") {
       throw new PlainProjectError(
@@ -906,7 +937,9 @@ export class WorkspaceService {
       if (!/has no upstream branch/i.test(msg)) {
         throw err;
       }
-      await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
+      // Set upstream for the LIVE git branch, not the workspace identity —
+      // after a branch switch they differ, and we push the current checkout.
+      await execGit(["push", "--set-upstream", "origin", workspace.worktree.branch], cwd);
     }
     return { ok: true };
   }

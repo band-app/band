@@ -157,12 +157,12 @@ export function useRemoveWorkspace() {
   const store = useRawDashboardStore();
 
   return useMutation({
-    mutationFn: ({ project, branch }: { project: string; branch: string }) =>
-      adapter.removeWorkspace(project, branch),
-    onSuccess: (_data, { project, branch }) => {
+    mutationFn: ({ project, name }: { project: string; name: string }) =>
+      adapter.removeWorkspace(project, name),
+    onSuccess: (_data, { project, name }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
-      const deletedWorkspaceId = toWorkspaceId(project, branch);
+      const deletedWorkspaceId = toWorkspaceId(project, name);
       if (store.getState().activeWorkspaceId === deletedWorkspaceId) {
         const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
         const projectInfo = projects?.find((p) => p.name === project);
