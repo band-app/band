@@ -121,10 +121,17 @@ jobs:
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
 
+      # Pin --test-threads=4 to match ci.yml. Each CLI integration test boots
+      # a real node Band server on its own port (TestEnv::new), and
+      # `workspaces create` dispatches to it. With unbounded parallelism the
+      # macos-latest runner boots too many servers at once; some aren't ready
+      # when create dispatches, so the worktree never registers and the
+      # workspaces_list_*/chat_auto_detects_workspace_from_cwd tests flake
+      # (see run 28698582656). CI already caps this; mirror it here.
       - name: Test
         run: |
           pnpm --filter @band-app/server test
-          cargo test --manifest-path apps/cli/Cargo.toml
+          cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
       - name: Build frontend
         env:
