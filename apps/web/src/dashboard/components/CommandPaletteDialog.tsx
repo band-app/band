@@ -33,7 +33,11 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]" showCloseButton={false}>
+      <DialogContent
+        variant="command-palette"
+        className="overflow-hidden p-0 lg:max-w-[520px]"
+        showCloseButton={false}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Command Palette</DialogTitle>
           <DialogDescription>Search for a command to run</DialogDescription>

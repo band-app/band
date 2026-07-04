@@ -113,15 +113,14 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        // Mobile: slides up as a bottom drawer (with a top safe-area gap).
-        // Desktop (sm+): the floating command-palette card — unchanged.
-        // No border ("white frame") and the app's floating-surface colour
-        // (`bg-popover`, same as dropdowns / context menus) so the picker reads
-        // as part of the app rather than a stock modal. `shadow-2xl` + the
-        // blurred overlay give it depth without a hard edge.
-        variant="bottom-sheet"
-        className="overflow-hidden border-0 bg-popover p-0 shadow-2xl lg:max-w-[520px] lg:border-0"
-        overlayClassName="backdrop-blur-sm"
+        // Mobile: slides up as a bottom drawer with the search input pinned
+        // below the list. Desktop: floating card anchored in the upper third,
+        // input fixed while the list grows downward. Uses the shared
+        // command-palette surface + dark overlay so it matches the other four
+        // command dialogs (quick open, find in files, command palette, language
+        // picker).
+        variant="command-palette"
+        className="overflow-hidden p-0 lg:max-w-[520px]"
         showCloseButton={false}
         data-testid="workspace-picker"
         // On touch devices, don't auto-focus the search input on open — that

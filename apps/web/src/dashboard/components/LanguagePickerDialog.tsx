@@ -91,7 +91,11 @@ export function LanguagePickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[480px]" showCloseButton={false}>
+      <DialogContent
+        variant="command-palette"
+        className="overflow-hidden p-0 lg:max-w-[480px]"
+        showCloseButton={false}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>Select Language Mode</DialogTitle>
           <DialogDescription>Search for a language to syntax-highlight the file</DialogDescription>

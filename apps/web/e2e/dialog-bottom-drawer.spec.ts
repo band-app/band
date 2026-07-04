@@ -124,7 +124,9 @@ test.describe("Mobile bottom drawers", () => {
     await workspacePage.openSwitcherFromHeader();
     await picker.waitVisible();
 
-    await expect(picker.dialog).toHaveAttribute("data-variant", "bottom-sheet");
+    // The command-palette variant is a bottom drawer on mobile (input pinned
+    // below the list) — see command-dialog-layout.spec.ts for the ordering.
+    await expect(picker.dialog).toHaveAttribute("data-variant", "command-palette");
 
     const box = await picker.dialogBox();
     // Anchored to the bottom edge and spanning the full width.
@@ -144,7 +146,10 @@ test.describe("Mobile bottom drawers", () => {
     // Same event the file-tree toolbar's "Quick Open" action fires.
     await workspacePage.dispatchOpenQuickOpen();
     await expect(workspacePage.quickOpenDialog()).toBeVisible();
-    await expect(workspacePage.quickOpenDialog()).toHaveAttribute("data-variant", "bottom-sheet");
+    await expect(workspacePage.quickOpenDialog()).toHaveAttribute(
+      "data-variant",
+      "command-palette",
+    );
 
     const box = await workspacePage.settledBoxOf(workspacePage.quickOpenDialog());
     expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);
@@ -161,7 +166,10 @@ test.describe("Mobile bottom drawers", () => {
     // Same event the file-tree toolbar's "Search in Files" action fires.
     await workspacePage.dispatchOpenSearchFiles();
     await expect(workspacePage.searchFilesDialog()).toBeVisible();
-    await expect(workspacePage.searchFilesDialog()).toHaveAttribute("data-variant", "bottom-sheet");
+    await expect(workspacePage.searchFilesDialog()).toHaveAttribute(
+      "data-variant",
+      "command-palette",
+    );
 
     const box = await workspacePage.settledBoxOf(workspacePage.searchFilesDialog());
     expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);

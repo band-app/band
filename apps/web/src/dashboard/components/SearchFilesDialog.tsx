@@ -135,9 +135,10 @@ export function SearchFilesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="search-files__root"
-        // Mobile: bottom drawer (with a top safe-area gap). Desktop: the
-        // floating command-palette card — unchanged.
-        variant="bottom-sheet"
+        // Mobile: bottom drawer with the search bar pinned below the results
+        // list. Desktop: floating card anchored in the upper third, search bar
+        // fixed while results grow downward.
+        variant="command-palette"
         className="overflow-hidden p-0 lg:max-w-[640px]"
         showCloseButton={false}
       >
@@ -153,6 +154,9 @@ export function SearchFilesDialog({
             options={searchOptions}
             onOptionsChange={setSearchOptions}
             placeholder="Search in files..."
+            // On mobile the search bar sits at the bottom of the sheet (below
+            // the list), so its divider flips to a top border.
+            className="max-lg:border-t max-lg:border-b-0"
           />
           <CommandList className="max-h-[400px]">
             <CommandEmpty>

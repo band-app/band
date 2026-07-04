@@ -300,9 +300,10 @@ export function QuickOpenDialog({
     <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="quick-open__root"
-        // Mobile: bottom drawer (with a top safe-area gap). Desktop: the
-        // floating command-palette card — unchanged.
-        variant="bottom-sheet"
+        // Mobile: bottom drawer with the input pinned below the results list.
+        // Desktop: floating card anchored in the upper third, input fixed while
+        // results grow downward.
+        variant="command-palette"
         className="overflow-hidden p-0 lg:max-w-[520px]"
         showCloseButton={false}
       >
