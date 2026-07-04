@@ -30,9 +30,11 @@ export interface PanelItem {
 }
 
 /** Props for the navigation cluster (sidebar toggle + menu + back/forward).
- *  This cluster lives in the SidebarTitleBar while the project list is
- *  visible, and relocates into the WorkspaceTitleBar when the list is
- *  collapsed — so both bars accept the same set of props. */
+ *  While the project list is visible the SidebarTitleBar renders only the
+ *  toggle + back/forward arrows (its `menuItems` is left undefined — the
+ *  overflow actions live in DashboardShell's bottom action bar). When the list
+ *  is collapsed the arrows and the fallback hamburger menu render in the
+ *  WorkspaceTitleBar instead — so both bars accept the same set of props. */
 interface NavControlsProps {
   /** Items rendered inside the global hamburger dropdown. When undefined, the
    *  hamburger button is not rendered. */

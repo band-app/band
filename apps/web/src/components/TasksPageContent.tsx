@@ -155,7 +155,7 @@ export function TasksPageContent() {
   );
 
   return (
-    <div className="flex flex-col overflow-hidden" data-testid="tasks__root">
+    <div className="flex flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2">
         <Select value={projectFilter} onValueChange={setProjectFilter}>
           <SelectTrigger className="h-8 w-40 text-xs" data-testid="tasks__project-filter">

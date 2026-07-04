@@ -542,11 +542,14 @@ function AppShell() {
     [],
   );
 
-  // The hamburger menu and back/forward arrows belong to the project-list
-  // region: they ride in the SidebarTitleBar while the list is visible, and
-  // relocate into the WorkspaceTitleBar (far left) when the list is collapsed
-  // so they stay reachable. Both bars receive the same nav props; each renders
-  // the cluster only in the appropriate state (keyed off `sidebarVisible`).
+  // The back/forward arrows (and, when the list is collapsed, the hamburger
+  // menu) belong to the project-list region. While the list is visible the
+  // SidebarTitleBar shows only the sidebar toggle + arrows — the overflow
+  // actions live in DashboardShell's bottom action bar, so `menuItems` is not
+  // passed there. When the list collapses, the arrows + the fallback hamburger
+  // relocate into the WorkspaceTitleBar (far left) so they stay reachable. Both
+  // bars receive the same nav props; each renders the cluster only in the
+  // appropriate state (keyed off `sidebarVisible`).
   //
   // Memoized so both bars get a stable prop reference across the frequent
   // AppShell re-renders (route changes, workspace switches, sidebar toggles).

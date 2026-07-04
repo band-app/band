@@ -25,8 +25,6 @@ export type TaskStatus = "running" | "completed" | "failed";
 export class TasksDialog {
   /** The Tasks dialog body. */
   readonly dialog: Locator;
-  /** Root of the tasks content — the "content mounted" anchor. */
-  readonly root: Locator;
   /** 3-dot overflow trigger in the project-list bottom action bar. */
   readonly overflowTrigger: Locator;
   /** "Tasks" entry inside the overflow dropdown. */
@@ -54,7 +52,6 @@ export class TasksDialog {
     private readonly token: string,
   ) {
     this.dialog = page.getByRole("dialog", { name: "Tasks" });
-    this.root = page.getByTestId("tasks__root");
     this.overflowTrigger = page.getByTestId("project-list__overflow-trigger");
     this.tasksMenuItem = page.getByRole("menuitem", { name: "Tasks" });
     this.projectFilter = page.getByTestId("tasks__project-filter");
