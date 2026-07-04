@@ -62,9 +62,16 @@ export interface ProjectState {
 
 /**
  * One worktree under a project. Plain projects synthesize a single
- * worktree at `{branch: "main", path: project.path}`.
+ * worktree at `{name: "main", branch: "main", path: project.path}`.
  */
 export interface WorktreeState {
+  /**
+   * Immutable workspace identity — the (slugified) branch name captured at
+   * creation. The workspace id derives from this (`toWorkspaceId`), so it
+   * is stable across git branch switches. Never mutated by `syncWorktrees`.
+   */
+  name: string;
+  /** Live git branch checked out in the worktree. Synced against git. */
   branch: string;
   path: string;
   head?: string;
@@ -113,7 +120,7 @@ export function reconcileKindForProject(project: ProjectState): boolean {
   // with no `.git` to reach back to) and the flattened plain UI would
   // render the wrong branch label.
   if (detectedKind === "plain") {
-    project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
+    project.worktrees = [{ name: "main", branch: "main", path: project.path, pinned: false }];
   }
   return true;
 }
@@ -147,6 +154,10 @@ export class ProjectQueries {
     for (const row of worktreeRows) {
       const list = wtByProject.get(row.projectName) ?? [];
       list.push({
+        // Defensive `|| branch`: a row written before the `name` column
+        // existed (backfilled by migration) should never be empty, but fall
+        // back to branch so identity stays stable even if it somehow is.
+        name: row.name || row.branch,
         branch: row.branch,
         path: row.path,
         head: row.head ?? undefined,
@@ -203,6 +214,7 @@ export class ProjectQueries {
           tx.insert(worktreesTable)
             .values({
               projectName: project.name,
+              name: wt.name,
               branch: wt.branch,
               path: wt.path,
               head: wt.head ?? null,

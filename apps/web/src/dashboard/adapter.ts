@@ -35,13 +35,15 @@ export interface DashboardAdapter {
    */
   promoteProjectToGit?(name: string): Promise<void>;
 
-  // Workspaces
+  // Workspaces. `name` is the immutable workspace identity (the initial
+  // branch), not the live git branch — see `WorktreeInfo.name`. `create`
+  // still takes `branch` because it names a *new* branch (which seeds `name`).
   createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
-  removeWorkspace(project: string, branch: string): Promise<void>;
-  setWorkspacePinned(project: string, branch: string, pinned: boolean): Promise<void>;
+  removeWorkspace(project: string, name: string): Promise<void>;
+  setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
-  gitPull(project: string, branch: string): Promise<void>;
-  gitPush(project: string, branch: string): Promise<void>;
+  gitPull(project: string, name: string): Promise<void>;
+  gitPush(project: string, name: string): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;

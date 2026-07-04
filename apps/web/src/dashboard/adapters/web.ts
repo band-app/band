@@ -91,12 +91,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.create.mutate({ project, branch, base, prompt });
   }
 
-  async removeWorkspace(project: string, branch: string): Promise<void> {
-    await this.trpc.workspaces.remove.mutate({ project, branch });
+  async removeWorkspace(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.remove.mutate({ project, name });
   }
 
-  async setWorkspacePinned(project: string, branch: string, pinned: boolean): Promise<void> {
-    await this.trpc.workspaces.setPinned.mutate({ project, branch, pinned });
+  async setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void> {
+    await this.trpc.workspaces.setPinned.mutate({ project, name, pinned });
   }
 
   async clearNeedsAttention(workspaceId: string): Promise<void> {
@@ -107,12 +107,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }
 
-  async gitPull(project: string, branch: string): Promise<void> {
-    await this.trpc.workspaces.gitPull.mutate({ project, branch });
+  async gitPull(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.gitPull.mutate({ project, name });
   }
 
-  async gitPush(project: string, branch: string): Promise<void> {
-    await this.trpc.workspaces.gitPush.mutate({ project, branch });
+  async gitPush(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.gitPush.mutate({ project, name });
   }
 
   async getSettings(): Promise<Settings> {

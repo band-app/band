@@ -62,6 +62,7 @@ export class ProjectService {
       label: string | undefined;
       kind: ProjectKind;
       worktrees: Array<{
+        name: string;
         branch: string;
         path: string;
         head?: string;
@@ -115,20 +116,32 @@ export class ProjectService {
           // worktree. Without this filter, the list reads stale data from
           // `git worktree list` and shows just-deleted workspaces until the
           // background cleanup completes.
-          const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
-          // Map by branch so we can preserve metadata (e.g. `pinned`) that git
-          // doesn't know about when merging git's view with our tracked state.
-          const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
+          // Map by PATH (not branch) so we can preserve Band-owned metadata
+          // git doesn't know about — the immutable `name` identity and the
+          // `pinned` flag — when merging git's view with our tracked state.
+          // Path is stable across a git branch switch; the branch is exactly
+          // what changes. Keying by branch here would drop a just-switched
+          // worktree from the list (and reset its `name`/`pinned`) in the
+          // window before the next sync tick reconciles the tracked branch.
+          // This mirrors the path-keyed merge in `sync-service.ts`.
+          const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
           try {
             const gitWorktrees = await this.git.listWorktrees(project.path);
             worktrees = gitWorktrees
-              .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
-              .map((wt) => ({
-                branch: wt.branch,
-                path: wt.path,
-                head: wt.head,
-                pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
-              }));
+              .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
+              .map((wt) => {
+                const tracked = trackedByPath.get(wt.path);
+                return {
+                  // Carry the stable identity from the tracked row; fall back
+                  // to the branch for worktrees git knows about but state
+                  // doesn't.
+                  name: tracked?.name ?? wt.branch,
+                  branch: wt.branch,
+                  path: wt.path,
+                  head: wt.head,
+                  pinned: tracked?.pinned ?? false,
+                };
+              });
           } catch {
             // Fall back to tracked worktrees
           }
@@ -141,7 +154,8 @@ export class ProjectService {
           label: project.label,
           kind: project.kind,
           worktrees: worktrees.map((wt) => {
-            const workspaceId = toWorkspaceId(project.name, wt.branch);
+            // Identity is by the immutable `name`, not the live branch.
+            const workspaceId = toWorkspaceId(project.name, wt.name);
             const status = statusMap.get(workspaceId);
             return {
               ...wt,
@@ -229,7 +243,15 @@ export class ProjectService {
         const gitWorktrees = await this.git.listWorktrees(resolvedPath);
         worktrees = gitWorktrees
           .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
+          // Seed `name` = branch at registration; from here it's immutable
+          // (sync updates `branch` only) so the id stays stable.
+          .map((wt) => ({
+            name: wt.branch,
+            branch: wt.branch,
+            path: wt.path,
+            head: wt.head,
+            pinned: false,
+          }));
       } catch {
         // No worktrees
       }
@@ -245,7 +267,7 @@ export class ProjectService {
       // the stored workspace path consistent with the `.git` probe and
       // with the implicit assumption elsewhere that workspace paths are
       // canonical.
-      worktrees = [{ branch: "main", path: resolvedPath, pinned: false }];
+      worktrees = [{ name: "main", branch: "main", path: resolvedPath, pinned: false }];
     }
 
     const project: ProjectState = {

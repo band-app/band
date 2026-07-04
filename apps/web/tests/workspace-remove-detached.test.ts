@@ -58,6 +58,22 @@ function listWorktreeBranches(tmpHome: string, projectName: string): string[] {
   }
 }
 
+// Companion to `listWorktreeBranches` that reads the `name` (identity)
+// column. `workspaces.remove` now filters rows by `name`, so asserting the
+// `name` entry is gone — not just the `branch` — pins the actual removal
+// key and guards against a future refactor that removes by branch.
+function listWorktreeNames(tmpHome: string, projectName: string): string[] {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    const rows = sqlite
+      .prepare("SELECT name FROM worktrees WHERE project_name = ? ORDER BY name")
+      .all(projectName) as Array<{ name: string }>;
+    return rows.map((r) => r.name);
+  } finally {
+    sqlite.close();
+  }
+}
+
 describe("workspaces.remove on a detached-HEAD worktree", () => {
   let server: ServerHandle;
   let tmpHome: string;
@@ -100,8 +116,8 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
           path: repoPath,
           defaultBranch: "main",
           worktrees: [
-            { branch: "main", path: repoPath },
-            { branch: detachedBranch, path: detachedPath },
+            { name: "main", branch: "main", path: repoPath },
+            { name: detachedBranch, branch: detachedBranch, path: detachedPath },
           ],
         },
       ],
@@ -122,11 +138,12 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     // via the same `listWorktrees` path, so it should agree with the
     // seed.
     expect(listWorktreeBranches(tmpHome, "proj").sort()).toEqual(["main", detachedBranch].sort());
+    expect(listWorktreeNames(tmpHome, "proj").sort()).toEqual(["main", detachedBranch].sort());
 
     const res = await trpcMutate(
       server.url,
       "workspaces.remove",
-      { project: "proj", branch: detachedBranch },
+      { project: "proj", name: detachedBranch },
       DEFAULT_TOKEN,
     );
     const body = await res.text();
@@ -143,8 +160,10 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     expect(body).not.toContain("not found");
     expect(JSON.parse(body)).toEqual({ result: { data: { ok: true } } });
 
-    // The persisted row for the detached branch must be gone; `main`
-    // must still be there (the filter has to be branch-scoped).
+    // The persisted row for the detached workspace must be gone; `main`
+    // must still be there. Assert on both the `branch` and the `name`
+    // (identity) columns so the removal is pinned by its actual key.
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
+    expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);
   });
 });

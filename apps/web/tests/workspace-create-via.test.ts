@@ -280,7 +280,7 @@ describe("workspaces.create via=terminal happy path", () => {
     const removeRes = await trpcMutate(
       server.url,
       "workspaces.remove",
-      { project: "viaproj", branch: "feat/term" },
+      { project: "viaproj", name: "feat/term" },
       TOKEN,
     );
     const removeBody = await removeRes.text();

@@ -268,7 +268,7 @@ export function resolveWorkspaceIdByCwd(cwd: string): string | null {
   for (const proj of state.projects) {
     for (const wt of proj.worktrees) {
       if (cwd === wt.path || cwd.startsWith(`${wt.path}/`)) {
-        return toWorkspaceId(proj.name, wt.branch);
+        return toWorkspaceId(proj.name, wt.name);
       }
     }
   }

@@ -40,6 +40,13 @@ export interface ProjectInfo {
 }
 
 export interface WorktreeInfo {
+  /**
+   * Immutable workspace identity — the branch name captured at creation.
+   * The workspace id derives from this (`toWorkspaceId`) and it's shown as
+   * the workspace label, so both stay stable across git branch switches.
+   * Never changes once set; `branch` below tracks the live git branch.
+   */
+  name: string;
   branch: string;
   path: string;
   head?: string;
@@ -276,7 +283,9 @@ export type CliStatus =
 
 export interface DeleteDialogInfo {
   projectName: string;
-  branch: string;
+  /** Workspace identity (immutable `name`), used both as the delete target
+   *  and as the label shown in the confirmation dialog. */
+  name: string;
   isUnmerged: boolean;
   isDirty: boolean;
   hasUnpushedCommits: boolean;

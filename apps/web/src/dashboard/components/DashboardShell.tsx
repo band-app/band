@@ -141,7 +141,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   const findProjectForWorkspace = useCallback(
     (workspaceId: string): ProjectInfo | undefined =>
       projects.find((p) =>
-        p.worktrees.some((wt) => toWorkspaceId(p.name, wt.branch) === workspaceId),
+        p.worktrees.some((wt) => toWorkspaceId(p.name, wt.name) === workspaceId),
       ),
     [projects],
   );

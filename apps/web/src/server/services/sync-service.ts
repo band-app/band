@@ -116,19 +116,27 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   let diskWorktrees: WorktreeState[];
   try {
     const gitWorktrees = await listWorktrees(project.path);
-    // Preserve the `pinned` flag for branches that still exist —
-    // syncWorktrees runs on a timer, and replacing the tracked
-    // worktrees with git's view would otherwise wipe pin state on
-    // every sync that adds/removes a worktree.
-    const pinnedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt.pinned]));
+    // Preserve Band-owned metadata (the immutable `name` identity and the
+    // `pinned` flag) across a sync. We key by PATH, not branch: the worktree
+    // path is stable across a git branch switch, but the branch is exactly
+    // what changes — matching by branch would fail to find the existing row
+    // after a switch and would (a) lose the pin state and (b) reset `name`,
+    // which must never move. `name` falls back to the current branch for
+    // worktrees created outside Band (first time we see them), matching the
+    // create-time invariant that `name === branch` initially.
+    const existingByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
     diskWorktrees = gitWorktrees
       .filter((wt) => !wt.isBare)
-      .map((wt) => ({
-        branch: wt.branch,
-        path: wt.path,
-        head: wt.head,
-        pinned: pinnedByBranch.get(wt.branch) ?? false,
-      }));
+      .map((wt) => {
+        const existing = existingByPath.get(wt.path);
+        return {
+          name: existing?.name ?? wt.branch,
+          branch: wt.branch,
+          path: wt.path,
+          head: wt.head,
+          pinned: existing?.pinned ?? false,
+        };
+      });
   } catch {
     // If git fails for this project (e.g. path was deleted, NFS mount is
     // gone), it has no usable origin — clear `hasOrigin` so the CI poller

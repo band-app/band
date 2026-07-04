@@ -47,14 +47,19 @@ export class WorkspaceQueries {
    * Resolve a workspace ID back to its on-disk identity (project, branch,
    * worktree path) by scanning the `worktrees` table.
    *
-   * The match expression mirrors `toWorkspaceId(project, branch)`:
-   *   `${project}-${branch.replaceAll("/", "-")}`
-   * SQLite's `REPLACE(str, "/", "-")` is also a replace-all, so this is
-   * bit-identical to the JS computation. Pushing the match down into SQL
-   * lets us read at most one row instead of fanning out the projects +
-   * worktrees tree just to find a single workspace (the previous
-   * `loadState()`-based implementation walked every project's worktree
-   * list to find the match in JS).
+   * The match expression mirrors `toWorkspaceId(project, name)`:
+   *   `${project}-${name.replaceAll("/", "-")}`
+   * where `name` is the immutable workspace identity (see the `worktrees`
+   * schema), NOT the live `branch`. SQLite's `REPLACE(str, "/", "-")` is
+   * also a replace-all, so this is bit-identical to the JS computation.
+   * Pushing the match down into SQL lets us read at most one row instead of
+   * fanning out the projects + worktrees tree just to find a single
+   * workspace (the previous `loadState()`-based implementation walked every
+   * project's worktree list to find the match in JS).
+   *
+   * The returned `branch` is the live git branch, still useful to callers
+   * that want the current checkout — identity is by `name`, git ops by
+   * `branch`.
    *
    * Called from two places today: the workspace-status upsert path in
    * `lib/state.ts::upsertWorkspaceStatus` (via the private
@@ -64,7 +69,7 @@ export class WorkspaceQueries {
    * loading the full project tree.
    *
    * TODO: `toWorkspaceId`'s encoding is not injective — project `foo-bar` +
-   * branch `main` and project `foo` + branch `bar/main` both serialize to
+   * name `main` and project `foo` + name `bar/main` both serialize to
    * `foo-bar-main`. `.get()` returns whichever row SQLite finds first, and
    * the sanity check below cannot disambiguate (both candidates satisfy
    * it). Fixing this requires changing the workspace-id encoding, which is
@@ -75,17 +80,18 @@ export class WorkspaceQueries {
     const row = db
       .select({
         project: worktreesTable.projectName,
+        name: worktreesTable.name,
         branch: worktreesTable.branch,
         worktreePath: worktreesTable.path,
       })
       .from(worktreesTable)
       .where(
-        sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.branch}, '/', '-') = ${workspaceId}`,
+        sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${workspaceId}`,
       )
       .get();
     // Use the `toWorkspaceId` helper as a runtime sanity check in case the
     // helper's encoding ever evolves to disagree with the SQL above.
-    if (row && toWorkspaceId(row.project, row.branch) === workspaceId) {
+    if (row && toWorkspaceId(row.project, row.name) === workspaceId) {
       return { project: row.project, branch: row.branch, worktreePath: row.worktreePath };
     }
     return null;

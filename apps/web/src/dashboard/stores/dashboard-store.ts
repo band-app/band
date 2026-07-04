@@ -24,8 +24,8 @@ export interface DashboardState {
   removeStatus: (workspaceId: string) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   runScript: (path: string, scriptType: string) => Promise<void>;
-  gitPull: (project: string, branch: string) => Promise<void>;
-  gitPush: (project: string, branch: string) => Promise<void>;
+  gitPull: (project: string, name: string) => Promise<void>;
+  gitPush: (project: string, name: string) => Promise<void>;
   updateGitStatus: (workspaceId: string, git: GitStatus) => void;
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
   updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
@@ -95,17 +95,17 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       }
     },
 
-    gitPull: async (project: string, branch: string) => {
+    gitPull: async (project: string, name: string) => {
       try {
-        await adapter.gitPull(project, branch);
+        await adapter.gitPull(project, name);
       } catch (e) {
         set({ error: String(e) });
       }
     },
 
-    gitPush: async (project: string, branch: string) => {
+    gitPush: async (project: string, name: string) => {
       try {
-        await adapter.gitPush(project, branch);
+        await adapter.gitPush(project, name);
       } catch (e) {
         set({ error: String(e) });
       }

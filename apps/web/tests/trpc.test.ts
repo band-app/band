@@ -540,7 +540,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove deletes a worktree and its branch", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-2",
+      name: "feature-2",
     });
     expect(res.status).toBe(200);
 
@@ -553,10 +553,10 @@ describe("tRPC — workspace operations", () => {
     expect(branches).not.toContain("feature-2");
   });
 
-  it("workspaces.remove returns error for unknown branch", async () => {
+  it("workspaces.remove returns error for unknown workspace name", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "nonexistent",
+      name: "nonexistent",
     });
     expect(res.status).toBe(500);
   });
@@ -1689,7 +1689,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove cleans up feature-1", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-1",
+      name: "feature-1",
     });
     expect(res.status).toBe(200);
   });
@@ -1697,7 +1697,7 @@ describe("tRPC — workspace operations", () => {
   it("workspaces.remove cleans up feature-3", async () => {
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "repo",
-      branch: "feature-3",
+      name: "feature-3",
     });
     expect(res.status).toBe(200);
   });
@@ -1779,7 +1779,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned pins a workspace and projects.list reflects it", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1794,7 +1794,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned unpins a previously pinned workspace", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: false,
     });
     expect(res.status).toBe(200);
@@ -1804,7 +1804,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned returns an error for unknown project", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "no-such-project",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(500);
@@ -1815,7 +1815,7 @@ describe("tRPC — pinned workspaces", () => {
   it("workspaces.setPinned returns an error for unknown branch", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "no-such-branch",
+      name: "no-such-branch",
       pinned: true,
     });
     expect(res.status).toBe(500);
@@ -1830,7 +1830,7 @@ describe("tRPC — pinned workspaces", () => {
     // through `WorktreeState` correctly.
     let res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1847,19 +1847,19 @@ describe("tRPC — pinned workspaces", () => {
     // Clean up: unpin and remove the sibling so the next test starts clean.
     await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: false,
     });
     await trpcMutate(server.url, "workspaces.remove", {
       project: "pin-repo",
-      branch: "sibling",
+      name: "sibling",
     });
   });
 
   it("pinned state persists across server restart", async () => {
     const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
@@ -1879,14 +1879,14 @@ describe("tRPC — pinned workspaces", () => {
     // and doesn't depend on prior tests in the describe block.
     let res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
       pinned: true,
     });
     expect(res.status).toBe(200);
 
     res = await trpcMutate(server.url, "workspaces.remove", {
       project: "pin-repo",
-      branch: "feature",
+      name: "feature",
     });
     expect(res.status).toBe(200);
 
@@ -2616,5 +2616,112 @@ describe("tRPC — auth enforcement", () => {
   it("returns 401 for projects.add without auth", async () => {
     const res = await trpcMutate(server.url, "projects.add", { path: "/tmp/fake" });
     expect(res.status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace identity is the immutable `name`, not the live git branch
+// ---------------------------------------------------------------------------
+//
+// Black-box HTTP coverage for the crux of the `name` feature: once a
+// worktree's git branch is switched away from the branch it was created on,
+// the workspace id (and everything keyed by it) must stay stable and the
+// projects-list label must keep showing the original `name`, while the
+// reported `branch` tracks git. Complements the white-box `sync-service`
+// unit test with the real server + tRPC surface (issue: workspace-name-field
+// review feedback [13]).
+describe("tRPC — workspace identity survives a git branch switch", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let featureWorktreePath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+
+    // Real repo + a real second worktree on `feature`, whose branch we then
+    // switch to `feature-renamed` — so on disk the worktree's live branch
+    // diverges from the `name` it was created under.
+    const repoPath = join(tmpHome, "proj");
+    mkdirSync(repoPath, { recursive: true });
+    git(repoPath, ["init", "-b", "main"]);
+    writeFileSync(join(repoPath, "README.md"), "# proj\n");
+    git(repoPath, ["add", "."]);
+    git(repoPath, ["commit", "-m", "initial commit"]);
+
+    featureWorktreePath = join(tmpHome, ".band", "worktrees", "proj", "feature");
+    mkdirSync(join(tmpHome, ".band", "worktrees", "proj"), { recursive: true });
+    git(repoPath, ["worktree", "add", "-b", "feature", featureWorktreePath]);
+    // Switch the live branch away from the creation branch.
+    git(featureWorktreePath, ["switch", "-c", "feature-renamed"]);
+
+    // Seed the divergent state directly: identity `name: "feature"` frozen at
+    // creation, live `branch: "feature-renamed"`. The seed helper supports an
+    // explicit `name` distinct from `branch` for exactly this scenario.
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "proj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { name: "main", branch: "main", path: repoPath },
+            { name: "feature", branch: "feature-renamed", path: featureWorktreePath },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    try {
+      git(join(tmpHome, "proj"), ["worktree", "remove", "--force", featureWorktreePath]);
+    } catch {
+      // best-effort — fine if already removed by the test
+    }
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it("projects.list keys the workspace id on `name` while reporting the live branch", async () => {
+    const res = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{
+        name: string;
+        worktrees: Array<{ name: string; branch: string; workspaceId: string }>;
+      }>;
+    }>(res);
+
+    const proj = data.projects.find((p) => p.name === "proj");
+    expect(proj).toBeDefined();
+
+    const feature = proj!.worktrees.find((wt) => wt.name === "feature");
+    expect(feature).toBeDefined();
+    // Id is derived from the immutable `name`, so it stays `proj-feature`…
+    expect(feature!.workspaceId).toBe("proj-feature");
+    // …even though the live git branch has moved on.
+    expect(feature!.branch).toBe("feature-renamed");
+    // The id must NOT have followed the branch to `proj-feature-renamed`.
+    const ids = proj!.worktrees.map((wt) => wt.workspaceId);
+    expect(ids).not.toContain("proj-feature-renamed");
+  });
+
+  it("workspaces.remove resolves by `name` even when the branch was switched", async () => {
+    const res = await trpcMutate(server.url, "workspaces.remove", {
+      project: "proj",
+      name: "feature",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{ name: string; worktrees: Array<{ name: string }> }>;
+    }>(listRes);
+    const proj = data.projects.find((p) => p.name === "proj");
+    expect(proj!.worktrees.map((wt) => wt.name)).not.toContain("feature");
   });
 });

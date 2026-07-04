@@ -161,8 +161,8 @@ enum WorkspacesCmd {
     Remove {
         /// Project name
         project: String,
-        /// Branch name
-        branch: String,
+        /// Workspace name (the branch it was created on — its stable identity)
+        name: String,
     },
 }
 
@@ -495,7 +495,7 @@ fn main() {
                 agent.as_deref(),
                 via.as_deref(),
             ),
-            WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
+            WorkspacesCmd::Remove { project, name } => cmd_workspaces_remove(&project, &name),
         },
         Commands::Chats { cmd } => match cmd {
             ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
@@ -1017,16 +1017,19 @@ fn user_default_via(settings: &state::Settings) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, String> {
+fn cmd_workspaces_remove(project: &str, name: &str) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
-    validate::validate_name(branch, "Branch name")?;
+    validate::validate_name(name, "Workspace name")?;
 
     let client = api::ApiClient::from_settings()?;
+    // The server identifies a workspace by its immutable `name` — the branch
+    // it was created on, which stays stable even after the git branch is
+    // switched (see the `worktrees.name` column).
     client.trpc_mutate(
         "workspaces.remove",
         &serde_json::json!({
             "project": project,
-            "branch": branch,
+            "name": name,
         }),
     )?;
 
@@ -2689,7 +2692,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Remove a workspace (git worktree + state cleanup)",
             "parameters": [
                 {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
-                {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Workspace name (the branch it was created on — its stable identity)"},
             ],
             "notes": "Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files."
         }),

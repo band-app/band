@@ -24,6 +24,9 @@ import { AgentStatusIndicator } from "./AgentStatusIndicator";
 interface WorkspaceEntry {
   workspaceId: string;
   projectName: string;
+  /** Stable workspace identity/label (see `WorktreeInfo.name`). */
+  name: string;
+  /** Live git branch — kept for search only. */
   branch: string;
   agent?: AgentInfo;
 }
@@ -64,10 +67,11 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
     const entries: WorkspaceEntry[] = [];
     for (const project of projects) {
       for (const worktree of project.worktrees) {
-        const workspaceId = toWorkspaceId(project.name, worktree.branch);
+        const workspaceId = toWorkspaceId(project.name, worktree.name);
         entries.push({
           workspaceId,
           projectName: project.name,
+          name: worktree.name,
           branch: worktree.branch,
           agent: statuses.get(workspaceId)?.agent,
         });
@@ -142,7 +146,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
               return (
                 <CommandItem
                   key={entry.workspaceId}
-                  value={`${entry.projectName} ${entry.branch}`}
+                  value={`${entry.projectName} ${entry.name} ${entry.branch}`}
                   onSelect={() => handleSelect(entry.workspaceId)}
                   data-testid={`workspace-picker__item--${entry.workspaceId}`}
                   // Coarse pointers (touch) get a 44px-tall row (iOS HIG hit
@@ -153,7 +157,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                 >
                   <AgentStatusIndicator agent={entry.agent} />
                   <span className="text-sm font-medium">
-                    {entry.projectName}/{entry.branch}
+                    {entry.projectName}/{entry.name}
                   </span>
                   {pinnedNow && (
                     <Pin className="size-3 -rotate-45 text-muted-foreground shrink-0" />
@@ -182,7 +186,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        togglePinned(entry.projectName, entry.branch, pinnedNow);
+                        togglePinned(entry.projectName, entry.name, pinnedNow);
                       }}
                     >
                       {pinnedNow ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}

@@ -53,6 +53,16 @@ export const worktrees = sqliteTable("worktrees", {
   projectName: text("project_name")
     .notNull()
     .references(() => projects.name, { onDelete: "cascade" }),
+  // Immutable workspace identity, set once at creation to the (slugified)
+  // branch name. The workspace id is derived from this (`toWorkspaceId`),
+  // NOT from `branch` — so switching the git branch inside the worktree
+  // doesn't change the id (and everything keyed by it) or the projects-list
+  // label. Sync updates `branch` to track git; it never touches `name`.
+  // Backfilled to `branch` for pre-existing rows by the migration.
+  name: text("name").notNull(),
+  // Live git branch checked out in the worktree. Reconciled against git by
+  // `syncWorktrees` and used as the target of git operations. Distinct from
+  // `name` above once the branch is switched.
   branch: text("branch").notNull(),
   path: text("path").notNull(),
   head: text("head"),

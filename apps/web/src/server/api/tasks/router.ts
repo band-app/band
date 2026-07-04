@@ -64,7 +64,7 @@ export const tasksRouter = t.router({
       const workspaceIds = new Set<string>();
       for (const p of state.projects) {
         for (const wt of p.worktrees) {
-          workspaceIds.add(toWorkspaceId(p.name, wt.branch));
+          workspaceIds.add(toWorkspaceId(p.name, wt.name));
         }
       }
       return {
