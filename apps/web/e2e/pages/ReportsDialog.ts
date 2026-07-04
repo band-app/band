@@ -2,17 +2,16 @@
  * Page object for the Reports dialog (issue #425).
  *
  * Same shape as `ResourcesPage` — no dedicated route, the dialog is
- * opened from the dashboard's overflow menu. Owns the locators for the
- * stat cards, the recharts SVG container, and the four breakdown
- * tables.
+ * opened from the Usage icon in the project-list bottom action bar.
+ * Owns the locators for the stat cards, the recharts SVG container, and
+ * the four breakdown tables.
  *
  * Locator priority:
  *
- *   - `getByRole({ name })` for the title-bar Menu trigger (the
- *     `aria-label="Menu"` value is system-controlled).
  *   - `getByTestId(...)` for owned card / chart / table / button
  *     elements. The BEM-style `reports__*` prefix matches the
- *     `data-testid` attributes set in `ReportsPageContent.tsx`.
+ *     `data-testid` attributes set in `ReportsPageContent.tsx`; the
+ *     `project-list__usage-button` testid rides on the Usage icon button.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -38,9 +37,8 @@ export class ReportsDialog {
   readonly byWorkspace: Locator;
   /** Period select. */
   readonly periodSelect: Locator;
-  /** Menu trigger + menu entry. */
-  readonly menuTrigger: Locator;
-  readonly reportsMenuItem: Locator;
+  /** Usage icon button in the project-list bottom action bar. */
+  readonly reportsButton: Locator;
 
   constructor(
     private readonly page: Page,
@@ -59,29 +57,28 @@ export class ReportsDialog {
     this.byAgent = page.getByTestId("reports__by-agent");
     this.byWorkspace = page.getByTestId("reports__by-workspace");
     this.periodSelect = page.getByTestId("reports__period-select");
-    this.menuTrigger = page.getByRole("button", { name: "Menu" });
-    this.reportsMenuItem = page.getByTestId("menu__reports");
+    this.reportsButton = page.getByTestId("project-list__usage-button");
   }
 
-  /** Navigate to the dashboard, open the title-bar menu, click Reports.
-   *  Uses the same `expect.poll` re-click pattern as `ResourcesPage` to
-   *  defeat the Radix `DropdownMenuTrigger` race where a fast Playwright
-   *  click can be swallowed before the menu stays open. */
+  /** Navigate to the dashboard, then click the Usage icon in the project-list
+   *  bottom action bar. The button is wrapped in a Radix Tooltip trigger whose
+   *  hover/pointer handling can swallow the first click during a fast run, so
+   *  re-click until the dialog actually opens. */
   async open(): Promise<void> {
-    await test.step("Open Reports via dashboard menu", async () => {
+    await test.step("Open Reports via the bottom action bar", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
-      await expect(this.menuTrigger).toBeVisible();
+      await this.page.waitForLoadState("networkidle");
+      await expect(this.reportsButton).toBeVisible();
       await expect
         .poll(
           async () => {
-            await this.menuTrigger.click();
-            return await this.reportsMenuItem.isVisible().catch(() => false);
+            if (await this.dialog.isVisible().catch(() => false)) return true;
+            await this.reportsButton.click();
+            return await this.dialog.isVisible().catch(() => false);
           },
           { timeout: 10_000 },
         )
         .toBe(true);
-      await this.reportsMenuItem.click();
-      await expect(this.dialog).toBeVisible();
     });
   }
 

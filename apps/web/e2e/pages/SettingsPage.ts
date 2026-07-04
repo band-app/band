@@ -1,10 +1,11 @@
 /**
  * Page object for the dashboard's Settings dialog.
  *
- * Owns the locators for the toolbar Menu trigger, the dialog itself, and
- * every per-row control we exercise in `e2e/settings-page.spec.ts`. Test
- * bodies never call `page.goto()`, `page.locator()`, `getByText`, or CSS-id
- * selectors directly — they go through this class.
+ * Owns the locators for the Settings button in the project-list bottom
+ * action bar, the dialog itself, and every per-row control we exercise in
+ * `e2e/settings-page.spec.ts`. Test bodies never call `page.goto()`,
+ * `page.locator()`, `getByText`, or CSS-id selectors directly — they go
+ * through this class.
  *
  * Locator priority for elements this app owns:
  *   1. `getByRole({ name })` when the ARIA name is system-controlled.
@@ -12,10 +13,9 @@
  *
  * Every Settings row's control has either an explicit `aria-label` or an
  * associated `<label htmlFor>` that contributes the accessible name, so
- * `getByRole(..., { name })` is the preferred shape here. The toolbar
- * "Menu" trigger button is anchored via its `data-testid` (set in
- * `DashboardShell.tsx`) since `aria-label="Menu"` is a generic value and
- * there are other "Menu" buttons elsewhere in the dashboard chrome.
+ * `getByRole(..., { name })` is the preferred shape here. The Settings
+ * gear button in the bottom action bar is anchored via its `data-testid`
+ * (`project-list__settings-button`, set in `DashboardShell.tsx`).
  *
  * CARVE-OUT (locator priority): a strict reading of the doctrine
  * bans `getByText`/`getByRole({ name })` against user-visible English copy
@@ -38,16 +38,10 @@ export class SettingsPage {
   readonly dialog: Locator;
   /** Save button in the dialog footer. Disabled until something is dirty. */
   readonly saveButton: Locator;
-  /** "Menu" dropdown trigger in the dashboard toolbar that opens the
-   *  menu containing the "Settings" item. Anchored via `data-testid`
-   *  (set in `DashboardShell.tsx`) because the bare `aria-label="Menu"`
-   *  is ambiguous across the dashboard chrome. */
-  readonly menuTrigger: Locator;
-  /** "Settings" menuitem inside the open toolbar dropdown. Promoted to a
-   *  named property (rather than inlined in `openDialog`) so the locator
-   *  lives alongside every other actionable element this POM owns — every
-   *  control elsewhere in this class is exposed the same way. */
-  readonly settingsMenuItem: Locator;
+  /** Settings gear icon button in the project-list bottom action bar.
+   *  Anchored via `data-testid` (set in `DashboardShell.tsx`). Opens the
+   *  Settings dialog directly — no intermediate dropdown. */
+  readonly settingsButton: Locator;
 
   constructor(
     private readonly page: Page,
@@ -55,9 +49,8 @@ export class SettingsPage {
     private readonly token: string,
   ) {
     this.dialog = page.getByRole("dialog", { name: "Settings" });
-    this.menuTrigger = page.getByTestId("dashboard__menu-trigger");
+    this.settingsButton = page.getByTestId("project-list__settings-button");
     this.saveButton = this.dialog.getByRole("button", { name: "Save" });
-    this.settingsMenuItem = page.getByRole("menuitem", { name: "Settings" });
   }
 
   /** Navigate to the dashboard root with the test token. */
@@ -65,42 +58,34 @@ export class SettingsPage {
     await test.step("Open dashboard", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
       // The dashboard React app fetches projects via tRPC on mount, so the
-      // toolbar's React click handlers may not be bound by the time `load`
+      // action bar's React click handlers may not be bound by the time `load`
       // fires. Wait for the network to settle before any subsequent step
-      // tries to drive the dropdown — without this, the first click on the
-      // menu trigger is silently lost in CI (matches the workaround already
+      // tries to click the Settings button — without this, the first click on
+      // the button can be silently lost in CI (matches the workaround already
       // in `tasks-page.spec.ts:openTasksDialog`).
       await this.page.waitForLoadState("networkidle");
     });
   }
 
   /**
-   * Open the "Menu" dropdown in the dashboard toolbar and click "Settings".
-   *
-   * The Radix DropdownMenu has a portal + small mount delay during the
-   * initial dashboard hydration, so we wrap the click in an
-   * `expect(...).toPass({ timeout })` poll — clicking too early loses the
-   * event before the menu mounts. Once the menu is visible we click the
-   * "Settings" item and wait for the dialog to render.
-   *
-   * The bare `getByRole("menu")` locator does not carry an accessible name —
-   * Radix's `DropdownMenuContent` portal does not accept an `aria-label`
-   * without further plumbing, and on the dashboard root the toolbar menu
-   * is the only `role="menu"` element in the DOM until something else
-   * opens (the label-filter dropdown is gated on `labels.length > 0` and
-   * the test seeds an empty project list). If a second menu is ever added
-   * unconditionally to the toolbar, scope this locator via an explicit
-   * `aria-label` on the `DropdownMenuContent`.
+   * Click the Settings button in the project-list bottom action bar and wait
+   * for the dialog to render. The button opens the dialog directly, but a
+   * hydration-swallowed first click (see `goto`) can drop the event, so
+   * re-click until the dialog is actually visible.
    */
   async openDialog(): Promise<void> {
-    await test.step("Open Settings dialog from toolbar menu", async () => {
-      await expect(this.menuTrigger).toBeVisible();
-      await expect(async () => {
-        await this.menuTrigger.click();
-        await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
-      }).toPass({ timeout: 15_000 });
-      await this.settingsMenuItem.click();
-      await expect(this.dialog).toBeVisible();
+    await test.step("Open Settings dialog from the bottom action bar", async () => {
+      await expect(this.settingsButton).toBeVisible();
+      await expect
+        .poll(
+          async () => {
+            if (await this.dialog.isVisible().catch(() => false)) return true;
+            await this.settingsButton.click();
+            return await this.dialog.isVisible().catch(() => false);
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(true);
     });
   }
 

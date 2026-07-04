@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, ChevronsDownUp, FolderPlus, Menu, Plus, Settings, Tag, X } from "lucide-react";
+import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import { useAppUpdate } from "../hooks/use-app-update";
@@ -48,15 +48,13 @@ import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
-  /** Extra menu items rendered inside the toolbar's overflow dropdown,
-   *  appended after the built-in Settings entry. */
-  toolbarMenuItems?: ReactNode;
+  /** Action cluster rendered on the right of the persistent bottom action
+   *  bar (Resources / Usage icons + a 3-dot overflow). Passed in as a node
+   *  because the `dashboard/` module must not import from `components/`;
+   *  callers supply `<ToolbarActionBar />`. */
+  bottomActions?: ReactNode;
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
-  /** Suppress the in-shell hamburger overflow menu. Used when this shell is
-   *  embedded under a global title bar that already exposes the same items
-   *  (Tasks / Cronjobs / Settings / …). */
-  hideMenu?: boolean;
 }
 
 // Desktop-shell detection. The Electron preload
@@ -80,7 +78,7 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
-export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: DashboardShellProps) {
+export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -374,33 +372,6 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border">
         <div className="flex min-w-0 items-center">
           <div className="flex items-center gap-1 pl-2">
-            {!hideMenu && (
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="text-muted-foreground"
-                        aria-label="Menu"
-                        data-testid="dashboard__menu-trigger"
-                      >
-                        <Menu className="size-5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">More</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start">
-                  {toolbarMenuItems}
-                  <DropdownMenuItem onClick={handleSettingsClick}>
-                    <Settings className="size-4" />
-                    Settings
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
             {labels.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -608,6 +579,28 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
           </Button>
         </div>
       )}
+
+      {/* Persistent bottom action bar. Left: a single Settings button (gear
+          icon + label) that opens the Settings dialog. Right: the
+          Resources/Usage icons + 3-dot overflow supplied by the caller
+          (`bottomActions` — a <ToolbarActionBar />), kept outside the
+          `dashboard/` seam. */}
+      <div
+        className="shrink-0 flex h-9 items-center justify-between gap-1 border-t border-border px-2"
+        data-testid="project-list__action-bar"
+      >
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          data-testid="project-list__settings-button"
+          onClick={handleSettingsClick}
+        >
+          <Settings className="size-4" />
+          Settings
+        </Button>
+        <div className="flex items-center gap-0.5">{bottomActions}</div>
+      </div>
 
       <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
         <DialogContent>

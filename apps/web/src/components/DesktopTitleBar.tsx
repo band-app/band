@@ -30,9 +30,11 @@ export interface PanelItem {
 }
 
 /** Props for the navigation cluster (sidebar toggle + menu + back/forward).
- *  This cluster lives in the SidebarTitleBar while the project list is
- *  visible, and relocates into the WorkspaceTitleBar when the list is
- *  collapsed — so both bars accept the same set of props. */
+ *  While the project list is visible the SidebarTitleBar renders only the
+ *  toggle + back/forward arrows (its `menuItems` is left undefined — the
+ *  overflow actions live in DashboardShell's bottom action bar). When the list
+ *  is collapsed the arrows and the fallback hamburger menu render in the
+ *  WorkspaceTitleBar instead — so both bars accept the same set of props. */
 interface NavControlsProps {
   /** Items rendered inside the global hamburger dropdown. When undefined, the
    *  hamburger button is not rendered. */
@@ -132,15 +134,14 @@ function NavControls({
                   type="button"
                   className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
                   aria-label="Menu"
-                  // Mirrors the testid on the DashboardShell-version of
-                  // the same trigger (`DashboardShell.tsx`). The two
-                  // triggers are mutually exclusive by layout: this title
-                  // bar mounts when `useDesktopLayout` is true, and the
-                  // sidebar's DashboardShell trigger is suppressed by the
-                  // `hideMenu` prop `AppShell` passes in that case
-                  // (`__root.tsx`). Sharing the testid lets test
-                  // page-objects target "the toolbar menu trigger" without
-                  // branching on layout mode.
+                  // This hamburger is the collapsed-sidebar fallback: while
+                  // the project list is visible its actions live in the
+                  // list's bottom action bar (`DashboardShell.tsx`), and
+                  // `AppShell` (`__root.tsx`) only passes `menuItems` to the
+                  // WorkspaceTitleBar — so this renders once the list
+                  // collapses. Retains the historical testid for any direct
+                  // `page.getByTestId` spec use (page objects target the
+                  // bottom-bar buttons now).
                   data-testid="dashboard__menu-trigger"
                 >
                   <Menu className="size-5" />
@@ -215,7 +216,10 @@ export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: Sidebar
       {/* Gate the cluster on visibility: when the list is collapsed the bar is
           clipped to 0px but stays mounted, so rendering the cluster here would
           duplicate it (the WorkspaceTitleBar shows it while collapsed) and put
-          two `…__sidebar-toggle` / `dashboard__menu-trigger` nodes in the DOM. */}
+          two `…__sidebar-toggle` nodes in the DOM. `AppShell` passes
+          `menuItems={undefined}` here, so this variant renders only the toggle
+          + back/forward arrows — the overflow menu lives in the WorkspaceTitleBar
+          fallback (collapsed) and the project-list bottom action bar (visible). */}
       {sidebarVisible && <NavControls sidebarVisible={sidebarVisible} {...nav} />}
     </div>
   );
