@@ -216,6 +216,190 @@ jobs:
       - name: Test (desktop)
         run: pnpm --filter @band-app/desktop test
 
+  # ---------------------------------------------------------------------------
+  # macOS CLI integration tests.
+  #
+  # The main `check` job runs the CLI integration tests only on ubuntu-latest,
+  # but several Band paths behave differently on macOS — most notably the
+  # `/var/folders` → `/private/var/folders` symlink that canonicalize() and git
+  # resolve but a raw temp path does not. That mismatch silently dropped
+  # seeded worktrees during path-string reconciliation (the server reconciles
+  # worktrees by path equality since #606) and broke four CLI integration tests
+  # — a failure that passes on every Linux PR (no `/private` symlink) and only
+  # surfaced on the macos-latest release runner for v0.24.0 (harness fix: #608).
+  #
+  # This job closes that gap by exercising the CLI integration tests on macOS on
+  # every relevant change. It is a SEPARATE, CLI-only job — NOT a macOS clone of
+  # `check` — because macOS runners are slower and costlier, so we only pay for
+  # the surface that actually has a macOS-specific failure mode. The lightweight
+  # `cli-macos-changes` job below gates it: PRs that don't touch the
+  # CLI/worktree/sync surface skip the macOS runner entirely.
+  # ---------------------------------------------------------------------------
+  cli-macos-changes:
+    name: Detect CLI-relevant changes
+    runs-on: ubuntu-latest
+    # Mirror the `check` job's cost gate: run on push to main, on same-repo PRs
+    # (collaborators), and on fork PRs a maintainer labelled `ci:approved`.
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      contains(github.event.pull_request.labels.*.name, 'ci:approved')
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history so the base commit is reachable for the diff below.
+          fetch-depth: 0
+
+      # Native git-diff path gate — same idiom as the "Check for docs changes"
+      # step in deploy-docs, so we don't add a third-party action to a workflow
+      # this security-conscious repo deliberately runs under `pull_request`
+      # (no secrets, PR-scoped cache). Fails OPEN: any ambiguity about the base
+      # runs the macOS job rather than risk skipping a real regression.
+      - name: Detect CLI-relevant changes
+        id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+
+          # No usable base (first push, force-push, all-zero SHA): fail open.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # `fetch-depth: 0` above already pulls full history, so $BASE is
+          # normally present. This shallow fetch is a belt-and-suspenders net
+          # for the edge case where the base branch was force-pushed and $BASE
+          # (recorded at PR-creation time) is orphaned from the fetched refs —
+          # GitHub still serves the loose commit. Then diff against the merge
+          # base (three-dot) so we only see what THIS branch changed, not
+          # unrelated commits that landed on main. Any git error → fail open.
+          git fetch --no-tags --depth=1 origin "$BASE" 2>/dev/null || true
+          if ! CHANGED=$(git diff --name-only "$BASE...$HEAD" 2>/dev/null); then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Keep this list in sync with the surface that can trigger the
+          # macOS-only worktree path-reconciliation bug: the CLI + its test
+          # harness, the server sync/workspace services, the workspaces query
+          # layer, and this workflow file itself.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(apps/cli/|apps/web/src/server/services/(sync-service|workspace-service)\.ts$|apps/web/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  cli-macos:
+    name: CLI Integration Tests (macOS)
+    runs-on: macos-latest
+    needs: cli-macos-changes
+    if: needs.cli-macos-changes.outputs.run == 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # `runner.os` is "macOS" here, so these keys are naturally distinct from
+      # the ubuntu `check` job's `Linux` cache entries — no cross-OS collision.
+      # See the `check` job for the full restore/save rationale; keep each
+      # Restore/Save pair's path & key in lock-step.
+      - name: Restore Cargo registry cache
+        id: cache-cargo-registry
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Restore CLI target cache
+        id: cache-cargo-cli
+        uses: actions/cache/restore@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: cargo-cli-${{ runner.os }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
+      # job) no explicit `node-gyp` install is needed — matches release.yml.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build the web server bundle the integration tests drive: each test
+      # boots `apps/web/dist/start-server.mjs` (a real node Band server) and
+      # runs CLI commands against it. The CLI binary itself is compiled by the
+      # `cargo test` step below via `env!("CARGO_BIN_EXE_band")` (test profile),
+      # so — unlike the `check`/`release` jobs — there is deliberately NO
+      # separate `cargo build --release` step here: those jobs release-build the
+      # CLI only so their *web* tests can shell out to a real `band` on PATH,
+      # and this CLI-only job runs no web tests. Dropping the release build
+      # avoids compiling the crate twice on the slower/costlier macOS runner
+      # (the exact cost #609 asks us to economise on).
+      - name: Build web (needed by tests)
+        run: pnpm build:web
+
+      # Keep --test-threads=4 (matching ci.yml `check` and release.yml): each
+      # test boots its own real Band server on a random port, and unbounded
+      # parallelism floods the slower macOS runner so servers aren't ready when
+      # `workspaces create` dispatches, flaking the worktree-dependent tests.
+      - name: Test (CLI)
+        run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
+
+      # Cache writes, gated on trusted events as defence-in-depth — same policy
+      # and failure semantics as the `check` job (registry saves `always()`,
+      # CLI target only on `success()` so broken incremental state isn't cached).
+      - name: Save Cargo registry cache
+        if: |
+          always() &&
+          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save CLI target cache
+        if: |
+          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/cache/save@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
   deploy-docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
