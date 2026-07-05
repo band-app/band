@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import type * as React from "react";
+import { useEffect } from "react";
 
 import { cn } from "../utils";
 import { Button } from "./button";
@@ -44,6 +45,24 @@ function DialogOverlay({
 // reverts to the centred modal at the `lg` breakpoint — desktop is left
 // exactly as the default variant.
 //
+// `command-palette` is the layout for the searchable command dialogs (quick
+// open, find in files, switch workspace, command palette, language picker).
+// Unlike the other variants it deliberately does NOT centre vertically:
+//   - Desktop (lg+): the card is anchored in the upper third by its TOP edge
+//     with no `translate-y`, so the search input (the first child) stays at a
+//     fixed Y while the results list grows/shrinks downward beneath it. A
+//     centred modal would bob the input up and down as results change.
+//   - Mobile (< lg): a bottom drawer whose input is pinned to the BOTTOM,
+//     just above the on-screen keyboard (easy thumb reach), with the results
+//     list above it. The input/list order is flipped visually only, by
+//     reversing the `<Command>` flex direction (DOM order + cmdk keyboard nav
+//     are untouched). The sheet sits at `bottom: var(--kb-inset)` (see
+//     `useKeyboardInset`), a JS-maintained variable equal to the keyboard's
+//     occluded height, so the input rides *above* the keyboard on iOS Safari
+//     too — where the layout viewport is never resized and a `bottom: 0` sheet
+//     would otherwise be drawn under the keyboard. The `max-h` subtracts the
+//     same inset so the sheet's top can't run past the safe-area gap.
+//
 // The breakpoint is `lg` (1024px), NOT `sm`, so it matches the app's own
 // mobile/desktop switch (`useIsDesktop` = `min-width: 1024px`): below 1024px
 // the app renders its mobile layout, so the dialogs must be bottom drawers
@@ -64,7 +83,76 @@ const DIALOG_CONTENT_VARIANTS = {
     "lg:inset-auto lg:top-[50%] lg:left-[50%] lg:bottom-auto lg:w-full lg:max-w-lg lg:max-h-[85vh] lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-lg lg:border-b",
     "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
   ].join(" "),
+  "command-palette": [
+    // Shared
+    "fixed z-50 flex flex-col bg-background shadow-lg duration-200 outline-none",
+    "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+    // Mobile (< lg): bottom drawer with the input pinned to the bottom. Flip
+    // the command's flex direction so the input sits below the results list,
+    // and flip the input wrapper's divider to a top border to match. The sheet
+    // floats at `bottom: var(--kb-inset)` (keyboard height; 0 when closed) so
+    // the input clears the on-screen keyboard — see `useKeyboardInset`.
+    "inset-x-0 bottom-[var(--kb-inset,0px)] w-full max-w-none rounded-t-2xl border border-b-0",
+    "max-h-[calc(100dvh-var(--kb-inset,0px)-env(safe-area-inset-top)-1.5rem)]",
+    "max-lg:[&_[data-slot=command]]:flex-col-reverse",
+    "max-lg:[&_[cmdk-input-wrapper]]:border-t max-lg:[&_[cmdk-input-wrapper]]:border-b-0",
+    "max-lg:data-[state=open]:slide-in-from-bottom max-lg:data-[state=closed]:slide-out-to-bottom",
+    // Desktop (lg+): anchored in the upper third by its TOP edge — no
+    // `translate-y`, so the input never moves as the list grows downward.
+    "lg:inset-x-auto lg:bottom-auto lg:top-[12vh] lg:left-1/2 lg:w-full lg:max-w-lg lg:max-h-[70vh] lg:-translate-x-1/2 lg:rounded-lg lg:border",
+    "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
+  ].join(" "),
 } as const;
+
+/**
+ * Keep a `--kb-inset` CSS variable on the document root in sync with the
+ * on-screen keyboard's occluded height, so the mobile `command-palette` bottom
+ * sheet can float above the keyboard rather than be drawn under it.
+ *
+ * Only Chrome Android honours the `interactive-widget=resizes-content` viewport
+ * hint (which shrinks the layout viewport so a `bottom: 0` sheet already clears
+ * the keyboard). iOS Safari never resizes the layout viewport for the keyboard,
+ * so a `position: fixed; bottom: 0` element stays put and the keyboard overlays
+ * it. `visualViewport` reports the occluded height on both platforms, so we
+ * drive the sheet's `bottom` (and `max-height`) off it. On
+ * Android-with-resizes-content the computed inset is ~0 (the layout viewport
+ * already shrank), making this a no-op there — no double offset.
+ *
+ * Runs only while a `command-palette` dialog is mounted (Radix mounts content
+ * on open, unmounts after the close animation), so the listeners are scoped to
+ * the dialog's lifetime. Live instances are tracked in a `Set` of per-effect
+ * tokens rather than an integer counter: when one command-palette dialog closes
+ * while another is still open (e.g. overlapping open/close animations), the
+ * variable is only cleared once the set is empty — so the surviving dialog
+ * isn't collapsed back to `bottom: 0`. A `Set` (vs. a bare `+1/-1` counter) also
+ * can't go negative under HMR module re-evaluation or React StrictMode's
+ * double-invoked effects, both of which would corrupt a plain counter.
+ */
+const keyboardInsetHolders = new Set<object>();
+
+function useKeyboardInset(active: boolean) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!active || !vv) return;
+    const root = document.documentElement;
+    const token = {};
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--kb-inset", `${inset}px`);
+    };
+    keyboardInsetHolders.add(token);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      keyboardInsetHolders.delete(token);
+      // Only clear once the last command-palette dialog has unmounted.
+      if (keyboardInsetHolders.size === 0) root.style.removeProperty("--kb-inset");
+    };
+  }, [active]);
+}
 
 function DialogContent({
   className,
@@ -81,9 +169,15 @@ function DialogContent({
    * Layout variant. `default` is the centred modal; `bottom-sheet` renders a
    * bottom drawer on mobile (with a top safe-area gap) that reverts to the
    * centred modal on desktop (`lg`+, 1024px — matching `useIsDesktop`).
+   * `command-palette` is for searchable command dialogs: upper-third
+   * top-anchored on desktop (fixed input, list grows downward) and a
+   * bottom drawer with the input pinned below the list on mobile.
    */
   variant?: keyof typeof DIALOG_CONTENT_VARIANTS;
 }) {
+  // Track the keyboard height for the mobile command-palette bottom sheet so
+  // its input clears the on-screen keyboard. No-op for the other variants.
+  useKeyboardInset(variant === "command-palette");
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay className={overlayClassName} />

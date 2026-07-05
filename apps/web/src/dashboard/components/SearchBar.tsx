@@ -1,3 +1,4 @@
+import { cn } from "@band-app/ui";
 import { CaseSensitive, ChevronDown, ChevronUp, Regex, Search, WholeWord, X } from "lucide-react";
 import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 
@@ -112,7 +113,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
 
   return (
     <div
-      className={`flex shrink-0 items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 ${className ?? ""}`}
+      className={cn(
+        "flex shrink-0 items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5",
+        className,
+      )}
     >
       <Search className="size-3.5 shrink-0 text-muted-foreground" />
       <input
