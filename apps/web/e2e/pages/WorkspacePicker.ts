@@ -21,7 +21,7 @@
  * and expose interaction methods.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 interface Box {
   x: number;
@@ -59,6 +59,13 @@ export class WorkspacePicker {
     return this.dialog.getByRole("option");
   }
 
+  /** Assert the number of workspace rows currently rendered. Wraps the
+   *  `options` locator so test bodies assert row counts through the page
+   *  object rather than consuming the raw locator. */
+  async expectOptionCount(count: number): Promise<void> {
+    await expect(this.options).toHaveCount(count);
+  }
+
   async waitVisible(): Promise<void> {
     await test.step("Wait for the workspace picker to open", async () => {
       await this.dialog.waitFor({ state: "visible", timeout: 15_000 });
@@ -68,7 +75,12 @@ export class WorkspacePicker {
   /** Wait for the dialog's open/slide/zoom animations (and any descendant's)
    *  to finish. The zoom/slide animation runs on the dialog CONTENT element,
    *  so a child (input, row) must wait on the DIALOG's subtree — not its own —
-   *  or it may be measured mid-zoom while the ancestor is still scaling. */
+   *  or it may be measured mid-zoom while the ancestor is still scaling.
+   *
+   *  NOTE: this intentionally differs from `WorkspacePage.settledBoxOf`, which
+   *  waits on the passed locator itself. Here the animation always lives on the
+   *  ancestor dialog, so every measurement anchors on `this.dialog` regardless
+   *  of which child is being measured. */
   private async waitAnimationsSettled(): Promise<void> {
     await this.dialog.evaluate((el) =>
       Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))),

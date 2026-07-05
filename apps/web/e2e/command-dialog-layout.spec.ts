@@ -48,8 +48,10 @@ const PROJECT = "layout-demo";
 // collapses to a single row when a unique branch is typed — the height delta
 // that would move a centred card's input. The names are deliberately
 // dissimilar (cmdk filters by fuzzy *subsequence*, so near-identical names
-// like `feature-a`/`feature-b` would all survive a single-letter query):
-// only `epsilon` contains an "s", so typing it narrows the list to one row.
+// like `feature-a`/`feature-b` would all survive a single-letter query).
+// Only `epsilon` contains an "s", so filtering on it narrows the list to one
+// row; `FILTER_TO_ONE` types the whole word (even more selective than a bare
+// "s") for readability.
 const BRANCHES = ["main", "alpha", "bravo", "charlie", "delta", "epsilon"];
 const FILTER_TO_ONE = "epsilon";
 const WS_MAIN = toWorkspaceId(PROJECT, "main");
@@ -99,7 +101,7 @@ test.describe("Command dialog layout — desktop (upper third, input anchored)",
     await picker.waitVisible();
 
     // All rows visible: on desktop the input is at the TOP, the list below it.
-    await expect(picker.options).toHaveCount(BRANCHES.length);
+    await picker.expectOptionCount(BRANCHES.length);
     const inputFull = await picker.inputBox();
     const firstRowFull = await picker.firstOptionBox();
     expect(firstRowFull.y).toBeGreaterThan(inputFull.y);
@@ -108,7 +110,7 @@ test.describe("Command dialog layout — desktop (upper third, input anchored)",
     // dialog would re-centre and pull the input downward; the top-anchored
     // command-palette variant must keep the input at the same Y.
     await picker.typeQuery(FILTER_TO_ONE);
-    await expect(picker.options).toHaveCount(1);
+    await picker.expectOptionCount(1);
 
     const inputFiltered = await picker.inputBox();
     expect(Math.abs(inputFiltered.y - inputFull.y)).toBeLessThanOrEqual(2);
@@ -134,7 +136,7 @@ test.describe("Command dialog layout — mobile (input below the list)", () => {
     // Pin the full count before measuring so `options.last()` can't be
     // snapshotted while later rows are still rendering (same anchor the
     // desktop test uses).
-    await expect(picker.options).toHaveCount(BRANCHES.length);
+    await picker.expectOptionCount(BRANCHES.length);
     const inputBox = await picker.inputBox();
     const lastRowBox = await picker.lastOptionBox();
 
