@@ -131,13 +131,16 @@ test.describe("Command dialog layout — mobile (input below the list)", () => {
     await workspacePage.openSwitcherFromHeader();
     await picker.waitVisible();
 
-    await expect(picker.options.first()).toBeVisible();
+    // Pin the full count before measuring so `options.last()` can't be
+    // snapshotted while later rows are still rendering (same anchor the
+    // desktop test uses).
+    await expect(picker.options).toHaveCount(BRANCHES.length);
     const inputBox = await picker.inputBox();
     const lastRowBox = await picker.lastOptionBox();
 
-    // Input pinned below the ENTIRE list → its top edge is below the top of the
-    // last (bottom-most) row. Measuring against the last row (not the first)
-    // proves the input isn't merely mid-list.
-    expect(inputBox.y).toBeGreaterThan(lastRowBox.y);
+    // Input pinned below the ENTIRE list → its top edge is at or below the
+    // BOTTOM edge of the last (bottom-most) row. Comparing against the row's
+    // bottom (not its top) proves the input doesn't overlap the list at all.
+    expect(inputBox.y).toBeGreaterThanOrEqual(lastRowBox.y + lastRowBox.height);
   });
 });

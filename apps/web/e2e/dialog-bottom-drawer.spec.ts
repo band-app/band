@@ -115,7 +115,7 @@ test.describe("Mobile bottom drawers", () => {
     expect(box.height).toBeLessThan(VIEWPORT.height);
   });
 
-  test("the workspace picker opens as a bottom drawer", async ({ page }) => {
+  test("the workspace picker opens as a command-palette bottom drawer", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     const picker = new WorkspacePicker(page);
 
@@ -137,7 +137,7 @@ test.describe("Mobile bottom drawers", () => {
     expect(box.y).toBeGreaterThan(8);
   });
 
-  test("Quick Open opens as a bottom drawer", async ({ page }) => {
+  test("Quick Open opens as a command-palette bottom drawer", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
     await workspacePage.goto(WORKSPACE);
@@ -157,7 +157,7 @@ test.describe("Mobile bottom drawers", () => {
     expect(box.y).toBeGreaterThan(8);
   });
 
-  test("Search in Files opens as a bottom drawer", async ({ page }) => {
+  test("Search in Files opens as a command-palette bottom drawer", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
     await workspacePage.goto(WORKSPACE);

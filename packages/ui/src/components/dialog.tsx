@@ -120,8 +120,13 @@ const DIALOG_CONTENT_VARIANTS = {
  *
  * Runs only while a `command-palette` dialog is mounted (Radix mounts content
  * on open, unmounts after the close animation), so the listeners are scoped to
- * the dialog's lifetime.
+ * the dialog's lifetime. Instances are ref-counted: when one command-palette
+ * dialog closes while another is still open (e.g. overlapping open/close
+ * animations), the variable is only cleared once the last one unmounts — so
+ * the surviving dialog isn't collapsed back to `bottom: 0`.
  */
+let keyboardInsetRefCount = 0;
+
 function useKeyboardInset(active: boolean) {
   useEffect(() => {
     const vv = window.visualViewport;
@@ -131,13 +136,16 @@ function useKeyboardInset(active: boolean) {
       const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       root.style.setProperty("--kb-inset", `${inset}px`);
     };
+    keyboardInsetRefCount += 1;
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
-      root.style.removeProperty("--kb-inset");
+      keyboardInsetRefCount -= 1;
+      // Only clear once the last command-palette dialog has unmounted.
+      if (keyboardInsetRefCount === 0) root.style.removeProperty("--kb-inset");
     };
   }, [active]);
 }
