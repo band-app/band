@@ -577,7 +577,7 @@ export class WorkspacePage {
    *  locator never collides with nested dockview tab strips (which
    *  render their own per-instance tab components and never carry
    *  `workspace__tab--*` testids). */
-  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph"): Locator {
     return this.page.getByTestId(`workspace__tab--${panelComponent}`);
   }
 
@@ -591,7 +591,9 @@ export class WorkspacePage {
    *  than waiting for the panel's content (e.g. xterm) to finish
    *  booting, and it isn't affected by xterm's offscreen helper textarea
    *  visibility quirks. */
-  tabContainer(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+  tabContainer(
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph",
+  ): Locator {
     // Anchor on our own testid (the one on `.dv-default-tab`) and walk
     // up to dockview's `.dv-tab` wrapper via the `:has(...)` pseudo —
     // a Playwright-supported CSS selector that picks the parent
@@ -902,10 +904,55 @@ export class WorkspacePage {
    *  raw tab click in a `test.step` so spec bodies switch tabs through the page
    *  object instead of touching the `tab(...)` locator directly. */
   async activateTab(
-    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph",
   ): Promise<void> {
     await test.step(`Activate the ${panelComponent} tab`, async () => {
       await this.tab(panelComponent).click();
+    });
+  }
+
+  /** Activate the Graph tab. The commit-graph SVG is then reachable via
+   *  `commitGraph`. */
+  async openGraphTab(): Promise<void> {
+    await this.activateTab("graph");
+  }
+
+  /** The commit-graph SVG rendered by `GitGraphView`. Its ARIA name
+   *  ("Commit graph") is system-controlled, so `getByRole` is the
+   *  highest-priority locator. */
+  get commitGraph(): Locator {
+    return this.page.getByRole("img", { name: "Commit graph" });
+  }
+
+  /** A commit row in the graph, located by its subject line. The subject is
+   *  runtime data the test itself committed, so `getByText` is appropriate. */
+  commitRow(subject: string): Locator {
+    return this.page.getByText(subject, { exact: true });
+  }
+
+  /** Rows whose subject is git-generated stash bookkeeping ("index on …",
+   *  "untracked files on …", "WIP on …", "On …: …"). Hidden while the
+   *  graph's "Hide stash" toggle is on (the default). */
+  stashBookkeepingRows(): Locator {
+    return this.page.getByText(/^(?:WIP on|On|index on|untracked files on) \S+: /);
+  }
+
+  /** The stash's index/untracked snapshot rows — never surfaced as their own
+   *  nodes regardless of the "Hide stash" toggle. */
+  stashInternalRows(): Locator {
+    return this.page.getByText(/^(?:index on|untracked files on) \S+: /);
+  }
+
+  /** The stash tip row (git subject "On <branch>: <message>"), located by its
+   *  message — runtime data the test itself stashed. */
+  stashTipRow(message: string): Locator {
+    return this.page.getByText(new RegExp(`^On \\S+: .*${message}`));
+  }
+
+  /** Toggle the graph's "Hide stash" checkbox (Graph tab must be open). */
+  async toggleHideStash(): Promise<void> {
+    await test.step("Toggle Hide stash", async () => {
+      await this.page.getByTestId("git-graph__hide-stash").click();
     });
   }
 

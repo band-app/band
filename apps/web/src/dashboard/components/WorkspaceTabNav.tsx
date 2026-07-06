@@ -1,6 +1,6 @@
-import { FolderOpen, GitCompare, MessageSquare, TerminalSquare } from "lucide-react";
+import { FolderOpen, GitBranch, GitCompare, MessageSquare, TerminalSquare } from "lucide-react";
 
-export type WorkspaceTab = "chat" | "diff" | "code" | "terminal";
+export type WorkspaceTab = "chat" | "diff" | "code" | "terminal" | "graph";
 
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
@@ -13,6 +13,7 @@ const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = 
   { id: "diff", label: "Changes", icon: GitCompare },
   { id: "code", label: "Files", icon: FolderOpen },
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
+  { id: "graph", label: "Graph", icon: GitBranch },
 ];
 
 export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: WorkspaceTabNavProps) {

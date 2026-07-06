@@ -18,6 +18,7 @@ import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
+import { GitGraphView } from "../components/GitGraphView";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -401,6 +402,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
                 <DockviewTerminalContainer workspaceId={workspaceId} visible={true} />
               </Suspense>
             )}
+            {activeTab === "graph" && <GitGraphView workspaceId={workspaceId} />}
           </main>
           <QuickOpenDialog
             workspaceId={workspaceId}

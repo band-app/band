@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-router";
 import {
   FolderOpen,
+  GitBranch,
   GitCompare,
   Globe,
   MessageSquare,
@@ -380,6 +381,7 @@ function AppShell() {
       // Browser pane works on both desktop (native webviews) and web (CDP
       // screencast of the desktop app's tabs — see ScreencastPanel).
       { id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" },
+      { id: "graph", label: "Graph", icon: GitBranch, shortcut: "⇧⌘Y" },
     ],
     [],
   );

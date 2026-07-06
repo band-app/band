@@ -80,6 +80,22 @@ export interface DiffResult {
   fileStatuses: Record<string, string>;
 }
 
+/** A single commit in the workspace's `git log --all` history. */
+export interface GraphCommit {
+  sha: string;
+  parents: string[];
+  author: string;
+  email: string;
+  ts: number;
+  subject: string;
+  refs: string[];
+}
+
+export interface CommitGraphResult {
+  commits: GraphCommit[];
+  head: string | null;
+}
+
 export interface DiffSummaryResult {
   stats: DiffStats;
   compareBranch: string;
@@ -265,6 +281,71 @@ export class DiffService {
       defaultBranch,
       headBranch: headBranch ?? defaultBranch,
     };
+  }
+
+  /**
+   * Parse `git log --all` into a flat commit list for the Graph panel. The
+   * client lays out the branch tree from each commit's parent SHAs. Returns
+   * an empty history (rather than throwing) for brand-new repos with no
+   * commits yet, so the panel renders "No commits." instead of an error.
+   */
+  async getCommitGraph(
+    workspaceId: string,
+    options: { limit?: number } = {},
+  ): Promise<CommitGraphResult> {
+    const workspace = this.workspaces.resolve(workspaceId);
+    if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
+
+    const cwd = workspace.worktree.path;
+    const limit = options.limit ?? 500;
+
+    // Field separator (US, 0x1f) and record separator (RS, 0x1e) avoid
+    // collisions with subject lines that contain pipes/quotes.
+    const FS = "\x1f";
+    const RS = "\x1e";
+    const fmt = `${["%H", "%P", "%an", "%ae", "%at", "%s", "%D"].join(FS)}${RS}`;
+
+    let stdout = "";
+    try {
+      stdout = await execGit(
+        ["log", "--all", "--date-order", `--max-count=${limit}`, `--pretty=format:${fmt}`],
+        cwd,
+      );
+    } catch {
+      return { commits: [], head: null };
+    }
+
+    const commits: GraphCommit[] = [];
+    for (const raw of stdout.split(RS)) {
+      const rec = raw.replace(/^\n/, "");
+      if (!rec) continue;
+      const parts = rec.split(FS);
+      if (parts.length < 7) continue;
+      const [sha, parentsStr, author, email, tsStr, subject, refsStr] = parts;
+      commits.push({
+        sha,
+        parents: parentsStr ? parentsStr.split(" ").filter(Boolean) : [],
+        author,
+        email,
+        ts: Number.parseInt(tsStr, 10) || 0,
+        subject,
+        refs: refsStr
+          ? refsStr
+              .split(",")
+              .map((r) => r.trim())
+              .filter(Boolean)
+          : [],
+      });
+    }
+
+    let head: string | null = null;
+    try {
+      head = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+    } catch {
+      // Detached / no commits — leave head null.
+    }
+
+    return { commits, head };
   }
 
   /**
