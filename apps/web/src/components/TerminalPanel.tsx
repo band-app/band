@@ -167,25 +167,13 @@ export function TerminalPanel({
   // separate visibility-change effect below. Same ref-routing pattern as
   // `fitAddonRef` / `terminalRef` — the closure has local context (the
   // live `attachWebGL`, `fitAddon`, etc.) that can't be reconstructed
-  // outside the init effect. Used to force one clean repaint when a
-  // terminal whose first paint happened while hidden becomes visible: such
-  // a terminal renders garbled (its WebGL surface was built against a
-  // hidden/degenerate layout) and a plain `fit()` won't repair it when the
-  // visible layout resolves to the same cols/rows.
+  // outside the init effect. Used to force a clean re-measure + WebGL
+  // re-attach every time this terminal becomes visible, repairing a render
+  // surface whose backing store was dropped or built against a
+  // hidden/degenerate layout while the workspace sat in the background LRU
+  // cache under `content-visibility: hidden` (see the become-visible effect
+  // below and band-app/band#615).
   const remeasureAndReattachRef = useRef<(() => void) | null>(null);
-  // True once this terminal has completed a paint while visible — i.e. its
-  // render surface is known-good. Set when the WebGL addon attaches while
-  // the panel is already visible (the common case), or after the one-shot
-  // hidden-surface repair below. Gates that repair so it fires AT MOST ONCE
-  // per mount: without this gate the `remeasureAndReattach` ref is non-null
-  // forever after init, so every workspace tab-switch back to this terminal
-  // would needlessly dispose + re-attach the WebGL addon.
-  const firstVisiblePaintDoneRef = useRef(false);
-  // Mirrors the latest `visible` prop so the async init effect can read the
-  // panel's visibility at WebGL-attach time (its deps don't include
-  // `visible`, so the closure would otherwise see the stale mount value).
-  const visibleRef = useRef(visible);
-  visibleRef.current = visible;
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;
 
@@ -993,32 +981,13 @@ export function TerminalPanel({
           attachWebGL();
         }
         fitAddon.fit();
-        // App-zoom (and DPR) events fire on EVERY mounted terminal, including
-        // those in cached, hidden background workspaces. When this dance runs
-        // while the panel is hidden, the WebGL surface we just re-attached and
-        // the `fit()` we just computed are sized against a hidden/degenerate
-        // layout — the exact hazard the become-visible repair below was built
-        // for (band-app/band#580). The one-shot repair flag is already `true`
-        // from the initial visible mount, so without this re-arm the next
-        // become-visible would only call a bare `fit()`, which early-returns
-        // when cols/rows are unchanged and leaves a stale frame (notably a
-        // missing scrollbar) until a manual resize. Re-arm so the next
-        // become-visible does a full re-measure + re-attach instead.
-        if (!visibleRef.current) {
-          firstVisiblePaintDoneRef.current = false;
-        }
       };
-      // Expose to the visibility-change effect so a terminal that first
-      // painted while hidden can force a clean re-measure + repaint when
-      // it becomes visible. Bound to the no-arg (re-measure-only) form;
-      // the zoom path keeps calling the local closure directly with its
-      // `{ newFontSize }` argument.
+      // Expose to the visibility-change effect so it can force a clean
+      // re-measure + WebGL re-attach every time this terminal becomes
+      // visible. Bound to the no-arg (re-measure-only) form; the zoom path
+      // keeps calling the local closure directly with its `{ newFontSize }`
+      // argument.
       remeasureAndReattachRef.current = () => remeasureAndReattach();
-      // Record whether the WebGL surface was built against a VISIBLE layout.
-      // If so it's already correct and the become-visible effect must NOT
-      // rebuild it; if the panel is hidden right now, the surface is suspect
-      // and the first become-visible will repair it exactly once.
-      firstVisiblePaintDoneRef.current = visibleRef.current;
       // DPR-only path: bail out if DPR didn't actually change; otherwise
       // run the re-measure dance. DOM renderer is a no-op (CSS sizing
       // handles DPR natively) — `remeasureAndReattach` already handles
@@ -1131,8 +1100,6 @@ export function TerminalPanel({
         searchAddonRef.current = null;
         webglAddonRef.current = null;
         remeasureAndReattachRef.current = null;
-        // Re-arm the one-shot hidden-surface repair for the next mount.
-        firstVisiblePaintDoneRef.current = false;
         wsRef.current = null;
         // Reset toolbar state so a remount (e.g. terminal reconnect) doesn't
         // come back up with selection mode armed against a buffer row that
@@ -1152,45 +1119,75 @@ export function TerminalPanel({
     };
   }, [terminalId, workspaceId, paneMetadata, autoFocus]);
 
-  // Refit when visibility changes and notify server of new size.
+  // Repair the render surface on EVERY hidden→visible transition.
   //
-  // A terminal whose first paint happened while its workspace was a hidden
-  // background tab establishes its WebGL backing store and cell geometry
-  // against a hidden/degenerate layout — the first frames render garbled.
-  // Re-fitting alone does NOT repair that: when the now-visible container
-  // resolves to the SAME cols/rows `fit()` already computed while hidden,
-  // xterm's `resize()` early-returns (no reflow, no renderer repaint) so
-  // the stale garbled frame stays on screen until a manual window resize
-  // changes the dimensions.
+  // While a workspace sits in the background LRU cache its panel host is
+  // `content-visibility: hidden` (see MultiWorkspacePanelHost), so the
+  // browser skips layout + paint for the subtree and may drop the terminal's
+  // WebGL backing store or leave its rendered glyphs stale. Coming back to
+  // the foreground then shows a garbled frame — overlapping text, wrong
+  // wrapping, misaligned glyphs.
   //
-  // So the FIRST time a terminal with a hidden first paint becomes visible
-  // we re-measure cell size and re-attach the WebGL addon (disposing the
-  // corrupted backing store and sizing a fresh canvas against the live
-  // layout) — the same recovery the DPR/zoom paths use — which repaints
-  // every cell from scratch regardless of whether the dimensions changed.
-  // This repair runs at most once per mount (`firstVisiblePaintDoneRef`):
-  // a terminal that first painted while visible never needs it, and every
-  // later visibility flip just re-fits, so we don't pay a full WebGL
-  // dispose + re-attach on every workspace tab-switch back to the terminal.
+  // A bare `fit()` can't repair it: when the now-visible container resolves
+  // to the SAME cols/rows `fit()` already computed while hidden, xterm's
+  // `resize()` early-returns — no reflow, no renderer repaint — so the stale
+  // frame survives until a manual window resize changes the dimensions (the
+  // one case that dodges the early-return, which is why resizing "fixes" it).
+  //
+  // So on become-visible we re-measure cell geometry and re-attach the WebGL
+  // addon (dispose the suspect surface, size a fresh <canvas> against the
+  // live layout) — the same recovery the DPR/zoom paths use — then force an
+  // unconditional `refresh()` so every cell repaints even under the DOM
+  // renderer (no addon to re-attach) regardless of whether cols/rows changed.
+  // Unlike the earlier one-shot repair (band-app/band#580) this runs on
+  // every transition, because a plain hide→show can corrupt the surface just
+  // as a first-paint-while-hidden can. See band-app/band#615.
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      requestAnimationFrame(() => {
-        const remeasure = remeasureAndReattachRef.current;
-        if (remeasure && !firstVisiblePaintDoneRef.current) {
-          // `remeasureAndReattach` fits internally, so we don't call
-          // `fit()` again here.
-          remeasure();
-        } else {
-          fitAddonRef.current?.fit();
+    if (!visible) return;
+    // Defer past a frame so the just-un-hidden layout has settled before we
+    // measure. Cancel on cleanup so a rapid hide→show→hide can't leave a
+    // stale callback fitting against a re-hidden (degenerate) layout.
+    let rafId = 0;
+    // Bound the retry below so a container that stays genuinely zero-sized
+    // (e.g. surfaced then immediately re-hidden) can't spin frame after frame.
+    // A handful of frames is ample for `content-visibility: hidden → visible`
+    // to lay the subtree back out.
+    const MAX_LAYOUT_FRAMES = 5;
+    const repair = (attempt: number) => {
+      const container = containerRef.current;
+      if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
+        // Layout hasn't settled yet. `content-visibility: hidden → visible`
+        // preserves the last-rendered size, so it may NOT fire the
+        // ResizeObserver on un-hide — we can't rely on that observer to retry
+        // the repair for us. Re-check on the next frame instead, capped so a
+        // permanently zero-sized container can't loop forever.
+        if (attempt < MAX_LAYOUT_FRAMES) {
+          rafId = requestAnimationFrame(() => repair(attempt + 1));
         }
-        firstVisiblePaintDoneRef.current = true;
-        const term = terminalRef.current;
-        const ws = wsRef.current;
-        if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
-          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-        }
-      });
-    }
+        return;
+      }
+      const remeasure = remeasureAndReattachRef.current;
+      if (remeasure) {
+        // `remeasureAndReattach` fits internally, so we don't call `fit()`
+        // again here.
+        remeasure();
+      } else {
+        fitAddonRef.current?.fit();
+      }
+      const term = terminalRef.current;
+      // Unconditional repaint: `fit()`/`resize()` no-op when the dimensions
+      // are unchanged, so force xterm to redraw every row from scratch. This
+      // is the safety net for the DOM renderer (where `remeasure` has no
+      // WebGL addon to re-attach) and mirrors superset-sh/superset, which
+      // calls `refresh(0, rows-1)` unconditionally on every reattach.
+      if (term && term.rows > 0) term.refresh(0, term.rows - 1);
+      const ws = wsRef.current;
+      if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      }
+    };
+    rafId = requestAnimationFrame(() => repair(0));
+    return () => cancelAnimationFrame(rafId);
   }, [visible]);
 
   // Listen for the workspace-level ⌃` "focus Terminal" event. Many
