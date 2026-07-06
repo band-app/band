@@ -1,6 +1,38 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+} from "@band-app/ui";
+import { ClipboardCopy, GitBranchPlus, GitCommitHorizontal, RotateCcw, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SearchBar, type SearchOptions } from "../dashboard/components/SearchBar";
+import { useDeferredMenuAction } from "../dashboard/hooks/use-deferred-menu-action";
+import { useDashboardStore } from "../dashboard/stores/index";
+import { writeClipboardText } from "../lib/clipboard";
 import { trpc } from "../lib/trpc-client";
 import { CommitDetailsPanel } from "./GitCommitDetails";
+
+/**
+ * A state-changing action queued from a context menu. The confirm /
+ * name-input dialog it maps to is rendered at the `GitGraphView` root and
+ * runs the matching `workspace.*` mutation on confirm.
+ */
+type PendingAction =
+  | { kind: "cherry-pick"; sha: string; subject: string }
+  | { kind: "revert"; sha: string; subject: string }
+  | { kind: "checkout"; branch: string }
+  | { kind: "create-branch"; sha: string };
 
 interface Commit {
   sha: string;
@@ -177,6 +209,28 @@ function refClasses(kind: RefBadge["kind"]): string {
   }
 }
 
+/**
+ * Build a predicate that tests a commit's subject / author / sha against the
+ * find query. Returns `null` when there's nothing to match (empty query, or an
+ * invalid regex) so the caller reports zero hits instead of throwing.
+ */
+function buildMatcher(query: string, options: SearchOptions): ((c: Commit) => boolean) | null {
+  if (!query) return null;
+  let test: (s: string) => boolean;
+  if (options.regex) {
+    try {
+      const re = new RegExp(query, options.caseSensitive ? "" : "i");
+      test = (s) => re.test(s);
+    } catch {
+      return null;
+    }
+  } else {
+    const q = options.caseSensitive ? query : query.toLowerCase();
+    test = (s) => (options.caseSensitive ? s : s.toLowerCase()).includes(q);
+  }
+  return (c) => test(c.subject) || test(c.author) || test(c.sha);
+}
+
 interface GitGraphViewProps {
   workspaceId: string;
 }
@@ -236,6 +290,118 @@ export function GitGraphView({ workspaceId }: GitGraphViewProps) {
     [filteredCommits],
   );
 
+  const setGlobalError = useDashboardStore((s) => s.setError);
+  const menu = useDeferredMenuAction();
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>({
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+  });
+  const [matchIndex, setMatchIndex] = useState(0);
+
+  // Row indices (into `graph.rows`) whose commit matches the find query.
+  const matches = useMemo(() => {
+    if (!graph || !searchOpen) return [];
+    const matcher = buildMatcher(searchQuery, searchOptions);
+    if (!matcher) return [];
+    const out: number[] = [];
+    for (let i = 0; i < graph.rows.length; i++) {
+      if (matcher(graph.rows[i].commit)) out.push(i);
+    }
+    return out;
+  }, [graph, searchOpen, searchQuery, searchOptions]);
+
+  // Reset to the first hit whenever the match set changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the match set, not matchIndex
+  useEffect(() => {
+    setMatchIndex(0);
+  }, [matches]);
+
+  // Scroll the current match into the middle of the viewport. Rows are a
+  // fixed `ROW_HEIGHT`, so the target scrollTop is derived from its index
+  // — no per-row refs needed.
+  useEffect(() => {
+    if (matches.length === 0) return;
+    const rowIndex = matches[matchIndex];
+    if (rowIndex == null) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = rowIndex * ROW_HEIGHT - el.clientHeight / 2 + ROW_HEIGHT / 2;
+    el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }, [matches, matchIndex]);
+
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
+  const nextMatch = useCallback(() => {
+    setMatchIndex((i) => (matches.length === 0 ? 0 : (i + 1) % matches.length));
+  }, [matches.length]);
+  const prevMatch = useCallback(() => {
+    setMatchIndex((i) => (matches.length === 0 ? 0 : (i - 1 + matches.length) % matches.length));
+  }, [matches.length]);
+
+  // ⌘F / Ctrl+F opens the find widget — but only while focus is inside this
+  // panel, so it never clobbers the diff editor's own ⌘F in another dockview
+  // group. Clicking any commit row (a <button>) puts focus here.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "f" && !e.shiftKey) {
+        if (!rootRef.current?.contains(document.activeElement)) return;
+        e.preventDefault();
+        openSearch();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openSearch]);
+
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  const performAction = useCallback(
+    async (action: PendingAction, branchName?: string) => {
+      setBusy(true);
+      try {
+        switch (action.kind) {
+          case "checkout":
+            await trpc.workspace.checkoutBranch.mutate({ workspaceId, branch: action.branch });
+            break;
+          case "cherry-pick":
+            await trpc.workspace.cherryPick.mutate({ workspaceId, sha: action.sha });
+            break;
+          case "revert":
+            await trpc.workspace.revertCommit.mutate({ workspaceId, sha: action.sha });
+            break;
+          case "create-branch":
+            await trpc.workspace.createBranch.mutate({
+              workspaceId,
+              sha: action.sha,
+              name: branchName ?? "",
+              checkout: true,
+            });
+            break;
+        }
+        setPending(null);
+        refresh();
+      } catch (err) {
+        setGlobalError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [workspaceId, refresh, setGlobalError],
+  );
+
   if (error) {
     return (
       <div className="flex h-full flex-col">
@@ -271,16 +437,32 @@ export function GitGraphView({ workspaceId }: GitGraphViewProps) {
 
   const graphWidth = GRAPH_PADDING_X * 2 + graph.maxLanes * LANE_WIDTH;
   const totalHeight = graph.rows.length * ROW_HEIGHT;
+  const currentRowIndex = matches.length > 0 ? matches[matchIndex] : -1;
+  const matchSet = new Set(matches);
 
   return (
-    <div className="flex h-full flex-col bg-background text-sm">
+    <div ref={rootRef} className="flex h-full flex-col bg-background text-sm">
       <Toolbar
-        onRefresh={() => setRefreshKey((k) => k + 1)}
+        onRefresh={refresh}
         hideStash={hideStash}
         onToggleStash={() => setHideStash((v) => !v)}
         commitCount={graph.rows.length}
       />
-      <div className="relative flex-1 overflow-auto">
+      {searchOpen && (
+        <SearchBar
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          options={searchOptions}
+          onOptionsChange={setSearchOptions}
+          placeholder="Find commit (subject, author, sha)…"
+          visibleOptions={["caseSensitive", "regex"]}
+          matchInfo={{ total: matches.length, current: matches.length ? matchIndex + 1 : 0 }}
+          onNext={nextMatch}
+          onPrevious={prevMatch}
+          onClose={closeSearch}
+        />
+      )}
+      <div ref={scrollRef} className="relative flex-1 overflow-auto">
         <div className="flex min-h-full" style={{ minWidth: "max-content" }}>
           <svg
             width={graphWidth}
@@ -460,7 +642,12 @@ export function GitGraphView({ workspaceId }: GitGraphViewProps) {
                   isSelected={selected === row.commit.sha}
                   isHead={data?.head === row.commit.sha}
                   showAvatar={!sameAuthor}
+                  matchState={
+                    i === currentRowIndex ? "current" : matchSet.has(i) ? "match" : "none"
+                  }
+                  menu={menu}
                   onSelect={() => setSelected(row.commit.sha)}
+                  onAction={setPending}
                 />
               );
             })}
@@ -474,7 +661,158 @@ export function GitGraphView({ workspaceId }: GitGraphViewProps) {
           onClose={() => setSelected(null)}
         />
       )}
+      {pending?.kind === "create-branch" ? (
+        <CreateBranchDialog
+          sha={pending.sha}
+          busy={busy}
+          onSubmit={(name) => performAction(pending, name)}
+          onCancel={() => {
+            if (!busy) setPending(null);
+          }}
+        />
+      ) : pending ? (
+        <ConfirmActionDialog
+          action={pending}
+          busy={busy}
+          onConfirm={() => performAction(pending)}
+          onCancel={() => {
+            if (!busy) setPending(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Confirm dialog for the state-changing actions (checkout / cherry-pick /
+ *  revert). Every one of these mutates the working tree, so the user always
+ *  gets a chance to back out first. */
+function ConfirmActionDialog({
+  action,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  action: Extract<PendingAction, { kind: "checkout" | "cherry-pick" | "revert" }>;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const copy =
+    action.kind === "checkout"
+      ? {
+          title: "Checkout branch",
+          body: `Switch the working tree to “${action.branch}”. Uncommitted changes may block the checkout.`,
+          confirm: "Checkout",
+          variant: "default" as const,
+        }
+      : action.kind === "cherry-pick"
+        ? {
+            title: "Cherry-pick commit",
+            body: `Apply “${action.subject}” (${action.sha.slice(0, 7)}) onto the current branch. Conflicts will stop the pick.`,
+            confirm: "Cherry-pick",
+            variant: "default" as const,
+          }
+        : {
+            title: "Revert commit",
+            body: `Create a commit that undoes “${action.subject}” (${action.sha.slice(0, 7)}).`,
+            confirm: "Revert",
+            variant: "destructive" as const,
+          };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onCancel();
+      }}
+    >
+      <DialogContent data-testid="git-graph__confirm-dialog">
+        <DialogHeader>
+          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogDescription>{copy.body}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant={copy.variant}
+            onClick={onConfirm}
+            disabled={busy}
+            data-testid="git-graph__confirm-action"
+          >
+            {copy.confirm}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Name-input dialog for "Create branch…". The new branch is created at the
+ *  right-clicked commit and checked out. */
+function CreateBranchDialog({
+  sha,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  sha: string;
+  busy: boolean;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const trimmed = name.trim();
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onCancel();
+      }}
+    >
+      <DialogContent data-testid="git-graph__create-branch-dialog">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (trimmed) onSubmit(trimmed);
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Create branch</DialogTitle>
+            <DialogDescription>
+              New branch at {sha.slice(0, 7)}. It will be checked out.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1.5 py-3">
+            <Label htmlFor="git-graph-branch-name">Branch name</Label>
+            <Input
+              id="git-graph-branch-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-feature"
+              autoFocus
+              autoComplete="off"
+              data-testid="git-graph__branch-name-input"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={busy || !trimmed}
+              data-testid="git-graph__create-branch-submit"
+            >
+              Create
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -523,77 +861,175 @@ function CommitRow({
   isSelected,
   isHead,
   showAvatar,
+  matchState,
+  menu,
   onSelect,
+  onAction,
 }: {
   row: GraphRow;
   isSelected: boolean;
   isHead: boolean;
   showAvatar: boolean;
+  matchState: "none" | "match" | "current";
+  menu: ReturnType<typeof useDeferredMenuAction>;
   onSelect: () => void;
+  onAction: (action: PendingAction) => void;
 }) {
+  const sha = row.commit.sha;
   const badges = row.commit.refs.map(classifyRef).filter((b): b is RefBadge => b !== null);
   const visibleBadges = badges.slice(0, 3);
   const overflow = badges.length - visibleBadges.length;
 
+  const matchClass =
+    matchState === "current"
+      ? "ring-2 ring-inset ring-amber-500 dark:ring-amber-400"
+      : matchState === "match"
+        ? "bg-amber-400/10"
+        : "";
+
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      title={row.commit.sha}
-      style={{ height: ROW_HEIGHT }}
-      className={`group flex w-full items-center gap-2 border-l-2 px-3 text-left transition-colors ${
-        isSelected ? "border-l-foreground bg-accent" : "border-l-transparent hover:bg-accent/40"
-      }`}
-    >
-      {showAvatar ? (
-        <span
-          className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-          style={{ backgroundColor: authorColor(row.commit.email) }}
-          title={`${row.commit.author} <${row.commit.email}>`}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={onSelect}
+          title={sha}
+          style={{ height: ROW_HEIGHT }}
+          className={`group flex w-full items-center gap-2 border-l-2 px-3 text-left transition-colors ${
+            isSelected ? "border-l-foreground bg-accent" : "border-l-transparent hover:bg-accent/40"
+          } ${matchClass}`}
         >
-          {authorInitials(row.commit.author)}
-        </span>
-      ) : (
-        <span
-          className="flex size-5 shrink-0 items-center justify-center"
-          title={`${row.commit.author} <${row.commit.email}>`}
-        >
-          <span
-            className="size-1.5 rounded-full opacity-50"
-            style={{ backgroundColor: authorColor(row.commit.email) }}
-          />
-        </span>
-      )}
-
-      {visibleBadges.length > 0 && (
-        <span className="flex shrink-0 items-center gap-1">
-          {visibleBadges.map((b) => (
+          {showAvatar ? (
             <span
-              key={`${b.kind}-${b.label}`}
-              className={`inline-flex max-w-[140px] items-center truncate rounded px-1.5 py-0.5 text-[10px] font-semibold ${refClasses(b.kind)}`}
+              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              style={{ backgroundColor: authorColor(row.commit.email) }}
+              title={`${row.commit.author} <${row.commit.email}>`}
             >
-              {b.label}
+              {authorInitials(row.commit.author)}
             </span>
-          ))}
-          {overflow > 0 && <span className="text-[10px] text-muted-foreground">+{overflow}</span>}
-        </span>
-      )}
+          ) : (
+            <span
+              className="flex size-5 shrink-0 items-center justify-center"
+              title={`${row.commit.author} <${row.commit.email}>`}
+            >
+              <span
+                className="size-1.5 rounded-full opacity-50"
+                style={{ backgroundColor: authorColor(row.commit.email) }}
+              />
+            </span>
+          )}
 
-      <span className={`min-w-0 flex-1 truncate ${isHead ? "font-medium" : ""}`}>
-        {row.commit.subject}
-      </span>
+          {visibleBadges.length > 0 && (
+            <span className="flex shrink-0 items-center gap-1">
+              {visibleBadges.map((b) => (
+                <RefBadgeChip
+                  key={`${b.kind}-${b.label}`}
+                  badge={b}
+                  menu={menu}
+                  onAction={onAction}
+                />
+              ))}
+              {overflow > 0 && (
+                <span className="text-[10px] text-muted-foreground">+{overflow}</span>
+              )}
+            </span>
+          )}
 
-      <span className="hidden shrink-0 truncate text-xs text-muted-foreground md:inline md:max-w-[140px]">
-        {row.commit.author}
-      </span>
+          <span className={`min-w-0 flex-1 truncate ${isHead ? "font-medium" : ""}`}>
+            {row.commit.subject}
+          </span>
 
-      <span className="shrink-0 font-mono text-xs text-muted-foreground/80">
-        {row.commit.sha.slice(0, 7)}
-      </span>
+          <span className="hidden shrink-0 truncate text-xs text-muted-foreground md:inline md:max-w-[140px]">
+            {row.commit.author}
+          </span>
 
-      <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {formatRelative(row.commit.ts)}
-      </span>
-    </button>
+          <span className="shrink-0 font-mono text-xs text-muted-foreground/80">
+            {sha.slice(0, 7)}
+          </span>
+
+          <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            {formatRelative(row.commit.ts)}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuContent onCloseAutoFocus={menu.flush}>
+        <ContextMenuItem
+          data-testid="git-graph__copy-hash"
+          onSelect={() => menu.queue(() => void writeClipboardText(sha))}
+        >
+          <ClipboardCopy className="size-4" />
+          Copy hash
+        </ContextMenuItem>
+        <ContextMenuItem
+          data-testid="git-graph__create-branch"
+          onSelect={() => menu.queue(() => onAction({ kind: "create-branch", sha }))}
+        >
+          <GitBranchPlus className="size-4" />
+          Create branch…
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          data-testid="git-graph__cherry-pick"
+          onSelect={() =>
+            menu.queue(() => onAction({ kind: "cherry-pick", sha, subject: row.commit.subject }))
+          }
+        >
+          <GitCommitHorizontal className="size-4" />
+          Cherry-pick
+        </ContextMenuItem>
+        <ContextMenuItem
+          variant="destructive"
+          data-testid="git-graph__revert"
+          onSelect={() =>
+            menu.queue(() => onAction({ kind: "revert", sha, subject: row.commit.subject }))
+          }
+        >
+          <Undo2 className="size-4" />
+          Revert
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** A single ref badge. Local branches carry their own context menu ("Checkout")
+ *  nested inside the row's menu; the `stopPropagation` on the trigger keeps a
+ *  right-click on the badge from also opening the row-level menu. Other ref
+ *  kinds (HEAD / remote / tag / stash) render as a plain, non-interactive
+ *  chip. */
+function RefBadgeChip({
+  badge,
+  menu,
+  onAction,
+}: {
+  badge: RefBadge;
+  menu: ReturnType<typeof useDeferredMenuAction>;
+  onAction: (action: PendingAction) => void;
+}) {
+  const chip = (
+    <span
+      className={`inline-flex max-w-[140px] items-center truncate rounded px-1.5 py-0.5 text-[10px] font-semibold ${refClasses(badge.kind)}`}
+    >
+      {badge.label}
+    </span>
+  );
+
+  if (badge.kind !== "branch") return chip;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild onContextMenu={(e) => e.stopPropagation()}>
+        {chip}
+      </ContextMenuTrigger>
+      <ContextMenuContent onCloseAutoFocus={menu.flush}>
+        <ContextMenuItem
+          data-testid="git-graph__checkout-branch"
+          onSelect={() => menu.queue(() => onAction({ kind: "checkout", branch: badge.label }))}
+        >
+          <RotateCcw className="size-4" />
+          Checkout {badge.label}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

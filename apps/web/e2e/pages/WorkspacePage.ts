@@ -956,6 +956,50 @@ export class WorkspacePage {
     });
   }
 
+  /** The Graph tab's bottom commit-details panel. `data-testid` set by
+   *  `CommitDetailsPanel` in `GitCommitDetails.tsx`; visible after a commit
+   *  row is selected. */
+  get commitDetails(): Locator {
+    return this.page.getByTestId("git-graph__commit-details");
+  }
+
+  /** Select a commit row (by subject) to open its details panel. */
+  async openCommitDetails(subject: string): Promise<void> {
+    await test.step(`Open details for commit "${subject}"`, async () => {
+      await this.commitRow(subject).click();
+    });
+  }
+
+  /** Right-click a commit row (by subject) to open its context menu. The
+   *  opened menu is a Radix `role="menu"`, reachable via `contextMenu`. */
+  async openCommitContextMenu(subject: string): Promise<void> {
+    await test.step(`Right-click commit "${subject}"`, async () => {
+      await this.commitRow(subject).click({ button: "right" });
+      await expect(this.contextMenu).toBeVisible();
+    });
+  }
+
+  /** Drive the "Create branch…" flow from a commit's context menu: right-click
+   *  the row, pick the item, type the name in the dialog, and submit. Exercises
+   *  the real `workspace.createBranch` mutation end-to-end. */
+  async createBranchFromCommit(subject: string, branchName: string): Promise<void> {
+    await test.step(`Create branch "${branchName}" from commit "${subject}"`, async () => {
+      await this.openCommitContextMenu(subject);
+      await this.page.getByTestId("git-graph__create-branch").click();
+      const input = this.page.getByTestId("git-graph__branch-name-input");
+      await input.waitFor({ state: "visible" });
+      await input.fill(branchName);
+      await this.page.getByTestId("git-graph__create-branch-submit").click();
+    });
+  }
+
+  /** A ref badge in the graph rendered with the given label (branch / HEAD /
+   *  tag / stash). The label is runtime data the test itself created, so
+   *  `getByText` is appropriate. */
+  refBadge(label: string): Locator {
+    return this.page.getByText(label, { exact: true });
+  }
+
   /** Read the server's recorded last-focused panel ids for a workspace via the
    *  `panelFocus.get` tRPC query. Used as a synchronisation barrier: focus is
    *  reported fire-and-forget, so a test polls this until the pane it just
