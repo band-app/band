@@ -384,14 +384,20 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
   // bytes that end up in scrollback.
   const OSC11_QUERY = "\x1b]11;?\x07";
   const OSC10_REPORT = "\x1b]10;rgb:e8e8/e8e8/e8e8\x07";
+  const OSC12_QUERY = "\x1b]12;?\x07";
   const MARKER = "DONEMARKER";
-  const COMMAND = "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007'; echo DONE\"\"MARKER\r";
+  const COMMAND =
+    "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007\\033]12;?\\007'; echo DONE\"\"MARKER\r";
 
   const WORKSPACE_ID = "workspace-main";
 
   // Spawn a PTY over the `/terminal` WebSocket, run the OSC-emitting command,
-  // and resolve only once the raw OSC bytes have appeared in live output —
-  // which guarantees they are now buffered in the server-side scrollback.
+  // and resolve only once BOTH the raw OSC bytes AND the trailing marker have
+  // appeared in live output — which guarantees the whole command's output
+  // (queries + marker) is buffered in the server-side scrollback. Waiting for
+  // the marker too matters: the PTY can deliver the OSC bytes and `DONEMARKER`
+  // in separate chunks, so resolving on the OSC alone could close the socket
+  // before the marker reaches scrollback and make the replay assertions flake.
   // Then close the socket; the pool keeps the PTY alive for reconnect/replay.
   async function seedOscScrollback(terminalId: string): Promise<void> {
     const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
@@ -414,15 +420,16 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
         }
         if (!isBinary) return; // skip JSON control frames (title, etc.)
         live = Buffer.concat([live, data]);
-        // Live output is NOT stripped, so the raw OSC 11 query round-trips
-        // here. Once we see it, the bytes are guaranteed in scrollback.
-        if (live.includes(Buffer.from(OSC11_QUERY))) {
+        // Live output is NOT stripped, so the raw OSC query round-trips here.
+        // Wait for the OSC bytes and the marker so the full command output is
+        // guaranteed in scrollback before we close.
+        if (live.includes(Buffer.from(OSC11_QUERY)) && live.includes(Buffer.from(MARKER))) {
           resolve();
         }
       });
       ws.on("error", reject);
       setTimeout(
-        () => reject(new Error("OSC query never appeared in live output within 10 s")),
+        () => reject(new Error("OSC query + marker never appeared in live output within 10 s")),
         10_000,
       );
     });
@@ -474,12 +481,15 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
     // Ordinary output survived replay.
     expect(replay.includes(MARKER)).toBe(true);
-    // Both OSC forms — the `?` query and the `rgb:` report — were stripped.
+    // Every OSC form — the `?` query (11/12) and the `rgb:` report (10) — was
+    // stripped.
     expect(replay.includes(Buffer.from(OSC11_QUERY))).toBe(false);
     expect(replay.includes(Buffer.from(OSC10_REPORT))).toBe(false);
+    expect(replay.includes(Buffer.from(OSC12_QUERY))).toBe(false);
     // Nothing starting an OSC 10/11/12 escape (`ESC ] 1x`) should remain.
     expect(replay.includes(Buffer.from("\x1b]10"))).toBe(false);
     expect(replay.includes(Buffer.from("\x1b]11"))).toBe(false);
+    expect(replay.includes(Buffer.from("\x1b]12"))).toBe(false);
   });
 
   // The second replay path (band-app/band#613): the tRPC `terminal.stream`
@@ -540,7 +550,35 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     expect(firstOutput).toContain(MARKER);
     expect(firstOutput).not.toContain(OSC11_QUERY);
     expect(firstOutput).not.toContain(OSC10_REPORT);
+    expect(firstOutput).not.toContain(OSC12_QUERY);
     expect(firstOutput).not.toContain("\x1b]10");
     expect(firstOutput).not.toContain("\x1b]11");
+    expect(firstOutput).not.toContain("\x1b]12");
+  });
+
+  // TEST-13: negative auth. The WebSocket upgrade and every HTTP request are
+  // gated on the `band_token` cookie (see start-server.ts upgrade handler and
+  // auth.ts). Assert both surfaces reject a request with no token.
+  it("rejects unauthenticated access: WS upgrade dropped and HTTP returns 401", async () => {
+    // HTTP: no cookie → 401 from the auth middleware.
+    const res = await fetch(`${server.url}/api/health`);
+    expect(res.status).toBe(401);
+
+    // WebSocket: no cookie → the upgrade handler destroys the socket before
+    // the 101 handshake, so the client never opens. Assert we observe a
+    // failure (error / unexpected-response / close) and never an `open`.
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=noauth`;
+    const ws = new WebSocket(wsUrl); // deliberately no Cookie header
+
+    const opened = await new Promise<boolean>((resolve, reject) => {
+      ws.on("open", () => resolve(true));
+      ws.on("error", () => resolve(false));
+      ws.on("unexpected-response", () => resolve(false));
+      ws.on("close", () => resolve(false));
+      setTimeout(() => reject(new Error("No open/error/close within 10 s")), 10_000);
+    });
+
+    expect(opened).toBe(false);
+    ws.close();
   });
 });
