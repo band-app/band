@@ -4,6 +4,7 @@ import { z } from "zod";
 import { terminalService } from "../../services/terminal-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
+import { stripTerminalQueries } from "./strip-queries";
 
 /**
  * Terminal sub-router — migrated into the 3-tier architecture as part of
@@ -105,9 +106,15 @@ const terminalRouter = t.router({
         return;
       }
 
-      // Replay buffered scrollback first
+      // Replay buffered scrollback first. Strip query/report escape
+      // sequences before replay for the same reason the WebSocket path does
+      // (band-app/band#613): a stale color/cursor/DA query replayed into a
+      // fresh terminal emulator gets answered back to the PTY and leaks as
+      // literal text at the prompt. This subscription replays-then-streams,
+      // exactly the reconnect scenario the leak needs, so it needs the same
+      // guard the `/terminal` WebSocket already applies.
       if (replay && session.scrollback.length > 0) {
-        yield { type: "output" as const, data: session.scrollback };
+        yield { type: "output" as const, data: stripTerminalQueries(session.scrollback) };
       }
 
       // Stream live output

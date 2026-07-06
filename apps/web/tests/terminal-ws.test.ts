@@ -75,7 +75,10 @@ function getRandomPort(): Promise<number> {
   });
 }
 
-async function startServer(home: string): Promise<ServerHandle> {
+async function startServer(
+  home: string,
+  extraEnv: Record<string, string> = {},
+): Promise<ServerHandle> {
   const port = await getRandomPort();
 
   return new Promise((resolve, reject) => {
@@ -86,6 +89,7 @@ async function startServer(home: string): Promise<ServerHandle> {
         HOME: home,
         PORT: String(port),
         NODE_ENV: "production",
+        ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -334,5 +338,141 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
 
     expect(gotPong).toBe(true);
     ws.close();
+  });
+});
+
+describe("terminal WebSocket — OSC color-query stripping on scrollback replay", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    const projectPath = join(tmpHome, "workspace");
+    mkdirSync(projectPath, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "workspace",
+          path: projectPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: projectPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    // Pin the shell so `printf`'s octal-escape handling is deterministic
+    // across macOS (defaults to zsh) and Linux CI. bash exists on both.
+    server = await startServer(tmpHome, { SHELL: "/bin/bash" });
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // Regression for band-app/band#613: a stale OSC 10/11/12 color query sitting
+  // in scrollback used to survive replay (stripTerminalQueries only matched CSI
+  // sequences). The client's xterm.js then answered the replayed query, the
+  // dashboard forwarded the answer to the PTY, and the shell's line editor
+  // inserted the printable remainder (`11;rgb:1e1e/1e1e/1e1e…`) as literal text
+  // at the prompt. This test proves the OSC bytes are stripped from replayed
+  // scrollback while ordinary output survives.
+  it("strips OSC 10/11 sequences from replayed scrollback but keeps normal output", async () => {
+    const workspaceId = "workspace-main";
+    const terminalId = "osc-strip-terminal";
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+
+    // OSC 11 (background) query + OSC 10 (foreground) rgb: report, plus a
+    // marker whose *source text* (`DONE""MARKER`) differs from its emitted
+    // output (`DONEMARKER`), so the marker we assert on can only come from
+    // executed output — never the shell's echo of the typed command line.
+    // `\\033`/`\\007` are literal backslash-escapes handed to the shell's
+    // printf; only its *execution* produces the raw ESC (0x1b) / BEL (0x07)
+    // bytes that end up in scrollback.
+    const OSC11_QUERY = "\x1b]11;?\x07";
+    const OSC10_REPORT = "\x1b]10;rgb:e8e8/e8e8/e8e8\x07";
+    const MARKER = "DONEMARKER";
+    const command =
+      "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007'; echo DONE\"\"MARKER\r";
+
+    // --- Connection 1: spawn the PTY, run the command, wait until the raw
+    //     OSC bytes appear in live output (proving they're now in scrollback).
+    const ws1 = new WebSocket(wsUrl, {
+      headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+    });
+
+    let live = Buffer.alloc(0);
+    let sentCommand = false;
+
+    await new Promise<void>((resolve, reject) => {
+      ws1.on("open", () => {
+        ws1.send(JSON.stringify({ type: "init" }));
+      });
+      ws1.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!sentCommand) {
+          // First frame proves the session is attached and the persistent
+          // message listener is live — now send the command.
+          sentCommand = true;
+          ws1.send(command);
+          return;
+        }
+        if (!isBinary) return; // skip JSON control frames (title, etc.)
+        live = Buffer.concat([live, data]);
+        // Live output is NOT stripped, so the raw OSC 11 query round-trips
+        // here. Once we see it, the bytes are guaranteed in scrollback.
+        if (live.includes(Buffer.from(OSC11_QUERY, "binary"))) {
+          resolve();
+        }
+      });
+      ws1.on("error", reject);
+      setTimeout(
+        () => reject(new Error("OSC query never appeared in live output within 10 s")),
+        10_000,
+      );
+    });
+
+    await new Promise<void>((r) => {
+      ws1.on("close", () => r());
+      ws1.close();
+    });
+
+    // --- Connection 2: reconnect to the same terminal. The server replays
+    //     the buffered scrollback through stripTerminalQueries.
+    const ws2 = new WebSocket(wsUrl, {
+      headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+    });
+
+    let replay = Buffer.alloc(0);
+
+    await new Promise<void>((resolve, reject) => {
+      ws2.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!isBinary) return;
+        replay = Buffer.concat([replay, data]);
+        // The marker proves scrollback was actually replayed (guards against
+        // a false pass where an empty buffer trivially contains no OSC).
+        if (replay.includes(MARKER)) {
+          resolve();
+        }
+      });
+      ws2.on("error", reject);
+      setTimeout(
+        () => reject(new Error("Marker never appeared in replayed scrollback within 10 s")),
+        10_000,
+      );
+    });
+
+    ws2.close();
+
+    // Ordinary output survived replay.
+    expect(replay.includes(MARKER)).toBe(true);
+    // Both OSC forms — the `?` query and the `rgb:` report — were stripped.
+    expect(replay.includes(Buffer.from(OSC11_QUERY, "binary"))).toBe(false);
+    expect(replay.includes(Buffer.from(OSC10_REPORT, "binary"))).toBe(false);
+    // Nothing starting an OSC 10/11/12 escape (`ESC ] 1x`) should remain.
+    expect(replay.includes(Buffer.from("\x1b]10", "binary"))).toBe(false);
+    expect(replay.includes(Buffer.from("\x1b]11", "binary"))).toBe(false);
   });
 });
