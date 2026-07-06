@@ -68,6 +68,10 @@ export class ChangesPanelPage {
    *  data the test seeded). The picker keeps this populated across diff-target
    *  refetches — the flicker-guard test asserts it never detaches/blanks. */
   readonly headBranchLabel: Locator;
+  /** Workspace opened via `openWorkspace`, remembered so `diffMode()` can build
+   *  the per-workspace `band:diff-mode:<id>` localStorage key that
+   *  `useDiffTarget` mirrors the selected mode into. */
+  private currentWorkspaceId: string | null = null;
 
   constructor(
     private readonly page: Page,
@@ -157,6 +161,7 @@ export class ChangesPanelPage {
     workspaceId: string,
     options: { expandAll?: boolean; viewMode?: DiffViewMode } = {},
   ): Promise<void> {
+    this.currentWorkspaceId = workspaceId;
     const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
     await test.step(`Open Changes panel for ${workspaceId}`, async () => {
       const { expandAll, viewMode } = options;
@@ -229,12 +234,21 @@ export class ChangesPanelPage {
     });
   }
 
-  /** The selected diff mode, read from the trigger's `data-diff-mode`
-   *  attribute — a stable enum value (`"uncommitted"` | `"branch"`), not the
-   *  localisable trigger label. On a fresh workspace with no stored pick this
-   *  is `"uncommitted"` (the default). */
-  async diffMode(): Promise<string | null> {
-    return await this.diffTargetTrigger.getAttribute("data-diff-mode");
+  /** The selected diff mode as a stable enum (`"uncommitted"` | `"branch"`),
+   *  read from the per-workspace `band:diff-mode:<id>` localStorage key that
+   *  `useDiffTarget` mirrors the mode into. Reading persisted client state
+   *  keeps this black-box (no production test-hook attribute) and dodges the
+   *  localisable trigger label. Falls back to `"uncommitted"` when the key is
+   *  absent — mirrors the app's own default for a fresh workspace with no
+   *  stored pick, where nothing has been written yet. */
+  async diffMode(): Promise<string> {
+    if (!this.currentWorkspaceId) {
+      throw new Error("diffMode() called before openWorkspace()");
+    }
+    return await this.page.evaluate((workspaceId) => {
+      const v = localStorage.getItem(`band:diff-mode:${workspaceId}`);
+      return v === "uncommitted" || v === "branch" ? v : "uncommitted";
+    }, this.currentWorkspaceId);
   }
 
   /** Open the diff-target dropdown. Radix renders the open listbox into a
@@ -245,7 +259,7 @@ export class ChangesPanelPage {
   async openDiffTargetDropdown(): Promise<void> {
     await test.step("Open diff-target dropdown", async () => {
       await this.diffTargetTrigger.click();
-      await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
+      await expect(this.firstDiffTargetOption).toBeVisible({ timeout: 10_000 });
     });
   }
 

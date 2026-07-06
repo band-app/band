@@ -106,10 +106,11 @@ test("Diff target defaults to Uncommitted on a fresh workspace", async ({ page }
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   await changes.openWorkspace(workspaceId);
   await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
-  // Assert on the stable `data-diff-mode` enum, not the localisable
-  // "Uncommitted" trigger copy. Poll so a one-tick gap between the trigger
-  // becoming visible and the attribute settling can't flake the assertion.
-  await expect.poll(() => changes.diffMode()).toBe("uncommitted");
+  // Assert on the stable mode enum (read from persisted client state), not the
+  // localisable "Uncommitted" trigger copy. Poll so a one-tick gap between the
+  // trigger becoming visible and the state settling can't flake the assertion;
+  // the explicit timeout matches the other server-round-trip polls in this file.
+  await expect.poll(() => changes.diffMode(), { timeout: 15_000 }).toBe("uncommitted");
 });
 
 test("Diff target dropdown pins Uncommitted, then staging branches, then default, then the rest", async ({
@@ -159,10 +160,10 @@ test("Head-branch label stays populated across a diff-target switch (no picker f
   await changes.selectDiffTarget("develop");
 
   // The picker reflects the new branch target — proof the refetch-triggering
-  // switch actually happened, so the guard window covered a real refetch.
-  // `data-diff-mode` is the stable enum anchor; the trigger text is the
-  // branch name (runtime data the test seeded), not localisable copy.
-  await expect(changes.diffTargetTrigger).toHaveAttribute("data-diff-mode", "branch");
+  // switch actually happened, so the guard window covered a real refetch. The
+  // mode enum comes from persisted client state; the trigger text is the branch
+  // name (runtime data the test seeded), not localisable copy.
+  await expect.poll(() => changes.diffMode(), { timeout: 15_000 }).toBe("branch");
   await expect(changes.diffTargetTrigger).toHaveText("develop");
 
   // The head-branch label never detached or blanked while the summary

@@ -2250,13 +2250,6 @@ export function DiffView({
     <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
       <SelectTrigger
         data-testid="diff-view__target-select"
-        // Expose the selected mode as an inert `data-*` state attribute — a
-        // stable, non-localised anchor so tests read the enum here instead of
-        // the "Uncommitted" UI copy. It rides on the element the testid already
-        // marks (no extra DOM), and holds a live value rather than an
-        // identifier, which is why it's a `data-diff-mode` state hook rather
-        // than a second `data-testid`.
-        data-diff-mode={diffMode}
         className="h-6 w-auto max-w-[300px] gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:truncate [&>[data-slot=select-value]]:block"
       >
         <SelectValue />
@@ -2270,7 +2263,10 @@ export function DiffView({
             {branch}
           </SelectItem>
         ))}
-        {otherBranches.length > 0 && <SelectSeparator />}
+        {/* Separator only when it has pinned branches above AND others below —
+            otherwise (no staging/default pins) it would orphan directly under
+            Uncommitted. */}
+        {topSectionBranches.length > 0 && otherBranches.length > 0 && <SelectSeparator />}
         {otherBranches.map((branch) => (
           <SelectItem key={branch} value={branch}>
             {branch}
@@ -2328,8 +2324,8 @@ export function DiffView({
   //
   // The remembered value is written in an effect (not the render body) so a
   // started-but-discarded render can't leave the ref mutated — DiffView
-  // re-renders frequently, and a ref write during render commits before the
-  // render itself does.
+  // re-renders frequently, and effects run only after a render commits, so the
+  // ref update is skipped for any render React throws away.
   useEffect(() => {
     if (summary?.headBranch) lastHeadBranchRef.current = summary.headBranch;
   }, [summary?.headBranch]);
