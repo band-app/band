@@ -25,7 +25,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import { createTRPCClient, createWSClient, httpBatchLink, wsLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { AppRouter } from "../src/server/api/router";
@@ -458,29 +458,25 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
     });
 
+    // The server replays the whole buffered scrollback in a single binary
+    // `ws.send`, so the FIRST binary frame is exactly the replayed scrollback.
+    // Capture only that frame — accumulating later frames could fold in live
+    // PTY output emitted after reconnect and muddy the OSC assertions.
     let replay = Buffer.alloc(0);
 
     await new Promise<void>((resolve, reject) => {
       ws2.on("message", (data: Buffer, isBinary: boolean) => {
-        if (!isBinary) return;
-        replay = Buffer.concat([replay, data]);
-        // The marker proves scrollback was actually replayed (guards against
-        // a false pass where an empty buffer trivially contains no OSC).
-        if (replay.includes(MARKER)) {
-          resolve();
-        }
+        if (!isBinary) return; // skip JSON control frames (title, etc.)
+        replay = data;
+        resolve();
       });
       ws2.on("error", reject);
-      setTimeout(
-        () => reject(new Error("Marker never appeared in replayed scrollback within 10 s")),
-        10_000,
-      );
+      setTimeout(() => reject(new Error("No replayed scrollback frame within 10 s")), 10_000);
     });
 
     ws2.close();
 
-    // Ordinary output survived replay (the promise above only resolves once
-    // MARKER is present, so this is the positive anchor for the negatives).
+    // Ordinary output survived replay — positive anchor for the negatives.
     expect(replay.toString()).toContain(MARKER);
     // Every OSC form — the `?` query (11/12) and the `rgb:` report (10) — was
     // stripped.
@@ -556,12 +552,40 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     expect(firstOutput).not.toContain("\x1b]11");
     expect(firstOutput).not.toContain("\x1b]12");
   });
+
+  // Third scrollback surface (band-app/band#613): the `terminal.output` tRPC
+  // query returns the buffered scrollback on demand. A client rendering that
+  // into a terminal emulator would hit the same OSC leak, so it strips too.
+  // Driven over the real HTTP tRPC transport.
+  it("strips OSC 10/11/12 sequences from the terminal.output query response", async () => {
+    const terminalId = "osc-strip-output";
+    await seedOscScrollback(terminalId);
+
+    const client = createTRPCClient<AppRouter>({
+      links: [
+        httpBatchLink({
+          url: `${server.url}/trpc`,
+          headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+        }),
+      ],
+    });
+
+    const { output } = await client.terminal.output.query({ terminalId });
+
+    expect(output).toContain(MARKER);
+    expect(output).not.toContain(OSC11_QUERY);
+    expect(output).not.toContain(OSC10_REPORT);
+    expect(output).not.toContain(OSC12_QUERY);
+    expect(output).not.toContain("\x1b]10");
+    expect(output).not.toContain("\x1b]11");
+    expect(output).not.toContain("\x1b]12");
+  });
 });
 
-// Negative-auth coverage (TEST-13): the WebSocket upgrade and every HTTP
-// request are gated on the `band_token` cookie (see the start-server.ts
-// upgrade handler and auth.ts). A seeded `tokenSecret` makes the server
-// enforce the token, so a request without it must be rejected.
+// Negative-auth coverage: the WebSocket upgrade and every HTTP request are
+// gated on the `band_token` cookie (see the start-server.ts upgrade handler
+// and auth.ts). A seeded `tokenSecret` makes the server enforce the token, so
+// a request without it must be rejected.
 describe("terminal WebSocket — authentication", () => {
   let server: ServerHandle;
   let tmpHome: string;

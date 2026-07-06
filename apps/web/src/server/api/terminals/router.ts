@@ -81,7 +81,13 @@ const terminalRouter = t.router({
           message: `Terminal not found: ${input.terminalId}`,
         });
       }
-      return { output };
+      // Strip query/report escape sequences here too (band-app/band#613):
+      // this scrollback fetch has no live-terminal handshake, so a stale
+      // color/cursor/DA query in it is pure noise, and any client that renders
+      // the result through a terminal emulator would hit the same OSC leak the
+      // replay paths do. Stripping is safe — these sequences carry no display
+      // value in a point-in-time scrollback read.
+      return { output: stripTerminalQueries(output) };
     }),
 
   kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(({ input }) => {
