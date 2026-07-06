@@ -25,8 +25,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import type { AppRouter } from "../src/server/api/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
@@ -373,61 +375,52 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  // Regression for band-app/band#613: a stale OSC 10/11/12 color query sitting
-  // in scrollback used to survive replay (stripTerminalQueries only matched CSI
-  // sequences). The client's xterm.js then answered the replayed query, the
-  // dashboard forwarded the answer to the PTY, and the shell's line editor
-  // inserted the printable remainder (`11;rgb:1e1e/1e1e/1e1e…`) as literal text
-  // at the prompt. This test proves the OSC bytes are stripped from replayed
-  // scrollback while ordinary output survives.
-  it("strips OSC 10/11 sequences from replayed scrollback but keeps normal output", async () => {
-    const workspaceId = "workspace-main";
-    const terminalId = "osc-strip-terminal";
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`;
+  // OSC 11 (background) query + OSC 10 (foreground) rgb: report, plus a
+  // marker whose *source text* (`DONE""MARKER`) differs from its emitted
+  // output (`DONEMARKER`), so the marker we assert on can only come from
+  // executed output — never the shell's echo of the typed command line.
+  // `\\033`/`\\007` are literal backslash-escapes handed to the shell's
+  // printf; only its *execution* produces the raw ESC (0x1b) / BEL (0x07)
+  // bytes that end up in scrollback.
+  const OSC11_QUERY = "\x1b]11;?\x07";
+  const OSC10_REPORT = "\x1b]10;rgb:e8e8/e8e8/e8e8\x07";
+  const MARKER = "DONEMARKER";
+  const COMMAND = "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007'; echo DONE\"\"MARKER\r";
 
-    // OSC 11 (background) query + OSC 10 (foreground) rgb: report, plus a
-    // marker whose *source text* (`DONE""MARKER`) differs from its emitted
-    // output (`DONEMARKER`), so the marker we assert on can only come from
-    // executed output — never the shell's echo of the typed command line.
-    // `\\033`/`\\007` are literal backslash-escapes handed to the shell's
-    // printf; only its *execution* produces the raw ESC (0x1b) / BEL (0x07)
-    // bytes that end up in scrollback.
-    const OSC11_QUERY = "\x1b]11;?\x07";
-    const OSC10_REPORT = "\x1b]10;rgb:e8e8/e8e8/e8e8\x07";
-    const MARKER = "DONEMARKER";
-    const command =
-      "printf '\\033]11;?\\007\\033]10;rgb:e8e8/e8e8/e8e8\\007'; echo DONE\"\"MARKER\r";
+  const WORKSPACE_ID = "workspace-main";
 
-    // --- Connection 1: spawn the PTY, run the command, wait until the raw
-    //     OSC bytes appear in live output (proving they're now in scrollback).
-    const ws1 = new WebSocket(wsUrl, {
-      headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
-    });
+  // Spawn a PTY over the `/terminal` WebSocket, run the OSC-emitting command,
+  // and resolve only once the raw OSC bytes have appeared in live output —
+  // which guarantees they are now buffered in the server-side scrollback.
+  // Then close the socket; the pool keeps the PTY alive for reconnect/replay.
+  async function seedOscScrollback(terminalId: string): Promise<void> {
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let live = Buffer.alloc(0);
     let sentCommand = false;
 
     await new Promise<void>((resolve, reject) => {
-      ws1.on("open", () => {
-        ws1.send(JSON.stringify({ type: "init" }));
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ type: "init" }));
       });
-      ws1.on("message", (data: Buffer, isBinary: boolean) => {
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!sentCommand) {
           // First frame proves the session is attached and the persistent
           // message listener is live — now send the command.
           sentCommand = true;
-          ws1.send(command);
+          ws.send(COMMAND);
           return;
         }
         if (!isBinary) return; // skip JSON control frames (title, etc.)
         live = Buffer.concat([live, data]);
         // Live output is NOT stripped, so the raw OSC 11 query round-trips
         // here. Once we see it, the bytes are guaranteed in scrollback.
-        if (live.includes(Buffer.from(OSC11_QUERY, "binary"))) {
+        if (live.includes(Buffer.from(OSC11_QUERY))) {
           resolve();
         }
       });
-      ws1.on("error", reject);
+      ws.on("error", reject);
       setTimeout(
         () => reject(new Error("OSC query never appeared in live output within 10 s")),
         10_000,
@@ -435,12 +428,25 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     });
 
     await new Promise<void>((r) => {
-      ws1.on("close", () => r());
-      ws1.close();
+      ws.on("close", () => r());
+      ws.close();
     });
+  }
 
-    // --- Connection 2: reconnect to the same terminal. The server replays
-    //     the buffered scrollback through stripTerminalQueries.
+  // Regression for band-app/band#613: a stale OSC 10/11/12 color query sitting
+  // in scrollback used to survive replay (stripTerminalQueries only matched CSI
+  // sequences). The client's xterm.js then answered the replayed query, the
+  // dashboard forwarded the answer to the PTY, and the shell's line editor
+  // inserted the printable remainder (`11;rgb:1e1e/1e1e/1e1e…`) as literal text
+  // at the prompt. This test proves the OSC bytes are stripped from replayed
+  // scrollback while ordinary output survives.
+  it("strips OSC 10/11 sequences from WebSocket scrollback replay but keeps normal output", async () => {
+    const terminalId = "osc-strip-ws";
+    await seedOscScrollback(terminalId);
+
+    // Reconnect to the same terminal. The server replays the buffered
+    // scrollback through stripTerminalQueries on the `/terminal` WS path.
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
     const ws2 = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
     });
@@ -469,10 +475,72 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     // Ordinary output survived replay.
     expect(replay.includes(MARKER)).toBe(true);
     // Both OSC forms — the `?` query and the `rgb:` report — were stripped.
-    expect(replay.includes(Buffer.from(OSC11_QUERY, "binary"))).toBe(false);
-    expect(replay.includes(Buffer.from(OSC10_REPORT, "binary"))).toBe(false);
+    expect(replay.includes(Buffer.from(OSC11_QUERY))).toBe(false);
+    expect(replay.includes(Buffer.from(OSC10_REPORT))).toBe(false);
     // Nothing starting an OSC 10/11/12 escape (`ESC ] 1x`) should remain.
-    expect(replay.includes(Buffer.from("\x1b]10", "binary"))).toBe(false);
-    expect(replay.includes(Buffer.from("\x1b]11", "binary"))).toBe(false);
+    expect(replay.includes(Buffer.from("\x1b]10"))).toBe(false);
+    expect(replay.includes(Buffer.from("\x1b]11"))).toBe(false);
+  });
+
+  // The second replay path (band-app/band#613): the tRPC `terminal.stream`
+  // subscription replays scrollback before streaming live output. It
+  // previously replayed raw scrollback with no stripping at all, so the same
+  // OSC leak applied. This drives the real tRPC client over the production WS
+  // transport and asserts the first replayed `output` frame is stripped.
+  it("strips OSC 10/11 sequences from the tRPC terminal.stream scrollback replay", async () => {
+    const terminalId = "osc-strip-trpc";
+    await seedOscScrollback(terminalId);
+
+    // The tRPC WS transport authenticates via the same `band_token` cookie the
+    // HTTP upgrade handler checks. `createWSClient` constructs its socket as
+    // `new WebSocket(url, protocols)` with no way to set headers, so wrap the
+    // `ws` implementation to always attach the cookie.
+    class CookieWebSocket extends WebSocket {
+      constructor(address: string, protocols?: string | string[]) {
+        super(address, protocols, {
+          headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+        });
+      }
+    }
+
+    const wsClient = createWSClient({
+      url: `ws://127.0.0.1:${server.port}/trpc`,
+      WebSocket: CookieWebSocket as unknown as typeof globalThis.WebSocket,
+    });
+    const client = createTRPCClient<AppRouter>({ links: [wsLink({ client: wsClient })] });
+
+    // The subscription replays scrollback as its first `output` event.
+    const firstOutput = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("No output event from terminal.stream within 10 s")),
+        10_000,
+      );
+      const sub = client.terminal.stream.subscribe(
+        { terminalId, replay: true },
+        {
+          onData: (evt) => {
+            if (evt.type === "output") {
+              clearTimeout(timer);
+              sub.unsubscribe();
+              resolve(evt.data);
+            }
+          },
+          onError: (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        },
+      );
+    });
+
+    wsClient.close();
+
+    // The replayed scrollback (a plain string on this path) kept normal
+    // output but had every OSC sequence stripped.
+    expect(firstOutput).toContain(MARKER);
+    expect(firstOutput).not.toContain(OSC11_QUERY);
+    expect(firstOutput).not.toContain(OSC10_REPORT);
+    expect(firstOutput).not.toContain("\x1b]10");
+    expect(firstOutput).not.toContain("\x1b]11");
   });
 });

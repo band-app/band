@@ -34,8 +34,16 @@ export function stripTerminalQueries(data: string): string {
       // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real ESC sequences in terminal output
       .replace(/\x1b\[\??[0-9]*[nc]|\x1b\[>[0-9]*c|\x1b\[=[0-9]*c/g, "")
       // OSC 10/11/12 color queries/reports. The payload runs until the first
-      // BEL or ST, so `[^\x07\x1b]*` stops at either terminator byte.
+      // BEL or ST, so `[^\x07\x1b]*` stops at either terminator byte. The
+      // terminator is OPTIONAL so an *unterminated* opener is stripped too:
+      // PTY output arrives in chunks, so scrollback can end mid-sequence
+      // (`\x1b]11;?` with its BEL not yet appended). Replaying that dangling
+      // query would leave xterm.js waiting for the terminator, which the live
+      // stream then supplies — re-triggering the #613 leak. Because the
+      // negated class stops at any ESC, the optional terminator only ever
+      // consumes a real terminator or nothing; it never eats a following
+      // escape sequence.
       // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real OSC sequences in terminal output
-      .replace(/\x1b\]1[012];[^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+      .replace(/\x1b\]1[012];[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
   );
 }
