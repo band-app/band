@@ -107,8 +107,9 @@ test("Diff target defaults to Uncommitted on a fresh workspace", async ({ page }
   await changes.openWorkspace(workspaceId);
   await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
   // Assert on the stable `data-diff-mode` enum, not the localisable
-  // "Uncommitted" trigger copy.
-  expect(await changes.diffMode()).toBe("uncommitted");
+  // "Uncommitted" trigger copy. Poll so a one-tick gap between the trigger
+  // becoming visible and the attribute settling can't flake the assertion.
+  await expect.poll(() => changes.diffMode()).toBe("uncommitted");
 });
 
 test("Diff target dropdown pins Uncommitted, then staging branches, then default, then the rest", async ({

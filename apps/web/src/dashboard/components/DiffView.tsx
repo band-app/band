@@ -2196,12 +2196,19 @@ export function DiffView({
   // ---------------------------------------------------------------------------
   const summaryCompareBranch = summary?.compareBranch ?? null;
   const defaultBranch = summary?.defaultBranch ?? availableDefaultBranch ?? null;
-  const branchOptions =
-    availableBranches.length > 0
-      ? availableBranches
-      : summaryCompareBranch
-        ? [summaryCompareBranch]
-        : [];
+  // Memoised so the fallback branches (which would otherwise build a fresh
+  // `[summaryCompareBranch]` / `[]` array literal every render) keep a stable
+  // reference — that stability is what lets the `topSectionBranches` memo below
+  // genuinely skip its priority scan + sort on unrelated re-renders.
+  const branchOptions = useMemo(
+    () =>
+      availableBranches.length > 0
+        ? availableBranches
+        : summaryCompareBranch
+          ? [summaryCompareBranch]
+          : [],
+    [availableBranches, summaryCompareBranch],
+  );
   const targetBranch = compareBranch ?? branchOptions[0] ?? summaryCompareBranch;
 
   // Branches pinned above the separator. Order matters in the rendered list:
@@ -2243,8 +2250,12 @@ export function DiffView({
     <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
       <SelectTrigger
         data-testid="diff-view__target-select"
-        // Stable, non-localised anchor for the selected diff mode so tests
-        // don't assert on the "Uncommitted" UI copy.
+        // Expose the selected mode as an inert `data-*` state attribute — a
+        // stable, non-localised anchor so tests read the enum here instead of
+        // the "Uncommitted" UI copy. It rides on the element the testid already
+        // marks (no extra DOM), and holds a live value rather than an
+        // identifier, which is why it's a `data-diff-mode` state hook rather
+        // than a second `data-testid`.
         data-diff-mode={diffMode}
         className="h-6 w-auto max-w-[300px] gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:truncate [&>[data-slot=select-value]]:block"
       >
