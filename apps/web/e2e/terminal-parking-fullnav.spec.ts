@@ -80,7 +80,13 @@ test.beforeAll(async () => {
       },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  // DOM renderer (not WebGL) so printed markers land in `.xterm-rows` for
+  // `readTerminalRenderedText` — CI's Chromium has WebGL (canvas → empty rows).
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    maxCachedWorkspaces: 3,
+    useWebGLTerminalRenderer: false,
+  });
   server = await startServer({ tmpHome });
 });
 

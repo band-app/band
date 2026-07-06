@@ -38,10 +38,17 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-terminal-parking-liveness-token";
 
+// The two tests use SEPARATE workspace pairs. Server-side PTYs persist across
+// tests in a file, so the output test's long-running loop would otherwise poison
+// the workspace the focus test reconnects to (busy shell / markers scrolled off).
 const PROJECT_A = "alpha-parking-live";
 const PROJECT_B = "bravo-parking-live";
 const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
 const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
+const PROJECT_C = "charlie-parking-live";
+const PROJECT_D = "delta-parking-live";
+const WORKSPACE_C = toWorkspaceId(PROJECT_C, "main");
+const WORKSPACE_D = toWorkspaceId(PROJECT_D, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -49,6 +56,8 @@ let server!: ServerHandle;
 let tmpHome!: string;
 let workdirA!: string;
 let workdirB!: string;
+let workdirC!: string;
+let workdirD!: string;
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {
@@ -85,6 +94,8 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdirA = makeGitWorkdir("band-parking-live-a-", tmpHome);
   workdirB = makeGitWorkdir("band-parking-live-b-", tmpHome);
+  workdirC = makeGitWorkdir("band-parking-live-c-", tmpHome);
+  workdirD = makeGitWorkdir("band-parking-live-d-", tmpHome);
   seedState(tmpHome, {
     projects: [
       {
@@ -99,9 +110,27 @@ test.beforeAll(async () => {
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
       },
+      {
+        name: PROJECT_C,
+        path: workdirC,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: workdirC }],
+      },
+      {
+        name: PROJECT_D,
+        path: workdirD,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: workdirD }],
+      },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  // DOM renderer (not WebGL) so printed markers land in `.xterm-rows` for
+  // `readTerminalRenderedText` — CI's Chromium has WebGL (canvas → empty rows).
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    maxCachedWorkspaces: 3,
+    useWebGLTerminalRenderer: false,
+  });
   server = await startServer({ tmpHome });
 });
 
@@ -110,6 +139,8 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
   if (workdirA) rmSync(workdirA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   if (workdirB) rmSync(workdirB, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (workdirC) rmSync(workdirC, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (workdirD) rmSync(workdirD, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test.describe("Terminal parking: liveness + focus isolation", () => {
@@ -175,75 +206,77 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
   });
 
   test("keystrokes for the active terminal never leak into a parked one", async ({ page }) => {
+    // Own workspace pair (C/D), separate from the output test's (A/B), so this
+    // test always starts from fresh, idle shells.
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.goto(WORKSPACE_C);
     await workspacePage.waitForReady();
     await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible({
       timeout: 20_000,
     });
     await workspacePage.waitForTerminalReady(20_000);
 
-    // Anchor: type a marker into A WHILE IT IS ACTIVE (no focus race), and wait
-    // until A renders it. This becomes the positive anchor for the negative
-    // assertion at the end — read back after A re-attaches, so the "no leak"
+    // Anchor: type a marker into C WHILE IT IS ACTIVE (no focus race), and wait
+    // until C renders it. This becomes the positive anchor for the negative
+    // assertion at the end — read back after C re-attaches, so the "no leak"
     // check can't pass vacuously against an unrendered buffer, and we never have
-    // to type into A after its park→re-attach (that focus race made this test
+    // to type into C after its park→re-attach (that focus race made this test
     // flaky under parallel load).
-    await workspacePage.runInTerminal("echo A_OWN_MARKER");
+    await workspacePage.runInTerminal("echo C_OWN_MARKER");
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("A_OWN_MARKER"),
+          (await workspacePage.readTerminalRenderedText(WORKSPACE_C)).includes("C_OWN_MARKER"),
         { timeout: 20_000 },
       )
       .toBe(true);
 
-    // Bring B forward with its own terminal; A parks.
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
+    // Bring D forward with its own terminal; C parks.
+    await workspacePage.switchWorkspace(WORKSPACE_D);
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_D, true)).toBeVisible({
       timeout: 20_000,
     });
     await workspacePage.waitForTerminalReady(20_000);
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.isTerminalParked(WORKSPACE_C), { timeout: 20_000 })
       .toBe(true);
 
     // The parking container isolates focus/input.
     expect(await workspacePage.readParkingIsolation()).toEqual({ inert: true, ariaHidden: true });
 
-    // Type a unique marker; it must land in the ACTIVE terminal (B), never the
-    // parked one (A). `terminalInput` resolves to B only — A's textarea is
+    // Type a unique marker; it must land in the ACTIVE terminal (D), never the
+    // parked one (C). `terminalInput` resolves to D only — C's textarea is
     // aria-hidden inside the inert parking container.
     await workspacePage.runInTerminal("echo LEAKMARKER987");
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_B)).includes("LEAKMARKER987"),
+          (await workspacePage.readTerminalRenderedText(WORKSPACE_D)).includes("LEAKMARKER987"),
         { timeout: 20_000 },
       )
       .toBe(true);
 
-    // Switch back to A so its buffer is repainted on re-attach (xterm freezes
-    // rendering while parked). Wait until A's own marker is rendered again (the
+    // Switch back to C so its buffer is repainted on re-attach (xterm freezes
+    // rendering while parked). Wait until C's own marker is rendered again (the
     // repaint completed), then assert the leak marker is absent — the keystrokes
-    // went only to B.
-    await workspacePage.switchWorkspace(WORKSPACE_A);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    // went only to D.
+    await workspacePage.switchWorkspace(WORKSPACE_C);
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible({
       timeout: 20_000,
     });
     await expect
-      .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.isTerminalParked(WORKSPACE_C), { timeout: 20_000 })
       .toBe(false);
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("A_OWN_MARKER"),
+          (await workspacePage.readTerminalRenderedText(WORKSPACE_C)).includes("C_OWN_MARKER"),
         { timeout: 20_000 },
       )
       .toBe(true);
-    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_A)).not.toContain(
+    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_C)).not.toContain(
       "LEAKMARKER987",
     );
   });

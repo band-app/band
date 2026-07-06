@@ -40,6 +40,9 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-terminal-parking-dispose-token";
 
+// Each test uses its own workspace(s): server-side PTYs + persisted dockview
+// layouts survive across tests in a file, so a test that mutates a workspace
+// (e.g. the split in the close-tab test) must not share it with another.
 const PROJECT_A = "alpha-parking-dispose";
 const PROJECT_B = "bravo-parking-dispose";
 const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
@@ -48,6 +51,9 @@ const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
 // menu item is hidden for the default branch). Used by the delete-dispose test.
 const FEATURE_BRANCH = "feature";
 const WORKSPACE_A_FEATURE = toWorkspaceId(PROJECT_A, FEATURE_BRANCH);
+// Dedicated workspace for the close-tab test (it splits, mutating the layout).
+const PROJECT_CLOSE = "charlie-parking-dispose";
+const WORKSPACE_CLOSE = toWorkspaceId(PROJECT_CLOSE, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -56,6 +62,7 @@ let tmpHome!: string;
 let workdirA!: string;
 let workdirB!: string;
 let workdirAFeature!: string;
+let workdirClose!: string;
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {
@@ -82,6 +89,7 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdirA = makeGitWorkdir("band-parking-dispose-a-", tmpHome);
   workdirB = makeGitWorkdir("band-parking-dispose-b-", tmpHome);
+  workdirClose = makeGitWorkdir("band-parking-dispose-close-", tmpHome);
   // A real second worktree of PROJECT_A on a non-default branch — deletable via
   // the sidebar (unlike the default-branch workspace) so the delete-dispose test
   // can remove it. `git worktree add` off workdirA's repo.
@@ -107,11 +115,24 @@ test.beforeAll(async () => {
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: workdirB }],
       },
+      {
+        name: PROJECT_CLOSE,
+        path: workdirClose,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: workdirClose }],
+      },
     ],
   });
   // Pin the LRU to 1 so a single A→B switch EVICTS A from the panel cache,
   // exercising the "evicted terminal is parked, not disposed" path.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 1 });
+  // `useWebGLTerminalRenderer: false` forces xterm's DOM renderer so the printed
+  // output lands in `.xterm-rows` where `readTerminalRenderedText` can read it —
+  // CI's Chromium has WebGL, which otherwise renders to a canvas (empty rows).
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    maxCachedWorkspaces: 1,
+    useWebGLTerminalRenderer: false,
+  });
   server = await startServer({ tmpHome });
 });
 
@@ -120,37 +141,41 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
   if (workdirA) rmSync(workdirA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   if (workdirB) rmSync(workdirB, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  if (workdirClose)
+    rmSync(workdirClose, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 test.describe("Terminal parking: dispose triggers", () => {
   test("closing a terminal tab disposes its cached instance", async ({ page }) => {
+    // Dedicated workspace — this test splits (mutating the layout), so it must
+    // not share a workspace with the other tests.
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.goto(WORKSPACE_CLOSE);
     await workspacePage.waitForReady();
     await workspacePage.openTerminalTab();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_CLOSE, true)).toBeVisible({
       timeout: 20_000,
     });
     await workspacePage.waitForTerminalReady(20_000);
     await expect
-      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(1);
 
     // Split so there are two terminals visible side-by-side (both mounted +
     // attached → two wrappers), which also enables the close (×) control.
-    await workspacePage.clickTerminalSplitRight(WORKSPACE_A);
+    await workspacePage.clickTerminalSplitRight(WORKSPACE_CLOSE);
     await expect
-      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(2);
     await expect
-      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(2);
 
     // Close one → its cached xterm is disposed (wrapper removed from the DOM).
-    await workspacePage.closeTerminalTab(WORKSPACE_A);
+    await workspacePage.closeTerminalTab(WORKSPACE_CLOSE);
     await expect
-      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_A), { timeout: 20_000 })
+      .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(1);
   });
 
