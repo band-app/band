@@ -14,10 +14,10 @@ import { TerminalPool } from "../src/server/infra/terminals/terminal-pool.ts";
 // and it "reconnects" to the empty PTY on reload.
 //
 // This drives `TerminalPool.spawn` directly (like `git.test.ts` /
-// `branch-status-poller-ci-throttle.test.ts` — see CLAUDE.md → Testing →
-// Exceptions): the double-spawn is a nondeterministic race that can't be forced
-// reliably through the full WS + tRPC stack, and dedup is internal server
-// behaviour. A real PTY is spawned in a real temp dir — no mocks.
+// `branch-status-poller-ci-throttle.test.ts`): the double-spawn is a
+// nondeterministic race that can't be forced reliably through the full
+// WS + tRPC stack, and dedup is internal server behaviour. A real PTY is
+// spawned in a real temp dir — no mocks.
 
 const cleanups: (() => void)[] = [];
 

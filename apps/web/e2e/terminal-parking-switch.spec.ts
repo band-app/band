@@ -167,24 +167,28 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
       .toBe(false);
 
     // The tagged canvases SURVIVE — the surface was reused, not rebuilt (the
-    // inverse of the old in-place-repair model), and it's correctly sized to
-    // the now-live container.
+    // inverse of the old in-place-repair model) — AND it's correctly sized to
+    // the now-live container: every backing store matches the `.xterm-screen`
+    // rect × dpr. All measurements are taken from ONE settled snapshot inside
+    // the poll so a render flush between reads can't produce a stale mismatch.
     await expect
       .poll(
         async () => {
           const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
-          return s.canvasCount > 0 && s.survivingTags === s.canvasCount && s.screen.w > 0;
+          const reused = s.canvasCount > 0 && s.survivingTags === s.canvasCount;
+          const sized =
+            s.backing.length > 0 &&
+            s.screen.w > 0 &&
+            s.screen.h > 0 &&
+            s.backing.every(
+              (b) =>
+                Math.abs(b.w - s.screen.w * s.dpr) <= 2 && Math.abs(b.h - s.screen.h * s.dpr) <= 2,
+            );
+          return reused && sized;
         },
         { timeout: 20_000 },
       )
       .toBe(true);
-
-    const surface = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
-    expect(surface.backing.length).toBeGreaterThan(0);
-    for (const backing of surface.backing) {
-      expect(Math.abs(backing.w - surface.screen.w * surface.dpr)).toBeLessThanOrEqual(2);
-      expect(Math.abs(backing.h - surface.screen.h * surface.dpr)).toBeLessThanOrEqual(2);
-    }
 
     // No new terminal socket opened across the round-trip: the in-session
     // switch reused the live connection (no reconnect/replay). This is the

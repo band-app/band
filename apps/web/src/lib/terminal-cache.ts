@@ -482,6 +482,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Mobile touch: scroll / long-press word-select / tap-to-focus ---
     // All bound to the persistent wrapper so they survive attach/detach moves.
+    // `.xterm-viewport` is created once by `term.open()` and (unlike the WebGL
+    // `.xterm-screen` canvas) is not rebuilt on renderer switches, so cache it
+    // rather than re-`querySelector` on every ~60 Hz touchmove.
+    const viewportEl = wrapper.querySelector(".xterm-viewport") as HTMLElement | null;
     let lastTouchY: number | null = null;
     const onTouchStart = (e: TouchEvent) => {
       lastTouchY = e.touches.length === 1 ? e.touches[0].clientY : null;
@@ -490,8 +494,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (e.touches.length !== 1 || lastTouchY === null) return;
       const currentY = e.touches[0].clientY;
       const deltaY = lastTouchY - currentY;
-      const viewport = wrapper.querySelector(".xterm-viewport") as HTMLElement | null;
-      const cellHeight = viewport && term.rows > 0 ? viewport.clientHeight / term.rows : 17;
+      const cellHeight = viewportEl && term.rows > 0 ? viewportEl.clientHeight / term.rows : 17;
       const lineDelta = Math.trunc(deltaY / cellHeight);
       if (lineDelta !== 0) {
         term.scrollLines(lineDelta);
@@ -700,7 +703,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
             } else if (msg.type === "title" && typeof msg.title === "string") {
               emitTitle(msg.title);
             } else if (msg.type === "error" && typeof msg.message === "string") {
-              term.write(`\r\n\x1b[31m${msg.message}\x1b[0m\r\n`);
+              // Strip control/escape bytes so a server-supplied error string
+              // can't drive xterm via injected ANSI/CSI sequences (forged
+              // scrollback, screen clears, cursor moves) — we only want to show
+              // its plain text, in red.
+              const safe = msg.message.replace(/\p{Cc}/gu, "");
+              term.write(`\r\n\x1b[31m${safe}\x1b[0m\r\n`);
             }
           } catch {
             term.write(event.data as string);
