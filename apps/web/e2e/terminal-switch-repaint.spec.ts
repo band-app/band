@@ -228,11 +228,21 @@ test.describe("Terminal repaint on plain workspace switch", () => {
     // repair stayed "done" (nothing re-armed it), so become-visible only
     // called `fit()` (resizing the SAME canvases at most) and the tags would
     // survive → this poll times out → the test fails before the fix.
+    //
+    // Require `canvasCount > 0` in the same poll: mid-rebuild there is a window
+    // where the old surface has been disposed and the fresh one not yet
+    // attached, during which `survivingTags` is trivially 0 with no canvas
+    // present. Pairing the conditions ensures we only accept a 0 that means "a
+    // real surface exists and none of it is tagged", never a vacuous 0.
     await expect
-      .poll(async () => (await workspacePage.readTerminalSurface(WORKSPACE_A)).survivingTags, {
-        timeout: 20_000,
-      })
-      .toBe(0);
+      .poll(
+        async () => {
+          const s = await workspacePage.readTerminalSurface(WORKSPACE_A);
+          return s.canvasCount > 0 && s.survivingTags === 0;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
 
     // Positive correctness anchor: the rebuilt surface is sized to the now-
     // visible container — its WebGL backing store matches the `.xterm-screen`

@@ -1147,12 +1147,25 @@ export function TerminalPanel({
     // Defer past a frame so the just-un-hidden layout has settled before we
     // measure. Cancel on cleanup so a rapid hide→show→hide can't leave a
     // stale callback fitting against a re-hidden (degenerate) layout.
-    const rafId = requestAnimationFrame(() => {
-      // Skip while the container still reports zero size — fitting against a
-      // 0×0 box would compute nonsense cols/rows. The ResizeObserver's own
-      // `fit()` repairs it once layout resolves to a real size.
+    let rafId = 0;
+    // Bound the retry below so a container that stays genuinely zero-sized
+    // (e.g. surfaced then immediately re-hidden) can't spin frame after frame.
+    // A handful of frames is ample for `content-visibility: hidden → visible`
+    // to lay the subtree back out.
+    const MAX_LAYOUT_FRAMES = 5;
+    const repair = (attempt: number) => {
       const container = containerRef.current;
-      if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
+      if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
+        // Layout hasn't settled yet. `content-visibility: hidden → visible`
+        // preserves the last-rendered size, so it may NOT fire the
+        // ResizeObserver on un-hide — we can't rely on that observer to retry
+        // the repair for us. Re-check on the next frame instead, capped so a
+        // permanently zero-sized container can't loop forever.
+        if (attempt < MAX_LAYOUT_FRAMES) {
+          rafId = requestAnimationFrame(() => repair(attempt + 1));
+        }
+        return;
+      }
       const remeasure = remeasureAndReattachRef.current;
       if (remeasure) {
         // `remeasureAndReattach` fits internally, so we don't call `fit()`
@@ -1172,7 +1185,8 @@ export function TerminalPanel({
       if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
         ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       }
-    });
+    };
+    rafId = requestAnimationFrame(() => repair(0));
     return () => cancelAnimationFrame(rafId);
   }, [visible]);
 
