@@ -4,6 +4,7 @@ import { z } from "zod";
 import { terminalService } from "../../services/terminal-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
+import { stripTerminalQueries } from "./strip-queries";
 
 /**
  * Terminal sub-router — migrated into the 3-tier architecture as part of
@@ -80,7 +81,13 @@ const terminalRouter = t.router({
           message: `Terminal not found: ${input.terminalId}`,
         });
       }
-      return { output };
+      // Strip query/report escape sequences here too (band-app/band#613):
+      // this scrollback fetch has no live-terminal handshake, so a stale
+      // color/cursor/DA query in it is pure noise, and any client that renders
+      // the result through a terminal emulator would hit the same OSC leak the
+      // replay paths do. Stripping is safe — these sequences carry no display
+      // value in a point-in-time scrollback read.
+      return { output: stripTerminalQueries(output) };
     }),
 
   kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(({ input }) => {
@@ -105,9 +112,15 @@ const terminalRouter = t.router({
         return;
       }
 
-      // Replay buffered scrollback first
+      // Replay buffered scrollback first. Strip query/report escape
+      // sequences before replay for the same reason the WebSocket path does
+      // (band-app/band#613): a stale color/cursor/DA query replayed into a
+      // fresh terminal emulator gets answered back to the PTY and leaks as
+      // literal text at the prompt. This subscription replays-then-streams,
+      // exactly the reconnect scenario the leak needs, so it needs the same
+      // guard the `/terminal` WebSocket already applies.
       if (replay && session.scrollback.length > 0) {
-        yield { type: "output" as const, data: session.scrollback };
+        yield { type: "output" as const, data: stripTerminalQueries(session.scrollback) };
       }
 
       // Stream live output

@@ -6,6 +6,7 @@ import {
   type TerminalSession,
   terminalService,
 } from "../../services/terminal-service";
+import { stripTerminalQueries } from "./strip-queries";
 
 const log = createLogger("terminal-ws");
 
@@ -285,25 +286,4 @@ function handleMessage(
     }
   }
   session.pty.write(message);
-}
-
-// ---------------------------------------------------------------------------
-// Strip terminal query escape sequences from scrollback
-// ---------------------------------------------------------------------------
-
-/**
- * Strip terminal query/request escape sequences from scrollback so
- * replaying them doesn't cause xterm.js to emit spurious responses.
- *
- * Covers:
- *  \x1b[6n   — Cursor Position Report (DSR CPR)
- *  \x1b[?6n  — Extended CPR
- *  \x1b[5n   — Device Status Report
- *  \x1b[c    — Primary Device Attributes (DA1)
- *  \x1b[>c   — Secondary Device Attributes (DA2)
- *  \x1b[=c   — Tertiary Device Attributes (DA3)
- */
-function stripTerminalQueries(data: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real ESC sequences in terminal output
-  return data.replace(/\x1b\[\??[0-9]*[nc]|\x1b\[>[0-9]*c|\x1b\[=[0-9]*c/g, "");
 }
