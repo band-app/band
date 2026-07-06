@@ -83,13 +83,49 @@ export class TerminalPool {
   private readonly outputListeners = new Map<string, Set<(data: string) => void>>();
 
   /**
-   * Spawn a new PTY for the given workspace + terminalId.
+   * terminalId -> in-flight spawn promise. A single terminal is created via TWO
+   * concurrent paths — the WebSocket handler (spawn-on-`getSession`-miss) and
+   * the tRPC `terminal.create` mutation. Without deduplication both spawn a PTY
+   * and the second `terminals.set` overwrites the first, so the client stays
+   * wired to one PTY while the server's session map (and thus scrollback /
+   * `terminals output` / reconnect-replay) points at the other. That's the
+   * "output on screen but empty server scrollback until reload" bug
+   * (band-app/band#617). This map makes concurrent spawns share ONE PTY.
+   */
+  private readonly spawning = new Map<string, Promise<TerminalSession>>();
+
+  /**
+   * Spawn (or return the already-spawning/spawned) PTY for a terminalId.
    *
-   * `workspaceRoot` is the absolute path to the worktree on disk; resolving
-   * the workspaceId to a path is the service tier's job so that the pool
-   * stays oblivious to the workspace registry.
+   * Idempotent per terminalId: if a session already exists it is returned
+   * as-is, and concurrent spawn calls for the same id share a single in-flight
+   * promise — so the WebSocket and tRPC create paths never create competing
+   * PTYs. `workspaceRoot` is the absolute worktree path; resolving the
+   * workspaceId to a path is the service tier's job so the pool stays oblivious
+   * to the workspace registry.
    */
   async spawn(
+    workspaceId: string,
+    terminalId: string,
+    workspaceRoot: string,
+    options?: SpawnOptions,
+  ): Promise<TerminalSession> {
+    const existing = this.terminals.get(terminalId);
+    if (existing) return existing;
+    const inflight = this.spawning.get(terminalId);
+    if (inflight) return inflight;
+    // Store the promise synchronously (before any await) so a concurrent call
+    // that arrives while this one is awaiting sees it and reuses it.
+    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options);
+    this.spawning.set(terminalId, promise);
+    try {
+      return await promise;
+    } finally {
+      this.spawning.delete(terminalId);
+    }
+  }
+
+  private async spawnNew(
     workspaceId: string,
     terminalId: string,
     workspaceRoot: string,

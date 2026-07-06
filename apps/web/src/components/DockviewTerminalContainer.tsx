@@ -31,6 +31,7 @@ import {
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
+import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
@@ -529,6 +530,10 @@ export function DockviewTerminalContainer({
         ?.focus();
     });
 
+    // Dispose the cached xterm instance (intentional close — tears down the
+    // socket + surface, no reconnect). The server-side PTY is killed below.
+    disposeTerminal(terminalId);
+
     // Kill the terminal on the server (kills PTY + removes from layout + emits event)
     trpc.terminal.kill.mutate({ terminalId }).catch((err) => {
       console.error("[DockviewTerminalContainer] failed to kill terminal:", err);
@@ -770,6 +775,9 @@ export function DockviewTerminalContainer({
           position: centralPanelPosition(api),
         });
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
+        // Dispose the cached xterm too so an externally-killed terminal (e.g.
+        // via the CLI) doesn't leave an orphaned instance + socket behind.
+        disposeTerminal(event.terminalId);
         const panel = api.getPanel(event.terminalId);
         if (panel) {
           api.removePanel(panel);
