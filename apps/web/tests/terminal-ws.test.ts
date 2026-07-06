@@ -479,8 +479,9 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
     ws2.close();
 
-    // Ordinary output survived replay.
-    expect(replay.includes(MARKER)).toBe(true);
+    // Ordinary output survived replay (the promise above only resolves once
+    // MARKER is present, so this is the positive anchor for the negatives).
+    expect(replay.toString()).toContain(MARKER);
     // Every OSC form — the `?` query (11/12) and the `rgb:` report (10) — was
     // stripped.
     expect(replay.includes(Buffer.from(OSC11_QUERY))).toBe(false);
@@ -555,19 +556,40 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     expect(firstOutput).not.toContain("\x1b]11");
     expect(firstOutput).not.toContain("\x1b]12");
   });
+});
 
-  // TEST-13: negative auth. The WebSocket upgrade and every HTTP request are
-  // gated on the `band_token` cookie (see start-server.ts upgrade handler and
-  // auth.ts). Assert both surfaces reject a request with no token.
-  it("rejects unauthenticated access: WS upgrade dropped and HTTP returns 401", async () => {
-    // HTTP: no cookie → 401 from the auth middleware.
+// Negative-auth coverage (TEST-13): the WebSocket upgrade and every HTTP
+// request are gated on the `band_token` cookie (see the start-server.ts
+// upgrade handler and auth.ts). A seeded `tokenSecret` makes the server
+// enforce the token, so a request without it must be rejected.
+describe("terminal WebSocket — authentication", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer(tmpHome);
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns 401 for an HTTP request without the band_token cookie", async () => {
     const res = await fetch(`${server.url}/api/health`);
     expect(res.status).toBe(401);
+  });
 
-    // WebSocket: no cookie → the upgrade handler destroys the socket before
-    // the 101 handshake, so the client never opens. Assert we observe a
-    // failure (error / unexpected-response / close) and never an `open`.
-    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=noauth`;
+  it("rejects a /terminal WebSocket upgrade without the band_token cookie", async () => {
+    // No cookie → the upgrade handler destroys the socket before the 101
+    // handshake, so the client never opens. Assert we observe a failure
+    // (error / unexpected-response / close) and never an `open`.
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=noauth`;
     const ws = new WebSocket(wsUrl); // deliberately no Cookie header
 
     const opened = await new Promise<boolean>((resolve, reject) => {
