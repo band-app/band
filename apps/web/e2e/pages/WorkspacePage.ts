@@ -641,6 +641,20 @@ export class WorkspacePage {
     });
   }
 
+  /** Click the first terminal tab's "Close terminal" (×) button within the
+   *  given workspace's terminal host. The button is only rendered when a group
+   *  has more than one tab. Scoped to the workspace's cached entry (like the
+   *  sibling terminal-toolbar helpers) so it never targets another mounted
+   *  workspace's terminal. */
+  async closeTerminalTab(workspaceId: string): Promise<void> {
+    await test.step(`Close the first terminal tab in workspace ${workspaceId}`, async () => {
+      await this.cachedPanelEntries(workspaceId)
+        .getByRole("button", { name: "Close terminal" })
+        .first()
+        .click();
+    });
+  }
+
   /** Count the panels in a workspace's persisted inner layout for the given
    *  container. Returns 0 when no layout has been persisted yet. Reads the
    *  server-side layout (via `readInnerLayout`) so it reflects which
@@ -884,55 +898,108 @@ export class WorkspacePage {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Terminal WebGL render-surface probing (terminal-garbled-until-resize).
+  // Parking-model surface probes (band-app/band#617).
   //
-  // These read xterm.js's own internal DOM (`.xterm-screen > canvas`). That
-  // DOM belongs to the xterm library, not to our code, so there is no
-  // `data-testid` to hook and a class selector is the only option — the
-  // locator-priority "no CSS selectors" rule applies to elements WE own.
-  // We scope every query to the terminal panel host for a specific
-  // workspace (one `workspace-panel-host__cached-entry--<id>` per panel
-  // kind; the terminal one is the entry that contains a
-  // `dockview-terminal-tab__*` marker) so a cached background workspace's
-  // surface can be inspected independently of the active one.
-  //
-  // The WebGL renderer is the production default (`useWebGLTerminalRenderer
-  // ?? true`) and the corruption this fix addresses is a GPU-canvas
-  // artifact, so these helpers assume the WebGL addon attached a <canvas>.
-  // Tests force the SwiftShader WebGL path on via Chromium launch flags
-  // and assert `webglCanvasCount > 0` as a precondition.
+  // Each cached terminal keeps ONE xterm opened into a persistent wrapper
+  // (`[data-testid="terminal-wrapper"]`, tagged with `data-workspace-id` /
+  // `data-terminal-id`). The wrapper is *moved* between its live panel and the
+  // shared off-screen parking container (`[data-testid="terminal-parking"]`),
+  // never disposed on a switch. Unlike the panel-host-scoped probes above,
+  // these locate a terminal by its wrapper's `data-workspace-id`, so they see
+  // the surface whether it's attached (live) or parked.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** Stamp a `data-band-probe` marker on every canvas currently inside the
-   *  given workspace's terminal render surface. Lets a later read detect
-   *  whether the surface was rebuilt (markers gone = the WebGL addon was
-   *  disposed + re-attached, i.e. a brand-new backing store) or merely
-   *  resized in place (markers survive on the same elements). Returns the
-   *  number of canvases stamped. */
-  async tagTerminalCanvases(workspaceId: string): Promise<number> {
-    return await test.step(`Tag terminal canvases for ${workspaceId}`, async () =>
-      await this.page.evaluate((id) => {
-        const hosts = Array.from(
-          document.querySelectorAll(`[data-testid="workspace-panel-host__cached-entry--${id}"]`),
-        );
-        const host = hosts.find((h) => h.querySelector('[data-testid^="dockview-terminal-tab__"]'));
-        const canvases = host
-          ? Array.from(host.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
-          : [];
-        canvases.forEach((c, i) => {
-          c.dataset.bandProbe = `tagged-${i}`;
-        });
-        return canvases.length;
-      }, workspaceId));
+  /** Start counting terminal WebSocket opens for a SPECIFIC workspace (matched
+   *  on the `workspaceId=` query param). Returns a getter for the running count.
+   *  Call BEFORE `goto`. Lets a test prove a given workspace's terminal did NOT
+   *  reconnect across a switch, independent of other workspaces' sockets. */
+  trackTerminalSocketOpensFor(workspaceId: string): () => number {
+    const needle = `workspaceId=${encodeURIComponent(workspaceId)}`;
+    let count = 0;
+    this.page.on("websocket", (ws) => {
+      if (ws.url().includes("/terminal?") && ws.url().includes(needle)) count += 1;
+    });
+    return () => count;
   }
 
-  /** Read the state of the given workspace's terminal render surface:
-   *  total canvas count, how many still carry the `tagTerminalCanvases`
-   *  marker (i.e. were NOT rebuilt), and each canvas's backing-store size
-   *  alongside the `.xterm-screen` CSS size. A rebuilt surface reports
-   *  `survivingTags: 0`; a correctly-sized surface reports backing sizes
-   *  matching the screen rect (× devicePixelRatio). */
-  async readTerminalSurface(workspaceId: string): Promise<{
+  /** Dispatch a window `online` event in the page — the resume trigger the
+   *  terminal client uses to reconnect a dropped socket. Lets a test drive the
+   *  reconnect path deterministically instead of waiting on a real network flap. */
+  async simulateNetworkOnline(): Promise<void> {
+    await test.step("Dispatch window 'online'", async () => {
+      await this.page.evaluate(() => window.dispatchEvent(new Event("online")));
+    });
+  }
+
+  /** Wait up to `timeoutMs` for the page to open a NEW terminal WebSocket for the
+   *  given workspace; resolves `true` if one opens, `false` on timeout. Used to
+   *  assert a reconnect did (or, for a terminated terminal, did NOT) happen —
+   *  event-driven, so the negative case fails fast rather than fixed-sleeping. */
+  async waitForTerminalSocket(workspaceId: string, timeoutMs: number): Promise<boolean> {
+    const needle = `workspaceId=${encodeURIComponent(workspaceId)}`;
+    try {
+      await this.page.waitForEvent("websocket", {
+        timeout: timeoutMs,
+        predicate: (ws) => ws.url().includes("/terminal?") && ws.url().includes(needle),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether the given workspace's terminal wrapper currently lives inside the
+   *  off-screen parking container (i.e. the terminal is detached/inactive). */
+  async isTerminalParked(workspaceId: string): Promise<boolean> {
+    return await this.page.evaluate((id) => {
+      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      return !!wrapper?.closest('[data-testid="terminal-parking"]');
+    }, workspaceId);
+  }
+
+  /** Read the set of terminalIds currently mounted for a workspace (from each
+   *  wrapper's `data-terminal-id`). Lets a test assert a terminal was REUSED
+   *  (same id) vs re-created (new id) across a navigation. */
+  async terminalIds(workspaceId: string): Promise<string[]> {
+    return await this.page.evaluate(
+      (id) =>
+        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`))
+          .map((el) => (el as HTMLElement).dataset.terminalId ?? "")
+          .filter(Boolean),
+      workspaceId,
+    );
+  }
+
+  /** Count the cached terminal wrappers for a workspace (one per terminal
+   *  session). Drops to 0 once the workspace's terminals are disposed. */
+  async terminalWrapperCount(workspaceId: string): Promise<number> {
+    return await this.page.evaluate(
+      (id) => document.querySelectorAll(`[data-workspace-id="${id}"]`).length,
+      workspaceId,
+    );
+  }
+
+  /** Tag every canvas inside a workspace's terminal wrapper (parked or live) so
+   *  a later read can tell whether the SAME surface was reused across a switch
+   *  (tags survive — the parking model's guarantee) or rebuilt (tags gone).
+   *  Returns the number of canvases tagged. */
+  async tagTerminalCanvasesByWorkspace(workspaceId: string): Promise<number> {
+    return await this.page.evaluate((id) => {
+      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      const canvases = wrapper
+        ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+        : [];
+      canvases.forEach((c, i) => {
+        c.dataset.bandProbe = `tagged-${i}`;
+      });
+      return canvases.length;
+    }, workspaceId);
+  }
+
+  /** Read a workspace's terminal render surface by wrapper (parked or live):
+   *  canvas count, surviving tags, `.xterm-screen` CSS size, per-canvas backing
+   *  store size, and dpr. */
+  async readTerminalSurfaceByWorkspace(workspaceId: string): Promise<{
     canvasCount: number;
     survivingTags: number;
     screen: { w: number; h: number };
@@ -940,13 +1007,10 @@ export class WorkspacePage {
     dpr: number;
   }> {
     return await this.page.evaluate((id) => {
-      const hosts = Array.from(
-        document.querySelectorAll(`[data-testid="workspace-panel-host__cached-entry--${id}"]`),
-      );
-      const host = hosts.find((h) => h.querySelector('[data-testid^="dockview-terminal-tab__"]'));
-      const screenEl = host?.querySelector(".xterm-screen") as HTMLElement | null;
-      const canvases = host
-        ? Array.from(host.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+      const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+      const screenEl = wrapper?.querySelector(".xterm-screen") as HTMLElement | null;
+      const canvases = wrapper
+        ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
         : [];
       const rect = screenEl?.getBoundingClientRect();
       return {
@@ -957,6 +1021,36 @@ export class WorkspacePage {
         dpr: window.devicePixelRatio,
       };
     }, workspaceId);
+  }
+
+  /** Read the rendered text of a workspace's terminal from xterm's DOM-renderer
+   *  rows (`.xterm-rows`). Only populated under the DOM renderer (no WebGL flags
+   *  in the test's launch options), which is exactly the case that lets a test
+   *  read the actual glyphs. Joins across all of the workspace's wrappers. */
+  async readTerminalRenderedText(workspaceId: string): Promise<string> {
+    return await this.page.evaluate((id) => {
+      const wrappers = Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`));
+      // `textContent` (not `innerText`) so it works for a parked wrapper that
+      // is rendered off-screen — `innerText` can collapse for non-viewport nodes.
+      return wrappers
+        .map((w) => (w.querySelector(".xterm-rows") as HTMLElement | null)?.textContent ?? "")
+        .join("\n");
+    }, workspaceId);
+  }
+
+  /** Whether the shared terminal parking container is properly isolated:
+   *  `inert` + `aria-hidden` so a parked terminal's hidden textarea can't take
+   *  focus or receive keystrokes (band-app/band#617). Returns null when no
+   *  parking container exists yet. */
+  async readParkingIsolation(): Promise<{ inert: boolean; ariaHidden: boolean } | null> {
+    return await this.page.evaluate(() => {
+      const el = document.querySelector('[data-testid="terminal-parking"]') as HTMLElement | null;
+      if (!el) return null;
+      return {
+        inert: el.hasAttribute("inert"),
+        ariaHidden: el.getAttribute("aria-hidden") === "true",
+      };
+    });
   }
 
   /** Type a line into the focused terminal and submit it with Enter.

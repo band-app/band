@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toWorkspaceId, useProjects, useSettingsQuery } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { reconcileTerminalWorkspaces } from "../lib/terminal-cache";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
 // ---------------------------------------------------------------------------
@@ -186,6 +187,12 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
         validIds.add(toWorkspaceId(project.name, worktree.name));
       }
     }
+    // Dispose cached terminals for workspaces that no longer exist (deleted /
+    // worktree removed). This is the ONLY workspace-level dispose trigger now
+    // (panel-LRU eviction leaves terminals parked); it self-heals for every
+    // disappearance path, mirroring the panel-cache reconcile below. The active
+    // workspace is never disposed even if mid-delete (see the guard inside).
+    reconcileTerminalWorkspaces(validIds, activeWorkspaceId);
     setCache((prev) => {
       // Steady-state fast-path: the projects query refetches every 30 s,
       // so this effect fires repeatedly with no actual eviction work to
@@ -216,6 +223,13 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   useEffect(() => {
     const current = new Set(cache.keys());
     for (const prev of lastCacheKeysRef.current) {
+      // NOTE: terminals are deliberately NOT disposed on panel-LRU eviction.
+      // Their xterm instances live in a module-level cache (`terminal-cache.ts`)
+      // with its OWN LRU bound, so a switched-away workspace's terminal is kept
+      // alive (parked) and reused on return — that's the whole point of the
+      // parking model (band-app/band#617). Disposing here would tear the
+      // terminal down on every switch when `maxCachedWorkspaces = 1`. Deleted
+      // workspaces' terminals are cleaned by the projects reconcile below.
       if (!current.has(prev)) clearPerWorkspaceState(prev);
     }
     lastCacheKeysRef.current = current;

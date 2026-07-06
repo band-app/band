@@ -1,141 +1,19 @@
-import type { FitAddon } from "@xterm/addon-fit";
-import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
-import type { WebglAddon } from "@xterm/addon-webgl";
-import type { ITheme, Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   SearchBar,
   type SearchBarHandle,
-  type SearchOptions,
   type TerminalInsertDetail,
   useSettingsQuery,
 } from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
-import { openExternalUrl } from "../lib/open-external-url";
-import { createTerminalFileLinkProvider } from "../lib/terminal-file-links";
 import {
-  type ArrowDirection,
-  applySelection,
-  type Cell,
-  getLineText,
-  moveCell,
-  pointToCell,
-  wordSelectionAt,
-} from "../lib/terminal-selection";
-import { getCurrentZoomLevel, subscribeToZoomChanges, ZOOM_CSS_VAR } from "../lib/zoom";
+  getOrCreateTerminal,
+  type PaneMetadata,
+  type TerminalCacheEntry,
+} from "../lib/terminal-cache";
 import { TerminalToolbar } from "./TerminalToolbar";
 
-/** Base xterm font size at zoom = 1.0. The terminal lives in a counter-zoomed
- *  container (`zoom: calc(1 / var(--app-zoom, 1))` — see render below) so its
- *  internal hit-testing math runs in unzoomed pixels regardless of the app
- *  zoom level. To keep the terminal text visually scaled with the rest of the
- *  UI, we drive xterm's own `fontSize` instead, multiplying by the live zoom
- *  factor whenever it changes. See band-app/band#463 for the motivating bug
- *  (clicks landing on the wrong cell under CSS `zoom`). */
-const BASE_FONT_SIZE = 13;
-
-/** How long a finger must rest on the terminal to trigger word-selection. */
-const LONG_PRESS_MS = 500;
-/** Maximum movement (px) tolerated during the long-press timer before we
- *  treat the gesture as a scroll instead of a long-press. */
-const LONG_PRESS_SLOP_PX = 10;
-
-/** xterm.js search addon decoration colors. The addon requires decorations to be
- *  set in order for `onDidChangeResults` to fire (which drives the "N of M"
- *  counter), so we always pass these in. Same palette VS Code uses for its
- *  terminal find: muted background highlight for all matches, brighter accent
- *  for the active match. Hex must be `#RRGGBB` (no alpha) per the addon's API. */
-const SEARCH_DECORATIONS = {
-  matchBackground: "#515c6a",
-  activeMatchBackground: "#a9913680",
-  matchOverviewRuler: "#a9913680",
-  activeMatchColorOverviewRuler: "#a99136",
-} as const;
-
-const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
-  caseSensitive: false,
-  wholeWord: false,
-  regex: false,
-};
-
-function toXtermSearchOptions(opts: SearchOptions): ISearchOptions {
-  return {
-    caseSensitive: opts.caseSensitive,
-    wholeWord: opts.wholeWord,
-    regex: opts.regex,
-    decorations: SEARCH_DECORATIONS,
-  };
-}
-
-/** xterm.js theme that follows the app's dark mode. Background/foreground use the
- *  same neutrals as the rest of the UI so the terminal blends into the panel. */
-const DARK_TERMINAL_THEME: ITheme = {
-  background: "#1e1e1e",
-  foreground: "#e8e8e8",
-  cursor: "#e8e8e8",
-  selectionBackground: "rgba(255, 255, 255, 0.2)",
-  // VS Code Dark+ ANSI palette. Without these 16 entries xterm.js falls back to
-  // its dated "Tango" default, which renders low-contrast, muddy reds/greens on
-  // the dark background. These canonical Dark+ values fix that.
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0dbc79",
-  yellow: "#e5e510",
-  blue: "#2472c8",
-  magenta: "#bc3fbc",
-  cyan: "#11a8cd",
-  white: "#e5e5e5",
-  brightBlack: "#666666",
-  brightRed: "#f14c4c",
-  brightGreen: "#23d18b",
-  brightYellow: "#f5f543",
-  brightBlue: "#3b8eea",
-  brightMagenta: "#d670d6",
-  brightCyan: "#29b8db",
-  brightWhite: "#e5e5e5",
-};
-
-const LIGHT_TERMINAL_THEME: ITheme = {
-  background: "#ffffff",
-  foreground: "#1e1e1e",
-  cursor: "#1e1e1e",
-  cursorAccent: "#ffffff",
-  selectionBackground: "rgba(0, 0, 0, 0.15)",
-  // Tweak ANSI colors so they remain readable on a white background. The default
-  // bright-yellow / bright-green xterm palette washes out badly in light mode.
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0a8043",
-  yellow: "#946800",
-  blue: "#0451a5",
-  magenta: "#bc05bc",
-  cyan: "#0598bc",
-  white: "#555555",
-  brightBlack: "#666666",
-  brightRed: "#cd3131",
-  brightGreen: "#0a8043",
-  brightYellow: "#946800",
-  brightBlue: "#0451a5",
-  brightMagenta: "#bc05bc",
-  brightCyan: "#0598bc",
-  brightWhite: "#1e1e1e",
-};
-
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains("dark");
-}
-
-function getTerminalTheme(): ITheme {
-  return isDarkMode() ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
-}
-
-export interface PaneMetadata {
-  name?: string;
-  command?: string;
-  cwd?: string;
-  env?: Record<string, string>;
-  focus?: boolean;
-}
+export type { PaneMetadata };
 
 interface TerminalPanelProps {
   workspaceId: string;
@@ -145,10 +23,26 @@ interface TerminalPanelProps {
   paneMetadata?: PaneMetadata;
   /** When true, auto-focus this terminal after it opens. */
   autoFocus?: boolean;
-  /** Called when the terminal emits a title change (e.g. shell sets window title via escape sequence). */
+  /** Called when the terminal emits a title change (shell window title). */
   onTitleChange?: (title: string) => void;
 }
 
+/**
+ * Thin React view over a cached, persistent xterm instance.
+ *
+ * The xterm lifecycle (creation, addons, WebSocket, reconnect, resize/zoom/DPR,
+ * gestures, and the search/selection/sticky-Ctrl UI state) lives entirely in
+ * `terminal-cache.ts`. This component only:
+ *   - resolves (or lazily creates) the cache entry for `terminalId`,
+ *   - `attach`es the entry's persistent wrapper into a live container when the
+ *     panel is visible and `detach`es (parks it off-screen) otherwise — never
+ *     disposing on a workspace/tab switch (band-app/band#617),
+ *   - mirrors the entry's reactive UI state via `useSyncExternalStore` and
+ *     renders the find bar + iOS keyboard toolbar wired to the entry's handlers.
+ *
+ * Dispose is driven externally (pane close / workspace eviction), NOT by this
+ * component's unmount — unmount only parks.
+ */
 export function TerminalPanel({
   workspaceId,
   terminalId,
@@ -157,1227 +51,161 @@ export function TerminalPanel({
   autoFocus,
   onTitleChange,
 }: TerminalPanelProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const searchAddonRef = useRef<SearchAddon | null>(null);
-  const webglAddonRef = useRef<WebglAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  // Exposes the init effect's `remeasureAndReattach` closure to the
-  // separate visibility-change effect below. Same ref-routing pattern as
-  // `fitAddonRef` / `terminalRef` — the closure has local context (the
-  // live `attachWebGL`, `fitAddon`, etc.) that can't be reconstructed
-  // outside the init effect. Used to force a clean re-measure + WebGL
-  // re-attach every time this terminal becomes visible, repairing a render
-  // surface whose backing store was dropped or built against a
-  // hidden/degenerate layout while the workspace sat in the background LRU
-  // cache under `content-visibility: hidden` (see the become-visible effect
-  // below and band-app/band#615).
-  const remeasureAndReattachRef = useRef<(() => void) | null>(null);
+  const liveRef = useRef<HTMLDivElement>(null);
+  const searchBarRef = useRef<SearchBarHandle>(null);
+
+  // WebGL preference is snapshotted at entry-create time; toggling it later
+  // should not tear down a live session (users are told to reopen the terminal).
+  const { settings } = useSettingsQuery();
+  const useWebGL = settings.useWebGLTerminalRenderer ?? true;
+
+  // Resolve (or create) the stable cache entry for this terminal. Kept in a ref
+  // so `subscribe`/`getSnapshot` identities stay stable across renders; only a
+  // terminalId change (never happens for a given dockview panel) re-resolves.
+  const entryRef = useRef<TerminalCacheEntry | null>(null);
+  // Re-resolve when the terminalId changes (never for a given panel) OR when the
+  // held entry was disposed out from under us — the cache's LRU can evict a
+  // parked entry while this panel is mounted-but-hidden (a cached, inactive
+  // workspace). On becoming visible again we must pick up a fresh entry, which
+  // reconnects + replays, rather than attach a destroyed one (a no-op that would
+  // leave a dead/blank terminal).
+  if (
+    !entryRef.current ||
+    entryRef.current.terminalId !== terminalId ||
+    entryRef.current.isDestroyed()
+  ) {
+    entryRef.current = getOrCreateTerminal(terminalId, {
+      workspaceId,
+      paneMetadata,
+      useWebGL,
+      autoFocus,
+    });
+  }
+  const entry = entryRef.current;
+
+  const state = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
+
+  // Attach when visible, park when hidden. Park (not dispose) on unmount.
+  useEffect(() => {
+    const el = liveRef.current;
+    if (!el) return;
+    if (visible) entry.attach(el, { autoFocus });
+    else entry.detach();
+  }, [visible, entry, autoFocus]);
+  useEffect(() => () => entry.detach(), [entry]);
+
+  // Route title changes to the dockview tab; replays the last known title so a
+  // title set while this panel was unmounted/parked isn't lost.
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;
+  useEffect(
+    () => entry.registerTitleListener((title) => onTitleChangeRef.current?.(title)),
+    [entry],
+  );
 
-  // Read the renderer preference and stash it in a ref. We *snapshot* the
-  // value when the main mount effect runs — toggling the setting at runtime
-  // should not tear down a live terminal session. The settings description
-  // tells users to reopen the terminal for changes to take effect.
-  // The ref is kept in sync each render so that any *next* mount of this
-  // panel picks up the latest value (e.g. a tab close + reopen).
-  const { settings } = useSettingsQuery();
-  const useWebGLRenderer = settings.useWebGLTerminalRenderer ?? true;
-  const useWebGLRendererRef = useRef(useWebGLRenderer);
-  useWebGLRendererRef.current = useWebGLRenderer;
-
-  // ---- Find-in-terminal state (Cmd+F / Ctrl+F) ----
-  // Wires xterm.js's SearchAddon to the same SearchBar component used by
-  // DiffView and FileBrowser. Decorations are required for the addon's
-  // `onDidChangeResults` event to fire — that's what drives the "N of M"
-  // counter, so we always pass them via `toXtermSearchOptions`.
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchOptions, setSearchOptions] = useState<SearchOptions>(DEFAULT_SEARCH_OPTIONS);
-  const [matchInfo, setMatchInfo] = useState<{ total: number; current: number }>({
-    total: 0,
-    current: 0,
-  });
-  const searchBarRef = useRef<SearchBarHandle>(null);
-  // Stable ref for the xterm key-event closure (which is captured once at mount).
-  const openSearchRef = useRef<() => void>(() => {});
-  // Stable ref so the WebSocket `onopen` closure (captured once at mount) can
-  // flush an "Add to Terminal" reference that was buffered while the socket was
-  // reconnecting. Kept in sync with the latest `flushPendingInsert` below.
-  const flushPendingInsertRef = useRef<() => void>(() => {});
-
-  // ---- iOS keyboard accessory toolbar state ----
-  // `terminalReady` flips once the dynamic-imported xterm.js instance is
-  // attached and addons are loaded. We can't render TerminalToolbar before
-  // then because it dereferences `terminalRef.current` directly (e.g. for
-  // `hasSelection()`). Promoting the ref to state is overkill — a single
-  // boolean is enough to trigger the re-render that paints the toolbar.
-  const [terminalReady, setTerminalReady] = useState(false);
-  // Sticky Ctrl modifier wired up to the toolbar. Ref mirrors state because
-  // the xterm `attachCustomKeyEventHandler` closure is captured once at mount
-  // and cannot read React state directly. `setPendingCtrl` from useState is a
-  // stable identity, so reading it from inside the captured closure is safe.
-  const pendingCtrlRef = useRef(false);
-  const [pendingCtrl, setPendingCtrl] = useState(false);
-  const handleToggleCtrl = useCallback(() => {
-    const next = !pendingCtrlRef.current;
-    pendingCtrlRef.current = next;
-    setPendingCtrl(next);
-  }, []);
-
-  // Long-press → word-select → arrow-extend state.
-  // `selectionAnchor` is the cell that stays fixed; `selectionHead` is the
-  // moving cell the arrow buttons push around. Both are absolute buffer
-  // coordinates (row includes scrollback offset). null = idle mode.
-  // The refs mirror state for the same reason as pendingCtrl: the touch
-  // handlers installed inside the mount effect capture once. The "enter"
-  // path is inlined into the long-press timer callback in the mount effect
-  // — it has more local context (the live terminal + screen element) than
-  // a top-level callback could see without ref-routing every dependency.
-  const selectionAnchorRef = useRef<Cell | null>(null);
-  const selectionHeadRef = useRef<Cell | null>(null);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const exitSelectionMode = useCallback(() => {
-    selectionAnchorRef.current = null;
-    selectionHeadRef.current = null;
-    setSelectionMode(false);
-    terminalRef.current?.clearSelection();
-  }, []);
-  const handleExtendSelection = useCallback((direction: ArrowDirection) => {
-    const terminal = terminalRef.current;
-    const anchor = selectionAnchorRef.current;
-    const head = selectionHeadRef.current;
-    if (!terminal || !anchor || !head) return;
-    const next = moveCell(head, direction, terminal);
-    selectionHeadRef.current = next;
-    applySelection(terminal, anchor, next);
-  }, []);
-  // Select All from the idle toolbar: highlight every cell in the buffer
-  // AND enter selection mode, so the user immediately sees the Copy / Done
-  // controls. Without the mode flip, Select All would visually select but
-  // leave the user with no way to copy.
-  const handleSelectAll = useCallback(() => {
-    const terminal = terminalRef.current;
-    if (!terminal) return;
-    const anchor: Cell = { col: 0, row: 0 };
-    const lastRow = Math.max(0, terminal.buffer.active.length - 1);
-    const head: Cell = { col: Math.max(0, terminal.cols - 1), row: lastRow };
-    applySelection(terminal, anchor, head);
-    selectionAnchorRef.current = anchor;
-    selectionHeadRef.current = head;
-    setSelectionMode(true);
-    // Same rationale as the long-press path: drop the iOS keyboard so the
-    // toolbar isn't squeezed against the bottom.
-    terminal.blur();
-  }, []);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    let cancelled = false;
-    let cleanup: (() => void) | undefined;
-
-    // Dynamic import so @xterm (CJS) is never evaluated during SSR.
-    // WebGL addon is imported unconditionally — it's small and we want
-    // it available for the onContextLoss reload path.
-    Promise.all([
-      import("@xterm/xterm"),
-      import("@xterm/addon-fit"),
-      import("@xterm/addon-web-links"),
-      import("@xterm/addon-search"),
-      import("@xterm/addon-webgl"),
-    ]).then(([xtermMod, fitMod, webLinksMod, searchMod, webglMod]) => {
-      const { Terminal: XTerm } = xtermMod;
-      const { FitAddon: XFitAddon } = fitMod;
-      const { WebLinksAddon: XWebLinksAddon } = webLinksMod;
-      const { SearchAddon: XSearchAddon } = searchMod;
-      const { WebglAddon: XWebglAddon } = webglMod;
-      if (cancelled || !containerRef.current) return;
-      const wantsWebGL = useWebGLRendererRef.current;
-
-      // CSS loaded on client only
-      import("@xterm/xterm/css/xterm.css");
-
-      const terminal = new XTerm({
-        // Opt in to addon-only APIs (decorations, markers, etc.) that
-        // xterm.js 6.1-beta gates behind this flag. Without it, the search
-        // addon's `findNext` throws "You must set the allowProposedApi
-        // option to true to use proposed API" the first time the user
-        // types in the find bar. The addons we ship (search, webgl) are
-        // first-party xterm.js addons that depend on these APIs.
-        allowProposedApi: true,
-        cursorBlink: true,
-        // Initial font size scales with the persisted app zoom level so the
-        // terminal opens already matching the user's previously-set zoom — the
-        // subscription below keeps it in sync as zoom changes at runtime. See
-        // BASE_FONT_SIZE above for the rationale (xterm lives in counter-zoom).
-        fontSize: BASE_FONT_SIZE * getCurrentZoomLevel(),
-        fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
-        // iTerm-style row spacing — only safe with the WebGL renderer.
-        // The WebGL addon redraws box-drawing (U+2500-U+257F), block
-        // elements (U+2580-U+259F), powerline separators, and other
-        // continuous glyphs at the full cell rect (via its `customGlyphs`
-        // option, default true) so a 1.2 lineHeight doesn't slice horizontal
-        // gaps through the opencode banner, claude-code's powerline
-        // statusline, or other ASCII art. xterm.js's DOM renderer does
-        // NOT do this — falling back to it means we have to revert to
-        // lineHeight: 1.0 to keep block art continuous.
-        // See https://github.com/band-app/band/issues/391 for history.
-        lineHeight: wantsWebGL ? 1.2 : 1.0,
-        macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
-        scrollback: 10000,
-        theme: getTerminalTheme(),
-      });
-
-      // Keep the terminal palette in sync with the app theme. ThemeSync toggles
-      // the "dark" class on <html>; we mirror that onto xterm at runtime.
-      const themeObserver = new MutationObserver(() => {
-        terminal.options.theme = getTerminalTheme();
-      });
-      themeObserver.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["class"],
-      });
-
-      const fitAddon = new XFitAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
-
-      // File-path links: detect references like `src/main.rs:42` in the
-      // terminal output and, on click, dispatch the same workspace-scoped
-      // `band:open-file` event chat file links use — routing the path into
-      // Quick Open so the file opens in the file browser. The WebLinksAddon
-      // above only matches real URLs (with a scheme), so the two providers
-      // never compete for the same token. `workspaceId` is captured from the
-      // panel's props (stable for its lifetime) so the file always opens
-      // against the workspace that owns this terminal, not whichever tab is
-      // active when the listener fires. See file-link-components.tsx / #539.
-      const fileLinkProviderDisposable = terminal.registerLinkProvider(
-        createTerminalFileLinkProvider(terminal, (filename) => {
-          window.dispatchEvent(
-            new CustomEvent("band:open-file", { detail: { filename, workspaceId } }),
-          );
-        }),
-      );
-
-      terminal.open(containerRef.current!);
-
-      // Swap the default DOM renderer for the GPU-accelerated WebGL renderer
-      // (when the user setting allows it and a WebGL2 context is available).
-      // Must happen *after* `terminal.open()` because the addon needs the
-      // attached DOM node to size its <canvas>. devicePixelRatio is handled
-      // internally — retina displays render crisply.
-      //
-      // Browsers occasionally drop the WebGL context (tab discard, GPU process
-      // restart, etc.); xterm.js fires `onContextLoss` in that case and the
-      // recommended recovery is to dispose the addon and load a fresh one.
-      // If the initial `loadAddon` throws (no WebGL2, headless env, exotic
-      // hardware), we leave the DOM renderer in place rather than break the
-      // panel — the setting description warns users that fallback is silent.
-      let webglContextLossDisposable: { dispose(): void } | undefined;
-      const attachWebGL = (): boolean => {
-        try {
-          const addon = new XWebglAddon({ customGlyphs: true });
-          terminal.loadAddon(addon);
-          // The WebGL addon appends a <canvas> to `.xterm-screen` and only sets
-          // width/height — no `pointer-events` or `touch-action`. That canvas
-          // sits on top of `.xterm-helper-textarea`, the hidden element xterm.js
-          // uses to receive keyboard focus and synthesize taps. On iOS Safari
-          // the opaque canvas swallows every touch: taps never reach the helper
-          // textarea (so the soft keyboard never appears), our drag-to-scroll
-          // handler doesn't fire reliably, and long-press selection is dead.
-          // The canvas is purely a render target — it never needs DOM events —
-          // so disable pointer/touch handling on it. We re-run this on every
-          // `attachWebGL()` invocation so the `onContextLoss` recovery path
-          // (which appends a fresh canvas) doesn't reintroduce the regression.
-          const screenEl = containerRef.current?.querySelector(
-            ".xterm-screen",
-          ) as HTMLElement | null;
-          const webglCanvas = screenEl?.querySelector(
-            ":scope > canvas:last-of-type",
-          ) as HTMLCanvasElement | null;
-          if (webglCanvas) {
-            webglCanvas.style.pointerEvents = "none";
-            webglCanvas.style.touchAction = "none";
-          }
-          webglAddonRef.current = addon;
-          webglContextLossDisposable?.dispose();
-          webglContextLossDisposable = addon.onContextLoss(() => {
-            console.warn("[TerminalPanel] WebGL context lost, reattaching addon");
-            addon.dispose();
-            webglAddonRef.current = null;
-            // Try once to re-establish; if it also fails, stay on DOM renderer.
-            attachWebGL();
-          });
-          return true;
-        } catch (err) {
-          console.warn("[TerminalPanel] WebGL renderer unavailable, falling back to DOM", err);
-          return false;
-        }
-      };
-      if (wantsWebGL) attachWebGL();
-
-      // Find-in-terminal. The SearchAddon scans the entire scrollback buffer
-      // and uses xterm.js's decoration API to highlight matches — works with
-      // the canvas renderer because decorations are renderer-agnostic.
-      const searchAddon = new XSearchAddon();
-      terminal.loadAddon(searchAddon);
-      const searchResultsDisposable = searchAddon.onDidChangeResults((event) => {
-        // resultIndex is -1 when the match count exceeds the addon's
-        // highlightLimit (default 1000). Show "N matches" then.
-        setMatchInfo({
-          total: event.resultCount,
-          current: event.resultIndex >= 0 ? event.resultIndex + 1 : 0,
-        });
-      });
-
-      // Custom key bindings:
-      // - Cmd/Ctrl+F  → open find bar (intercept before xterm and before the
-      //                 browser's native find-in-page in non-Electron contexts)
-      // - Shift+Enter → LF (0x0A) so TUIs that distinguish Ctrl+J from Enter
-      //                 (e.g. Claude Code's chat:newline) insert a newline
-      // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
-      terminal.attachCustomKeyEventHandler((e) => {
-        if (e.type === "keydown") {
-          // Pending Ctrl (set by the iOS toolbar's sticky Ctrl button): the
-          // user already tapped "Ctrl" once; transform the next single
-          // printable key into a Ctrl+key control character. Letters a..z map
-          // to 0x01..0x1A, the same byte the desktop renderer would emit for
-          // Ctrl+A..Ctrl+Z. Anything outside that range silently clears the
-          // pending flag (consistent with how a real Ctrl modifier behaves on
-          // a hardware keyboard — Ctrl+5 just sends `5`).
-          if (
-            pendingCtrlRef.current &&
-            e.key.length === 1 &&
-            !e.metaKey &&
-            !e.altKey &&
-            !e.ctrlKey
-          ) {
-            const lower = e.key.toLowerCase();
-            const code = lower.charCodeAt(0);
-            if (code >= 97 && code <= 122) {
-              terminal.input(String.fromCharCode(code - 96));
-              pendingCtrlRef.current = false;
-              // Schedule the state update so React renders the un-armed
-              // button — we're inside a non-React event handler.
-              setPendingCtrl(false);
-              e.preventDefault();
-              return false;
-            }
-            // Non-letter printable: just clear the pending modifier and let
-            // the key go through unmodified. This matches "armed-and-dismiss"
-            // behavior in Termius / Blink.
-            pendingCtrlRef.current = false;
-            setPendingCtrl(false);
-          }
-          // Cmd+F (macOS) / Ctrl+F (Linux/Windows) → open the find bar.
-          // Call preventDefault so the browser doesn't open native find-in-page
-          // alongside our overlay (no-op in Electron, important in the web app).
-          if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
-            e.preventDefault();
-            openSearchRef.current();
-            return false;
-          }
-          // Shift+Enter → LF so TUIs that bind ctrl+j to "newline" (e.g. Claude
-          // Code's chat:newline) insert one. preventDefault() is load-bearing:
-          // returning false from attachCustomKeyEventHandler only stops xterm's
-          // internal _keyDown; the browser still dispatches `keypress` for
-          // Enter, which xterm's hidden textarea translates into a plain `\r`.
-          // Without preventDefault the byte stream is `\n\r`, and the trailing
-          // `\r` re-submits — identical to plain Enter from the user's POV.
-          if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-            e.preventDefault();
-            terminal.input("\n");
-            return false;
-          }
-          if (e.altKey && !e.metaKey && !e.ctrlKey) {
-            if (e.key === "ArrowLeft") {
-              terminal.input("\x1bb");
-              return false;
-            }
-            if (e.key === "ArrowRight") {
-              terminal.input("\x1bf");
-              return false;
-            }
-          }
-        }
-        return true;
-      });
-
-      terminalRef.current = terminal;
-      fitAddonRef.current = fitAddon;
-      searchAddonRef.current = searchAddon;
-      // Trigger a re-render so the iOS keyboard accessory toolbar (which
-      // dereferences `terminalRef.current`) can mount. We deliberately wait
-      // until *after* the addons are loaded so `hasSelection()` etc. behave.
-      setTerminalReady(true);
-
-      // Mobile touch scrolling. xterm renders `.xterm-screen` (canvas/dom) on top
-      // of the scrollable `.xterm-viewport`, so touches on the visible terminal
-      // never reach the scroll layer in iOS Safari and native finger-scroll fails.
-      // Translate vertical touch drags into `terminal.scrollLines()` calls so the
-      // user can pull up/down to scroll back through history.
-      const containerEl = containerRef.current!;
-      let lastTouchY: number | null = null;
-      const onTouchStart = (e: TouchEvent) => {
-        lastTouchY = e.touches.length === 1 ? e.touches[0].clientY : null;
-      };
-      const onTouchMove = (e: TouchEvent) => {
-        if (e.touches.length !== 1 || lastTouchY === null) return;
-        const currentY = e.touches[0].clientY;
-        const deltaY = lastTouchY - currentY;
-        // Estimate the cell height from the rendered viewport so the scroll
-        // speed matches finger movement at any font size / DPR.
-        const viewport = containerEl.querySelector(".xterm-viewport") as HTMLElement | null;
-        const cellHeight =
-          viewport && terminal.rows > 0 ? viewport.clientHeight / terminal.rows : 17;
-        const lineDelta = Math.trunc(deltaY / cellHeight);
-        if (lineDelta !== 0) {
-          terminal.scrollLines(lineDelta);
-          // Carry the unconsumed sub-line remainder into the next move so
-          // slow drags still accumulate instead of being rounded away.
-          lastTouchY = currentY + (deltaY - lineDelta * cellHeight);
-          e.preventDefault();
-        }
-      };
-      const onTouchEnd = () => {
-        lastTouchY = null;
-      };
-      containerEl.addEventListener("touchstart", onTouchStart, { passive: true });
-      containerEl.addEventListener("touchmove", onTouchMove, { passive: false });
-      containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
-      containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
-
-      // Long-press → word-select. Sets a timer on touchstart; cancels on any
-      // significant movement (so a scroll drag wins) or early lift. When it
-      // fires we resolve the touch point into a buffer cell, read the line
-      // text, expand to word boundaries, and tell the toolbar to switch into
-      // selection mode. From that point the toolbar's arrows extend the
-      // highlighted range.
-      //
-      // Implementation note: we read the .xterm-screen element fresh each
-      // time. xterm.js destroys and rebuilds it on certain renderer switches,
-      // so caching it at mount could leave us pointing at a detached node.
-      let longPressTimer: number | null = null;
-      let longPressStart: { x: number; y: number } | null = null;
-      const cancelLongPress = () => {
-        if (longPressTimer !== null) {
-          window.clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-        longPressStart = null;
-      };
-      const onLongPressStart = (e: TouchEvent) => {
-        cancelLongPress();
-        if (e.touches.length !== 1) return;
-        const t = e.touches[0];
-        longPressStart = { x: t.clientX, y: t.clientY };
-        longPressTimer = window.setTimeout(() => {
-          longPressTimer = null;
-          const start = longPressStart;
-          if (!start) return;
-          const screenEl = containerEl.querySelector(".xterm-screen") as HTMLElement | null;
-          if (!screenEl) return;
-          const cell = pointToCell(start.x, start.y, terminal, screenEl);
-          const lineText = getLineText(terminal, cell.row);
-          const { anchor, head } = wordSelectionAt(cell, lineText);
-          applySelection(terminal, anchor, head);
-          selectionAnchorRef.current = anchor;
-          selectionHeadRef.current = head;
-          setSelectionMode(true);
-          // Suppress the tap-to-focus that would otherwise fire when the
-          // finger lifts (we don't want the iOS keyboard to pop open right
-          // after the user just made a selection).
-          tapStartX = null;
-          tapStartY = null;
-          // Dismiss the iOS soft keyboard. The user is about to navigate
-          // with the toolbar arrows, not type — the keyboard is just stealing
-          // screen space and squeezing the toolbar against the terminal
-          // bottom. `terminal.blur()` blurs xterm's hidden textarea, which
-          // iOS treats as the signal to slide the keyboard down. We re-open
-          // it later if the user taps inside the terminal (existing
-          // tap-to-focus path) or otherwise re-engages typing.
-          terminal.blur();
-          // Light haptic — feels native, no-op where unsupported (desktop,
-          // most non-iOS browsers). Wrapped in typeof check because the
-          // Vibration API isn't in lib.dom.d.ts on all TS versions.
-          if (typeof navigator.vibrate === "function") {
-            try {
-              navigator.vibrate(15);
-            } catch {
-              // Some browsers throw if vibration is policy-blocked; ignore.
-            }
-          }
-        }, LONG_PRESS_MS);
-      };
-      const onLongPressMove = (e: TouchEvent) => {
-        if (!longPressStart || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        const dx = Math.abs(t.clientX - longPressStart.x);
-        const dy = Math.abs(t.clientY - longPressStart.y);
-        if (dx > LONG_PRESS_SLOP_PX || dy > LONG_PRESS_SLOP_PX) cancelLongPress();
-      };
-      containerEl.addEventListener("touchstart", onLongPressStart, { passive: true });
-      containerEl.addEventListener("touchmove", onLongPressMove, { passive: true });
-      containerEl.addEventListener("touchend", cancelLongPress, { passive: true });
-      containerEl.addEventListener("touchcancel", cancelLongPress, { passive: true });
-
-      // Mobile focus-on-tap. Disabling `pointer-events` on the WebGL canvas
-      // (see `attachWebGL` above) lets touches reach `.xterm-screen`, but
-      // xterm.js's built-in click→focus path doesn't reliably re-engage the
-      // iOS soft keyboard in two scenarios:
-      //   1. Split terminals — tapping another panel needs to move focus to
-      //      that panel's `.xterm-helper-textarea`, but the synthesized click
-      //      via the canvas+pointer-events-none layout doesn't always trigger
-      //      xterm's internal focus call.
-      //   2. After the user taps "Done" on the soft keyboard, the textarea is
-      //      blurred. iOS only re-opens the keyboard when `.focus()` is called
-      //      synchronously inside a user gesture.
-      // Bind our own touchstart/touchend that explicitly calls
-      // `terminal.focus()` on taps (touches that release within ~10px of where
-      // they started). Larger movements are scroll drags handled by the scroll
-      // handler above — we deliberately skip focus there so a flick-to-scroll
-      // doesn't accidentally pop the keyboard.
-      let tapStartX: number | null = null;
-      let tapStartY: number | null = null;
-      const onTapStart = (e: TouchEvent) => {
-        if (e.touches.length === 1) {
-          tapStartX = e.touches[0].clientX;
-          tapStartY = e.touches[0].clientY;
-        } else {
-          tapStartX = null;
-          tapStartY = null;
-        }
-      };
-      const onTapEnd = (e: TouchEvent) => {
-        const startX = tapStartX;
-        const startY = tapStartY;
-        tapStartX = null;
-        tapStartY = null;
-        if (startX === null || startY === null || e.changedTouches.length !== 1) return;
-        const dx = Math.abs(e.changedTouches[0].clientX - startX);
-        const dy = Math.abs(e.changedTouches[0].clientY - startY);
-        if (dx < 10 && dy < 10) {
-          // Tap during selection mode: exit selection. iOS users expect a
-          // tap outside the selection to dismiss the edit menu; ours behaves
-          // the same. The toolbar's own buttons sit in a fixed-position
-          // overlay outside containerEl so their taps don't reach this
-          // handler.
-          if (selectionAnchorRef.current !== null) {
-            selectionAnchorRef.current = null;
-            selectionHeadRef.current = null;
-            setSelectionMode(false);
-            terminal.clearSelection();
-          }
-          terminal.focus();
-        }
-      };
-      const onTapCancel = () => {
-        tapStartX = null;
-        tapStartY = null;
-      };
-      containerEl.addEventListener("touchstart", onTapStart, { passive: true });
-      containerEl.addEventListener("touchend", onTapEnd, { passive: true });
-      containerEl.addEventListener("touchcancel", onTapCancel, { passive: true });
-
-      // Connect WebSocket — with auto-reconnect + heartbeat so the terminal
-      // survives machine sleep, network drops, and tab-backgrounding. The
-      // server keeps the PTY alive across socket drops and replays scrollback
-      // on reconnect (see apps/web/src/server/api/terminals/ws.ts), so the
-      // client only has to notice the drop and re-open the socket.
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`;
-
-      // Heartbeat: the browser WebSocket API can neither send protocol-level
-      // pings nor observe protocol-level pongs, so after sleep a dead socket
-      // can sit in `readyState === OPEN` indefinitely without ever firing
-      // `onclose`. We run an application-level ping/pong instead: ping every
-      // HEARTBEAT_INTERVAL_MS, and if no pong arrives within
-      // HEARTBEAT_TIMEOUT_MS treat the socket as dead and force it closed
-      // (which triggers the reconnect path). On wake the suspended interval
-      // fires immediately and sees a stale `lastPongAt`, so the zombie socket
-      // is caught at once rather than only when the user next types.
-      const HEARTBEAT_INTERVAL_MS = 10_000;
-      const HEARTBEAT_TIMEOUT_MS = 20_000;
-      const RECONNECT_BASE_MS = 500;
-      const RECONNECT_MAX_MS = 10_000;
-
-      let intentionalClose = false;
-      let didConnectOnce = false;
-      let reconnectAttempts = 0;
-      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-      let lastPongAt = 0;
-
-      const clearReconnectTimer = () => {
-        if (reconnectTimer !== null) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-      };
-      const stopHeartbeat = () => {
-        if (heartbeatTimer !== null) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
-      };
-
-      // Probe the live socket: drop it if a pong is overdue, otherwise ping.
-      // Shared by the heartbeat interval and the resume handler.
-      const probeConnection = () => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        if (Date.now() - lastPongAt > HEARTBEAT_TIMEOUT_MS) {
-          // No pong within the timeout window — the socket is a zombie.
-          // Closing it fires `onclose`, which schedules a reconnect.
-          ws.close();
-          return;
-        }
-        try {
-          ws.send(JSON.stringify({ type: "ping" }));
-        } catch {
-          ws.close();
-        }
-      };
-
-      const scheduleReconnect = () => {
-        if (intentionalClose || reconnectTimer !== null) return;
-        const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempts, RECONNECT_MAX_MS);
-        // Stop growing the exponent once the backoff is pinned at the ceiling —
-        // otherwise 2 ** reconnectAttempts overflows to Infinity after ~1023
-        // consecutive drops.
-        if (delay < RECONNECT_MAX_MS) reconnectAttempts += 1;
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          connect();
-        }, delay);
-      };
-
-      function connect() {
-        if (intentionalClose) return;
-        clearReconnectTimer();
-        const isReconnect = didConnectOnce;
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-        // Binary frames = PTY data, text frames = JSON control messages.
-        ws.binaryType = "arraybuffer";
-
-        ws.onopen = () => {
-          reconnectAttempts = 0;
-          lastPongAt = Date.now();
-
-          // On reconnect the server replays the full buffered scrollback, so
-          // wipe the local buffer first to avoid duplicating everything the
-          // user already sees. (On the first connect there's nothing to clear.)
-          if (isReconnect) terminal.reset();
-
-          // Send the init message only on the very first connect — the server
-          // spawns the PTY once and ignores `init` for an existing session.
-          if (
-            !didConnectOnce &&
-            paneMetadata &&
-            (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)
-          ) {
-            const initMsg: Record<string, unknown> = { type: "init" };
-            if (paneMetadata.command) initMsg.command = paneMetadata.command;
-            if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
-            if (paneMetadata.env) initMsg.env = paneMetadata.env;
-            ws.send(JSON.stringify(initMsg));
-          }
-          didConnectOnce = true;
-
-          fitAddon.fit();
-          ws.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
-
-          // Auto-focus only on the initial open — stealing focus on every
-          // background reconnect would be hostile.
-          if (autoFocus && !isReconnect) terminal.focus();
-
-          stopHeartbeat();
-          heartbeatTimer = setInterval(probeConnection, HEARTBEAT_INTERVAL_MS);
-
-          // Flush any "Add to Terminal" reference that was buffered while the
-          // socket was down (the user clicked during a reconnect gap), so it
-          // isn't silently dropped now that the PTY connection is back.
-          flushPendingInsertRef.current();
-        };
-
-        ws.onmessage = (event) => {
-          if (event.data instanceof ArrayBuffer) {
-            // Binary frame = raw PTY output
-            terminal.write(new Uint8Array(event.data));
-          } else {
-            // Text frame = JSON control message
-            try {
-              const msg = JSON.parse(event.data as string);
-              if (msg.type === "pong") {
-                lastPongAt = Date.now();
-              } else if (msg.type === "title" && typeof msg.title === "string") {
-                onTitleChangeRef.current?.(msg.title);
-              }
-            } catch {
-              // Not valid JSON — write as-is (shouldn't happen)
-              terminal.write(event.data);
-            }
-          }
-        };
-
-        ws.onclose = () => {
-          // Discard events from a socket that's already been replaced —
-          // `handleResume` can call `connect()` while a previous socket is
-          // still CONNECTING, and that orphan's late `onclose` would otherwise
-          // schedule a second, overlapping reconnect.
-          if (wsRef.current !== ws) return;
-          stopHeartbeat();
-          if (intentionalClose) return;
-          // Transient drop — tell the user we're retrying. The message is
-          // wiped by `terminal.reset()` once the reconnect lands.
-          terminal.write("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n");
-          scheduleReconnect();
-        };
-      }
-
-      // Re-establish the connection immediately when the machine wakes, the
-      // network returns, or the tab is refocused, rather than waiting for the
-      // next heartbeat tick. If the socket is already gone we reconnect now;
-      // if it merely looks alive we probe it so a zombie is caught fast.
-      const handleResume = () => {
-        if (intentionalClose) return;
-        const ws = wsRef.current;
-        if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-          reconnectAttempts = 0;
-          clearReconnectTimer();
-          connect();
-        } else if (ws.readyState === WebSocket.OPEN) {
-          probeConnection();
-        }
-      };
-      const handleVisibility = () => {
-        if (!document.hidden) handleResume();
-      };
-      window.addEventListener("online", handleResume);
-      document.addEventListener("visibilitychange", handleVisibility);
-
-      connect();
-
-      terminal.onData((data) => {
-        const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      // Propagate shell title changes (e.g. running command, cwd) to the tab
-      terminal.onTitleChange((title) => {
-        onTitleChangeRef.current?.(title);
-      });
-
-      // Re-apply the active selection after every xterm resize. xterm's
-      // SelectionService internally subscribes to `bufferService.onResize`
-      // and calls `clearSelection()` whenever `rowsChanged` — that wipes
-      // the SelectionModel entirely. Our `terminal.onResize` listener and
-      // the SelectionService's clear listener are both fired during the
-      // same synchronous resize pass, and the registration order isn't
-      // guaranteed: if the clear runs after us, our re-apply gets undone
-      // before the frame paints. (This is what made the iOS keyboard-
-      // dismiss path lose the highlight even after the earlier fix.)
-      //
-      // Defer the re-apply via requestAnimationFrame so it lands *after*
-      // every synchronous resize handler has run, but still before the
-      // browser paints the frame — exactly when xterm is about to render
-      // the new dimensions. Coalesce repeated resizes (iOS animates the
-      // keyboard slide, so multiple onResize events fire in quick
-      // succession) with a single pending-RAF flag.
-      let selectionRafId: number | null = null;
-      const reapplySelectionOnNextFrame = () => {
-        if (selectionRafId !== null) return;
-        if (!selectionAnchorRef.current || !selectionHeadRef.current) return;
-        selectionRafId = requestAnimationFrame(() => {
-          selectionRafId = null;
-          const anchor = selectionAnchorRef.current;
-          const head = selectionHeadRef.current;
-          if (anchor && head) applySelection(terminal, anchor, head);
-        });
-      };
-      const selectionResizeDisposable = terminal.onResize(reapplySelectionOnNextFrame);
-
-      // Auto-fit on container resize (skip zero-size to avoid killing server PTY).
-      // Also handles devicePixelRatio changes (Chrome DevTools mobile-emulation
-      // toggle, dragging the window between a retina and non-retina monitor,
-      // OS zoom changes) and app zoom changes. In all three cases the WebGL
-      // canvas's backing store is mismatched with its CSS display size — the
-      // text balloons or shrinks to fill the stretched canvas. Re-attaching
-      // the addon resizes the backing store and re-measures cell dimensions;
-      // same recovery path as `onContextLoss`.
-      let lastDpr = window.devicePixelRatio;
-      // Send a PTY resize over the websocket. Coalesced via a small helper
-      // because both the ResizeObserver and the zoom-change handler need to
-      // notify the server after fitAddon.fit() settles.
-      //
-      // Synchrony note: callers invoke this immediately after
-      // `fitAddon.fit()`, which xterm executes synchronously (it reads
-      // `CharSizeService` after a layout pass and writes the new
-      // `terminal.cols/rows` before returning). If a future xterm version
-      // defers that work, this assumption would need to move to a
-      // post-fit `onResize` listener instead.
-      const sendPtyResize = () => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        if (terminal.cols <= 0 || terminal.rows <= 0) return;
-        ws.send(
-          JSON.stringify({
-            type: "resize",
-            cols: terminal.cols,
-            rows: terminal.rows,
-          }),
-        );
-      };
-      // Shared "force xterm to re-measure cell size & re-attach the WebGL
-      // backing store" routine. Two things have to happen:
-      //
-      // 1) xterm's CharSizeService must re-measure. Its cache feeds the
-      //    WebGL addon's `_updateDimensions`. Reassigning `fontSize` to a
-      //    distinct value is the public-API way to force a re-measure —
-      //    the options proxy fires `onSpecificOptionChange("fontSize")`
-      //    when the new value differs, and CharSizeService is subscribed
-      //    to that. For the DPR-change path the font size doesn't change,
-      //    so we perturb-by-one and restore; for the zoom path the new
-      //    font size IS the new value and a single assignment suffices.
-      //
-      // 2) The WebGL addon's `_devicePixelRatio` cache must update. It's
-      //    set once at activation and only refreshed via the private
-      //    `handleDevicePixelRatioChange()`. The reliable public-API path
-      //    is to dispose the addon and re-attach — the new instance reads
-      //    the live `coreBrowserService.dpr` (a live getter for
-      //    `window.devicePixelRatio`). We do this AFTER the font toggle so
-      //    the new addon picks up the freshly measured CharSizeService
-      //    values.
-      const remeasureAndReattach = (opts: { newFontSize?: number } = {}): void => {
-        const { newFontSize } = opts;
-        if (newFontSize !== undefined) {
-          // Zoom path: assign the new value directly. xterm's options
-          // proxy skips the change event if the new value equals the old,
-          // so we only assign when it's actually different. This is
-          // defensive — the only current caller (`handleZoomChange`)
-          // already early-returns on equality, so in practice this
-          // branch is always taken. Keep the guard so future callers
-          // can't accidentally trigger a no-op WebGL dispose/reattach.
-          if (terminal.options.fontSize !== newFontSize) {
-            terminal.options.fontSize = newFontSize;
-          }
-        } else {
-          const fs = terminal.options.fontSize;
-          if (typeof fs === "number") {
-            terminal.options.fontSize = fs + 1;
-            terminal.options.fontSize = fs;
-          }
-        }
-        const addon = webglAddonRef.current;
-        if (addon) {
-          addon.dispose();
-          webglAddonRef.current = null;
-          attachWebGL();
-        }
-        fitAddon.fit();
-      };
-      // Expose to the visibility-change effect so it can force a clean
-      // re-measure + WebGL re-attach every time this terminal becomes
-      // visible. Bound to the no-arg (re-measure-only) form; the zoom path
-      // keeps calling the local closure directly with its `{ newFontSize }`
-      // argument.
-      remeasureAndReattachRef.current = () => remeasureAndReattach();
-      // DPR-only path: bail out if DPR didn't actually change; otherwise
-      // run the re-measure dance. DOM renderer is a no-op (CSS sizing
-      // handles DPR natively) — `remeasureAndReattach` already handles
-      // that by skipping the addon dispose/reattach when none is mounted.
-      // Returns true when it actually re-measured so the ResizeObserver
-      // caller can skip its own follow-up `fitAddon.fit()` (the re-measure
-      // already called fit, and a double-call here is more expensive than
-      // it looks because remeasureAndReattach disposes+reattaches the
-      // WebGL addon).
-      const handleDprChange = (): boolean => {
-        const currentDpr = window.devicePixelRatio;
-        if (currentDpr === lastDpr) return false;
-        lastDpr = currentDpr;
-        remeasureAndReattach();
-        return true;
-      };
-      const resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
-        // Check DPR before fit so the re-attached addon picks up the right
-        // cell dimensions. When DPR changed, `handleDprChange` already
-        // ran a full re-measure + fit, so skip the extra fit here.
-        const dprChanged = handleDprChange();
-        if (!dprChanged) fitAddon.fit();
-        sendPtyResize();
-      });
-      resizeObserver.observe(containerRef.current!);
-
-      // App-zoom (Cmd+= / Cmd+-) handler. The terminal container is
-      // counter-zoomed via CSS (`zoom: calc(1 / var(--app-zoom, 1))`, see
-      // the render block) so xterm itself lives in unzoomed pixel space —
-      // that's what makes `pointToCell`, drag-select, double-click word,
-      // triple-click line, and link clicks land under the cursor. To keep
-      // the visible terminal text scaled with the rest of the UI we drive
-      // xterm's own `fontSize` here instead. Same re-measure-and-refit
-      // dance as the DPR path, then a PTY resize so the shell sees the
-      // new col/row count. See band-app/band#463 for the bug this fixes.
-      const handleZoomChange = (zoom: number) => {
-        // Round to 2-decimal precision. `BASE_FONT_SIZE * zoom` produces
-        // IEEE-754 noise at several real zoom levels — e.g.
-        // `13 * 0.6 = 7.800000000000001`, `13 * 0.9 = 11.700000000000001`.
-        // If xterm ever normalises or rounds the stored `fontSize`, the
-        // `===` no-op guard below would silently miss the equality and
-        // we'd dispose+reattach the WebGL addon on every duplicate event
-        // (e.g. cross-window storage echo). Two decimals matches the
-        // precision we already apply to the zoom level itself in
-        // `applyZoomLevelToDom`, so this never throws away meaningful
-        // granularity.
-        const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
-        // Bail out if nothing meaningful changed (avoids a redundant
-        // WebGL re-attach on no-op events fired by cross-window sync).
-        if (terminal.options.fontSize === target) return;
-        remeasureAndReattach({ newFontSize: target });
-        sendPtyResize();
-      };
-      const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
-
-      // Belt-and-suspenders: also listen for DPR changes that don't cause a
-      // container size change (rare — e.g. an external display unplug, or
-      // dragging the window between two same-size monitors with different
-      // DPR). `matchMedia('(resolution: Xdppx)')` only fires for the
-      // specific transition out of X, so we re-bind after each change.
-      let dprMql: MediaQueryList | undefined;
-      const bindDprListener = () => {
-        dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-        dprMql.addEventListener("change", onDprMediaChange);
-      };
-      const onDprMediaChange = () => {
-        handleDprChange();
-        dprMql?.removeEventListener("change", onDprMediaChange);
-        bindDprListener();
-      };
-      bindDprListener();
-
-      cleanup = () => {
-        // Mark the close intentional so neither the heartbeat nor `onclose`
-        // tries to reconnect during teardown.
-        intentionalClose = true;
-        clearReconnectTimer();
-        stopHeartbeat();
-        window.removeEventListener("online", handleResume);
-        document.removeEventListener("visibilitychange", handleVisibility);
-        themeObserver.disconnect();
-        resizeObserver.disconnect();
-        searchResultsDisposable.dispose();
-        selectionResizeDisposable.dispose();
-        fileLinkProviderDisposable.dispose();
-        if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
-        webglContextLossDisposable?.dispose();
-        dprMql?.removeEventListener("change", onDprMediaChange);
-        unsubscribeZoom();
-        cancelLongPress();
-        containerEl.removeEventListener("touchstart", onTouchStart);
-        containerEl.removeEventListener("touchmove", onTouchMove);
-        containerEl.removeEventListener("touchend", onTouchEnd);
-        containerEl.removeEventListener("touchcancel", onTouchEnd);
-        containerEl.removeEventListener("touchstart", onLongPressStart);
-        containerEl.removeEventListener("touchmove", onLongPressMove);
-        containerEl.removeEventListener("touchend", cancelLongPress);
-        containerEl.removeEventListener("touchcancel", cancelLongPress);
-        containerEl.removeEventListener("touchstart", onTapStart);
-        containerEl.removeEventListener("touchend", onTapEnd);
-        containerEl.removeEventListener("touchcancel", onTapCancel);
-        wsRef.current?.close();
-        // `terminal.dispose()` cascades to all loaded addons (including the
-        // WebGL addon if present), so we don't need to dispose it manually.
-        terminal.dispose();
-        terminalRef.current = null;
-        fitAddonRef.current = null;
-        searchAddonRef.current = null;
-        webglAddonRef.current = null;
-        remeasureAndReattachRef.current = null;
-        wsRef.current = null;
-        // Reset toolbar state so a remount (e.g. terminal reconnect) doesn't
-        // come back up with selection mode armed against a buffer row that
-        // no longer exists, or with Ctrl still pending.
-        selectionAnchorRef.current = null;
-        selectionHeadRef.current = null;
-        pendingCtrlRef.current = false;
-        setSelectionMode(false);
-        setPendingCtrl(false);
-        setTerminalReady(false);
-      };
-    });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
-    };
-  }, [terminalId, workspaceId, paneMetadata, autoFocus]);
-
-  // Repair the render surface on EVERY hidden→visible transition.
-  //
-  // While a workspace sits in the background LRU cache its panel host is
-  // `content-visibility: hidden` (see MultiWorkspacePanelHost), so the
-  // browser skips layout + paint for the subtree and may drop the terminal's
-  // WebGL backing store or leave its rendered glyphs stale. Coming back to
-  // the foreground then shows a garbled frame — overlapping text, wrong
-  // wrapping, misaligned glyphs.
-  //
-  // A bare `fit()` can't repair it: when the now-visible container resolves
-  // to the SAME cols/rows `fit()` already computed while hidden, xterm's
-  // `resize()` early-returns — no reflow, no renderer repaint — so the stale
-  // frame survives until a manual window resize changes the dimensions (the
-  // one case that dodges the early-return, which is why resizing "fixes" it).
-  //
-  // So on become-visible we re-measure cell geometry and re-attach the WebGL
-  // addon (dispose the suspect surface, size a fresh <canvas> against the
-  // live layout) — the same recovery the DPR/zoom paths use — then force an
-  // unconditional `refresh()` so every cell repaints even under the DOM
-  // renderer (no addon to re-attach) regardless of whether cols/rows changed.
-  // Unlike the earlier one-shot repair (band-app/band#580) this runs on
-  // every transition, because a plain hide→show can corrupt the surface just
-  // as a first-paint-while-hidden can. See band-app/band#615.
-  useEffect(() => {
-    if (!visible) return;
-    // Defer past a frame so the just-un-hidden layout has settled before we
-    // measure. Cancel on cleanup so a rapid hide→show→hide can't leave a
-    // stale callback fitting against a re-hidden (degenerate) layout.
-    let rafId = 0;
-    // Bound the retry below so a container that stays genuinely zero-sized
-    // (e.g. surfaced then immediately re-hidden) can't spin frame after frame.
-    // A handful of frames is ample for `content-visibility: hidden → visible`
-    // to lay the subtree back out.
-    const MAX_LAYOUT_FRAMES = 5;
-    const repair = (attempt: number) => {
-      const container = containerRef.current;
-      if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
-        // Layout hasn't settled yet. `content-visibility: hidden → visible`
-        // preserves the last-rendered size, so it may NOT fire the
-        // ResizeObserver on un-hide — we can't rely on that observer to retry
-        // the repair for us. Re-check on the next frame instead, capped so a
-        // permanently zero-sized container can't loop forever.
-        if (attempt < MAX_LAYOUT_FRAMES) {
-          rafId = requestAnimationFrame(() => repair(attempt + 1));
-        }
-        return;
-      }
-      const remeasure = remeasureAndReattachRef.current;
-      if (remeasure) {
-        // `remeasureAndReattach` fits internally, so we don't call `fit()`
-        // again here.
-        remeasure();
-      } else {
-        fitAddonRef.current?.fit();
-      }
-      const term = terminalRef.current;
-      // Unconditional repaint: `fit()`/`resize()` no-op when the dimensions
-      // are unchanged, so force xterm to redraw every row from scratch. This
-      // is the safety net for the DOM renderer (where `remeasure` has no
-      // WebGL addon to re-attach) and mirrors superset-sh/superset, which
-      // calls `refresh(0, rows-1)` unconditionally on every reattach.
-      if (term && term.rows > 0) term.refresh(0, term.rows - 1);
-      const ws = wsRef.current;
-      if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
-        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      }
-    };
-    rafId = requestAnimationFrame(() => repair(0));
-    return () => cancelAnimationFrame(rafId);
-  }, [visible]);
-
-  // Listen for the workspace-level ⌃` "focus Terminal" event. Many
-  // TerminalPanel instances may exist (one per terminal session × one
-  // per workspace) — the visibility gate ensures only the active
-  // session in the active workspace actually grabs focus.
+  // Workspace-level ⌃` "focus Terminal": only the visible session grabs focus.
   useEffect(() => {
     const handler = () => {
-      if (!visible) return;
-      terminalRef.current?.focus();
+      if (visible) entry.focus();
     };
     window.addEventListener("band:focus-terminal", handler);
     return () => window.removeEventListener("band:focus-terminal", handler);
-  }, [visible]);
+  }, [visible, entry]);
 
-  // Deliver an "Add to Terminal" reference from the selection tooltip in the
-  // diff/file viewers. The shared dockview layout owns the `band:add-to-terminal`
-  // intent event: it surfaces this workspace's terminal panel (so it becomes
-  // visible) and re-dispatches the scoped `band:terminal-insert` event handled
-  // here. Many TerminalPanel instances may exist (one per terminal session ×
-  // one per cached workspace), so we react only when the delivery targets this
-  // panel's workspace AND this panel is the visible one.
-  //
-  // Surfacing the terminal flips `visible` on a later React render, which can
-  // land after the delivery event fires. To bridge that gap the reference is
-  // held in `pendingRef` and flushed once this panel is visible with an open
-  // socket; it's dropped when the panel is hidden so a stale reference can't
-  // surface later. The reference is written to the PTY as typed input (no
-  // newline) the same way keystrokes are, so a terminal-based agent receives it
-  // just like the chat agent does.
+  // ---- Find-in-terminal: focus + select the bar when it opens ----
+  useEffect(() => {
+    if (!state.searchOpen) return;
+    const id = requestAnimationFrame(() => {
+      searchBarRef.current?.focus();
+      searchBarRef.current?.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [state.searchOpen]);
+
+  // ---- "Add to Terminal" reference delivery (mirrors the old buffering) ----
+  // A reference dispatched via `band:terminal-insert` is written verbatim to the
+  // PTY as typed input (no newline). Surfacing the terminal flips `visible` on a
+  // later render, so buffer until this panel is visible with an open socket;
+  // drop the buffer when hidden so a stale reference can't surface later.
   const pendingInsertRef = useRef<string | null>(null);
   const flushPendingInsert = useCallback(() => {
     const reference = pendingInsertRef.current;
     if (!reference) return;
-    const ws = wsRef.current;
-    if (ws?.readyState !== WebSocket.OPEN) return;
-    // `reference` is typed-keystroke-only input: it is written verbatim to the
-    // PTY's stdin exactly like a user typing, NOT executed in a shell. It must
-    // never contain a trailing newline (that would submit it) — the dispatcher
-    // guarantees a single trailing space and no newline. Do not promote this to
-    // a shell-execution path or escape it; it is raw terminal input by design.
-    ws.send(reference);
+    if (!entry.isSocketOpen()) return;
+    entry.sendInput(reference);
     pendingInsertRef.current = null;
-    terminalRef.current?.focus();
-  }, []);
-  // Keep the mount-captured `onopen` closure pointed at the latest flush.
-  flushPendingInsertRef.current = flushPendingInsert;
+    entry.focus();
+  }, [entry]);
 
   useEffect(() => {
-    if (visible) {
-      flushPendingInsert();
-    } else {
-      // Hidden panels must not hold a reference that would flush the next time
-      // the user surfaces them.
-      pendingInsertRef.current = null;
-    }
+    if (visible) flushPendingInsert();
+    else pendingInsertRef.current = null;
   }, [visible, flushPendingInsert]);
+
+  // Flush a reference buffered during a reconnect gap once the socket reopens.
+  useEffect(
+    () =>
+      entry.subscribeConnect(() => {
+        if (visible) flushPendingInsert();
+      }),
+    [entry, visible, flushPendingInsert],
+  );
 
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
       if (!detail?.reference || detail.workspaceId !== workspaceId) return;
-      // When the delivery names a specific terminal (the workspace's
-      // last-focused one, resolved server-side), only that terminal accepts —
-      // so a split-visible sibling doesn't also receive the reference. When no
-      // terminalId is set (no focus recorded yet), fall back to the pre-focus
-      // behavior: the currently visible terminal takes it.
       if (detail.terminalId && detail.terminalId !== terminalId) return;
       pendingInsertRef.current = detail.reference;
-      // Send immediately when already visible; otherwise the `visible` effect
-      // above flushes once the layout finishes surfacing this terminal. The
-      // terminal container activates the target inner tab in parallel, so a
-      // targeted (non-visible) terminal becomes visible and flushes shortly.
       if (visible) flushPendingInsert();
     };
     window.addEventListener("band:terminal-insert", handler);
     return () => window.removeEventListener("band:terminal-insert", handler);
   }, [visible, workspaceId, terminalId, flushPendingInsert]);
 
-  // ---- Find-in-terminal handlers ----
-  const handleOpenSearch = useCallback(() => {
-    setSearchOpen(true);
-    // Focus + select-all on next frame so re-pressing Cmd+F re-uses the prior query.
-    requestAnimationFrame(() => {
-      searchBarRef.current?.focus();
-      searchBarRef.current?.select();
-    });
-  }, []);
-  // Keep the xterm key-event closure pointed at the latest handler.
-  openSearchRef.current = handleOpenSearch;
-
-  const handleCloseSearch = useCallback(() => {
-    searchAddonRef.current?.clearDecorations();
-    setSearchOpen(false);
-    setSearchQuery("");
-    setMatchInfo({ total: 0, current: 0 });
-    terminalRef.current?.focus();
-  }, []);
-
-  const handleNext = useCallback(() => {
-    if (!searchQuery) return;
-    searchAddonRef.current?.findNext(searchQuery, toXtermSearchOptions(searchOptions));
-  }, [searchQuery, searchOptions]);
-
-  const handlePrevious = useCallback(() => {
-    if (!searchQuery) return;
-    searchAddonRef.current?.findPrevious(searchQuery, toXtermSearchOptions(searchOptions));
-  }, [searchQuery, searchOptions]);
-
-  // Re-run the search whenever the query or options change. xterm.js's search
-  // addon does its own debouncing internally for decoration rendering, but
-  // we don't add extra debounce here — typical scrollback (10k lines) scans
-  // in <5ms. Empty query clears decorations.
-  useEffect(() => {
-    const addon = searchAddonRef.current;
-    if (!addon) return;
-    if (!searchQuery) {
-      addon.clearDecorations();
-      setMatchInfo({ total: 0, current: 0 });
-      return;
-    }
-    addon.findNext(searchQuery, toXtermSearchOptions(searchOptions));
-  }, [searchQuery, searchOptions]);
-
-  // Reserve space at the bottom of the terminal container equal to the
-  // floating toolbar's height. Without this, the toolbar (which uses
-  // `position: fixed`) renders on top of the bottom rows of the terminal
-  // and hides the prompt while typing. The hook returns 0 on desktop so
-  // the layout is unchanged there. The ResizeObserver in the mount effect
-  // notices the size change and reflows xterm via `fitAddon.fit()`.
+  // Reserve space at the bottom for the floating iOS keyboard toolbar (0 on
+  // desktop). The cache's ResizeObserver on the wrapper reflows xterm on change.
   const { contentBottomInset } = useVirtualKeyboardToolbar();
+
+  const terminal = entry.getTerminal();
 
   return (
     <div className="relative flex h-full w-full flex-col">
-      {searchOpen && (
+      {state.searchOpen && (
         <SearchBar
           ref={searchBarRef}
-          query={searchQuery}
-          onQueryChange={setSearchQuery}
-          options={searchOptions}
-          onOptionsChange={setSearchOptions}
+          query={state.searchQuery}
+          onQueryChange={entry.setSearchQuery}
+          options={state.searchOptions}
+          onOptionsChange={entry.setSearchOptions}
           placeholder="Find in terminal..."
-          matchInfo={matchInfo}
-          onNext={handleNext}
-          onPrevious={handlePrevious}
-          onClose={handleCloseSearch}
+          matchInfo={state.matchInfo}
+          onNext={entry.findNext}
+          onPrevious={entry.findPrevious}
+          onClose={entry.closeSearch}
         />
       )}
       <div className="relative min-h-0 flex-1">
+        {/* Sizing box only — the cache's persistent wrapper (which carries the
+            counter-zoom and hosts xterm) is appended here on `attach` and moved
+            to the parking container on `detach`. `absolute` makes it the
+            positioned containing block for the wrapper's `inset: 0`. */}
         <div
-          ref={containerRef}
+          ref={liveRef}
           className="absolute inset-x-2 top-2 overflow-hidden"
-          // `bottom = base gap + toolbar reservation`. Inline style instead of
-          // a Tailwind class so the reservation can be 0 on desktop without an
-          // extra conditional class.
-          //
-          // `zoom: calc(1 / var(--app-zoom, 1))` counter-zooms the terminal
-          // out of the document-level CSS `zoom` coordinate space — see
-          // `applyZoomLevel` in lib/zoom.ts for the `--app-zoom` CSS variable.
-          // The `<html>` `zoom` multiplied by the counter-zoom is 1, so xterm
-          // renders into unzoomed pixels. That keeps `getBoundingClientRect`,
-          // pointer `clientX/Y`, xterm's internal `CharSizeService`, and the
-          // WebGL canvas backing store all in the same coordinate system —
-          // which is what makes clicks land on the cell under the cursor at
-          // any zoom level. The visible terminal size still scales with zoom
-          // because we drive `terminal.options.fontSize` from the live zoom
-          // factor (see handleZoomChange above). See band-app/band#463.
-          style={{
-            bottom: 8 + contentBottomInset,
-            zoom: `calc(1 / var(${ZOOM_CSS_VAR}, 1))`,
-          }}
+          style={{ bottom: 8 + contentBottomInset }}
         />
       </div>
-      {/* iOS / touch keyboard accessory toolbar. Renders nothing on desktop
-          (gated by `useVirtualKeyboardToolbar`). Sits in `position: fixed`
-          relative to the visual viewport so it floats just above the soft
-          keyboard when open and pins to the screen bottom otherwise. */}
-      {terminalReady && terminalRef.current && (
+      {state.ready && terminal && (
         <TerminalToolbar
-          terminal={terminalRef.current}
-          sendInput={(data) => {
-            const ws = wsRef.current;
-            if (ws?.readyState === WebSocket.OPEN) ws.send(data);
-          }}
-          pendingCtrl={pendingCtrl}
-          onToggleCtrl={handleToggleCtrl}
-          selectionMode={selectionMode}
-          onExtendSelection={handleExtendSelection}
-          onExitSelection={exitSelectionMode}
-          onSelectAll={handleSelectAll}
+          terminal={terminal}
+          sendInput={entry.sendInput}
+          pendingCtrl={state.pendingCtrl}
+          onToggleCtrl={entry.toggleCtrl}
+          selectionMode={state.selectionMode}
+          onExtendSelection={entry.extendSelection}
+          onExitSelection={entry.exitSelection}
+          onSelectAll={entry.selectAll}
         />
       )}
     </div>
