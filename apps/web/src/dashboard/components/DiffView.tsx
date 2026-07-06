@@ -2206,20 +2206,26 @@ export function DiffView({
 
   // Branches pinned above the separator. Order matters in the rendered list:
   // staging-style branches first (in priority order), then the default branch.
-  const stagingBranches = STAGING_BRANCH_PRIORITY.map((name) =>
-    branchOptions.find((b) => b.toLowerCase() === name),
-  ).filter((b): b is string => b != null);
-  const topSectionBranches: string[] = [...stagingBranches];
-  if (
-    defaultBranch &&
-    branchOptions.includes(defaultBranch) &&
-    !topSectionBranches.includes(defaultBranch)
-  ) {
-    topSectionBranches.push(defaultBranch);
-  }
-  const otherBranches = branchOptions
-    .filter((b) => !topSectionBranches.includes(b))
-    .sort((a, b) => a.localeCompare(b));
+  // Memoised (keyed on the branch list + default branch, mirroring the
+  // `filenames` memo below) so the 9-branch priority scan + filter +
+  // localeCompare sort don't re-run on every unrelated DiffView re-render.
+  const { topSectionBranches, otherBranches } = useMemo(() => {
+    const stagingBranches = STAGING_BRANCH_PRIORITY.map((name) =>
+      branchOptions.find((b) => b.toLowerCase() === name),
+    ).filter((b): b is string => b != null);
+    const topSection: string[] = [...stagingBranches];
+    if (
+      defaultBranch &&
+      branchOptions.includes(defaultBranch) &&
+      !topSection.includes(defaultBranch)
+    ) {
+      topSection.push(defaultBranch);
+    }
+    const others = branchOptions
+      .filter((b) => !topSection.includes(b))
+      .sort((a, b) => a.localeCompare(b));
+    return { topSectionBranches: topSection, otherBranches: others };
+  }, [branchOptions, defaultBranch]);
 
   const diffSelectValue =
     diffMode === "uncommitted" ? UNCOMMITTED_VALUE : (targetBranch ?? UNCOMMITTED_VALUE);
@@ -2308,7 +2314,14 @@ export function DiffView({
   // remember the last known value and keep showing it across refetches. The
   // picker itself never unmounts; this just stops the label beside it from
   // popping in and out.
-  if (summary?.headBranch) lastHeadBranchRef.current = summary.headBranch;
+  //
+  // The remembered value is written in an effect (not the render body) so a
+  // started-but-discarded render can't leave the ref mutated — DiffView
+  // re-renders frequently, and a ref write during render commits before the
+  // render itself does.
+  useEffect(() => {
+    if (summary?.headBranch) lastHeadBranchRef.current = summary.headBranch;
+  }, [summary?.headBranch]);
   const headBranchLabel = summary?.headBranch ?? lastHeadBranchRef.current;
 
   // Active-file detection: every row is in the DOM (LazyFileRow only
@@ -2582,7 +2595,9 @@ export function DiffView({
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
       {headBranchLabel && (
         <div className="hidden items-center gap-1.5 @[32rem]/diff:flex">
-          <span className="font-medium text-foreground">{headBranchLabel}</span>
+          <span data-testid="diff-view__head-branch" className="font-medium text-foreground">
+            {headBranchLabel}
+          </span>
           <ArrowRight className="size-3" aria-hidden />
         </div>
       )}
