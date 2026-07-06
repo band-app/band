@@ -53,6 +53,25 @@ export class ChangesPanelPage {
    *  cardinality as `cmEditors`, same FRAGILITY caveat against
    *  CodeMirror class-name renames in major upgrades. */
   readonly cmScrollers: Locator;
+  /** The diff-target `<Select>` trigger (mode + compare-branch picker).
+   *  `data-testid="diff-view__target-select"` is set on the shadcn
+   *  `SelectTrigger` in DiffView.tsx — the system-controlled anchor the
+   *  doctrine prefers. Its rendered text is the currently-selected
+   *  target (e.g. "Uncommitted" or a branch name). */
+  readonly diffTargetTrigger: Locator;
+  /** First option in the open diff-target dropdown. Used to assert (via its
+   *  stable testid, not the localisable "Uncommitted" copy) that the
+   *  Uncommitted entry sits at the top of the list. */
+  readonly firstDiffTargetOption: Locator;
+  /** The toolbar's `<head-branch> →` indicator span. `data-testid` is set on
+   *  the span in DiffView.tsx. Its text is the workspace's HEAD branch (runtime
+   *  data the test seeded). The picker keeps this populated across diff-target
+   *  refetches — the flicker-guard test asserts it never detaches/blanks. */
+  readonly headBranchLabel: Locator;
+  /** Workspace opened via `openWorkspace`, remembered so `diffMode()` can build
+   *  the per-workspace `band:diff-mode:<id>` localStorage key that
+   *  `useDiffTarget` mirrors the selected mode into. */
+  private currentWorkspaceId: string | null = null;
 
   constructor(
     private readonly page: Page,
@@ -62,6 +81,9 @@ export class ChangesPanelPage {
     this.scroller = page.getByTestId("diff-view__scroller");
     this.cmEditors = page.locator(".cm-editor");
     this.cmScrollers = page.locator(".cm-scroller");
+    this.diffTargetTrigger = page.getByTestId("diff-view__target-select");
+    this.firstDiffTargetOption = page.getByRole("option").first();
+    this.headBranchLabel = page.getByTestId("diff-view__head-branch");
   }
 
   /** Factory method that bundles the common "open the Changes panel
@@ -139,6 +161,7 @@ export class ChangesPanelPage {
     workspaceId: string,
     options: { expandAll?: boolean; viewMode?: DiffViewMode } = {},
   ): Promise<void> {
+    this.currentWorkspaceId = workspaceId;
     const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
     await test.step(`Open Changes panel for ${workspaceId}`, async () => {
       const { expandAll, viewMode } = options;
@@ -208,6 +231,107 @@ export class ChangesPanelPage {
       const line = this.cmEditors.first().locator(".cm-line", { hasText: text }).first();
       await line.waitFor({ state: "visible", timeout: 15_000 });
       await line.dblclick();
+    });
+  }
+
+  /** The selected diff mode as a stable enum (`"uncommitted"` | `"branch"`),
+   *  read from the per-workspace `band:diff-mode:<id>` localStorage key that
+   *  `useDiffTarget` mirrors the mode into. Reading persisted client state
+   *  keeps this black-box (no production test-hook attribute) and dodges the
+   *  localisable trigger label. Falls back to `"uncommitted"` when the key is
+   *  absent — mirrors the app's own default for a fresh workspace with no
+   *  stored pick, where nothing has been written yet. */
+  async diffMode(): Promise<string> {
+    if (!this.currentWorkspaceId) {
+      throw new Error("diffMode() called before openWorkspace()");
+    }
+    return await this.page.evaluate((workspaceId) => {
+      const v = localStorage.getItem(`band:diff-mode:${workspaceId}`);
+      return v === "uncommitted" || v === "branch" ? v : "uncommitted";
+    }, this.currentWorkspaceId);
+  }
+
+  /** Open the diff-target dropdown. Radix renders the open listbox into a
+   *  portal; the branch list arrives asynchronously (via `listBranches`)
+   *  and Radix re-renders the still-open listbox as options appear, so
+   *  callers open ONCE here and then poll `visibleDiffTargetOptions()` —
+   *  re-clicking the trigger in a poll loop would toggle it shut. */
+  async openDiffTargetDropdown(): Promise<void> {
+    await test.step("Open diff-target dropdown", async () => {
+      await this.diffTargetTrigger.click();
+      await expect(this.firstDiffTargetOption).toBeVisible({ timeout: 10_000 });
+    });
+  }
+
+  /** Every currently-rendered option label in the open diff-target
+   *  dropdown, in DOM order. Each `<SelectItem>` carries `role="option"`,
+   *  so `getByRole("option")` returns them top-to-bottom (the
+   *  `<SelectSeparator>` is a `role="separator"` and is excluded).
+   *  Callers assert on the ordering — Uncommitted first, then pinned
+   *  staging branches, then the default branch, then the alphabetical
+   *  remainder. Does not click, so it's safe to call inside `expect.poll`
+   *  while the branch list settles. */
+  async visibleDiffTargetOptions(): Promise<string[]> {
+    return (await this.page.getByRole("option").allTextContents()).map((t) => t.trim());
+  }
+
+  /** Open the diff-target dropdown and pick the option whose label is
+   *  `branchName`. The option label is a branch name (runtime data the test
+   *  seeded), so `getByRole("option", { name, exact })` is the doctrine-
+   *  allowed path — `exact` avoids `develop` matching `development`. Selecting
+   *  a branch flips the picker to `branch` mode and triggers a diff-target
+   *  refetch (the summary is nulled then reloaded). */
+  async selectDiffTarget(branchName: string): Promise<void> {
+    await test.step(`Select diff target "${branchName}"`, async () => {
+      await this.openDiffTargetDropdown();
+      await this.page.getByRole("option", { name: branchName, exact: true }).click();
+    });
+  }
+
+  /** Plant a MutationObserver that flags if the head-branch label ever
+   *  detaches from the DOM or blanks to empty text while it's connected.
+   *  Mirrors the flicker guard in `workspace-switch-changes.spec.ts`: an
+   *  auto-retrying assertion would step over a one-frame blank, but the
+   *  observer records every mutation in the window, so a single transient
+   *  blank during the diff-target refetch is enough to fail. Pair with
+   *  `stopHeadBranchFlickerGuard()` after the switch settles. */
+  async startHeadBranchFlickerGuard(): Promise<void> {
+    await this.page.evaluate((testId) => {
+      const selector = `[data-testid="${testId}"]`;
+      const isBlank = () => {
+        const el = document.querySelector(selector);
+        return !el || (el.textContent ?? "").trim() === "";
+      };
+      interface FlickerRecorder {
+        blanked: boolean;
+        observer: MutationObserver;
+      }
+      const recorder: FlickerRecorder = {
+        blanked: isBlank(),
+        observer: new MutationObserver(() => {
+          if (isBlank()) recorder.blanked = true;
+        }),
+      };
+      recorder.observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      (
+        window as unknown as { __headBranchFlickerRecorder: FlickerRecorder }
+      ).__headBranchFlickerRecorder = recorder;
+    }, "diff-view__head-branch");
+  }
+
+  /** Disconnect the flicker guard and report whether the head-branch label
+   *  ever detached/blanked while it was connected. */
+  async stopHeadBranchFlickerGuard(): Promise<boolean> {
+    return await this.page.evaluate(() => {
+      const w = window as unknown as {
+        __headBranchFlickerRecorder: { blanked: boolean; observer: MutationObserver };
+      };
+      w.__headBranchFlickerRecorder.observer.disconnect();
+      return w.__headBranchFlickerRecorder.blanked;
     });
   }
 
