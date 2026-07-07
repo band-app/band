@@ -43,7 +43,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { listWorktreeBranches } from "./helpers/db-read";
+import { listWorktreeBranches, listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
@@ -152,7 +152,11 @@ describe("workspaces.remove on a locked worktree", () => {
     expect(JSON.parse(body)).toEqual({ result: { data: { ok: true } } });
 
     // The persisted row is dropped synchronously by the fast path.
+    // Assert on both `branch` and the `name` (identity) column —
+    // `workspaces.remove` filters by `name`, so pinning it guards
+    // against a regression that leaves the identity row behind.
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
+    expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);
 
     // The git deregistration is the crux — and it runs in a background
     // `setImmediate` task in the server process, so poll until the
@@ -171,5 +175,6 @@ describe("workspaces.remove on a locked worktree", () => {
     await server.close();
     server = await startServer({ tmpHome });
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
+    expect(listWorktreeNames(tmpHome, "proj")).toEqual(["main"]);
   });
 });
