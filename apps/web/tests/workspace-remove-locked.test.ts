@@ -30,19 +30,20 @@
 //   1. `git worktree list --porcelain` no longer lists the removed
 //      path once the background cleanup finishes.
 //   2. The persisted `worktrees` row is gone.
-//   3. A subsequent `syncWorktrees` reconcile does NOT re-add it.
+//   3. A subsequent reconcile does NOT re-add it — exercised by booting
+//      a FRESH server against the same home, whose boot-time
+//      `syncWorktrees` (awaited before it listens) runs the real
+//      reconcile against the cleaned git state, all over the real
+//      process boundary.
 //
-// Integration-only — no mocks. The removal path runs inside the real
-// production server; the reconcile check runs the real `syncWorktrees`
-// against the same on-disk state, mirroring `sync-service.test.ts`.
+// Integration-only — no mocks, no in-process calls to the system under
+// test. Mirrors `workspace-remove-detached.test.ts`.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb } from "../src/server/infra/db/connection";
-import { syncWorktrees } from "../src/server/services/sync-service";
+import { listWorktreeBranches } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
@@ -58,21 +59,6 @@ const gitEnv = {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
-}
-
-// Read the persisted `worktrees` rows straight from SQLite — the same
-// DB the server writes to — rather than going through an unrelated
-// tRPC endpoint. Matches `workspace-remove-detached.test.ts`.
-function listWorktreeBranches(tmpHome: string, projectName: string): string[] {
-  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
-  try {
-    const rows = sqlite
-      .prepare("SELECT branch FROM worktrees WHERE project_name = ? ORDER BY branch")
-      .all(projectName) as Array<{ branch: string }>;
-    return rows.map((r) => r.branch);
-  } finally {
-    sqlite.close();
-  }
 }
 
 // Absolute paths git currently tracks as worktrees, parsed from the
@@ -92,11 +78,6 @@ describe("workspaces.remove on a locked worktree", () => {
   let tmpHome: string;
   let repoPath: string;
   let featurePath: string;
-  // The removal test closes the server early (see below) so the
-  // in-process reconcile is the only DB writer. Guard against a
-  // double-close from `afterAll`.
-  let serverClosed = false;
-  const previousBandHome = process.env.BAND_HOME;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-locked-remove-");
@@ -134,13 +115,7 @@ describe("workspaces.remove on a locked worktree", () => {
   });
 
   afterAll(async () => {
-    if (!serverClosed) await server.close();
-    closeDb();
-    if (previousBandHome === undefined) {
-      delete process.env.BAND_HOME;
-    } else {
-      process.env.BAND_HOME = previousBandHome;
-    }
+    await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
@@ -187,17 +162,14 @@ describe("workspaces.remove on a locked worktree", () => {
       .poll(() => listGitWorktreePaths(repoPath), { timeout: 10_000, interval: 100 })
       .not.toContain(featurePath);
 
-    // Prove the resurrection path is closed: run the real reconcile
-    // against the now-clean git state and confirm it does not re-add
-    // the removed workspace. Close the server first so the in-process
-    // `syncWorktrees` is the sole writer to the SQLite DB — otherwise
-    // the server's own periodic reconcile could contend on the WAL.
-    // `syncWorktrees` reads `$BAND_HOME`.
+    // Prove the resurrection path is closed through the real boundary:
+    // boot a FRESH server against the same home. Its boot-time
+    // `runFirstTimeSetup` → `syncWorktrees` is awaited before the server
+    // listens, so once `startServer` resolves the production reconcile
+    // has already run against the cleaned git state. If the entry had
+    // survived locked, reconcile would re-add `feature` here.
     await server.close();
-    serverClosed = true;
-    process.env.BAND_HOME = join(tmpHome, ".band");
-    await syncWorktrees();
-    closeDb();
+    server = await startServer({ tmpHome });
     expect(listWorktreeBranches(tmpHome, "proj")).toEqual(["main"]);
   });
 });
