@@ -35,6 +35,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Check,
   ChevronRight,
+  Circle,
   Clipboard,
   Folder,
   FolderOpen,
@@ -44,7 +45,7 @@ import {
   Plus,
   Tag,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
@@ -79,6 +80,45 @@ import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
+
+/**
+ * Wraps a collapsible section's body so expand/collapse animates smoothly.
+ *
+ * Uses the CSS grid-rows `[0fr] → [1fr]` trick: the outer grid animates its
+ * single row track between 0 and its content height, and the inner
+ * `overflow-hidden` child clips the content while the track shrinks. This
+ * animates height without measuring it in JS (no `max-height` guesswork).
+ *
+ * The body stays mounted in both states — the transition needs the content
+ * present at both ends to animate (unmounting the content on collapse would
+ * make expand "pop" open with no starting height to animate from). `inert`
+ * takes the hidden subtree out of the tab order and blocks pointer/focus so a
+ * collapsed section behaves as if it weren't there (keyboard workspace nav
+ * already excludes collapsed rows via `allWorkspaceIds`). Keeping a sidebar's
+ * bounded set of cards mounted is cheap — they're memoized and only re-render
+ * when their own store slice changes.
+ */
+function CollapsibleSection({
+  collapsed,
+  className,
+  children,
+}: {
+  collapsed: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+        collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+      }`}
+    >
+      <div className={`overflow-hidden ${className ?? ""}`} inert={collapsed}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 interface SortableProjectProps {
   project: ProjectInfo;
@@ -388,12 +428,12 @@ function SortableProject({
       </ContextMenu>
 
       {/* Nested workspaces section — only meaningful for git projects.
-          Plain projects are flat: the header above IS the workspace. */}
-      {!isPlain && !collapsed && (
-        // `ml-3` indents the branch list so the workspaces read as children of
-        // the project header above, not as sibling rows. The indentation alone
-        // (no divider rail) conveys the hierarchy, keeping the list uncluttered.
-        <div className="flex flex-col gap-0.5 overflow-hidden ml-3">
+          Plain projects are flat: the header above IS the workspace.
+          `ml-3` indents the branch list so the workspaces read as children of
+          the project header above, not as sibling rows. The indentation alone
+          (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
+      {!isPlain && (
+        <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
               <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
@@ -412,14 +452,14 @@ function SortableProject({
                   status={statuses.get(wsId)}
                   branchStatus={branchStatuses.get(wsId)}
                   setupStatus={setupStatuses.get(wsId)}
-                  isFocused={currentIndex === focusedIndex}
+                  isFocused={!collapsed && currentIndex === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
                   onTogglePinned={onTogglePinned}
                 />
               );
             })
           )}
-        </div>
+        </CollapsibleSection>
       )}
     </div>
   );
@@ -472,6 +512,9 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
         isOver ? "bg-primary/20" : ""
       }`}
     >
+      {/* Hollow circle mirrors the position of the filled color dot on labelled
+          group headers, signalling "no label" without borrowing a real color. */}
+      <Circle className="size-2.5 shrink-0 text-muted-foreground" />
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
       <ChevronRight
         className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
@@ -900,26 +943,27 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                 }`}
               />
             </button>
-            {!pinnedSectionCollapsed && (
-              <div className="flex flex-col gap-0.5 px-2">
-                {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
-                  <WorkspaceCard
-                    key={workspaceId}
-                    worktree={worktree}
-                    projectName={project.name}
-                    defaultBranch={project.defaultBranch}
-                    projectKind={project.kind}
-                    status={statuses.get(workspaceId)}
-                    branchStatus={branchStatuses.get(workspaceId)}
-                    setupStatus={setupStatuses.get(workspaceId)}
-                    isFocused={i === focusedIndex}
-                    onShowDeleteDialog={setDeleteDialog}
-                    showProjectName
-                    onTogglePinned={togglePinned}
-                  />
-                ))}
-              </div>
-            )}
+            <CollapsibleSection
+              collapsed={pinnedSectionCollapsed}
+              className="flex flex-col gap-0.5 px-2"
+            >
+              {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
+                <WorkspaceCard
+                  key={workspaceId}
+                  worktree={worktree}
+                  projectName={project.name}
+                  defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
+                  status={statuses.get(workspaceId)}
+                  branchStatus={branchStatuses.get(workspaceId)}
+                  setupStatus={setupStatuses.get(workspaceId)}
+                  isFocused={!pinnedSectionCollapsed && i === focusedIndex}
+                  onShowDeleteDialog={setDeleteDialog}
+                  showProjectName
+                  onTogglePinned={togglePinned}
+                />
+              ))}
+            </CollapsibleSection>
           </div>
         )}
 
@@ -954,8 +998,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                         onToggle={() => labelCollapse.toggle(groupKey)}
                       />
                     ))}
-                  {!groupCollapsed &&
-                    group.projects.map((project) => (
+                  <CollapsibleSection collapsed={groupCollapsed}>
+                    {group.projects.map((project) => (
                       // Consecutive projects in a label group are separated by
                       // spacing alone (no divider line); the first row sits
                       // flush under the label header.
@@ -982,6 +1026,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                         />
                       </div>
                     ))}
+                  </CollapsibleSection>
                 </div>
               );
             })}

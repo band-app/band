@@ -110,9 +110,13 @@ function NavControls({
               type="button"
               onClick={onToggleSidebar}
               aria-label="Toggle sidebar"
+              // `aria-pressed` still reflects the sidebar state for a11y (and
+              // is the observable signal the toggle tests assert on), but the
+              // icon no longer changes color when active — it stays muted like
+              // the sibling nav buttons so it doesn't read as a selected tab.
               aria-pressed={sidebarVisible ?? false}
               data-testid="desktop-title-bar__sidebar-toggle"
-              className={`flex items-center justify-center rounded p-1 transition-colors hover:bg-accent/50 hover:text-foreground ${sidebarVisible ? "text-foreground" : "text-muted-foreground"}`}
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
             >
               <PanelLeft className="size-5" />
             </button>
