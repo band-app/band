@@ -25,7 +25,10 @@ export function getRecentWorkspaceOrder(): string[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
+    // Guard every element, not just the array shape: an older/corrupted schema
+    // (e.g. numeric ids) must fall through to `[]` rather than feed non-string
+    // keys into the switcher's `orderMap` comparison.
+    if (Array.isArray(parsed) && parsed.every((e) => typeof e === "string")) return parsed;
   } catch {
     // Corrupted data — ignore
   }

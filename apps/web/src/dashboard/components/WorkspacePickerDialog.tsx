@@ -18,7 +18,6 @@ import { useProjects } from "../hooks/use-projects";
 import { getRecentWorkspaceOrder, recordWorkspaceAccess } from "../lib/recent-workspaces";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
-import type { AgentInfo } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { WorkspaceLabel } from "./WorkspaceLabel";
 
@@ -35,7 +34,6 @@ interface WorkspaceEntry {
    * instead of the branch glyph, mirroring the project-list root card.
    */
   isRoot: boolean;
-  agent?: AgentInfo;
 }
 
 interface WorkspacePickerDialogProps {
@@ -82,7 +80,6 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
           // A git project's default-branch worktree is its main checkout (the
           // repo root). Plain projects have no root/feature distinction.
           isRoot: project.kind !== "plain" && worktree.name === project.defaultBranch,
-          agent: statuses.get(workspaceId)?.agent,
         });
       }
     }
@@ -97,11 +94,20 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
     });
 
     return entries;
-  }, [projects, statuses, recentOrder, activeWorkspaceId]);
+    // `statuses` is intentionally NOT a dependency: agent status is read per row
+    // at render time (below), not baked into the sorted entries. Otherwise every
+    // ~1 Hz agent-status tick would re-run this whole flatten + sort while the
+    // picker is open — precisely when agents are busiest.
+  }, [projects, recentOrder, activeWorkspaceId]);
 
   const handleSelect = useCallback(
     (workspaceId: string) => {
       clearNeedsAttention(workspaceId);
+      // Recency is recorded on explicit picker selection. Navigating via URL,
+      // browser back/forward, or the project-list sidebar does NOT currently
+      // update the recency store — those paths keep their existing order until
+      // the workspace is next chosen through the picker. (Broadening recording
+      // to every navigation path is a possible follow-up.)
       recordWorkspaceAccess(workspaceId);
       const href = capabilities.getWorkspaceHref?.(workspaceId);
       if (href && capabilities.navigate) {
@@ -146,6 +152,9 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
             {sortedWorkspaces.map((entry) => {
               const isActive = activeWorkspaceId === entry.workspaceId;
               const pinnedNow = isPinned(entry.workspaceId);
+              // Read live agent status per row here (not inside the sort memo) so
+              // status ticks repaint only the rows, never re-sort the list.
+              const agent = statuses.get(entry.workspaceId)?.agent;
               return (
                 <CommandItem
                   key={entry.workspaceId}
@@ -162,7 +171,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                       as the project-list root card); an active agent's status
                       dot replaces it via the fallback slot. */}
                   <AgentStatusIndicator
-                    agent={entry.agent}
+                    agent={agent}
                     isActive={isActive}
                     fallback={
                       entry.isRoot ? (

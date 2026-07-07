@@ -229,6 +229,11 @@ test.describe("Workspace picker — ordering is recency, not pinned", () => {
     await workspacePage.openWorkspacePickerViaShortcut();
     await picker.waitVisible();
 
+    // Guard against a vacuous pass: `orderedWorkspaceIds` snapshots the DOM
+    // without auto-retry, so wait for all rows (alpha main + alpha feature +
+    // beta + gamma = 4) to render before reading the order.
+    await picker.expectOptionCount(4);
+
     const order = await picker.orderedWorkspaceIds();
     // The load-bearing assertion: pinned GAMMA must NOT jump ahead of the
     // more-recently-used BETA (it did under the old pinned-priority sort).

@@ -80,9 +80,11 @@ export class WorkspacePicker {
    *  switcher's sort. Used to assert the recency ordering. */
   async orderedWorkspaceIds(): Promise<string[]> {
     return this.options.evaluateAll((els) =>
-      els.map((el) =>
-        (el.getAttribute("data-testid") ?? "").replace("workspace-picker__item--", ""),
-      ),
+      els
+        .map((el) => (el.getAttribute("data-testid") ?? "").replace("workspace-picker__item--", ""))
+        // Drop any option that lacked the expected testid rather than letting a
+        // silent "" leak into ordering assertions.
+        .filter((id) => id.length > 0),
     );
   }
 
