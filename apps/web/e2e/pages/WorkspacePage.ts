@@ -473,11 +473,10 @@ export class WorkspacePage {
     return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
   }
 
-  /** The hamburger menu trigger (Tasks / Cronjobs / Settings …). Now rendered
-   *  by `NavControls` only in the WorkspaceTitleBar as the fallback for the
-   *  collapsed-sidebar state — while the sidebar is visible those actions live
-   *  in the project-list bottom action bar instead. Targeted by its
-   *  system-controlled ARIA name. */
+  /** The old collapsed-sidebar hamburger menu trigger. The hamburger was
+   *  removed — the overflow actions live solely in the project-list bottom
+   *  action bar now — so this button no longer renders in any state. Retained
+   *  as a locator so specs can assert its absence. */
   get menuTrigger(): Locator {
     return this.page.getByRole("button", { name: "Menu" });
   }
@@ -507,23 +506,6 @@ export class WorkspacePage {
    *  the sidebar is visible. */
   get sidebarToggleWithinSidebar(): Locator {
     return this.sidebar.getByTestId("desktop-title-bar__sidebar-toggle");
-  }
-
-  /** The hamburger menu trigger scoped to the project-list column. The menu no
-   *  longer rides in the SidebarTitleBar (its actions moved to the bottom
-   *  action bar), so this is count 0 while the list is visible; the menu only
-   *  appears in the WorkspaceTitleBar once the sidebar collapses. */
-  get menuTriggerWithinSidebar(): Locator {
-    return this.sidebar.getByRole("button", { name: "Menu" });
-  }
-
-  /** Open the hamburger menu from wherever the cluster currently lives. The
-   *  open dropdown is exposed via the existing `contextMenu` getter (both are
-   *  Radix `role="menu"`). */
-  async openTitleBarMenu(): Promise<void> {
-    await test.step("Open the title-bar hamburger menu", async () => {
-      await this.menuTrigger.click();
-    });
   }
 
   /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.

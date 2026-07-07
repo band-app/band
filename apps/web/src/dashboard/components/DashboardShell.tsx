@@ -246,11 +246,11 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
     ],
   );
 
-  // The desktop shell's native menu (Cmd+,) and the in-app DesktopTitleBar
-  // hamburger both call `window.__bandOpenSettings()` to pop this dialog.
-  // The native-menu path goes via webview.eval / executeJavaScript — same
-  // pattern as the zoom menu. Register the global unconditionally so the
-  // hamburger works in the browser too (E2E + web shell).
+  // The desktop shell's native menu (Cmd+,) calls `window.__bandOpenSettings()`
+  // to pop this dialog. The native-menu path goes via webview.eval /
+  // executeJavaScript — same pattern as the zoom menu. Register the global
+  // unconditionally so the handler exists in the browser too (E2E + web shell),
+  // even though only the desktop menu invokes it today.
   //
   // Multiple `DashboardShell` instances can be alive concurrently —
   // DockviewInstanceManager keeps one per cached workspace. They all

@@ -42,9 +42,17 @@ const TOKEN = "e2e-workspace-picker-token";
 
 const PROJECT_ALPHA = "alpha-picker";
 const PROJECT_BETA = "beta-picker";
+const PROJECT_GAMMA = "gamma-picker";
 
 const WS_ALPHA = toWorkspaceId(PROJECT_ALPHA, "main");
 const WS_BETA = toWorkspaceId(PROJECT_BETA, "main");
+const WS_GAMMA = toWorkspaceId(PROJECT_GAMMA, "main");
+
+// A feature-branch worktree on alpha (name !== defaultBranch), used to assert
+// the switcher shows the branch glyph — not the house icon — for non-root
+// workspaces.
+const ALPHA_FEATURE_BRANCH = "feat/switcher-home";
+const WS_ALPHA_FEATURE = toWorkspaceId(PROJECT_ALPHA, ALPHA_FEATURE_BRANCH);
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview (which
 // owns the ⌘K picker shortcut and the project-list sidebar) mounts, along with
@@ -62,13 +70,22 @@ test.beforeAll(async () => {
         name: PROJECT_ALPHA,
         path: `/tmp/fake/${PROJECT_ALPHA}`,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_ALPHA}` }],
+        worktrees: [
+          { branch: "main", path: `/tmp/fake/${PROJECT_ALPHA}` },
+          { branch: ALPHA_FEATURE_BRANCH, path: `/tmp/fake/${PROJECT_ALPHA}-feature` },
+        ],
       },
       {
         name: PROJECT_BETA,
         path: `/tmp/fake/${PROJECT_BETA}`,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_BETA}` }],
+      },
+      {
+        name: PROJECT_GAMMA,
+        path: `/tmp/fake/${PROJECT_GAMMA}`,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_GAMMA}` }],
       },
     ],
   });
@@ -160,5 +177,85 @@ test.describe("Workspace picker — pin is separate from select", () => {
     await expect(page).toHaveURL(new RegExp(WS_BETA));
     // ...and the dialog closed.
     await expect(picker.dialog).toBeHidden();
+  });
+});
+
+test.describe("Workspace picker — ordering is recency, not pinned", () => {
+  test("a pinned but stale workspace does not float above a recently-used one", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    // Pin GAMMA — the workspace we never visit, so it stays the LEAST
+    // recently accessed. Under the old sort a pinned card floated near the
+    // top of the switcher; under the new sort recency wins and pin status is
+    // ignored for ordering. (localStorage recency is per-test-context, so
+    // this test starts with an empty recent list regardless of prior tests;
+    // any DB-persisted pins from earlier tests are irrelevant since pinning
+    // no longer affects order.)
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+    await picker.togglePin(WS_GAMMA);
+    await expect(picker.pinButton(WS_GAMMA)).toHaveAttribute("aria-label", "Unpin workspace");
+    await picker.dismiss();
+    await expect(picker.dialog).toBeHidden();
+
+    // Build the recency trail: visit BETA, then ALPHA. Selecting a row calls
+    // `recordWorkspaceAccess`, so the recent order becomes [ALPHA, BETA];
+    // GAMMA has never been accessed and sorts last.
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+    await picker.select(WS_BETA);
+    await expect(page).toHaveURL(new RegExp(WS_BETA));
+    await workspacePage.waitForReady();
+
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+    await picker.select(WS_ALPHA);
+    await expect(page).toHaveURL(new RegExp(WS_ALPHA));
+    await workspacePage.waitForReady();
+
+    // Reopen on ALPHA and read the row order. Expected: ALPHA (active) first,
+    // then BETA (recently used), then the pinned-but-stale GAMMA LAST.
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+
+    const order = await picker.orderedWorkspaceIds();
+    // The load-bearing assertion: pinned GAMMA must NOT jump ahead of the
+    // more-recently-used BETA (it did under the old pinned-priority sort).
+    expect(order.indexOf(WS_BETA)).toBeLessThan(order.indexOf(WS_GAMMA));
+    // Scoped to the three workspaces this test drives (the seed also has an
+    // untouched feature worktree), the order is strict recency with the active
+    // workspace pinned to top.
+    const scoped = order.filter((id) => [WS_ALPHA, WS_BETA, WS_GAMMA].includes(id));
+    expect(scoped).toEqual([WS_ALPHA, WS_BETA, WS_GAMMA]);
+  });
+});
+
+test.describe("Workspace picker — root workspaces show a house icon", () => {
+  test("the main-branch workspace shows a house icon; a feature branch does not", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const picker = new WorkspacePicker(page);
+
+    await workspacePage.goto(WS_ALPHA);
+    await workspacePage.waitForReady();
+
+    await workspacePage.openWorkspacePickerViaShortcut();
+    await picker.waitVisible();
+
+    // The default-branch worktree is the project's main checkout — marked with
+    // a house icon, mirroring the project-list root card.
+    await expect(picker.homeIcon(WS_ALPHA)).toBeVisible();
+
+    // The feature-branch worktree renders in the list but keeps the branch
+    // glyph — no house icon.
+    await expect(picker.item(WS_ALPHA_FEATURE)).toBeVisible();
+    await expect(picker.homeIcon(WS_ALPHA_FEATURE)).toHaveCount(0);
   });
 });

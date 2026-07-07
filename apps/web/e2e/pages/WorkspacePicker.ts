@@ -45,6 +45,13 @@ export class WorkspacePicker {
     return this.page.getByTestId(`workspace-picker__pin--${workspaceId}`);
   }
 
+  /** The house icon a row shows when its workspace is the project's main
+   *  checkout (default-branch worktree). Feature-branch rows show the branch
+   *  glyph instead and have no such node. */
+  homeIcon(workspaceId: string): Locator {
+    return this.page.getByTestId(`workspace-picker__home-icon--${workspaceId}`);
+  }
+
   /** The search input inside the picker. cmdk's `Command.Input` renders an
    *  `<input role="combobox" aria-autocomplete="list">`; scoping to the dialog
    *  keeps it from resolving any other combobox on the page. Used by the
@@ -64,6 +71,19 @@ export class WorkspacePicker {
    *  object rather than consuming the raw locator. */
   async expectOptionCount(count: number): Promise<void> {
     await expect(this.options).toHaveCount(count);
+  }
+
+  /** The workspace ids of the rows in visual (top-to-bottom) order. Each row
+   *  carries `data-testid="workspace-picker__item--<workspaceId>"`; cmdk keeps
+   *  the rows in the order the component renders them (mount order, preserved
+   *  when the search box is empty), so `evaluateAll` over the DOM reflects the
+   *  switcher's sort. Used to assert the recency ordering. */
+  async orderedWorkspaceIds(): Promise<string[]> {
+    return this.options.evaluateAll((els) =>
+      els.map((el) =>
+        (el.getAttribute("data-testid") ?? "").replace("workspace-picker__item--", ""),
+      ),
+    );
   }
 
   async waitVisible(): Promise<void> {
