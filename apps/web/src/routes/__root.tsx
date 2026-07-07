@@ -525,12 +525,16 @@ function AppShell() {
   // it). Removed as soon as it finishes so dragging the separator stays
   // pixel-exact — a persistent transition would make the drag lag.
   const animateSidebarToggle = useCallback(() => {
-    const els = [sidebarElRef.current, mainElRef.current];
+    // Guard first: the cleanup that strips the transition back off is keyed on
+    // the sidebar element's `transitionend`. Without the sidebar we have no way
+    // to schedule that cleanup, so never write the transition (onto either
+    // panel) unless the removal path will also run.
+    const sidebar = sidebarElRef.current;
+    if (!sidebar) return;
+    const els = [sidebar, mainElRef.current];
     for (const el of els) {
       if (el) el.style.transition = "flex-grow 200ms ease, flex-basis 200ms ease";
     }
-    const sidebar = sidebarElRef.current;
-    if (!sidebar) return;
     let timer = 0;
     const clear = (e?: TransitionEvent) => {
       // Ignore transitions bubbling up from the sidebar's own contents; only

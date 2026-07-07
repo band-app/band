@@ -243,6 +243,8 @@ test.describe("Project list context menu — zoom regression", () => {
     await expect(workspacePage.addWorkspaceMenuItem).toBeVisible();
 
     await workspacePage.clickAddWorkspaceMenuItem();
+    // Prove the dropdown dismissed before asserting the dialog opened.
+    await expect(workspacePage.contextMenu).not.toBeVisible();
     await expect(workspacePage.newWorkspaceDialog).toBeVisible();
   });
 });
