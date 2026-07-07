@@ -67,6 +67,46 @@ export class WorkspacePage {
     return this.page.getByTestId(`project-list__workspace-card--${workspaceId}`);
   }
 
+  /** The root (default-branch) workspace card's house icon — the identity
+   *  marker `AgentStatusIndicator` renders as its idle fallback for the root
+   *  card. `data-testid` set on the lucide `Home` glyph in `WorkspaceCard`.
+   *  Scoped to the card so it never matches another project's root. Present
+   *  only while the root agent is idle; a live status replaces it with the
+   *  status dot — mirroring how the branch glyph is replaced on non-root
+   *  cards. */
+  rootWorkspaceHomeIcon(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).getByTestId("workspace-card__home-icon");
+  }
+
+  /** The agent status dot inside a workspace card. `data-testid` set on the
+   *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
+   *  is "working" / "needs_attention". Scoped to the card. */
+  agentStatusDot(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).getByTestId("workspace-card__agent-status");
+  }
+
+  /** Set a workspace's agent status via the real `statuses.update` tRPC
+   *  mutation (the same procedure the dashboard uses), which emits an SSE
+   *  update the mounted status watcher consumes — so the card re-renders
+   *  live, the way it would in production. Auth via the `band_token` cookie,
+   *  matching the other tRPC HTTP helpers. */
+  async setAgentStatus(workspaceId: string, status: string): Promise<void> {
+    await test.step(`Set agent status of ${workspaceId} to ${status}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/statuses.update`, {
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `band_token=${this.token}`,
+        },
+        data: { workspaceId, agent: { status } },
+      });
+      if (!res.ok()) {
+        throw new Error(
+          `setAgentStatus(${workspaceId}, ${status}) failed: ${res.status()} ${await res.text()}`,
+        );
+      }
+    });
+  }
+
   /** Locate the per-panel-host cached entry div for the given workspaceId
    *  (issue #508). `MultiWorkspacePanelHost` renders one of these per
    *  workspace it currently caches; the test asserts on their presence /
