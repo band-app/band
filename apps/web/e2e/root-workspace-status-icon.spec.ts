@@ -119,10 +119,16 @@ test.describe("Root workspace status icon", () => {
     // upsert is idempotent and the router re-emits on every call — until the
     // dot renders, so a lost pre-subscription event can't flake the test.
     await expect
-      .poll(async () => {
-        await workspacePage.setAgentStatus(WORKSPACE, "working");
-        return workspacePage.agentStatusDot(WORKSPACE).count();
-      })
+      .poll(
+        async () => {
+          await workspacePage.setAgentStatus(WORKSPACE, "working");
+          return workspacePage.agentStatusDot(WORKSPACE).count();
+        },
+        // Match the `waitForReady` budget: on a slow CI worker the SSE
+        // subscription can take longer than the default 5 s poll window to
+        // come up, and this loop is the barrier that waits for it.
+        { timeout: 15_000 },
+      )
       .toBeGreaterThan(0);
 
     // Positive anchor: the status dot appeared (the swap happened)…
