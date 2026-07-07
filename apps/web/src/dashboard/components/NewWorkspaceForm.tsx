@@ -58,7 +58,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px]" data-testid="new-workspace-form__dialog">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Add Workspace</DialogTitle>

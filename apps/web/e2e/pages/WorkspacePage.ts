@@ -134,17 +134,38 @@ export class WorkspacePage {
     return this.page.getByRole("menu");
   }
 
-  /** The "Collapse"/"Expand" item in a git project's context menu. Located
-   *  by its `data-testid` rather than its localisable visible text, which
-   *  would tie the locator to English UI copy. */
-  get collapseMenuItem(): Locator {
-    return this.page.getByTestId("project-list__context-menu-item--collapse");
+  /** The "Add workspace" item — the first action in a git project's menu,
+   *  shared by the right-click context menu and the "⋮" dropdown. Located by
+   *  `data-testid` rather than its localisable visible text. */
+  get addWorkspaceMenuItem(): Locator {
+    return this.page.getByTestId("project-list__action--add-workspace");
+  }
+
+  /** The New Workspace dialog opened by the "Add workspace" action — the
+   *  observable side effect used to prove whether the action fired. */
+  get newWorkspaceDialog(): Locator {
+    return this.page.getByTestId("new-workspace-form__dialog");
+  }
+
+  /** The header's "⋮" project-actions button (revealed on hover / focus). */
+  projectMenuTrigger(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-menu-trigger--${projectName}`);
   }
 
   /** Right-click a project header to open its context menu. */
   async openProjectContextMenu(projectName: string): Promise<void> {
     await test.step(`Open context menu for project ${projectName}`, async () => {
       await this.projectHeader(projectName).click({ button: "right" });
+    });
+  }
+
+  /** Open a project's action menu via the header "⋮" button: hover the row to
+   *  reveal the button, then left-click it. Distinct from the right-click
+   *  `openProjectContextMenu`. */
+  async openProjectMenuViaKebab(projectName: string): Promise<void> {
+    await test.step(`Open project menu via kebab for ${projectName}`, async () => {
+      await this.projectHeader(projectName).hover();
+      await this.projectMenuTrigger(projectName).click();
     });
   }
 
@@ -194,22 +215,22 @@ export class WorkspacePage {
     });
   }
 
-  /** Click the collapse/expand item via a normal left click. */
-  async clickCollapseMenuItem(): Promise<void> {
-    await test.step("Click the collapse/expand menu item", async () => {
-      await this.collapseMenuItem.click();
+  /** Left-click the first action ("Add workspace") in the open menu. */
+  async clickAddWorkspaceMenuItem(): Promise<void> {
+    await test.step("Click the Add workspace menu item", async () => {
+      await this.addWorkspaceMenuItem.click();
     });
   }
 
   /** Dispatch the bug-triggering synthetic right-button pointer sequence
-   *  directly on the collapse menu item: a `pointermove` (cursor over the
-   *  item) followed by a `button=2` `pointerup` with no matching
-   *  `pointerdown` — the exact pattern Radix's `MenuItem` heuristic
+   *  directly on the first menu item ("Add workspace"): a `pointermove`
+   *  (cursor over the item) followed by a `button=2` `pointerup` with no
+   *  matching `pointerdown` — the exact pattern Radix's `MenuItem` heuristic
    *  mistakes for a click. `bubbles: true` is required so the event reaches
    *  React's root listener. */
-  async dispatchRightButtonPointerUpOnCollapseItem(): Promise<void> {
-    await test.step("Dispatch right-button pointerup on the collapse item", async () => {
-      await this.collapseMenuItem.evaluate((el) => {
+  async dispatchRightButtonPointerUpOnAddWorkspaceItem(): Promise<void> {
+    await test.step("Dispatch right-button pointerup on the Add workspace item", async () => {
+      await this.addWorkspaceMenuItem.evaluate((el) => {
         el.dispatchEvent(
           new PointerEvent("pointermove", {
             bubbles: true,

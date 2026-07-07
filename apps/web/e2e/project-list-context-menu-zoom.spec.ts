@@ -4,7 +4,7 @@
  *
  * Bug 1 — menu disappears on right-button release. At non-100% zoom,
  * right-clicking a project header makes the context menu appear and
- * immediately vanish: the first item ("Collapse" for a git project)
+ * immediately vanish: the first item ("Add workspace" for a git project)
  * fires as if clicked, even though the user only released the right
  * mouse button. `@radix-ui/react-menu`'s `MenuItem` synthesises a
  * `click()` whenever a `pointerup` arrives on an item without a matching
@@ -67,12 +67,10 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   // A git-kind project (worktree count > 0 with a non-default branch) so
-  // the rendered SortableProject takes the git branch — the one that
-  // owns the failing context menu. A plain project's context menu starts
-  // with "Set label" / "Copy path" instead of the "Collapse" item the
-  // bug activates first, so the assertion below ("Collapse" did not
-  // fire") would be ambiguous. Two worktrees keep the "Add workspace"
-  // and "Delete workspace" affordances visible too.
+  // the rendered SortableProject takes the git branch — the one that owns
+  // the failing context menu, whose first item is "Add workspace". Two
+  // worktrees keep the "Add workspace" and "Delete workspace" affordances
+  // meaningful.
   seedState(tmpHome, {
     projects: [
       {
@@ -129,28 +127,24 @@ test.describe("Project list context menu — zoom regression", () => {
     await workspacePage.waitForReady();
 
     await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
-    // Positive pre-condition: the worktree card is rendered before the
-    // action, so the post-action "still visible" assertion below proves
-    // Collapse did NOT fire (rather than the card never having existed).
-    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
     await workspacePage.openProjectContextMenu(PROJECT);
 
     // Confirm the menu actually mounted before driving pointer events.
-    await expect(workspacePage.collapseMenuItem).toBeVisible();
+    await expect(workspacePage.addWorkspaceMenuItem).toBeVisible();
 
-    await workspacePage.dispatchRightButtonPointerUpOnCollapseItem();
+    await workspacePage.dispatchRightButtonPointerUpOnAddWorkspaceItem();
 
     // Assertion 1 — the menu MUST still be open after the right-button
     // pointerup. Before the fix, Radix calls `.click()` on the item, the
-    // `onClick` handler runs `onToggleCollapse`, and the menu closes.
+    // `onClick` handler runs, and the menu closes.
     await expect(workspacePage.contextMenu).toBeVisible();
-    await expect(workspacePage.collapseMenuItem).toBeVisible();
+    await expect(workspacePage.addWorkspaceMenuItem).toBeVisible();
 
-    // Assertion 2 — the "Collapse" action must NOT have fired. The
-    // worktree card (`feature-zoom-ctx`) is only rendered while the
-    // project is expanded; if "Collapse" had been triggered, the card
-    // would be removed from the DOM.
-    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
+    // Assertion 2 — the "Add workspace" action must NOT have fired. Its
+    // observable side effect is opening the New Workspace dialog; if the
+    // item had been triggered, that dialog would be present. The still-open
+    // menu asserted above is the positive anchor for this negative check.
+    await expect(workspacePage.newWorkspaceDialog).not.toBeVisible();
   });
 
   test("right-click stays open at 150% browser zoom", async ({ page }) => {
@@ -167,20 +161,13 @@ test.describe("Project list context menu — zoom regression", () => {
     await workspacePage.goto(WORKSPACE_ID);
     await workspacePage.waitForReady();
 
-    // Positive pre-condition before zooming: the worktree card is present
-    // in the expanded project, so the post-action assertion proves the
-    // menu stayed open (Collapse didn't fire) rather than the card never
-    // existing.
-    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
-
     await workspacePage.applyBodyZoom(ZOOM_FACTOR);
 
     await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
     await workspacePage.openProjectContextMenu(PROJECT);
 
     await expect(workspacePage.contextMenu).toBeVisible();
-    await expect(workspacePage.collapseMenuItem).toBeVisible();
-    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).toBeVisible();
+    await expect(workspacePage.addWorkspaceMenuItem).toBeVisible();
   });
 
   test("context menu anchors at the cursor at 150% app zoom", async ({ page }) => {
@@ -228,14 +215,36 @@ test.describe("Project list context menu — zoom regression", () => {
 
     await expect(workspacePage.contextMenu).toBeVisible();
 
-    // Left-clicking "Collapse" should still actually collapse the
-    // project — proving the capture-phase filter is button-selective.
-    await workspacePage.clickCollapseMenuItem();
+    // Left-clicking the first item ("Add workspace") must still activate it
+    // — proving the capture-phase filter is button-selective (left clicks
+    // pass through; only non-left pointer events are swallowed).
+    await workspacePage.clickAddWorkspaceMenuItem();
     await expect(workspacePage.contextMenu).not.toBeVisible();
-    // Positive anchor: the project header stays present while its worktree
-    // cards collapse away — proving the collapsed state actually rendered
-    // rather than the whole row disappearing.
+    // Positive anchor: the action fired, so its New Workspace dialog rendered.
+    await expect(workspacePage.newWorkspaceDialog).toBeVisible();
+  });
+
+  test("the header ⋮ button opens the project action menu and can add a workspace", async ({
+    page,
+  }) => {
+    // The kebab is a left-click opener for the same action list as the
+    // right-click context menu — the discoverable path (and the only one on
+    // touch, where there's no right-click). Prove it opens the menu and that
+    // "Add workspace" is wired to the New Workspace dialog.
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+
+    await workspacePage.goto(WORKSPACE_ID);
+    await workspacePage.waitForReady();
+
     await expect(workspacePage.projectHeader(PROJECT)).toBeVisible();
-    await expect(workspacePage.workspaceCard(WORKSPACE_ID)).not.toBeVisible();
+    await workspacePage.openProjectMenuViaKebab(PROJECT);
+
+    await expect(workspacePage.contextMenu).toBeVisible();
+    await expect(workspacePage.addWorkspaceMenuItem).toBeVisible();
+
+    await workspacePage.clickAddWorkspaceMenuItem();
+    // Prove the dropdown dismissed before asserting the dialog opened.
+    await expect(workspacePage.contextMenu).not.toBeVisible();
+    await expect(workspacePage.newWorkspaceDialog).toBeVisible();
   });
 });

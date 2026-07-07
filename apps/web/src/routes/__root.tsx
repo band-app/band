@@ -436,6 +436,13 @@ function AppShell() {
   // ──────────────────────────────────────────────────────────────────────
   const sidebarPanelRef = usePanelRef();
 
+  // DOM refs to the two panels' outer (flex) elements. `<Panel className>`
+  // targets a nested div, so the element whose `flex-grow` the library animates
+  // is reached via `elementRef` — we need it to arm a width transition on a
+  // programmatic toggle.
+  const sidebarElRef = useRef<HTMLDivElement | null>(null);
+  const mainElRef = useRef<HTMLDivElement | null>(null);
+
   // Read the persisted sidebar state ONCE at mount (these `<Group>`/`useState`
   // seeds are only consumed on the first render). Stashing them in a ref keeps
   // the localStorage reads off the re-render path, matching the `sidebarVisible`
@@ -510,19 +517,55 @@ function AppShell() {
     [],
   );
 
+  // Arm a one-shot width transition on both panels so a programmatic sidebar
+  // toggle (⌘B / the toggle button / ⌃0) slides open/closed instead of
+  // snapping. Set synchronously on the DOM before `collapse()`/`expand()` so
+  // the transition is in place when the library writes the new `flex-grow`
+  // (React never owns the `transition` property, so its re-render won't clear
+  // it). Removed as soon as it finishes so dragging the separator stays
+  // pixel-exact — a persistent transition would make the drag lag.
+  const animateSidebarToggle = useCallback(() => {
+    // Guard first: the cleanup that strips the transition back off is keyed on
+    // the sidebar element's `transitionend`. Without the sidebar we have no way
+    // to schedule that cleanup, so never write the transition (onto either
+    // panel) unless the removal path will also run.
+    const sidebar = sidebarElRef.current;
+    if (!sidebar) return;
+    const els = [sidebar, mainElRef.current];
+    for (const el of els) {
+      if (el) el.style.transition = "flex-grow 200ms ease, flex-basis 200ms ease";
+    }
+    let timer = 0;
+    const clear = (e?: TransitionEvent) => {
+      // Ignore transitions bubbling up from the sidebar's own contents; only
+      // the panel's flex-grow reaching its target ends the toggle.
+      if (e && (e.target !== sidebar || e.propertyName !== "flex-grow")) return;
+      for (const el of els) if (el) el.style.transition = "";
+      sidebar.removeEventListener("transitionend", clear);
+      if (timer) window.clearTimeout(timer);
+    };
+    // Fallback in case transitionend never fires (e.g. no size change).
+    timer = window.setTimeout(clear, 280);
+    sidebar.addEventListener("transitionend", clear);
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     const panel = sidebarPanelRef.current;
     if (!panel) return;
+    animateSidebarToggle();
     if (panel.isCollapsed()) panel.expand();
     else panel.collapse();
-  }, [sidebarPanelRef]);
+  }, [sidebarPanelRef, animateSidebarToggle]);
 
   // ⌘B toggles the sidebar; ⌃0 / "Focus Projects" reveal it before focusing
   // the list.
   useEffect(() => {
     const onToggle = () => toggleSidebar();
     const onShow = () => {
-      if (sidebarPanelRef.current?.isCollapsed()) sidebarPanelRef.current.expand();
+      if (sidebarPanelRef.current?.isCollapsed()) {
+        animateSidebarToggle();
+        sidebarPanelRef.current.expand();
+      }
     };
     window.addEventListener("band:toggle-sidebar", onToggle);
     window.addEventListener("band:show-sidebar", onShow);
@@ -530,7 +573,7 @@ function AppShell() {
       window.removeEventListener("band:toggle-sidebar", onToggle);
       window.removeEventListener("band:show-sidebar", onShow);
     };
-  }, [toggleSidebar, sidebarPanelRef]);
+  }, [toggleSidebar, sidebarPanelRef, animateSidebarToggle]);
 
   // Cancel a pending sidebar-width RAF on unmount so it can't fire (and write
   // localStorage) after the component is gone — matches the cleanup discipline
@@ -618,6 +661,7 @@ function AppShell() {
             <Panel
               id="sidebar"
               panelRef={sidebarPanelRef}
+              elementRef={sidebarElRef}
               defaultSize={SIDEBAR_MIN_SIZE}
               minSize={SIDEBAR_MIN_SIZE}
               maxSize={SIDEBAR_MAX_SIZE}
@@ -648,7 +692,7 @@ function AppShell() {
               </div>
             </Panel>
             <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-            <Panel id="main" minSize="20%">
+            <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
               <div className="h-full flex flex-col min-w-0 overflow-hidden">

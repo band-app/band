@@ -8,6 +8,14 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -35,16 +43,26 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Check,
   ChevronRight,
+  Circle,
   Clipboard,
   Folder,
   FolderOpen,
   GitBranch,
   ListMinus,
+  MoreVertical,
   Pin,
   Plus,
   Tag,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ElementType,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAdapter, useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
@@ -79,6 +97,45 @@ import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
+
+/**
+ * Wraps a collapsible section's body so expand/collapse animates smoothly.
+ *
+ * Uses the CSS grid-rows `[0fr] → [1fr]` trick: the outer grid animates its
+ * single row track between 0 and its content height, and the inner
+ * `overflow-hidden` child clips the content while the track shrinks. This
+ * animates height without measuring it in JS (no `max-height` guesswork).
+ *
+ * The body stays mounted in both states — the transition needs the content
+ * present at both ends to animate (unmounting the content on collapse would
+ * make expand "pop" open with no starting height to animate from). `inert`
+ * takes the hidden subtree out of the tab order and blocks pointer/focus so a
+ * collapsed section behaves as if it weren't there (keyboard workspace nav
+ * already excludes collapsed rows via `allWorkspaceIds`). Keeping a sidebar's
+ * bounded set of cards mounted is cheap — they're memoized and only re-render
+ * when their own store slice changes.
+ */
+function CollapsibleSection({
+  collapsed,
+  className,
+  children,
+}: {
+  collapsed: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+        collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+      }`}
+    >
+      <div className={`overflow-hidden ${className ?? ""}`} inert={collapsed}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 interface SortableProjectProps {
   project: ProjectInfo;
@@ -217,6 +274,84 @@ function SortableProject({
       }`
     : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11`;
 
+  // The project action list is rendered in two places — the right-click
+  // context menu and the header's "⋮" dropdown — so it's defined once here and
+  // parameterised by the menu primitive set (Context* or Dropdown*), which
+  // share the same Item/Sub/SubTrigger/SubContent/Portal shape. Keeps the two
+  // menus from drifting.
+  const renderMenuItems = (menu: {
+    Item: ElementType;
+    Sub: ElementType;
+    SubTrigger: ElementType;
+    SubContent: ElementType;
+    Portal: ElementType;
+  }) => {
+    const { Item, Sub, SubTrigger, SubContent, Portal } = menu;
+    return (
+      <>
+        {/* Git projects only: `git worktree add`. Mirrors the header's
+            hover-revealed "+" button, kept first as the primary action. */}
+        {!isPlain && (
+          <Item
+            data-testid="project-list__action--add-workspace"
+            onClick={() => setWorkspaceDialog(project.name)}
+          >
+            <Plus />
+            Add workspace
+          </Item>
+        )}
+        {labels.length > 0 && (
+          <Sub>
+            <SubTrigger>
+              <Tag className="size-4 mr-2" />
+              Set label
+            </SubTrigger>
+            <Portal>
+              <SubContent>
+                <Item onClick={() => updateProjectLabel(project.name, null)}>
+                  <span className="flex-1">None</span>
+                  {!project.label && <Check className="size-3 ml-2" />}
+                </Item>
+                {labels.map((lbl) => (
+                  <Item key={lbl.id} onClick={() => updateProjectLabel(project.name, lbl.id)}>
+                    <span
+                      className="size-2.5 rounded-full shrink-0 mr-2"
+                      style={{ backgroundColor: lbl.color }}
+                    />
+                    <span className="flex-1">{lbl.name}</span>
+                    {project.label === lbl.id && <Check className="size-3 ml-2" />}
+                  </Item>
+                ))}
+              </SubContent>
+            </Portal>
+          </Sub>
+        )}
+        {isPlain && canPromoteToGit && (
+          <Item onClick={() => onPromoteToGit(project.name)}>
+            <GitBranch />
+            Promote to git…
+          </Item>
+        )}
+        {capabilities.copyPath && (
+          <Item onClick={() => navigator.clipboard.writeText(project.path)}>
+            <Clipboard />
+            Copy path
+          </Item>
+        )}
+        {capabilities.revealInFinder && (
+          <Item onClick={() => capabilities.revealInFinder!(project.path)}>
+            <FolderOpen />
+            Open in Finder
+          </Item>
+        )}
+        <Item onClick={() => removeProject(project.name)}>
+          <ListMinus />
+          Remove from list
+        </Item>
+      </>
+    );
+  };
+
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <ContextMenu>
@@ -288,7 +423,46 @@ function SortableProject({
                 <TooltipContent side="right">{project.name}</TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex items-center gap-1">
+            {/* The "+" button is revealed on hover (or keyboard focus) to keep
+                the header uncluttered while scanning the list; the same action
+                lives in the right-click / long-press context menu below.
+                `opacity-0` (not `hidden`) reserves the space so the row doesn't
+                reflow on hover. On touch devices there's no hover, so it stays
+                visible. */}
+            <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+              {/* "⋮" opens the same action list as right-click, so the menu is
+                  reachable with a plain left click (and on touch, where there's
+                  no right-click). Sits to the left of the "+" quick action. */}
+              {!isPlain && (
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="Project actions"
+                          data-testid={`project-list__project-menu-trigger--${project.name}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreVertical />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>More actions</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end">
+                    {renderMenuItems({
+                      Item: DropdownMenuItem,
+                      Sub: DropdownMenuSub,
+                      SubTrigger: DropdownMenuSubTrigger,
+                      SubContent: DropdownMenuSubContent,
+                      Portal: DropdownMenuPortal,
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {/* Plain (non-git) projects have a single implicit workspace
                   and don't support `git worktree add`, so the "+" Add
                   workspace button is hidden — see #427. The server also
@@ -315,85 +489,23 @@ function SortableProject({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          {/* Git projects toggle collapse from this menu (keyboard fallback
-              for users who can't reach the header click target). Plain
-              projects have nothing to collapse — they're already flat. */}
-          {!isPlain && (
-            <ContextMenuItem
-              data-testid="project-list__context-menu-item--collapse"
-              onClick={() => onToggleCollapse(project.name)}
-            >
-              <ChevronRight className={collapsed ? "" : "rotate-90"} />
-              {collapsed ? "Expand" : "Collapse"}
-            </ContextMenuItem>
-          )}
-          {/* Pinning is intentionally omitted for plain projects: the
-              project header IS the workspace, already at the top of its
-              own project block. There's no nested card to surface in the
-              Pinned section, and adding the menu item created a footgun
-              where pin → filter → empty worktrees → crash. To reorder
-              plain projects, drag the project header. */}
-          {labels.length > 0 && (
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Tag className="size-4 mr-2" />
-                Set label
-              </ContextMenuSubTrigger>
-              <ContextMenuPortal>
-                <ContextMenuSubContent>
-                  <ContextMenuItem onClick={() => updateProjectLabel(project.name, null)}>
-                    <span className="flex-1">None</span>
-                    {!project.label && <Check className="size-3 ml-2" />}
-                  </ContextMenuItem>
-                  {labels.map((lbl) => (
-                    <ContextMenuItem
-                      key={lbl.id}
-                      onClick={() => updateProjectLabel(project.name, lbl.id)}
-                    >
-                      <span
-                        className="size-2.5 rounded-full shrink-0 mr-2"
-                        style={{ backgroundColor: lbl.color }}
-                      />
-                      <span className="flex-1">{lbl.name}</span>
-                      {project.label === lbl.id && <Check className="size-3 ml-2" />}
-                    </ContextMenuItem>
-                  ))}
-                </ContextMenuSubContent>
-              </ContextMenuPortal>
-            </ContextMenuSub>
-          )}
-          {isPlain && canPromoteToGit && (
-            <ContextMenuItem onClick={() => onPromoteToGit(project.name)}>
-              <GitBranch />
-              Promote to git…
-            </ContextMenuItem>
-          )}
-          {capabilities.copyPath && (
-            <ContextMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
-              <Clipboard />
-              Copy path
-            </ContextMenuItem>
-          )}
-          {capabilities.revealInFinder && (
-            <ContextMenuItem onClick={() => capabilities.revealInFinder!(project.path)}>
-              <FolderOpen />
-              Open in Finder
-            </ContextMenuItem>
-          )}
-          <ContextMenuItem onClick={() => removeProject(project.name)}>
-            <ListMinus />
-            Remove from list
-          </ContextMenuItem>
+          {renderMenuItems({
+            Item: ContextMenuItem,
+            Sub: ContextMenuSub,
+            SubTrigger: ContextMenuSubTrigger,
+            SubContent: ContextMenuSubContent,
+            Portal: ContextMenuPortal,
+          })}
         </ContextMenuContent>
       </ContextMenu>
 
       {/* Nested workspaces section — only meaningful for git projects.
-          Plain projects are flat: the header above IS the workspace. */}
-      {!isPlain && !collapsed && (
-        // `ml-3` indents the branch list so the workspaces read as children of
-        // the project header above, not as sibling rows. The indentation alone
-        // (no divider rail) conveys the hierarchy, keeping the list uncluttered.
-        <div className="flex flex-col gap-0.5 overflow-hidden ml-3">
+          Plain projects are flat: the header above IS the workspace.
+          `ml-3` indents the branch list so the workspaces read as children of
+          the project header above, not as sibling rows. The indentation alone
+          (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
+      {!isPlain && (
+        <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
               <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
@@ -412,14 +524,14 @@ function SortableProject({
                   status={statuses.get(wsId)}
                   branchStatus={branchStatuses.get(wsId)}
                   setupStatus={setupStatuses.get(wsId)}
-                  isFocused={currentIndex === focusedIndex}
+                  isFocused={!collapsed && currentIndex === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
                   onTogglePinned={onTogglePinned}
                 />
               );
             })
           )}
-        </div>
+        </CollapsibleSection>
       )}
     </div>
   );
@@ -472,6 +584,9 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
         isOver ? "bg-primary/20" : ""
       }`}
     >
+      {/* Hollow circle mirrors the position of the filled color dot on labelled
+          group headers, signalling "no label" without borrowing a real color. */}
+      <Circle className="size-2.5 shrink-0 text-muted-foreground" />
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
       <ChevronRight
         className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
@@ -900,26 +1015,27 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                 }`}
               />
             </button>
-            {!pinnedSectionCollapsed && (
-              <div className="flex flex-col gap-0.5 px-2">
-                {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
-                  <WorkspaceCard
-                    key={workspaceId}
-                    worktree={worktree}
-                    projectName={project.name}
-                    defaultBranch={project.defaultBranch}
-                    projectKind={project.kind}
-                    status={statuses.get(workspaceId)}
-                    branchStatus={branchStatuses.get(workspaceId)}
-                    setupStatus={setupStatuses.get(workspaceId)}
-                    isFocused={i === focusedIndex}
-                    onShowDeleteDialog={setDeleteDialog}
-                    showProjectName
-                    onTogglePinned={togglePinned}
-                  />
-                ))}
-              </div>
-            )}
+            <CollapsibleSection
+              collapsed={pinnedSectionCollapsed}
+              className="flex flex-col gap-0.5 px-2"
+            >
+              {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
+                <WorkspaceCard
+                  key={workspaceId}
+                  worktree={worktree}
+                  projectName={project.name}
+                  defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
+                  status={statuses.get(workspaceId)}
+                  branchStatus={branchStatuses.get(workspaceId)}
+                  setupStatus={setupStatuses.get(workspaceId)}
+                  isFocused={!pinnedSectionCollapsed && i === focusedIndex}
+                  onShowDeleteDialog={setDeleteDialog}
+                  showProjectName
+                  onTogglePinned={togglePinned}
+                />
+              ))}
+            </CollapsibleSection>
           </div>
         )}
 
@@ -954,8 +1070,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                         onToggle={() => labelCollapse.toggle(groupKey)}
                       />
                     ))}
-                  {!groupCollapsed &&
-                    group.projects.map((project) => (
+                  <CollapsibleSection collapsed={groupCollapsed}>
+                    {group.projects.map((project) => (
                       // Consecutive projects in a label group are separated by
                       // spacing alone (no divider line); the first row sits
                       // flush under the label header.
@@ -982,6 +1098,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                         />
                       </div>
                     ))}
+                  </CollapsibleSection>
                 </div>
               );
             })}

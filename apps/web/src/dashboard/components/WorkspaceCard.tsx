@@ -13,6 +13,7 @@ import {
   ArrowUpFromLine,
   Clipboard,
   FolderOpen,
+  Home,
   Pin,
   PinOff,
   Play,
@@ -134,6 +135,16 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorkspaceMutation = useRemoveWorkspace();
   const isPinned = worktree.pinned;
+  // The default-branch worktree is a git project's main checkout — its path is
+  // the repository root (git's "main worktree"). A home icon marks it apart
+  // from the added feature worktrees below it. Plain projects have no root
+  // worktree distinction (the project header IS the workspace).
+  const isRoot = !isPlain && worktree.name === defaultBranch;
+  // AgentStatusIndicator falls back to a branch glyph when idle; on the root
+  // card the house is that identity marker instead, so we only mount the
+  // indicator (a status dot) when an agent is actually active.
+  const agentActive =
+    status?.agent?.status === "working" || status?.agent?.status === "needs_attention";
 
   const workspaceId = toWorkspaceId(projectName, worktree.name);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
@@ -229,12 +240,42 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           <Tooltip delayDuration={800}>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
-                <span
-                  className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
-                >
-                  {showProjectName ? `${projectName}/${worktree.name}` : worktree.name}
-                </span>
+                {isRoot ? (
+                  <>
+                    {agentActive && (
+                      <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
+                    )}
+                    <Home
+                      className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                    />
+                  </>
+                ) : (
+                  <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
+                )}
+                {showProjectName ? (
+                  // Pinned section: stack the branch name over the project name
+                  // as a compact two-line block so a mixed list of pinned cards
+                  // stays scannable without a long, mid-truncated
+                  // `project/branch` string on one line.
+                  <div className="flex flex-col min-w-0 leading-tight">
+                    <span
+                      className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
+                    >
+                      {worktree.name}
+                    </span>
+                    <span
+                      className={`text-xs truncate ${isActive ? "text-foreground/80" : "text-muted-foreground"}`}
+                    >
+                      {projectName}
+                    </span>
+                  </div>
+                ) : (
+                  <span
+                    className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
+                  >
+                    {worktree.name}
+                  </span>
+                )}
               </div>
             </TooltipTrigger>
             {/* Always show the full `project/name` identity in the
