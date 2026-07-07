@@ -1,3 +1,5 @@
+import { cn } from "@band-app/ui";
+
 /**
  * Two-row workspace label: the workspace name on the first line with the
  * project name stacked beneath it. Shared by the Pinned section cards
@@ -43,8 +45,8 @@ export function WorkspaceLabel({
 
   return (
     <div className="flex flex-col min-w-0 leading-tight">
-      <span className={`text-sm truncate ${nameClass}`}>{name}</span>
-      <span className={`text-xs truncate ${projectClass}`}>{projectName}</span>
+      <span className={cn("text-sm truncate", nameClass)}>{name}</span>
+      <span className={cn("text-xs truncate", projectClass)}>{projectName}</span>
     </div>
   );
 }

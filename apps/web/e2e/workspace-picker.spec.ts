@@ -193,10 +193,15 @@ test.describe("Workspace picker — ordering is recency, not pinned", () => {
     // Pin GAMMA — the workspace we never visit, so it stays the LEAST
     // recently accessed. Under the old sort a pinned card floated near the
     // top of the switcher; under the new sort recency wins and pin status is
-    // ignored for ordering. (localStorage recency is per-test-context, so
-    // this test starts with an empty recent list regardless of prior tests;
-    // any DB-persisted pins from earlier tests are irrelevant since pinning
-    // no longer affects order.)
+    // ignored for ordering.
+    //
+    // Recency lives ONLY in localStorage (`lib/recent-workspaces.ts`, key
+    // `band-recent-workspaces`) — there is no server/DB projection — and
+    // Playwright gives every test a fresh browser context, so this test
+    // starts from an empty recent list no matter what earlier tests did.
+    // GAMMA is never selected in this context, so it never enters the recent
+    // list; DB-persisted pins from earlier tests are irrelevant now that
+    // pinning no longer affects order.
     await workspacePage.openWorkspacePickerViaShortcut();
     await picker.waitVisible();
     await picker.togglePin(WS_GAMMA);
@@ -250,8 +255,10 @@ test.describe("Workspace picker — root workspaces show a house icon", () => {
     await picker.waitVisible();
 
     // The default-branch worktree is the project's main checkout — marked with
-    // a house icon, mirroring the project-list root card.
+    // a house icon, mirroring the project-list root card. Assert it for two
+    // different projects so the marker is proven not to be project-specific.
     await expect(picker.homeIcon(WS_ALPHA)).toBeVisible();
+    await expect(picker.homeIcon(WS_BETA)).toBeVisible();
 
     // The feature-branch worktree renders in the list but keeps the branch
     // glyph — no house icon.
