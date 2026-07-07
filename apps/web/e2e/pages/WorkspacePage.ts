@@ -1247,6 +1247,29 @@ export class WorkspacePage {
     );
   }
 
+  /** Distance in CSS px between the right edge of the given inner
+   *  container's visible header toolbar (the inner dockview's "Split
+   *  right / Split down / +" action row) and the right edge of the
+   *  viewport.
+   *
+   *  Geometric probe for the maximize-restore "ghost panel" regression
+   *  (#490's flow): the toolbar is right-aligned inside the inner
+   *  dockview's group header, so its right edge tracks the inner
+   *  dockview's laid-out width. When the outer group is maximized the
+   *  inner dockview must span the full grid — a small gap (≈ the header
+   *  padding). If the inner splitview is stuck at a stale split width,
+   *  the gap is roughly half the grid (the blank ghost region). Returns
+   *  `null` while the toolbar has no box yet (callers poll). */
+  async readToolbarRightGap(
+    workspaceId: string,
+    container: "terminal" | "browser",
+  ): Promise<number | null> {
+    const box = await this.centralToolbar(workspaceId, container).first().boundingBox();
+    const viewport = this.page.viewportSize();
+    if (!box || !viewport) return null;
+    return viewport.width - (box.x + box.width);
+  }
+
   /** Read the active view id for a specific group from the persisted
    *  state. Asserts the test's expectation that a hidden group's
    *  saved-view is preserved across workspace switches. */

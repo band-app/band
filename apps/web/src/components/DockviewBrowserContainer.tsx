@@ -756,27 +756,41 @@ export function DockviewBrowserContainer({
   // `api.layout(...)` runs synchronously and re-applies the correct
   // sizes before paint.
   //
-  // Zero-rect fallback: same pattern as `DockviewTerminalContainer`.
-  // If the container hasn't reflowed yet when `useLayoutEffect`
-  // runs, defer `api.layout()` to the first ResizeObserver tick
-  // that reports a non-zero size, so the fix isn't a silent no-op.
+  // Zero-rect fallback + persistent observation: same pattern as
+  // `DockviewTerminalContainer`. The observer stays attached for the
+  // whole visible period — the synchronous measure can run before
+  // `SharedDockviewLayout`'s switch effect re-applies a saved maximize
+  // (which grows this container), and dockview-core's own
+  // `watchElementResize` can miss that change when the transient
+  // pre-maximize size never reached a rendered frame (the "ghost
+  // panel" regression in #490's maximize-restore flow). Both paths
+  // funnel through a last-applied-dims dedupe so the observer's
+  // guaranteed initial delivery doesn't re-force a full re-layout
+  // (a WebContentsView bounds update per pane on desktop) for the
+  // size the synchronous measure just applied. See the terminal
+  // container's comment for the full mechanism.
   useLayoutEffect(() => {
     if (!visible) return;
     const api = apiRef.current;
     const container = containerRef.current;
     if (!api || !container) return;
+    let lastWidth = 0;
+    let lastHeight = 0;
+    const applyLayout = (width: number, height: number) => {
+      const w = Math.round(width);
+      const h = Math.round(height);
+      if (w <= 0 || h <= 0) return;
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      api.layout(w, h, true);
+    };
     const rect = container.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      api.layout(Math.round(rect.width), Math.round(rect.height), true);
-      return;
-    }
+    applyLayout(rect.width, rect.height);
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (width <= 0 || height <= 0) return;
-      ro.disconnect();
-      api.layout(Math.round(width), Math.round(height), true);
+      applyLayout(entry.contentRect.width, entry.contentRect.height);
     });
     ro.observe(container);
     return () => ro.disconnect();
