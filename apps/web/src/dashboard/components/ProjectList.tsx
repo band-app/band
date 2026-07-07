@@ -328,7 +328,13 @@ function SortableProject({
                 <TooltipContent side="right">{project.name}</TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex items-center gap-1">
+            {/* The "+" button is revealed on hover (or keyboard focus) to keep
+                the header uncluttered while scanning the list; the same action
+                lives in the right-click / long-press context menu below.
+                `opacity-0` (not `hidden`) reserves the space so the row doesn't
+                reflow on hover. On touch devices there's no hover, so it stays
+                visible. */}
+            <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
               {/* Plain (non-git) projects have a single implicit workspace
                   and don't support `git worktree add`, so the "+" Add
                   workspace button is hidden — see #427. The server also
@@ -365,6 +371,17 @@ function SortableProject({
             >
               <ChevronRight className={collapsed ? "" : "rotate-90"} />
               {collapsed ? "Expand" : "Collapse"}
+            </ContextMenuItem>
+          )}
+          {/* Same action as the hover-revealed "+" button in the header — the
+              menu is the discoverable path on touch (no hover) and keyboard. */}
+          {!isPlain && (
+            <ContextMenuItem
+              data-testid="project-list__context-menu-item--add-workspace"
+              onClick={() => setWorkspaceDialog(project.name)}
+            >
+              <Plus />
+              Add workspace
             </ContextMenuItem>
           )}
           {/* Pinning is intentionally omitted for plain projects: the
