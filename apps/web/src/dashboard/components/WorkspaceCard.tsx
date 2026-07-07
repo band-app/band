@@ -140,11 +140,6 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   // from the added feature worktrees below it. Plain projects have no root
   // worktree distinction (the project header IS the workspace).
   const isRoot = !isPlain && worktree.name === defaultBranch;
-  // AgentStatusIndicator falls back to a branch glyph when idle; on the root
-  // card the house is that identity marker instead, so we only mount the
-  // indicator (a status dot) when an agent is actually active.
-  const agentActive =
-    status?.agent?.status === "working" || status?.agent?.status === "needs_attention";
 
   const workspaceId = toWorkspaceId(projectName, worktree.name);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
@@ -241,14 +236,20 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 {isRoot ? (
-                  <>
-                    {agentActive && (
-                      <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
-                    )}
-                    <Home
-                      className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
-                    />
-                  </>
+                  // On the root card the house is AgentStatusIndicator's idle
+                  // fallback (the slot other cards use for the branch glyph),
+                  // so an active agent's status dot replaces the house rather
+                  // than sitting beside it.
+                  <AgentStatusIndicator
+                    agent={status?.agent}
+                    isActive={isActive}
+                    fallback={
+                      <Home
+                        data-testid="workspace-card__home-icon"
+                        className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                    }
+                  />
                 ) : (
                   <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
                 )}

@@ -1,18 +1,26 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { GitBranch } from "lucide-react";
+import type { ReactNode } from "react";
 import type { AgentInfo } from "../types";
 
 interface Props {
   agent?: AgentInfo;
   isActive?: boolean;
+  // Icon shown when the agent is idle. Non-root cards fall back to the branch
+  // glyph (the default); the root card passes its house icon so the status dot
+  // occupies the same slot — replacing the identity icon rather than sitting
+  // beside it.
+  fallback?: ReactNode;
 }
 
-export function AgentStatusIndicator({ agent, isActive }: Props) {
+export function AgentStatusIndicator({ agent, isActive, fallback }: Props) {
   if (!agent || (agent.status !== "working" && agent.status !== "needs_attention")) {
     return (
-      <GitBranch
-        className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
-      />
+      fallback ?? (
+        <GitBranch
+          className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+        />
+      )
     );
   }
 
@@ -24,7 +32,10 @@ export function AgentStatusIndicator({ agent, isActive }: Props) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`inline-block size-2 shrink-0 rounded-full ${color} ${animation}`} />
+        <span
+          data-testid="workspace-card__agent-status"
+          className={`inline-block size-2 shrink-0 rounded-full ${color} ${animation}`}
+        />
       </TooltipTrigger>
       <TooltipContent side="top">{tooltip}</TooltipContent>
     </Tooltip>
