@@ -22,8 +22,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { listWorktreeBranches, listWorktreeNames } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
@@ -41,38 +41,12 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-// Read directly from SQLite rather than going through `projects.list`
-// over tRPC. The mutation's effect on the persisted state is the
-// invariant we're pinning here, and reading via the same DB the server
-// writes to keeps the assertion independent of an unrelated endpoint's
-// behaviour. (Same pattern as `task-cleanup.test.ts`.)
-function listWorktreeBranches(tmpHome: string, projectName: string): string[] {
-  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
-  try {
-    const rows = sqlite
-      .prepare("SELECT branch FROM worktrees WHERE project_name = ? ORDER BY branch")
-      .all(projectName) as Array<{ branch: string }>;
-    return rows.map((r) => r.branch);
-  } finally {
-    sqlite.close();
-  }
-}
-
-// Companion to `listWorktreeBranches` that reads the `name` (identity)
-// column. `workspaces.remove` now filters rows by `name`, so asserting the
-// `name` entry is gone — not just the `branch` — pins the actual removal
-// key and guards against a future refactor that removes by branch.
-function listWorktreeNames(tmpHome: string, projectName: string): string[] {
-  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
-  try {
-    const rows = sqlite
-      .prepare("SELECT name FROM worktrees WHERE project_name = ? ORDER BY name")
-      .all(projectName) as Array<{ name: string }>;
-    return rows.map((r) => r.name);
-  } finally {
-    sqlite.close();
-  }
-}
+// `listWorktreeBranches` / `listWorktreeNames` read straight from the
+// SQLite DB the server writes to (shared with the locked-remove test) —
+// see `helpers/db-read.ts`. Reading the DB keeps the assertion
+// independent of an unrelated endpoint's behaviour, and asserting BOTH
+// the `branch` and the `name` (identity) columns pins the actual removal
+// key: `workspaces.remove` filters rows by `name`.
 
 describe("workspaces.remove on a detached-HEAD worktree", () => {
   let server: ServerHandle;

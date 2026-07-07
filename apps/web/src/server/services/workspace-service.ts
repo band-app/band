@@ -801,6 +801,27 @@ export class WorkspaceService {
           }
         }
 
+        // Unlock the worktree first. External tooling (e.g. `supacode`)
+        // locks Band's worktrees — visible as a `locked "{...}"` line in
+        // `git worktree list --porcelain` — most likely to stop `git gc` /
+        // auto-prune from reclaiming a worktree while an agent is mid-flight.
+        // A locked worktree is refused by a single `git worktree remove
+        // --force` ("cannot remove a locked working tree") AND is skipped by
+        // `git worktree prune`, so without this unlock the admin record in
+        // `.git/worktrees/<id>/` survives and `syncWorktrees` re-adds the
+        // workspace on the next tick (issue: locked worktrees resurrect
+        // forever). Best-effort: swallow "not locked" and any other error.
+        try {
+          await execFileAsync(command, ["worktree", "unlock", worktreePath], {
+            cwd: projPath,
+            env: gitEnv,
+            encoding: "utf-8",
+          });
+        } catch {
+          // Worktree was not locked, or the path is already gone — either
+          // way there's nothing to unlock. Removal/prune below still runs.
+        }
+
         try {
           await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
             cwd: projPath,
@@ -808,8 +829,8 @@ export class WorkspaceService {
             encoding: "utf-8",
           });
         } catch {
-          // Worktree may be corrupted (e.g. missing .git file).
-          // Manually remove the directory and prune stale entries.
+          // Worktree may be corrupted (e.g. missing .git file) or still
+          // refused. Manually remove the directory and prune stale entries.
           try {
             await rm(worktreePath, { recursive: true, force: true });
           } catch (err) {
@@ -818,6 +839,19 @@ export class WorkspaceService {
             // `git worktree prune` to at least clean the index — matches
             // the existing best-effort pattern used for prune/branch -D.
             log.warn({ err, workspaceId, worktreePath }, "manual worktree rm failed");
+          }
+          // Re-run the unlock: `git worktree prune` skips LOCKED entries, so
+          // a still-locked admin record (whose working dir we just `rm`'d)
+          // would otherwise survive the prune and resurrect on sync. Unlock
+          // resolves the entry by its recorded path even when the dir is gone.
+          try {
+            await execFileAsync(command, ["worktree", "unlock", worktreePath], {
+              cwd: projPath,
+              env: gitEnv,
+              encoding: "utf-8",
+            });
+          } catch {
+            // Already unlocked or entry gone — prune below handles the rest.
           }
           try {
             await execFileAsync(command, ["worktree", "prune"], {
