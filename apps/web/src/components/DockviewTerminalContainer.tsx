@@ -690,26 +690,55 @@ export function DockviewTerminalContainer({
   // away because `useLayoutEffect` runs after React has committed
   // the DOM change. If the browser hasn't reflowed yet (rare timing
   // edge), the rect comes back 0×0 and we'd silently skip the fix.
-  // The ResizeObserver fallback below catches that case by deferring
-  // `api.layout()` until the container actually gains non-zero size,
-  // avoiding the silent no-op.
+  // The ResizeObserver's guaranteed initial delivery catches that
+  // case by deferring `api.layout()` until the container actually
+  // has non-zero size, avoiding the silent no-op.
+  //
+  // The observer stays attached for the whole visible period (it is
+  // NOT a one-shot). The synchronous measure above can run one effect
+  // ahead of a container resize: on a workspace switch back into a
+  // workspace with a saved maximize, this (child) layout effect
+  // measures while the outer dockview is still in the previous
+  // workspace's split, and `SharedDockviewLayout`'s switch effect
+  // re-applies the maximize — growing this container — only
+  // afterwards. That transient pre-maximize size never reaches a
+  // rendered frame, so dockview-core's own `watchElementResize` (which
+  // compares against the size it last delivered) can miss the change,
+  // leaving the inner splitview inlined at the stale split width — the
+  // "ghost panel" regression in #490's maximize-restore flow. A
+  // persistent observer gets the post-maximize size delivered
+  // regardless (initial delivery on `observe()` + one per subsequent
+  // change) and re-layouts.
+  //
+  // Both paths funnel through a last-applied-dims dedupe: the
+  // observer's guaranteed initial delivery repeats the synchronous
+  // measure's size, and re-forcing `api.layout` for identical dims
+  // would cascade a redundant full re-layout (an xterm refit + PTY
+  // resize message per terminal) on every reveal. The ghost-panel fix
+  // is unaffected — the post-maximize delivery arrives with different
+  // dims and still lays out.
   useLayoutEffect(() => {
     if (!visible) return;
     const api = apiRef.current;
     const container = containerRef.current;
     if (!api || !container) return;
+    let lastWidth = 0;
+    let lastHeight = 0;
+    const applyLayout = (width: number, height: number) => {
+      const w = Math.round(width);
+      const h = Math.round(height);
+      if (w <= 0 || h <= 0) return;
+      if (w === lastWidth && h === lastHeight) return;
+      lastWidth = w;
+      lastHeight = h;
+      api.layout(w, h, true);
+    };
     const rect = container.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      api.layout(Math.round(rect.width), Math.round(rect.height), true);
-      return;
-    }
+    applyLayout(rect.width, rect.height);
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      const { width, height } = entry.contentRect;
-      if (width <= 0 || height <= 0) return;
-      ro.disconnect();
-      api.layout(Math.round(width), Math.round(height), true);
+      applyLayout(entry.contentRect.width, entry.contentRect.height);
     });
     ro.observe(container);
     return () => ro.disconnect();
