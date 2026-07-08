@@ -588,7 +588,11 @@ export class CronjobService {
       // Resolve the agent's HEADLESS CLI invocation on the request thread so we
       // can fall back to chat synchronously when it's unsupported (e.g.
       // cursor-cli). No `codingAgentId` on the cron row — use the workspace's
-      // default agent.
+      // default agent. `createWorkspaceAgent` deliberately does NOT register in
+      // the chat agent pool (see its doc in `infra/agents/agent-pool.ts`) — it
+      // just constructs a standalone adapter — so this create-then-`abort`
+      // leaves no pool slot behind, the same one-shot pattern
+      // `workspaceService.generateCommitMessage` uses.
       const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
       const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
       // Release the short-lived adapter. `cliHeadlessInvocation` returns pure
