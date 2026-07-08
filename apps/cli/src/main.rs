@@ -366,6 +366,15 @@ enum CronjobsCmd {
         /// Workspace ID (required when scope is "workspace")
         #[arg(long)]
         workspace_id: Option<String>,
+        /// Where each fire dispatches the prompt: `chat` (chat pane) or
+        /// `terminal` (agent's vendor CLI in a fresh self-closing PTY). When
+        /// omitted, resolved via the same precedence as `workspaces create`:
+        /// `--via` flag → `$BAND_DISPATCH` → `.band/config.json`
+        /// `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia`
+        /// → `terminal`. So a cron created from a chat agent defaults to chat,
+        /// one created from a terminal defaults to terminal (issue #581).
+        #[arg(long)]
+        via: Option<String>,
         /// Start disabled
         #[arg(long)]
         disabled: bool,
@@ -577,6 +586,7 @@ fn main() {
                 cron,
                 scope,
                 workspace_id,
+                via,
                 disabled,
             } => cmd_cronjobs_create(
                 &key,
@@ -585,6 +595,7 @@ fn main() {
                 &cron,
                 &scope,
                 workspace_id.as_deref(),
+                via.as_deref(),
                 disabled,
             ),
             CronjobsCmd::Update {
@@ -2104,6 +2115,7 @@ fn cmd_cronjobs_create(
     cron: &str,
     scope: &str,
     workspace_id: Option<&str>,
+    via: Option<&str>,
     disabled: bool,
 ) -> Result<CommandResult, String> {
     if scope != "project" && scope != "workspace" {
@@ -2113,13 +2125,23 @@ fn cmd_cronjobs_create(
         return Err("--workspace-id is required when scope is 'workspace'".to_string());
     }
 
-    let client = api::ApiClient::from_settings()?;
+    // Read settings once and share the snapshot between the API client (port +
+    // auth token) and the dispatch-target resolver — same pattern as
+    // `cmd_workspaces_create`. A cronjob always carries a prompt, so we always
+    // resolve `via` through the precedence chain: a cron created from a chat
+    // agent (BAND_DISPATCH=chat) defaults to chat, one from a terminal
+    // (BAND_DISPATCH=terminal) defaults to terminal (issue #581).
+    let settings = state::load_settings()?;
+    let client = api::ApiClient::from_loaded_settings(settings.clone());
+    let resolved_via = resolve_dispatch_target(via, &settings)?;
+
     let mut input = serde_json::json!({
         "key": key,
         "name": name,
         "prompt": prompt,
         "cronExpression": cron,
         "scope": scope,
+        "via": resolved_via,
         "enabled": !disabled,
     });
     if let Some(ws) = workspace_id {
@@ -2195,15 +2217,39 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
         &serde_json::json!({"key": key, "id": id}),
     )?;
 
-    let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+    // The server echoes the dispatch it actually used (issue #581). A
+    // via="terminal" job returns a `terminalId` (and no task/chat); a via="chat"
+    // job — including a terminal job whose agent has no vendor CLI and fell back
+    // — returns `taskId`/`chatId`.
     let workspace_id = data
         .get("workspaceId")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let via = data.get("via").and_then(|v| v.as_str()).unwrap_or("chat");
 
+    if via == "terminal" {
+        let terminal_id = data
+            .get("terminalId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return Ok(CommandResult {
+            text: format!("{terminal_id}\n"),
+            json: serde_json::json!({
+                "via": "terminal",
+                "terminalId": terminal_id,
+                "workspaceId": workspace_id,
+            }),
+        });
+    }
+
+    let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
     Ok(CommandResult {
         text: format!("{task_id}\n"),
-        json: serde_json::json!({"taskId": task_id, "workspaceId": workspace_id}),
+        json: serde_json::json!({
+            "via": "chat",
+            "taskId": task_id,
+            "workspaceId": workspace_id,
+        }),
     })
 }
 
@@ -2738,6 +2784,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--cron", "type": "string", "required": true, "description": "Cron expression (e.g. \"0 */6 * * *\")"},
                 {"name": "--scope", "type": "string", "required": false, "description": "Scope: project (default) or workspace"},
                 {"name": "--workspace-id", "type": "string", "required": false, "description": "Workspace ID (required when scope is workspace)"},
+                {"name": "--via", "type": "string", "required": false, "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'workspaces create' (--via > BAND_DISPATCH > config > settings > terminal)."},
                 {"name": "--disabled", "type": "boolean", "required": false, "description": "Create the job in disabled state"},
             ]
         }),

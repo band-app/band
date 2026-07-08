@@ -114,6 +114,13 @@ export class TerminalService {
     workspaceId: string,
     terminalId: string,
     options?: SpawnOptions,
+    // `cleanupOnExit` (issue #581): when set, a *natural* PTY exit (e.g. a
+    // self-closing cron pane whose command ended with `exit`) triggers the same
+    // teardown as an explicit `kill` — the tab is dropped from the saved layout
+    // and a `terminal-killed` event is emitted. Off by default so a user's
+    // interactive terminal keeps its "Terminal exited" pane on screen (existing
+    // behavior); only opt-in callers get the auto-prune.
+    opts?: { cleanupOnExit?: boolean },
   ): Promise<TerminalSession> {
     const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
@@ -124,6 +131,7 @@ export class TerminalService {
       terminalId,
       workspace.worktree.path,
       options,
+      opts?.cleanupOnExit ? () => this.emitRemoved(workspaceId, terminalId) : undefined,
     );
 
     // Mirror what `createChat` and `createBrowser` do: register the new
@@ -151,9 +159,20 @@ export class TerminalService {
     const workspaceId = session?.workspaceId;
     this.pool.kill(terminalId);
     if (workspaceId) {
-      removeTerminalFromLayout(workspaceId, terminalId);
-      emit({ kind: "terminal-killed", workspaceId, terminalId });
+      this.emitRemoved(workspaceId, terminalId);
     }
+  }
+
+  /**
+   * Drop a terminal from the saved dockview layout and broadcast
+   * `terminal-killed` so an open dashboard prunes the panel. Shared by the
+   * explicit {@link kill} path and the `cleanupOnExit` natural-exit hook wired
+   * up in {@link spawn}. Idempotent: `removeTerminalFromLayout` is a no-op when
+   * the panel is already gone, and a duplicate `terminal-killed` is harmless.
+   */
+  private emitRemoved(workspaceId: string, terminalId: string): void {
+    removeTerminalFromLayout(workspaceId, terminalId);
+    emit({ kind: "terminal-killed", workspaceId, terminalId });
   }
 
   /**

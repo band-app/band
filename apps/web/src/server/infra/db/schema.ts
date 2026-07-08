@@ -107,10 +107,21 @@ export const cronjobs = sqliteTable("cronjobs", {
   cronExpression: text("cron_expression").notNull(),
   scope: text("scope", { enum: ["project", "workspace"] }).notNull(),
   workspaceId: text("workspace_id"),
+  // Where a fire dispatches the prompt (issue #581): "chat" submits a task to
+  // the workspace's cron chat pane (default, backward-compatible); "terminal"
+  // spawns the agent's vendor CLI in a fresh self-closing PTY pane. Mirrors the
+  // `via` discriminator on `workspaces.create` (#551).
+  via: text("via", { enum: ["chat", "terminal"] })
+    .notNull()
+    .default("chat"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull(),
   lastRunAt: text("last_run_at"),
   lastRunStatus: text("last_run_status", { enum: ["completed", "failed", "skipped"] }),
+  // For via="terminal" jobs, the id of the terminal spawned by the most recent
+  // fire. Used as the overlap-check handle: if this PTY is still alive when the
+  // next tick fires, the run is skipped rather than launching a second agent.
+  lastTerminalId: text("last_terminal_id"),
 });
 
 // Persistent record of token usage and cost from coding-agent sessions

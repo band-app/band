@@ -109,6 +109,7 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
+    onExit?: () => void,
   ): Promise<TerminalSession> {
     const existing = this.terminals.get(terminalId);
     if (existing) return existing;
@@ -116,7 +117,7 @@ export class TerminalPool {
     if (inflight) return inflight;
     // Store the promise synchronously (before any await) so a concurrent call
     // that arrives while this one is awaiting sees it and reuses it.
-    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options);
+    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options, onExit);
     this.spawning.set(terminalId, promise);
     try {
       return await promise;
@@ -130,6 +131,7 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
+    onExit?: () => void,
   ): Promise<TerminalSession> {
     const shell = defaultShell();
     const resolvedPath = await shellPath();
@@ -290,6 +292,17 @@ export class TerminalPool {
           unlinkSync(session.autoRunFile);
         } catch {
           // Already gone / never written — nothing to clean up.
+        }
+      }
+      // Notify the caller that the PTY exited on its own (e.g. a self-closing
+      // cron pane whose command ended with `exit`). The pool stays oblivious to
+      // layout / event concerns; the service-supplied callback does that
+      // cleanup. Guarded so a throwing callback can't wedge the exit handler.
+      if (onExit) {
+        try {
+          onExit();
+        } catch (err) {
+          log.warn("onExit callback threw for terminal %s: %s", terminalId, err);
         }
       }
     });

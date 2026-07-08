@@ -74,9 +74,12 @@ export const cronjobsRouter = t.router({
     }
   }),
 
-  trigger: publicProcedure.input(cronjobByIdInput).mutation(({ input }) => {
+  trigger: publicProcedure.input(cronjobByIdInput).mutation(async ({ input }) => {
     try {
-      return cronjobService.trigger(input.key, input.id);
+      // `trigger` is async since #581 — the via="terminal" path resolves the
+      // agent adapter and spawns a PTY. `TaskConflictError` (previous terminal
+      // run still active, or a running chat task) still maps to 409 below.
+      return await cronjobService.trigger(input.key, input.id);
     } catch (err) {
       throwAsTRPCError(err);
     }

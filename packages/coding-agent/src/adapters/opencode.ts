@@ -354,6 +354,22 @@ export class OpenCodeAdapter implements CodingAgent {
   }
 
   /**
+   * Headless one-shot invocation for automated terminal dispatch (cronjobs,
+   * issue #581). `opencode run "<prompt>"` executes the prompt
+   * non-interactively and exits on completion — unlike `cliInvocation`'s
+   * `opencode --prompt "<prompt>"`, which opens the interactive TUI and stays
+   * parked. `run` takes the prompt as its trailing positional (same shape as
+   * the SDK `runSession` path above, minus the JSON formatting we only need
+   * when parsing programmatically).
+   */
+  cliHeadlessInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath,
+      args: ["run", prompt],
+    };
+  }
+
+  /**
    * Resume CLI invocation for the chat tab's "Continue in terminal" action.
    * `opencode --session <id>` launches the interactive TUI on that exact
    * session (the same `--session` flag `runSession` uses for headless

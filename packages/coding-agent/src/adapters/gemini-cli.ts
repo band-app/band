@@ -231,6 +231,22 @@ export class GeminiCliAdapter implements CodingAgent {
   }
 
   /**
+   * Headless one-shot invocation for automated terminal dispatch (cronjobs,
+   * issue #581). `gemini --prompt=<prompt>` runs non-interactively and exits
+   * on completion — unlike `cliInvocation`'s `gemini -- "<prompt>"`, which
+   * opens the interactive REPL and stays parked. The `--prompt=<value>`
+   * joined form (rather than `--prompt <value>`) binds the prompt as the
+   * flag's argument even when it starts with `-`, mirroring the leading-dash
+   * safety the interactive `--` guard provides.
+   */
+  cliHeadlessInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath,
+      args: [`--prompt=${prompt}`],
+    };
+  }
+
+  /**
    * The chat tab's "Continue in terminal" action has no Gemini equivalent:
    * the Gemini CLI has no session model, so there's no session ID to resume
    * by. Returning the `unsupported` sentinel keeps the menu item disabled.

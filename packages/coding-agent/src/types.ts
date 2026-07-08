@@ -277,6 +277,25 @@ export interface CodingAgent {
    */
   cliInvocation?(prompt: string): CliInvocation;
   /**
+   * Resolve the *headless* (non-interactive) one-shot CLI invocation for
+   * `prompt` — the vendor CLI's "run this and exit" mode (`claude -p
+   * "<prompt>"`, `codex exec "<prompt>"`, `gemini --prompt "<prompt>"`,
+   * `opencode run "<prompt>"`).
+   *
+   * Distinct from {@link cliInvocation}, which opens the *interactive* REPL
+   * and never exits on its own. This variant powers automated, recurring
+   * dispatch — cronjobs with `via: "terminal"` (issue #581) — where the pane
+   * must run to completion, stream its output, and then exit so the terminal
+   * self-closes and the scheduler can tell "still running" from "done".
+   * Using the interactive form there would leave the pane parked at the REPL
+   * forever, blocking every subsequent tick.
+   *
+   * Adapters with no non-interactive CLI (e.g. `cursor-cli`) return
+   * `{ unsupported: true, reason: "..." }`; the caller falls back to the
+   * SDK/chat path.
+   */
+  cliHeadlessInvocation?(prompt: string): CliInvocation;
+  /**
    * Resolve the CLI invocation that *resumes* an existing agent session in
    * an interactive terminal pane (`claude --resume <id>`, `codex resume
    * <id>`, `opencode --session <id>`). Powers the chat tab's "Continue in

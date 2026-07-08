@@ -14,6 +14,14 @@ import { cronjobs } from "../schema";
  */
 export type CronjobScope = "project" | "workspace";
 
+/**
+ * Where a cronjob fire dispatches its prompt (issue #581). Defined inline here
+ * rather than importing `workspaceVia` from the services tier: Infra must not
+ * depend on `services/`, and the two `via` enums share the same two values by
+ * convention (keep them in sync).
+ */
+export type CronjobVia = "chat" | "terminal";
+
 export interface CronjobDefinition {
   /** Unique identifier, e.g. "cj_1710000000000_a1b2c3d4" */
   id: string;
@@ -27,6 +35,8 @@ export interface CronjobDefinition {
   scope: CronjobScope;
   /** For workspace-scoped jobs, the workspace ID (project-branch) */
   workspaceId?: string;
+  /** Where a fire dispatches the prompt: chat pane (default) or terminal PTY */
+  via: CronjobVia;
   /** Whether the job is enabled */
   enabled: boolean;
   /** ISO timestamp of creation */
@@ -35,6 +45,12 @@ export interface CronjobDefinition {
   lastRunAt?: string;
   /** Status of the last execution */
   lastRunStatus?: "completed" | "failed" | "skipped";
+  /**
+   * For via="terminal" jobs, the id of the terminal spawned by the most recent
+   * fire. The scheduler checks whether this PTY is still alive to decide
+   * whether to skip an overlapping run.
+   */
+  lastTerminalId?: string;
 }
 
 /**
@@ -120,10 +136,12 @@ export class CronjobQueries {
             cronExpression: job.cronExpression,
             scope: job.scope,
             workspaceId: job.workspaceId ?? null,
+            via: job.via ?? "chat",
             enabled: job.enabled,
             createdAt: job.createdAt,
             lastRunAt: job.lastRunAt ?? null,
             lastRunStatus: job.lastRunStatus ?? null,
+            lastTerminalId: job.lastTerminalId ?? null,
           })
           .run();
       }
@@ -164,6 +182,20 @@ export class CronjobQueries {
   }
 
   /**
+   * Record (or clear) the terminal a via="terminal" fire spawned.
+   *
+   * Dedicated targeted UPDATE — same rationale as `updateLastRun`: the fire
+   * path shouldn't load + diff + rewrite the whole file just to stamp one
+   * column. The stored id is the handle the scheduler uses on the next tick to
+   * decide whether the previous run is still in flight (skip) or finished
+   * (spawn a fresh pane). Pass `null` to clear it.
+   */
+  updateLastTerminal(jobId: string, terminalId: string | null): void {
+    const db = getDb();
+    db.update(cronjobs).set({ lastTerminalId: terminalId }).where(eq(cronjobs.id, jobId)).run();
+  }
+
+  /**
    * Convert a Drizzle row into the optional-T-shaped `CronjobDefinition`.
    *
    * Static so the service tier can map listAll-style results without
@@ -177,10 +209,12 @@ export class CronjobQueries {
       cronExpression: row.cronExpression,
       scope: row.scope as CronjobDefinition["scope"],
       workspaceId: row.workspaceId ?? undefined,
+      via: (row.via ?? "chat") as CronjobDefinition["via"],
       enabled: row.enabled,
       createdAt: row.createdAt,
       lastRunAt: row.lastRunAt ?? undefined,
       lastRunStatus: row.lastRunStatus as CronjobDefinition["lastRunStatus"],
+      lastTerminalId: row.lastTerminalId ?? undefined,
     };
   }
 }
