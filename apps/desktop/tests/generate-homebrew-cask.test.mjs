@@ -89,25 +89,45 @@ describe("generate-homebrew-cask", () => {
     assert.match(stderr, /version/i);
   });
 
-  test("a sha that is not 64 lowercase hex chars exits 1", () => {
-    for (const bad of [
-      "abc", // too short
-      "A".repeat(64), // uppercase
-      `${"a".repeat(63)}g`, // non-hex char
-      `${"a".repeat(65)}`, // too long
-    ]) {
-      const { status, stderr } = run([
-        "--version",
-        "0.26.1",
-        "--arm-sha",
-        bad,
-        "--intel-sha",
-        INTEL_SHA,
-      ]);
-      assert.equal(status, 1, `expected exit 1 for arm-sha "${bad}"`);
-      assert.match(stderr, /sha/i);
-    }
+  test("missing --arm-sha exits 1", () => {
+    const { status, stderr } = run(["--version", "0.26.1", "--intel-sha", INTEL_SHA]);
+    assert.equal(status, 1);
+    assert.match(stderr, /sha/i);
   });
+
+  test("missing --intel-sha exits 1", () => {
+    const { status, stderr } = run(["--version", "0.26.1", "--arm-sha", ARM_SHA]);
+    assert.equal(status, 1);
+    assert.match(stderr, /sha/i);
+  });
+
+  // Both sha flags share one validation path, but exercise each independently
+  // so a regression touching only one branch can't hide behind the other.
+  // One test() per bad shape so the first failure doesn't mask the rest.
+  const BAD_SHAS = {
+    "too short": "abc",
+    uppercase: "A".repeat(64),
+    "non-hex char": `${"a".repeat(63)}g`,
+    "too long": "a".repeat(65),
+  };
+  for (const flag of ["--arm-sha", "--intel-sha"]) {
+    for (const [shape, bad] of Object.entries(BAD_SHAS)) {
+      test(`${flag} that is ${shape} exits 1`, () => {
+        const otherFlag = flag === "--arm-sha" ? "--intel-sha" : "--arm-sha";
+        const good = flag === "--arm-sha" ? INTEL_SHA : ARM_SHA;
+        const { status, stderr } = run([
+          "--version",
+          "0.26.1",
+          flag,
+          bad,
+          otherFlag,
+          good,
+        ]);
+        assert.equal(status, 1);
+        assert.match(stderr, /sha/i);
+      });
+    }
+  }
 
   test("an unknown argument exits 1", () => {
     const { status, stderr } = run([...VALID_ARGS, "--bogus"]);

@@ -241,6 +241,12 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           VERSION: ${{ steps.version.outputs.new_version }}
         run: |
+          # Defence-in-depth: fail fast if the release version isn't a plain
+          # semver before interpolating it into any command below. (new_version
+          # comes from the trusted bump-version step, and bash does not
+          # re-evaluate $() inside an expanded variable, but a malformed value
+          # would otherwise build a wrong DMG path and fail shasum silently.)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION is not a plain semver: $VERSION" >&2; exit 1; }
           ARM_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-apple-silicon.dmg" | awk '{print $1}')
           INTEL_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-intel.dmg" | awk '{print $1}')
           KEY_FILE="$RUNNER_TEMP/tap_deploy_key"
