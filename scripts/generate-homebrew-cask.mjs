@@ -16,16 +16,27 @@ function parseArgs() {
   const args = process.argv.slice(2);
   const opts = { version: null, armSha: null, intelSha: null };
 
+  // Read the value that follows a flag, failing with a flag-specific message
+  // if it was the last token (so an omitted value isn't misreported later as
+  // a malformed one).
+  const takeValue = (flag, i) => {
+    if (i >= args.length) {
+      console.error(`${flag} requires a value`);
+      process.exit(1);
+    }
+    return args[i];
+  };
+
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case "--version":
-        opts.version = args[++i];
+        opts.version = takeValue("--version", ++i);
         break;
       case "--arm-sha":
-        opts.armSha = args[++i];
+        opts.armSha = takeValue("--arm-sha", ++i);
         break;
       case "--intel-sha":
-        opts.intelSha = args[++i];
+        opts.intelSha = takeValue("--intel-sha", ++i);
         break;
       default:
         console.error(`Unknown argument: ${args[i]}`);
@@ -53,9 +64,10 @@ function parseArgs() {
 const { version, armSha, intelSha } = parseArgs();
 
 // The `binary` stanza symlinks the CLI sidecar bundled inside the app
-// (electron-builder `extraResources`, see apps/desktop/electron-builder.yml)
-// into Homebrew's bin, so `brew install --cask band` also provides the
-// `band` command without the in-app admin-privileged symlink flow.
+// (placed in Contents/Resources/binaries/ by electron-builder's
+// extraResources config) into Homebrew's bin, so `brew install --cask band`
+// also provides the `band` command without the in-app admin-privileged
+// symlink flow.
 process.stdout.write(`cask "band" do
   version "${version}"
 

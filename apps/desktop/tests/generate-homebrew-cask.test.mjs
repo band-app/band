@@ -62,7 +62,11 @@ describe("generate-homebrew-cask", () => {
     // Fix [1]: the app self-updates via Squirrel, so `auto_updates true` owns
     // upgrades and there is no (redundant, contradictory) livecheck block.
     assert.ok(stdout.includes("auto_updates true"), "auto_updates retained");
-    assert.ok(!stdout.includes("livecheck do"), "livecheck block removed");
+    assert.equal(
+      stdout.includes("livecheck do"),
+      false,
+      "unexpected livecheck block in output",
+    );
   });
 
   test("missing --version exits 1 with a meaningful message", () => {
@@ -128,6 +132,18 @@ describe("generate-homebrew-cask", () => {
       });
     }
   }
+
+  test("a flag with no following value exits 1 with a requires-a-value message", () => {
+    const { status, stderr } = run([
+      "--arm-sha",
+      ARM_SHA,
+      "--intel-sha",
+      INTEL_SHA,
+      "--version",
+    ]);
+    assert.equal(status, 1);
+    assert.match(stderr, /--version requires a value/);
+  });
 
   test("an unknown argument exits 1", () => {
     const { status, stderr } = run([...VALID_ARGS, "--bogus"]);
