@@ -74,11 +74,10 @@ process.stdout.write(`cask "band" do
   desc "IDE-agnostic agent orchestrator"
   homepage "https://github.com/band-app/band"
 
-  livecheck do
-    url :url
-    strategy :github_latest
-  end
-
+  # Band ships a Squirrel.Mac auto-updater (see the ShipIt entry in the zap
+  # trash list below), so the app upgrades itself in place. auto_updates true
+  # tells Homebrew not to manage upgrades -- hence no livecheck block, which
+  # would only matter if brew upgrade owned the upgrade path.
   auto_updates true
   depends_on macos: :big_sur
 

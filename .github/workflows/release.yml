@@ -250,7 +250,7 @@ jobs:
           # Pin GitHub's published SSH host key (docs.github.com "GitHub's
           # SSH key fingerprints") instead of trust-on-first-use.
           echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes"
+          export GIT_SSH_COMMAND="ssh -i \"$KEY_FILE\" -o UserKnownHostsFile=\"$RUNNER_TEMP/known_hosts\" -o StrictHostKeyChecking=yes"
           git clone --depth 1 git@github.com:band-app/homebrew-band.git "$RUNNER_TEMP/homebrew-band"
           node scripts/generate-homebrew-cask.mjs \
             --version "$VERSION" \
