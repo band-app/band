@@ -8,8 +8,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, ChevronsUpDown, Menu, PanelLeft, PanelTop } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronsUpDown, PanelLeft, PanelTop } from "lucide-react";
+import { useEffect, useState } from "react";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { EditorPicker } from "./EditorPicker";
@@ -29,16 +29,12 @@ export interface PanelItem {
   shortcut?: string;
 }
 
-/** Props for the navigation cluster (sidebar toggle + menu + back/forward).
- *  While the project list is visible the SidebarTitleBar renders only the
- *  toggle + back/forward arrows (its `menuItems` is left undefined — the
- *  overflow actions live in DashboardShell's bottom action bar). When the list
- *  is collapsed the arrows and the fallback hamburger menu render in the
- *  WorkspaceTitleBar instead — so both bars accept the same set of props. */
+/** Props for the navigation cluster (sidebar toggle + back/forward). While the
+ *  project list is visible the SidebarTitleBar renders the cluster; when the
+ *  list is collapsed the same cluster relocates into the WorkspaceTitleBar —
+ *  so both bars accept the same set of props. The overflow actions always live
+ *  in DashboardShell's bottom action bar, so the cluster carries no menu. */
 interface NavControlsProps {
-  /** Items rendered inside the global hamburger dropdown. When undefined, the
-   *  hamburger button is not rendered. */
-  menuItems?: ReactNode;
   /** Toggle the project-list sidebar's visibility (⌘B). When undefined, the
    *  sidebar toggle button is not rendered. */
   onToggleSidebar?: () => void;
@@ -90,10 +86,9 @@ interface WorkspaceTitleBarProps extends NavControlsProps, TitleBarOffsetProps {
   onTogglePanelVisibility?: (panelId: string) => void;
 }
 
-/** Sidebar toggle + hamburger menu + back/forward arrows. Shared by both
- *  title-bar halves; rendered in exactly one of them at a time. */
+/** Sidebar toggle + back/forward arrows. Shared by both title-bar halves;
+ *  rendered in exactly one of them at a time. */
 function NavControls({
-  menuItems,
   onToggleSidebar,
   sidebarVisible,
   onGoBack,
@@ -128,36 +123,6 @@ function NavControls({
             </kbd>
           </TooltipContent>
         </Tooltip>
-      )}
-      {menuItems && (
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                  aria-label="Menu"
-                  // This hamburger is the collapsed-sidebar fallback: while
-                  // the project list is visible its actions live in the
-                  // list's bottom action bar (`DashboardShell.tsx`), and
-                  // `AppShell` (`__root.tsx`) only passes `menuItems` to the
-                  // WorkspaceTitleBar — so this renders once the list
-                  // collapses. Retains the historical testid for any direct
-                  // `page.getByTestId` spec use (page objects target the
-                  // bottom-bar buttons now).
-                  data-testid="dashboard__menu-trigger"
-                >
-                  <Menu className="size-5" />
-                </button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              More
-            </TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start">{menuItems}</DropdownMenuContent>
-        </DropdownMenu>
       )}
       {(onGoBack || onGoForward) && (
         <>
@@ -208,7 +173,7 @@ function NavControls({
 }
 
 /** Draggable title bar over the project-list sidebar. Holds the navigation
- *  cluster (sidebar toggle, menu, back/forward) while the list is visible.
+ *  cluster (sidebar toggle, back/forward) while the list is visible.
  *  Painted with the sidebar surface so it reads as one panel with the list
  *  below it, visually separated from the workspace layout to its right. */
 export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: SidebarTitleBarProps) {
@@ -220,10 +185,9 @@ export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: Sidebar
       {/* Gate the cluster on visibility: when the list is collapsed the bar is
           clipped to 0px but stays mounted, so rendering the cluster here would
           duplicate it (the WorkspaceTitleBar shows it while collapsed) and put
-          two `…__sidebar-toggle` nodes in the DOM. `AppShell` passes
-          `menuItems={undefined}` here, so this variant renders only the toggle
-          + back/forward arrows — the overflow menu lives in the WorkspaceTitleBar
-          fallback (collapsed) and the project-list bottom action bar (visible). */}
+          two `…__sidebar-toggle` nodes in the DOM. This variant renders the
+          toggle + back/forward arrows; the overflow actions live in the
+          project-list bottom action bar. */}
       {sidebarVisible && <NavControls sidebarVisible={sidebarVisible} {...nav} />}
     </div>
   );
@@ -232,8 +196,8 @@ export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: Sidebar
 /** Draggable title bar over the workspace layout. Holds the workspace name
  *  (center), the open-in-editor picker, and the panel/layout switcher. When
  *  the project-list sidebar is collapsed, the navigation cluster relocates
- *  here (far left, clearing the traffic lights) so the menu and back/forward
- *  arrows stay reachable. */
+ *  here (far left, clearing the traffic lights) so the back/forward arrows
+ *  stay reachable. */
 export function WorkspaceTitleBar({
   title,
   workspaceName,

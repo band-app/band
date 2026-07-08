@@ -12,7 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Activity, BarChart3, Globe, ListTodo, MoreHorizontal, Timer } from "lucide-react";
+import { Activity, BarChart3, Globe, ListTodo, MoreVertical, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
@@ -49,8 +49,9 @@ export function useAnyToolbarDialogOpen(): boolean {
  * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
  *
  * The dialogs are rendered as siblings to `children`, so they remain mounted even when
- * the parent overflow dropdown closes. Menu items live inside the dropdown via
- * <ToolbarOverflowMenuItems /> and call the context handlers to open the dialogs.
+ * the parent overflow dropdown closes. The action buttons live in the project-list
+ * bottom action bar via <ToolbarActionBar /> and call the context handlers to open
+ * the dialogs.
  */
 export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
@@ -168,55 +169,6 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Menu items for the title-bar hamburger dropdown shown when the project-list
- * sidebar is collapsed (the `WorkspaceTitleBar` fallback). While the sidebar
- * is visible these actions live in the project-list bottom action bar
- * (`ToolbarActionBar`) instead.
- *
- * Must be rendered inside a <ToolbarOverflowProvider>. Returns a fragment of
- * DropdownMenuItem so it can be embedded directly in a DropdownMenuContent.
- */
-export function ToolbarOverflowMenuItems() {
-  const ctx = useContext(ToolbarOverflowContext);
-  if (!ctx) {
-    throw new Error("ToolbarOverflowMenuItems must be used inside ToolbarOverflowProvider");
-  }
-
-  return (
-    <>
-      <DropdownMenuItem onClick={ctx.openTasks}>
-        <ListTodo className="size-4" />
-        Tasks
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openCronjobs}>
-        <Timer className="size-4" />
-        Cronjobs
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openReports} data-testid="menu__reports">
-        <BarChart3 className="size-4" />
-        Usage
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openTunnel}>
-        <Globe
-          className={
-            ctx.tunnelStatus === "error"
-              ? "size-4 text-red-500"
-              : ctx.tunnelStatus === "running"
-                ? "size-4 text-green-500"
-                : "size-4"
-          }
-        />
-        {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openResources} data-testid="menu__resources">
-        <Activity className="size-4" />
-        Resources
-      </DropdownMenuItem>
-    </>
-  );
-}
-
-/**
  * Bottom action row cluster for the project list (right-hand side).
  *
  * Surfaces Resources and Usage as standalone icon buttons and tucks the
@@ -233,6 +185,46 @@ export function ToolbarActionBar() {
 
   return (
     <>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="More actions"
+                data-testid="project-list__overflow-trigger"
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">More</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={ctx.openTasks}>
+            <ListTodo className="size-4" />
+            Tasks
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openCronjobs}>
+            <Timer className="size-4" />
+            Cronjobs
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openTunnel}>
+            <Globe
+              className={
+                ctx.tunnelStatus === "error"
+                  ? "size-4 text-red-500"
+                  : ctx.tunnelStatus === "running"
+                    ? "size-4 text-green-500"
+                    : "size-4"
+              }
+            />
+            {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -263,46 +255,6 @@ export function ToolbarActionBar() {
         </TooltipTrigger>
         <TooltipContent side="top">Usage</TooltipContent>
       </Tooltip>
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                aria-label="More actions"
-                data-testid="project-list__overflow-trigger"
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top">More</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={ctx.openTasks}>
-            <ListTodo className="size-4" />
-            Tasks
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={ctx.openCronjobs}>
-            <Timer className="size-4" />
-            Cronjobs
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={ctx.openTunnel}>
-            <Globe
-              className={
-                ctx.tunnelStatus === "error"
-                  ? "size-4 text-red-500"
-                  : ctx.tunnelStatus === "running"
-                    ? "size-4 text-green-500"
-                    : "size-4"
-              }
-            />
-            {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </>
   );
 }

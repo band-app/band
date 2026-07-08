@@ -423,13 +423,14 @@ function SortableProject({
                 <TooltipContent side="right">{project.name}</TooltipContent>
               </Tooltip>
             </div>
-            {/* The "+" button is revealed on hover (or keyboard focus) to keep
-                the header uncluttered while scanning the list; the same action
-                lives in the right-click / long-press context menu below.
-                `opacity-0` (not `hidden`) reserves the space so the row doesn't
-                reflow on hover. On touch devices there's no hover, so it stays
-                visible. */}
-            <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100">
+            {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
+                focus) to keep the header uncluttered while scanning the list;
+                the same actions live in the right-click / long-press context
+                menu below. `opacity-0` (not `hidden`) reserves the space so the
+                row doesn't reflow on hover. On touch devices there's no hover
+                and no room to spare, so the cluster is hidden entirely — the
+                actions are reached via long-press instead. */}
+            <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:hidden">
               {/* "⋮" opens the same action list as right-click, so the menu is
                   reachable with a plain left click (and on touch, where there's
                   no right-click). Sits to the left of the "+" quick action. */}

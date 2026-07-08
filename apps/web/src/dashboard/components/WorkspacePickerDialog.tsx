@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { Pin, PinOff } from "lucide-react";
+import { Home, Pin, PinOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCapabilities } from "../context";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
@@ -18,8 +18,8 @@ import { useProjects } from "../hooks/use-projects";
 import { getRecentWorkspaceOrder, recordWorkspaceAccess } from "../lib/recent-workspaces";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
-import type { AgentInfo } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { WorkspaceLabel } from "./WorkspaceLabel";
 
 interface WorkspaceEntry {
   workspaceId: string;
@@ -28,7 +28,12 @@ interface WorkspaceEntry {
   name: string;
   /** Live git branch — kept for search only. */
   branch: string;
-  agent?: AgentInfo;
+  /**
+   * True when this workspace is the project's main checkout (its default-branch
+   * worktree, and the project is a git project). Marked with a house icon
+   * instead of the branch glyph, mirroring the project-list root card.
+   */
+  isRoot: boolean;
 }
 
 interface WorkspacePickerDialogProps {
@@ -43,7 +48,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
   const statuses = useDashboardStore((s) => s.statuses);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
-  const { isPinned, toggle: togglePinned, pinned } = usePinnedWorkspaces();
+  const { isPinned, toggle: togglePinned } = usePinnedWorkspaces();
 
   const [query, setQuery] = useState("");
 
@@ -57,12 +62,11 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
     }
   }, [open]);
 
-  // Map workspaceId -> rank in pinnedEntries (order = DB insertion order).
-  // Used to sort pinned entries deterministically near the top of the list.
-  const pinnedRank = useMemo(() => new Map(pinned.map((p, i) => [p.workspaceId, i])), [pinned]);
-
-  // Flatten all workspaces and sort: active first, then pinned (in pin order),
-  // then everything else by recency.
+  // Flatten all workspaces and sort strictly by most-recently-accessed. The
+  // active workspace floats to the top (it's what the user just left / is on),
+  // then everything else follows the recent-access order. Pinned status does
+  // NOT affect ordering here — pinning is a sidebar-grouping affordance, so a
+  // rarely-touched pinned workspace must not jump above one the user just used.
   const sortedWorkspaces = useMemo(() => {
     const entries: WorkspaceEntry[] = [];
     for (const project of projects) {
@@ -73,7 +77,9 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
           projectName: project.name,
           name: worktree.name,
           branch: worktree.branch,
-          agent: statuses.get(workspaceId)?.agent,
+          // A git project's default-branch worktree is its main checkout (the
+          // repo root). Plain projects have no root/feature distinction.
+          isRoot: project.kind !== "plain" && worktree.name === project.defaultBranch,
         });
       }
     }
@@ -82,22 +88,26 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
     entries.sort((a, b) => {
       if (a.workspaceId === activeWorkspaceId) return -1;
       if (b.workspaceId === activeWorkspaceId) return 1;
-      const ap = pinnedRank.get(a.workspaceId);
-      const bp = pinnedRank.get(b.workspaceId);
-      if (ap !== undefined && bp === undefined) return -1;
-      if (bp !== undefined && ap === undefined) return 1;
-      if (ap !== undefined && bp !== undefined) return ap - bp;
       const ai = orderMap.get(a.workspaceId) ?? Number.MAX_SAFE_INTEGER;
       const bi = orderMap.get(b.workspaceId) ?? Number.MAX_SAFE_INTEGER;
       return ai - bi;
     });
 
     return entries;
-  }, [projects, statuses, recentOrder, activeWorkspaceId, pinnedRank]);
+    // `statuses` is intentionally NOT a dependency: agent status is read per row
+    // at render time (below), not baked into the sorted entries. Otherwise every
+    // ~1 Hz agent-status tick would re-run this whole flatten + sort while the
+    // picker is open — precisely when agents are busiest.
+  }, [projects, recentOrder, activeWorkspaceId]);
 
   const handleSelect = useCallback(
     (workspaceId: string) => {
       clearNeedsAttention(workspaceId);
+      // Recency is recorded on explicit picker selection. Navigating via URL,
+      // browser back/forward, or the project-list sidebar does NOT currently
+      // update the recency store — those paths keep their existing order until
+      // the workspace is next chosen through the picker. (Broadening recording
+      // to every navigation path is a possible follow-up.)
       recordWorkspaceAccess(workspaceId);
       const href = capabilities.getWorkspaceHref?.(workspaceId);
       if (href && capabilities.navigate) {
@@ -142,6 +152,9 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
             {sortedWorkspaces.map((entry) => {
               const isActive = activeWorkspaceId === entry.workspaceId;
               const pinnedNow = isPinned(entry.workspaceId);
+              // Read live agent status per row here (not inside the sort memo) so
+              // status ticks repaint only the rows, never re-sort the list.
+              const agent = statuses.get(entry.workspaceId)?.agent;
               return (
                 <CommandItem
                   key={entry.workspaceId}
@@ -154,13 +167,27 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                   // project-list rows.
                   className="group touch-manipulation [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:gap-3"
                 >
-                  <AgentStatusIndicator agent={entry.agent} />
-                  <span className="text-sm font-medium">
-                    {entry.projectName}/{entry.name}
-                  </span>
-                  {pinnedNow && (
-                    <Pin className="size-3 -rotate-45 text-muted-foreground shrink-0" />
-                  )}
+                  {/* Root workspaces get a house icon (the same identity marker
+                      as the project-list root card); an active agent's status
+                      dot replaces it via the fallback slot. */}
+                  <AgentStatusIndicator
+                    agent={agent}
+                    isActive={isActive}
+                    fallback={
+                      entry.isRoot ? (
+                        <Home
+                          data-testid={`workspace-picker__home-icon--${entry.workspaceId}`}
+                          className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                        />
+                      ) : undefined
+                    }
+                  />
+                  <WorkspaceLabel
+                    name={entry.name}
+                    projectName={entry.projectName}
+                    isActive={isActive}
+                    tone="switcher"
+                  />
                   <div className="ml-auto flex items-center gap-2">
                     {isActive && (
                       <span className="shrink-0 text-xs text-muted-foreground">current</span>

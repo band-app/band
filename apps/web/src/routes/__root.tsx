@@ -1,4 +1,4 @@
-import { DropdownMenuItem, TooltipProvider } from "@band-app/ui";
+import { TooltipProvider } from "@band-app/ui";
 import {
   createRootRoute,
   HeadContent,
@@ -13,7 +13,6 @@ import {
   GitCompare,
   Globe,
   MessageSquare,
-  Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,11 +29,7 @@ import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { type PanelItem, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
-import {
-  ToolbarActionBar,
-  ToolbarOverflowMenuItems,
-  ToolbarOverflowProvider,
-} from "../components/ToolbarButtons";
+import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -585,40 +580,20 @@ function AppShell() {
     [],
   );
 
-  // The back/forward arrows (and, when the list is collapsed, the hamburger
-  // menu) belong to the project-list region. While the list is visible the
-  // SidebarTitleBar shows only the sidebar toggle + arrows — the overflow
-  // actions live in DashboardShell's bottom action bar, so `menuItems` is not
-  // passed there. When the list collapses, the arrows + the fallback hamburger
-  // relocate into the WorkspaceTitleBar (far left) so they stay reachable. Both
-  // bars receive the same nav props; each renders the cluster only in the
-  // appropriate state (keyed off `sidebarVisible`).
+  // The back/forward arrows and sidebar toggle belong to the project-list
+  // region. While the list is visible the SidebarTitleBar shows the cluster;
+  // when the list collapses, the same cluster relocates into the
+  // WorkspaceTitleBar (far left) so it stays reachable. The overflow actions
+  // always live in DashboardShell's bottom action bar, so the cluster carries
+  // no menu of its own. Both bars receive the same nav props; each renders the
+  // cluster only in the appropriate state (keyed off `sidebarVisible`).
   //
   // Memoized so both bars get a stable prop reference across the frequent
   // AppShell re-renders (route changes, workspace switches, sidebar toggles).
-  // Hooks must run unconditionally, so these sit above the narrow/mobile early
+  // Hooks must run unconditionally, so this sits above the narrow/mobile early
   // return below.
-  const menuItems = useMemo(
-    () => (
-      <>
-        <ToolbarOverflowMenuItems />
-        <DropdownMenuItem
-          onClick={() => {
-            const fn = (window as unknown as { __bandOpenSettings?: () => void })
-              .__bandOpenSettings;
-            fn?.();
-          }}
-        >
-          <SettingsIcon className="size-4" />
-          Settings
-        </DropdownMenuItem>
-      </>
-    ),
-    [],
-  );
   const navControlProps = useMemo(
     () => ({
-      menuItems,
       onGoBack: navigationHistory.goBack,
       onGoForward: navigationHistory.goForward,
       canGoBack: navigationHistory.canGoBack,
@@ -627,7 +602,6 @@ function AppShell() {
       sidebarVisible,
     }),
     [
-      menuItems,
       navigationHistory.goBack,
       navigationHistory.goForward,
       navigationHistory.canGoBack,
@@ -676,16 +650,10 @@ function AppShell() {
                 className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
                 data-testid="app-shell__sidebar"
               >
-                {/* The hamburger menu is dropped here: while the list is
-                    visible its actions live in DashboardShell's bottom action
-                    bar. Only the sidebar toggle + back/forward arrows ride in
-                    the SidebarTitleBar. The menu stays in the WorkspaceTitleBar
-                    (below) as the fallback for the collapsed-list state. */}
-                <SidebarTitleBar
-                  {...navControlProps}
-                  menuItems={undefined}
-                  offsetClass={titleBarOffset}
-                />
+                {/* The sidebar toggle + back/forward arrows ride in the
+                    SidebarTitleBar; the overflow actions live in
+                    DashboardShell's bottom action bar below. */}
+                <SidebarTitleBar {...navControlProps} offsetClass={titleBarOffset} />
                 <div className="flex-1 min-h-0">
                   <DashboardShell hideTitleBar bottomActions={<ToolbarActionBar />} />
                 </div>

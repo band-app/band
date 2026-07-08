@@ -128,15 +128,15 @@ test("the nav cluster is hosted in the sidebar title bar while the sidebar is vi
 
   // The split title bar puts the sidebar toggle inside the project-list
   // column (SidebarTitleBar) when the list is shown. The overflow actions
-  // no longer ride in a title-bar hamburger — they live in the project-list
-  // bottom action bar — so the sidebar menu trigger is absent here.
+  // live in the project-list bottom action bar; there is no title-bar
+  // hamburger anywhere, so the Menu button is absent.
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
   await expect(wp.sidebarToggleWithinSidebar).toBeVisible();
   await expect(wp.actionBarWithinSidebar).toBeVisible();
-  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
+  await expect(wp.menuTrigger).toHaveCount(0);
 });
 
-test("the menu and back/forward relocate into the workspace bar when the sidebar collapses", async ({
+test("the toggle and back/forward relocate into the workspace bar when the sidebar collapses", async ({
   page,
 }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
@@ -144,25 +144,20 @@ test("the menu and back/forward relocate into the workspace bar when the sidebar
   await wp.waitForReady();
 
   // Precondition: while visible, the actions live in the project-list bottom
-  // action bar and no hamburger rides in the sidebar title bar.
+  // action bar and there is no title-bar hamburger.
   await expect(wp.actionBarWithinSidebar).toBeVisible();
-  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
+  await expect(wp.menuTrigger).toHaveCount(0);
 
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
 
-  // Assert the settled new state first — prove the controls rendered in their
-  // new home (the workspace title bar) before asserting the old node is gone...
-  await expect(wp.menuTrigger).toBeVisible();
+  // The nav cluster relocated into the workspace title bar so its controls
+  // stay reachable while the list is collapsed...
+  await expect(wp.sidebarToggle).toBeVisible();
   await expect(wp.backButton).toBeVisible();
   await expect(wp.forwardButton).toBeVisible();
-  // ...and they've left the (now-collapsed) sidebar column.
-  await expect(wp.menuTriggerWithinSidebar).toHaveCount(0);
-
-  // The relocated menu is still wired: clicking it opens the dropdown.
-  await wp.openTitleBarMenu();
-  await expect(wp.contextMenu).toBeVisible();
-  await wp.pressEscape();
+  // ...and no hamburger was resurrected as part of the relocation.
+  await expect(wp.menuTrigger).toHaveCount(0);
 });
 
 test("the collapsed state persists across a reload", async ({ page }) => {

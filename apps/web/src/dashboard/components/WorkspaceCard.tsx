@@ -37,6 +37,7 @@ import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
+import { WorkspaceLabel } from "./WorkspaceLabel";
 
 // ---------------------------------------------------------------------------
 // Recent-user-activation marker (used to suppress auto-scroll on in-list nav)
@@ -257,19 +258,13 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                   // Pinned section: stack the branch name over the project name
                   // as a compact two-line block so a mixed list of pinned cards
                   // stays scannable without a long, mid-truncated
-                  // `project/branch` string on one line.
-                  <div className="flex flex-col min-w-0 leading-tight">
-                    <span
-                      className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
-                    >
-                      {worktree.name}
-                    </span>
-                    <span
-                      className={`text-xs truncate ${isActive ? "text-foreground/80" : "text-muted-foreground"}`}
-                    >
-                      {projectName}
-                    </span>
-                  </div>
+                  // `project/branch` string on one line. Shared with the ⌘K
+                  // workspace picker via `WorkspaceLabel`.
+                  <WorkspaceLabel
+                    name={worktree.name}
+                    projectName={projectName}
+                    isActive={isActive}
+                  />
                 ) : (
                   <span
                     className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
