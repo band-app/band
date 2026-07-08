@@ -44,7 +44,11 @@ import {
   extractActiveState,
   walkGridNode,
 } from "../lib/dockview-active-state";
-import { findFocusedInnerDockview, toggleEdgeGroup } from "../lib/dockview-edge-groups";
+import {
+  applyMaximizeEdgeVisibility,
+  findFocusedInnerDockview,
+  toggleEdgeGroup,
+} from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
@@ -1569,6 +1573,12 @@ export function SharedDockviewLayout() {
       }
       if (initialActiveState?.maximizedGroup) {
         applyMaximizedGroupToApi(event.api, initialActiveState.maximizedGroup);
+        // The `onDidMaximizedGroupChange` listener is guarded out here
+        // (`initializedRef.current` is still false), so hide the edge
+        // panels explicitly for a reload that lands on a maximized tab.
+        // The edge-visibility reconciliation above already ran (edges
+        // visible from panel count); this hides them over the top.
+        applyMaximizeEdgeVisibility(event.api, true);
       }
 
       // Persist layout on changes. With a single dockview instance shared by
@@ -1608,6 +1618,14 @@ export function SharedDockviewLayout() {
           // flag is set by `saveLayout` for the synchronous duration of
           // its `toJSON()` call.
           if (inSaveLayoutToJSON) return;
+          // Collapse the edge panels while a group is maximized so the
+          // maximized tab gets the full area; re-derive them on exit. This
+          // is the hook for the Maximize/Restore button (which calls
+          // `api.maximize()` / `api.exitMaximized()` directly) and for
+          // workspace-switch-driven maximize changes. The initial-mount
+          // path is handled separately below because `initializedRef` is
+          // still false there and this listener is guarded out.
+          applyMaximizeEdgeVisibility(event.api, !!e.isMaximized);
           const workspaceId = activeWorkspaceIdRef.current;
           if (!workspaceId) return;
           // Defensive: dockview's event payload types both `group` and
@@ -1702,6 +1720,12 @@ export function SharedDockviewLayout() {
     // (maximized) → B (no state) would leave B rendered under A's
     // maximize overlay.
     applyMaximizedGroupToApi(api, activeState?.maximizedGroup);
+    // Keep the edge panels in sync with the incoming workspace's maximize
+    // state deterministically. When `applyMaximizedGroupToApi` actually
+    // changes the maximize the listener above also fires, but it's a no-op
+    // when the state is unchanged — and `applyMaximizeEdgeVisibility` is
+    // idempotent, so calling it here is safe either way.
+    applyMaximizeEdgeVisibility(api, !!activeState?.maximizedGroup);
   }, [activeWorkspaceId]);
 
   // ---------------------------------------------------------------------
