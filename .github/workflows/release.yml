@@ -229,3 +229,47 @@ jobs:
         run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Regenerate the Homebrew cask in band-app/homebrew-band so
+      # `brew install --cask band` resolves the release that was just
+      # published. Hashes the local signed DMGs (same files uploaded above)
+      # and pushes over SSH with a write deploy key scoped to the tap repo.
+      # Runs last so a tap-side failure can't block the npm publish of an
+      # already-tagged release.
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          VERSION: ${{ steps.version.outputs.new_version }}
+        run: |
+          # Defence-in-depth: fail fast if the release version isn't a plain
+          # semver before interpolating it into any command below. (new_version
+          # comes from the trusted bump-version step, and bash does not
+          # re-evaluate $() inside an expanded variable, but a malformed value
+          # would otherwise build a wrong DMG path and fail shasum silently.)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION is not a plain semver: $VERSION" >&2; exit 1; }
+          ARM_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-apple-silicon.dmg" | awk '{print $1}')
+          INTEL_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-intel.dmg" | awk '{print $1}')
+          KEY_FILE="$RUNNER_TEMP/tap_deploy_key"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          # Pin GitHub's published SSH host key (docs.github.com "GitHub's
+          # SSH key fingerprints") instead of trust-on-first-use.
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i \"$KEY_FILE\" -o UserKnownHostsFile=\"$RUNNER_TEMP/known_hosts\" -o StrictHostKeyChecking=yes"
+          git clone --depth 1 git@github.com:band-app/homebrew-band.git "$RUNNER_TEMP/homebrew-band"
+          node scripts/generate-homebrew-cask.mjs \
+            --version "$VERSION" \
+            --arm-sha "$ARM_SHA" \
+            --intel-sha "$INTEL_SHA" \
+            > "$RUNNER_TEMP/homebrew-band/Casks/band.rb"
+          cd "$RUNNER_TEMP/homebrew-band"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/band.rb
+          if git diff --cached --quiet; then
+            echo "Cask already up to date"
+            exit 0
+          fi
+          git commit -m "band ${VERSION}"
+          git push origin HEAD:main
