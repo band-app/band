@@ -332,13 +332,9 @@ export class CronjobService {
     this.queries.saveFile(key, file);
     // Best-effort: tear down the terminal a via="terminal" job last spawned so
     // deleting the job doesn't leave a stray pane running the agent. No-op when
-    // the id is unset or the PTY already exited.
-    //
-    // If the PTY is still live, `kill()` emits `terminal-killed` synchronously
-    // AND killing the PTY trips its `cleanupOnExit` hook, which emits a second
-    // `terminal-killed` asynchronously. The duplicate is harmless — layout
-    // removal is idempotent and a repeat prune event is a no-op — so we accept
-    // it rather than reaching into the pool to clear the exit hook first.
+    // the id is unset or the PTY already exited. `kill()` emits `terminal-killed`
+    // once — the pool suppresses the `cleanupOnExit` hook on an explicit kill
+    // (it detects the session was already removed), so there's no double-emit.
     if (removed?.lastTerminalId) {
       terminalService.kill(removed.lastTerminalId);
     }
@@ -586,7 +582,10 @@ export class CronjobService {
       // default agent.
       const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
       const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
-      // Release the short-lived adapter; we only needed the pure-data invocation.
+      // Release the short-lived adapter. `cliHeadlessInvocation` returns pure
+      // data and starts no session/subprocess, so this `abort` is a safe no-op
+      // for every current adapter; it's kept as a belt-and-braces release in
+      // case a future adapter allocates a handle on construction.
       adapter.abort?.();
       if (!invocation || invocation.unsupported) {
         const reason = invocation?.reason ?? "adapter does not expose cliHeadlessInvocation";

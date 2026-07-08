@@ -238,6 +238,10 @@ export class GeminiCliAdapter implements CodingAgent {
    * joined form (rather than `--prompt <value>`) binds the prompt as the
    * flag's argument even when it starts with `-`, mirroring the leading-dash
    * safety the interactive `--` guard provides.
+   *
+   * `--output-format` is deliberately omitted (unlike `runSession`, which asks
+   * for NDJSON): a cron terminal shows plain human-readable output in the pane,
+   * not a machine-parsed stream.
    */
   cliHeadlessInvocation(prompt: string): CliInvocation {
     return {

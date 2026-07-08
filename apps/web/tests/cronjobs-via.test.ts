@@ -146,10 +146,9 @@ async function listTerminals(
   token: string,
 ): Promise<TerminalListEntry[]> {
   const res = await trpcQuery(serverUrl, "terminal.list", { workspaceId }, token);
-  const body = await res.text();
-  expect(res.status, `terminal.list failed: ${body}`).toBe(200);
-  return (JSON.parse(body) as { result: { data: { terminals: TerminalListEntry[] } } }).result.data
-    .terminals;
+  expect(res.status).toBe(200);
+  const { terminals } = await trpcData<{ terminals: TerminalListEntry[] }>(res);
+  return terminals;
 }
 
 interface TriggerResponse {
@@ -440,6 +439,9 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     expect(data.via).toBe("chat");
     expect(typeof data.taskId).toBe("string");
     expect(data.terminalId).toBeUndefined();
+    // Full chat-response shape (TEST-17): the union also carries workspaceId + chatId.
+    expect(data.workspaceId).toBe("chatcron-main");
+    expect(typeof data.chatId).toBe("string");
 
     const workspaceId = toWorkspaceId("chatcron", "main");
 
@@ -462,9 +464,14 @@ describe("cronjobs.trigger default dispatches to chat", () => {
 // ---------------------------------------------------------------------------
 // via=terminal + unsupported adapter → silent fallback to chat
 //
-// cursor-cli's `cliInvocation` returns `unsupported: true`; the service warns
-// and downgrades to chat. As in workspace-create-via, the real Cursor SDK isn't
-// safe to run in the test process, so we assert the response shape only.
+// cursor-cli's `cliHeadlessInvocation` returns `unsupported: true`; the service
+// warns and downgrades to chat. As in workspace-create-via, the real Cursor SDK
+// isn't safe to run in the test process, so we assert the response shape only.
+// The chat fallback fires `submitTask`, which spawns the Cursor SDK in the
+// background; with no `cursor` binary in CI that background task fails, but the
+// failure is out-of-band (the response has already returned) and the process is
+// reaped by `server.close()` in afterAll — the only visible effect is benign
+// error-log noise, not a test failure.
 // ---------------------------------------------------------------------------
 
 describe("cronjobs.trigger via=terminal falls back to chat when unsupported", () => {
@@ -531,6 +538,10 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     // its absence.
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
+    // Full fallback-response shape (TEST-17): it lands on the chat branch, so
+    // workspaceId + chatId are present just like a native via=chat trigger.
+    expect(data.workspaceId).toBe("fbcron-main");
+    expect(typeof data.chatId).toBe("string");
   });
 });
 
@@ -617,7 +628,11 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
       { label: "cron terminal registered before delete" },
     );
 
-    // Deleting the job must tear down its live pane.
+    // Deleting the job must tear down its live pane. The stub sleeps
+    // STUB_SLEEP_SECONDS (6s), far longer than the localhost delete +
+    // terminal.list round-trips below, so the pane cannot self-expire within
+    // this window — its removal is attributable to `delete`, not a natural
+    // exit racing the assertion.
     const del = await trpcMutate(
       server.url,
       "cronjobs.delete",
