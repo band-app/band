@@ -109,6 +109,7 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
+    onExit?: () => void,
   ): Promise<TerminalSession> {
     const existing = this.terminals.get(terminalId);
     if (existing) return existing;
@@ -116,7 +117,7 @@ export class TerminalPool {
     if (inflight) return inflight;
     // Store the promise synchronously (before any await) so a concurrent call
     // that arrives while this one is awaiting sees it and reuses it.
-    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options);
+    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options, onExit);
     this.spawning.set(terminalId, promise);
     try {
       return await promise;
@@ -130,6 +131,7 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
+    onExit?: () => void,
   ): Promise<TerminalSession> {
     const shell = defaultShell();
     const resolvedPath = await shellPath();
@@ -275,6 +277,13 @@ export class TerminalPool {
 
     ptyProcess.onExit(() => {
       log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
+      // Distinguish a natural exit from an explicit `kill()`: the `kill()` path
+      // calls `pty.kill()` and then synchronously deletes the session from
+      // `terminals` — both run before node-pty's async `onExit` fires here, so
+      // if the entry is already gone the caller tore this terminal down. On a
+      // natural exit the entry is still present (this handler deletes it just
+      // below). Captured before that delete.
+      const explicitlyKilled = !this.terminals.has(terminalId);
       this.terminals.delete(terminalId);
       this.outputListeners.delete(terminalId);
       const set = this.workspaceTerminals.get(workspaceId);
@@ -290,6 +299,20 @@ export class TerminalPool {
           unlinkSync(session.autoRunFile);
         } catch {
           // Already gone / never written — nothing to clean up.
+        }
+      }
+      // Notify the caller that the PTY exited on its OWN (e.g. a self-closing
+      // cron pane whose command ended with `exit`). The pool stays oblivious to
+      // layout / event concerns; the service-supplied callback does that
+      // cleanup. Skipped on an explicit `kill()` — that path already runs the
+      // same teardown synchronously, so firing here too would double-emit
+      // `terminal-killed`. Guarded so a throwing callback can't wedge the exit
+      // handler.
+      if (onExit && !explicitlyKilled) {
+        try {
+          onExit();
+        } catch (err) {
+          log.warn("onExit callback threw for terminal %s: %s", terminalId, err);
         }
       }
     });

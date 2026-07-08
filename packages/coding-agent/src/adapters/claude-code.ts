@@ -789,6 +789,21 @@ export class ClaudeCodeAdapter implements CodingAgent {
   }
 
   /**
+   * Headless one-shot invocation for automated terminal dispatch (cronjobs,
+   * issue #581). `claude -p "<prompt>"` runs the prompt in print
+   * (non-interactive) mode and exits when the turn completes — unlike
+   * `cliInvocation`'s bare `claude "<prompt>"`, which opens the REPL and
+   * stays parked. The prompt is the value of `-p`, so a leading `-` in it is
+   * consumed as the flag's argument rather than parsed as a flag.
+   */
+  cliHeadlessInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CLAUDE_CODE_DEFAULT_BINARY,
+      args: ["-p", prompt],
+    };
+  }
+
+  /**
    * Resume CLI invocation for the chat tab's "Continue in terminal" action.
    * `claude --resume <session-id>` reopens the interactive REPL with that
    * exact conversation restored (session-ID lookup is scoped to the

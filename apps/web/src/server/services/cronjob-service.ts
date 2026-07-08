@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
@@ -7,9 +8,23 @@ import {
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
+// FRAGILE: `agentService`, `terminalService`, and `workspaceService` are
+// imported at module load but referenced ONLY inside function bodies
+// (`spawnCronTerminal` and friends). `workspace-service` already imports
+// `cronjobService` from this file, so the two form an ESM cycle — the same
+// live-binding constraint documented on the import block in
+// `workspace-service.ts` applies: never capture these at module load
+// (`const t = terminalService` at the top would get `undefined`), always
+// dereference at call time. The `via` enum below is deliberately NOT imported
+// from `workspace-service` for exactly this reason — see `cronjobVia`.
+import { formatShellCommand } from "./_utils/format-shell-command";
+import { agentService } from "./agent-service";
 import { BAND_CRON_ID_LABEL, type ChatSession, chatService } from "./chat-service";
 import { loadState } from "./state";
 import { TaskConflictError, taskService } from "./task-service";
+import { terminalService } from "./terminal-service";
+import { emit } from "./watcher-service";
+import { workspaceService } from "./workspace-service";
 
 const log = createLogger("cronjob-service");
 
@@ -28,6 +43,17 @@ interface SchedulerState {
   jobs: Map<string, Cron>;
   /** Whether the scheduler has been started */
   started: boolean;
+  /**
+   * Job ids with a `via="terminal"` dispatch currently mid-spawn. Held
+   * synchronously across the `await`-heavy body of `spawnCronTerminal`
+   * (resolve adapter → spawn PTY → persist `lastTerminalId`) so two
+   * concurrent fires for the same job — a manual `trigger` racing a
+   * scheduled tick, or a double-click — can't both pass the overlap check
+   * before either commits its new terminal id and orphan a PTY. The
+   * pool's own `spawning` map only dedupes identical `terminalId`s; this
+   * guards the check-then-act at the job level.
+   */
+  spawningTerminals: Set<string>;
 }
 
 const SCHEDULER_KEY = Symbol.for("band.cronjob-scheduler");
@@ -37,6 +63,7 @@ if (!g[SCHEDULER_KEY]) {
   g[SCHEDULER_KEY] = {
     jobs: new Map<string, Cron>(),
     started: false,
+    spawningTerminals: new Set<string>(),
   } satisfies SchedulerState;
 }
 
@@ -56,6 +83,20 @@ function schedulerState(): SchedulerState {
 // error at every call site instead of silent drift.
 // ---------------------------------------------------------------------------
 
+/**
+ * Where a cronjob fire dispatches its prompt (issue #581) — the same two
+ * values as `workspaceVia` on `workspaces.create` (#551).
+ *
+ * Deliberately re-declared here rather than imported from
+ * `workspace-service.ts`: that module and this one form an ESM cycle
+ * (`workspace-service` imports `cronjobService`), and `workspaceVia` is a
+ * module-load value — importing it across the cycle risks reading `undefined`
+ * while `workspace-service` is still initialising (see the FRAGILE note on the
+ * import block above). Keep the two enums in sync by convention.
+ */
+export const cronjobVia = z.enum(["chat", "terminal"]);
+export type CronjobVia = z.infer<typeof cronjobVia>;
+
 export const cronjobCreateInput = z.object({
   key: z.string().min(1),
   name: z.string().min(1),
@@ -63,6 +104,9 @@ export const cronjobCreateInput = z.object({
   cronExpression: z.string().min(1),
   scope: z.enum(["project", "workspace"]),
   workspaceId: z.string().optional(),
+  // Dispatch target for scheduled + manual fires. Optional — absent defaults to
+  // "chat" in `create()` so existing callers (the web UI) keep their behavior.
+  via: cronjobVia.optional(),
   enabled: z.boolean().default(true),
 });
 
@@ -102,6 +146,20 @@ export const cronjobByIdInput = z.object({
 export type CronjobCreateInput = z.infer<typeof cronjobCreateInput>;
 export type CronjobUpdateInput = z.infer<typeof cronjobUpdateInput>;
 export type CronjobByIdInput = z.infer<typeof cronjobByIdInput>;
+
+/**
+ * Result of a manual `trigger`, discriminated on the dispatch target.
+ *
+ *   - `chat` — a task was submitted to the cron chat pane (returns the task +
+ *     chat ids, preserving the pre-#581 response fields).
+ *   - `terminal` — a fresh self-closing PTY pane was spawned (returns its id).
+ *
+ * A `via="terminal"` job whose agent has no vendor CLI silently falls back to
+ * the chat shape, so callers can always rely on `via` to know what happened.
+ */
+export type CronjobTriggerResult =
+  | { via: "chat"; taskId: string; workspaceId: string; chatId: string }
+  | { via: "terminal"; terminalId: string; workspaceId: string };
 
 // ---------------------------------------------------------------------------
 // Service-level error types
@@ -223,6 +281,9 @@ export class CronjobService {
       cronExpression: input.cronExpression,
       scope: input.scope,
       workspaceId: input.workspaceId,
+      // Absent `via` means the web UI (or a pre-#581 caller) — default to chat
+      // so existing cronjobs keep dispatching exactly as before.
+      via: input.via ?? "chat",
       enabled: input.enabled,
       createdAt: new Date().toISOString(),
     };
@@ -267,8 +328,16 @@ export class CronjobService {
     const file = this.queries.loadFile(key);
     const index = file.jobs.findIndex((j) => j.id === id);
     if (index === -1) throw new CronjobNotFoundError();
-    file.jobs.splice(index, 1);
+    const [removed] = file.jobs.splice(index, 1);
     this.queries.saveFile(key, file);
+    // Best-effort: tear down the terminal a via="terminal" job last spawned so
+    // deleting the job doesn't leave a stray pane running the agent. No-op when
+    // the id is unset or the PTY already exited. `kill()` emits `terminal-killed`
+    // once — the pool suppresses the `cleanupOnExit` hook on an explicit kill
+    // (it detects the session was already removed), so there's no double-emit.
+    if (removed?.lastTerminalId) {
+      terminalService.kill(removed.lastTerminalId);
+    }
     this.reloadSchedules();
     return { ok: true };
   }
@@ -295,16 +364,27 @@ export class CronjobService {
    * succeeds (which would require buffering the chat name/labels on the
    * task row).
    */
-  trigger(key: string, id: string): { taskId: string; workspaceId: string; chatId: string } {
+  async trigger(key: string, id: string): Promise<CronjobTriggerResult> {
     const job = this.findJob(key, id);
     if (!job) throw new CronjobNotFoundError();
 
     const workspaceId = this.resolveWorkspaceId(job, key);
     if (!workspaceId) throw new CronjobProjectNotFoundError();
 
+    // Terminal dispatch mirrors the scheduled fire. `spawnCronTerminal` throws
+    // `TaskConflictError` when the previous pane is still alive (→ 409, same as
+    // the chat path's running-task conflict) and returns `{ terminalId: null }`
+    // when the agent has no vendor CLI, in which case we fall through to chat.
+    if (job.via === "terminal") {
+      const { terminalId } = await this.spawnCronTerminal(job, workspaceId, key);
+      if (terminalId) {
+        return { via: "terminal", terminalId, workspaceId };
+      }
+    }
+
     const cronChat = this.getOrCreateCronjobChat(workspaceId, job);
     const task = taskService.submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
-    return { taskId: task.id, workspaceId, chatId: cronChat.id };
+    return { via: "chat", taskId: task.id, workspaceId, chatId: cronChat.id };
   }
 
   // -------------------------------------------------------------------------
@@ -429,6 +509,125 @@ export class CronjobService {
   }
 
   /**
+   * Dispatch a `via="terminal"` fire: spawn the agent's *headless* vendor CLI
+   * in a fresh, self-closing PTY pane. Mirrors the `via=terminal` branch of
+   * `WorkspaceService.create` (#551), but adapted for a recurring cron in two
+   * important ways:
+   *
+   *   - **Headless, not interactive.** We use `adapter.cliHeadlessInvocation`
+   *     (`claude -p`, `codex exec`, …), NOT the interactive `cliInvocation`
+   *     that workspace-create uses. The interactive REPL never exits on its
+   *     own, so the pane would stay parked after the turn — the shell's `exit`
+   *     would never run and the overlap guard below would treat "idle at the
+   *     REPL" as "still running", blocking every subsequent tick (issue #581
+   *     follow-up). The headless form runs the prompt and exits, which is what
+   *     makes both the self-close and the overlap guard actually work.
+   *   - **Overlap guard.** If the terminal spawned by this job's previous fire
+   *     is still alive, throw `TaskConflictError` instead of launching a second
+   *     agent — the caller records "skipped" (scheduled) or surfaces 409
+   *     (manual trigger), exactly like the chat running-task conflict. Because
+   *     the headless process exits when the turn completes, a live PTY reliably
+   *     means the previous run is genuinely still working.
+   *   - **Self-closing pane.** The command is `<headless-cli>\nexit`, staged
+   *     and sourced by the pool via `.`, so the shell exits the moment the
+   *     headless CLI returns. Combined with `cleanupOnExit`, the finished pane
+   *     removes itself from the layout and emits `terminal-killed` — bounding a
+   *     frequent cron to ~1 pane and keeping the next tick's liveness check
+   *     accurate.
+   *
+   * Returns `{ terminalId: null }` when the agent exposes no headless CLI (or
+   * the workspace can't be resolved), signalling the caller to fall back to
+   * chat. Spawn failures propagate (recorded as "failed").
+   *
+   * Edge case: if `terminalService.spawn` throws *after* the PTY is forked but
+   * before `updateLastTerminal` runs, `lastTerminalId` stays unset for this
+   * fire, so the next tick's overlap guard won't see that (now likely dead)
+   * PTY. This is acceptable — a spawn that rejects has almost certainly failed
+   * to produce a usable pane, and the synchronous in-process lock above still
+   * prevents a *concurrent* double-spawn; only a subsequent, well-separated
+   * tick could add a second pane, which is the same at-most-transient
+   * duplication the self-close bound already tolerates.
+   */
+  private async spawnCronTerminal(
+    job: CronjobDefinition,
+    workspaceId: string,
+    fileKey: string,
+  ): Promise<{ terminalId: string | null }> {
+    const state = schedulerState();
+    // Close the check-then-act TOCTOU window (PR #627 review): the live-PTY
+    // overlap guard below reads `lastTerminalId`, then this method `await`s an
+    // adapter resolve + PTY spawn before persisting a NEW id. Two concurrent
+    // fires for the same job (a manual `trigger` racing a scheduled tick, a
+    // double-click) could both pass the guard before either commits, spawn two
+    // PTYs, and orphan the first. A synchronous check-and-add BEFORE any await
+    // rejects the second caller with the same `TaskConflictError` the overlap
+    // guard uses (→ scheduled "skipped" / manual 409). Released in `finally`.
+    if (state.spawningTerminals.has(job.id)) {
+      throw new TaskConflictError(`Cronjob ${job.id} terminal run is already being spawned`);
+    }
+    state.spawningTerminals.add(job.id);
+    try {
+      const workspace = workspaceService.resolve(workspaceId);
+      if (!workspace) {
+        log.warn(
+          { jobId: job.id, workspaceId },
+          "workspace not resolvable for via=terminal cronjob; falling back to chat",
+        );
+        return { terminalId: null };
+      }
+
+      // Overlap guard: re-read the row (the scheduled path closes over a stale
+      // `job` captured at schedule time) so we check the terminal the LAST fire
+      // actually spawned. A live PTY means the previous headless run is still
+      // working (a finished one has exited and self-closed).
+      const prevTerminalId = this.findJob(fileKey, job.id)?.lastTerminalId;
+      if (prevTerminalId && terminalService.getSession(prevTerminalId)) {
+        throw new TaskConflictError(`Cronjob ${job.id} terminal run is still in progress`);
+      }
+
+      // Resolve the agent's HEADLESS CLI invocation on the request thread so we
+      // can fall back to chat synchronously when it's unsupported (e.g.
+      // cursor-cli). No `codingAgentId` on the cron row — use the workspace's
+      // default agent. `createWorkspaceAgent` deliberately does NOT register in
+      // the chat agent pool (see its doc in `infra/agents/agent-pool.ts`) — it
+      // just constructs a standalone adapter — so this create-then-`abort`
+      // leaves no pool slot behind, the same one-shot pattern
+      // `workspaceService.generateCommitMessage` uses.
+      const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
+      const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
+      // Release the short-lived adapter. `cliHeadlessInvocation` returns pure
+      // data and starts no session/subprocess, so this `abort` is a safe no-op
+      // for every current adapter; it's kept as a belt-and-braces release in
+      // case a future adapter allocates a handle on construction.
+      adapter.abort?.();
+      if (!invocation || invocation.unsupported) {
+        const reason = invocation?.reason ?? "adapter does not expose cliHeadlessInvocation";
+        log.warn(
+          { jobId: job.id, workspaceId, reason },
+          "via=terminal requested but agent has no headless CLI; falling back to chat",
+        );
+        return { terminalId: null };
+      }
+
+      // `\nexit` makes the pane self-close when the headless CLI returns: the
+      // pool stages `<command>\n` into a temp file and runs it via the POSIX dot
+      // builtin, so a trailing `exit` terminates the shell once the CLI exits.
+      const command = `${formatShellCommand(invocation.command, invocation.args)}\nexit`;
+      const terminalId = randomUUID();
+      await terminalService.spawn(workspaceId, terminalId, { command }, { cleanupOnExit: true });
+      // Persist the id BEFORE emitting so the next tick's overlap check sees it
+      // even if the emit's subscribers race.
+      this.queries.updateLastTerminal(job.id, terminalId);
+      // Broadcast so an open dashboard adds the pane without a reload — same
+      // pattern as `terminal.create` and the `via=terminal` workspace-create path.
+      emit({ kind: "terminal-created", workspaceId, terminalId });
+      return { terminalId };
+    } finally {
+      state.spawningTerminals.delete(job.id);
+    }
+  }
+
+  /**
    * Resolve the workspace the cronjob fires into.
    *
    * Returns `null` for project-scoped jobs whose project no longer exists
@@ -532,6 +731,38 @@ export class CronjobService {
     }
 
     log.info({ jobId: job.id, name: job.name, workspaceId }, "executing cronjob");
+
+    // Terminal dispatch (issue #581). `spawnCronTerminal` throws
+    // `TaskConflictError` when the job's previous pane is still alive (record
+    // "skipped", identical to the chat running-task conflict below) and returns
+    // `{ terminalId: null }` when the agent has no vendor CLI — in which case we
+    // fall through to the chat path so the fire still does something.
+    if (job.via === "terminal") {
+      try {
+        const { terminalId } = await this.spawnCronTerminal(job, workspaceId, fileKey);
+        if (terminalId) {
+          log.info({ jobId: job.id, terminalId, workspaceId }, "cronjob terminal spawned");
+          this.safeUpdateLastRun(job.id, "completed");
+          return;
+        }
+        log.info(
+          { jobId: job.id, workspaceId },
+          "via=terminal not supported by agent; falling back to chat dispatch",
+        );
+      } catch (err) {
+        if (err instanceof TaskConflictError) {
+          log.info(
+            { jobId: job.id, workspaceId },
+            "previous terminal run still active, skipping cronjob execution",
+          );
+          this.safeUpdateLastRun(job.id, "skipped");
+          return;
+        }
+        log.error({ jobId: job.id, err }, "cronjob terminal dispatch failed");
+        this.safeUpdateLastRun(job.id, "failed");
+        return;
+      }
+    }
 
     try {
       const chat = this.getOrCreateCronjobChat(workspaceId, job);

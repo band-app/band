@@ -160,8 +160,10 @@ band cronjobs list [--project <string>] [--workspace <string>]
 ### Create a new scheduled cronjob
 
 ```sh
-band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--workspace-id <string>] [--disabled]
+band cronjobs create <key> --name <string> --prompt <string> --cron <string> [--scope <string>] [--workspace-id <string>] [--via <string>] [--disabled]
 ```
+
+`--via` picks where each fire dispatches the prompt: `chat` (submits a task to the cronjob's dedicated chat pane — the default and backward-compatible behavior) or `terminal` (spawns the agent's vendor CLI in a fresh self-closing PTY pane; if the agent has no vendor CLI it silently falls back to chat). When omitted it resolves via the same precedence as `workspaces create`: `--via` flag → `BAND_DISPATCH` env → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`. A terminal fire is skipped (recorded `skipped`) when the previous run's pane is still active, so an agent that runs longer than the interval is never interrupted.
 
 ### Update an existing cronjob
 

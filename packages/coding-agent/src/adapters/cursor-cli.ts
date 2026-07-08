@@ -188,6 +188,19 @@ export class CursorCliAdapter implements CodingAgent {
   }
 
   /**
+   * Cursor CLI is SDK-only (JSON over a managed subprocess) with no
+   * non-interactive vendor CLI to run in a pane, so headless terminal
+   * dispatch (cronjobs `via: "terminal"`, issue #581) also returns the
+   * `unsupported` sentinel — the cronjob service then falls back to chat.
+   */
+  cliHeadlessInvocation(_prompt: string): CliInvocation {
+    return {
+      unsupported: true,
+      reason: "Cursor CLI has no non-interactive CLI invocation; falling back to chat.",
+    };
+  }
+
+  /**
    * The chat tab's "Continue in terminal" action has no Cursor equivalent:
    * the agent runs over the SDK's managed JSON subprocess, with no
    * interactive by-id resume CLI. Returning the `unsupported` sentinel

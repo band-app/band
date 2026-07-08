@@ -515,6 +515,19 @@ export class CodexAdapter implements CodingAgent {
   }
 
   /**
+   * Headless one-shot invocation for automated terminal dispatch (cronjobs,
+   * issue #581). `codex exec "<prompt>"` runs the prompt non-interactively
+   * and exits on completion — unlike `cliInvocation`'s bare `codex
+   * "<prompt>"`, which opens the interactive TUI and stays parked.
+   */
+  cliHeadlessInvocation(prompt: string): CliInvocation {
+    return {
+      command: this.executablePath ?? CODEX_DEFAULT_BINARY,
+      args: ["exec", prompt],
+    };
+  }
+
+  /**
    * Resume CLI invocation for the chat tab's "Continue in terminal" action.
    * `codex resume <session-id>` reopens the interactive Codex TUI with that
    * thread restored.
