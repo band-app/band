@@ -277,10 +277,12 @@ export class TerminalPool {
 
     ptyProcess.onExit(() => {
       log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
-      // Distinguish a natural exit from an explicit `kill()`: `kill()` removes
-      // the session from `terminals` synchronously before `pty.kill()`'s async
-      // `onExit` lands here, so a missing entry means the caller already tore
-      // this terminal down. Captured before this handler's own delete below.
+      // Distinguish a natural exit from an explicit `kill()`: the `kill()` path
+      // calls `pty.kill()` and then synchronously deletes the session from
+      // `terminals` — both run before node-pty's async `onExit` fires here, so
+      // if the entry is already gone the caller tore this terminal down. On a
+      // natural exit the entry is still present (this handler deletes it just
+      // below). Captured before that delete.
       const explicitlyKilled = !this.terminals.has(terminalId);
       this.terminals.delete(terminalId);
       this.outputListeners.delete(terminalId);

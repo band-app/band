@@ -538,6 +538,15 @@ export class CronjobService {
    * Returns `{ terminalId: null }` when the agent exposes no headless CLI (or
    * the workspace can't be resolved), signalling the caller to fall back to
    * chat. Spawn failures propagate (recorded as "failed").
+   *
+   * Edge case: if `terminalService.spawn` throws *after* the PTY is forked but
+   * before `updateLastTerminal` runs, `lastTerminalId` stays unset for this
+   * fire, so the next tick's overlap guard won't see that (now likely dead)
+   * PTY. This is acceptable — a spawn that rejects has almost certainly failed
+   * to produce a usable pane, and the synchronous in-process lock above still
+   * prevents a *concurrent* double-spawn; only a subsequent, well-separated
+   * tick could add a second pane, which is the same at-most-transient
+   * duplication the self-close bound already tolerates.
    */
   private async spawnCronTerminal(
     job: CronjobDefinition,

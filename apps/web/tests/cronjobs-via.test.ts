@@ -93,10 +93,13 @@ function writeVendorCliScript(tmpHome: string, name: string, body: string): stri
  *      so an unrelated spawn's line is simply ignored.
  */
 function writeLoggingVendorCli(tmpHome: string, name: string, logPath: string): string {
+  // POSIX single-quote escaping so an apostrophe in the tmp path can't break
+  // the `>> '<path>'` redirect (which would fail the test as a silent timeout).
+  const quotedLog = logPath.replace(/'/g, `'\\''`);
   return writeVendorCliScript(
     tmpHome,
     name,
-    `out="ARGV:"\nfor arg in "$@"; do out="$out$arg|"; done\nprintf '%s\\n' "$out" >> '${logPath}'\n`,
+    `out="ARGV:"\nfor arg in "$@"; do out="$out$arg|"; done\nprintf '%s\\n' "$out" >> '${quotedLog}'\n`,
   );
 }
 
@@ -146,9 +149,12 @@ async function listTerminals(
   token: string,
 ): Promise<TerminalListEntry[]> {
   const res = await trpcQuery(serverUrl, "terminal.list", { workspaceId }, token);
-  expect(res.status).toBe(200);
-  const { terminals } = await trpcData<{ terminals: TerminalListEntry[] }>(res);
-  return terminals;
+  // Read the body first so a non-200 surfaces the server's error text, not just
+  // the status — matches the pattern in the sibling terminal specs.
+  const body = await res.text();
+  expect(res.status, `terminal.list failed: ${body}`).toBe(200);
+  return (JSON.parse(body) as { result: { data: { terminals: TerminalListEntry[] } } }).result.data
+    .terminals;
 }
 
 interface TriggerResponse {
@@ -439,7 +445,8 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     expect(data.via).toBe("chat");
     expect(typeof data.taskId).toBe("string");
     expect(data.terminalId).toBeUndefined();
-    // Full chat-response shape (TEST-17): the union also carries workspaceId + chatId.
+    // Assert the full chat-branch shape so a field rename/drop is caught: the
+    // union also carries workspaceId + chatId.
     expect(data.workspaceId).toBe("chatcron-main");
     expect(typeof data.chatId).toBe("string");
 
@@ -538,7 +545,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
     // its absence.
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
-    // Full fallback-response shape (TEST-17): it lands on the chat branch, so
+    // Assert the full fallback shape: it lands on the chat branch, so
     // workspaceId + chatId are present just like a native via=chat trigger.
     expect(data.workspaceId).toBe("fbcron-main");
     expect(typeof data.chatId).toBe("string");
@@ -781,5 +788,103 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
       { label: "one cron terminal registered" },
     );
     expect(terminals).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// via=terminal — workspace-scoped job resolves to its own workspaceId (not the
+// project's default-branch workspace). All other blocks use scope="project";
+// this exercises `resolveWorkspaceId`'s workspace branch (returns
+// `job.workspaceId` directly) with a terminal dispatch, on a NON-default
+// branch so the two resolutions are distinguishable.
+// ---------------------------------------------------------------------------
+
+describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
+  const TOKEN = "cron-via-wsscope-token";
+  const STUB_SLEEP_SECONDS = 6;
+  let server: ServerHandle;
+  let tmpHome: string;
+  let jobId: string;
+  const FEATURE_WS = toWorkspaceId("wsscron", "feature");
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-cron-via-wsscope-");
+    const repoPath = createGitRepo(tmpHome, "wsscron");
+    // A real second worktree on a non-default branch so `workspaceService
+    // .resolve(FEATURE_WS)` finds a path and the resolved id ("wsscron-feature")
+    // differs from the project default ("wsscron-main").
+    const featurePath = join(tmpHome, "wsscron-feature-wt");
+    git(repoPath, ["worktree", "add", featurePath, "-b", "feature"]);
+    const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "wsscron",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { branch: "main", path: repoPath },
+            { branch: "feature", path: featurePath },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
+      ],
+    });
+    server = await startServer({ tmpHome });
+
+    // Storage key for a workspace-scoped cron is the workspace id itself.
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: FEATURE_WS,
+        name: "Workspace-scoped terminal cron",
+        prompt: "workspace scoped work",
+        cronExpression: "0 0 * * *",
+        scope: "workspace",
+        workspaceId: FEATURE_WS,
+        via: "terminal",
+      },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ job: { id: string } }>(res);
+    jobId = data.job.id;
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("dispatches the terminal into the job's own workspace", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.trigger",
+      { key: FEATURE_WS, id: jobId },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const data = await trpcData<TriggerResponse>(res);
+    expect(data.via).toBe("terminal");
+    expect(typeof data.terminalId).toBe("string");
+    // The workspace branch returns the job's workspaceId verbatim — the feature
+    // workspace, NOT the project's default "wsscron-main".
+    expect(data.workspaceId).toBe(FEATURE_WS);
+
+    // And the PTY is registered under that same workspace.
+    const terminals = await waitFor(
+      async () => {
+        const list = await listTerminals(server.url, FEATURE_WS, TOKEN);
+        return list.some((t) => t.terminalId === data.terminalId) ? list : undefined;
+      },
+      { label: "terminal registered under the feature workspace" },
+    );
+    expect(terminals.some((t) => t.terminalId === data.terminalId)).toBe(true);
   });
 });
