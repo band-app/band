@@ -1260,6 +1260,41 @@ export class WorkspacePage {
     return state?.groups[groupId];
   }
 
+  /** Seed the shared global dockview layout (`band:dockview-layout-v7`)
+   *  before the app mounts. Uses `addInitScript`, so it MUST run BEFORE
+   *  the first `goto` — the value is applied to `localStorage` ahead of
+   *  the page script, exactly like `installTerminalSocketInstrumentation`.
+   *
+   *  The empty default layout leaves all three edge groups collapsed and
+   *  empty (so they render at zero size and there's nothing to observe a
+   *  maximize collapsing). Seeding a layout that docks a panel into an
+   *  edge group is the only non-flaky way to start with a populated,
+   *  visible edge — dockview's edge docking is native HTML5 drag-and-drop,
+   *  which is unreliable to drive through Playwright. */
+  async seedGlobalLayout(layout: unknown): Promise<void> {
+    await this.page.addInitScript((serialized) => {
+      localStorage.setItem("band:dockview-layout-v7", serialized as string);
+    }, JSON.stringify(layout));
+  }
+
+  /** The dockview bottom edge-group container that is currently on-screen.
+   *
+   *  dockview tags every edge-group shell element with a library-provided
+   *  `data-testid` (`dv-edge-group-edge-<direction>`), and renders the
+   *  bottom slot in more than one shell position — only the populated one
+   *  is laid out at a non-zero size. Filtering to `visible` collapses that
+   *  to the single on-screen instance, so the test can assert
+   *  `toHaveCount(1)` (edge shown) vs `toHaveCount(0)` (edge collapsed to
+   *  zero size while a group is maximized).
+   *
+   *  Using dockview's own testid here mirrors how the maximize spec already
+   *  asserts on dockview-owned chrome (e.g. the `dv-active-tab` class on
+   *  `.dv-tab`): the edge shell is third-party markup we don't render, so
+   *  there's no BEM `data-testid` of our own to key off. */
+  bottomEdgeGroup(): Locator {
+    return this.page.getByTestId("dv-edge-group-edge-bottom").filter({ visible: true });
+  }
+
   /** Reset the per-workspace shared-dockview state entry in
    *  `localStorage` and (re-)navigate to the workspace so the next
    *  mount runs against a clean slate. Two-step (matches

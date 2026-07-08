@@ -119,6 +119,31 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
   }
 }
 
+/**
+ * Collapse (hide) every edge group while a grid group is maximized so the
+ * maximized tab gets the full area; on exit, re-derive edge visibility from
+ * panel presence.
+ *
+ * Restore is deliberately state-free: we only ever toggle *visibility* here,
+ * never `collapse()`/`expand()`, so each edge's collapsed-vs-expanded strip
+ * state is left untouched and comes back exactly as the user left it. Edge
+ * visibility is already an ephemeral, derived property (see
+ * `refreshEdgeGroupVisibility`), so hiding it for the duration of a maximize
+ * and re-deriving on exit is consistent with how the rest of the layout
+ * treats it — no separate "prior edge state" bookkeeping is needed.
+ */
+export function applyMaximizeEdgeVisibility(api: DockviewApi, maximized: boolean): void {
+  if (maximized) {
+    for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
+      try {
+        api.setEdgeGroupVisible(direction, false);
+      } catch {}
+    }
+  } else {
+    refreshEdgeGroupVisibility(api, false);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Collapse/expand toggle + inner-dockview registry
 // ---------------------------------------------------------------------------
