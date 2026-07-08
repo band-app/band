@@ -114,10 +114,11 @@ function throwAsTRPCError(err: unknown): never {
     throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
   }
   if (err instanceof TaskConflictError) {
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: "Task already running for this chat pane",
-    });
+    // Surface the actual conflict reason rather than a hardcoded string: since
+    // #581 a `via="terminal"` fire also throws `TaskConflictError` (previous
+    // terminal run still in progress / being spawned), so a chat-pane-specific
+    // message would misdescribe the terminal case.
+    throw new TRPCError({ code: "CONFLICT", message: err.message });
   }
   throw err;
 }

@@ -43,6 +43,17 @@ interface SchedulerState {
   jobs: Map<string, Cron>;
   /** Whether the scheduler has been started */
   started: boolean;
+  /**
+   * Job ids with a `via="terminal"` dispatch currently mid-spawn. Held
+   * synchronously across the `await`-heavy body of `spawnCronTerminal`
+   * (resolve adapter → spawn PTY → persist `lastTerminalId`) so two
+   * concurrent fires for the same job — a manual `trigger` racing a
+   * scheduled tick, or a double-click — can't both pass the overlap check
+   * before either commits its new terminal id and orphan a PTY. The
+   * pool's own `spawning` map only dedupes identical `terminalId`s; this
+   * guards the check-then-act at the job level.
+   */
+  spawningTerminals: Set<string>;
 }
 
 const SCHEDULER_KEY = Symbol.for("band.cronjob-scheduler");
@@ -52,6 +63,7 @@ if (!g[SCHEDULER_KEY]) {
   g[SCHEDULER_KEY] = {
     jobs: new Map<string, Cron>(),
     started: false,
+    spawningTerminals: new Set<string>(),
   } satisfies SchedulerState;
 }
 
@@ -321,6 +333,12 @@ export class CronjobService {
     // Best-effort: tear down the terminal a via="terminal" job last spawned so
     // deleting the job doesn't leave a stray pane running the agent. No-op when
     // the id is unset or the PTY already exited.
+    //
+    // If the PTY is still live, `kill()` emits `terminal-killed` synchronously
+    // AND killing the PTY trips its `cleanupOnExit` hook, which emits a second
+    // `terminal-killed` asynchronously. The duplicate is harmless — layout
+    // removal is idempotent and a repeat prune event is a no-op — so we accept
+    // it rather than reaching into the pool to clear the exit hook first.
     if (removed?.lastTerminalId) {
       terminalService.kill(removed.lastTerminalId);
     }
@@ -530,54 +548,71 @@ export class CronjobService {
     workspaceId: string,
     fileKey: string,
   ): Promise<{ terminalId: string | null }> {
-    const workspace = workspaceService.resolve(workspaceId);
-    if (!workspace) {
-      log.warn(
-        { jobId: job.id, workspaceId },
-        "workspace not resolvable for via=terminal cronjob; falling back to chat",
-      );
-      return { terminalId: null };
+    const state = schedulerState();
+    // Close the check-then-act TOCTOU window (PR #627 review): the live-PTY
+    // overlap guard below reads `lastTerminalId`, then this method `await`s an
+    // adapter resolve + PTY spawn before persisting a NEW id. Two concurrent
+    // fires for the same job (a manual `trigger` racing a scheduled tick, a
+    // double-click) could both pass the guard before either commits, spawn two
+    // PTYs, and orphan the first. A synchronous check-and-add BEFORE any await
+    // rejects the second caller with the same `TaskConflictError` the overlap
+    // guard uses (→ scheduled "skipped" / manual 409). Released in `finally`.
+    if (state.spawningTerminals.has(job.id)) {
+      throw new TaskConflictError(`Cronjob ${job.id} terminal run is already being spawned`);
     }
+    state.spawningTerminals.add(job.id);
+    try {
+      const workspace = workspaceService.resolve(workspaceId);
+      if (!workspace) {
+        log.warn(
+          { jobId: job.id, workspaceId },
+          "workspace not resolvable for via=terminal cronjob; falling back to chat",
+        );
+        return { terminalId: null };
+      }
 
-    // Overlap guard: re-read the row (the scheduled path closes over a stale
-    // `job` captured at schedule time) so we check the terminal the LAST fire
-    // actually spawned. A live PTY means the previous headless run is still
-    // working (a finished one has exited and self-closed).
-    const prevTerminalId = this.findJob(fileKey, job.id)?.lastTerminalId;
-    if (prevTerminalId && terminalService.getSession(prevTerminalId)) {
-      throw new TaskConflictError(`Cronjob ${job.id} terminal run is still in progress`);
+      // Overlap guard: re-read the row (the scheduled path closes over a stale
+      // `job` captured at schedule time) so we check the terminal the LAST fire
+      // actually spawned. A live PTY means the previous headless run is still
+      // working (a finished one has exited and self-closed).
+      const prevTerminalId = this.findJob(fileKey, job.id)?.lastTerminalId;
+      if (prevTerminalId && terminalService.getSession(prevTerminalId)) {
+        throw new TaskConflictError(`Cronjob ${job.id} terminal run is still in progress`);
+      }
+
+      // Resolve the agent's HEADLESS CLI invocation on the request thread so we
+      // can fall back to chat synchronously when it's unsupported (e.g.
+      // cursor-cli). No `codingAgentId` on the cron row — use the workspace's
+      // default agent.
+      const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
+      const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
+      // Release the short-lived adapter; we only needed the pure-data invocation.
+      adapter.abort?.();
+      if (!invocation || invocation.unsupported) {
+        const reason = invocation?.reason ?? "adapter does not expose cliHeadlessInvocation";
+        log.warn(
+          { jobId: job.id, workspaceId, reason },
+          "via=terminal requested but agent has no headless CLI; falling back to chat",
+        );
+        return { terminalId: null };
+      }
+
+      // `\nexit` makes the pane self-close when the headless CLI returns: the
+      // pool stages `<command>\n` into a temp file and runs it via the POSIX dot
+      // builtin, so a trailing `exit` terminates the shell once the CLI exits.
+      const command = `${formatShellCommand(invocation.command, invocation.args)}\nexit`;
+      const terminalId = randomUUID();
+      await terminalService.spawn(workspaceId, terminalId, { command }, { cleanupOnExit: true });
+      // Persist the id BEFORE emitting so the next tick's overlap check sees it
+      // even if the emit's subscribers race.
+      this.queries.updateLastTerminal(job.id, terminalId);
+      // Broadcast so an open dashboard adds the pane without a reload — same
+      // pattern as `terminal.create` and the `via=terminal` workspace-create path.
+      emit({ kind: "terminal-created", workspaceId, terminalId });
+      return { terminalId };
+    } finally {
+      state.spawningTerminals.delete(job.id);
     }
-
-    // Resolve the agent's HEADLESS CLI invocation on the request thread so we
-    // can fall back to chat synchronously when it's unsupported (e.g.
-    // cursor-cli). No `codingAgentId` on the cron row — use the workspace's
-    // default agent.
-    const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
-    const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
-    // Release the short-lived adapter; we only needed the pure-data invocation.
-    adapter.abort?.();
-    if (!invocation || invocation.unsupported) {
-      const reason = invocation?.reason ?? "adapter does not expose cliHeadlessInvocation";
-      log.warn(
-        { jobId: job.id, workspaceId, reason },
-        "via=terminal requested but agent has no headless CLI; falling back to chat",
-      );
-      return { terminalId: null };
-    }
-
-    // `\nexit` makes the pane self-close when the headless CLI returns: the pool
-    // stages `<command>\n` into a temp file and runs it via the POSIX dot
-    // builtin, so a trailing `exit` terminates the shell once the CLI exits.
-    const command = `${formatShellCommand(invocation.command, invocation.args)}\nexit`;
-    const terminalId = randomUUID();
-    await terminalService.spawn(workspaceId, terminalId, { command }, { cleanupOnExit: true });
-    // Persist the id BEFORE emitting so the next tick's overlap check sees it
-    // even if the emit's subscribers race.
-    this.queries.updateLastTerminal(job.id, terminalId);
-    // Broadcast so an open dashboard adds the pane without a reload — same
-    // pattern as `terminal.create` and the `via=terminal` workspace-create path.
-    emit({ kind: "terminal-created", workspaceId, terminalId });
-    return { terminalId };
   }
 
   /**

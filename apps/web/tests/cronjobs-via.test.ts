@@ -681,3 +681,90 @@ describe("cronjobs.trigger — auth", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// via=terminal — concurrent fires spawn at most one terminal (PR #627 review
+// blocker: TOCTOU race in the overlap guard). Two triggers racing for the same
+// job must NOT both pass the guard and spawn two PTYs (orphaning one). The
+// synchronous per-job spawn lock in `spawnCronTerminal` guarantees exactly one
+// wins and the other conflicts (409). Uses a sleeping stub so the winner's pane
+// stays alive long enough to count.
+// ---------------------------------------------------------------------------
+
+describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
+  const TOKEN = "cron-via-race-token";
+  const STUB_SLEEP_SECONDS = 6;
+  let server: ServerHandle;
+  let tmpHome: string;
+  let jobId: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-cron-via-race-");
+    const repoPath = createGitRepo(tmpHome, "racecron");
+    const stubBin = writeSleepingVendorCli(tmpHome, "stub-claude.sh", STUB_SLEEP_SECONDS);
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "racecron",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
+      ],
+    });
+    server = await startServer({ tmpHome });
+
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "racecron",
+        name: "Racing terminal cron",
+        prompt: "long running work",
+        cronExpression: "0 0 * * *",
+        scope: "project",
+        via: "terminal",
+      },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ job: { id: string } }>(res);
+    jobId = data.job.id;
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("two concurrent triggers spawn exactly one terminal; the loser gets 409", async () => {
+    // Fire both at once so their dispatch paths interleave at the `await`
+    // boundaries inside `spawnCronTerminal`.
+    const [a, b] = await Promise.all([
+      trpcMutate(server.url, "cronjobs.trigger", { key: "racecron", id: jobId }, TOKEN),
+      trpcMutate(server.url, "cronjobs.trigger", { key: "racecron", id: jobId }, TOKEN),
+    ]);
+    const statuses = [a.status, b.status].sort();
+
+    // Exactly one winner (200) and one conflict (409) — never two 200s (which
+    // would mean two PTYs raced past the guard).
+    expect(statuses).toEqual([200, 409]);
+
+    // And the workspace holds exactly one terminal — no orphan.
+    const workspaceId = toWorkspaceId("racecron", "main");
+    const terminals = await waitFor(
+      async () => {
+        const list = await listTerminals(server.url, workspaceId, TOKEN);
+        return list.length >= 1 ? list : undefined;
+      },
+      { label: "one cron terminal registered" },
+    );
+    expect(terminals).toHaveLength(1);
+  });
+});

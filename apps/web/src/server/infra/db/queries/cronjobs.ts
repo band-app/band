@@ -17,8 +17,8 @@ export type CronjobScope = "project" | "workspace";
 /**
  * Where a cronjob fire dispatches its prompt (issue #581). Defined inline here
  * rather than importing `workspaceVia` from the services tier: Infra must not
- * depend on `services/`, and the two `via` enums share the same two values by
- * convention (keep them in sync).
+ * depend on `services/`. Keep this `CronjobVia` and the `cronjobVia` zod enum in
+ * `cronjob-service.ts` in sync — they intentionally carry the same two values.
  */
 export type CronjobVia = "chat" | "terminal";
 

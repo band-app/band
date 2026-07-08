@@ -119,7 +119,10 @@ export class TerminalService {
     // teardown as an explicit `kill` — the tab is dropped from the saved layout
     // and a `terminal-killed` event is emitted. Off by default so a user's
     // interactive terminal keeps its "Terminal exited" pane on screen (existing
-    // behavior); only opt-in callers get the auto-prune.
+    // behavior); only opt-in callers get the auto-prune. The exit hook closes
+    // over THIS call's `workspaceId`/`terminalId`, so callers must pass the same
+    // `workspaceId` the terminal is registered under in the layout (they match
+    // here — `addTerminalToLayout` below uses the same value).
     opts?: { cleanupOnExit?: boolean },
   ): Promise<TerminalSession> {
     const workspace = workspaceService.resolve(workspaceId);
