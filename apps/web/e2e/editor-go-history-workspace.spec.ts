@@ -33,11 +33,11 @@
  *     (the palette's real dispatch is a synchronous `window.dispatchEvent`).
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -74,23 +74,6 @@ const B_TWO_TEXT = "workspace B file two";
 // renders. The bug only manifests in the desktop layout, where multiple
 // workspaces are alive at once under `MultiWorkspacePanelHost`'s LRU cache.
 test.use({ viewport: { width: 1280, height: 800 } });
-
-function makeGitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@test.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@test.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-}
-
-function git(cwd: string, args: string[], home: string): void {
-  execFileSync("git", args, { cwd, env: makeGitEnv(home) });
-}
 
 let server!: ServerHandle;
 let tmpHome: string | undefined;

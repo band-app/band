@@ -305,6 +305,13 @@ const clientCache = new Map<string, CachedClient>();
 /**
  * Get or create an LSP client for the given WebSocket URL.
  * The client is cached per URL (effectively per workspace+language).
+ *
+ * `workspaceId` is only consumed on the CREATE path — it's baked into the
+ * `BandWorkspace` at construction. On a cache hit it's intentionally ignored:
+ * `wsUrl` is built from the workspaceId (`buildLspWsUrl`), so the cache key
+ * already partitions clients by workspace and a hit is guaranteed to carry the
+ * same workspaceId the caller passed. (If that URL↔workspace coupling ever
+ * changes, this assumption must be revisited.)
  */
 async function getOrCreateClient(
   wsUrl: string,

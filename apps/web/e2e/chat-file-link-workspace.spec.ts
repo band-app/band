@@ -45,11 +45,11 @@
  * close the dispatcher-side coverage gap.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -76,27 +76,6 @@ const WORKSPACE_B = toWorkspaceId(PROJECT, BRANCH_B);
 // cache. The mobile layout mounts one workspace at a time, so there's no
 // cross-workspace event leak to guard against there in the same way.
 test.use({ viewport: { width: 1280, height: 800 } });
-
-function makeGitEnv(home: string): NodeJS.ProcessEnv {
-  // Hermetic git environment — mirrors `workspace-cache-eviction.spec.ts`.
-  // `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` pointed at /dev/null block
-  // host config from leaking into commits, which is what makes the
-  // initial-commit hash reproducible across runs.
-  return {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@test.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@test.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-}
-
-function git(cwd: string, args: string[], home: string): void {
-  execFileSync("git", args, { cwd, env: makeGitEnv(home) });
-}
 
 let server!: ServerHandle;
 let tmpHome: string | undefined;

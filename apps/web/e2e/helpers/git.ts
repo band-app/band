@@ -26,3 +26,30 @@ export const gitEnv = {
 export function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, env: gitEnv });
 }
+
+/**
+ * Fully hermetic git environment rooted at `home`. Unlike `gitEnv` (which
+ * inherits the host `process.env`, including the real `HOME`), this pins
+ * `HOME` to the throwaway tmp home and points `GIT_CONFIG_GLOBAL` /
+ * `GIT_CONFIG_SYSTEM` at `/dev/null` so no host config leaks into the fixture
+ * repo — required by the multi-worktree specs that seed a repo inside the
+ * tmp home and rely on reproducible initial commits.
+ */
+export function makeGitEnv(home: string): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    HOME: home,
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@test.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@test.com",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+  };
+}
+
+/** Run `git <args>` in `cwd` under the hermetic environment rooted at `home`
+ *  (see `makeGitEnv`). The home-aware counterpart of `git` above. */
+export function gitInHome(cwd: string, args: string[], home: string): void {
+  execFileSync("git", args, { cwd, env: makeGitEnv(home) });
+}
