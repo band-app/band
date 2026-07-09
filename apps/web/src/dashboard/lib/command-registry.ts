@@ -58,6 +58,16 @@ export interface CommandRegistryDeps {
    * opens the dialog (same pattern as `formatCurrentFile`).
    */
   changeLanguageMode: () => void;
+  /**
+   * Step the active editor's navigation history backward/forward.
+   * Implementations read the active `workspaceId` from a ref and dispatch
+   * `band:editor-go-back` / `band:editor-go-forward` with `{workspaceId}` so
+   * only the active workspace's CodeBrowserView acts — hidden sibling
+   * workspaces stay mounted and would otherwise step their own history
+   * stacks too (same pattern as `formatCurrentFile`, see issue #539).
+   */
+  editorGoBack: () => void;
+  editorGoForward: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,12 +233,12 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // FileViewer toolbar and via this palette entry.
       id: "editor-go-back",
       label: "Go Back",
-      action: () => window.dispatchEvent(new CustomEvent("band:editor-go-back")),
+      action: () => deps.editorGoBack(),
     },
     {
       id: "editor-go-forward",
       label: "Go Forward",
-      action: () => window.dispatchEvent(new CustomEvent("band:editor-go-forward")),
+      action: () => deps.editorGoForward(),
     },
     {
       // No shortcut advertised: Shift+Tab is wired only inside the chat

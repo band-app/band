@@ -1483,6 +1483,53 @@ export class WorkspacePage {
     });
   }
 
+  /** Dispatch a synthetic `band:lsp-navigate` window event — the same event
+   *  the CodeMirror LSP client fires on go-to-definition (see
+   *  `codemirror-lsp.ts`). Captures the cross-workspace routing contract under
+   *  test: an LSP navigation belongs to the workspace that owns the editor, so
+   *  a navigate addressed to workspace A must NOT drive the (different) active
+   *  workspace B's CodeBrowserView to open A's relative path against B's root
+   *  (ENOENT + poisoned `band-open-tabs:<B>`). Mirrors `dispatchOpenFileEvent`;
+   *  an event with no `workspaceId` falls through to the active workspace
+   *  (forward-compat). See the issue #539 pattern. */
+  async dispatchLspNavigateEvent(opts: { filePath: string; workspaceId?: string }): Promise<void> {
+    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+    await test.step(`Dispatch band:lsp-navigate for "${opts.filePath}"${target}`, async () => {
+      await this.page.evaluate(({ filePath, workspaceId }) => {
+        window.dispatchEvent(
+          new CustomEvent("band:lsp-navigate", {
+            detail: { filePath, workspaceId },
+          }),
+        );
+      }, opts);
+    });
+  }
+
+  /** Dispatch a synthetic `band:editor-go-back` / `band:editor-go-forward`
+   *  window event — the same events the command palette fires for the editor
+   *  history "Go Back" / "Go Forward" commands (see `command-registry.ts` +
+   *  `SharedDockviewLayout.tsx`). Captures the cross-workspace routing contract
+   *  under test: an editor-history step belongs to the workspace that owns the
+   *  editor, so a step addressed to workspace A must NOT also walk the (hidden)
+   *  active workspace B's independent history stack. Mirrors
+   *  `dispatchLspNavigateEvent`; a missing `workspaceId` falls through to the
+   *  active workspace (forward-compat). See the issue #539 pattern. */
+  async dispatchEditorHistoryEvent(opts: {
+    direction: "back" | "forward";
+    workspaceId?: string;
+  }): Promise<void> {
+    const eventName = opts.direction === "back" ? "band:editor-go-back" : "band:editor-go-forward";
+    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+    await test.step(`Dispatch ${eventName}${target}`, async () => {
+      await this.page.evaluate(
+        ({ name, workspaceId }) => {
+          window.dispatchEvent(new CustomEvent(name, { detail: { workspaceId } }));
+        },
+        { name: eventName, workspaceId: opts.workspaceId },
+      );
+    });
+  }
+
   /** Write the persisted open-tabs state for a workspace directly into
    *  localStorage under the key `band-open-tabs:<workspaceId>`. Used
    *  by tests that need to seed a "this workspace has a stale tab

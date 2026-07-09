@@ -974,6 +974,25 @@ export function SharedDockviewLayout() {
             }),
           );
         },
+        editorGoBack: () => {
+          const ws = activeWorkspaceIdRef.current;
+          // Bail without a target workspace — a `{ workspaceId: null }` detail
+          // is falsy, so the listener guard would treat it as "fall through to
+          // every mounted workspace" and re-introduce the cross-workspace
+          // history-stepping this fix prevents. Mirrors `formatCurrentFile` /
+          // `changeLanguageMode` above.
+          if (!ws) return;
+          window.dispatchEvent(
+            new CustomEvent("band:editor-go-back", { detail: { workspaceId: ws } }),
+          );
+        },
+        editorGoForward: () => {
+          const ws = activeWorkspaceIdRef.current;
+          if (!ws) return;
+          window.dispatchEvent(
+            new CustomEvent("band:editor-go-forward", { detail: { workspaceId: ws } }),
+          );
+        },
       }),
     [],
   );

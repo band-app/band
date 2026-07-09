@@ -119,10 +119,12 @@ class BandWorkspace extends Workspace {
   files: BandWorkspaceFile[] = [];
   private fileVersions: Record<string, number> = Object.create(null);
   private rootUri: string;
+  private workspaceId: string | undefined;
 
-  constructor(client: LSPClient, rootUri: string) {
+  constructor(client: LSPClient, rootUri: string, workspaceId?: string) {
     super(client);
     this.rootUri = rootUri;
+    this.workspaceId = workspaceId;
   }
 
   private nextFileVersion(uri: string): number {
@@ -203,10 +205,22 @@ class BandWorkspace extends Workspace {
 
       pendingNavigation = { resolve, timer };
 
-      // Dispatch navigation event to CodeBrowserView
+      // Dispatch navigation event to CodeBrowserView.
+      //
+      // Scope the event to the owning workspace. Multiple workspace subtrees
+      // stay mounted at once (MultiWorkspacePanelHost keeps up to
+      // `maxCachedWorkspaces` alive, hidden with visibility:hidden), and each
+      // one's CodeBrowserView listens for `band:lsp-navigate` on `window`.
+      // Without a workspace label, a go-to-definition in the active workspace
+      // A would also open the (A-relative) file in hidden workspaces B/C,
+      // whose FileViewer then stats it against B/C's own worktree root →
+      // ENOENT, and poisons B/C's `band-open-tabs:` localStorage. The listener
+      // filters on this id; a missing id falls through to the active
+      // workspace (forward-compat). Same shape as `band:open-file`, see
+      // issue #539.
       window.dispatchEvent(
         new CustomEvent("band:lsp-navigate", {
-          detail: { filePath },
+          detail: { filePath, workspaceId: this.workspaceId },
         }),
       );
     });
@@ -291,8 +305,19 @@ const clientCache = new Map<string, CachedClient>();
 /**
  * Get or create an LSP client for the given WebSocket URL.
  * The client is cached per URL (effectively per workspace+language).
+ *
+ * `workspaceId` is only consumed on the CREATE path — it's baked into the
+ * `BandWorkspace` at construction. On a cache hit it's intentionally ignored:
+ * `wsUrl` is built from the workspaceId (`buildLspWsUrl`), so the cache key
+ * already partitions clients by workspace and a hit is guaranteed to carry the
+ * same workspaceId the caller passed. (If that URL↔workspace coupling ever
+ * changes, this assumption must be revisited.)
  */
-async function getOrCreateClient(wsUrl: string, rootUri: string): Promise<LSPClient> {
+async function getOrCreateClient(
+  wsUrl: string,
+  rootUri: string,
+  workspaceId?: string,
+): Promise<LSPClient> {
   const cached = clientCache.get(wsUrl);
   if (cached) {
     cached.refCount++;
@@ -301,7 +326,7 @@ async function getOrCreateClient(wsUrl: string, rootUri: string): Promise<LSPCli
 
   const client = new LSPClient({
     rootUri,
-    workspace: (c) => new BandWorkspace(c, rootUri),
+    workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
     extensions: languageServerExtensions(),
     timeout: 10000,
   });
@@ -470,14 +495,18 @@ const cmdClickLinkPlugin = ViewPlugin.fromClass(
  * @param rootUri - Workspace root as file URI (e.g., `file:///path/to/workspace`)
  * @param documentUri - Current file as file URI (e.g., `file:///path/to/workspace/src/index.ts`)
  * @param languageId - LSP language ID (e.g., `typescript`, `typescriptreact`)
+ * @param workspaceId - Owning workspace id, stamped onto `band:lsp-navigate`
+ *   events so hidden sibling workspaces ignore this workspace's
+ *   cross-file navigations (see issue #539 pattern).
  */
 export async function createLspExtension(
   wsUrl: string,
   rootUri: string,
   documentUri: string,
   languageId?: string,
+  workspaceId?: string,
 ): Promise<Extension> {
-  const client = await getOrCreateClient(wsUrl, rootUri);
+  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
   return [
     client.plugin(documentUri, languageId),
     // Cmd+Click (Mac) / Ctrl+Click (other) to jump to definition — the
