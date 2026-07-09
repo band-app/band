@@ -963,7 +963,10 @@ export function FileViewer({
         )}
 
         {error && (
-          <div className="flex h-32 items-center justify-center text-sm text-destructive">
+          <div
+            data-testid="file-viewer__error"
+            className="flex h-32 items-center justify-center text-sm text-destructive"
+          >
             {error}
           </div>
         )}

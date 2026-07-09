@@ -687,7 +687,7 @@ export function CodeBrowserView({
     const cmLang = langMap[ext ?? ""];
     const languageId = cmLang ? getLspLanguageId(cmLang) : undefined;
 
-    createLspExtension(lspWsUrl, rootUri, documentUri, languageId)
+    createLspExtension(lspWsUrl, rootUri, documentUri, languageId, workspaceId)
       .then((ext) => {
         if (!cancelled) setLspExtension(ext);
       })
@@ -699,7 +699,7 @@ export function CodeBrowserView({
     return () => {
       cancelled = true;
     };
-  }, [lspWsUrl, workspacePath, viewFilePath]);
+  }, [lspWsUrl, workspacePath, viewFilePath, workspaceId]);
 
   // Clean up LSP client when the WebSocket URL changes or on unmount.
   // Runs the cleanup for the *previous* lspWsUrl on each change.
@@ -1269,10 +1269,25 @@ export function CodeBrowserView({
     if (entry) navigateToEntry(entry);
   }, [editorHistory.goForward, navigateToEntry]);
 
-  // Listen for keyboard shortcut events dispatched from SharedDockviewLayout
+  // Listen for editor history events dispatched from the command palette.
+  //
+  // Scope to the owning workspace: several workspace subtrees stay mounted at
+  // once (MultiWorkspacePanelHost), and each one's CodeBrowserView listens on
+  // `window`. Without the guard a Go Back/Forward in the active workspace would
+  // also step every hidden workspace's independent history stack. A missing
+  // `workspaceId` (older dispatcher) falls through to keep working — same shape
+  // as `band:open-file`, see issue #539.
   useEffect(() => {
-    const handleGoBack = () => handleEditorGoBack();
-    const handleGoForward = () => handleEditorGoForward();
+    const handleGoBack = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string } | undefined>).detail;
+      if (detail?.workspaceId && detail.workspaceId !== workspaceId) return;
+      handleEditorGoBack();
+    };
+    const handleGoForward = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string } | undefined>).detail;
+      if (detail?.workspaceId && detail.workspaceId !== workspaceId) return;
+      handleEditorGoForward();
+    };
 
     window.addEventListener("band:editor-go-back", handleGoBack);
     window.addEventListener("band:editor-go-forward", handleGoForward);
@@ -1280,15 +1295,25 @@ export function CodeBrowserView({
       window.removeEventListener("band:editor-go-back", handleGoBack);
       window.removeEventListener("band:editor-go-forward", handleGoForward);
     };
-  }, [handleEditorGoBack, handleEditorGoForward]);
+  }, [handleEditorGoBack, handleEditorGoForward, workspaceId]);
 
   // Listen for LSP cross-file navigation events (e.g., go-to-definition).
   // Go-to-definition is an explicit user intent to land on the target — pin
   // the destination so the next single-click in the tree doesn't silently
   // replace the file the user just navigated to.
+  //
+  // Scope to the owning workspace: the event is dispatched on `window` and
+  // every mounted (incl. hidden) workspace's CodeBrowserView listens. Without
+  // the guard a go-to-definition in workspace A would also open A's relative
+  // path in hidden workspaces B/C — whose FileViewer stats it against B/C's
+  // own worktree root (→ ENOENT) and persists it into B/C's
+  // `band-open-tabs:` localStorage. A missing `workspaceId` (older dispatcher)
+  // falls through to keep working — same shape as `band:open-file`, issue #539.
   useEffect(() => {
     const handleLspNavigate = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
+      const detail = (e as CustomEvent<{ filePath?: string; workspaceId?: string } | undefined>)
+        .detail;
+      if (detail?.workspaceId && detail.workspaceId !== workspaceId) return;
       if (detail?.filePath) {
         pushDepartureAndArrival({ filePath: detail.filePath });
         // Use skipFileEffectRef to prevent the route change from clobbering nav
@@ -1306,7 +1331,7 @@ export function CodeBrowserView({
 
     window.addEventListener("band:lsp-navigate", handleLspNavigate);
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
-  }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile]);
+  }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile, workspaceId]);
 
   // Keyboard shortcuts (capture phase, scoped to this section's focus):
   // - Cmd/Ctrl+W              → close the active file tab

@@ -974,6 +974,18 @@ export function SharedDockviewLayout() {
             }),
           );
         },
+        editorGoBack: () => {
+          const ws = activeWorkspaceIdRef.current;
+          window.dispatchEvent(
+            new CustomEvent("band:editor-go-back", { detail: { workspaceId: ws } }),
+          );
+        },
+        editorGoForward: () => {
+          const ws = activeWorkspaceIdRef.current;
+          window.dispatchEvent(
+            new CustomEvent("band:editor-go-forward", { detail: { workspaceId: ws } }),
+          );
+        },
       }),
     [],
   );

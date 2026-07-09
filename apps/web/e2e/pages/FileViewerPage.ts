@@ -27,11 +27,38 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 export const FILE_VIEWER_ROOT_TESTID = "file-viewer__root";
 
 export class FileViewerPage {
-  constructor(private readonly page: Page) {}
+  /**
+   * @param page  The Playwright page.
+   * @param scope Optional locator to scope the viewer lookup to a single
+   *   workspace's subtree. Several workspace subtrees stay mounted at once
+   *   (`MultiWorkspacePanelHost`'s LRU cache), so `file-viewer__root` can
+   *   resolve to more than one element — pass a per-workspace scope (e.g.
+   *   `workspacePage.cachedPanelEntries(id)`) to disambiguate. Defaults to the
+   *   whole page for the common single-workspace case.
+   */
+  constructor(
+    private readonly page: Page,
+    private readonly scope?: Locator,
+  ) {}
+
+  /** The file viewer root, optionally scoped to a single workspace. */
+  private get root(): Locator {
+    return (this.scope ?? this.page).getByTestId(FILE_VIEWER_ROOT_TESTID);
+  }
 
   /** The active file viewer's CodeMirror content element. */
   private get editor(): Locator {
-    return this.page.getByTestId(FILE_VIEWER_ROOT_TESTID).locator(".cm-content").first();
+    return this.root.locator(".cm-content").first();
+  }
+
+  /** The file viewer's load-error banner. Rendered by `FileViewer` when a
+   *  read fails (e.g. an `ENOENT: no such file or directory, stat '<root>/<path>'`
+   *  from the server's `stat`). `data-testid` set on the banner element in
+   *  `FileViewer.tsx` so the assertion doesn't tie to the server error copy.
+   *  Used by the cross-workspace-leak regression to prove a stray file from a
+   *  DIFFERENT workspace never made this viewer attempt a stat that fails. */
+  get errorBanner(): Locator {
+    return this.root.getByTestId("file-viewer__error");
   }
 
   /** Assert (auto-retrying) that the editor's rendered text contains `text`. */

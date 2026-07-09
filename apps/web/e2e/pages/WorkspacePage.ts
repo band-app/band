@@ -1483,6 +1483,28 @@ export class WorkspacePage {
     });
   }
 
+  /** Dispatch a synthetic `band:lsp-navigate` window event — the same event
+   *  the CodeMirror LSP client fires on go-to-definition (see
+   *  `codemirror-lsp.ts`). Captures the cross-workspace routing contract under
+   *  test: an LSP navigation belongs to the workspace that owns the editor, so
+   *  a navigate addressed to workspace A must NOT drive the (different) active
+   *  workspace B's CodeBrowserView to open A's relative path against B's root
+   *  (ENOENT + poisoned `band-open-tabs:<B>`). Mirrors `dispatchOpenFileEvent`;
+   *  an event with no `workspaceId` falls through to the active workspace
+   *  (forward-compat). See the issue #539 pattern. */
+  async dispatchLspNavigateEvent(opts: { filePath: string; workspaceId?: string }): Promise<void> {
+    const target = opts.workspaceId ? ` for workspace ${opts.workspaceId}` : "";
+    await test.step(`Dispatch band:lsp-navigate for "${opts.filePath}"${target}`, async () => {
+      await this.page.evaluate(({ filePath, workspaceId }) => {
+        window.dispatchEvent(
+          new CustomEvent("band:lsp-navigate", {
+            detail: { filePath, workspaceId },
+          }),
+        );
+      }, opts);
+    });
+  }
+
   /** Write the persisted open-tabs state for a workspace directly into
    *  localStorage under the key `band-open-tabs:<workspaceId>`. Used
    *  by tests that need to seed a "this workspace has a stale tab
