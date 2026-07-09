@@ -182,7 +182,11 @@ test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file 
     await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
     await workspacePage.switchWorkspace(WORKSPACE_B);
     await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
+    // `.count()` is a one-shot read with no auto-retry — poll so an async LRU
+    // mount of A's cached panels can't lose a race with this assertion.
+    await expect
+      .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
+      .toBeGreaterThan(0);
 
     // Open a healthy file in B so B's FileViewer is mounted and shows valid
     // content — the clean baseline the leak would corrupt. We open

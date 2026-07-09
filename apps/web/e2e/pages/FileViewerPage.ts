@@ -61,6 +61,17 @@ export class FileViewerPage {
     return this.root.getByTestId("file-viewer__error");
   }
 
+  /** Read the editor's currently-rendered text. CodeMirror only renders the
+   *  visible viewport, so this is reliable for the small single-line fixtures
+   *  the workspace-scoping specs use. Returns "" when no viewer is mounted.
+   *  Used for poll-for-appearance assertions (poll for a specific file's text
+   *  arriving within a bounded window, then assert it never did). */
+  async readText(): Promise<string> {
+    const el = this.editor;
+    if ((await el.count()) === 0) return "";
+    return (await el.textContent()) ?? "";
+  }
+
   /** Assert (auto-retrying) that the editor's rendered text contains `text`. */
   async expectContent(text: string): Promise<void> {
     await test.step(`Editor shows "${text}"`, async () => {
