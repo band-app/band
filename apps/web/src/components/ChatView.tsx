@@ -775,6 +775,16 @@ export function ChatView({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
+  // Entrance-animation bookkeeping for the virtualized list. Rows remount on
+  // scroll, so "is this message NEW?" must be tracked per conversation mount:
+  // `seenMessageIdsRef` holds every id ever rendered (null until the first
+  // renderItem pass marks the initially-loaded history as seen, so history
+  // never animates); `enteringIdsRef` holds ids currently inside their
+  // entrance window so streaming re-renders (~30/sec) keep the class stable
+  // instead of toggling it off mid-animation.
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
+  const enteringIdsRef = useRef<Set<string>>(new Set());
+
   // ---------------------------------------------------------------------
   // Scroll-back pagination — top sentinel observer.
   //
@@ -811,6 +821,25 @@ export function ChatView({
     (message: UIMessage, messageIndex: number) => {
       const currentMessages = messagesRef.current;
       const isLastMessage = messageIndex === currentMessages.length - 1;
+
+      const seen = seenMessageIdsRef.current;
+      let entering = false;
+      if (seen === null) {
+        // First renderItem pass for this conversation: mark the whole loaded
+        // history as seen without animating.
+        seenMessageIdsRef.current = new Set(currentMessages.map((m) => m.id));
+      } else if (!seen.has(message.id)) {
+        seen.add(message.id);
+        // Only messages appended at the END animate. Pagination prepends land
+        // at low indices and must render instantly (they are also "unseen").
+        if (messageIndex >= currentMessages.length - 2) {
+          entering = true;
+          enteringIdsRef.current.add(message.id);
+          window.setTimeout(() => enteringIdsRef.current.delete(message.id), 400);
+        }
+      } else if (enteringIdsRef.current.has(message.id)) {
+        entering = true;
+      }
       const isLastAssistant = message.role === "assistant" && isLastMessage;
       const hasPendingInteractiveTool =
         isLastAssistant &&
@@ -835,7 +864,7 @@ export function ChatView({
         // User messages render normally
         if (segments.length === 0) return null;
         return (
-          <Message from="user">
+          <Message from="user" className={entering ? "chat-message-enter" : undefined}>
             <MessageContent>
               {segments.map((segment) => {
                 if (
@@ -869,7 +898,7 @@ export function ChatView({
       // split an assistant message at `data-prompt` boundaries.
       if (segments.length === 0 && !showThinking) return null;
       return (
-        <Message from="assistant">
+        <Message from="assistant" className={entering ? "chat-message-enter" : undefined}>
           <MessageContent>
             {segments.map((segment) => {
               if (segment.type === "text") {
@@ -1467,7 +1496,7 @@ function ContextMeter({
               cy="12"
               r={DONUT_RADIUS}
               fill="none"
-              className={cn("transition-all", progressColor)}
+              className={cn("transition-[stroke-dashoffset,stroke]", progressColor)}
               strokeWidth="3"
               strokeLinecap="round"
               strokeDasharray={DONUT_CIRCUMFERENCE}
