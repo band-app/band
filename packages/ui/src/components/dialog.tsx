@@ -67,13 +67,14 @@ function DialogOverlay({
 // mobile/desktop switch (`useIsDesktop` = `min-width: 1024px`): below 1024px
 // the app renders its mobile layout, so the dialogs must be bottom drawers
 // across that whole range. The `max-lg:`/`lg:` split keeps the slide
-// animation mobile-only and the zoom animation desktop-only.
+// animation mobile-only; the `command-palette` variant has NO desktop
+// animation at all (a keyboard-summoned surface must appear instantly).
 const DIALOG_CONTENT_VARIANTS = {
   default:
-    "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+    "ease-out fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
   "bottom-sheet": [
     // Shared
-    "fixed z-50 flex flex-col bg-background shadow-lg duration-200 outline-none",
+    "ease-out fixed z-50 flex flex-col bg-background shadow-lg duration-200 outline-none",
     "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
     // Mobile (< lg): bottom drawer
     "inset-x-0 bottom-0 w-full max-w-none rounded-t-2xl border border-b-0 p-6",
@@ -85,8 +86,11 @@ const DIALOG_CONTENT_VARIANTS = {
   ].join(" "),
   "command-palette": [
     // Shared
-    "fixed z-50 flex flex-col bg-background shadow-lg duration-200 outline-none",
-    "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+    "fixed z-50 flex flex-col bg-background shadow-lg outline-none",
+    // Mobile-only open/close animation: the drawer slide is touch-initiated.
+    // Desktop (lg+) gets NO open/close animation — this is a keyboard-summoned
+    // surface hit dozens of times a day; it must appear instantly.
+    "max-lg:duration-200 max-lg:data-[state=closed]:animate-out max-lg:data-[state=closed]:fade-out-0 max-lg:data-[state=open]:animate-in max-lg:data-[state=open]:fade-in-0",
     // Mobile (< lg): bottom drawer with the input pinned to the bottom. Flip
     // the command's flex direction so the input sits below the results list,
     // and flip the input wrapper's divider to a top border to match. The sheet
@@ -100,7 +104,6 @@ const DIALOG_CONTENT_VARIANTS = {
     // Desktop (lg+): anchored in the upper third by its TOP edge — no
     // `translate-y`, so the input never moves as the list grows downward.
     "lg:inset-x-auto lg:bottom-auto lg:top-[12vh] lg:left-1/2 lg:w-full lg:max-w-lg lg:max-h-[70vh] lg:-translate-x-1/2 lg:rounded-lg lg:border",
-    "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
   ].join(" "),
 } as const;
 
@@ -180,7 +183,13 @@ function DialogContent({
   useKeyboardInset(variant === "command-palette");
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay className={overlayClassName} />
+      <DialogOverlay
+        className={cn(
+          variant === "command-palette" &&
+            "lg:data-[state=open]:animate-none lg:data-[state=closed]:animate-none",
+          overlayClassName,
+        )}
+      />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         data-variant={variant}
