@@ -119,6 +119,11 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
   }
 }
 
+// Tracks the pending class-removal timer per animation root so rapid
+// maximize/restore toggles extend the window instead of cutting the
+// second toggle's transition short.
+const edgeAnimTimers = new WeakMap<HTMLElement, number>();
+
 /**
  * Collapse (hide) every edge group while a grid group is maximized so the
  * maximized tab gets the full area; on exit, re-derive edge visibility from
@@ -132,11 +137,6 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
  * and re-deriving on exit is consistent with how the rest of the layout
  * treats it — no separate "prior edge state" bookkeeping is needed.
  */
-// Tracks the pending class-removal timer per animation root so rapid
-// maximize/restore toggles extend the window instead of cutting the
-// second toggle's transition short.
-const edgeAnimTimers = new WeakMap<HTMLElement, number>();
-
 export function applyMaximizeEdgeVisibility(
   api: DockviewApi,
   maximized: boolean,
