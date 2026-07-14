@@ -70,28 +70,40 @@ import { MarkdownPreview } from "./MarkdownPreview";
 // ---------------------------------------------------------------------------
 // File tree width persistence
 // ---------------------------------------------------------------------------
+// The width is stored in **pixels**, not as a percentage of the group. The
+// explorer is a fixed-width chrome column (VS Code's Primary Side Bar model):
+// it must keep the width the user dragged it to when the surrounding container
+// changes size — maximizing/restoring the Files tab, collapsing the project
+// sidebar, resizing the window. The editor panel absorbs the delta instead.
+// A percentage would rescale the explorer on every one of those events.
+// The `-px` suffix on the key is a deliberate break from the old
+// `band-file-tree-width:` key, whose values were percentages: reusing the key
+// would restore "15" (15%) as 15px.
 function fileTreeWidthKey(wsId: string): string {
-  return `band-file-tree-width:${wsId}`;
+  return `band-file-tree-width-px:${wsId}`;
 }
 
 function fileTreeCollapsedKey(wsId: string): string {
   return `band-file-tree-collapsed:${wsId}`;
 }
 
+/** Fallback when nothing is persisted — also the `defaultSize` for a fresh workspace. */
+const DEFAULT_FILE_TREE_WIDTH_PX = 240; // 15rem
+
 function loadFileTreeWidth(wsId: string): number | null {
   try {
     const raw = localStorage.getItem(fileTreeWidthKey(wsId));
     if (raw == null) return null;
     const val = Number(raw);
-    return Number.isFinite(val) ? val : null;
+    return Number.isFinite(val) && val > 0 ? val : null;
   } catch {
     return null;
   }
 }
 
-function saveFileTreeWidth(wsId: string, width: number): void {
+function saveFileTreeWidth(wsId: string, widthPx: number): void {
   try {
-    localStorage.setItem(fileTreeWidthKey(wsId), String(width));
+    localStorage.setItem(fileTreeWidthKey(wsId), String(Math.round(widthPx)));
   } catch {
     // storage unavailable
   }
@@ -245,6 +257,7 @@ function FileTreeToolbar({
   return (
     <div
       ref={rootRef}
+      data-testid="file-tree__toolbar"
       className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/50 pl-3 pr-1.5"
     >
       <span className="text-xs font-medium text-muted-foreground">Files</span>
@@ -1871,28 +1884,61 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const treePanelRef = usePanelRef();
   const [treeCollapsed, setTreeCollapsed] = useState(() => loadFileTreeCollapsed(workspaceId));
-  const skipFirstLayoutCallback = useRef(true);
-
-  const savedCollapsed = loadFileTreeCollapsed(workspaceId);
-  const savedWidth = loadFileTreeWidth(workspaceId);
-  const defaultLayout = savedCollapsed
-    ? { "file-tree": 0, "file-viewer": 100 }
-    : savedWidth
-      ? { "file-tree": savedWidth, "file-viewer": 100 - savedWidth }
-      : undefined;
-
-  const handleLayoutChanged = useCallback(
-    (layout: Record<string, number>) => {
-      if (skipFirstLayoutCallback.current) {
-        skipFirstLayoutCallback.current = false;
-        return;
-      }
-      if (layout["file-tree"] != null) {
-        saveFileTreeWidth(workspaceId, layout["file-tree"]);
-      }
-    },
-    [workspaceId],
+  const [treeWidthPx, setTreeWidthPx] = useState(
+    () => loadFileTreeWidth(workspaceId) ?? DEFAULT_FILE_TREE_WIDTH_PX,
   );
+
+  // The Group remounts whenever the layout crosses the mobile/desktop
+  // threshold, so `defaultSize` and the collapsed state are re-seeded from live
+  // state rather than read once at first mount.
+  //
+  // `hydratedTreeRef` guards the persistence writes in `onResize` against the
+  // panel's own mount-time callback, which always reports the panel expanded at
+  // its `defaultSize` — without the guard, remounting a collapsed explorer would
+  // immediately persist `collapsed = false`.
+  const hydratedTreeRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `useMobileLayout` is a trigger, not an input — it is what mounts or remounts the Group, and this effect re-seeds the fresh panel. `treeCollapsed` is read but deliberately not a dependency: this is a re-seed, not a controlled-collapse effect.
+  useLayoutEffect(() => {
+    hydratedTreeRef.current = false;
+    // Restore collapsed imperatively rather than mounting the panel at size 0:
+    // `expand()` returns a panel to its last uncollapsed size, and one that
+    // mounted at 0 has none — it would expand to the group's auto-assigned
+    // even split instead of the width the user dragged.
+    if (treeCollapsed) treePanelRef.current?.collapse();
+    hydratedTreeRef.current = true;
+  }, [useMobileLayout, treePanelRef]);
+
+  // `onLayoutChanged` fires *before* the browser applies the new layout, and
+  // `getSize()` is a live `offsetWidth` read. Measuring synchronously here
+  // catches the explorer still sized by the old percentage inside the already-
+  // resized container: maximizing the tab persisted 721px for a 360px explorer,
+  // and restoring persisted 180px — so every maximize/restore cycle halved the
+  // user's width on the next reload, even though the on-screen width never
+  // moved. Defer the read to the next frame, once the settled width is real.
+  const widthWriteFrameRef = useRef<number | null>(null);
+  const handleLayoutChanged = useCallback(() => {
+    if (widthWriteFrameRef.current !== null) {
+      cancelAnimationFrame(widthWriteFrameRef.current);
+    }
+    widthWriteFrameRef.current = requestAnimationFrame(() => {
+      widthWriteFrameRef.current = null;
+      const size = treePanelRef.current?.getSize();
+      // Skip the collapsed layout: the width we persist is the one the explorer
+      // expands *back* to. Collapsed-ness is tracked separately, in `onResize`.
+      if (size && size.inPixels > 0) {
+        setTreeWidthPx(size.inPixels);
+        saveFileTreeWidth(workspaceId, size.inPixels);
+      }
+    });
+  }, [workspaceId, treePanelRef]);
+
+  useEffect(() => {
+    return () => {
+      if (widthWriteFrameRef.current !== null) {
+        cancelAnimationFrame(widthWriteFrameRef.current);
+      }
+    };
+  }, []);
 
   const toggleTree = useCallback(() => {
     const panel = treePanelRef.current;
@@ -2035,24 +2081,26 @@ export function CodeBrowserView({
         )
       ) : (
         // Desktop: side-by-side layout with resizable file tree
-        <Group
-          orientation="horizontal"
-          defaultLayout={defaultLayout}
-          onLayoutChanged={handleLayoutChanged}
-        >
+        <Group orientation="horizontal" onLayoutChanged={handleLayoutChanged}>
           {/* Left panel — file tree */}
           <Panel
             id="file-tree"
-            defaultSize="15rem"
+            defaultSize={`${treeWidthPx}px`}
             minSize="10rem"
             maxSize="50%"
+            // Hold the explorer's pixel width when the Files tab itself is
+            // resized — maximize/restore, window resize, project-sidebar
+            // collapse. The editor panel keeps the default
+            // `preserve-relative-size` and absorbs the delta; a group needs at
+            // least one relative-size panel.
+            groupResizeBehavior="preserve-pixel-size"
             collapsible
             collapsedSize="0%"
             panelRef={treePanelRef}
             onResize={(size) => {
               const collapsed = size.asPercentage === 0;
               setTreeCollapsed(collapsed);
-              saveFileTreeCollapsed(workspaceId, collapsed);
+              if (hydratedTreeRef.current) saveFileTreeCollapsed(workspaceId, collapsed);
             }}
           >
             <div className="flex h-full flex-col overflow-hidden border-r border-border">
@@ -2078,7 +2126,10 @@ export function CodeBrowserView({
             </div>
           </Panel>
 
-          <Separator className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize">
+          <Separator
+            id="file-tree-separator"
+            className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize"
+          >
             <button
               type="button"
               onClick={toggleTree}
