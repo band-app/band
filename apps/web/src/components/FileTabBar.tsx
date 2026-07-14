@@ -24,6 +24,7 @@ import {
   ExternalLink,
   FileText,
   PanelLeft,
+  PanelRight,
   Pin,
   X,
 } from "lucide-react";
@@ -78,6 +79,8 @@ interface FileTabBarProps {
   actions?: React.ReactNode;
   /** Whether the file-tree sidebar is collapsed (used to flip the toggle icon's tooltip). */
   treeCollapsed?: boolean;
+  /** Which edge the file-tree sidebar is docked to (used to mirror the toggle icon). */
+  treeSide?: "left" | "right";
   /** When provided, renders a leading button that toggles the file-tree sidebar.
    *  The button auto-hides when the tab bar's container becomes too narrow. */
   onToggleTree?: () => void;
@@ -102,6 +105,7 @@ export function FileTabBar({
   onSaveUntitled,
   actions,
   treeCollapsed,
+  treeSide = "left",
   onToggleTree,
 }: FileTabBarProps) {
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -246,10 +250,15 @@ export function FileTabBar({
             <TooltipTrigger asChild>
               <button
                 type="button"
+                data-testid="file-tab-bar__tree-toggle"
                 onClick={onToggleTree}
                 className="ml-1 hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors @[16rem]:inline-flex"
               >
-                <PanelLeft className="size-3.5" />
+                {treeSide === "right" ? (
+                  <PanelRight className="size-3.5" />
+                ) : (
+                  <PanelLeft className="size-3.5" />
+                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">

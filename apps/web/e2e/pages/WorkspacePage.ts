@@ -1176,6 +1176,31 @@ export class WorkspacePage {
     });
   }
 
+  /** The outer dockview group shell (`.dv-groupview`) that currently hosts the
+   *  named outer tab. dockview owns this markup — we don't render it — so, as
+   *  with `tabContainer`'s `.dv-tab` wrapper, anchoring on our own
+   *  `workspace__tab--*` testid and walking up to the library's shell via
+   *  `:has(...)` is the only way to address a specific group. Nested (inner)
+   *  dockviews render their own `.dv-groupview`s but never carry
+   *  `workspace__tab--*` testids, so this stays scoped to the outer layout. */
+  groupContaining(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+    return this.page.locator(
+      `.dv-groupview:has([data-testid="workspace__tab--${panelComponent}"])`,
+    );
+  }
+
+  /** Maximize the outer group that hosts the named tab (rather than the Nth
+   *  group, which depends on the default layout's ordering). Each center group
+   *  renders exactly one Maximize/Restore toggle in its right header actions
+   *  (`MainGroupRightActions` in `SharedDockviewLayout.tsx`). */
+  async maximizeGroupContaining(
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
+  ): Promise<void> {
+    await test.step(`Maximize the group hosting the ${panelComponent} tab`, async () => {
+      await this.groupContaining(panelComponent).getByRole("button", { name: "Maximize" }).click();
+    });
+  }
+
   /** Click the Nth Maximize button (0-indexed). Useful when the layout
    *  has multiple groups and the test wants to target a specific one. */
   async maximizePanel(index = 0): Promise<void> {

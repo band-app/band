@@ -1,4 +1,8 @@
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -10,6 +14,7 @@ import {
 } from "@band-app/ui";
 import type { Extension } from "@codemirror/state";
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Code,
@@ -19,6 +24,8 @@ import {
   FilePlus,
   FolderPlus,
   MoreVertical,
+  PanelLeft,
+  PanelRight,
   Search,
   TextSearch,
 } from "lucide-react";
@@ -68,30 +75,60 @@ import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./Markdown
 import { MarkdownPreview } from "./MarkdownPreview";
 
 // ---------------------------------------------------------------------------
-// File tree width persistence
+// File tree width / side persistence
 // ---------------------------------------------------------------------------
+// The width is stored in **pixels**, not as a percentage of the group. The
+// explorer is a fixed-width chrome column (VS Code's Primary Side Bar model):
+// it must keep the width the user dragged it to when the surrounding container
+// changes size — maximizing/restoring the Files tab, collapsing the project
+// sidebar, resizing the window. The editor panel absorbs the delta instead.
+// A percentage would rescale the explorer on every one of those events.
+// The `-px` suffix on the key is a deliberate break from the old
+// `band-file-tree-width:` key, whose values were percentages: reusing the key
+// would restore "15" (15%) as 15px.
 function fileTreeWidthKey(wsId: string): string {
-  return `band-file-tree-width:${wsId}`;
+  return `band-file-tree-width-px:${wsId}`;
 }
 
 function fileTreeCollapsedKey(wsId: string): string {
   return `band-file-tree-collapsed:${wsId}`;
 }
 
+function fileTreeSideKey(wsId: string): string {
+  return `band-file-tree-side:${wsId}`;
+}
+
+export type FileTreeSide = "left" | "right";
+
+/** Fallback when nothing is persisted — also the `defaultSize` for a fresh workspace. */
+const DEFAULT_FILE_TREE_WIDTH_PX = 240; // 15rem
+
+/**
+ * The explorer's size constraints. These back the Panel's `minSize` / `maxSize`
+ * props *and* the clamp arithmetic in the resize handler, which has to know the
+ * bounds the layout engine is enforcing in order to tell "the user chose this
+ * width" apart from "the container squeezed us to this width".
+ */
+const MIN_FILE_TREE_WIDTH_PX = 160; // 10rem
+const MAX_FILE_TREE_WIDTH_RATIO = 0.5; // half the group
+
+/** Trailing debounce on the width write — see the tree Panel's `onResize`. */
+const WIDTH_PERSIST_DEBOUNCE_MS = 200;
+
 function loadFileTreeWidth(wsId: string): number | null {
   try {
     const raw = localStorage.getItem(fileTreeWidthKey(wsId));
     if (raw == null) return null;
     const val = Number(raw);
-    return Number.isFinite(val) ? val : null;
+    return Number.isFinite(val) && val > 0 ? val : null;
   } catch {
     return null;
   }
 }
 
-function saveFileTreeWidth(wsId: string, width: number): void {
+function saveFileTreeWidth(wsId: string, widthPx: number): void {
   try {
-    localStorage.setItem(fileTreeWidthKey(wsId), String(width));
+    localStorage.setItem(fileTreeWidthKey(wsId), String(Math.round(widthPx)));
   } catch {
     // storage unavailable
   }
@@ -108,6 +145,22 @@ function loadFileTreeCollapsed(wsId: string): boolean {
 function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
   try {
     localStorage.setItem(fileTreeCollapsedKey(wsId), String(collapsed));
+  } catch {
+    // storage unavailable
+  }
+}
+
+function loadFileTreeSide(wsId: string): FileTreeSide {
+  try {
+    return localStorage.getItem(fileTreeSideKey(wsId)) === "right" ? "right" : "left";
+  } catch {
+    return "left";
+  }
+}
+
+function saveFileTreeSide(wsId: string, side: FileTreeSide): void {
+  try {
+    localStorage.setItem(fileTreeSideKey(wsId), side);
   } catch {
     // storage unavailable
   }
@@ -157,6 +210,15 @@ interface FileTreeToolbarProps {
    * the user actually saves (`capabilities.pickSaveFile`).
    */
   onNewUntitled?: () => void;
+  /**
+   * Which edge of the Files tab the explorer is docked to. Undefined on the
+   * mobile layout, where the tree and the editor are separate full-width
+   * views and "side" is meaningless — the toolbar then omits the
+   * move-explorer context menu entirely.
+   */
+  side?: FileTreeSide;
+  /** Dock the explorer to the given edge. Paired with `side`. */
+  onSetSide?: (side: FileTreeSide) => void;
 }
 
 // Below this width (px), the toolbar collapses its action buttons into a
@@ -196,6 +258,8 @@ function FileTreeToolbar({
   onNewFolder,
   onOpenFile,
   onNewUntitled,
+  side,
+  onSetSide,
 }: FileTreeToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
@@ -242,9 +306,10 @@ function FileTreeToolbar({
     fn?.();
   }, []);
 
-  return (
+  const header = (
     <div
       ref={rootRef}
+      data-testid="file-tree__toolbar"
       className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/50 pl-3 pr-1.5"
     >
       <span className="text-xs font-medium text-muted-foreground">Files</span>
@@ -415,6 +480,26 @@ function FileTreeToolbar({
         </>
       )}
     </div>
+  );
+
+  if (!side || !onSetSide) return header;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[12rem]">
+        <ContextMenuItem data-testid="file-tree__move-left" onSelect={() => onSetSide("left")}>
+          <PanelLeft className="size-4" />
+          Explorer on Left
+          {side === "left" && <Check className="ml-auto size-4" />}
+        </ContextMenuItem>
+        <ContextMenuItem data-testid="file-tree__move-right" onSelect={() => onSetSide("right")}>
+          <PanelRight className="size-4" />
+          Explorer on Right
+          {side === "right" && <Check className="ml-auto size-4" />}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -1158,23 +1243,32 @@ export function CodeBrowserView({
     notifySelectFile(null);
   }, [viewFilePath, handleTabClose, notifySelectFile]);
 
+  // Save full editor state for the current file (doc, selection, undo history,
+  // scroll) into both the in-memory cache and localStorage. Call this before
+  // anything that tears the CodeMirror view down — switching tabs, or
+  // remounting the panel Group to move the explorer to the other side.
+  //
+  // Distinct from `flushActiveEditorState` below, which *returns* the state so
+  // a rename/delete caller can re-file it under a different path.
+  const persistActiveEditorState = useCallback(() => {
+    const view = editorViewRef.current;
+    if (!view || !viewFilePath) return;
+    try {
+      const state = serializeEditorState(view);
+      savedEditorStatesRef.current[viewFilePath] = state;
+      // Persist to localStorage so undo history survives workspace switches
+      tabState.update(viewFilePath, {
+        editorState: state.editorState,
+        scrollTop: state.scrollTop,
+      });
+    } catch {
+      // CM view not ready
+    }
+  }, [viewFilePath, tabState.update]);
+
   const handleTabSelect = useCallback(
     (filePath: string) => {
-      // Save full editor state for the departing file (doc, selection, undo history, scroll)
-      const view = editorViewRef.current;
-      if (view && viewFilePath) {
-        try {
-          const state = serializeEditorState(view);
-          savedEditorStatesRef.current[viewFilePath] = state;
-          // Persist to localStorage so undo history survives workspace switches
-          tabState.update(viewFilePath, {
-            editorState: state.editorState,
-            scrollTop: state.scrollTop,
-          });
-        } catch {
-          // CM view not ready
-        }
-      }
+      persistActiveEditorState();
 
       // Prevent the file prop effect from overwriting state.
       // The route round-trip (via onSelectFile) only carries the file path.
@@ -1188,7 +1282,7 @@ export function CodeBrowserView({
       setViewColumn(undefined);
       notifySelectFile(filePath);
     },
-    [fileTabs.setActiveTab, notifySelectFile, viewFilePath, tabState.update],
+    [fileTabs.setActiveTab, notifySelectFile, viewFilePath, persistActiveEditorState],
   );
 
   // Sync viewFilePath when active tab changes due to a close.
@@ -1871,27 +1965,155 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const treePanelRef = usePanelRef();
   const [treeCollapsed, setTreeCollapsed] = useState(() => loadFileTreeCollapsed(workspaceId));
-  const skipFirstLayoutCallback = useRef(true);
+  const [treeSide, setTreeSide] = useState<FileTreeSide>(() => loadFileTreeSide(workspaceId));
+  // Mirrors `treeCollapsed` so `onResize` — which fires per pointermove — can
+  // detect an actual flip without reading through React state.
+  const collapsedRef = useRef(treeCollapsed);
 
-  const savedCollapsed = loadFileTreeCollapsed(workspaceId);
-  const savedWidth = loadFileTreeWidth(workspaceId);
-  const defaultLayout = savedCollapsed
-    ? { "file-tree": 0, "file-viewer": 100 }
-    : savedWidth
-      ? { "file-tree": savedWidth, "file-viewer": 100 - savedWidth }
-      : undefined;
+  // The explorer's width lives in a ref, not state. It is only ever *consumed*
+  // as the panel's `defaultSize` — i.e. at mount — so re-rendering when it
+  // changes buys nothing and costs a lot: `defaultSize` sits in the library's
+  // Panel registration effect dependencies, so a new value unregisters and
+  // re-registers the panel (two `sortPanels` passes, each reading `offsetLeft`
+  // on every panel — a forced reflow) without moving anything on screen. The
+  // panel's `onResize` fires on every ResizeObserver tick, so as state this
+  // fired that whole cascade ~60×/sec for the length of any window or splitter
+  // drag.
+  const treeWidthRef = useRef(loadFileTreeWidth(workspaceId) ?? DEFAULT_FILE_TREE_WIDTH_PX);
 
-  const handleLayoutChanged = useCallback(
-    (layout: Record<string, number>) => {
-      if (skipFirstLayoutCallback.current) {
-        skipFirstLayoutCallback.current = false;
+  // Switching sides remounts the Group (see `key={treeSide}` below), because
+  // react-resizable-panels orders its panels by `offsetLeft` at *registration*
+  // time — reordering the children in place would leave it with a stale order.
+  // Crossing the mobile/desktop threshold remounts it too. Either way the fresh
+  // panel has to be re-seeded from live state rather than from a value read once
+  // at first mount.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `treeSide` and `useMobileLayout` are triggers, not inputs — they are what mount or remount the Group, and this effect re-seeds the fresh panel. `treeCollapsed` is read but deliberately not a dependency: this is a re-seed, not a controlled-collapse effect.
+  useLayoutEffect(() => {
+    // Restore collapsed imperatively rather than mounting the panel at size 0:
+    // `expand()` returns a panel to its last uncollapsed size, and one that
+    // mounted at 0 has none — it would expand to the group's auto-assigned
+    // even split instead of the width the user dragged. Running before the
+    // browser lays out means the library's ResizeObserver measures the panel
+    // already collapsed, so this never round-trips through a 0 → expanded blip.
+    if (treeCollapsed) treePanelRef.current?.collapse();
+  }, [treeSide, useMobileLayout, treePanelRef]);
+
+  // Width is measured in the Panel's `onResize`, NOT in the Group's
+  // `onLayoutChanged`. `onLayoutChanged` fires *before* the browser applies the
+  // new layout, so reading the panel there caught it still sized by its old
+  // proportion inside the already-resized container: maximizing the tab reported
+  // 721px for a 360px explorer, restoring reported 180px, and every
+  // maximize/restore cycle halved the user's width on the next reload even
+  // though the on-screen width never moved. `onResize` is delivered from the
+  // library's ResizeObserver — i.e. after layout — so the size it hands us is
+  // the settled one.
+  //
+  // The localStorage write is debounced because `onResize` fires on every
+  // pointermove of a drag and `setItem` is synchronous and disk-backed:
+  // persisting on each one would write ~60×/sec and throw all but the last away.
+  const widthPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleWidthPersist = useCallback(() => {
+    if (widthPersistTimerRef.current !== null) {
+      clearTimeout(widthPersistTimerRef.current);
+    }
+    widthPersistTimerRef.current = setTimeout(() => {
+      widthPersistTimerRef.current = null;
+      saveFileTreeWidth(workspaceId, treeWidthRef.current);
+    }, WIDTH_PERSIST_DEBOUNCE_MS);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    return () => {
+      if (widthPersistTimerRef.current !== null) {
+        clearTimeout(widthPersistTimerRef.current);
+        // Don't drop a width the user set moments before unmounting.
+        saveFileTreeWidth(workspaceId, treeWidthRef.current);
+      }
+    };
+  }, [workspaceId]);
+
+  // Width of the group at the last `onResize`, used to tell the two kinds of
+  // resize apart, and a flag marking the resizes we asked for ourselves.
+  const groupWidthRef = useRef(0);
+  const selfResizeRef = useRef(false);
+
+  const handleTreeResize = useCallback(
+    (size: { asPercentage: number; inPixels: number }) => {
+      const collapsed = size.asPercentage === 0;
+
+      // `onResize` fires on every pointermove of a drag, so only touch React and
+      // localStorage when collapsed-ness actually flipped.
+      if (collapsed !== collapsedRef.current) {
+        collapsedRef.current = collapsed;
+        setTreeCollapsed(collapsed);
+        saveFileTreeCollapsed(workspaceId, collapsed);
+      }
+
+      // A collapsed panel reports 0, which is not a width the user chose.
+      // Skipping it — rather than clearing anything — is what lets a
+      // drag-then-collapse keep the width the drag just set.
+      if (collapsed) return;
+
+      const groupWidth = size.inPixels / (size.asPercentage / 100);
+      const groupResized = Math.abs(groupWidth - groupWidthRef.current) > 1;
+      groupWidthRef.current = groupWidth;
+
+      // A resize we requested below. Its result tells us nothing about what the
+      // user wants — swallow it, or a clamped restore would overwrite the very
+      // width it was trying to restore.
+      if (selfResizeRef.current) {
+        selfResizeRef.current = false;
         return;
       }
-      if (layout["file-tree"] != null) {
-        saveFileTreeWidth(workspaceId, layout["file-tree"]);
+
+      if (!groupResized) {
+        // The group is the same size, so nothing but the user can have moved the
+        // panel (separator drag, or keyboard resize). This is a chosen width.
+        treeWidthRef.current = size.inPixels;
+        scheduleWidthPersist();
+        return;
+      }
+
+      // The group changed size. `preserve-pixel-size` normally holds the
+      // explorer's width through that — but `maxSize` still binds, so narrowing
+      // the tab far enough squeezes the explorer below the chosen width. Left
+      // alone, the layout engine has no memory of the width it took away, so
+      // widening back would strand the explorer at the squeezed size and the
+      // next persist would make that the user's width. Take it back instead,
+      // as far as there is now room for.
+      const maxWidth = groupWidth * MAX_FILE_TREE_WIDTH_RATIO;
+      if (maxWidth < MIN_FILE_TREE_WIDTH_PX) return; // no room to honour either bound
+      const target = Math.min(treeWidthRef.current, maxWidth);
+      if (Math.abs(size.inPixels - target) > 1) {
+        selfResizeRef.current = true;
+        treePanelRef.current?.resize(`${target}px`);
       }
     },
-    [workspaceId],
+    [workspaceId, treePanelRef, scheduleWidthPersist],
+  );
+
+  const handleSetTreeSide = useCallback(
+    (side: FileTreeSide) => {
+      // The Group remount tears down CodeMirror, and the editor's state is only
+      // written on tab switch or on CodeBrowserView unmount — neither of which
+      // happens here. Without this, moving the explorer silently drops the open
+      // file's undo history, cursor and scroll position.
+      persistActiveEditorState();
+
+      // Capture the explorer's live width before the remount. Moving sides must
+      // not resize the explorer, and `treeWidthRef` — which seeds the remounted
+      // panel's `defaultSize` — otherwise only refreshes on `onResize`. Reading
+      // the panel directly means the width the user is looking at is exactly the
+      // width that comes back on the other side.
+      const size = treePanelRef.current?.getSize();
+      if (size && size.inPixels > 0) {
+        treeWidthRef.current = size.inPixels;
+        saveFileTreeWidth(workspaceId, size.inPixels);
+      }
+      setTreeSide(side);
+      saveFileTreeSide(workspaceId, side);
+    },
+    [workspaceId, treePanelRef, persistActiveEditorState],
   );
 
   const toggleTree = useCallback(() => {
@@ -1926,6 +2148,80 @@ export function CodeBrowserView({
       treePanelRef.current?.expand();
     }
   }, [fileTabs.openTabs.length, treeCollapsed, treePanelRef]);
+
+  // The explorer panel and its separator are hoisted out of the JSX below so
+  // they can be rendered on either side of the editor panel without
+  // duplicating them.
+  const treePanelEl = (
+    <Panel
+      key="file-tree"
+      id="file-tree"
+      defaultSize={`${treeWidthRef.current}px`}
+      minSize={`${MIN_FILE_TREE_WIDTH_PX}px`}
+      maxSize={`${MAX_FILE_TREE_WIDTH_RATIO * 100}%`}
+      // Hold the explorer's pixel width when the Files tab itself is resized —
+      // maximize/restore, window resize, project-sidebar collapse. The editor
+      // panel keeps the default `preserve-relative-size` and absorbs the delta;
+      // a group needs at least one relative-size panel.
+      groupResizeBehavior="preserve-pixel-size"
+      collapsible
+      collapsedSize="0%"
+      panelRef={treePanelRef}
+      onResize={handleTreeResize}
+    >
+      <div
+        className={`flex h-full flex-col overflow-hidden border-border ${
+          treeSide === "left" ? "border-r" : "border-l"
+        }`}
+      >
+        <FileTreeToolbar
+          onNewFile={handleNewFile}
+          onNewFolder={handleNewFolder}
+          onOpenFile={pickFile ? handleOpenExternalFile : undefined}
+          onNewUntitled={handleNewUntitled}
+          side={treeSide}
+          onSetSide={handleSetTreeSide}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <FileBrowser
+            ref={fileBrowserRef}
+            workspaceId={workspaceId}
+            workspacePath={workspacePath}
+            onOpenFile={handleSelectFile}
+            onOpenFilePinned={handleSelectFilePinned}
+            compact
+            selectedFile={viewFilePath}
+            onPathRenamed={handlePathRenamed}
+            onPathDeleted={handlePathDeleted}
+          />
+        </div>
+      </div>
+    </Panel>
+  );
+
+  // The chevron points the way the explorer would travel: toward its own edge
+  // to collapse, back toward the editor to expand.
+  const pointsLeft = treeSide === "left" ? !treeCollapsed : treeCollapsed;
+  const separatorEl = (
+    <Separator
+      key="file-tree-separator"
+      // react-resizable-panels renders `id` onto BOTH the element's `id` and
+      // its `data-testid` (same as the `file-tree` / `file-viewer` panels
+      // above), which is the only stable hook e2e tests have for grabbing this
+      // separator — the workspace shell renders other `role="separator"`
+      // elements (the project sidebar's), so role alone is ambiguous.
+      id="file-tree-separator"
+      className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize"
+    >
+      <button
+        type="button"
+        onClick={toggleTree}
+        className="absolute top-1/2 left-1/2 z-10 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-accent-foreground/30 bg-background text-muted-foreground opacity-0 shadow-md transition-opacity hover:border-accent-foreground/50 hover:text-foreground group-hover:opacity-100"
+      >
+        {pointsLeft ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
+      </button>
+    </Separator>
+  );
 
   // -------------------------------------------------------------------------
   // Render — mobile toggle layout or desktop side-by-side layout
@@ -2034,66 +2330,17 @@ export function CodeBrowserView({
           </div>
         )
       ) : (
-        // Desktop: side-by-side layout with resizable file tree
-        <Group
-          orientation="horizontal"
-          defaultLayout={defaultLayout}
-          onLayoutChanged={handleLayoutChanged}
-        >
-          {/* Left panel — file tree */}
-          <Panel
-            id="file-tree"
-            defaultSize="15rem"
-            minSize="10rem"
-            maxSize="50%"
-            collapsible
-            collapsedSize="0%"
-            panelRef={treePanelRef}
-            onResize={(size) => {
-              const collapsed = size.asPercentage === 0;
-              setTreeCollapsed(collapsed);
-              saveFileTreeCollapsed(workspaceId, collapsed);
-            }}
-          >
-            <div className="flex h-full flex-col overflow-hidden border-r border-border">
-              <FileTreeToolbar
-                onNewFile={handleNewFile}
-                onNewFolder={handleNewFolder}
-                onOpenFile={pickFile ? handleOpenExternalFile : undefined}
-                onNewUntitled={handleNewUntitled}
-              />
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <FileBrowser
-                  ref={fileBrowserRef}
-                  workspaceId={workspaceId}
-                  workspacePath={workspacePath}
-                  onOpenFile={handleSelectFile}
-                  onOpenFilePinned={handleSelectFilePinned}
-                  compact
-                  selectedFile={viewFilePath}
-                  onPathRenamed={handlePathRenamed}
-                  onPathDeleted={handlePathDeleted}
-                />
-              </div>
-            </div>
-          </Panel>
+        // Desktop: side-by-side layout with resizable file tree. The Group is
+        // keyed on the side so it fully remounts when the explorer moves —
+        // react-resizable-panels sorts its panels by `offsetLeft` when they
+        // register, so reordering the children in place would leave it holding
+        // a stale order.
+        <Group key={treeSide} orientation="horizontal">
+          {treeSide === "left" && treePanelEl}
+          {treeSide === "left" && separatorEl}
 
-          <Separator className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize">
-            <button
-              type="button"
-              onClick={toggleTree}
-              className="absolute top-1/2 left-1/2 z-10 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-accent-foreground/30 bg-background text-muted-foreground opacity-0 shadow-md transition-opacity hover:border-accent-foreground/50 hover:text-foreground group-hover:opacity-100"
-            >
-              {treeCollapsed ? (
-                <ChevronRight className="size-4" />
-              ) : (
-                <ChevronLeft className="size-4" />
-              )}
-            </button>
-          </Separator>
-
-          {/* Right panel — file tabs + content */}
-          <Panel id="file-viewer" minSize="20%">
+          {/* Editor panel — file tabs + content */}
+          <Panel key="file-viewer" id="file-viewer" minSize="20%">
             <div className="relative flex h-full min-w-0 flex-col overflow-hidden">
               {/* Tab bar — owns the file-tree toggle now (auto-hides when narrow) */}
               <FileTabBar
@@ -2110,6 +2357,7 @@ export function CodeBrowserView({
                 isDirty={tabState.isDirty}
                 onSaveUntitled={pickSaveFile ? handleSaveUntitledForClose : undefined}
                 treeCollapsed={treeCollapsed}
+                treeSide={treeSide}
                 onToggleTree={toggleTree}
                 actions={
                   isMarkdown ? (
@@ -2236,6 +2484,9 @@ export function CodeBrowserView({
               </div>
             </div>
           </Panel>
+
+          {treeSide === "right" && separatorEl}
+          {treeSide === "right" && treePanelEl}
         </Group>
       )}
     </div>
