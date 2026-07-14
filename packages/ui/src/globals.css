@@ -41,6 +41,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-xl: calc(var(--radius) + 4px);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* strong ease-out for UI */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* strong ease-in-out for on-screen movement */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* iOS-like drawer curve */
 }
 
 :root {
@@ -127,20 +130,6 @@ button,
   display: block;
 }
 
-@keyframes status-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-.animate-status-pulse {
-  animation: status-pulse 1.5s ease-in-out infinite;
-}
-
 body {
   margin: 0;
   background: var(--background);
@@ -150,4 +139,30 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Neutralize tw-animate-css movement; opacity fades
+     (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
+  * {
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-enter-scale: 1;
+    --tw-enter-rotate: 0;
+    --tw-enter-blur: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+    --tw-exit-scale: 1;
+    --tw-exit-rotate: 0;
+    --tw-exit-blur: 0;
+  }
+
+  /* Height keyframes can't be neutralized via the vars above — disable them.
+     Content snaps open/closed instead of sliding. */
+  .animate-accordion-down,
+  .animate-accordion-up,
+  .animate-collapsible-down,
+  .animate-collapsible-up {
+    animation: none;
+  }
 }

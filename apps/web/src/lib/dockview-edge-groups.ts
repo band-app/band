@@ -119,6 +119,11 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
   }
 }
 
+// Tracks the pending class-removal timer per animation root so rapid
+// maximize/restore toggles extend the window instead of cutting the
+// second toggle's transition short.
+const edgeAnimTimers = new WeakMap<HTMLElement, number>();
+
 /**
  * Collapse (hide) every edge group while a grid group is maximized so the
  * maximized tab gets the full area; on exit, re-derive edge visibility from
@@ -132,7 +137,23 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
  * and re-deriving on exit is consistent with how the rest of the layout
  * treats it — no separate "prior edge state" bookkeeping is needed.
  */
-export function applyMaximizeEdgeVisibility(api: DockviewApi, maximized: boolean): void {
+export function applyMaximizeEdgeVisibility(
+  api: DockviewApi,
+  maximized: boolean,
+  animateRoot?: HTMLElement | null,
+): void {
+  if (animateRoot) {
+    const pending = edgeAnimTimers.get(animateRoot);
+    if (pending !== undefined) window.clearTimeout(pending);
+    animateRoot.classList.add("dv-edge-anim");
+    edgeAnimTimers.set(
+      animateRoot,
+      window.setTimeout(() => {
+        animateRoot.classList.remove("dv-edge-anim");
+        edgeAnimTimers.delete(animateRoot);
+      }, 300),
+    );
+  }
   if (maximized) {
     for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
       try {

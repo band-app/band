@@ -126,7 +126,7 @@ function CollapsibleSection({
 }) {
   return (
     <div
-      className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+      className={`grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${
         collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
       }`}
     >

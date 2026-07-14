@@ -526,9 +526,12 @@ function AppShell() {
     // panel) unless the removal path will also run.
     const sidebar = sidebarElRef.current;
     if (!sidebar) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const els = [sidebar, mainElRef.current];
     for (const el of els) {
-      if (el) el.style.transition = "flex-grow 200ms ease, flex-basis 200ms ease";
+      if (el)
+        el.style.transition =
+          "flex-grow 200ms cubic-bezier(0.77, 0, 0.175, 1), flex-basis 200ms cubic-bezier(0.77, 0, 0.175, 1)";
     }
     let timer = 0;
     const clear = (e?: TransitionEvent) => {

@@ -294,3 +294,27 @@
   .dv-tab.dv-active-tab {
   box-shadow: none;
 }
+
+/* Scoped edge-collapse animation for tab maximize/restore. The class is
+   added by applyMaximizeEdgeVisibility for the duration of the toggle only,
+   so sash dragging (which writes width per pointermove) is never affected.
+   Child combinators keep this on the shell's own two splitviews — nested
+   dockviews inside panels are untouched. */
+.dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
+.dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view {
+  transition:
+    width 200ms cubic-bezier(0.77, 0, 0.175, 1),
+    left 200ms cubic-bezier(0.77, 0, 0.175, 1),
+    height 200ms cubic-bezier(0.77, 0, 0.175, 1),
+    top 200ms cubic-bezier(0.77, 0, 0.175, 1);
+  /* .dv-view is overflow:auto by default — hide it during the tween so a
+     shrinking wrapper never flashes scrollbars over the clipped content. */
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
+  .dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view {
+    transition: none;
+  }
+}

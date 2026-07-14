@@ -1644,7 +1644,7 @@ export function SharedDockviewLayout() {
           // workspace-switch-driven maximize changes. The initial-mount
           // path is handled separately below because `initializedRef` is
           // still false there and this listener is guarded out.
-          applyMaximizeEdgeVisibility(event.api, !!e.isMaximized);
+          applyMaximizeEdgeVisibility(event.api, !!e.isMaximized, containerRef.current);
           const workspaceId = activeWorkspaceIdRef.current;
           if (!workspaceId) return;
           // Defensive: dockview's event payload types both `group` and
