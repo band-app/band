@@ -199,9 +199,13 @@ test.describe("Files-tab explorer docking side", () => {
       WIDTH_TOLERANCE_PX,
     );
 
-    // The dragged width — not the default — is what got persisted.
-    const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE_A);
-    expect(persisted).not.toBeNull();
-    expect(Math.abs((persisted as number) - draggedWidth)).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+    // The dragged width — not the default — is what got persisted. The width
+    // write is debounced (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll for it.
+    await expect
+      .poll(async () => {
+        const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE_A);
+        return persisted === null ? null : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
+      })
+      .toBe(true);
   });
 });

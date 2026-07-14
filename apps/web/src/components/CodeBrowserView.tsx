@@ -103,6 +103,9 @@ export type FileTreeSide = "left" | "right";
 /** Fallback when nothing is persisted — also the `defaultSize` for a fresh workspace. */
 const DEFAULT_FILE_TREE_WIDTH_PX = 240; // 15rem
 
+/** Trailing debounce on the width write — see the tree Panel's `onResize`. */
+const WIDTH_PERSIST_DEBOUNCE_MS = 200;
+
 function loadFileTreeWidth(wsId: string): number | null {
   try {
     const raw = localStorage.getItem(fileTreeWidthKey(wsId));
@@ -1231,23 +1234,32 @@ export function CodeBrowserView({
     notifySelectFile(null);
   }, [viewFilePath, handleTabClose, notifySelectFile]);
 
+  // Save full editor state for the current file (doc, selection, undo history,
+  // scroll) into both the in-memory cache and localStorage. Call this before
+  // anything that tears the CodeMirror view down — switching tabs, or
+  // remounting the panel Group to move the explorer to the other side.
+  //
+  // Distinct from `flushActiveEditorState` below, which *returns* the state so
+  // a rename/delete caller can re-file it under a different path.
+  const persistActiveEditorState = useCallback(() => {
+    const view = editorViewRef.current;
+    if (!view || !viewFilePath) return;
+    try {
+      const state = serializeEditorState(view);
+      savedEditorStatesRef.current[viewFilePath] = state;
+      // Persist to localStorage so undo history survives workspace switches
+      tabState.update(viewFilePath, {
+        editorState: state.editorState,
+        scrollTop: state.scrollTop,
+      });
+    } catch {
+      // CM view not ready
+    }
+  }, [viewFilePath, tabState.update]);
+
   const handleTabSelect = useCallback(
     (filePath: string) => {
-      // Save full editor state for the departing file (doc, selection, undo history, scroll)
-      const view = editorViewRef.current;
-      if (view && viewFilePath) {
-        try {
-          const state = serializeEditorState(view);
-          savedEditorStatesRef.current[viewFilePath] = state;
-          // Persist to localStorage so undo history survives workspace switches
-          tabState.update(viewFilePath, {
-            editorState: state.editorState,
-            scrollTop: state.scrollTop,
-          });
-        } catch {
-          // CM view not ready
-        }
-      }
+      persistActiveEditorState();
 
       // Prevent the file prop effect from overwriting state.
       // The route round-trip (via onSelectFile) only carries the file path.
@@ -1261,7 +1273,7 @@ export function CodeBrowserView({
       setViewColumn(undefined);
       notifySelectFile(filePath);
     },
-    [fileTabs.setActiveTab, notifySelectFile, viewFilePath, tabState.update],
+    [fileTabs.setActiveTab, notifySelectFile, viewFilePath, persistActiveEditorState],
   );
 
   // Sync viewFilePath when active tab changes due to a close.
@@ -1945,81 +1957,94 @@ export function CodeBrowserView({
   const treePanelRef = usePanelRef();
   const [treeCollapsed, setTreeCollapsed] = useState(() => loadFileTreeCollapsed(workspaceId));
   const [treeSide, setTreeSide] = useState<FileTreeSide>(() => loadFileTreeSide(workspaceId));
-  const [treeWidthPx, setTreeWidthPx] = useState(
-    () => loadFileTreeWidth(workspaceId) ?? DEFAULT_FILE_TREE_WIDTH_PX,
-  );
+  // Mirrors `treeCollapsed` so `onResize` — which fires per pointermove — can
+  // detect an actual flip without reading through React state.
+  const collapsedRef = useRef(treeCollapsed);
+
+  // The explorer's width lives in a ref, not state. It is only ever *consumed*
+  // as the panel's `defaultSize` — i.e. at mount — so re-rendering when it
+  // changes buys nothing and costs a lot: `defaultSize` sits in the library's
+  // Panel registration effect dependencies, so a new value unregisters and
+  // re-registers the panel (two `sortPanels` passes, each reading `offsetLeft`
+  // on every panel — a forced reflow) without moving anything on screen. The
+  // panel's `onResize` fires on every ResizeObserver tick, so as state this
+  // fired that whole cascade ~60×/sec for the length of any window or splitter
+  // drag.
+  const treeWidthRef = useRef(loadFileTreeWidth(workspaceId) ?? DEFAULT_FILE_TREE_WIDTH_PX);
 
   // Switching sides remounts the Group (see `key={treeSide}` below), because
   // react-resizable-panels orders its panels by `offsetLeft` at *registration*
   // time — reordering the children in place would leave it with a stale order.
-  // A remount means `defaultSize` / collapsed have to be re-seeded from live
-  // state rather than read once at first mount, which is what the two hooks
-  // below do.
-  //
-  // `hydratedTreeRef` guards the persistence writes in `onResize` against the
-  // panel's own mount-time callback, which always reports the panel expanded
-  // at its `defaultSize` — without the guard, remounting a collapsed explorer
-  // would immediately persist `collapsed = false`.
-  const hydratedTreeRef = useRef(false);
+  // Crossing the mobile/desktop threshold remounts it too. Either way the fresh
+  // panel has to be re-seeded from live state rather than from a value read once
+  // at first mount.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `treeSide` and `useMobileLayout` are triggers, not inputs — they are what mount or remount the Group, and this effect re-seeds the fresh panel. `treeCollapsed` is read but deliberately not a dependency: this is a re-seed, not a controlled-collapse effect.
   useLayoutEffect(() => {
-    hydratedTreeRef.current = false;
     // Restore collapsed imperatively rather than mounting the panel at size 0:
     // `expand()` returns a panel to its last uncollapsed size, and one that
     // mounted at 0 has none — it would expand to the group's auto-assigned
-    // even split instead of the width the user dragged.
+    // even split instead of the width the user dragged. Running before the
+    // browser lays out means the library's ResizeObserver measures the panel
+    // already collapsed, so this never round-trips through a 0 → expanded blip.
     if (treeCollapsed) treePanelRef.current?.collapse();
-    hydratedTreeRef.current = true;
   }, [treeSide, useMobileLayout, treePanelRef]);
 
-  // `onLayoutChanged` fires *before* the browser applies the new layout, and
-  // `getSize()` is a live `offsetWidth` read. Measuring synchronously here
-  // catches the explorer still sized by the old percentage inside the already-
-  // resized container: maximizing the tab persisted 721px for a 360px explorer,
-  // and restoring persisted 180px — so every maximize/restore cycle halved the
-  // user's width on the next reload, even though the on-screen width never
-  // moved. Defer the read to the next frame, once the settled width is real.
-  const widthWriteFrameRef = useRef<number | null>(null);
-  const handleLayoutChanged = useCallback(() => {
-    if (widthWriteFrameRef.current !== null) {
-      cancelAnimationFrame(widthWriteFrameRef.current);
+  // Width is measured in the Panel's `onResize`, NOT in the Group's
+  // `onLayoutChanged`. `onLayoutChanged` fires *before* the browser applies the
+  // new layout, so reading the panel there caught it still sized by its old
+  // proportion inside the already-resized container: maximizing the tab reported
+  // 721px for a 360px explorer, restoring reported 180px, and every
+  // maximize/restore cycle halved the user's width on the next reload even
+  // though the on-screen width never moved. `onResize` is delivered from the
+  // library's ResizeObserver — i.e. after layout — so the size it hands us is
+  // the settled one.
+  //
+  // The localStorage write is debounced because `onResize` fires on every
+  // pointermove of a drag and `setItem` is synchronous and disk-backed:
+  // persisting on each one would write ~60×/sec and throw all but the last away.
+  const widthPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleWidthPersist = useCallback(() => {
+    if (widthPersistTimerRef.current !== null) {
+      clearTimeout(widthPersistTimerRef.current);
     }
-    widthWriteFrameRef.current = requestAnimationFrame(() => {
-      widthWriteFrameRef.current = null;
-      const size = treePanelRef.current?.getSize();
-      // Skip the collapsed layout: the width we persist is the one the explorer
-      // expands *back* to. Collapsed-ness is tracked separately, in `onResize`.
-      if (size && size.inPixels > 0) {
-        setTreeWidthPx(size.inPixels);
-        saveFileTreeWidth(workspaceId, size.inPixels);
-      }
-    });
-  }, [workspaceId, treePanelRef]);
+    widthPersistTimerRef.current = setTimeout(() => {
+      widthPersistTimerRef.current = null;
+      saveFileTreeWidth(workspaceId, treeWidthRef.current);
+    }, WIDTH_PERSIST_DEBOUNCE_MS);
+  }, [workspaceId]);
 
   useEffect(() => {
     return () => {
-      if (widthWriteFrameRef.current !== null) {
-        cancelAnimationFrame(widthWriteFrameRef.current);
+      if (widthPersistTimerRef.current !== null) {
+        clearTimeout(widthPersistTimerRef.current);
+        // Don't drop a width the user set moments before unmounting.
+        saveFileTreeWidth(workspaceId, treeWidthRef.current);
       }
     };
-  }, []);
+  }, [workspaceId]);
 
   const handleSetTreeSide = useCallback(
     (side: FileTreeSide) => {
-      // Capture the explorer's live width before the Group remounts. Moving
-      // sides must not resize the explorer, and `treeWidthPx` — which seeds the
-      // remounted panel's `defaultSize` — otherwise only refreshes on
-      // `onLayoutChanged`. Reading the panel directly means the width the user
-      // is looking at is exactly the width that comes back on the other side.
+      // The Group remount tears down CodeMirror, and the editor's state is only
+      // written on tab switch or on CodeBrowserView unmount — neither of which
+      // happens here. Without this, moving the explorer silently drops the open
+      // file's undo history, cursor and scroll position.
+      persistActiveEditorState();
+
+      // Capture the explorer's live width before the remount. Moving sides must
+      // not resize the explorer, and `treeWidthRef` — which seeds the remounted
+      // panel's `defaultSize` — otherwise only refreshes on `onResize`. Reading
+      // the panel directly means the width the user is looking at is exactly the
+      // width that comes back on the other side.
       const size = treePanelRef.current?.getSize();
       if (size && size.inPixels > 0) {
-        setTreeWidthPx(size.inPixels);
+        treeWidthRef.current = size.inPixels;
         saveFileTreeWidth(workspaceId, size.inPixels);
       }
       setTreeSide(side);
       saveFileTreeSide(workspaceId, side);
     },
-    [workspaceId, treePanelRef],
+    [workspaceId, treePanelRef, persistActiveEditorState],
   );
 
   const toggleTree = useCallback(() => {
@@ -2062,7 +2087,7 @@ export function CodeBrowserView({
     <Panel
       key="file-tree"
       id="file-tree"
-      defaultSize={`${treeWidthPx}px`}
+      defaultSize={`${treeWidthRef.current}px`}
       minSize="10rem"
       maxSize="50%"
       // Hold the explorer's pixel width when the Files tab itself is resized —
@@ -2075,8 +2100,23 @@ export function CodeBrowserView({
       panelRef={treePanelRef}
       onResize={(size) => {
         const collapsed = size.asPercentage === 0;
-        setTreeCollapsed(collapsed);
-        if (hydratedTreeRef.current) saveFileTreeCollapsed(workspaceId, collapsed);
+
+        // Remember the width the explorer expands *back* to. A collapsed panel
+        // reports 0, which is not a width the user chose — skipping it (rather
+        // than clearing anything) is what lets a drag-then-collapse keep the
+        // width the drag just set.
+        if (!collapsed && size.inPixels > 0) {
+          treeWidthRef.current = size.inPixels;
+          scheduleWidthPersist();
+        }
+
+        // `onResize` fires on every pointermove of a drag, so only touch React
+        // and localStorage when collapsed-ness actually flipped.
+        if (collapsed !== collapsedRef.current) {
+          collapsedRef.current = collapsed;
+          setTreeCollapsed(collapsed);
+          saveFileTreeCollapsed(workspaceId, collapsed);
+        }
       }}
     >
       <div
@@ -2245,7 +2285,7 @@ export function CodeBrowserView({
         // react-resizable-panels sorts its panels by `offsetLeft` when they
         // register, so reordering the children in place would leave it holding
         // a stale order.
-        <Group key={treeSide} orientation="horizontal" onLayoutChanged={handleLayoutChanged}>
+        <Group key={treeSide} orientation="horizontal">
           {treeSide === "left" && treePanelEl}
           {treeSide === "left" && separatorEl}
 

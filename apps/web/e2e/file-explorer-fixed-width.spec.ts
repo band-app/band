@@ -176,10 +176,14 @@ test.describe("Files-tab explorer keeps its pixel width across maximize", () => 
     );
 
     // The persisted value must still be the dragged pixel width — it is what
-    // seeds the panel's `defaultSize` on the next mount.
-    const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
-    expect(persisted).not.toBeNull();
-    expect(Math.abs((persisted as number) - draggedWidth)).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+    // seeds the panel's `defaultSize` on the next mount. The write is debounced
+    // (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll rather than reading once.
+    await expect
+      .poll(async () => {
+        const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
+        return persisted === null ? null : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
+      })
+      .toBe(true);
 
     // …and the user-visible consequence of getting that wrong: reload and the
     // explorer must come back at the width the user dragged it to.
@@ -189,6 +193,31 @@ test.describe("Files-tab explorer keeps its pixel width across maximize", () => 
     expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
       WIDTH_TOLERANCE_PX,
     );
+  });
+
+  test("a legacy percentage width is ignored, not restored as a pixel width", async ({ page }) => {
+    const workspace = new WorkspacePage(page, server.url, TOKEN);
+    const codeBrowser = new CodeBrowserPage(page, workspace);
+
+    // Users upgrading from the percentage era have `band-file-tree-width:<ws>`
+    // = "15" (meaning 15% of the group). The key was deliberately renamed to
+    // `-px`, because reusing it would restore that 15 as a 15-PIXEL explorer —
+    // a sliver, below even the 10rem minSize. Seed the legacy key before the app
+    // mounts and assert the explorer falls back to the 240px default.
+    await codeBrowser.seedLegacyWidthValue(WORKSPACE, "15");
+
+    await workspace.goto(WORKSPACE);
+    await workspace.waitForReady();
+    await codeBrowser.openFilesTab();
+
+    expect(
+      Math.abs((await codeBrowser.explorerWidth()) - DEFAULT_TREE_WIDTH_PX),
+    ).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+    // The legacy value is not migrated into the new key either — the explorer
+    // simply starts from the default and re-persists from there.
+    await expect
+      .poll(() => codeBrowser.readPersistedWidthPx(WORKSPACE))
+      .toBe(DEFAULT_TREE_WIDTH_PX);
   });
 });
 

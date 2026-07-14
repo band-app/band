@@ -250,6 +250,7 @@ export function FileTabBar({
             <TooltipTrigger asChild>
               <button
                 type="button"
+                data-testid="file-tab-bar__tree-toggle"
                 onClick={onToggleTree}
                 className="ml-1 hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors @[16rem]:inline-flex"
               >
