@@ -234,6 +234,22 @@ export class CodeBrowserPage {
     });
   }
 
+  /** Resize the browser window to `width` (keeping the current height) — a real
+   *  window resize, which is what drives a container-driven `onResize` of the
+   *  explorer panel (as opposed to a user-driven separator drag).
+   *
+   *  Callers that need the Group to stay mounted must keep the Files tab's own
+   *  container above CodeBrowserView's 600px mobile threshold; that container is
+   *  roughly half the width left over after the project sidebar, so a viewport
+   *  around 1700px still leaves it comfortably desktop. */
+  async setWindowWidth(width: number): Promise<void> {
+    await test.step(`Resize the window to ${width}px wide`, async () => {
+      const size = this.page.viewportSize();
+      if (!size) throw new Error("No viewport size — cannot resize");
+      await this.page.setViewportSize({ width, height: size.height });
+    });
+  }
+
   /** Force the `key={treeSide}` Group to REMOUNT without changing the docking
    *  side: narrow the window until the Files tab's own container drops under
    *  `CodeBrowserView`'s 600px threshold (the desktop Group unmounts in favour

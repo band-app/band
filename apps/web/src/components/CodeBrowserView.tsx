@@ -103,6 +103,15 @@ export type FileTreeSide = "left" | "right";
 /** Fallback when nothing is persisted — also the `defaultSize` for a fresh workspace. */
 const DEFAULT_FILE_TREE_WIDTH_PX = 240; // 15rem
 
+/**
+ * The explorer's size constraints. These back the Panel's `minSize` / `maxSize`
+ * props *and* the clamp arithmetic in the resize handler, which has to know the
+ * bounds the layout engine is enforcing in order to tell "the user chose this
+ * width" apart from "the container squeezed us to this width".
+ */
+const MIN_FILE_TREE_WIDTH_PX = 160; // 10rem
+const MAX_FILE_TREE_WIDTH_RATIO = 0.5; // half the group
+
 /** Trailing debounce on the width write — see the tree Panel's `onResize`. */
 const WIDTH_PERSIST_DEBOUNCE_MS = 200;
 
@@ -2023,6 +2032,66 @@ export function CodeBrowserView({
     };
   }, [workspaceId]);
 
+  // Width of the group at the last `onResize`, used to tell the two kinds of
+  // resize apart, and a flag marking the resizes we asked for ourselves.
+  const groupWidthRef = useRef(0);
+  const selfResizeRef = useRef(false);
+
+  const handleTreeResize = useCallback(
+    (size: { asPercentage: number; inPixels: number }) => {
+      const collapsed = size.asPercentage === 0;
+
+      // `onResize` fires on every pointermove of a drag, so only touch React and
+      // localStorage when collapsed-ness actually flipped.
+      if (collapsed !== collapsedRef.current) {
+        collapsedRef.current = collapsed;
+        setTreeCollapsed(collapsed);
+        saveFileTreeCollapsed(workspaceId, collapsed);
+      }
+
+      // A collapsed panel reports 0, which is not a width the user chose.
+      // Skipping it — rather than clearing anything — is what lets a
+      // drag-then-collapse keep the width the drag just set.
+      if (collapsed) return;
+
+      const groupWidth = size.inPixels / (size.asPercentage / 100);
+      const groupResized = Math.abs(groupWidth - groupWidthRef.current) > 1;
+      groupWidthRef.current = groupWidth;
+
+      // A resize we requested below. Its result tells us nothing about what the
+      // user wants — swallow it, or a clamped restore would overwrite the very
+      // width it was trying to restore.
+      if (selfResizeRef.current) {
+        selfResizeRef.current = false;
+        return;
+      }
+
+      if (!groupResized) {
+        // The group is the same size, so nothing but the user can have moved the
+        // panel (separator drag, or keyboard resize). This is a chosen width.
+        treeWidthRef.current = size.inPixels;
+        scheduleWidthPersist();
+        return;
+      }
+
+      // The group changed size. `preserve-pixel-size` normally holds the
+      // explorer's width through that — but `maxSize` still binds, so narrowing
+      // the tab far enough squeezes the explorer below the chosen width. Left
+      // alone, the layout engine has no memory of the width it took away, so
+      // widening back would strand the explorer at the squeezed size and the
+      // next persist would make that the user's width. Take it back instead,
+      // as far as there is now room for.
+      const maxWidth = groupWidth * MAX_FILE_TREE_WIDTH_RATIO;
+      if (maxWidth < MIN_FILE_TREE_WIDTH_PX) return; // no room to honour either bound
+      const target = Math.min(treeWidthRef.current, maxWidth);
+      if (Math.abs(size.inPixels - target) > 1) {
+        selfResizeRef.current = true;
+        treePanelRef.current?.resize(`${target}px`);
+      }
+    },
+    [workspaceId, treePanelRef, scheduleWidthPersist],
+  );
+
   const handleSetTreeSide = useCallback(
     (side: FileTreeSide) => {
       // The Group remount tears down CodeMirror, and the editor's state is only
@@ -2088,8 +2157,8 @@ export function CodeBrowserView({
       key="file-tree"
       id="file-tree"
       defaultSize={`${treeWidthRef.current}px`}
-      minSize="10rem"
-      maxSize="50%"
+      minSize={`${MIN_FILE_TREE_WIDTH_PX}px`}
+      maxSize={`${MAX_FILE_TREE_WIDTH_RATIO * 100}%`}
       // Hold the explorer's pixel width when the Files tab itself is resized —
       // maximize/restore, window resize, project-sidebar collapse. The editor
       // panel keeps the default `preserve-relative-size` and absorbs the delta;
@@ -2098,26 +2167,7 @@ export function CodeBrowserView({
       collapsible
       collapsedSize="0%"
       panelRef={treePanelRef}
-      onResize={(size) => {
-        const collapsed = size.asPercentage === 0;
-
-        // Remember the width the explorer expands *back* to. A collapsed panel
-        // reports 0, which is not a width the user chose — skipping it (rather
-        // than clearing anything) is what lets a drag-then-collapse keep the
-        // width the drag just set.
-        if (!collapsed && size.inPixels > 0) {
-          treeWidthRef.current = size.inPixels;
-          scheduleWidthPersist();
-        }
-
-        // `onResize` fires on every pointermove of a drag, so only touch React
-        // and localStorage when collapsed-ness actually flipped.
-        if (collapsed !== collapsedRef.current) {
-          collapsedRef.current = collapsed;
-          setTreeCollapsed(collapsed);
-          saveFileTreeCollapsed(workspaceId, collapsed);
-        }
-      }}
+      onResize={handleTreeResize}
     >
       <div
         className={`flex h-full flex-col overflow-hidden border-border ${
