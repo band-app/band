@@ -577,7 +577,7 @@ export class WorkspacePage {
    *  locator never collides with nested dockview tab strips (which
    *  render their own per-instance tab components and never carry
    *  `workspace__tab--*` testids). */
-  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph"): Locator {
     return this.page.getByTestId(`workspace__tab--${panelComponent}`);
   }
 
@@ -591,7 +591,9 @@ export class WorkspacePage {
    *  than waiting for the panel's content (e.g. xterm) to finish
    *  booting, and it isn't affected by xterm's offscreen helper textarea
    *  visibility quirks. */
-  tabContainer(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+  tabContainer(
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph",
+  ): Locator {
     // Anchor on our own testid (the one on `.dv-default-tab`) and walk
     // up to dockview's `.dv-tab` wrapper via the `:has(...)` pseudo —
     // a Playwright-supported CSS selector that picks the parent
@@ -902,11 +904,100 @@ export class WorkspacePage {
    *  raw tab click in a `test.step` so spec bodies switch tabs through the page
    *  object instead of touching the `tab(...)` locator directly. */
   async activateTab(
-    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser" | "graph",
   ): Promise<void> {
     await test.step(`Activate the ${panelComponent} tab`, async () => {
       await this.tab(panelComponent).click();
     });
+  }
+
+  /** Activate the Graph tab. The commit-graph SVG is then reachable via
+   *  `commitGraph`. */
+  async openGraphTab(): Promise<void> {
+    await this.activateTab("graph");
+  }
+
+  /** The commit-graph SVG rendered by `GitGraphView`. Its ARIA name
+   *  ("Commit graph") is system-controlled, so `getByRole` is the
+   *  highest-priority locator. */
+  get commitGraph(): Locator {
+    return this.page.getByRole("img", { name: "Commit graph" });
+  }
+
+  /** A commit row in the graph, located by its subject line. The subject is
+   *  runtime data the test itself committed, so `getByText` is appropriate. */
+  commitRow(subject: string): Locator {
+    return this.page.getByText(subject, { exact: true });
+  }
+
+  /** Rows whose subject is git-generated stash bookkeeping ("index on …",
+   *  "untracked files on …", "WIP on …", "On …: …"). Hidden while the
+   *  graph's "Hide stash" toggle is on (the default). */
+  stashBookkeepingRows(): Locator {
+    return this.page.getByText(/^(?:WIP on|On|index on|untracked files on) \S+: /);
+  }
+
+  /** The stash's index/untracked snapshot rows — never surfaced as their own
+   *  nodes regardless of the "Hide stash" toggle. */
+  stashInternalRows(): Locator {
+    return this.page.getByText(/^(?:index on|untracked files on) \S+: /);
+  }
+
+  /** The stash tip row (git subject "On <branch>: <message>"), located by its
+   *  message — runtime data the test itself stashed. */
+  stashTipRow(message: string): Locator {
+    return this.page.getByText(new RegExp(`^On \\S+: .*${message}`));
+  }
+
+  /** Toggle the graph's "Hide stash" checkbox (Graph tab must be open). */
+  async toggleHideStash(): Promise<void> {
+    await test.step("Toggle Hide stash", async () => {
+      await this.page.getByTestId("git-graph__hide-stash").click();
+    });
+  }
+
+  /** The Graph tab's bottom commit-details panel. `data-testid` set by
+   *  `CommitDetailsPanel` in `GitCommitDetails.tsx`; visible after a commit
+   *  row is selected. */
+  get commitDetails(): Locator {
+    return this.page.getByTestId("git-graph__commit-details");
+  }
+
+  /** Select a commit row (by subject) to open its details panel. */
+  async openCommitDetails(subject: string): Promise<void> {
+    await test.step(`Open details for commit "${subject}"`, async () => {
+      await this.commitRow(subject).click();
+    });
+  }
+
+  /** Right-click a commit row (by subject) to open its context menu. The
+   *  opened menu is a Radix `role="menu"`, reachable via `contextMenu`. */
+  async openCommitContextMenu(subject: string): Promise<void> {
+    await test.step(`Right-click commit "${subject}"`, async () => {
+      await this.commitRow(subject).click({ button: "right" });
+      await expect(this.contextMenu).toBeVisible();
+    });
+  }
+
+  /** Drive the "Create branch…" flow from a commit's context menu: right-click
+   *  the row, pick the item, type the name in the dialog, and submit. Exercises
+   *  the real `workspace.createBranch` mutation end-to-end. */
+  async createBranchFromCommit(subject: string, branchName: string): Promise<void> {
+    await test.step(`Create branch "${branchName}" from commit "${subject}"`, async () => {
+      await this.openCommitContextMenu(subject);
+      await this.page.getByTestId("git-graph__create-branch").click();
+      const input = this.page.getByTestId("git-graph__branch-name-input");
+      await input.waitFor({ state: "visible" });
+      await input.fill(branchName);
+      await this.page.getByTestId("git-graph__create-branch-submit").click();
+    });
+  }
+
+  /** A ref badge in the graph rendered with the given label (branch / HEAD /
+   *  tag / stash). The label is runtime data the test itself created, so
+   *  `getByText` is appropriate. */
+  refBadge(label: string): Locator {
+    return this.page.getByText(label, { exact: true });
   }
 
   /** Read the server's recorded last-focused panel ids for a workspace via the

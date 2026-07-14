@@ -213,6 +213,12 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => activatePanel(deps, "browser"),
     },
     {
+      id: "show-graph",
+      label: "Show Git Graph",
+      shortcut: "Cmd+Shift+Y",
+      action: () => activatePanel(deps, "graph"),
+    },
+    {
       // ⌃0 — reveal the project-list sidebar (which lives outside the
       // dockview) and move keyboard focus into the list. `band:show-sidebar`
       // expands the sidebar if it's collapsed; DashboardShell's

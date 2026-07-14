@@ -4,6 +4,7 @@ import { diffService } from "../../services/diff-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
+import { gitGraphService } from "../../services/git-graph-service";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
 import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
@@ -56,6 +57,27 @@ const compareBranchSchema = z
 const mergeBaseSchema = z
   .string()
   .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
+
+/**
+ * A commit SHA passed to the Graph tab's detail/action procedures. Pinned to
+ * 7–40 hex chars so it can never be read by git as a flag (`--exec=…`) or a
+ * symbolic ref — the graph always hands us a real object id.
+ */
+const commitShaSchema = z
+  .string()
+  .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
+
+/**
+ * A branch name for checkout/create. Forbids a leading `-` (flag injection)
+ * and the characters git itself rejects in ref names; git's own
+ * `check-ref-format` still guards the create path, this is the transport gate.
+ */
+const refNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[^-]/, "branch name must not start with '-'")
+  .regex(/^[^\s~^:?*[\\]+$/, "branch name contains invalid characters");
 
 /**
  * Wire-contract note: every workspace-tier service error (including
@@ -216,6 +238,63 @@ export const workspaceRouter = t.router({
   listBranches: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .query(({ input }) => diffService.listBranches(input.workspaceId)),
+
+  getCommitGraph: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        limit: z.number().int().min(1).max(2000).optional(),
+      }),
+    )
+    .query(({ input }) => diffService.getCommitGraph(input.workspaceId, { limit: input.limit })),
+
+  // ── Graph tab: commit details + essentials actions (issue: git-graph) ──
+
+  getCommitDetails: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
+    .query(({ input }) => gitGraphService.getCommitDetails(input.workspaceId, input.sha)),
+
+  getCommitFileDiff: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sha: commitShaSchema,
+        filePath: z.string().min(1).regex(/^[^-]/, "filePath must not start with '-'"),
+      }),
+    )
+    .query(({ input }) =>
+      gitGraphService.getCommitFileDiff(input.workspaceId, input.sha, input.filePath),
+    ),
+
+  checkoutBranch: publicProcedure
+    .input(z.object({ workspaceId: z.string(), branch: refNameSchema }))
+    .mutation(({ input }) => gitGraphService.checkoutBranch(input.workspaceId, input.branch)),
+
+  createBranch: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sha: commitShaSchema,
+        name: refNameSchema,
+        checkout: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ input }) =>
+      gitGraphService.createBranch(
+        input.workspaceId,
+        input.sha,
+        input.name,
+        input.checkout ?? false,
+      ),
+    ),
+
+  cherryPick: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
+    .mutation(({ input }) => gitGraphService.cherryPick(input.workspaceId, input.sha)),
+
+  revertCommit: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
+    .mutation(({ input }) => gitGraphService.revert(input.workspaceId, input.sha)),
 
   getDiff: publicProcedure
     .input(

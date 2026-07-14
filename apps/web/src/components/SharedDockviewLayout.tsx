@@ -11,6 +11,7 @@ import {
 } from "dockview";
 import {
   FolderOpen,
+  GitBranch,
   GitCompare,
   Globe,
   Maximize2,
@@ -54,6 +55,7 @@ import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewChatContainer } from "./DockviewChatContainer";
+import { GitGraphView } from "./GitGraphView";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
 import {
   getPerWorkspaceState,
@@ -83,6 +85,7 @@ const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   files: FolderOpen,
   terminal: TerminalIcon,
   browser: Globe,
+  graph: GitBranch,
 };
 
 const PANEL_SHORTCUTS: Record<string, string> = {
@@ -91,6 +94,7 @@ const PANEL_SHORTCUTS: Record<string, string> = {
   files: "⇧⌘E",
   terminal: "⌃`",
   browser: "⇧⌘B",
+  graph: "⇧⌘Y",
 };
 
 // ---------------------------------------------------------------------------
@@ -326,6 +330,14 @@ function BrowserPanelComponent({ api }: IDockviewPanelProps) {
   );
 }
 
+function GraphPanelComponent(_props: IDockviewPanelProps) {
+  return (
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={GitBranch} />}>
+      {(workspaceId) => <GitGraphView workspaceId={workspaceId} />}
+    </MultiWorkspacePanelHost>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tab components (icon + title, no close button)
 // ---------------------------------------------------------------------------
@@ -440,6 +452,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
   files: FilesPanelComponent,
   terminal: TerminalPanelComponent,
   browser: BrowserPanelComponent,
+  graph: GraphPanelComponent,
 };
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
@@ -534,7 +547,7 @@ function useDiffFileCount(workspaceId: string | null): number {
 // Required panel definitions & layout persistence
 // ---------------------------------------------------------------------------
 
-const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
+const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser", "graph"] as const;
 
 /**
  * Panel ids that USED to be required and may live in saved layouts. We strip
@@ -1155,6 +1168,11 @@ export function SharedDockviewLayout() {
             window.dispatchEvent(new CustomEvent("band:focus-browser"));
           });
         }
+      } else if (key === "y" && e.shiftKey && api) {
+        e.preventDefault();
+        if (!hiddenPanelsRef.current.includes("graph")) {
+          api.getPanel("graph")?.api.setActive();
+        }
       } else if (key === "b" && !e.shiftKey && !e.altKey && api) {
         // ⌘B → toggle the project-list sidebar. Focus-aware: if an inner
         // dockview (terminal / chat / browser) is focused AND has panels on
@@ -1360,6 +1378,7 @@ export function SharedDockviewLayout() {
       files: "Files",
       terminal: "Terminal",
       browser: "Browser",
+      graph: "Graph",
     };
 
     const opts: Record<string, unknown> = {
@@ -1468,6 +1487,28 @@ export function SharedDockviewLayout() {
           id: "browser",
           component: "browser",
           title: "Browser",
+          params: {},
+          position: { referencePanel: "chat", direction: "right" },
+        });
+        rightGroupRef = "browser";
+      }
+    }
+
+    if (!hidden.includes("graph")) {
+      if (rightGroupRef) {
+        api.addPanel({
+          id: "graph",
+          component: "graph",
+          title: "Graph",
+          params: {},
+          position: { referencePanel: rightGroupRef, direction: "within" },
+          inactive: true,
+        });
+      } else {
+        api.addPanel({
+          id: "graph",
+          component: "graph",
+          title: "Graph",
           params: {},
           position: { referencePanel: "chat", direction: "right" },
         });
