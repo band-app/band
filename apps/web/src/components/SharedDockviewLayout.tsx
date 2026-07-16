@@ -45,8 +45,10 @@ import {
   walkGridNode,
 } from "../lib/dockview-active-state";
 import {
+  anchorHiddenGridViews,
   applyMaximizeEdgeVisibility,
   findFocusedInnerDockview,
+  prepareMaximizeRestoreAnimation,
   toggleEdgeGroup,
 } from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
@@ -475,9 +477,16 @@ const MainGroupRightActions = memo(function MainGroupRightActions(
           <button
             type="button"
             aria-label={label}
-            onClick={() => {
-              if (props.api.isMaximized()) props.api.exitMaximized();
-              else props.api.maximize();
+            onClick={(e) => {
+              if (props.api.isMaximized()) {
+                // Re-commit the hidden views' parked positions before the
+                // restore writes land, so the tween starts from the right
+                // edge (see prepareMaximizeRestoreAnimation).
+                prepareMaximizeRestoreAnimation(e.currentTarget.closest<HTMLElement>(".dv-shell"));
+                props.api.exitMaximized();
+              } else {
+                props.api.maximize();
+              }
             }}
             className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -1197,11 +1206,18 @@ export function SharedDockviewLayout() {
         const active = api.activeGroup;
         if (!active) return;
         if (active.api.location.type !== "grid") {
-          if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
+          if (api.hasMaximizedGroup()) {
+            prepareMaximizeRestoreAnimation(containerRef.current);
+            api.exitMaximizedGroup();
+          }
           return;
         }
-        if (active.api.isMaximized()) active.api.exitMaximized();
-        else active.api.maximize();
+        if (active.api.isMaximized()) {
+          prepareMaximizeRestoreAnimation(containerRef.current);
+          active.api.exitMaximized();
+        } else {
+          active.api.maximize();
+        }
       }
     };
     window.addEventListener("keydown", handler, true);
@@ -1645,6 +1661,13 @@ export function SharedDockviewLayout() {
           // path is handled separately below because `initializedRef` is
           // still false there and this listener is guarded out.
           applyMaximizeEdgeVisibility(event.api, !!e.isMaximized, containerRef.current);
+          // Synchronously (same task, same style recalc as dockview's own
+          // hide writes) re-anchor the views the maximize just hid, so the
+          // in-flight tween collapses them in place instead of sweeping
+          // them across the maximized group. See anchorHiddenGridViews.
+          if (e.isMaximized && containerRef.current) {
+            anchorHiddenGridViews(containerRef.current);
+          }
           const workspaceId = activeWorkspaceIdRef.current;
           if (!workspaceId) return;
           // Defensive: dockview's event payload types both `group` and
@@ -1738,6 +1761,14 @@ export function SharedDockviewLayout() {
     // from the workspace we just left — otherwise switching A
     // (maximized) → B (no state) would leave B rendered under A's
     // maximize overlay.
+    //
+    // When this is about to EXIT a maximize (switching out of a maximized
+    // workspace), the exit animates via the onDidMaximizedGroupChange
+    // listener — commit the hidden views' parked positions first so the
+    // tween starts from the correct edge.
+    if (api.hasMaximizedGroup()) {
+      prepareMaximizeRestoreAnimation(containerRef.current);
+    }
     applyMaximizedGroupToApi(api, activeState?.maximizedGroup);
     // Keep the edge panels in sync with the incoming workspace's maximize
     // state deterministically. When `applyMaximizedGroupToApi` actually

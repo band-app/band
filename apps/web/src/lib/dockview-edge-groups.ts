@@ -125,6 +125,78 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
 const edgeAnimTimers = new WeakMap<HTMLElement, number>();
 
 /**
+ * Call IMMEDIATELY BEFORE exiting a maximized group. Any relayout while
+ * maximized (panel mounts after a reload, a window resize) re-parks the
+ * hidden views at offset 0, so the restore tween would start from the
+ * wrong edge. Re-anchor and force a synchronous style flush so the
+ * corrected positions are committed as the transition START values before
+ * the restore's own style writes land in the same task.
+ */
+export function prepareMaximizeRestoreAnimation(root: HTMLElement | null): void {
+  if (!root) return;
+  anchorHiddenGridViews(root);
+  void root.offsetWidth;
+}
+
+/**
+ * dockview's splitview parks a hidden view at offset 0 regardless of which
+ * side of the visible (maximized) view it came from. For a view that sits
+ * AFTER the maximized group the maximize tween then sweeps its box across
+ * the maximized group — and since it is a later DOM sibling it paints on
+ * top, so the old panel visibly slides "through" the maximizing one (and
+ * back out from under it on restore). Views BEFORE the maximized group are
+ * unaffected: offset 0 is already their natural collapse anchor, which is
+ * why maximizing the right panel tweens with a clean seam while maximizing
+ * the left one ghosted.
+ *
+ * Re-anchor every hidden view that has a visible sibling before it to the
+ * container's far edge so its box collapses (and later re-expands) in
+ * place, exactly mirroring the before-side behaviour.
+ *
+ * Must run synchronously in the same task as the maximize toggle so the new
+ * anchor lands in the same style recalc as dockview's own inline-style
+ * writes. The far edge is derived from the visible siblings' inline styles
+ * rather than clientWidth so the patch never forces a layout flush.
+ *
+ * The anchor persists as an inline style until dockview's next relayout of
+ * that splitview. A relayout while maximized (e.g. a window resize) re-parks
+ * hidden views at 0, so the following restore can still ghost for one
+ * 200ms tween — accepted; the next maximize re-anchors.
+ */
+export function anchorHiddenGridViews(root: HTMLElement): void {
+  for (const sv of Array.from(
+    root.querySelectorAll<HTMLElement>(".dv-branch-node > .dv-split-view-container"),
+  )) {
+    // Only the outer grid's splitviews participate in the maximize tween —
+    // splitviews inside panel content (inner chat/terminal/browser
+    // dockviews) are exempted from the animation by the CSS override, so
+    // skip them here too rather than writing dead inline styles.
+    if (sv.closest(".dv-content-container")) continue;
+    const horizontal = sv.classList.contains("dv-horizontal");
+    const views = Array.from(
+      sv.querySelectorAll<HTMLElement>(":scope > .dv-view-container > .dv-view"),
+    );
+    let farEdge = 0;
+    for (const v of views) {
+      if (!v.classList.contains("visible")) continue;
+      const start = Number.parseFloat(horizontal ? v.style.left : v.style.top) || 0;
+      const size = Number.parseFloat(horizontal ? v.style.width : v.style.height) || 0;
+      farEdge = Math.max(farEdge, start + size);
+    }
+    let seenVisible = false;
+    for (const v of views) {
+      if (v.classList.contains("visible")) {
+        seenVisible = true;
+        continue;
+      }
+      if (!seenVisible) continue;
+      if (horizontal) v.style.left = `${farEdge}px`;
+      else v.style.top = `${farEdge}px`;
+    }
+  }
+}
+
+/**
  * Collapse (hide) every edge group while a grid group is maximized so the
  * maximized tab gets the full area; on exit, re-derive edge visibility from
  * panel presence.
