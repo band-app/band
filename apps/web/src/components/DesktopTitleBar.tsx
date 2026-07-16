@@ -231,14 +231,28 @@ export function WorkspaceTitleBar({
       // Left padding clears the macOS traffic lights only when this bar sits at
       // the window's left edge — i.e. while the sidebar is collapsed and the
       // nav cluster lives here. When the sidebar is visible it owns that gutter.
-      className={`h-[38px] shrink-0 flex items-center gap-1 border-b border-border bg-background pr-2 ${sidebarVisible ? "pl-2" : offsetClass}`}
+      className={`relative h-[38px] shrink-0 flex items-center gap-1 border-b border-border bg-background pr-2 ${sidebarVisible ? "pl-2" : offsetClass}`}
       style={DRAG_STYLE}
     >
       {/* Nav cluster relocates here (left-aligned, in normal flow) while the
-          project list is collapsed, so it never overlaps the centered title. */}
-      {!sidebarVisible && <NavControls sidebarVisible={sidebarVisible} {...nav} />}
+          project list is collapsed. The collapsed sidebar's 3px Separator
+          still sits at the window edge, so this bar starts 3px right of
+          where the SidebarTitleBar starts — pull the cluster back by that
+          much so the toggle lands on the exact same pixel in both hosts and
+          the handoff between the two bars is invisible. */}
+      {!sidebarVisible && (
+        <div className="-ml-[3px]">
+          <NavControls sidebarVisible={sidebarVisible} {...nav} />
+        </div>
+      )}
 
-      <div className="flex flex-1 items-center justify-center min-w-0 px-1">
+      {/* The title is centered on the BAR (absolute overlay), not on the
+          leftover flex space — flex-centering would re-center it the instant
+          the nav cluster mounts/unmounts on a sidebar toggle, a ±44px jump
+          layered on top of the bar's own smooth 200ms slide. Anchored to the
+          bar, it only ever moves with the bar. pointer-events pass through
+          the overlay; the picker button re-enables them for itself. */}
+      <div className="absolute inset-x-0 top-0 flex h-full items-center justify-center min-w-0 px-1 pointer-events-none">
         {workspaceName ? (
           onWorkspaceNameClick ? (
             // Interactive: clicking opens the workspace picker (mirrors the
@@ -283,7 +297,10 @@ export function WorkspaceTitleBar({
       </div>
 
       {(hasEditorPicker || hasPanels) && (
-        <div className="flex shrink-0 items-center gap-1 pointer-events-auto" style={NO_DRAG_STYLE}>
+        <div
+          className="ml-auto flex shrink-0 items-center gap-1 pointer-events-auto"
+          style={NO_DRAG_STYLE}
+        >
           {hasEditorPicker && (
             <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />
           )}

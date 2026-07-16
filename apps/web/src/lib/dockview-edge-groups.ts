@@ -125,6 +125,31 @@ export function refreshEdgeGroupVisibility(api: DockviewApi, forceVisible: boole
 const edgeAnimTimers = new WeakMap<HTMLElement, number>();
 
 /**
+ * dockview-core defers its ResizeObserver callback by one
+ * requestAnimationFrame (`watchElementResize` in its dom.ts), so while the
+ * container is animating — the project-sidebar toggle tween, a sash drag —
+ * dockview lays out against the PREVIOUS frame's size and the grid content
+ * visibly trails the panel edge (up to ~80px at the tween's velocity peak:
+ * a hole on collapse, clipped overshoot on expand). Observe the container
+ * ourselves WITHOUT the deferral and lay out synchronously in the same
+ * frame. dockview's own deferred pass still runs a frame later with the
+ * stale size, but rAF callbacks run before resize-observer callbacks within
+ * a frame, so this observer always gets the last word while the size is
+ * changing.
+ *
+ * Returns a disposer — call it from the owning effect's cleanup.
+ */
+export function attachSyncLayout(el: HTMLElement, api: DockviewApi): () => void {
+  const observer = new ResizeObserver((entries) => {
+    const rect = entries[entries.length - 1]?.contentRect;
+    if (!rect) return;
+    api.layout(rect.width, rect.height);
+  });
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
+/**
  * Call IMMEDIATELY BEFORE exiting a maximized group. Any relayout while
  * maximized (panel mounts after a reload, a window resize) re-parks the
  * hidden views at offset 0, so the restore tween would start from the

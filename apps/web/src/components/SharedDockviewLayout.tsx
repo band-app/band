@@ -47,6 +47,7 @@ import {
 import {
   anchorHiddenGridViews,
   applyMaximizeEdgeVisibility,
+  attachSyncLayout,
   findFocusedInnerDockview,
   prepareMaximizeRestoreAnimation,
   toggleEdgeGroup,
@@ -1695,6 +1696,22 @@ export function SharedDockviewLayout() {
     },
     [buildDefaultLayout, addMissingPanel],
   );
+
+  // ---------------------------------------------------------------------
+  // Synchronous layout on container resize
+  // ---------------------------------------------------------------------
+
+  // dockview's built-in resize handling is deferred by one animation frame,
+  // which makes the grid visibly trail the panel edge during the sidebar
+  // toggle tween and sash drags — see attachSyncLayout. `apiRef` is set by
+  // `onReady` during DockviewReact's mount, which runs before this parent
+  // effect, so the api is available on first pass.
+  useEffect(() => {
+    const el = containerRef.current;
+    const api = apiRef.current;
+    if (!el || !api) return;
+    return attachSyncLayout(el, api);
+  }, []);
 
   // ---------------------------------------------------------------------
   // Reactive: badge update on diff count change
