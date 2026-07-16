@@ -119,24 +119,21 @@ test("⌃0 (Focus Projects) reveals a collapsed sidebar", async ({ page }) => {
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
 });
 
-test("the nav cluster is hosted in the sidebar title bar while the sidebar is visible", async ({
-  page,
-}) => {
+test("the nav cluster renders once alongside the sidebar's own action bar", async ({ page }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
 
-  // The split title bar puts the sidebar toggle inside the project-list
-  // column (SidebarTitleBar) when the list is shown. The overflow actions
-  // live in the project-list bottom action bar; there is no title-bar
-  // hamburger anywhere, so the Menu button is absent.
+  // The nav cluster is a single stationary overlay over the title-bar row. The
+  // overflow actions live in the project-list bottom action bar; there is
+  // no title-bar hamburger anywhere, so the Menu button is absent.
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
-  await expect(wp.sidebarToggleWithinSidebar).toBeVisible();
+  await expect(wp.sidebarToggle).toHaveCount(1);
   await expect(wp.actionBarWithinSidebar).toBeVisible();
   await expect(wp.menuTrigger).toHaveCount(0);
 });
 
-test("the toggle and back/forward relocate into the workspace bar when the sidebar collapses", async ({
+test("the toggle and back/forward stay put (no relocation, no jump) when the sidebar collapses", async ({
   page,
 }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
@@ -147,17 +144,28 @@ test("the toggle and back/forward relocate into the workspace bar when the sideb
   // action bar and there is no title-bar hamburger.
   await expect(wp.actionBarWithinSidebar).toBeVisible();
   await expect(wp.menuTrigger).toHaveCount(0);
+  await expect(wp.sidebarToggle).toBeVisible();
+  const xBefore = await wp.sidebarToggleX();
 
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
 
-  // The nav cluster relocated into the workspace title bar so its controls
-  // stay reachable while the list is collapsed...
+  // The cluster is hosted in a stationary overlay, so its controls stay reachable
+  // while the list is collapsed — at the exact same position (the flicker
+  // regression was the cluster remounting 3px off between the two bars)...
   await expect(wp.sidebarToggle).toBeVisible();
   await expect(wp.backButton).toBeVisible();
   await expect(wp.forwardButton).toBeVisible();
-  // ...and no hamburger was resurrected as part of the relocation.
+  await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
+  // ...and no hamburger appears in the collapsed state either.
   await expect(wp.menuTrigger).toHaveCount(0);
+
+  // Round trip: re-expanding was the other half of the flicker regression
+  // (the cluster used to remount into the sidebar bar) — the toggle must
+  // hold the same position through the expand too.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
 });
 
 test("the collapsed state persists across a reload", async ({ page }) => {

@@ -465,10 +465,10 @@ export class WorkspacePage {
   }
 
   /** The header button that toggles the sidebar (⌘B). Rendered by
-   *  `NavControls` in `DesktopTitleBar.tsx`, hosted by `SidebarTitleBar` while
-   *  the sidebar is visible and by `WorkspaceTitleBar` while it's collapsed
-   *  (the cluster relocates so the controls stay reachable). Its `aria-pressed`
-   *  reflects current visibility. */
+   *  `NavControls` in `DesktopTitleBar.tsx`, hosted once in `AppShell`'s
+   *  stationary overlay pinned over the title-bar row's left edge — it stays put in both
+   *  sidebar states rather than relocating between the title bars. Its
+   *  `aria-pressed` reflects current visibility. */
   get sidebarToggle(): Locator {
     return this.page.getByTestId("desktop-title-bar__sidebar-toggle");
   }
@@ -487,25 +487,31 @@ export class WorkspacePage {
     return this.sidebar.getByTestId("project-list__action-bar");
   }
 
-  /** The workspace-history back arrow (⌘[). Part of the relocating
+  /** The workspace-history back arrow (⌘[). Part of the stationary-overlay
    *  `NavControls` cluster. Targeted by testid: the "Back"/"Forward" ARIA
    *  names aren't unique app-wide (ScreencastPanel's address bar reuses them). */
   get backButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__back");
   }
 
-  /** The workspace-history forward arrow (⌘]). Part of the relocating
+  /** The workspace-history forward arrow (⌘]). Part of the stationary-overlay
    *  `NavControls` cluster. Targeted by testid for the same uniqueness reason
    *  as `backButton`. */
   get forwardButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__forward");
   }
 
-  /** The sidebar-toggle button scoped to the project-list column — proves the
-   *  nav cluster is hosted in `SidebarTitleBar` (not the workspace bar) while
-   *  the sidebar is visible. */
-  get sidebarToggleWithinSidebar(): Locator {
-    return this.sidebar.getByTestId("desktop-title-bar__sidebar-toggle");
+  /** The sidebar-toggle button's viewport x-position. The nav cluster lives
+   *  in a stationary overlay, so this must not change when the sidebar collapses
+   *  or expands — the geometric signal that the toggle neither relocates nor
+   *  jumps during the tween. */
+  async sidebarToggleX(): Promise<number> {
+    const box = await this.sidebarToggle.boundingBox();
+    // Throw rather than return NaN: `expect(NaN).toBe(NaN)` passes
+    // (Object.is), so a hidden toggle would make two compared reads
+    // vacuously equal instead of failing loudly.
+    if (!box) throw new Error("sidebar toggle has no bounding box — not visible");
+    return box.x;
   }
 
   /** Current rendered width of the sidebar in CSS px — ~0 when collapsed.

@@ -137,13 +137,20 @@ const edgeAnimTimers = new WeakMap<HTMLElement, number>();
  * a frame, so this observer always gets the last word while the size is
  * changing.
  *
+ * Cost: while the container is actively resizing (toggle tween, sash drag,
+ * window resize) dockview lays out twice per frame — its stale deferred
+ * pass plus this corrective one, ~0.5-2ms each on the default 5-panel
+ * layout. Sizes are rounded to whole px to match dockview's own rounded
+ * bookkeeping, so the settle frame doesn't trigger a final
+ * fractional-vs-rounded extra relayout.
+ *
  * Returns a disposer — call it from the owning effect's cleanup.
  */
 export function attachSyncLayout(el: HTMLElement, api: DockviewApi): () => void {
   const observer = new ResizeObserver((entries) => {
     const rect = entries[entries.length - 1]?.contentRect;
     if (!rect) return;
-    api.layout(rect.width, rect.height);
+    api.layout(Math.round(rect.width), Math.round(rect.height));
   });
   observer.observe(el);
   return () => observer.disconnect();

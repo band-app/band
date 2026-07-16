@@ -1705,7 +1705,9 @@ export function SharedDockviewLayout() {
   // which makes the grid visibly trail the panel edge during the sidebar
   // toggle tween and sash drags — see attachSyncLayout. `apiRef` is set by
   // `onReady` during DockviewReact's mount, which runs before this parent
-  // effect, so the api is available on first pass.
+  // effect, so the api is available on first pass. The observer's initial
+  // notification also reconciles any mount-time container/api size mismatch
+  // (this replaced a one-shot rAF layout-sync effect that did only that).
   useEffect(() => {
     const el = containerRef.current;
     const api = apiRef.current;
@@ -1822,22 +1824,6 @@ export function SharedDockviewLayout() {
       }
     }
   }, [hiddenPanels, addMissingPanel]);
-
-  // ---------------------------------------------------------------------
-  // Recalculate dockview layout on container resize
-  // ---------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!apiRef.current || !containerRef.current) return;
-    const api = apiRef.current;
-    const el = containerRef.current;
-    requestAnimationFrame(() => {
-      const { clientWidth, clientHeight } = el;
-      if (clientWidth !== api.width || clientHeight !== api.height) {
-        api.layout(clientWidth, clientHeight);
-      }
-    });
-  }, []);
 
   // ---------------------------------------------------------------------
   // Edge group drag visibility

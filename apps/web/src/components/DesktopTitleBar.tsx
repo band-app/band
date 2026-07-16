@@ -29,12 +29,16 @@ export interface PanelItem {
   shortcut?: string;
 }
 
-/** Props for the navigation cluster (sidebar toggle + back/forward). While the
- *  project list is visible the SidebarTitleBar renders the cluster; when the
- *  list is collapsed the same cluster relocates into the WorkspaceTitleBar —
- *  so both bars accept the same set of props. The overflow actions always live
- *  in DashboardShell's bottom action bar, so the cluster carries no menu. */
-interface NavControlsProps {
+/** Props for the navigation cluster (sidebar toggle + back/forward). The
+ *  cluster is hosted ONCE, in `AppShell`'s stationary overlay pinned over the
+ *  title-bar row's left edge (absolutely positioned on the app root, which
+ *  spans the window) — never inside either title bar. Earlier revisions
+ *  relocated it between the two bars on sidebar toggle, but the handoff
+ *  remounted the buttons inside an overflow-clipped, animating panel, so
+ *  they visibly flickered mid-tween. A stationary overlay can't flicker:
+ *  the panels slide beneath it. The overflow actions always live in
+ *  DashboardShell's bottom action bar, so the cluster carries no menu. */
+export interface NavControlsProps {
   /** Toggle the project-list sidebar's visibility (⌘B). When undefined, the
    *  sidebar toggle button is not rendered. */
   onToggleSidebar?: () => void;
@@ -51,20 +55,7 @@ interface NavControlsProps {
   canGoForward?: boolean;
 }
 
-/** The traffic-light gutter class: on macOS desktop (outside fullscreen) the
- *  window controls occupy the top-left ~80px, so whichever title-bar half sits
- *  at the window's left edge must clear that space. Computed once in `AppShell`
- *  (a single `useIsFullscreen` subscription) and passed to both halves. */
-interface TitleBarOffsetProps {
-  /** Left-padding class to apply when the bar is at the window's left edge. */
-  offsetClass: string;
-}
-
-/** The sidebar half takes the shared nav-control props verbatim;
- *  `sidebarVisible` (inherited from NavControlsProps) gates the cluster. */
-type SidebarTitleBarProps = NavControlsProps & TitleBarOffsetProps;
-
-interface WorkspaceTitleBarProps extends NavControlsProps, TitleBarOffsetProps {
+interface WorkspaceTitleBarProps {
   /** Static title. If omitted, fetches the app title from the desktop shell. */
   title?: string;
   /** Active workspace name to display prominently. */
@@ -86,9 +77,9 @@ interface WorkspaceTitleBarProps extends NavControlsProps, TitleBarOffsetProps {
   onTogglePanelVisibility?: (panelId: string) => void;
 }
 
-/** Sidebar toggle + back/forward arrows. Shared by both title-bar halves;
- *  rendered in exactly one of them at a time. */
-function NavControls({
+/** Sidebar toggle + back/forward arrows. Rendered once by `AppShell` in a
+ *  stationary overlay pinned over the title-bar row's left edge. */
+export function NavControls({
   onToggleSidebar,
   sidebarVisible,
   onGoBack,
@@ -172,32 +163,25 @@ function NavControls({
   );
 }
 
-/** Draggable title bar over the project-list sidebar. Holds the navigation
- *  cluster (sidebar toggle, back/forward) while the list is visible.
- *  Painted with the sidebar surface so it reads as one panel with the list
- *  below it, visually separated from the workspace layout to its right. */
-export function SidebarTitleBar({ sidebarVisible, offsetClass, ...nav }: SidebarTitleBarProps) {
+/** Draggable title bar over the project-list sidebar. A pure drag/paint
+ *  surface: the navigation cluster that used to live here is now hosted in
+ *  `AppShell`'s stationary overlay (see NavControlsProps), which sits on top of
+ *  this bar while the list is visible. Painted with the sidebar surface so
+ *  it reads as one panel with the list below it, visually separated from
+ *  the workspace layout to its right. */
+export function SidebarTitleBar() {
   return (
     <div
-      className={`h-[38px] shrink-0 flex items-center gap-0.5 border-b border-border bg-sidebar pr-2 ${offsetClass}`}
+      className="h-[38px] shrink-0 flex items-center border-b border-border bg-sidebar"
       style={DRAG_STYLE}
-    >
-      {/* Gate the cluster on visibility: when the list is collapsed the bar is
-          clipped to 0px but stays mounted, so rendering the cluster here would
-          duplicate it (the WorkspaceTitleBar shows it while collapsed) and put
-          two `…__sidebar-toggle` nodes in the DOM. This variant renders the
-          toggle + back/forward arrows; the overflow actions live in the
-          project-list bottom action bar. */}
-      {sidebarVisible && <NavControls sidebarVisible={sidebarVisible} {...nav} />}
-    </div>
+    />
   );
 }
 
 /** Draggable title bar over the workspace layout. Holds the workspace name
- *  (center), the open-in-editor picker, and the panel/layout switcher. When
- *  the project-list sidebar is collapsed, the navigation cluster relocates
- *  here (far left, clearing the traffic lights) so the back/forward arrows
- *  stay reachable. */
+ *  (centered on the bar) and the open-in-editor / panel-switcher controls
+ *  (right). The navigation cluster lives in `AppShell`'s stationary overlay, not
+ *  here — see NavControlsProps. */
 export function WorkspaceTitleBar({
   title,
   workspaceName,
@@ -207,9 +191,6 @@ export function WorkspaceTitleBar({
   panelItems,
   hiddenPanels,
   onTogglePanelVisibility,
-  sidebarVisible,
-  offsetClass,
-  ...nav
 }: WorkspaceTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
 
@@ -228,30 +209,16 @@ export function WorkspaceTitleBar({
 
   return (
     <div
-      // Left padding clears the macOS traffic lights only when this bar sits at
-      // the window's left edge — i.e. while the sidebar is collapsed and the
-      // nav cluster lives here. When the sidebar is visible it owns that gutter.
-      className={`relative h-[38px] shrink-0 flex items-center gap-1 border-b border-border bg-background pr-2 ${sidebarVisible ? "pl-2" : offsetClass}`}
+      className="relative h-[38px] shrink-0 flex items-center gap-1 border-b border-border bg-background pr-2 pl-2"
       style={DRAG_STYLE}
     >
-      {/* Nav cluster relocates here (left-aligned, in normal flow) while the
-          project list is collapsed. The collapsed sidebar's 3px Separator
-          still sits at the window edge, so this bar starts 3px right of
-          where the SidebarTitleBar starts — pull the cluster back by that
-          much so the toggle lands on the exact same pixel in both hosts and
-          the handoff between the two bars is invisible. */}
-      {!sidebarVisible && (
-        <div className="-ml-[3px]">
-          <NavControls sidebarVisible={sidebarVisible} {...nav} />
-        </div>
-      )}
-
       {/* The title is centered on the BAR (absolute overlay), not on the
-          leftover flex space — flex-centering would re-center it the instant
-          the nav cluster mounts/unmounts on a sidebar toggle, a ±44px jump
-          layered on top of the bar's own smooth 200ms slide. Anchored to the
-          bar, it only ever moves with the bar. pointer-events pass through
-          the overlay; the picker button re-enables them for itself. */}
+          leftover flex space — flex-centering re-centers it whenever the
+          bar's other flex children change (an instant jump layered on top
+          of the bar's own smooth 200ms slide during a sidebar toggle).
+          Anchored to the bar, it only ever moves with the bar.
+          pointer-events pass through the overlay; the picker button
+          re-enables them for itself. */}
       <div className="absolute inset-x-0 top-0 flex h-full items-center justify-center min-w-0 px-1 pointer-events-none">
         {workspaceName ? (
           onWorkspaceNameClick ? (
@@ -296,9 +263,13 @@ export function WorkspaceTitleBar({
         )}
       </div>
 
+      {/* `relative` lifts the controls above the absolutely-positioned title
+          overlay (positioned siblings later in the DOM paint on top) so a
+          long workspace name can never sit over these buttons and steal
+          their clicks on a narrow bar. */}
       {(hasEditorPicker || hasPanels) && (
         <div
-          className="ml-auto flex shrink-0 items-center gap-1 pointer-events-auto"
+          className="relative ml-auto flex shrink-0 items-center gap-1 pointer-events-auto"
           style={NO_DRAG_STYLE}
         >
           {hasEditorPicker && (
