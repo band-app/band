@@ -754,10 +754,23 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         probeConnection();
       }
     };
+    // Coming back to the foreground (tab re-shown, or — in the Electron app —
+    // the window regaining OS focus, which does NOT fire `visibilitychange`).
+    // Besides re-checking the socket, force a full repaint: a WebGL terminal
+    // that was backgrounded/throttled can drop the rAF frames carrying a TUI's
+    // in-place statusline redraws, leaving the bottom rows stale/garbled until
+    // the next byte arrives. `scheduleRepair` is rAF-debounced (self-guards on
+    // attached+visible), so a switch-back that fires both `visibilitychange`
+    // and `focus` coalesces into a single repair — same idiom as `attach`.
+    const handleForeground = () => {
+      handleResume();
+      scheduleRepair();
+    };
     const handleVisibility = () => {
-      if (!document.hidden) handleResume();
+      if (!document.hidden) handleForeground();
     };
     window.addEventListener("online", handleResume);
+    window.addEventListener("focus", handleForeground);
     document.addEventListener("visibilitychange", handleVisibility);
 
     connect();
@@ -890,6 +903,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       clearReconnectTimer();
       stopHeartbeat();
       window.removeEventListener("online", handleResume);
+      window.removeEventListener("focus", handleForeground);
       document.removeEventListener("visibilitychange", handleVisibility);
       themeObserver.disconnect();
       resizeObserver.disconnect();
