@@ -56,6 +56,12 @@ export function QuickOpenDialog({
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Controlled cmdk selection. We drive the highlighted item ourselves so we
+  // can snap it back to the first result whenever the query changes (see the
+  // reset effect near the render). The scrollable results list is scrolled to
+  // the top at the same time.
+  const [selectedValue, setSelectedValue] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Track whether a search has resolved at least once since the dialog opened.
   // This prevents the auto-open effect from firing before the search starts
@@ -296,6 +302,28 @@ export function QuickOpenDialog({
   const displayFiles = showRecent ? recentFiles : files;
   const groupHeading = showRecent ? "Recent files" : undefined;
 
+  // Whenever a new result set is applied — the query changed and fresh search
+  // results arrived, or we toggled between the recent-files view and a search —
+  // snap the highlighted item back to the first result and scroll the list to
+  // the top, matching VS Code's Quick Open. Without this, cmdk keeps a stale
+  // selection: when the previously highlighted file is still present in the new
+  // results (just not first) it stays selected, and the list never scrolls back
+  // up on its own — so pressing Enter would open the wrong file.
+  //
+  // Keyed on the result *contents* (not the array reference) so that repeated
+  // clears to an empty list — e.g. the go-to-line path calls `setFiles([])` on
+  // every keystroke — don't re-fire and fight cmdk's own single-item selection.
+  // Keyboard up/down and hover still update `selectedValue` via `onValueChange`,
+  // so this only overrides selection on an actual result change, never
+  // mid-navigation.
+  const firstFile = displayFiles[0] ?? "";
+  const resultKey = displayFiles.join("\n");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
+  useEffect(() => {
+    setSelectedValue(firstFile);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [resultKey, firstFile]);
+
   return (
     <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
       <DialogContent
@@ -311,7 +339,7 @@ export function QuickOpenDialog({
           <DialogTitle>Quick Open</DialogTitle>
           <DialogDescription>Search for files by name</DialogDescription>
         </DialogHeader>
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} value={selectedValue} onValueChange={setSelectedValue}>
           <CommandInput
             placeholder="Search files by name..."
             value={query}
@@ -327,7 +355,7 @@ export function QuickOpenDialog({
               )}
             </div>
           )}
-          <CommandList className="max-h-[360px]">
+          <CommandList ref={listRef} className="max-h-[360px]">
             {isGoToLine && currentFile ? (
               <CommandGroup>
                 <CommandItem onSelect={handleGoToLine}>

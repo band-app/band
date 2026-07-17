@@ -1437,8 +1437,9 @@ export class WorkspacePage {
 
   /** Dispatch the `band:open-quick-open` window event — the same event the
    *  file-tree toolbar's "Quick Open" action fires (see `CodeBrowserView.tsx`).
-   *  MobileWorkspaceLayout listens for it and opens the QuickOpenDialog with an
-   *  empty query (unlike `band:open-file`, which pre-fills a query and can
+   *  On desktop `SharedDockviewLayout` listens for it; on mobile
+   *  `MobileWorkspaceLayout` does. Either way it opens the QuickOpenDialog with
+   *  an empty query (unlike `band:open-file`, which pre-fills a query and can
    *  auto-open a single match without ever showing the dialog). */
   async dispatchOpenQuickOpen(): Promise<void> {
     await test.step("Dispatch band:open-quick-open", async () => {
@@ -1487,6 +1488,110 @@ export class WorkspacePage {
    *  real user would take. */
   async closeQuickOpenDialog(): Promise<void> {
     await this.pressEscape();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Quick Open selection / scroll probes (fix/quick-open-select-first).
+  //
+  // The dialog is a cmdk `Command`; its input, list, and item rows carry the
+  // `data-slot` attributes set by the `@band-app/ui` command wrappers plus the
+  // `aria-selected` / `data-value` attributes cmdk owns. All locators below are
+  // scoped to the QuickOpenDialog root so they never collide with the other
+  // command palettes (workspace picker, command palette) mounted in the tree.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The Quick Open search input. ARIA role is system-controlled (cmdk sets
+   *  `role="combobox"`); scoped to the dialog root. */
+  get quickOpenInput(): Locator {
+    return this.quickOpenDialog().getByRole("combobox");
+  }
+
+  /** The scrollable results list — cmdk renders `role="listbox"` on
+   *  `Command.List` (system-controlled), the element whose `scrollTop` the fix
+   *  must reset to 0. `getByRole` matches the sibling cmdk page objects and the
+   *  locator-priority doctrine. */
+  get quickOpenList(): Locator {
+    return this.quickOpenDialog().getByRole("listbox");
+  }
+
+  /** All rendered result rows — cmdk renders `role="option"` on every
+   *  `Command.Item` (matching `WorkspacePicker.options`). Covers the
+   *  file/recent rows plus any action row; the test reads each row's
+   *  `data-value` (the file path) to reason about order and selection. */
+  get quickOpenItems(): Locator {
+    return this.quickOpenDialog().getByRole("option");
+  }
+
+  /** Open Quick Open via the same `band:open-quick-open` window event the file
+   *  tree toolbar fires, then wait for the dialog to render. */
+  async openQuickOpen(): Promise<void> {
+    await test.step("Open Quick Open", async () => {
+      await this.dispatchOpenQuickOpen();
+      await this.quickOpenDialog().waitFor({ state: "visible" });
+    });
+  }
+
+  /** Type a query into the Quick Open input (replacing any existing text), the
+   *  way a user editing the search field would. Focuses first, selects all so
+   *  the new text replaces a restored `lastQuery`, then types. */
+  async typeQuickOpen(text: string): Promise<void> {
+    await test.step(`Type Quick Open query "${text}"`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Append text to the Quick Open query without clearing it — the way a user
+   *  refining an existing search types the next character. Distinct from
+   *  `typeQuickOpen`, which replaces the field: appending keeps the previously
+   *  matched files continuously mounted, which is the exact condition under
+   *  which the stale-selection bug reproduced. */
+  async appendQuickOpen(text: string): Promise<void> {
+    await test.step(`Append "${text}" to Quick Open query`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Clear the Quick Open input entirely (select-all + delete) so the empty-
+   *  query recent-files view is shown. */
+  async clearQuickOpenQuery(): Promise<void> {
+    await test.step("Clear Quick Open query", async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.press("Delete");
+    });
+  }
+
+  /** Press a key while the Quick Open input is focused — the real path for
+   *  keyboard navigation (ArrowDown / ArrowUp / Home / End / Enter). */
+  async pressQuickOpenKey(key: string): Promise<void> {
+    await test.step(`Press "${key}" in Quick Open`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press(key);
+    });
+  }
+
+  /** The `data-value` (file path) of every rendered result row, in DOM order.
+   *  cmdk mirrors each item's `value` prop onto its `data-value` attribute. */
+  async quickOpenItemValues(): Promise<string[]> {
+    return await this.quickOpenItems.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-value") ?? ""),
+    );
+  }
+
+  /** The `data-value` of the single row cmdk currently marks
+   *  `aria-selected="true"`, or `null` when nothing is selected. */
+  async selectedQuickOpenValue(): Promise<string | null> {
+    const selected = this.quickOpenItems.and(this.page.locator('[aria-selected="true"]'));
+    if ((await selected.count()) === 0) return null;
+    return await selected.first().getAttribute("data-value");
+  }
+
+  /** Current `scrollTop` of the Quick Open results list. 0 ⇔ scrolled to top. */
+  async quickOpenListScrollTop(): Promise<number> {
+    return await this.quickOpenList.evaluate((el) => el.scrollTop);
   }
 
   /** Dispatch a synthetic `band:open-file` window event into the page
