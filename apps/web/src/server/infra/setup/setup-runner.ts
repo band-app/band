@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { emit } from "../events/status-event-bus";
-import { prependBinDirs } from "../process/path";
+import { prependBinDirs, shellCommandInvocation } from "../process/path";
 import { loadProjectConfig } from "./project-config";
 
 /**
@@ -46,7 +46,11 @@ export function runSetup(
   }
 
   const { PORT: _port, ...parentEnv } = process.env;
-  const child = spawn("bash", ["-c", setupCommand], {
+  // `bash -c <cmd>` on POSIX, `cmd.exe /d /s /c <cmd>` on Windows — a
+  // stock Windows host has no bash, so route the command through the
+  // platform shell rather than ENOENT on a missing `bash`.
+  const { file, args } = shellCommandInvocation(setupCommand);
+  const child = spawn(file, args, {
     cwd: worktreePath,
     env: {
       ...parentEnv,

@@ -60,13 +60,18 @@ export async function checkHooks(): Promise<{
 }
 
 export async function installHooks(): Promise<void> {
-  // Find band binary
+  // Find band binary. The `/usr/local/bin/band` symlink is POSIX-only;
+  // on Windows resolve it off PATH (`where band`) instead — the hook
+  // command is executed by the coding agent's own shell, so a `band.cmd`
+  // shim path works there.
   let bandPath: string | null = null;
-  try {
-    const stat = await import("node:fs/promises").then((m) => m.stat("/usr/local/bin/band"));
-    if (stat) bandPath = "/usr/local/bin/band";
-  } catch {
-    // Try which
+  if (process.platform !== "win32") {
+    try {
+      const stat = await import("node:fs/promises").then((m) => m.stat("/usr/local/bin/band"));
+      if (stat) bandPath = "/usr/local/bin/band";
+    } catch {
+      // Try which
+    }
   }
   if (!bandPath) {
     bandPath = await systemService.whichBinary("band");

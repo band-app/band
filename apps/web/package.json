@@ -18,7 +18,8 @@
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "scripts": {
     "dev": "NODE_ENV=development tsx watch start-server.ts",
@@ -28,7 +29,7 @@
     "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
     "test:e2e": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test",
     "test:e2e:ui": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test --ui",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
+    "postinstall": "node -e \"process.platform!=='win32'&&require('child_process').execSync('chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true',{stdio:'ignore'})\""
   },
   "dependencies": {
     "@vscode/ripgrep": "^1.18.0",

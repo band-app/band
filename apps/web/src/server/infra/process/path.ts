@@ -84,10 +84,53 @@ export function prependBinDirs(path: string | undefined): string {
   return [...extraBinDirs(), ...(path ? [path] : [])].join(delimiter);
 }
 
+/**
+ * Build the argv to run a shell *command string* (the `sh -c "<command>"`
+ * shape used by the `.band` setup/teardown hooks) cross-platform.
+ *
+ * POSIX keeps the historical `bash -c <command>` so user-authored setup
+ * commands (which are written as bash) behave exactly as before. Windows
+ * has no bash on a stock host, so route the command through the command
+ * interpreter (`%ComSpec%`, i.e. cmd.exe) with `/d /s /c` — `/d` skips
+ * AutoRun, `/s` fixes quote handling, `/c` runs the string and exits.
+ */
+export function shellCommandInvocation(command: string): { file: string; args: string[] } {
+  if (process.platform === "win32") {
+    return { file: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", command] };
+  }
+  return { file: "bash", args: ["-c", command] };
+}
+
+/**
+ * Build the argv to execute a script *file* by path cross-platform.
+ *
+ * POSIX runs it via `bash <scriptPath>` (the file is interpreted as a bash
+ * script regardless of its executable bit). Windows has no bash on a stock
+ * host, so hand the path to the command interpreter — a `.cmd`/`.bat`
+ * runs directly; a bash-shaped script won't execute correctly, but the
+ * interpreter always exists so the call never ENOENTs on a missing `bash`.
+ */
+export function scriptInvocation(scriptPath: string): { file: string; args: string[] } {
+  if (process.platform === "win32") {
+    return { file: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", scriptPath] };
+  }
+  return { file: "bash", args: [scriptPath] };
+}
+
 let cachedShellPath: string | null = null;
 
 export async function shellPath(): Promise<string> {
   if (cachedShellPath) return cachedShellPath;
+
+  // Windows has no POSIX login shell to interrogate — cmd.exe/PowerShell
+  // don't understand `-li -c 'echo $PATH'`. The process already inherits
+  // the user's `PATH` from the environment, so use it directly.
+  // `extraBinDirs()` is empty on Windows, so `prependBinDirs` is a
+  // passthrough that just normalises an undefined `PATH` to "".
+  if (process.platform === "win32") {
+    cachedShellPath = prependBinDirs(process.env.PATH);
+    return cachedShellPath;
+  }
 
   const shell = defaultShell();
   try {
@@ -116,9 +159,13 @@ export async function shellPath(): Promise<string> {
 /** Resolve a binary against the user's interactive `$PATH`, or `null` when absent. */
 export async function whichBinary(name: string): Promise<string | null> {
   const resolvedPath = await shellPath();
+  // `which` is POSIX-only; Windows ships `where.exe`, which prints one
+  // absolute match per line (resolving against `PATHEXT`, so a bare name
+  // like `claude` finds `claude.cmd`/`claude.exe`).
+  const locator = process.platform === "win32" ? "where" : "which";
   try {
     const result = await new Promise<string>((resolve, reject) => {
-      execFile("which", [name], { env: { ...process.env, PATH: resolvedPath } }, (err, stdout) => {
+      execFile(locator, [name], { env: { ...process.env, PATH: resolvedPath } }, (err, stdout) => {
         if (err) {
           reject(err);
           return;
@@ -126,7 +173,9 @@ export async function whichBinary(name: string): Promise<string | null> {
         resolve(stdout.trim());
       });
     });
-    return result || null;
+    // `where` can return several lines (one per match); take the first.
+    const first = result.split(/\r?\n/)[0]?.trim();
+    return first || null;
   } catch {
     return null;
   }

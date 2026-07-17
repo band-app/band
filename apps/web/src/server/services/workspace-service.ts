@@ -15,7 +15,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
-import { prependBinDirs } from "../infra/process/path";
+import { prependBinDirs, scriptInvocation, shellCommandInvocation } from "../infra/process/path";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
@@ -787,7 +787,9 @@ export class WorkspaceService {
         // project files.
         if (teardownCmd) {
           try {
-            await execFileAsync("bash", ["-c", teardownCmd], {
+            // `bash -c <cmd>` on POSIX, `cmd.exe /d /s /c <cmd>` on Windows.
+            const { file, args } = shellCommandInvocation(teardownCmd);
+            await execFileAsync(file, args, {
               cwd: worktreePath,
               env: {
                 ...process.env,
@@ -1270,10 +1272,13 @@ export class WorkspaceService {
    *
    * Used by the dashboard's "Run script" actions on a workspace
    * (e.g. `on-create`, `on-open`). Returns once the script exits 0;
-   * rejects on a non-zero exit. The script is run via
-   * `bash <scriptPath>` — execFile, not a shell-spawned command, so no
-   * shell interpretation of `input.path` / `input.scriptType` is
-   * possible.
+   * rejects on a non-zero exit. On POSIX the script is run via
+   * `bash <scriptPath>` — execFile with a fixed argv, not a shell-spawned
+   * command string, so no shell interpretation of `input.path` /
+   * `input.scriptType` is possible. On Windows it runs through the command
+   * interpreter (`cmd.exe /d /s /c <scriptPath>`); `scriptPath` is composed
+   * from a server-controlled workspace path plus a constrained
+   * `scriptType`, so it is not attacker-controlled.
    *
    * Missing-script case throws a generic `Error` (not a domain class) so
    * tRPC surfaces it as `INTERNAL_SERVER_ERROR` (500). The wire-level
@@ -1289,7 +1294,10 @@ export class WorkspaceService {
     }
 
     try {
-      await execFileAsync("bash", [scriptPath], { cwd: input.path });
+      // `bash <scriptPath>` on POSIX; on Windows the script runs through
+      // the command interpreter (see `scriptInvocation`).
+      const { file, args } = scriptInvocation(scriptPath);
+      await execFileAsync(file, args, { cwd: input.path });
     } catch (err) {
       // Rewrap as a plain `Error` carrying just the message — preserves the
       // legacy router's behaviour, where the callback-style failure path
