@@ -14,8 +14,9 @@
  * now controls cmdk's selection and, whenever the result *contents* change,
  * forces the selection back to the first row and scrolls the list to the top.
  *
- * Test architecture (per CLAUDE.md + write-integration-test doctrine):
- *   - Boots the real production server against a fresh tmp home.
+ * Test architecture:
+ *   - Boots the real production server (via `startServer`) against a fresh tmp
+ *     home — no in-process React mounting.
  *   - A real git worktree seeded with a deterministic corpus so the real
  *     `searchWorkspaceFiles` fuzzy ranking is predictable: the two queries
  *     under test return different result *sets*, and a distinctly long-named
@@ -137,7 +138,7 @@ test.describe("Quick Open selection reset on query change", () => {
     const itemsBefore = await workspacePage.quickOpenItemValues();
     expect(itemsBefore[itemsBefore.length - 1]).toBe(TARGET);
     expect(itemsBefore[0]).not.toBe(TARGET);
-    expect(await workspacePage.quickOpenListScrollTop()).toBeGreaterThan(0);
+    await expect.poll(() => workspacePage.quickOpenListScrollTop()).toBeGreaterThan(0);
 
     // Query 2: refine to "reports" by APPENDING "s" (not retyping) so TARGET
     // stays continuously mounted — the 6 ".md" decoys drop out (21 results),

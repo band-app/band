@@ -1584,7 +1584,7 @@ export class WorkspacePage {
   /** The `data-value` of the single row cmdk currently marks
    *  `aria-selected="true"`, or `null` when nothing is selected. */
   async selectedQuickOpenValue(): Promise<string | null> {
-    const selected = this.quickOpenItems.and(this.page.locator('[aria-selected="true"]'));
+    const selected = this.quickOpenDialog().getByRole("option", { selected: true });
     if ((await selected.count()) === 0) return null;
     return await selected.first().getAttribute("data-value");
   }

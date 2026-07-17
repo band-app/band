@@ -316,8 +316,10 @@ export function QuickOpenDialog({
   // Keyboard up/down and hover still update `selectedValue` via `onValueChange`,
   // so this only overrides selection on an actual result change, never
   // mid-navigation.
-  const firstFile = displayFiles[0] ?? "";
-  const resultKey = displayFiles.join("\n");
+  const firstFile = useMemo(() => displayFiles[0] ?? "", [displayFiles]);
+  // O(N) string allocation — memoised on `displayFiles` so it only recomputes
+  // when the result set changes, not on every `selectedValue` / hover render.
+  const resultKey = useMemo(() => displayFiles.join("\n"), [displayFiles]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
   useEffect(() => {
     setSelectedValue(firstFile);
