@@ -501,6 +501,36 @@ export class WorkspacePage {
     return this.page.getByTestId("desktop-title-bar__forward");
   }
 
+  /** The stationary nav-cluster overlay that hosts the sidebar toggle and
+   *  back/forward arrows. `data-testid` set in `__root.tsx` (`AppShell`). */
+  get navOverlay(): Locator {
+    return this.page.getByTestId("app-shell__nav-overlay");
+  }
+
+  /** Whether the nav-cluster overlay renders AFTER every title-bar drag
+   *  surface in DOM order. Load-bearing in the desktop shell: Chromium
+   *  computes the window's draggable region by walking the layout tree in
+   *  document order — unioning `app-region: drag` rects and subtracting
+   *  `no-drag` rects as it goes, z-index irrelevant. If the overlay renders
+   *  before the bars, the bars' drag rects re-cover the buttons and every
+   *  click on them starts a window drag (PR #634). True drag-region
+   *  hit-testing only exists in Electron, so DOM order is the assertable
+   *  projection of the invariant in this browser harness. Throws when either
+   *  side is missing so a renamed testid can't produce a vacuous pass. */
+  async navOverlayFollowsTitleBars(): Promise<boolean> {
+    return await this.navOverlay.evaluate((overlay) => {
+      const bars = document.querySelectorAll(
+        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="desktop-title-bar__workspace-surface"]',
+      );
+      if (bars.length === 0) {
+        throw new Error("no title-bar drag surfaces found — testids renamed?");
+      }
+      return Array.from(bars).every(
+        (bar) => (bar.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      );
+    });
+  }
+
   /** The sidebar-toggle button's viewport x-position. The nav cluster lives
    *  in a stationary overlay, so this must not change when the sidebar collapses
    *  or expands — the geometric signal that the toggle neither relocates nor

@@ -97,6 +97,13 @@ export const Channels = {
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
 
 export const Events = {
+  /** Pushed when the machine wakes from system sleep or the screen is
+   *  unlocked (powerMonitor `resume` / `unlock-screen`). The window often
+   *  kept OS focus through the nap, so the renderer sees neither `focus`
+   *  nor `visibilitychange` — but the GPU may have discarded texture
+   *  memory in the meantime. WebGL surfaces (terminal glyph atlases)
+   *  subscribe to repair themselves. */
+  systemResumed: "system-resumed",
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
   /** Emitted when a `WebContentsView` is destroyed (LRU eviction,
