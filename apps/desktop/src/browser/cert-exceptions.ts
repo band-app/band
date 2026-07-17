@@ -21,11 +21,12 @@
  *     There is no persistence to disk. Restarting the desktop app
  *     clears every exception (acceptance criterion). Persistence
  *     with a management UI is an explicit follow-up.
- *   - **Partition-aware**. Even though Band's browser tabs currently
- *     all share the default Electron session, keying by partition
- *     keeps the store correct if a future feature introduces named
- *     partitions (e.g. per-workspace storage isolation). The default
- *     session is keyed as `"default"`.
+ *   - **Partition-aware**. Band's browser tabs live in the dedicated
+ *     `persist:band-browser` partition (see `BROWSER_PARTITION` in
+ *     `view-manager.ts`), so their exceptions are keyed by that
+ *     partition's `storagePath`. Keying by partition also keeps the
+ *     store correct if further named partitions are ever introduced
+ *     (e.g. per-workspace storage isolation).
  *   - **No global "ignore all" flag**. Per-host only by design.
  *
  * This module is intentionally pure: no Electron imports, no IPC.

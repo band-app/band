@@ -15,7 +15,7 @@
 
 import { app, BrowserWindow, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
-import { BrowserViewManager } from "../browser/view-manager.js";
+import { BROWSER_PARTITION, BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
@@ -276,19 +276,17 @@ async function bootstrap(): Promise<void> {
   // setImmediate, so we just return an empty no-content response
   // and Chromium quietly throws away the result.
   //
-  // **Default session only.** `BrowserViewManager.createView()`
-  // constructs every `WebContentsView` without `webPreferences.
-  // partition` or `webPreferences.session`, so they all share
-  // `session.defaultSession`. If a future feature introduces named
-  // partitions (e.g. `persist:workspace-<id>`), each new partition's
-  // `Session` is a separate object and would need this handler
-  // re-registered on it — otherwise band-action navigations in
-  // those tabs would still pop the macOS "no application set to
-  // open this URL" dialog before our setImmediate fires. Add the
-  // call to whatever code creates the partition.
-  session.defaultSession.protocol.handle("band-action", () => {
-    return new Response(null, { status: 204 });
-  });
+  // Registered on BOTH sessions in play: `session.defaultSession`
+  // (the dashboard window) and the browser panes' dedicated
+  // `BROWSER_PARTITION` (each partition's `Session` is a separate
+  // object with its own protocol registry — without the second
+  // registration, band-action navigations in tabs would pop the
+  // macOS "no application set to open this URL" dialog before our
+  // setImmediate fires). If another partition is ever introduced,
+  // register the handler on it too.
+  const bandActionHandler = () => new Response(null, { status: 204 });
+  session.defaultSession.protocol.handle("band-action", bandActionHandler);
+  session.fromPartition(BROWSER_PARTITION).protocol.handle("band-action", bandActionHandler);
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,

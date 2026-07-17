@@ -322,7 +322,7 @@ function AppShell() {
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
-  // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
+  // Cmd+= / Cmd+- / Cmd+Shift+0 — zoom in/out/reset (browser mode only;
   // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
 
@@ -616,10 +616,10 @@ function AppShell() {
     ],
   );
 
-  // Single source for the macOS traffic-light gutter: compute it once here (one
-  // `useIsFullscreen` subscription) and pass to both title-bar halves, rather
-  // than each bar instantiating its own hook. The offset applies to whichever
-  // bar sits at the window's left edge.
+  // Single source for the macOS traffic-light gutter: the offset is applied
+  // to the stationary nav-cluster overlay below so the sidebar-toggle /
+  // back-forward buttons clear the traffic lights; the title bars themselves
+  // no longer take an offset prop.
   const isFullscreen = useIsFullscreen();
   const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
 
