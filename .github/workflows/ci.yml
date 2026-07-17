@@ -132,6 +132,18 @@ jobs:
       - name: Test e2e (web)
         run: pnpm --filter @band-app/server test:e2e
 
+      # Playwright writes per-failure error-context.md snapshots (+ any traces)
+      # into test-results/. Without this upload a CI-only e2e flake leaves
+      # nothing to diagnose beyond the assertion message in the log.
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 

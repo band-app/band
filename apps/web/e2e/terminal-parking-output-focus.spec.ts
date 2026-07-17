@@ -145,6 +145,10 @@ test.afterAll(async () => {
 
 test.describe("Terminal parking: liveness + focus isolation", () => {
   test("output keeps flowing into a parked terminal over the same socket", async ({ page }) => {
+    // The default 30 s test budget can't absorb this test's stacked 20 s
+    // waits (two workspace loads + three rendered-text polls) on a loaded CI
+    // worker — same override as the other terminal-heavy specs.
+    test.setTimeout(90_000);
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     // Count only workspace A's terminal sockets so a reconnect is detectable
     // independent of B opening its own.
@@ -158,16 +162,23 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     });
     await workspacePage.waitForTerminalReady(20_000);
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
+    // Barrier: the prompt is rendered in `.xterm-rows` before we type. Splits
+    // "DOM renderer never active (rows empty forever)" from "keystrokes lost"
+    // — the two causes a bare TICK poll can't tell apart.
+    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_A);
 
-    // Start a long, self-paced stream of incrementing markers.
-    await workspacePage.runInTerminal("for i in $(seq 1 200); do echo TICK_$i; sleep 0.25; done");
-    // Confirm it started rendering while A is active, and record the highest
-    // marker visible just before we switch away.
-    await expect
-      .poll(async () => maxTick(await workspacePage.readTerminalRenderedText(WORKSPACE_A)), {
-        timeout: 20_000,
-      })
-      .toBeGreaterThan(0);
+    // Start a long, self-paced stream of incrementing markers. Self-verifying
+    // typing: retypes if no TICK renders (dropped keystrokes under CI load).
+    // The typed command echo can't satisfy the marker — `TICK_$i` has no
+    // digits — only real loop output matches. A rare double-typed loop is
+    // harmless: the second copy sits buffered in the PTY until the first
+    // finishes (~50 s), long after this test stopped reading.
+    await workspacePage.runInTerminalUntilRendered(
+      WORKSPACE_A,
+      "for i in $(seq 1 200); do echo TICK_$i; sleep 0.25; done",
+      /TICK_\d+/,
+    );
+    // Record the highest marker visible just before we switch away.
     const beforePark = maxTick(await workspacePage.readTerminalRenderedText(WORKSPACE_A));
 
     // Switch away → A parks. In-app nav keeps A cached (maxCachedWorkspaces=3).
@@ -208,6 +219,7 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
   test("keystrokes for the active terminal never leak into a parked one", async ({ page }) => {
     // Own workspace pair (C/D), separate from the output test's (A/B), so this
     // test always starts from fresh, idle shells.
+    test.setTimeout(90_000);
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
     await workspacePage.goto(WORKSPACE_C);
@@ -224,14 +236,12 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // check can't pass vacuously against an unrendered buffer, and we never have
     // to type into C after its park→re-attach (that focus race made this test
     // flaky under parallel load).
-    await workspacePage.runInTerminal("echo C_OWN_MARKER");
-    await expect
-      .poll(
-        async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_C)).includes("C_OWN_MARKER"),
-        { timeout: 20_000 },
-      )
-      .toBe(true);
+    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_C);
+    await workspacePage.runInTerminalUntilRendered(
+      WORKSPACE_C,
+      "echo C_OWN_MARKER",
+      /C_OWN_MARKER/,
+    );
 
     // Bring D forward with its own terminal; C parks.
     await workspacePage.switchWorkspace(WORKSPACE_D);
@@ -249,14 +259,12 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // Type a unique marker; it must land in the ACTIVE terminal (D), never the
     // parked one (C). `terminalInput` resolves to D only — C's textarea is
     // aria-hidden inside the inert parking container.
-    await workspacePage.runInTerminal("echo LEAKMARKER987");
-    await expect
-      .poll(
-        async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_D)).includes("LEAKMARKER987"),
-        { timeout: 20_000 },
-      )
-      .toBe(true);
+    await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_D);
+    await workspacePage.runInTerminalUntilRendered(
+      WORKSPACE_D,
+      "echo LEAKMARKER987",
+      /LEAKMARKER987/,
+    );
 
     // Switch back to C so its buffer is repainted on re-attach (xterm freezes
     // rendering while parked). Wait until C's own marker is rendered again (the

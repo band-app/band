@@ -1119,6 +1119,58 @@ export class WorkspacePage {
     });
   }
 
+  /** Wait until the workspace's terminal has rendered ANY text into xterm's
+   *  DOM-renderer rows — i.e. the shell prompt has been drawn. Two failure
+   *  modes collapse into "rendered text is empty forever" without this
+   *  barrier, and it splits them apart: rows that never fill mean the DOM
+   *  renderer isn't active (a WebGL terminal keeps `.xterm-rows` empty), while
+   *  rows that fill but never show a later marker mean the keystrokes were
+   *  lost. Call it after `waitForTerminalReady` and before the first
+   *  `runInTerminal*` a rendered-text assertion depends on. */
+  async waitForTerminalRenderedPrompt(workspaceId: string, timeoutMs = 20_000): Promise<void> {
+    await test.step(`Wait for rendered shell prompt in ${workspaceId}`, async () => {
+      await expect
+        .poll(async () => (await this.readTerminalRenderedText(workspaceId)).trim().length, {
+          timeout: timeoutMs,
+        })
+        .toBeGreaterThan(0);
+    });
+  }
+
+  /** `runInTerminal`, made self-verifying: type `line`, then wait until
+   *  `marker` shows up in the workspace's rendered rows; if it doesn't within
+   *  `renderTimeoutMs`, retype (up to `attempts` total). Keystrokes typed into
+   *  xterm's hidden textarea can be dropped wholesale under parallel CI load
+   *  (a focus steal or a socket hiccup mid-`keyboard.type`), and a plain
+   *  `runInTerminal` has no way to notice — the test then times out on a
+   *  downstream assertion with no clue the command never ran. `runInTerminal`'s
+   *  leading Enter clears any half-typed line a failed attempt left behind, so
+   *  a retype never concatenates onto the previous attempt. Only use with an
+   *  idempotent `line` — a retype after a false-negative render wait would run
+   *  it again. */
+  async runInTerminalUntilRendered(
+    workspaceId: string,
+    line: string,
+    marker: RegExp,
+    { attempts = 3, renderTimeoutMs = 8_000 }: { attempts?: number; renderTimeoutMs?: number } = {},
+  ): Promise<void> {
+    await test.step(`Run in terminal until ${marker} renders: ${line}`, async () => {
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        await this.runInTerminal(line);
+        try {
+          await expect
+            .poll(async () => marker.test(await this.readTerminalRenderedText(workspaceId)), {
+              timeout: renderTimeoutMs,
+            })
+            .toBe(true);
+          return;
+        } catch (error) {
+          if (attempt === attempts) throw error;
+        }
+      }
+    });
+  }
+
   /** Start counting terminal WebSocket connections the page opens.
    *  Returns a getter for the running count. Call this BEFORE `goto` so
    *  the listener is attached before the first socket opens. A test
