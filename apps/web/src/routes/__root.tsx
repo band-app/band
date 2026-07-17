@@ -630,19 +630,6 @@ function AppShell() {
   return (
     <ToolbarOverflowProvider>
       <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
-        {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
-            this stationary overlay pinned over the title-bar row's left edge, floating above
-            both title bars. Hosting it inside either bar means remounting it
-            on every sidebar toggle inside an overflow-clipped, animating
-            panel — the buttons visibly flickered mid-tween. Here the panels
-            slide beneath it and it never moves or remounts. The container is
-            pointer-events-none so the drag regions beneath stay draggable;
-            NavControls re-enables pointer events on itself. */}
-        <div
-          className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
-        >
-          <NavControls {...navControlProps} />
-        </div>
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"
@@ -703,6 +690,26 @@ function AppShell() {
               </div>
             </Panel>
           </Group>
+        </div>
+        {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
+            this stationary overlay pinned over the title-bar row's left edge, floating above
+            both title bars. Hosting it inside either bar means remounting it
+            on every sidebar toggle inside an overflow-clipped, animating
+            panel — the buttons visibly flickered mid-tween. Here the panels
+            slide beneath it and it never moves or remounts. The container is
+            pointer-events-none so the drag regions beneath stay draggable;
+            NavControls re-enables pointer events on itself.
+
+            MUST come after the title bars in DOM order: Chromium computes the
+            window's draggable region by walking the layout tree in document
+            order, unioning `app-region: drag` rects and subtracting `no-drag`
+            rects as it goes — z-index is irrelevant. If this overlay renders
+            before the bars, the bars' drag rects re-cover the buttons and
+            every click on them starts a window drag in the desktop app. */}
+        <div
+          className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
+        >
+          <NavControls {...navControlProps} />
         </div>
       </div>
     </ToolbarOverflowProvider>

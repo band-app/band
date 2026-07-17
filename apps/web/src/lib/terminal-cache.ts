@@ -2,6 +2,8 @@ import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import type { SearchOptions } from "@/dashboard";
+import { listen as desktopListen } from "./desktop-ipc";
+import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
 import { getParkingContainer } from "./terminal-parking";
@@ -327,6 +329,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   // WebGL "backing store may be stale" flag; a full re-attach is deferred to the
   // next `attach` (e.g. context lost while parked).
   let webglSuspect = false;
+  // WebGL "glyph atlas may be corrupted" flag. A backgrounded/occluded window
+  // can lose GPU texture memory WITHOUT a `webglcontextlost` event; after that,
+  // `term.refresh` alone redraws every row through the same damaged atlas
+  // (backgrounds paint, glyphs come out blank/partial). Set on every return to
+  // the foreground; the next repair drops the atlas so glyphs re-rasterize.
+  // Deliberately NOT set on plain attach (pane switches) — the atlas rebuild
+  // costs a few ms of glyph rasterization and parked terminals keep a healthy
+  // atlas.
+  let atlasSuspect = false;
 
   // Selection (long-press → word-select → arrow-extend) state.
   let selectionAnchor: Cell | null = null;
@@ -764,6 +775,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // and `focus` coalesces into a single repair — same idiom as `attach`.
     const handleForeground = () => {
       handleResume();
+      atlasSuspect = true;
       scheduleRepair();
     };
     const handleVisibility = () => {
@@ -772,6 +784,20 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     window.addEventListener("online", handleResume);
     window.addEventListener("focus", handleForeground);
     document.addEventListener("visibilitychange", handleVisibility);
+    // Desktop shell only: wake from system sleep / screen unlock. The window
+    // often kept OS focus through the nap, so neither `focus` nor
+    // `visibilitychange` fires in the renderer — but the GPU may have
+    // discarded texture memory while the display was down. The main process
+    // forwards powerMonitor's resume/unlock as `system-resumed`.
+    let unlistenSystemResumed: (() => void) | null = null;
+    if (isDesktop) {
+      desktopListen("system-resumed", handleForeground)
+        .then((off) => {
+          if (destroyed) off();
+          else unlistenSystemResumed = off;
+        })
+        .catch(() => {});
+    }
 
     connect();
 
@@ -886,6 +912,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         fit.fit();
       }
       webglSuspect = false;
+      // Foreground return: the atlas texture may have been damaged while the
+      // window was backgrounded/occluded, and `refresh` would faithfully
+      // redraw the damage. Drop it so glyphs re-rasterize on the next frame.
+      // (The `webglSuspect` branches above rebuild the whole addon — fresh
+      // atlas — so doing both is harmless.)
+      if (atlasSuspect) {
+        atlasSuspect = false;
+        webglAddon?.clearTextureAtlas();
+      }
       if (term.rows > 0) term.refresh(0, term.rows - 1);
       sendPtyResize();
     };
@@ -905,6 +940,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       window.removeEventListener("online", handleResume);
       window.removeEventListener("focus", handleForeground);
       document.removeEventListener("visibilitychange", handleVisibility);
+      unlistenSystemResumed?.();
       themeObserver.disconnect();
       resizeObserver.disconnect();
       searchResultsDisposable.dispose();

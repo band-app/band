@@ -13,9 +13,10 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow, protocol, session } from "electron";
+import { app, BrowserWindow, powerMonitor, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BROWSER_PARTITION, BrowserViewManager } from "../browser/view-manager.js";
+import { Events } from "../shared/ipc-channels.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
@@ -62,6 +63,9 @@ interface AppState {
   /** Empty string in dev mode where we don't own the server. */
   webDir: string;
 }
+
+/** powerMonitor listeners survive window close; wire them at most once. */
+let powerEventsWired = false;
 
 const state: AppState = {
   mainWindow: null,
@@ -339,6 +343,19 @@ async function bootstrap(): Promise<void> {
   };
   state.mainWindow.on("enter-full-screen", () => sendFullscreen(true));
   state.mainWindow.on("leave-full-screen", () => sendFullscreen(false));
+
+  // Forward wake-from-sleep / screen-unlock to the renderer (see the
+  // `systemResumed` event doc in shared/ipc-channels.ts). powerMonitor
+  // listeners are process-global, so guard against a macOS dock re-activate
+  // re-running bootstrap and stacking duplicates.
+  if (!powerEventsWired) {
+    powerEventsWired = true;
+    const sendSystemResumed = () => {
+      state.mainWindow?.webContents.send(Events.systemResumed);
+    };
+    powerMonitor.on("resume", sendSystemResumed);
+    powerMonitor.on("unlock-screen", sendSystemResumed);
+  }
 }
 
 app.on("window-all-closed", () => {
