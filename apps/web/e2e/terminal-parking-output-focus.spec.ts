@@ -236,10 +236,13 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // check can't pass vacuously against an unrendered buffer, and we never have
     // to type into C after its park→re-attach (that focus race made this test
     // flaky under parallel load).
+    // The quoted fragment keeps the typed echo (`C_OWN_"MARKER"`) from matching
+    // the marker — only executed output (quote removal) can satisfy it, so a
+    // dropped trailing Enter can't pass verification.
     await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_C);
     await workspacePage.runInTerminalUntilRendered(
       WORKSPACE_C,
-      "echo C_OWN_MARKER",
+      'echo C_OWN_"MARKER"',
       /C_OWN_MARKER/,
     );
 
@@ -259,10 +262,11 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // Type a unique marker; it must land in the ACTIVE terminal (D), never the
     // parked one (C). `terminalInput` resolves to D only — C's textarea is
     // aria-hidden inside the inert parking container.
+    // Quoted fragment again: typed echo can't satisfy the marker, only output.
     await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_D);
     await workspacePage.runInTerminalUntilRendered(
       WORKSPACE_D,
-      "echo LEAKMARKER987",
+      'echo LEAK"MARKER987"',
       /LEAKMARKER987/,
     );
 
@@ -284,8 +288,9 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
         { timeout: 20_000 },
       )
       .toBe(true);
-    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_C)).not.toContain(
-      "LEAKMARKER987",
-    );
+    // "MARKER987" (not the full "LEAKMARKER987") so a leak is caught in BOTH
+    // forms it could render in C: executed output (`LEAKMARKER987`) and the raw
+    // typed echo (`LEAK"MARKER987"`). C's own marker never contains "MARKER987".
+    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_C)).not.toContain("MARKER987");
   });
 });

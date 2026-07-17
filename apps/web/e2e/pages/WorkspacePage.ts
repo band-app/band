@@ -1143,11 +1143,15 @@ export class WorkspacePage {
    *  xterm's hidden textarea can be dropped wholesale under parallel CI load
    *  (a focus steal or a socket hiccup mid-`keyboard.type`), and a plain
    *  `runInTerminal` has no way to notice — the test then times out on a
-   *  downstream assertion with no clue the command never ran. `runInTerminal`'s
-   *  leading Enter clears any half-typed line a failed attempt left behind, so
-   *  a retype never concatenates onto the previous attempt. Only use with an
-   *  idempotent `line` — a retype after a false-negative render wait would run
-   *  it again. */
+   *  downstream assertion with no clue the command never ran. A retry starts
+   *  with Ctrl+C, which resets both a half-typed line AND a PS2 continuation
+   *  state (a dropped tail like `for … do` without its `done`, or an unclosed
+   *  quote — `runInTerminal`'s leading Enter alone can't escape those), and
+   *  kills a loop a false-negative render wait left running. Only use with an
+   *  idempotent `line` — a retype after a false negative would run it again.
+   *  `marker` must not match the typed line's own echo (quote a fragment,
+   *  e.g. `echo C_OWN_"MARKER"`, so only executed output can match) —
+   *  otherwise a dropped trailing Enter passes verification. */
   async runInTerminalUntilRendered(
     workspaceId: string,
     line: string,
@@ -1156,6 +1160,10 @@ export class WorkspacePage {
   ): Promise<void> {
     await test.step(`Run in terminal until ${marker} renders: ${line}`, async () => {
       for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (attempt > 1) {
+          await this.terminalInput.first().focus();
+          await this.page.keyboard.press("Control+C");
+        }
         await this.runInTerminal(line);
         try {
           await expect
