@@ -65,6 +65,23 @@ const log = createLogger("view-manager");
 
 const MAX_BROWSER_VIEWS = 10;
 
+/**
+ * Session partition for every browser-pane `WebContentsView`.
+ *
+ * Isolating the tabs from `session.defaultSession` (which the dashboard
+ * window uses) matters for zoom: Chromium's zoom is stored per-origin
+ * per-StoragePartition and propagates live to every webContents in the
+ * partition — so with a shared session, zooming a tab pointed at the
+ * dashboard's own origin (localhost:<port>) zoomed the dashboard window
+ * itself and persisted that on disk. A dedicated partition keeps tab
+ * zoom (and cookies/storage) away from the dashboard entirely.
+ *
+ * Anything registered on `session.defaultSession` that tabs rely on must
+ * also be registered on this partition's session — currently the
+ * `band-action://` protocol handler (see `apps/desktop/src/main/index.ts`).
+ */
+export const BROWSER_PARTITION = "persist:band-browser";
+
 // Zoom range + step, intentionally aligned with the dashboard's zoom
 // settings (`apps/web/src/lib/zoom.ts`). Keeping them in sync avoids
 // the dashboard chrome and the tab content drifting to different
@@ -542,10 +559,12 @@ export class BrowserViewManager {
 
   /**
    * Per-tab zoom. Adjusts `webContents.zoomFactor` on the targeted view
-   * by ±`ZOOM_STEP`, or sets it back to `ZOOM_DEFAULT`. The zoom is
-   * stored on the WebContents (Electron preserves it across reloads on
-   * the same origin, same as Chrome), and is independent of every
-   * other tab and of the dashboard's `document.documentElement.style.zoom`.
+   * by ±`ZOOM_STEP`, or sets it back to `ZOOM_DEFAULT`. Chromium stores
+   * the zoom per-origin within `BROWSER_PARTITION` (preserved across
+   * reloads, shared between tabs on the same origin — same as Chrome),
+   * and — because the tabs live in their own partition — it can never
+   * leak into the dashboard window's session or its CSS
+   * `document.documentElement.style.zoom`.
    *
    * The `direct` overload, taking a view rather than an args bag, lets
    * the menu handler reuse this logic for the
@@ -731,13 +750,17 @@ export class BrowserViewManager {
       return;
     }
 
-    // Create the DevTools-host sibling. Same security flags as the
-    // page view — DevTools is just a webpage from Chromium's POV.
+    // Create the DevTools-host sibling. Same security flags and partition
+    // as the page view — DevTools is just a webpage from Chromium's POV,
+    // and keeping it in BROWSER_PARTITION means its network activity
+    // (e.g. source-map fetches declared by the inspected page) and any
+    // per-origin zoom writes stay out of the dashboard's default session.
     const dt = new WebContentsView({
       webPreferences: {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
+        partition: BROWSER_PARTITION,
       },
     });
     const parent = this.parentByKey.get(key) ?? "main";
@@ -936,6 +959,7 @@ export class BrowserViewManager {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
+        partition: BROWSER_PARTITION,
       },
     });
     this.wireEvents(key, view);

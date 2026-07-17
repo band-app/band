@@ -298,10 +298,17 @@
 /* Scoped edge-collapse animation for tab maximize/restore. The class is
    added by applyMaximizeEdgeVisibility for the duration of the toggle only,
    so sash dragging (which writes width per pointermove) is never affected.
-   Child combinators keep this on the shell's own two splitviews — nested
-   dockviews inside panels are untouched. */
+   Three splitview layers move during a maximize toggle and all must tween
+   with the same curve or the layout tears (issue: maximizing the right
+   group snapped while maximizing the left felt smooth):
+   - the shell's outer splitview (edge panels sliding away),
+   - the shell's middle column (bottom edge),
+   - the gridview branch splitviews (the maximized group swallowing its
+     siblings — dockview resizes them via inline width/left, so without a
+     transition the grid part of the movement is an instant jump). */
 .dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
-.dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view {
+.dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view,
+.dv-edge-anim .dv-branch-node > .dv-split-view-container > .dv-view-container > .dv-view {
   transition:
     width 200ms cubic-bezier(0.77, 0, 0.175, 1),
     left 200ms cubic-bezier(0.77, 0, 0.175, 1),
@@ -312,9 +319,21 @@
   overflow: hidden;
 }
 
+/* Inner dockviews nested inside panel content (chat tabs, terminal
+   sections, browser tabs) are full shells + grids, so the rules above
+   match their splitviews too. They re-layout via a ResizeObserver while
+   the OUTER tween runs, and each of those per-frame inline-style writes
+   would start its own 200ms transition — the inner content then visibly
+   chases its wrapper and settles a beat late. Let them track instantly
+   instead; same order in the cascade wins over the grant above. */
+.dv-edge-anim .dv-content-container .dv-split-view-container > .dv-view-container > .dv-view {
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
-  .dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view {
+  .dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view,
+  .dv-edge-anim .dv-branch-node > .dv-split-view-container > .dv-view-container > .dv-view {
     transition: none;
   }
 }

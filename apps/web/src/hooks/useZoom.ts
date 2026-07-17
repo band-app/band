@@ -1,14 +1,15 @@
 import { useEffect } from "react";
 import { isDesktop } from "../lib/is-desktop";
-import { zoomIn, zoomOut } from "../lib/zoom";
+import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 
 /**
  * Browser-mode keyboard shortcut handler for zoom.
  *
- * Registers Cmd+= (zoom in) and Cmd+- (zoom out). Cmd+0 is intentionally
- * NOT bound — that combo is owned by the dashboard's "All projects" label
- * filter (see DashboardShell). Reset is still reachable via the desktop
- * View menu's "Actual Size" item.
+ * Registers Cmd+= (zoom in), Cmd+- (zoom out) and Cmd+Shift+0 (reset).
+ * Plain Cmd+0 is intentionally NOT bound — that combo is owned by the
+ * dashboard's "All projects" label filter (see DashboardShell), which is
+ * also why reset uses the shifted variant (mirrored by the desktop View
+ * menu's "Actual Size" accelerator in `apps/desktop/src/main/menu.ts`).
  *
  * Only active outside the desktop shell — when running inside Electron the
  * native View menu accelerators intercept these keys before they reach the
@@ -37,6 +38,16 @@ export function useZoom(): void {
         e.preventDefault();
         e.stopPropagation();
         zoomOut();
+        return;
+      }
+
+      // Cmd+Shift+0 → reset. Match on `e.code`: with Shift held, `e.key`
+      // is layout-dependent (")" on US keyboards), but the physical digit
+      // key is always Digit0.
+      if (e.shiftKey && e.code === "Digit0") {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomReset();
       }
     };
 

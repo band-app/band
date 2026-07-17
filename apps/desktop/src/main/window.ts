@@ -80,6 +80,18 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   const { width, height } = primary.workAreaSize;
   win.setBounds({ x: 0, y: 0, width, height });
 
+  // The dashboard's zoom is CSS-based (`<html> zoom`, see
+  // apps/web/src/lib/zoom.ts) — its Chromium-level zoom must always stay
+  // at 1. Chromium persists per-origin zoom in the default partition's
+  // Preferences, so a stray zoom on the dashboard's origin (historically:
+  // zooming a browser tab pointed at localhost:<port> back when tabs
+  // shared the default session) would silently rescale the whole window
+  // on every boot, misaligning the native WebContentsView overlays.
+  // Force it back on every load; this also rewrites the persisted entry.
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.setZoomLevel(0);
+  });
+
   win.once("ready-to-show", () => {
     win.show();
     // Auto-open DevTools in dev so the renderer is inspectable from the

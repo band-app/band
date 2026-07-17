@@ -27,7 +27,12 @@ import {
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import { type PanelItem, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
+import {
+  NavControls,
+  type PanelItem,
+  SidebarTitleBar,
+  WorkspaceTitleBar,
+} from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -317,7 +322,7 @@ function AppShell() {
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
-  // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
+  // Cmd+= / Cmd+- / Cmd+Shift+0 — zoom in/out/reset (browser mode only;
   // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
 
@@ -583,17 +588,14 @@ function AppShell() {
     [],
   );
 
-  // The back/forward arrows and sidebar toggle belong to the project-list
-  // region. While the list is visible the SidebarTitleBar shows the cluster;
-  // when the list collapses, the same cluster relocates into the
-  // WorkspaceTitleBar (far left) so it stays reachable. The overflow actions
-  // always live in DashboardShell's bottom action bar, so the cluster carries
-  // no menu of its own. Both bars receive the same nav props; each renders the
-  // cluster only in the appropriate state (keyed off `sidebarVisible`).
+  // Props for the nav cluster (sidebar toggle + back/forward) hosted in the
+  // stationary overlay in the render below. The overflow actions always live in
+  // DashboardShell's bottom action bar, so the cluster carries no menu of
+  // its own.
   //
-  // Memoized so both bars get a stable prop reference across the frequent
-  // AppShell re-renders (route changes, workspace switches, sidebar toggles).
-  // Hooks must run unconditionally, so this sits above the narrow/mobile early
+  // Memoized for a stable prop reference across the frequent AppShell
+  // re-renders (route changes, workspace switches, sidebar toggles). Hooks
+  // must run unconditionally, so this sits above the narrow/mobile early
   // return below.
   const navControlProps = useMemo(
     () => ({
@@ -614,10 +616,10 @@ function AppShell() {
     ],
   );
 
-  // Single source for the macOS traffic-light gutter: compute it once here (one
-  // `useIsFullscreen` subscription) and pass to both title-bar halves, rather
-  // than each bar instantiating its own hook. The offset applies to whichever
-  // bar sits at the window's left edge.
+  // Single source for the macOS traffic-light gutter: the offset is applied
+  // to the stationary nav-cluster overlay below so the sidebar-toggle /
+  // back-forward buttons clear the traffic lights; the title bars themselves
+  // no longer take an offset prop.
   const isFullscreen = useIsFullscreen();
   const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
 
@@ -627,7 +629,20 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
+      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
+        {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
+            this stationary overlay pinned over the title-bar row's left edge, floating above
+            both title bars. Hosting it inside either bar means remounting it
+            on every sidebar toggle inside an overflow-clipped, animating
+            panel — the buttons visibly flickered mid-tween. Here the panels
+            slide beneath it and it never moves or remounts. The container is
+            pointer-events-none so the drag regions beneath stay draggable;
+            NavControls re-enables pointer events on itself. */}
+        <div
+          className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
+        >
+          <NavControls {...navControlProps} />
+        </div>
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"
@@ -653,10 +668,10 @@ function AppShell() {
                 className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
                 data-testid="app-shell__sidebar"
               >
-                {/* The sidebar toggle + back/forward arrows ride in the
-                    SidebarTitleBar; the overflow actions live in
-                    DashboardShell's bottom action bar below. */}
-                <SidebarTitleBar {...navControlProps} offsetClass={titleBarOffset} />
+                {/* Pure drag/paint surface — the sidebar toggle + back/forward
+                    arrows live in the stationary overlay above; the overflow
+                    actions live in DashboardShell's bottom action bar below. */}
+                <SidebarTitleBar />
                 <div className="flex-1 min-h-0">
                   <DashboardShell hideTitleBar bottomActions={<ToolbarActionBar />} />
                 </div>
@@ -668,8 +683,6 @@ function AppShell() {
                   subtree or the dockview tears down all cached workspaces. */}
               <div className="h-full flex flex-col min-w-0 overflow-hidden">
                 <WorkspaceTitleBar
-                  {...navControlProps}
-                  offsetClass={titleBarOffset}
                   workspaceName={activeWorkspaceId ?? undefined}
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}
                   onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}

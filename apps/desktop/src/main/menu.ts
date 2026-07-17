@@ -214,11 +214,12 @@ export function buildAppMenu(deps: MenuDeps): Menu {
       accelerator: "CmdOrCtrl+-",
       click: () => zoomFocused(deps, "out"),
     },
-    // Zoom-reset deliberately has no accelerator: CmdOrCtrl+0 is owned by
-    // the dashboard's "All projects" label filter (see DashboardShell).
-    // Reset is still reachable here via menu click.
+    // CmdOrCtrl+0 is owned by the dashboard's "All projects" label filter
+    // (see DashboardShell), so zoom-reset uses the shifted variant instead
+    // of the conventional plain Cmd+0.
     {
       label: "Actual Size",
+      accelerator: "CmdOrCtrl+Shift+0",
       click: () => zoomFocused(deps, "reset"),
     },
     { type: "separator" },
