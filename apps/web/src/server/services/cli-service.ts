@@ -317,6 +317,10 @@ async function installCliWindows(binaryPath: string): Promise<void> {
   mkdirSync(binDir, { recursive: true });
   // `%*` forwards every argument; the binary path is quoted so a space in
   // the install location (e.g. under a profile dir) is handled correctly.
+  // `binaryPath` comes from `findCliBinary()` (a resolved on-disk path) and
+  // the Windows filesystem forbids `"` in paths, so the double-quote wrapping
+  // can't be broken by the interpolated value — the same assumption
+  // `checkCliWindows` relies on when it parses the quoted target back out.
   const shim = `@echo off\r\n"${binaryPath}" %*\r\n`;
   writeFileSync(SYMLINK_PATH, shim, "utf-8");
   await addBinDirToUserPath(binDir);

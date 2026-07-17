@@ -36,9 +36,11 @@ describe("prereqs.installTunnel", () => {
     if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  // Skipped on darwin only — the assertion body reaches the brew shell-out on
-  // macOS. Everywhere else it exercises the non-darwin platform hint.
-  it.skipIf(process.platform === "darwin")(
+  // Linux-only: the hint text asserted here is the Linux package-manager
+  // branch. On darwin the procedure would reach the brew shell-out (must
+  // never run from a test); on win32 the hint is the winget/choco branch
+  // (asserted separately below), so this runs only on Linux.
+  it.skipIf(process.platform !== "linux")(
     "fails with a package-manager hint instead of shelling out to brew",
     async () => {
       const res = await trpcMutate(server.url, "prereqs.installTunnel", undefined, TOKEN);
@@ -48,6 +50,24 @@ describe("prereqs.installTunnel", () => {
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("only supported on macOS");
       expect(body.error.message).toMatch(/apt install cloudflared|dnf install cloudflared/);
+      expect(body.error.message).toContain(
+        "developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads",
+      );
+    },
+  );
+
+  // Windows-only counterpart: `package.json` now declares `win32` supported,
+  // so a Windows CI runner is a valid target. There the non-darwin guard
+  // surfaces the winget/choco hint rather than the Linux one.
+  it.skipIf(process.platform !== "win32")(
+    "fails with a winget/choco hint on Windows instead of shelling out to brew",
+    async () => {
+      const res = await trpcMutate(server.url, "prereqs.installTunnel", undefined, TOKEN);
+
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toContain("only supported on macOS");
+      expect(body.error.message).toMatch(/winget install|choco install/);
       expect(body.error.message).toContain(
         "developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads",
       );

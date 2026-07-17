@@ -76,8 +76,10 @@ export async function findBandBinary(): Promise<string | null> {
   // path.
   if (process.platform !== "win32") {
     try {
-      const stat = statSync("/usr/local/bin/band");
-      if (stat) return "/usr/local/bin/band";
+      // `statSync` throws when the symlink is absent (caught below); a
+      // successful return means it exists, so no truthiness check is needed.
+      statSync("/usr/local/bin/band");
+      return "/usr/local/bin/band";
     } catch {
       // Fall through to `which`.
     }

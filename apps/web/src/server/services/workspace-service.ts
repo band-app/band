@@ -1274,11 +1274,12 @@ export class WorkspaceService {
    * (e.g. `on-create`, `on-open`). Returns once the script exits 0;
    * rejects on a non-zero exit. On POSIX the script is run via
    * `bash <scriptPath>` — execFile with a fixed argv, not a shell-spawned
-   * command string, so no shell interpretation of `input.path` /
-   * `input.scriptType` is possible. On Windows it runs through the command
-   * interpreter (`cmd.exe /d /s /c <scriptPath>`); `scriptPath` is composed
-   * from a server-controlled workspace path plus a constrained
-   * `scriptType`, so it is not attacker-controlled.
+   * command string. On Windows it runs through the command interpreter
+   * (`cmd.exe /d /s /c <scriptPath>`), where cmd metacharacters in the path
+   * WOULD be interpreted — so `scriptType` (an unconstrained `z.string()` at
+   * the tRPC edge) is validated to a safe filename charset before it becomes
+   * a path segment, closing both a Windows shell-injection vector and a
+   * cross-platform `..` path-traversal vector.
    *
    * Missing-script case throws a generic `Error` (not a domain class) so
    * tRPC surfaces it as `INTERNAL_SERVER_ERROR` (500). The wire-level
@@ -1288,6 +1289,15 @@ export class WorkspaceService {
    * pattern-matching on status.
    */
   async runScript(input: WorkspaceRunScriptInput): Promise<{ ok: true }> {
+    // Harden `scriptType` before it becomes a path segment / command token.
+    // Real callers only ever send `"setup"` / `"teardown"` (see WorkspaceCard),
+    // but the tRPC input is an unconstrained `z.string()`. Restrict to a safe
+    // filename charset — no path separators, no `..` segment, no cmd.exe
+    // metacharacters — so the Windows `cmd /c <scriptPath>` path can't be
+    // steered into shell injection or traversal outside `.band/`.
+    if (!/^[a-zA-Z0-9._-]+$/.test(input.scriptType) || input.scriptType.includes("..")) {
+      throw new Error(`Invalid script type "${input.scriptType}"`);
+    }
     const scriptPath = join(input.path, ".band", input.scriptType);
     if (!existsSync(scriptPath)) {
       throw new Error(`Script "${input.scriptType}" not found`);

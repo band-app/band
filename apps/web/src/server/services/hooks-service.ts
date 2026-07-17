@@ -67,8 +67,10 @@ export async function installHooks(): Promise<void> {
   let bandPath: string | null = null;
   if (process.platform !== "win32") {
     try {
-      const stat = await import("node:fs/promises").then((m) => m.stat("/usr/local/bin/band"));
-      if (stat) bandPath = "/usr/local/bin/band";
+      // `stat` rejects when the symlink is absent (caught below); resolving
+      // means it exists, so no truthiness check on the Stats object is needed.
+      await import("node:fs/promises").then((m) => m.stat("/usr/local/bin/band"));
+      bandPath = "/usr/local/bin/band";
     } catch {
       // Try which
     }

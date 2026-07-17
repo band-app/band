@@ -34,14 +34,17 @@ const DU_TIMEOUT_MS = 30_000;
  * followed — avoiding both double-counting a file reachable two ways and
  * infinite loops on a symlink cycle.
  *
- * Bounded like the POSIX path: a `DU_TIMEOUT_MS` deadline (checked once per
- * directory) caps the wall-clock so a pathological tree or a stalled
- * network mount can't pin the caller's `du` semaphore slot indefinitely —
- * the partial total is returned, mirroring `du`'s partial-output-on-timeout
- * behaviour. Per-directory `stat`s are batched with `Promise.all` so the
- * libuv threadpool services several at once rather than one round-trip at a
- * time.
+ * Bounded like the POSIX path: a `DU_TIMEOUT_MS` deadline caps the
+ * wall-clock so a pathological tree or a stalled network mount can't pin
+ * the caller's `du` semaphore slot indefinitely — the partial total is
+ * returned, mirroring `du`'s partial-output-on-timeout behaviour. Per-file
+ * `stat`s run concurrently but in bounded chunks (`STAT_CHUNK`) so a single
+ * huge directory (a big `node_modules`) can't queue tens of thousands of
+ * pending stats against the small libuv threadpool at once; the deadline is
+ * re-checked between chunks.
  */
+const STAT_CHUNK = 256;
+
 async function duBytesNodeWalk(path: string): Promise<number> {
   const deadline = Date.now() + DU_TIMEOUT_MS;
   let total = 0;
@@ -60,15 +63,18 @@ async function duBytesNodeWalk(path: string): Promise<number> {
         }
         // Symlinks (and other special entries) are not followed or counted.
       }
-      const sizes = await Promise.all(
-        filePaths.map((p) =>
-          stat(p).then(
-            (s) => s.size,
-            () => 0, // vanished between readdir and stat — count as 0
+      for (let i = 0; i < filePaths.length; i += STAT_CHUNK) {
+        if (Date.now() > deadline) break;
+        const sizes = await Promise.all(
+          filePaths.slice(i, i + STAT_CHUNK).map((p) =>
+            stat(p).then(
+              (s) => s.size,
+              () => 0, // vanished between readdir and stat — count as 0
+            ),
           ),
-        ),
-      );
-      for (const size of sizes) total += size;
+        );
+        for (const size of sizes) total += size;
+      }
     } catch {
       // Unreadable directory — skip, like `du` does on EACCES.
     }

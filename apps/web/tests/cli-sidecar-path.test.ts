@@ -57,9 +57,11 @@ describe("findCliBinaryAt in packaged Electron layout", () => {
     mkdirSync(distDir, { recursive: true });
     mkdirSync(binDir, { recursive: true });
     writeFileSync(join(distDir, "start-server.mjs"), "// stub bundled server\n", "utf-8");
-    const sidecar = join(binDir, "band");
+    // On Windows the resolver looks for `band.exe`; elsewhere `band`. The
+    // executable bit is meaningless on Windows, so chmod only off-win32.
+    const sidecar = join(binDir, process.platform === "win32" ? "band.exe" : "band");
     writeFileSync(sidecar, "#!/bin/sh\nexit 0\n", "utf-8");
-    chmodSync(sidecar, 0o755);
+    if (process.platform !== "win32") chmodSync(sidecar, 0o755);
 
     // cwd is <Resources>/web (matches the real spawn cwd) and dirname is
     // <Resources>/web/dist (matches `import.meta.dirname` of the bundled
@@ -95,9 +97,11 @@ describe("findCliBinaryAt in packaged Electron layout", () => {
     const binDir = join(resources, "binaries");
     mkdirSync(distDir, { recursive: true });
     mkdirSync(binDir, { recursive: true });
-    const sidecar = join(binDir, "band");
+    // On Windows the resolver looks for `band.exe`; elsewhere `band`. The
+    // executable bit is meaningless on Windows, so chmod only off-win32.
+    const sidecar = join(binDir, process.platform === "win32" ? "band.exe" : "band");
     writeFileSync(sidecar, "#!/bin/sh\nexit 0\n", "utf-8");
-    chmodSync(sidecar, 0o755);
+    if (process.platform !== "win32") chmodSync(sidecar, 0o755);
 
     // cwd points at an unrelated subtree with no binaries/ sibling, so the
     // cwd-based candidate misses. dirname is the real bundled location.
