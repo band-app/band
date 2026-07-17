@@ -128,11 +128,12 @@ test.describe("Quick Open selection reset on query change", () => {
     await workspacePage.typeQuickOpen("report");
     await expect.poll(() => workspacePage.quickOpenItems.count()).toBe(27);
 
-    // Drive the selection to the LAST row (TARGET) with the keyboard. cmdk's
-    // "End" binding selects the last item and scrolls it into view — the
+    // Drive the selection down to the LAST row (TARGET) with ArrowDown — the
     // stale-selection precondition: a non-first item selected, list scrolled
-    // off the top.
-    await workspacePage.pressQuickOpenKey("End");
+    // off the top. (ArrowDown, not End: with focus in the search input End is
+    // ambiguous with a caret move and can't be relied on to move the list
+    // selection — see `navigateQuickOpenTo`.)
+    await workspacePage.navigateQuickOpenTo(TARGET);
     await expect.poll(() => workspacePage.selectedQuickOpenValue()).toBe(TARGET);
 
     const itemsBefore = await workspacePage.quickOpenItemValues();

@@ -1565,11 +1565,32 @@ export class WorkspacePage {
   }
 
   /** Press a key while the Quick Open input is focused — the real path for
-   *  keyboard navigation (ArrowDown / ArrowUp / Home / End / Enter). */
+   *  keyboard navigation (ArrowDown / ArrowUp / Enter). */
   async pressQuickOpenKey(key: string): Promise<void> {
     await test.step(`Press "${key}" in Quick Open`, async () => {
       await this.quickOpenInput.focus();
       await this.page.keyboard.press(key);
+    });
+  }
+
+  /** Move the Quick Open selection onto the row whose `data-value` is `value`
+   *  by stepping `ArrowDown` from the current position. Deterministic where
+   *  cmdk's `End` binding is not: with focus in the search input, `End` is
+   *  ambiguous with a caret-to-end-of-text move, so it can't be relied on to
+   *  jump the list selection. `ArrowDown` is unambiguous and walks every row in
+   *  DOM order until it wraps, so a bounded loop reaches any rendered row.
+   *  Throws (rather than looping forever) if `value` is never selected. */
+  async navigateQuickOpenTo(value: string): Promise<void> {
+    await test.step(`Navigate Quick Open selection to "${value}"`, async () => {
+      // One press per row is always enough to reach any row from any start
+      // position; +2 leaves slack for the initial (already-selected) row and a
+      // possible trailing action row without risking a wrap past the target.
+      const maxPresses = (await this.quickOpenItems.count()) + 2;
+      for (let i = 0; i < maxPresses; i++) {
+        if ((await this.selectedQuickOpenValue()) === value) return;
+        await this.pressQuickOpenKey("ArrowDown");
+      }
+      throw new Error(`Quick Open never selected "${value}" after ${maxPresses} ArrowDown presses`);
     });
   }
 
