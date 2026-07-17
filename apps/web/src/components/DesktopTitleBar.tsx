@@ -172,6 +172,7 @@ export function NavControls({
 export function SidebarTitleBar() {
   return (
     <div
+      data-testid="desktop-title-bar__sidebar-surface"
       className="h-[38px] shrink-0 flex items-center border-b border-border bg-sidebar"
       style={DRAG_STYLE}
     />
@@ -209,6 +210,7 @@ export function WorkspaceTitleBar({
 
   return (
     <div
+      data-testid="desktop-title-bar__workspace-surface"
       className="relative h-[38px] shrink-0 flex items-center gap-1 border-b border-border bg-background pr-2 pl-2"
       style={DRAG_STYLE}
     >

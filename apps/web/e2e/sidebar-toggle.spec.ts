@@ -168,6 +168,30 @@ test("the toggle and back/forward stay put (no relocation, no jump) when the sid
   await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
 });
 
+test("the nav-cluster overlay renders after the title bars in DOM order", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Positive anchor: the overlay and its toggle actually rendered.
+  await expect(wp.sidebarToggle).toBeVisible();
+
+  // Drag-region invariant (PR #634): in the Electron shell, Chromium builds
+  // the window's draggable region in DOCUMENT order — the overlay's `no-drag`
+  // carve-out only wins if it comes after the title bars' `drag` rects. An
+  // earlier-in-DOM overlay leaves the nav buttons covered by the drag region
+  // (clicks start a window drag instead). Real drag-region hit-testing isn't
+  // reachable from this browser harness, so DOM order is the assertable
+  // projection; the page-object probe throws if either side goes missing.
+  expect(await wp.navOverlayFollowsTitleBars()).toBe(true);
+
+  // The invariant must hold in the collapsed state too — the workspace title
+  // bar is the only drag surface then.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  expect(await wp.navOverlayFollowsTitleBars()).toBe(true);
+});
+
 test("the collapsed state persists across a reload", async ({ page }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);

@@ -103,6 +103,9 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-open-window",
   "window-fullscreen-changed",
   "updater-status-changed",
+  // Wake from system sleep / screen unlock (powerMonitor resume/unlock-screen);
+  // WebGL surfaces subscribe to repair their glyph atlases.
+  "system-resumed",
 ]);
 
 type Unlisten = () => void;

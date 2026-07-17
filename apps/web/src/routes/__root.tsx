@@ -707,6 +707,7 @@ function AppShell() {
             before the bars, the bars' drag rects re-cover the buttons and
             every click on them starts a window drag in the desktop app. */}
         <div
+          data-testid="app-shell__nav-overlay"
           className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
         >
           <NavControls {...navControlProps} />

@@ -351,7 +351,11 @@ async function bootstrap(): Promise<void> {
   if (!powerEventsWired) {
     powerEventsWired = true;
     const sendSystemResumed = () => {
-      state.mainWindow?.webContents.send(Events.systemResumed);
+      // These listeners outlive the window: on macOS the app stays alive in
+      // the dock after close, and a destroyed BrowserWindow's webContents
+      // throws (optional chaining only guards null, not destroyed).
+      const win = state.mainWindow;
+      if (win && !win.isDestroyed()) win.webContents.send(Events.systemResumed);
     };
     powerMonitor.on("resume", sendSystemResumed);
     powerMonitor.on("unlock-screen", sendSystemResumed);
