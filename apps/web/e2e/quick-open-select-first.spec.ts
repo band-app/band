@@ -213,7 +213,7 @@ test.describe("Quick Open selection reset on query change", () => {
       .toBe(openedFile);
 
     // Reopen and clear the query so the recent-files view shows. Its first
-    // (and only) entry — the file just opened — must be selected.
+    // entry — the file just opened — must be selected.
     await workspacePage.openQuickOpen();
     await workspacePage.clearQuickOpenQuery();
     await expect

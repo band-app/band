@@ -119,7 +119,9 @@ export function SearchFilesDialog({
     [grouped],
   );
   const firstValue = itemValues[0] ?? "";
-  const resultKey = itemValues.join("\n");
+  // O(N) string allocation — memoised so it only recomputes when the result set
+  // changes, not on every `selectedValue` / hover render.
+  const resultKey = useMemo(() => itemValues.join("\n"), [itemValues]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstValue is unchanged) — it isn't read in the body
   useEffect(() => {
     setSelectedValue(firstValue);

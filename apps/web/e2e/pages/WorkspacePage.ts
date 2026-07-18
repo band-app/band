@@ -1451,8 +1451,9 @@ export class WorkspacePage {
 
   /** Dispatch the `band:open-search-files` window event — the same event the
    *  file-tree toolbar's "Search in Files" action fires (see
-   *  `CodeBrowserView.tsx`). MobileWorkspaceLayout listens for it and opens
-   *  the SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
+   *  `CodeBrowserView.tsx`). On desktop `SharedDockviewLayout` listens for it;
+   *  on mobile `MobileWorkspaceLayout` does. Either way it opens the
+   *  SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
   async dispatchOpenSearchFiles(): Promise<void> {
     await test.step("Dispatch band:open-search-files", async () => {
       await this.page.evaluate(() => {
@@ -1507,9 +1508,9 @@ export class WorkspacePage {
   }
 
   /** The scrollable results list — cmdk renders `role="listbox"` on
-   *  `Command.List` (system-controlled), the element whose `scrollTop` the fix
-   *  must reset to 0. `getByRole` matches the sibling cmdk page objects and the
-   *  locator-priority doctrine. */
+   *  `Command.List` (a system-controlled ARIA role), the element whose
+   *  `scrollTop` the fix must reset to 0, so `getByRole("listbox")` is the
+   *  correct locator. */
   get quickOpenList(): Locator {
     return this.quickOpenDialog().getByRole("listbox");
   }
@@ -1634,7 +1635,11 @@ export class WorkspacePage {
           if (isStable) stable = current;
           return isStable;
         },
-        { intervals: [150, 150, 150, 150, 150, 150], timeout: 6000 },
+        {
+          intervals: [150, 150, 150, 150, 150, 150],
+          timeout: 6000,
+          message: "Quick Open / Search-in-Files selection never stabilized within 6s",
+        },
       )
       .toBe(true);
     return stable;
