@@ -1533,8 +1533,9 @@ export class WorkspacePage {
 
   /** Dispatch the `band:open-quick-open` window event — the same event the
    *  file-tree toolbar's "Quick Open" action fires (see `CodeBrowserView.tsx`).
-   *  MobileWorkspaceLayout listens for it and opens the QuickOpenDialog with an
-   *  empty query (unlike `band:open-file`, which pre-fills a query and can
+   *  On desktop `SharedDockviewLayout` listens for it; on mobile
+   *  `MobileWorkspaceLayout` does. Either way it opens the QuickOpenDialog with
+   *  an empty query (unlike `band:open-file`, which pre-fills a query and can
    *  auto-open a single match without ever showing the dialog). */
   async dispatchOpenQuickOpen(): Promise<void> {
     await test.step("Dispatch band:open-quick-open", async () => {
@@ -1546,8 +1547,9 @@ export class WorkspacePage {
 
   /** Dispatch the `band:open-search-files` window event — the same event the
    *  file-tree toolbar's "Search in Files" action fires (see
-   *  `CodeBrowserView.tsx`). MobileWorkspaceLayout listens for it and opens
-   *  the SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
+   *  `CodeBrowserView.tsx`). On desktop `SharedDockviewLayout` listens for it;
+   *  on mobile `MobileWorkspaceLayout` does. Either way it opens the
+   *  SearchFilesDialog. Mirrors `dispatchOpenFileEvent`. */
   async dispatchOpenSearchFiles(): Promise<void> {
     await test.step("Dispatch band:open-search-files", async () => {
       await this.page.evaluate(() => {
@@ -1583,6 +1585,290 @@ export class WorkspacePage {
    *  real user would take. */
   async closeQuickOpenDialog(): Promise<void> {
     await this.pressEscape();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Quick Open selection / scroll probes.
+  //
+  // The dialog is a cmdk `Command`; its input, list, and item rows carry the
+  // `data-slot` attributes set by the `@band-app/ui` command wrappers plus the
+  // `aria-selected` / `data-value` attributes cmdk owns. All locators below are
+  // scoped to the QuickOpenDialog root so they never collide with the other
+  // command palettes (workspace picker, command palette) mounted in the tree.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The Quick Open search input. ARIA role is system-controlled (cmdk sets
+   *  `role="combobox"`); scoped to the dialog root. */
+  get quickOpenInput(): Locator {
+    return this.quickOpenDialog().getByRole("combobox");
+  }
+
+  /** The scrollable results list — cmdk renders `role="listbox"` on
+   *  `Command.List` (a system-controlled ARIA role), the element whose
+   *  `scrollTop` the fix must reset to 0, so `getByRole("listbox")` is the
+   *  correct locator. */
+  get quickOpenList(): Locator {
+    return this.quickOpenDialog().getByRole("listbox");
+  }
+
+  /** All rendered result rows — cmdk renders `role="option"` on every
+   *  `Command.Item` (a system-controlled ARIA role), so `getByRole("option")`
+   *  is the correct locator. Covers the file/recent rows plus any action row;
+   *  the test reads each row's `data-value` (the file path) to reason about
+   *  order and selection. */
+  get quickOpenItems(): Locator {
+    return this.quickOpenDialog().getByRole("option");
+  }
+
+  /** Open Quick Open via the same `band:open-quick-open` window event the file
+   *  tree toolbar fires, then wait for the dialog to render. */
+  async openQuickOpen(): Promise<void> {
+    await test.step("Open Quick Open", async () => {
+      await this.dispatchOpenQuickOpen();
+      await this.quickOpenDialog().waitFor({ state: "visible" });
+    });
+  }
+
+  /** Type a query into the Quick Open input (replacing any existing text), the
+   *  way a user editing the search field would. Focuses first, selects all so
+   *  the new text replaces a restored `lastQuery`, then types. */
+  async typeQuickOpen(text: string): Promise<void> {
+    await test.step(`Type Quick Open query "${text}"`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Append text to the Quick Open query without clearing it — the way a user
+   *  refining an existing search types the next character. Distinct from
+   *  `typeQuickOpen`, which replaces the field: appending keeps the previously
+   *  matched files continuously mounted, which is the exact condition under
+   *  which the stale-selection bug reproduced. */
+  async appendQuickOpen(text: string): Promise<void> {
+    await test.step(`Append "${text}" to Quick Open query`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Clear the Quick Open input entirely (select-all + delete) so the empty-
+   *  query recent-files view is shown. */
+  async clearQuickOpenQuery(): Promise<void> {
+    await test.step("Clear Quick Open query", async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.press("Delete");
+    });
+  }
+
+  /** Press a key while the Quick Open input is focused — the real path for
+   *  keyboard navigation (ArrowDown / ArrowUp / Enter). */
+  async pressQuickOpenKey(key: string): Promise<void> {
+    await test.step(`Press "${key}" in Quick Open`, async () => {
+      await this.quickOpenInput.focus();
+      await this.page.keyboard.press(key);
+    });
+  }
+
+  /** Move the Quick Open selection onto the row whose `data-value` is `value`
+   *  by stepping `ArrowDown` from the current position. Deterministic where
+   *  cmdk's `End` binding is not: with focus in the search input, `End` is
+   *  ambiguous with a caret-to-end-of-text move, so it can't be relied on to
+   *  jump the list selection. `ArrowDown` is unambiguous and walks every row in
+   *  DOM order until it wraps, so a bounded loop reaches any rendered row.
+   *  Throws (rather than looping forever) if `value` is never selected.
+   *  Precondition: the caller must have waited for the result count to settle
+   *  (e.g. `expect.poll(() => quickOpenItems.count())`) — the press bound is
+   *  snapshotted once, so a still-growing list could make it give up early. */
+  async navigateQuickOpenTo(value: string): Promise<void> {
+    await test.step(`Navigate Quick Open selection to "${value}"`, async () => {
+      // One press per row is always enough to reach any row from any start
+      // position; +2 leaves slack for the initial (already-selected) row and a
+      // possible trailing action row without risking a wrap past the target.
+      const maxPresses = (await this.quickOpenItems.count()) + 2;
+      for (let i = 0; i < maxPresses; i++) {
+        if ((await this.selectedQuickOpenValue()) === value) return;
+        await this.pressQuickOpenKey("ArrowDown");
+      }
+      throw new Error(`Quick Open never selected "${value}" after ${maxPresses} ArrowDown presses`);
+    });
+  }
+
+  /** The `data-value` (file path) of every rendered result row, in DOM order.
+   *  cmdk mirrors each item's `value` prop onto its `data-value` attribute. */
+  async quickOpenItemValues(): Promise<string[]> {
+    return await this.quickOpenItems.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-value") ?? ""),
+    );
+  }
+
+  /** The `data-value` of the single row cmdk currently marks
+   *  `aria-selected="true"`, or `null` when nothing is selected. */
+  async selectedQuickOpenValue(): Promise<string | null> {
+    const selected = this.quickOpenDialog().getByRole("option", { selected: true });
+    if ((await selected.count()) === 0) return null;
+    return await selected.first().getAttribute("data-value");
+  }
+
+  /** Current `scrollTop` of the Quick Open results list. 0 ⇔ scrolled to top. */
+  async quickOpenListScrollTop(): Promise<number> {
+    return await this.quickOpenList.evaluate((el) => el.scrollTop);
+  }
+
+  /** Poll `read` until it returns the same value on two consecutive samples —
+   *  i.e. the selection has settled — and return that stable value. Needed
+   *  because the *pre-fix* palettes briefly highlight the first row while React
+   *  re-renders a new result set, then snap the highlight back to a stale
+   *  surviving row; a one-shot poll for "selection is first" would pass on that
+   *  transient and miss the regression. The post-fix selection is first AND
+   *  stays first, so the settled value is the honest signal for both.
+   *
+   *  The canonical stability-polling primitive for any cmdk dialog's selection;
+   *  `protected` so a future dialog page object can reuse it. */
+  protected async waitForStableSelection(
+    read: () => Promise<string | null>,
+  ): Promise<string | null> {
+    let previous: string | null | undefined;
+    await expect
+      .poll(
+        async () => {
+          const current = await read();
+          const isStable = previous !== undefined && current === previous;
+          previous = current;
+          return isStable;
+        },
+        {
+          // Sample ~10 times at 200ms so a sub-render transient on slow CI
+          // can't be mistaken for a settled value by two adjacent samples.
+          intervals: [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+          timeout: 8000,
+          message: "Quick Open / Search-in-Files selection never stabilized within 8s",
+        },
+      )
+      .toBe(true);
+    // The poll resolved on two consecutive equal samples, so `previous` holds
+    // the settled value.
+    return previous ?? null;
+  }
+
+  /** The Quick Open selection once it has settled — see `waitForStableSelection`. */
+  async settledSelectedQuickOpenValue(): Promise<string | null> {
+    return await this.waitForStableSelection(() => this.selectedQuickOpenValue());
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Search-in-Files selection / scroll probes.
+  //
+  // SearchFilesDialog is the sibling cmdk `Command` with `shouldFilter={false}`
+  // — the same manual-filtering pattern as QuickOpen, so it carries the same
+  // stale-selection contract: a new result set must snap the highlight to the
+  // first row and scroll the list to the top. Its input is a custom `SearchBar`
+  // textbox (not cmdk's `CommandInput`), but the rows are still cmdk items, so
+  // the list/option/selected probes match the QuickOpen ones. All locators are
+  // scoped to the SearchFilesDialog root.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The Search-in-Files query input — the `SearchBar`'s plain `<input>`
+   *  (role `textbox`), the only textbox inside the dialog. */
+  get searchFilesInput(): Locator {
+    return this.searchFilesDialog().getByRole("textbox");
+  }
+
+  /** The scrollable results list — cmdk renders `role="listbox"` on
+   *  `Command.List`, the element whose `scrollTop` the fix resets to 0. */
+  get searchFilesList(): Locator {
+    return this.searchFilesDialog().getByRole("listbox");
+  }
+
+  /** All rendered content-match rows — cmdk renders `role="option"` on every
+   *  `Command.Item`. Each row's `data-value` is `file:line:content`. */
+  get searchFilesItems(): Locator {
+    return this.searchFilesDialog().getByRole("option");
+  }
+
+  /** Open Search-in-Files via the same `band:open-search-files` window event
+   *  the file-tree toolbar fires, then wait for the dialog to render. */
+  async openSearchFiles(): Promise<void> {
+    await test.step("Open Search in Files", async () => {
+      await this.dispatchOpenSearchFiles();
+      await this.searchFilesDialog().waitFor({ state: "visible" });
+    });
+  }
+
+  /** Type a query into the Search-in-Files input, replacing any existing text
+   *  (focus, select-all, type) the way a user editing the field would. */
+  async typeSearchFiles(text: string): Promise<void> {
+    await test.step(`Type Search-in-Files query "${text}"`, async () => {
+      await this.searchFilesInput.focus();
+      await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Append text to the Search-in-Files query without clearing it — the way a
+   *  user refining an existing search types the next character. Keeps the
+   *  previously matched rows continuously mounted, the exact condition under
+   *  which the stale-selection bug reproduces. */
+  async appendSearchFiles(text: string): Promise<void> {
+    await test.step(`Append "${text}" to Search-in-Files query`, async () => {
+      await this.searchFilesInput.focus();
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Press a key while the Search-in-Files input is focused — ArrowDown /
+   *  ArrowUp / Enter. */
+  async pressSearchFilesKey(key: string): Promise<void> {
+    await test.step(`Press "${key}" in Search in Files`, async () => {
+      await this.searchFilesInput.focus();
+      await this.page.keyboard.press(key);
+    });
+  }
+
+  /** The `data-value` (`file:line:content`) of every rendered row, in DOM
+   *  order. */
+  async searchFilesItemValues(): Promise<string[]> {
+    return await this.searchFilesItems.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-value") ?? ""),
+    );
+  }
+
+  /** The `data-value` of the single row cmdk currently marks
+   *  `aria-selected="true"`, or `null` when nothing is selected. */
+  async selectedSearchFilesValue(): Promise<string | null> {
+    const selected = this.searchFilesDialog().getByRole("option", { selected: true });
+    if ((await selected.count()) === 0) return null;
+    return await selected.first().getAttribute("data-value");
+  }
+
+  /** Current `scrollTop` of the Search-in-Files results list. */
+  async searchFilesListScrollTop(): Promise<number> {
+    return await this.searchFilesList.evaluate((el) => el.scrollTop);
+  }
+
+  /** The Search-in-Files selection once it has settled — see
+   *  `waitForStableSelection`. */
+  async settledSelectedSearchFilesValue(): Promise<string | null> {
+    return await this.waitForStableSelection(() => this.selectedSearchFilesValue());
+  }
+
+  /** Move the Search-in-Files selection onto the row whose `data-value` is
+   *  `value` by stepping ArrowDown (deterministic where cmdk's `End` is not —
+   *  see `navigateQuickOpenTo`). Throws if `value` is never selected.
+   *  Precondition: the caller must have waited for the result count to settle
+   *  (the press bound is snapshotted once, as in `navigateQuickOpenTo`). */
+  async navigateSearchFilesTo(value: string): Promise<void> {
+    await test.step(`Navigate Search-in-Files selection to "${value}"`, async () => {
+      const maxPresses = (await this.searchFilesItems.count()) + 2;
+      for (let i = 0; i < maxPresses; i++) {
+        if ((await this.selectedSearchFilesValue()) === value) return;
+        await this.pressSearchFilesKey("ArrowDown");
+      }
+      throw new Error(
+        `Search in Files never selected "${value}" after ${maxPresses} ArrowDown presses`,
+      );
+    });
   }
 
   /** Dispatch a synthetic `band:open-file` window event into the page

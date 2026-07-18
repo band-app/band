@@ -42,6 +42,7 @@ export function SearchFilesDialog({
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open || !adapter.searchWorkspaceContent || query.length < 2) {
@@ -99,27 +100,33 @@ export function SearchFilesDialog({
     return Array.from(map.entries());
   }, [results]);
 
-  // Auto-select the first result only when the current selection is no longer valid
-  const selectedValueRef = useRef(selectedValue);
-  selectedValueRef.current = selectedValue;
-
+  // Whenever a new result set is applied, snap the highlighted item back to the
+  // first result and scroll the list to the top, matching VS Code and the Quick
+  // Open dialog. cmdk runs with `shouldFilter={false}` here, so it never re-runs
+  // its own select-first logic on a query change: a match that survives a query
+  // refinement (its `file:line:content` value still present in the new results,
+  // just not first) would otherwise stay selected with the list scrolled down,
+  // and pressing Enter would open the wrong match.
+  //
+  // Keyed on the result *contents* (not the array reference) so repeated clears
+  // to an empty list — a query under 2 chars sets `results` to [] — don't
+  // re-fire and fight cmdk's own single-item selection. Keyboard up/down and
+  // hover still update `selectedValue` via `onValueChange`, so this only
+  // overrides selection on an actual result change, never mid-navigation.
+  const itemValues = useMemo(
+    () =>
+      grouped.flatMap(([file, matches]) => matches.map((m) => `${file}:${m.line}:${m.content}`)),
+    [grouped],
+  );
+  const firstValue = itemValues[0] ?? "";
+  // O(N) string allocation — memoised so it only recomputes when the result set
+  // changes, not on every `selectedValue` / hover render.
+  const resultKey = useMemo(() => itemValues.join("\n"), [itemValues]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstValue is unchanged) — it isn't read in the body
   useEffect(() => {
-    if (grouped.length > 0) {
-      const current = selectedValueRef.current;
-      const stillValid =
-        current &&
-        grouped.some(([file, matches]) =>
-          matches.some((m) => `${file}:${m.line}:${m.content}` === current),
-        );
-      if (!stillValid) {
-        const [file, matches] = grouped[0];
-        const first = matches[0];
-        setSelectedValue(`${file}:${first.line}:${first.content}`);
-      }
-    } else {
-      setSelectedValue("");
-    }
-  }, [grouped]);
+    setSelectedValue(firstValue);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [resultKey, firstValue]);
 
   const handleSelect = useCallback(
     (filePath: string, line: number) => {
@@ -130,6 +137,13 @@ export function SearchFilesDialog({
   );
 
   const totalMatches = results.length;
+
+  // Running row index into the memoised `itemValues`, advanced once per rendered
+  // match below. `grouped.flatMap(...)` (which builds `itemValues`) and the
+  // `grouped.map(...).matches.map(...)` render walk `grouped` in the same order,
+  // so `itemValues[rowIndex]` is that row's `file:line:content` — reused for both
+  // `key` and `value` instead of re-allocating the string on every render.
+  let rowIndex = 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -158,7 +172,7 @@ export function SearchFilesDialog({
             // the list), so its divider flips to a top border.
             className="max-lg:border-t max-lg:border-b-0"
           />
-          <CommandList className="max-h-[400px]">
+          <CommandList ref={listRef} className="max-h-[400px]">
             <CommandEmpty>
               {loading
                 ? "Searching..."
@@ -178,18 +192,22 @@ export function SearchFilesDialog({
                     </span>
                   }
                 >
-                  {matches.map((match) => (
-                    <CommandItem
-                      key={`${file}:${match.line}:${match.content}`}
-                      value={`${file}:${match.line}:${match.content}`}
-                      onSelect={() => handleSelect(file, match.line)}
-                    >
-                      <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                        {match.line}
-                      </span>
-                      <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
-                    </CommandItem>
-                  ))}
+                  {matches.map((match) => {
+                    // Reuse the pre-computed `file:line:content` for key + value.
+                    const value = itemValues[rowIndex++];
+                    return (
+                      <CommandItem
+                        key={value}
+                        value={value}
+                        onSelect={() => handleSelect(file, match.line)}
+                      >
+                        <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                          {match.line}
+                        </span>
+                        <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               );
             })}
