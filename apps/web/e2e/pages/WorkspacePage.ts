@@ -1492,7 +1492,7 @@ export class WorkspacePage {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Quick Open selection / scroll probes (fix/quick-open-select-first).
+  // Quick Open selection / scroll probes.
   //
   // The dialog is a cmdk `Command`; its input, list, and item rows carry the
   // `data-slot` attributes set by the `@band-app/ui` command wrappers plus the
@@ -1516,9 +1516,10 @@ export class WorkspacePage {
   }
 
   /** All rendered result rows — cmdk renders `role="option"` on every
-   *  `Command.Item` (matching `WorkspacePicker.options`). Covers the
-   *  file/recent rows plus any action row; the test reads each row's
-   *  `data-value` (the file path) to reason about order and selection. */
+   *  `Command.Item` (a system-controlled ARIA role), so `getByRole("option")`
+   *  is the correct locator. Covers the file/recent rows plus any action row;
+   *  the test reads each row's `data-value` (the file path) to reason about
+   *  order and selection. */
   get quickOpenItems(): Locator {
     return this.quickOpenDialog().getByRole("option");
   }
@@ -1580,7 +1581,10 @@ export class WorkspacePage {
    *  ambiguous with a caret-to-end-of-text move, so it can't be relied on to
    *  jump the list selection. `ArrowDown` is unambiguous and walks every row in
    *  DOM order until it wraps, so a bounded loop reaches any rendered row.
-   *  Throws (rather than looping forever) if `value` is never selected. */
+   *  Throws (rather than looping forever) if `value` is never selected.
+   *  Precondition: the caller must have waited for the result count to settle
+   *  (e.g. `expect.poll(() => quickOpenItems.count())`) — the press bound is
+   *  snapshotted once, so a still-growing list could make it give up early. */
   async navigateQuickOpenTo(value: string): Promise<void> {
     await test.step(`Navigate Quick Open selection to "${value}"`, async () => {
       // One press per row is always enough to reach any row from any start
@@ -1625,14 +1629,12 @@ export class WorkspacePage {
    *  stays first, so the settled value is the honest signal for both. */
   private async waitForStableSelection(read: () => Promise<string | null>): Promise<string | null> {
     let previous: string | null | undefined;
-    let stable: string | null = null;
     await expect
       .poll(
         async () => {
           const current = await read();
           const isStable = previous !== undefined && current === previous;
           previous = current;
-          if (isStable) stable = current;
           return isStable;
         },
         {
@@ -1644,7 +1646,9 @@ export class WorkspacePage {
         },
       )
       .toBe(true);
-    return stable;
+    // The poll resolved on two consecutive equal samples, so `previous` holds
+    // the settled value.
+    return previous ?? null;
   }
 
   /** The Quick Open selection once it has settled — see `waitForStableSelection`. */
@@ -1653,7 +1657,7 @@ export class WorkspacePage {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Search-in-Files selection / scroll probes (fix/quick-open-select-first).
+  // Search-in-Files selection / scroll probes.
   //
   // SearchFilesDialog is the sibling cmdk `Command` with `shouldFilter={false}`
   // — the same manual-filtering pattern as QuickOpen, so it carries the same
@@ -1750,7 +1754,9 @@ export class WorkspacePage {
 
   /** Move the Search-in-Files selection onto the row whose `data-value` is
    *  `value` by stepping ArrowDown (deterministic where cmdk's `End` is not —
-   *  see `navigateQuickOpenTo`). Throws if `value` is never selected. */
+   *  see `navigateQuickOpenTo`). Throws if `value` is never selected.
+   *  Precondition: the caller must have waited for the result count to settle
+   *  (the press bound is snapshotted once, as in `navigateQuickOpenTo`). */
   async navigateSearchFilesTo(value: string): Promise<void> {
     await test.step(`Navigate Search-in-Files selection to "${value}"`, async () => {
       const maxPresses = (await this.searchFilesItems.count()) + 2;

@@ -138,6 +138,13 @@ export function SearchFilesDialog({
 
   const totalMatches = results.length;
 
+  // Running row index into the memoised `itemValues`, advanced once per rendered
+  // match below. `grouped.flatMap(...)` (which builds `itemValues`) and the
+  // `grouped.map(...).matches.map(...)` render walk `grouped` in the same order,
+  // so `itemValues[rowIndex]` is that row's `file:line:content` — reused for both
+  // `key` and `value` instead of re-allocating the string on every render.
+  let rowIndex = 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -186,10 +193,8 @@ export function SearchFilesDialog({
                   }
                 >
                   {matches.map((match) => {
-                    // Compute the `file:line:content` row value once and reuse
-                    // it for both `key` and `value` instead of allocating the
-                    // template literal twice per row on every render.
-                    const value = `${file}:${match.line}:${match.content}`;
+                    // Reuse the pre-computed `file:line:content` for key + value.
+                    const value = itemValues[rowIndex++];
                     return (
                       <CommandItem
                         key={value}

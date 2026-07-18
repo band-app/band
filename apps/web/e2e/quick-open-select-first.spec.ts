@@ -124,7 +124,8 @@ test.describe("Quick Open selection reset on query change", () => {
 
     await workspacePage.openQuickOpen();
 
-    // Query 1: "report" — matches all 27 seeded files. TARGET ranks last.
+    // Query 1: "report" — matches all 27 seeded files
+    // (20 reports-NN.ts + 6 report-decoy-NN.md + 1 TARGET). TARGET ranks last.
     await workspacePage.typeQuickOpen("report");
     await expect.poll(() => workspacePage.quickOpenItems.count()).toBe(27);
 
