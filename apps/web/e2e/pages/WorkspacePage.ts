@@ -1636,9 +1636,11 @@ export class WorkspacePage {
           return isStable;
         },
         {
-          intervals: [150, 150, 150, 150, 150, 150],
-          timeout: 6000,
-          message: "Quick Open / Search-in-Files selection never stabilized within 6s",
+          // Sample ~10 times at 200ms so a sub-render transient on slow CI
+          // can't be mistaken for a settled value by two adjacent samples.
+          intervals: [200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+          timeout: 8000,
+          message: "Quick Open / Search-in-Files selection never stabilized within 8s",
         },
       )
       .toBe(true);

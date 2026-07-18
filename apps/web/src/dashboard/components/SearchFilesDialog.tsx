@@ -185,18 +185,24 @@ export function SearchFilesDialog({
                     </span>
                   }
                 >
-                  {matches.map((match) => (
-                    <CommandItem
-                      key={`${file}:${match.line}:${match.content}`}
-                      value={`${file}:${match.line}:${match.content}`}
-                      onSelect={() => handleSelect(file, match.line)}
-                    >
-                      <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                        {match.line}
-                      </span>
-                      <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
-                    </CommandItem>
-                  ))}
+                  {matches.map((match) => {
+                    // Compute the `file:line:content` row value once and reuse
+                    // it for both `key` and `value` instead of allocating the
+                    // template literal twice per row on every render.
+                    const value = `${file}:${match.line}:${match.content}`;
+                    return (
+                      <CommandItem
+                        key={value}
+                        value={value}
+                        onSelect={() => handleSelect(file, match.line)}
+                      >
+                        <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                          {match.line}
+                        </span>
+                        <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               );
             })}

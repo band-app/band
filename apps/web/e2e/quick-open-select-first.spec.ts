@@ -185,13 +185,15 @@ test.describe("Quick Open selection reset on query change", () => {
 
     // Enter opens the highlighted (first) file. The open is observable through
     // the persisted open-tabs state the Files panel writes for this workspace.
+    // Assert the positive new state (the tab opened) first, then that the
+    // dialog closed.
     await workspacePage.pressQuickOpenKey("Enter");
-    await expect(workspacePage.quickOpenDialog()).toBeHidden();
     await expect
       .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
         timeout: 15_000,
       })
       .toBe(firstFile);
+    await expect(workspacePage.quickOpenDialog()).toBeHidden();
   });
 
   test("empty-query recent-files view selects its first item", async ({ page }) => {

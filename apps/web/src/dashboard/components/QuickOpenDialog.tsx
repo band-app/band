@@ -320,6 +320,13 @@ export function QuickOpenDialog({
   // O(N) string allocation — memoised on `displayFiles` so it only recomputes
   // when the result set changes, not on every `selectedValue` / hover render.
   const resultKey = useMemo(() => displayFiles.join("\n"), [displayFiles]);
+  // Basename per row, memoised on `displayFiles` so the `split`/`pop` only runs
+  // when the result set changes — not on every `selectedValue` render caused by
+  // keyboard navigation or hover. Indexed by row position in the map below.
+  const fileNames = useMemo(
+    () => displayFiles.map((file) => file.split("/").pop() || file),
+    [displayFiles],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
   useEffect(() => {
     setSelectedValue(firstFile);
@@ -371,8 +378,8 @@ export function QuickOpenDialog({
               <>
                 <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
                 <CommandGroup heading={groupHeading}>
-                  {displayFiles.map((file) => {
-                    const fileName = file.split("/").pop() || file;
+                  {displayFiles.map((file, index) => {
+                    const fileName = fileNames[index];
                     const Icon = getFileIcon(fileName);
                     return (
                       <CommandItem key={file} value={file} onSelect={() => handleSelect(file)}>

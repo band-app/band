@@ -173,13 +173,15 @@ test.describe("Search in Files selection reset on query change", () => {
     // Enter opens the highlighted (first) match. The value is `file:line:content`;
     // the open is observable through the persisted open-tabs state, whose active
     // entry carries the opened file path (a `path:line` location).
+    // Assert the positive new state (the tab opened) first, then that the
+    // dialog closed.
     const firstFile = firstValue.split(":")[0];
     await workspacePage.pressSearchFilesKey("Enter");
-    await expect(workspacePage.searchFilesDialog()).toBeHidden();
     await expect
       .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
         timeout: 15_000,
       })
       .toContain(firstFile);
+    await expect(workspacePage.searchFilesDialog()).toBeHidden();
   });
 });
