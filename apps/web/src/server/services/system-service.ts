@@ -84,18 +84,23 @@ export class SystemService {
    * even when the Node process inherited a stripped-down PATH from
    * launchd / Electron.
    *
-   * Homebrew is macOS-only here: a stock Linux host has no `brew`, so
-   * shelling out to it would fail with an opaque ENOENT. Guard on
-   * `darwin` and surface a distro-appropriate hint on every other
-   * platform — the message bubbles up to the dashboard's install flow as
-   * a normal error instead of a crash.
+   * Homebrew is macOS-only here: a stock Linux or Windows host has no
+   * `brew`, so shelling out to it would fail with an opaque ENOENT. Guard
+   * on `darwin` and surface a platform-appropriate hint everywhere else —
+   * the message bubbles up to the dashboard's install flow as a normal
+   * error instead of a crash.
    */
   async installCloudflared(resolvedPath: string): Promise<void> {
     if (process.platform !== "darwin") {
+      const hint =
+        process.platform === "win32"
+          ? "On Windows, install it with `winget install --id Cloudflare.cloudflared` " +
+            "(or `choco install cloudflared`)"
+          : "On Linux, install it with your package manager " +
+            "(e.g. `sudo apt install cloudflared` or `sudo dnf install cloudflared`)";
       throw new Error(
         "Automatic cloudflared install is only supported on macOS (via Homebrew). " +
-          "On Linux, install it with your package manager " +
-          "(e.g. `sudo apt install cloudflared` or `sudo dnf install cloudflared`) " +
+          `${hint} ` +
           "or download it from " +
           "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ " +
           "and re-open the tunnel.",

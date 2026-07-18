@@ -42,7 +42,10 @@ export class TunnelClient {
   }
 
   private spawnTunnel(options: { port: number }, resolvedPath: string): Promise<void> {
-    const args = ["tunnel", "--config", "/dev/null", "--url", `http://localhost:${options.port}`];
+    // Point cloudflared at the platform's null device so it never picks up
+    // a stray config file: `/dev/null` on POSIX, `NUL` on Windows.
+    const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
+    const args = ["tunnel", "--config", nullDevice, "--url", `http://localhost:${options.port}`];
 
     log.debug("spawning cloudflared %s", args.join(" "));
 

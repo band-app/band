@@ -1185,6 +1185,12 @@ async function main() {
     process.exit(0);
   };
 
+  // SIGINT (Ctrl-C) is delivered on every platform. SIGTERM is a POSIX
+  // signal that Node never raises on Windows — a Windows host relies on
+  // SIGINT for interactive stops, and graceful shutdown when launched by
+  // the Electron desktop parent will be wired through parent-process IPC
+  // as part of the desktop-integration work (#518). Registering the
+  // SIGTERM handler here is harmless on Windows (it simply never fires).
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 }

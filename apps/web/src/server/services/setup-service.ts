@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { checkCli, installCli } from "./cli-service";
+import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
 import { modelRefreshService } from "./model-refresh-service";
@@ -210,7 +210,7 @@ async function ensureCliInstalled(): Promise<void> {
   log.info("Installing band CLI...");
   try {
     await installCli();
-    log.info("CLI installed to /usr/local/bin/band");
+    log.info("CLI installed to %s", SYMLINK_PATH);
   } catch (err) {
     log.warn("CLI installation failed: %s", err instanceof Error ? err.message : String(err));
   }

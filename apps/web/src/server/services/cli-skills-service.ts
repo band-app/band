@@ -69,11 +69,20 @@ const SKILL_FILE = "SKILL.md";
  * idempotent setup pipeline).
  */
 export async function findBandBinary(): Promise<string | null> {
-  try {
-    const stat = statSync("/usr/local/bin/band");
-    if (stat) return "/usr/local/bin/band";
-  } catch {
-    // Fall through to `which`.
+  // The `/usr/local/bin/band` symlink is POSIX-only. On Windows the CLI
+  // install is a `band.cmd` shim (which `execFile` can't invoke directly
+  // anyway), so skip this shortcut and rely on `where band` / the bundled
+  // sidecar resolver below, both of which return a directly-executable
+  // path.
+  if (process.platform !== "win32") {
+    try {
+      // `statSync` throws when the symlink is absent (caught below); a
+      // successful return means it exists, so no truthiness check is needed.
+      statSync("/usr/local/bin/band");
+      return "/usr/local/bin/band";
+    } catch {
+      // Fall through to `which`.
+    }
   }
 
   const onPath = await systemService.whichBinary("band");
