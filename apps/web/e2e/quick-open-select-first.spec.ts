@@ -148,16 +148,17 @@ test.describe("Quick Open selection reset on query change", () => {
     await workspacePage.appendQuickOpen("s");
     await expect.poll(() => workspacePage.quickOpenItems.count()).toBe(21);
 
-    // Post-fix: selection snaps to the first row and the list is at the top.
-    await expect
-      .poll(async () => {
-        const items = await workspacePage.quickOpenItemValues();
-        const selected = await workspacePage.selectedQuickOpenValue();
-        return selected !== null && selected === items[0];
-      })
-      .toBe(true);
-    expect(await workspacePage.selectedQuickOpenValue()).not.toBe(TARGET);
-    await expect.poll(() => workspacePage.quickOpenListScrollTop()).toBe(0);
+    // Post-fix: once the new result set settles, the selection is on the FIRST
+    // row and the list is scrolled to the top. We wait for the *settled*
+    // selection rather than a transient one — the pre-fix dialog briefly
+    // highlights the first row while React re-renders, then snaps the highlight
+    // back to the stale surviving row (TARGET), so a plain `expect.poll` for
+    // "selection is first" would pass on that transient and miss the bug.
+    const settled = await workspacePage.settledSelectedQuickOpenValue();
+    const items = await workspacePage.quickOpenItemValues();
+    expect(settled).toBe(items[0]);
+    expect(settled).not.toBe(TARGET);
+    expect(await workspacePage.quickOpenListScrollTop()).toBe(0);
   });
 
   test("arrow keys move the selection and Enter opens the highlighted (first) result", async ({
