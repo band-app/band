@@ -106,6 +106,9 @@ test.describe("Search in Files selection reset on query change", () => {
   test("changing the query snaps selection to the first result and scrolls the list to the top", async ({
     page,
   }) => {
+    // Navigating to the last of 40 rows is ~40 sequential ArrowDown round-trips
+    // plus an up-to-8s stability poll; give slow CI headroom over the 30s default.
+    test.setTimeout(90_000);
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await workspacePage.goto(WORKSPACE);
     await workspacePage.waitForReady();
@@ -145,7 +148,7 @@ test.describe("Search in Files selection reset on query change", () => {
     const items = await workspacePage.searchFilesItemValues();
     expect(settled).toBe(items[0]);
     expect(settled).not.toBe(target);
-    expect(await workspacePage.searchFilesListScrollTop()).toBe(0);
+    await expect.poll(() => workspacePage.searchFilesListScrollTop()).toBe(0);
   });
 
   test("arrow keys move the selection and Enter opens the highlighted (first) result", async ({

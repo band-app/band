@@ -1626,8 +1626,13 @@ export class WorkspacePage {
    *  re-renders a new result set, then snap the highlight back to a stale
    *  surviving row; a one-shot poll for "selection is first" would pass on that
    *  transient and miss the regression. The post-fix selection is first AND
-   *  stays first, so the settled value is the honest signal for both. */
-  private async waitForStableSelection(read: () => Promise<string | null>): Promise<string | null> {
+   *  stays first, so the settled value is the honest signal for both.
+   *
+   *  The canonical stability-polling primitive for any cmdk dialog's selection;
+   *  `protected` so a future dialog page object can reuse it. */
+  protected async waitForStableSelection(
+    read: () => Promise<string | null>,
+  ): Promise<string | null> {
     let previous: string | null | undefined;
     await expect
       .poll(

@@ -159,7 +159,7 @@ test.describe("Quick Open selection reset on query change", () => {
     const items = await workspacePage.quickOpenItemValues();
     expect(settled).toBe(items[0]);
     expect(settled).not.toBe(TARGET);
-    expect(await workspacePage.quickOpenListScrollTop()).toBe(0);
+    await expect.poll(() => workspacePage.quickOpenListScrollTop()).toBe(0);
   });
 
   test("arrow keys move the selection and Enter opens the highlighted (first) result", async ({
