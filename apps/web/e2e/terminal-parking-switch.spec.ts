@@ -264,4 +264,48 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // The repair is renderer-only: no reconnect, no fresh shell.
     expect(socketCount()).toBe(1);
   });
+
+  test("focus entering the terminal rebuilds the WebGL surface (throttled) without a reconnect", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+
+    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.waitForReady();
+    await workspacePage.openTerminalTab();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect
+      .poll(
+        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
+
+    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    expect(tagged).toBeGreaterThan(0);
+
+    // Focus entering the terminal (the user's "click the garbled terminal"
+    // reflex) is the only repair signal when the window already holds OS
+    // focus and spontaneous corruption fires no event. The rebuild is
+    // throttled to once per second after any addon build, so poll the
+    // blur+refocus gesture until the tagged canvas is replaced — the poll's
+    // retries naturally outlast the throttle window.
+    await expect
+      .poll(
+        async () => {
+          await workspacePage.refocusTerminal();
+          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          return s.canvasCount > 0 && s.survivingTags === 0;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+
+    // Renderer-only repair: no reconnect, no fresh shell.
+    expect(socketCount()).toBe(1);
+  });
 });

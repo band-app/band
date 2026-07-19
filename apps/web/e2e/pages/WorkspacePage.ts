@@ -1020,6 +1020,20 @@ export class WorkspacePage {
     });
   }
 
+  /** Blur then refocus the terminal's xterm input textarea — fires a real
+   *  `focusin` on the terminal wrapper, the "click into the garbled
+   *  terminal" repair trigger. Blurring first matters: focus() on an
+   *  already-focused element fires nothing, and the repair is throttled, so
+   *  tests poll this until the rebuild is observed. */
+  async refocusTerminal(): Promise<void> {
+    await test.step("Blur + refocus terminal input", async () => {
+      await this.terminalInput.first().evaluate((el) => {
+        (el as HTMLElement).blur();
+        (el as HTMLElement).focus();
+      });
+    });
+  }
+
   /** Wait up to `timeoutMs` for the page to open a NEW terminal WebSocket for the
    *  given workspace; resolves `true` if one opens, `false` on timeout. Used to
    *  assert a reconnect did (or, for a terminated terminal, did NOT) happen —

@@ -818,6 +818,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // close-search refocus, tap-to-focus), and without the guard each of
     // those would pay for a second context + atlas right after the first.
     const handleFocusIn = () => {
+      // WebGL-only repair: the DOM renderer can't suffer GPU atlas
+      // corruption, and if no WebGL build ever succeeded there is nothing
+      // to rebuild — repairing anyway would refit/refresh on every click
+      // and, in the WebGL-unavailable case, re-attempt (and re-fail)
+      // context creation each time.
+      if (!useWebGL || lastWebglBuildAt === 0) return;
       if (Date.now() - lastWebglBuildAt < 1_000) return;
       webglSuspect = true;
       scheduleRepair();

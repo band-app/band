@@ -17,7 +17,9 @@ const MAX_SCROLLBACK_SIZE = 100_000;
  * replay-on-reconnect (see {@link TerminalPool.serialize}). Matches the
  * client xterm's `scrollback: 10000` (terminal-cache.ts) so a reconnect
  * replays as much history as the client can hold; the raw byte buffer
- * above covers the plain-text read paths.
+ * above covers the plain-text read paths. Deliberate memory trade-off: a
+ * saturated mirror buffer costs several MB per terminal (~12 bytes/cell ×
+ * cols × 10k lines), paid for the lifetime of each PTY.
  */
 const HEADLESS_SCROLLBACK_LINES = 10_000;
 
@@ -120,6 +122,10 @@ export class TerminalPool {
   /** terminalId -> in-flight serialize drain, shared by concurrent callers
    *  (see {@link serialize} for why the pause/resume pair must not overlap). */
   private readonly serializing = new Map<string, Promise<string | null>>();
+
+  /** terminalIds with a shrink-and-restore nudge in flight (see
+   *  {@link nudgeResize} for why concurrent nudges must not compound). */
+  private readonly nudging = new Set<string>();
 
   /**
    * Spawn (or return the already-spawning/spawned) PTY for a terminalId.
@@ -559,18 +565,32 @@ export class TerminalPool {
    * a new client is watching — two SIGWINCHes with a real dimension change
    * in between force a redraw. The 50 ms gap keeps the pair from
    * coalescing into a same-size no-op.
+   *
+   * Nudges ROWS, not cols: a column change forces a synchronous re-wrap of
+   * the headless mirror's whole scrollback (O(buffer) — tens of ms at 10k
+   * lines, and wake-from-sleep re-attaches every open terminal at once),
+   * while a row change is O(1) and delivers the same SIGWINCH.
+   *
+   * Concurrent nudges for one terminal are deduped: two clients
+   * re-attaching together (the same pair that shares a serialize drain)
+   * would otherwise compound shrinks — A shrinks R→R-1, B shrinks
+   * R-1→R-2, A's restore guard fails, B restores only to R-1 — leaving
+   * the PTY one row short until a real client resize.
    */
   nudgeResize(terminalId: string): void {
     const session = this.terminals.get(terminalId);
     if (!session) return;
+    if (this.nudging.has(terminalId)) return;
     const { cols, rows } = session.pty;
-    if (cols <= 1) return;
-    this.resize(terminalId, cols - 1, rows);
+    if (rows <= 1) return;
+    this.nudging.add(terminalId);
+    this.resize(terminalId, cols, rows - 1);
     const timer = setTimeout(() => {
+      this.nudging.delete(terminalId);
       const current = this.terminals.get(terminalId);
       // Restore only if the dims are still ours — a real client resize
       // landing in between carries the final dims and must win.
-      if (current && current.pty.cols === cols - 1 && current.pty.rows === rows) {
+      if (current && current.pty.cols === cols && current.pty.rows === rows - 1) {
         this.resize(terminalId, cols, rows);
       }
     }, 50);
@@ -665,25 +685,43 @@ export class TerminalPool {
   private async drainAndSerialize(terminalId: string): Promise<string | null> {
     const session = this.terminals.get(terminalId);
     if (!session) return null;
+    // No output has ever been emitted — there is no state to snapshot, so
+    // skip the pause/drain entirely. This matters beyond the wasted work:
+    // pausing a JUST-SPAWNED PTY before its first read can wedge node-pty's
+    // flow control under load (the shell's prompt then never reaches any
+    // client). A chunk that lands right after this check is simply
+    // delivered live by the caller's forwarder — not lost, not duplicated.
+    if (session.scrollback.length === 0) return "";
     session.pty.pause();
     let deathWatch: NodeJS.Timeout | undefined;
+    let drainCap: NodeJS.Timeout | undefined;
     try {
       // A zero-length write's callback fires only after everything queued
-      // before it has been parsed. If the PTY exits mid-drain, `onExit`
-      // disposes the headless terminal and xterm drops queued callbacks
-      // without invoking them — so also watch for the session's death, or
-      // this promise (and the attach awaiting it) would hang forever.
+      // before it has been parsed. Two guards keep this promise from
+      // hanging — an unsettled await would skip the `finally` and leave
+      // the PTY PAUSED FOREVER (a silently dead terminal for every
+      // client, which is strictly worse than any stale snapshot):
+      //  - death watch: if the PTY exits mid-drain, `onExit` disposes the
+      //    headless terminal and xterm drops queued callbacks without
+      //    invoking them.
+      //  - hard cap: the parse queue drains in single-digit ms; if the
+      //    callback ever stalls (loaded event loop, write-buffer edge
+      //    case), give up after 1 s and serialize whatever has parsed —
+      //    late chunks are simply delivered live by the caller instead.
       await new Promise<void>((resolve) => {
         session.headless.write("", resolve);
         deathWatch = setInterval(() => {
           if (this.terminals.get(terminalId) !== session) resolve();
         }, 50);
         deathWatch.unref();
+        drainCap = setTimeout(resolve, 1_000);
+        drainCap.unref();
       });
       if (this.terminals.get(terminalId) !== session) return null;
       return session.serializeAddon.serialize();
     } finally {
       if (deathWatch) clearInterval(deathWatch);
+      if (drainCap) clearTimeout(drainCap);
       // Skip the resume if the session died mid-drain — the PTY is gone.
       if (this.terminals.get(terminalId) === session) session.pty.resume();
     }

@@ -1,6 +1,5 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
-import type { IDisposable } from "node-pty";
 import type { WebSocket } from "ws";
 import {
   type SpawnOptions,
@@ -166,12 +165,13 @@ function attachSession(
     workspaceId,
   );
 
-  // Live-output forwarder. Registered by the async replay block below only
-  // AFTER the replay snapshot has been sent, so replayed state and live
-  // bytes can never interleave out of order; `serialize` pauses the PTY
-  // while it drains, which guarantees no output is lost or duplicated in
-  // between.
-  let dataDisposable: IDisposable | undefined;
+  // Live-output forwarder. Registered by the async replay block below in
+  // the same synchronous slot as the snapshot send, so replayed state and
+  // live bytes can never interleave out of order; `serialize` pauses the
+  // PTY while it drains, which guarantees no output is lost or duplicated
+  // in between. Structural type rather than node-pty's IDisposable — this
+  // tier deliberately never references node-pty (see terminal-service.ts).
+  let dataDisposable: { dispose(): void } | undefined;
   let closed = false;
 
   // Poll the PTY foreground process name and send title updates (text/JSON frames).
@@ -262,16 +262,21 @@ function attachSession(
       log.error("Failed to serialize terminal %s for replay: %s", terminalId, err);
     }
     if (closed) return;
-    if (snapshot && ws.readyState === ws.OPEN) {
-      ws.send(Buffer.from(stripTerminalQueries(snapshot)));
-    }
 
-    // PTY output -> WebSocket (binary frames)
+    // PTY output -> WebSocket (binary frames). Registered BEFORE the
+    // snapshot send but in the same synchronous block, so no PTY chunk can
+    // interleave ahead of the snapshot on the wire — and a synchronous
+    // `ws.send` throw on the snapshot (this file documents `ws` throwing)
+    // cannot skip the forwarder and wedge an OPEN socket.
     dataDisposable = session.pty.onData((data: string) => {
       if (ws.readyState === ws.OPEN) {
         ws.send(Buffer.from(data));
       }
     });
+
+    if (snapshot && ws.readyState === ws.OPEN) {
+      ws.send(Buffer.from(stripTerminalQueries(snapshot)));
+    }
 
     // The snapshot restores the pixels, but a live full-screen TUI doesn't
     // know a client re-attached and won't repaint on its own — and the
