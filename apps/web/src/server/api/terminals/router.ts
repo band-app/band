@@ -112,18 +112,13 @@ const terminalRouter = t.router({
         return;
       }
 
-      // Replay buffered scrollback first. Strip query/report escape
-      // sequences before replay for the same reason the WebSocket path does
-      // (band-app/band#613): a stale color/cursor/DA query replayed into a
-      // fresh terminal emulator gets answered back to the PTY and leaks as
-      // literal text at the prompt. This subscription replays-then-streams,
-      // exactly the reconnect scenario the leak needs, so it needs the same
-      // guard the `/terminal` WebSocket already applies.
-      if (replay && session.scrollback.length > 0) {
-        yield { type: "output" as const, data: stripTerminalQueries(session.scrollback) };
-      }
-
-      // Stream live output
+      // Register the live-output queue BEFORE serializing. `serialize`
+      // pauses the PTY synchronously in this same tick, so no chunk can be
+      // double-delivered (queued AND baked into the snapshot); every chunk
+      // emitted after the drain's resume lands in the queue — including
+      // ones arriving while the snapshot `yield` below is suspended waiting
+      // on the consumer. Subscribing after that yield would silently drop
+      // them.
       const queue: string[] = [];
       let resolve: (() => void) | null = null;
 
@@ -138,6 +133,19 @@ const terminalRouter = t.router({
       });
 
       try {
+        // Replay a serialized reconstruction of the terminal state first,
+        // same as the `/terminal` WebSocket path: the raw scrollback tail
+        // can be cut mid-escape-sequence and garble TUI apps drawn with
+        // relative cursor motion. Query/report escapes are still stripped
+        // (band-app/band#613) — serialize shouldn't emit them, but the
+        // guard is cheap and keeps this path aligned with the WS replay.
+        if (replay) {
+          const snapshot = await terminalService.serialize(terminalId);
+          if (snapshot) {
+            yield { type: "output" as const, data: stripTerminalQueries(snapshot) };
+          }
+        }
+
         while (!opts.signal?.aborted) {
           while (queue.length > 0) {
             yield { type: "output" as const, data: queue.shift()! };

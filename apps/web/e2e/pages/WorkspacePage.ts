@@ -1010,6 +1010,16 @@ export class WorkspacePage {
     });
   }
 
+  /** Dispatch a window `focus` event in the page — the foreground trigger the
+   *  terminal client uses to repair a possibly-corrupted WebGL surface (same
+   *  handler the desktop shell's `system-resumed` wake event invokes). Lets a
+   *  test drive the sleep/unlock repair path deterministically. */
+  async simulateWindowForeground(): Promise<void> {
+    await test.step("Dispatch window 'focus'", async () => {
+      await this.page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    });
+  }
+
   /** Wait up to `timeoutMs` for the page to open a NEW terminal WebSocket for the
    *  given workspace; resolves `true` if one opens, `false` on timeout. Used to
    *  assert a reconnect did (or, for a terminated terminal, did NOT) happen —
@@ -1059,8 +1069,9 @@ export class WorkspacePage {
   }
 
   /** Tag every canvas inside a workspace's terminal wrapper (parked or live) so
-   *  a later read can tell whether the SAME surface was reused across a switch
-   *  (tags survive — the parking model's guarantee) or rebuilt (tags gone).
+   *  a later read can tell whether the renderer surface was left untouched
+   *  (tags survive) or rebuilt with a fresh WebGL addon (tags gone — what the
+   *  corruption-repair paths guarantee on re-attach / foreground return).
    *  Returns the number of canvases tagged. */
   async tagTerminalCanvasesByWorkspace(workspaceId: string): Promise<number> {
     return await this.page.evaluate((id) => {

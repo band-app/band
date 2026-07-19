@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
+import type { IDisposable } from "node-pty";
 import type { WebSocket } from "ws";
 import {
   type SpawnOptions,
@@ -165,18 +166,13 @@ function attachSession(
     workspaceId,
   );
 
-  // Replay buffered scrollback so the client sees previous output.
-  // Send as binary frame so the client can distinguish from JSON control messages.
-  if (session.scrollback.length > 0) {
-    ws.send(Buffer.from(stripTerminalQueries(session.scrollback)));
-  }
-
-  // PTY output -> WebSocket (binary frames)
-  const dataDisposable = session.pty.onData((data: string) => {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(Buffer.from(data));
-    }
-  });
+  // Live-output forwarder. Registered by the async replay block below only
+  // AFTER the replay snapshot has been sent, so replayed state and live
+  // bytes can never interleave out of order; `serialize` pauses the PTY
+  // while it drains, which guarantees no output is lost or duplicated in
+  // between.
+  let dataDisposable: IDisposable | undefined;
+  let closed = false;
 
   // Poll the PTY foreground process name and send title updates (text/JSON frames).
   // This mimics how iTerm detects the running command without relying on OSC sequences.
@@ -237,11 +233,56 @@ function attachSession(
 
   // WebSocket close -> detach listeners but keep PTY alive
   ws.on("close", () => {
+    closed = true;
     clearInterval(processInterval);
     clearInterval(pingInterval);
-    dataDisposable.dispose();
+    dataDisposable?.dispose();
     exitDisposable.dispose();
     log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);
+  });
+
+  // Replay a serialized reconstruction of the terminal state so the client
+  // sees previous output, then wire up live forwarding. The raw scrollback
+  // buffer is NOT replayed: its tail slice can start mid-escape-sequence,
+  // which garbles TUI apps that draw with relative cursor motion
+  // (claude-code, vim) after a reload/reconnect. The serialize output
+  // shouldn't contain query escapes, but stripTerminalQueries stays as the
+  // #613 guard (OSC 10/11 color *sets* replayed from scrollback are report
+  // forms it strips too). Sent as a binary frame so the client can
+  // distinguish it from JSON control messages.
+  void (async () => {
+    // Replay is best-effort: a serialize failure (e.g. the PTY dying
+    // mid-drain) must not abandon the attach, or the client would hold an
+    // OPEN socket that accepts keystrokes but never shows output. The
+    // forwarder below is registered no matter what.
+    let snapshot: string | null = null;
+    try {
+      snapshot = await terminalService.serialize(terminalId);
+    } catch (err) {
+      log.error("Failed to serialize terminal %s for replay: %s", terminalId, err);
+    }
+    if (closed) return;
+    if (snapshot && ws.readyState === ws.OPEN) {
+      ws.send(Buffer.from(stripTerminalQueries(snapshot)));
+    }
+
+    // PTY output -> WebSocket (binary frames)
+    dataDisposable = session.pty.onData((data: string) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(Buffer.from(data));
+      }
+    });
+
+    // The snapshot restores the pixels, but a live full-screen TUI doesn't
+    // know a client re-attached and won't repaint on its own — and the
+    // client's follow-up resize carries unchanged dims, so it produces no
+    // SIGWINCH. Nudge the PTY so the app redraws. Skipped on a fresh spawn
+    // (nothing drawn yet) and when there was no state to replay.
+    if (!isNew && snapshot) {
+      terminalService.nudgeResize(terminalId);
+    }
+  })().catch((err) => {
+    log.error("Failed to replay terminal %s: %s", terminalId, err);
   });
 }
 

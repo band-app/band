@@ -8,8 +8,10 @@
 // than hiding the wrapper in place under `content-visibility: hidden`, the old
 // MultiWorkspacePanelHost model) is what fixes the garbled-render-on-switch bug
 // (band-app/band#615): a parked terminal lives in a normal-visibility subtree
-// off to the side, so the browser never drops its WebGL backing store or leaves
-// its glyphs stale.
+// off to the side, so a workspace switch alone doesn't drop its WebGL backing
+// store. (The GPU can still corrupt a parked surface — sleep/unlock, texture
+// memory pressure, no context-loss event — so `detach` marks the surface
+// suspect and re-attach rebuilds the WebGL addon; see `terminal-cache.ts`.)
 //
 // The container is:
 //   • position:fixed at (-9999px, -9999px) — rendered (so layout/paint keep the
