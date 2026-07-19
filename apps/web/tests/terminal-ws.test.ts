@@ -451,22 +451,25 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     const terminalId = "osc-strip-ws";
     await seedOscScrollback(terminalId);
 
-    // Reconnect to the same terminal. The server replays the buffered
-    // scrollback through stripTerminalQueries on the `/terminal` WS path.
+    // Reconnect to the same terminal. The server replays a serialized
+    // reconstruction of the terminal state (headless-xterm snapshot) through
+    // stripTerminalQueries on the `/terminal` WS path.
     const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
     const ws2 = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
     });
 
-    // The server replays the whole buffered scrollback in a single binary
-    // `ws.send`, so the FIRST binary frame is exactly the replayed scrollback.
-    // Capture only that frame — accumulating later frames could fold in live
-    // PTY output emitted after reconnect and muddy the OSC assertions.
-    let replay = Buffer.alloc(0);
+    // The server replays the whole serialized snapshot in a single binary
+    // `ws.send`, so the FIRST binary frame is exactly the replayed state.
+    // Capture only that frame, LATCHED — the post-replay `nudgeResize` makes
+    // the shell redraw its prompt, and those live frames can arrive before
+    // the socket close completes; without the latch they'd overwrite the
+    // captured snapshot and muddy the OSC assertions.
+    let replay: Buffer | null = null;
 
     await new Promise<void>((resolve, reject) => {
       ws2.on("message", (data: Buffer, isBinary: boolean) => {
-        if (!isBinary) return; // skip JSON control frames (title, etc.)
+        if (!isBinary || replay !== null) return; // skip JSON control frames + post-replay live output
         replay = data;
         resolve();
       });
@@ -476,17 +479,19 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
     ws2.close();
 
+    // Non-null: `resolve` only fires after the latch assignment above.
+    const frame = replay as unknown as Buffer;
     // Ordinary output survived replay — positive anchor for the negatives.
-    expect(replay.toString()).toContain(MARKER);
+    expect(frame.toString()).toContain(MARKER);
     // Every OSC form — the `?` query (11/12) and the `rgb:` report (10) — was
     // stripped.
-    expect(replay.includes(Buffer.from(OSC11_QUERY))).toBe(false);
-    expect(replay.includes(Buffer.from(OSC10_REPORT))).toBe(false);
-    expect(replay.includes(Buffer.from(OSC12_QUERY))).toBe(false);
+    expect(frame.includes(Buffer.from(OSC11_QUERY))).toBe(false);
+    expect(frame.includes(Buffer.from(OSC10_REPORT))).toBe(false);
+    expect(frame.includes(Buffer.from(OSC12_QUERY))).toBe(false);
     // Nothing starting an OSC 10/11/12 escape (`ESC ] 1x`) should remain.
-    expect(replay.includes(Buffer.from("\x1b]10"))).toBe(false);
-    expect(replay.includes(Buffer.from("\x1b]11"))).toBe(false);
-    expect(replay.includes(Buffer.from("\x1b]12"))).toBe(false);
+    expect(frame.includes(Buffer.from("\x1b]10"))).toBe(false);
+    expect(frame.includes(Buffer.from("\x1b]11"))).toBe(false);
+    expect(frame.includes(Buffer.from("\x1b]12"))).toBe(false);
   });
 
   // The second replay path (band-app/band#613): the tRPC `terminal.stream`
@@ -516,7 +521,8 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     });
     const client = createTRPCClient<AppRouter>({ links: [wsLink({ client: wsClient })] });
 
-    // The subscription replays scrollback as its first `output` event.
+    // The subscription replays the serialized snapshot as its first
+    // `output` event.
     const firstOutput = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("No output event from terminal.stream within 10 s")),
@@ -627,4 +633,260 @@ describe("terminal WebSocket — authentication", () => {
     expect(opened).toBe(false);
     ws.close();
   });
+});
+
+// Serialized replay on reconnect — the user-observable surface of the
+// headless-mirror change. The pool used to replay the raw scrollback buffer:
+// a 100 KB tail slice that can start mid-escape-sequence, so TUI apps drawn
+// with relative cursor motion (claude-code, vim) landed their moves on the
+// wrong rows after a reload/reconnect. Now the first binary frame of a
+// `/terminal` reconnect is `serialize()` output — a clean reconstruction of
+// the terminal *state* (screen, alt buffer, scrollback), not the historical
+// byte stream. These tests drive that surface end-to-end: real server, real
+// PTY, real WS reconnect, asserting on the exact first replay frame.
+//
+// Escape sequences are emitted through `/bin/bash -c 'printf …'` so
+// octal-escape handling is deterministic regardless of the host shell (same
+// reasoning as the SHELL pin above), and marker strings are split with `""`
+// in the command text so the shell's echo of the typed line can never
+// satisfy an assertion — only executed output can.
+//
+// Not asserted here: the `nudgeResize` SIGWINCH pair fired after the replay
+// (ws.ts) — its only hermetic observable is the PTY dims, covered at pool
+// level in terminal-pool-nudge-resize.test.ts; observing the resulting
+// repaint would need a SIGWINCH-aware TUI binary in CI.
+describe("terminal WebSocket — serialized replay on reconnect", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  const WORKSPACE_ID = "workspace-main";
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    const projectPath = join(tmpHome, "workspace");
+    mkdirSync(projectPath, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "workspace",
+          path: projectPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: projectPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer(tmpHome, { SHELL: "/bin/bash" });
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  /** Connect to a terminal, optionally resize, run a command, wait until
+   *  `until` appears in live output, then close — leaving the PTY alive with
+   *  its state ready for a reconnect replay. */
+  async function runAndDisconnect(
+    terminalId: string,
+    command: string,
+    until: string,
+    resize?: { cols: number; rows: number },
+  ): Promise<void> {
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
+
+    let live = Buffer.alloc(0);
+    let sentCommand = false;
+
+    await new Promise<void>((resolve, reject) => {
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ type: "init" }));
+      });
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!sentCommand) {
+          // First frame proves the session is attached and the persistent
+          // message listener is live — now (resize and) send the command.
+          sentCommand = true;
+          if (resize) {
+            ws.send(JSON.stringify({ type: "resize", cols: resize.cols, rows: resize.rows }));
+          }
+          ws.send(command);
+          return;
+        }
+        if (!isBinary) return; // skip JSON control frames (title, etc.)
+        live = Buffer.concat([live, data]);
+        if (live.includes(Buffer.from(until))) resolve();
+      });
+      ws.on("error", reject);
+      setTimeout(
+        () => reject(new Error(`"${until}" never appeared in live output within 10 s`)),
+        10_000,
+      );
+    });
+
+    await new Promise<void>((r) => {
+      ws.on("close", () => r());
+      ws.close();
+    });
+  }
+
+  /** Reconnect to a terminal and capture the FIRST binary frame — the
+   *  serialized replay snapshot (single `ws.send` on the server side). The
+   *  latch matters: the post-replay `nudgeResize` makes the shell redraw its
+   *  prompt, and those live frames arrive before `close()` completes — an
+   *  unlatched `replay = data` would let them clobber the captured snapshot. */
+  async function captureReplayFrame(terminalId: string): Promise<Buffer> {
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
+
+    let replay: Buffer | null = null;
+    await new Promise<void>((resolve, reject) => {
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!isBinary || replay !== null) return;
+        replay = data;
+        resolve();
+      });
+      ws.on("error", reject);
+      setTimeout(() => reject(new Error("No replay frame within 10 s")), 10_000);
+    });
+
+    await new Promise<void>((r) => {
+      ws.on("close", () => r());
+      ws.close();
+    });
+    // Non-null: `resolve` only fires after the latch assignment above.
+    return replay as unknown as Buffer;
+  }
+
+  it("replays the final TUI screen state on reconnect instead of the historical bytes", async () => {
+    const terminalId = "serialize-replay-tui";
+
+    // TUI-style drawing: enter the alt screen, print TEMPMARKER at row 5,
+    // move back, erase the line, print FINALMARKER in its place, park the
+    // cursor on row 8 so the shell prompt that follows can't touch row 5.
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033[?1049h\\033[5;5HTEMP""MARKER\\033[5;5H\\033[2KFINAL""MARKER\\033[8;1H"'\r`,
+      "FINALMARKER",
+    );
+
+    const replay = await captureReplayFrame(terminalId);
+    const text = replay.toString();
+
+    // The snapshot is the *state*: the surviving text is there and the
+    // alt-buffer switch is reconstructed…
+    expect(text).toContain("FINALMARKER");
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching the real alt-buffer escape sequence
+    expect(text).toMatch(/\x1b\[\?(?:47|1047|1049)h/);
+    // …and the erased text is NOT — proof the frame is a serialized screen,
+    // not the raw byte history (which contained TEMPMARKER before the erase).
+    expect(text).not.toContain("TEMPMARKER");
+  }, 30_000);
+
+  it("replays at the resized dimensions — the mirror follows PTY resizes", async () => {
+    const terminalId = "serialize-replay-resize";
+
+    // Draw on row 28 and then row 24 after growing to 120x30. If the
+    // server-side mirror were still 24 rows, both cursor moves would clamp
+    // to row 24 and SHALLOWROW would overwrite DEEPROW — so both markers
+    // surviving in the replay proves the mirror followed the resize.
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033[28;1HDEEP""ROW\\033[24;1HSHALLOW""ROW\\033[29;1H"'\r`,
+      "SHALLOWROW",
+      { cols: 120, rows: 30 },
+    );
+
+    const replay = await captureReplayFrame(terminalId);
+    const text = replay.toString();
+    expect(text).toContain("DEEPROW");
+    expect(text).toContain("SHALLOWROW");
+  }, 30_000);
+});
+
+// The pool strips color-disabling vars (NO_COLOR / FORCE_COLOR / CLICOLOR)
+// inherited from the shell that launched the server — a pane spawned by a
+// server started under `NO_COLOR=1` used to come up monochrome even though
+// the pane advertises a truecolor terminal via COLORTERM.
+describe("terminal WebSocket — color env vars stripped from spawned panes", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    const projectPath = join(tmpHome, "workspace");
+    mkdirSync(projectPath, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "workspace",
+          path: projectPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: projectPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    // The server itself runs with all three vars set — the pane must not
+    // inherit them.
+    server = await startServer(tmpHome, {
+      SHELL: "/bin/bash",
+      NO_COLOR: "1",
+      FORCE_COLOR: "1",
+      CLICOLOR: "0",
+    });
+  });
+
+  afterAll(async () => {
+    if (server) await server.close();
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("spawns the pane shell without NO_COLOR / FORCE_COLOR / CLICOLOR", async () => {
+    const terminalId = "color-env-strip";
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=${terminalId}`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
+
+    // Markers are split with `""` in the typed command so the shell's echo
+    // of the line (`NC""=${NO_COLOR:-unset}…`) can never satisfy the
+    // assertion — only the executed, expanded output prints `NC=unset`.
+    const COMMAND = `echo "NC""=\${NO_COLOR:-unset} FC""=\${FORCE_COLOR:-unset} CC""=\${CLICOLOR:-unset}"\r`;
+
+    let live = Buffer.alloc(0);
+    let sentCommand = false;
+
+    await new Promise<void>((resolve, reject) => {
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ type: "init" }));
+      });
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!sentCommand) {
+          sentCommand = true;
+          ws.send(COMMAND);
+          return;
+        }
+        if (!isBinary) return;
+        live = Buffer.concat([live, data]);
+        // Resolve on either outcome so a regression fails on the assertion
+        // below (with the actual values) instead of on a timeout.
+        if (live.includes(Buffer.from("NC="))) resolve();
+      });
+      ws.on("error", reject);
+      setTimeout(() => reject(new Error("No NC= output within 10 s")), 10_000);
+    });
+
+    await new Promise<void>((r) => {
+      ws.on("close", () => r());
+      ws.close();
+    });
+
+    expect(live.toString()).toContain("NC=unset FC=unset CC=unset");
+  }, 30_000);
 });

@@ -211,12 +211,26 @@ export class TerminalService {
     return this.pool.getScrollback(terminalId, lines);
   }
 
+  /**
+   * Serialized reconstruction of the terminal's current state — the
+   * replay-on-reconnect payload (see `TerminalPool.serialize` for why raw
+   * scrollback bytes are not sound to replay).
+   */
+  serialize(terminalId: string): Promise<string | null> {
+    return this.pool.serialize(terminalId);
+  }
+
   write(terminalId: string, data: string): boolean {
     return this.pool.write(terminalId, data);
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
     this.pool.resize(terminalId, cols, rows);
+  }
+
+  /** Force a live TUI to repaint after re-attach — see `TerminalPool.nudgeResize`. */
+  nudgeResize(terminalId: string): void {
+    this.pool.nudgeResize(terminalId);
   }
 
   subscribeOutput(terminalId: string, callback: (data: string) => void): () => void {

@@ -34,7 +34,9 @@
   "dependencies": {
     "@vscode/ripgrep": "^1.18.0",
     "@xterm/addon-search": "^0.16.0",
+    "@xterm/addon-serialize": "0.15.0-beta.216",
     "@xterm/addon-webgl": "0.20.0-beta.215",
+    "@xterm/headless": "6.1.0-beta.216",
     "fzf": "0.5.2",
     "node-pty": "^1.1.0",
     "prettier": "^3.8.3",

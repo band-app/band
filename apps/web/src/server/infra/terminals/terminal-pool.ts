@@ -3,12 +3,25 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
+import type { SerializeAddon } from "@xterm/addon-serialize";
+import type { Terminal as HeadlessTerminal } from "@xterm/headless";
 import type { IPty } from "node-pty";
 import { defaultShell, shellPath } from "../process/path";
 
 const log = createLogger("terminal-pool");
 
 const MAX_SCROLLBACK_SIZE = 100_000;
+
+/**
+ * Lines of scrollback kept by the headless xterm mirror used for
+ * replay-on-reconnect (see {@link TerminalPool.serialize}). Matches the
+ * client xterm's `scrollback: 10000` (terminal-cache.ts) so a reconnect
+ * replays as much history as the client can hold; the raw byte buffer
+ * above covers the plain-text read paths. Deliberate memory trade-off: a
+ * saturated mirror buffer costs several MB per terminal (~12 bytes/cell ×
+ * cols × 10k lines), paid for the lifetime of each PTY.
+ */
+const HEADLESS_SCROLLBACK_LINES = 10_000;
 
 /**
  * Options for spawning a new PTY session.
@@ -33,11 +46,23 @@ export interface SpawnOptions {
  * `workspaceId` reverse-lookup so the service tier never has to touch
  * `node-pty` directly. `scrollback` is a single growing string capped at
  * `MAX_SCROLLBACK_SIZE` (~100 KB) — see `onData` below for the bounded
- * write.
+ * write. It serves the plain-text read paths (`terminal.output` /
+ * `band terminals output`); replay-into-a-terminal paths use the
+ * `headless` mirror via {@link TerminalPool.serialize} instead, because
+ * the tail-sliced raw bytes are not sound to replay (they can start
+ * mid-escape-sequence).
  */
 export interface TerminalSession {
   pty: IPty;
   scrollback: string;
+  /**
+   * Headless xterm that parses the same PTY stream the clients see, so
+   * the pool can serialize a clean reconstruction of the current terminal
+   * state for replay on reconnect. Kept in lock-step with the PTY dims by
+   * {@link TerminalPool.resize} and disposed with the PTY on exit.
+   */
+  headless: HeadlessTerminal;
+  serializeAddon: SerializeAddon;
   workspaceId: string;
   /**
    * Path of the temp file staging an auto-run command, if any. Removed
@@ -93,6 +118,14 @@ export class TerminalPool {
    * (band-app/band#617). This map makes concurrent spawns share ONE PTY.
    */
   private readonly spawning = new Map<string, Promise<TerminalSession>>();
+
+  /** terminalId -> in-flight serialize drain, shared by concurrent callers
+   *  (see {@link serialize} for why the pause/resume pair must not overlap). */
+  private readonly serializing = new Map<string, Promise<string | null>>();
+
+  /** terminalIds with a shrink-and-restore nudge in flight (see
+   *  {@link nudgeResize} for why concurrent nudges must not compound). */
+  private readonly nudging = new Set<string>();
 
   /**
    * Spawn (or return the already-spawning/spawned) PTY for a terminalId.
@@ -152,6 +185,14 @@ export class TerminalPool {
     // segments as monochrome blocks. iTerm2/Alacritty/kitty/Ghostty all set
     // this; node-pty does not, so we set it explicitly.
     env.COLORTERM = "truecolor";
+    // Color vars inherited from the launching shell — NO_COLOR / CLICOLOR=0
+    // disable color, FORCE_COLOR pins a level — override COLORTERM's
+    // truecolor hint in most tools (e.g. a server started from a profile
+    // exporting NO_COLOR=1 renders every pane monochrome). This pane IS a
+    // truecolor terminal, so drop them and let tools detect from COLORTERM.
+    delete env.NO_COLOR;
+    delete env.FORCE_COLOR;
+    delete env.CLICOLOR;
     // Hint foreground/background colors so CLI tools (vim, bat, etc.) don't send
     // OSC 11 queries whose responses leak as visible garbage in the terminal.
     env.COLORFGBG = "15;0";
@@ -239,7 +280,54 @@ export class TerminalPool {
       throw err;
     }
 
-    const session: TerminalSession = { pty: ptyProcess, scrollback: "", workspaceId };
+    // Headless xterm mirror for replay-on-reconnect (see `serialize`).
+    // Same CJS-ESM interop caveat as node-pty above, with a twist: these
+    // packages ship webpack bundles whose named exports Node's
+    // cjs-module-lexer can't detect, so under a plain Node import the
+    // classes are reachable ONLY via `.default`, while tsx's loader (and
+    // esbuild's bundle interop) put them on the namespace. Reach through
+    // whichever is present.
+    let headless: HeadlessTerminal;
+    let serializeAddon: SerializeAddon;
+    try {
+      const headlessNs = (await import("@xterm/headless")) as
+        | typeof import("@xterm/headless")
+        | { default: typeof import("@xterm/headless") };
+      const { Terminal } = "Terminal" in headlessNs ? headlessNs : headlessNs.default;
+      const serializeNs = (await import("@xterm/addon-serialize")) as
+        | typeof import("@xterm/addon-serialize")
+        | { default: typeof import("@xterm/addon-serialize") };
+      const { SerializeAddon } =
+        "SerializeAddon" in serializeNs ? serializeNs : serializeNs.default;
+
+      // Dims match the PTY spawn above; `resize` keeps them in lock-step.
+      headless = new Terminal({
+        cols: 80,
+        rows: 24,
+        scrollback: HEADLESS_SCROLLBACK_LINES,
+        allowProposedApi: true,
+      });
+      serializeAddon = new SerializeAddon();
+      // SerializeAddon's typings are written against the browser
+      // `@xterm/xterm` Terminal; the headless Terminal exposes the same core
+      // surface minus the DOM members, so the addon works but needs the cast.
+      headless.loadAddon(serializeAddon as unknown as Parameters<typeof headless.loadAddon>[0]);
+    } catch (err) {
+      // The PTY spawned above but the session was never registered — kill it
+      // so a failed headless setup can't leak an orphaned shell process.
+      ptyProcess.kill();
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error("headless mirror setup failed for terminal %s: %s", terminalId, msg);
+      throw err;
+    }
+
+    const session: TerminalSession = {
+      pty: ptyProcess,
+      scrollback: "",
+      headless,
+      serializeAddon,
+      workspaceId,
+    };
     this.terminals.set(terminalId, session);
 
     // Auto-run initial command if provided. Robust against the cold-PTY
@@ -257,12 +345,14 @@ export class TerminalPool {
     }
     ids.add(terminalId);
 
-    // Buffer all PTY output for replay on reconnect + notify listeners
+    // Buffer all PTY output for the plain-text read paths, mirror it into
+    // the headless terminal for replay-on-reconnect, and notify listeners.
     ptyProcess.onData((data: string) => {
       session.scrollback += data;
       if (session.scrollback.length > MAX_SCROLLBACK_SIZE) {
         session.scrollback = session.scrollback.slice(-MAX_SCROLLBACK_SIZE);
       }
+      session.headless.write(data);
       const listeners = this.outputListeners.get(terminalId);
       if (listeners) {
         for (const cb of listeners) {
@@ -301,6 +391,10 @@ export class TerminalPool {
           // Already gone / never written — nothing to clean up.
         }
       }
+      // Tear down the headless mirror with the PTY. This handler fires for
+      // explicit `kill()` paths too (pty.kill → onExit), so it is the single
+      // dispose site; also disposes the loaded SerializeAddon.
+      session.headless.dispose();
       // Notify the caller that the PTY exited on its OWN (e.g. a self-closing
       // cron pane whose command ended with `exit`). The pool stays oblivious to
       // layout / event concerns; the service-supplied callback does that
@@ -458,7 +552,49 @@ export class TerminalPool {
     const session = this.terminals.get(terminalId);
     if (session) {
       session.pty.resize(cols, rows);
+      // Keep the headless mirror on the same geometry so serialized replays
+      // reconstruct the screen at the dims the client renders at.
+      session.headless.resize(cols, rows);
     }
+  }
+
+  /**
+   * Shrink-and-restore resize so a live full-screen TUI (claude-code, vim)
+   * repaints after a client re-attach. Replaying the serialized snapshot
+   * restores what the screen looked like, but the running app doesn't know
+   * a new client is watching — two SIGWINCHes with a real dimension change
+   * in between force a redraw. The 50 ms gap keeps the pair from
+   * coalescing into a same-size no-op.
+   *
+   * Nudges ROWS, not cols: a column change forces a synchronous re-wrap of
+   * the headless mirror's whole scrollback (O(buffer) — tens of ms at 10k
+   * lines, and wake-from-sleep re-attaches every open terminal at once),
+   * while a row change is O(1) and delivers the same SIGWINCH.
+   *
+   * Concurrent nudges for one terminal are deduped: two clients
+   * re-attaching together (the same pair that shares a serialize drain)
+   * would otherwise compound shrinks — A shrinks R→R-1, B shrinks
+   * R-1→R-2, A's restore guard fails, B restores only to R-1 — leaving
+   * the PTY one row short until a real client resize.
+   */
+  nudgeResize(terminalId: string): void {
+    const session = this.terminals.get(terminalId);
+    if (!session) return;
+    if (this.nudging.has(terminalId)) return;
+    const { cols, rows } = session.pty;
+    if (rows <= 1) return;
+    this.nudging.add(terminalId);
+    this.resize(terminalId, cols, rows - 1);
+    const timer = setTimeout(() => {
+      this.nudging.delete(terminalId);
+      const current = this.terminals.get(terminalId);
+      // Restore only if the dims are still ours — a real client resize
+      // landing in between carries the final dims and must win.
+      if (current && current.pty.cols === cols && current.pty.rows === rows - 1) {
+        this.resize(terminalId, cols, rows);
+      }
+    }, 50);
+    timer.unref();
   }
 
   /**
@@ -496,6 +632,10 @@ export class TerminalPool {
   /**
    * Returns the scrollback buffer for a terminal, optionally limited to the
    * last N lines. Returns `null` if the terminal is not found.
+   *
+   * This is the plain-text read surface (`terminal.output` /
+   * `band terminals output`). Replaying these raw bytes into a terminal
+   * emulator is NOT sound — use {@link serialize} for that.
    */
   getScrollback(terminalId: string, lines?: number): string | null {
     const session = this.terminals.get(terminalId);
@@ -503,6 +643,88 @@ export class TerminalPool {
     if (lines == null) return session.scrollback;
     const allLines = session.scrollback.split("\n");
     return allLines.slice(-lines).join("\n");
+  }
+
+  /**
+   * Serialize the terminal's current state (screen, scrollback, colors,
+   * modes, alt buffer) into an escape-sequence stream that reconstructs it
+   * when written into a fresh client terminal. Returns `null` if the
+   * terminal is not found.
+   *
+   * This is the replay-on-reconnect payload. The raw `scrollback` buffer is
+   * unsound for replay: it is tail-sliced at `MAX_SCROLLBACK_SIZE`, so it
+   * can start mid-escape-sequence, and TUI apps that draw with relative
+   * cursor motion (claude-code, vim) land their moves on the wrong rows —
+   * a garbled screen after reload/reconnect. The headless mirror has parsed
+   * the full stream, so serializing it always yields a clean, complete
+   * repaint.
+   *
+   * Async because xterm parses writes on an internal queue. The PTY is
+   * paused while the queue drains, so the snapshot covers exactly the
+   * chunks already delivered to output listeners — a caller that sends the
+   * snapshot and then subscribes to live output (before the microtask
+   * chain yields to I/O) neither loses nor duplicates bytes.
+   *
+   * Concurrent calls for the same terminal (a `/terminal` WS reconnect
+   * racing a `terminal.stream` attach, or two windows waking together)
+   * share ONE in-flight drain — same pattern as `spawning`. Without the
+   * dedupe, the first caller's `finally` would resume the PTY while the
+   * second was still draining, letting fresh chunks flow before the second
+   * caller's output forwarder exists: silent output loss.
+   */
+  serialize(terminalId: string): Promise<string | null> {
+    const inflight = this.serializing.get(terminalId);
+    if (inflight) return inflight;
+    const promise = this.drainAndSerialize(terminalId).finally(() => {
+      this.serializing.delete(terminalId);
+    });
+    this.serializing.set(terminalId, promise);
+    return promise;
+  }
+
+  private async drainAndSerialize(terminalId: string): Promise<string | null> {
+    const session = this.terminals.get(terminalId);
+    if (!session) return null;
+    // No output has ever been emitted — there is no state to snapshot, so
+    // skip the pause/drain entirely. This matters beyond the wasted work:
+    // pausing a JUST-SPAWNED PTY before its first read can wedge node-pty's
+    // flow control under load (the shell's prompt then never reaches any
+    // client). A chunk that lands right after this check is simply
+    // delivered live by the caller's forwarder — not lost, not duplicated.
+    if (session.scrollback.length === 0) return "";
+    session.pty.pause();
+    let deathWatch: NodeJS.Timeout | undefined;
+    let drainCap: NodeJS.Timeout | undefined;
+    try {
+      // A zero-length write's callback fires only after everything queued
+      // before it has been parsed. Two guards keep this promise from
+      // hanging — an unsettled await would skip the `finally` and leave
+      // the PTY PAUSED FOREVER (a silently dead terminal for every
+      // client, which is strictly worse than any stale snapshot):
+      //  - death watch: if the PTY exits mid-drain, `onExit` disposes the
+      //    headless terminal and xterm drops queued callbacks without
+      //    invoking them.
+      //  - hard cap: the parse queue drains in single-digit ms; if the
+      //    callback ever stalls (loaded event loop, write-buffer edge
+      //    case), give up after 1 s and serialize whatever has parsed —
+      //    late chunks are simply delivered live by the caller instead.
+      await new Promise<void>((resolve) => {
+        session.headless.write("", resolve);
+        deathWatch = setInterval(() => {
+          if (this.terminals.get(terminalId) !== session) resolve();
+        }, 50);
+        deathWatch.unref();
+        drainCap = setTimeout(resolve, 1_000);
+        drainCap.unref();
+      });
+      if (this.terminals.get(terminalId) !== session) return null;
+      return session.serializeAddon.serialize();
+    } finally {
+      if (deathWatch) clearInterval(deathWatch);
+      if (drainCap) clearTimeout(drainCap);
+      // Skip the resume if the session died mid-drain — the PTY is gone.
+      if (this.terminals.get(terminalId) === session) session.pty.resume();
+    }
   }
 
   /**

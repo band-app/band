@@ -31,8 +31,10 @@ import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 // `MultiWorkspacePanelHost` hid inactive terminals in place under
 // `content-visibility: hidden`, which dropped the WebGL backing store and
 // produced garbled frames on switch-back that only a manual resize fixed
-// (band-app/band#615). Parking keeps the surface in a normal-visibility subtree,
-// so it never corrupts; on re-attach we do one unconditional fit + refresh.
+// (band-app/band#615). Parking keeps the surface in a normal-visibility subtree;
+// since even a parked surface can still be corrupted by the GPU (sleep/unlock,
+// memory pressure — no context-loss event fires), re-attach rebuilds the WebGL
+// addon and does one unconditional fit + refresh.
 //
 // The entry owns everything terminal-scoped: the xterm + addons, the WebSocket
 // with its reconnect/heartbeat machinery, the ResizeObserver, the zoom/DPR
@@ -155,7 +157,8 @@ const MAX_LAYOUT_FRAMES = 5;
  * deleted (`reconcileTerminalWorkspaces`), or this LRU cap is exceeded.
  *
  * The cap also bounds live WebGL contexts (browsers hard-cap ~16); each cached
- * terminal keeps its context so its surface can be reused without a rebuild.
+ * terminal keeps a context alive while parked (the addon is rebuilt on
+ * re-attach, since a parked surface can be corrupted by the GPU off-screen).
  */
 const MAX_CACHED_TERMINALS = 8;
 
@@ -326,18 +329,23 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   // LRU recency for the module-level cache cap. Bumped on create/attach/touch.
   let lastActive = Date.now();
 
-  // WebGL "backing store may be stale" flag; a full re-attach is deferred to the
-  // next `attach` (e.g. context lost while parked).
+  // WebGL "surface may be corrupted" flag. The GPU can corrupt the glyph
+  // atlas and the renderer's buffers WITHOUT any `webglcontextlost` event
+  // (display sleep / screen unlock, background occlusion, texture memory
+  // pressure), and a damaged surface cannot be repaired in place —
+  // `clearTextureAtlas` + full refresh still redraws the damage. The only
+  // reliable repair is disposing and recreating the WebGL addon (fresh
+  // context, buffers, atlas), which `repairAndFit` does whenever this flag is
+  // set. Set on foreground return / system resume, on detach (a parked
+  // surface can rot off-screen), and on focus entering the terminal
+  // (spontaneous mid-session corruption fires no event at all). The rebuild
+  // costs a few ms of glyph rasterization.
   let webglSuspect = false;
-  // WebGL "glyph atlas may be corrupted" flag. A backgrounded/occluded window
-  // can lose GPU texture memory WITHOUT a `webglcontextlost` event; after that,
-  // `term.refresh` alone redraws every row through the same damaged atlas
-  // (backgrounds paint, glyphs come out blank/partial). Set on every return to
-  // the foreground; the next repair drops the atlas so glyphs re-rasterize.
-  // Deliberately NOT set on plain attach (pane switches) — the atlas rebuild
-  // costs a few ms of glyph rasterization and parked terminals keep a healthy
-  // atlas.
-  let atlasSuspect = false;
+  // Epoch ms of the last WebGL addon build (initial load, DPR/zoom rebuild,
+  // or suspect repair). Lets the focus-driven repair below skip a rebuild
+  // that another path performed moments earlier (e.g. the auto-focus right
+  // after the first attach) instead of paying for a second context + atlas.
+  let lastWebglBuildAt = 0;
 
   // Selection (long-press → word-select → arrow-extend) state.
   let selectionAnchor: Cell | null = null;
@@ -419,6 +427,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           webglCanvas.style.touchAction = "none";
         }
         webglAddon = addon;
+        lastWebglBuildAt = Date.now();
         webglContextLossDisposable?.dispose();
         webglContextLossDisposable = addon.onContextLoss(() => {
           console.warn("[terminal-cache] WebGL context lost, reattaching addon");
@@ -767,15 +776,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     };
     // Coming back to the foreground (tab re-shown, or — in the Electron app —
     // the window regaining OS focus, which does NOT fire `visibilitychange`).
-    // Besides re-checking the socket, force a full repaint: a WebGL terminal
-    // that was backgrounded/throttled can drop the rAF frames carrying a TUI's
-    // in-place statusline redraws, leaving the bottom rows stale/garbled until
-    // the next byte arrives. `scheduleRepair` is rAF-debounced (self-guards on
+    // Besides re-checking the socket, mark the surface suspect and repair:
+    // backgrounding/throttling can drop the rAF frames carrying a TUI's
+    // in-place redraws, and the GPU can silently discard texture memory while
+    // the window is away. `scheduleRepair` is rAF-debounced (self-guards on
     // attached+visible), so a switch-back that fires both `visibilitychange`
     // and `focus` coalesces into a single repair — same idiom as `attach`.
     const handleForeground = () => {
       handleResume();
-      atlasSuspect = true;
+      webglSuspect = true;
       scheduleRepair();
     };
     const handleVisibility = () => {
@@ -798,6 +807,28 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         })
         .catch(() => {});
     }
+
+    // Focus entering the terminal itself. When the window already holds OS
+    // focus, spontaneous mid-session corruption produces NO window-level event
+    // at all — the only signal left is the user clicking into the garbled
+    // terminal. `focusin` on the persistent wrapper (fires when xterm's helper
+    // textarea gains focus) turns that reflex into a surface rebuild. Skipped
+    // when ANY path built the addon within the last second — focus lands on
+    // the terminal during ordinary interaction too (auto-focus on connect,
+    // close-search refocus, tap-to-focus), and without the guard each of
+    // those would pay for a second context + atlas right after the first.
+    const handleFocusIn = () => {
+      // WebGL-only repair: the DOM renderer can't suffer GPU atlas
+      // corruption, and if no WebGL build ever succeeded there is nothing
+      // to rebuild — repairing anyway would refit/refresh on every click
+      // and, in the WebGL-unavailable case, re-attempt (and re-fail)
+      // context creation each time.
+      if (!useWebGL || lastWebglBuildAt === 0) return;
+      if (Date.now() - lastWebglBuildAt < 1_000) return;
+      webglSuspect = true;
+      scheduleRepair();
+    };
+    wrapper.addEventListener("focusin", handleFocusIn);
 
     connect();
 
@@ -902,25 +933,14 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (!attached || !hostIsVisible()) return;
       const dprChanged = handleDprChange();
       if (!dprChanged) {
-        if (webglSuspect && webglAddon == null && useWebGL) {
-          attachWebGL();
-        } else if (webglSuspect && webglAddon) {
-          webglAddon.dispose();
+        if (webglSuspect && useWebGL) {
+          webglAddon?.dispose();
           webglAddon = null;
           attachWebGL();
         }
         fit.fit();
       }
       webglSuspect = false;
-      // Foreground return: the atlas texture may have been damaged while the
-      // window was backgrounded/occluded, and `refresh` would faithfully
-      // redraw the damage. Drop it so glyphs re-rasterize on the next frame.
-      // (The `webglSuspect` branches above rebuild the whole addon — fresh
-      // atlas — so doing both is harmless.)
-      if (atlasSuspect) {
-        atlasSuspect = false;
-        webglAddon?.clearTextureAtlas();
-      }
       if (term.rows > 0) term.refresh(0, term.rows - 1);
       sendPtyResize();
     };
@@ -1009,6 +1029,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (destroyed) return;
       attached = false;
       liveContainer = null;
+      // A parked surface can rot off-screen (GPU texture memory reclaimed with
+      // no context-loss event), so treat it as suspect; the next `attach`
+      // rebuilds the addon against the live layout.
+      webglSuspect = true;
       if (repairRafId !== null) {
         cancelAnimationFrame(repairRafId);
         repairRafId = null;

@@ -3,16 +3,22 @@
  *
  * This spec proves the core switch behaviour the parking model guarantees:
  * switching a workspace away and back does NOT recreate the terminal. The one
- * xterm instance is kept alive, its surface *moved* to an off-screen parking
- * container while inactive and moved back on return — so on switch-back the
- * SAME WebGL backing store is reused (correctly sized, repainted) and NO new
- * terminal socket is opened. That is the root-cause fix for the garble-on-
- * switch bug (#615), replacing the old "hide in place + repair on show" dance.
+ * xterm instance is kept alive (same terminal id, same wrapper, NO new terminal
+ * socket), its surface *moved* to an off-screen parking container while
+ * inactive and moved back on return.
+ *
+ * The WebGL *renderer* inside that surface is intentionally NOT reused across
+ * the round-trip: the GPU can corrupt a parked or backgrounded surface (display
+ * sleep / screen unlock, texture memory pressure) without any
+ * `webglcontextlost` event, and `clearTextureAtlas` + refresh proved
+ * insufficient against that damage. So re-attach and every foreground return
+ * rebuild the WebGL addon — fresh canvas, correctly sized to the live
+ * container. This spec asserts BOTH halves: terminal reused, renderer rebuilt.
  *
  * Doctrine: real production server, real PTYs (git-init'd dirs → "git" projects
  * with clickable sidebar cards + a real cwd), no tRPC mocking, no `page.route`
  * on our own routes. WebGL is forced on via SwiftShader launch flags so xterm
- * attaches a real <canvas> (otherwise the surface-reuse assertion is vacuous).
+ * attaches a real <canvas> (otherwise the rebuild assertion is vacuous).
  * Driven entirely through `WorkspacePage`.
  */
 
@@ -112,7 +118,7 @@ test.afterAll(async () => {
 });
 
 test.describe("Terminal parking: workspace switch reuses the cached xterm", () => {
-  test("switching back to a cached workspace reuses the parked surface with no new socket and no manual resize", async ({
+  test("switching back to a cached workspace reuses the terminal (no new socket) and rebuilds its WebGL surface", async ({
     page,
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
@@ -143,8 +149,11 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
     const socketsAfterA = socketCount();
 
-    // Tag A's canvases so we can prove the SAME surface is reused after the
-    // round-trip switch (parking never disposes it).
+    // Remember A's terminal identity so we can prove the terminal itself is
+    // REUSED across the round-trip (same session, not a recreated one), and
+    // tag A's canvases so we can prove the WebGL renderer is REBUILT.
+    const idsBefore = await workspacePage.terminalIds(WORKSPACE_A);
+    expect(idsBefore.length).toBeGreaterThan(0);
     const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
     expect(tagged).toBeGreaterThan(0);
 
@@ -166,16 +175,18 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
       .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
       .toBe(false);
 
-    // The tagged canvases SURVIVE — the surface was reused, not rebuilt (the
-    // inverse of the old in-place-repair model) — AND it's correctly sized to
-    // the now-live container: every backing store matches the `.xterm-screen`
-    // rect × dpr. All measurements are taken from ONE settled snapshot inside
-    // the poll so a render flush between reads can't produce a stale mismatch.
+    // The tagged canvases are GONE — re-attach rebuilds the WebGL addon (a
+    // parked surface can be corrupted by the GPU off-screen with no
+    // context-loss event) — while a fresh canvas exists and is correctly sized
+    // to the now-live container: every backing store matches the
+    // `.xterm-screen` rect × dpr. All measurements are taken from ONE settled
+    // snapshot inside the poll so a render flush between reads can't produce a
+    // stale mismatch.
     await expect
       .poll(
         async () => {
           const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
-          const reused = s.canvasCount > 0 && s.survivingTags === s.canvasCount;
+          const rebuilt = s.canvasCount > 0 && s.survivingTags === 0;
           const sized =
             s.backing.length > 0 &&
             s.screen.w > 0 &&
@@ -184,16 +195,117 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
               (b) =>
                 Math.abs(b.w - s.screen.w * s.dpr) <= 2 && Math.abs(b.h - s.screen.h * s.dpr) <= 2,
             );
-          return reused && sized;
+          return rebuilt && sized;
         },
         { timeout: 20_000 },
       )
       .toBe(true);
+
+    // The terminal SESSION was reused: same terminal id backs the same wrapper.
+    expect(await workspacePage.terminalIds(WORKSPACE_A)).toEqual(idsBefore);
 
     // No new terminal socket opened across the round-trip: the in-session
     // switch reused the live connection (no reconnect/replay). This is the
     // property that removes the replay-flicker for in-session switches while
     // leaving genuine reload / multi-client replay (#613) untouched.
     expect(socketCount()).toBe(socketsAfterA);
+  });
+
+  test("returning to the foreground rebuilds the visible terminal's WebGL surface without a reconnect", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+
+    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.waitForReady();
+    await workspacePage.openTerminalTab();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect
+      .poll(
+        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
+
+    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    expect(tagged).toBeGreaterThan(0);
+
+    // A foreground return (window `focus` — the same handler the desktop
+    // shell's `system-resumed` wake event and visibility un-hide invoke) must
+    // rebuild the WebGL addon: after display sleep / screen unlock the GPU may
+    // have silently corrupted the glyph atlas and renderer buffers, and only a
+    // full rebuild — not `clearTextureAtlas` + refresh — repairs that damage.
+    await workspacePage.simulateWindowForeground();
+
+    // Fresh, correctly-sized canvas; the tagged (possibly-corrupt) one is gone.
+    await expect
+      .poll(
+        async () => {
+          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          const rebuilt = s.canvasCount > 0 && s.survivingTags === 0;
+          const sized =
+            s.backing.length > 0 &&
+            s.screen.w > 0 &&
+            s.screen.h > 0 &&
+            s.backing.every(
+              (b) =>
+                Math.abs(b.w - s.screen.w * s.dpr) <= 2 && Math.abs(b.h - s.screen.h * s.dpr) <= 2,
+            );
+          return rebuilt && sized;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+
+    // The repair is renderer-only: no reconnect, no fresh shell.
+    expect(socketCount()).toBe(1);
+  });
+
+  test("focus entering the terminal rebuilds the WebGL surface (throttled) without a reconnect", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
+
+    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.waitForReady();
+    await workspacePage.openTerminalTab();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect
+      .poll(
+        async () => (await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A)).canvasCount,
+        { timeout: 20_000 },
+      )
+      .toBeGreaterThan(0);
+    await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
+
+    const tagged = await workspacePage.tagTerminalCanvasesByWorkspace(WORKSPACE_A);
+    expect(tagged).toBeGreaterThan(0);
+
+    // Focus entering the terminal (the user's "click the garbled terminal"
+    // reflex) is the only repair signal when the window already holds OS
+    // focus and spontaneous corruption fires no event. The rebuild is
+    // throttled to once per second after any addon build, so poll the
+    // blur+refocus gesture until the tagged canvas is replaced — the poll's
+    // retries naturally outlast the throttle window.
+    await expect
+      .poll(
+        async () => {
+          await workspacePage.refocusTerminal();
+          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          return s.canvasCount > 0 && s.survivingTags === 0;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+
+    // Renderer-only repair: no reconnect, no fresh shell.
+    expect(socketCount()).toBe(1);
   });
 });
