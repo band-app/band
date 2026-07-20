@@ -191,8 +191,10 @@ export interface DashboardAdapter {
    * does it exist, is it a regular file, and does it live inside the
    * worktree (→ `workspaceRelativePath`) or outside it (→ `external`)? Used
    * by Quick Open to decide whether a pasted / terminal-link path opens as a
-   * normal workspace file or an external tab. Never rejects for a
-   * missing/invalid path — reports `{ exists: false }`.
+   * normal workspace file or an external tab.
+   *
+   * Resolves even when the path doesn't exist on disk (reports
+   * `{ exists: false }`); may REJECT when `workspaceId` is unknown.
    */
   resolveWorkspacePath?(
     workspaceId: string,

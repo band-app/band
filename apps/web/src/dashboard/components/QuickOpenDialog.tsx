@@ -124,8 +124,12 @@ export function QuickOpenDialog({
   // An absolute-path query isn't a worktree-relative fuzzy match — resolve
   // it against the workspace to find out if it exists and whether it lives
   // inside the worktree (open as a normal file) or outside it (external
-  // tab). Gated on the host exposing the resolver.
-  const isAbsoluteQuery = !!adapter.resolveWorkspacePath && isAbsoluteFilePath(searchQuery);
+  // tab). Gated on the host exposing the resolver. Memoised so it's a stable
+  // dependency for the two effects and the `probeReady`/`probeHit` derivations.
+  const isAbsoluteQuery = useMemo(
+    () => !!adapter.resolveWorkspacePath && isAbsoluteFilePath(searchQuery),
+    [adapter.resolveWorkspacePath, searchQuery],
+  );
 
   // Only trust the probe result when it's for the CURRENT query (see the
   // `probe` state comment). `probeReady` gates auto-open; `probeHit` is the

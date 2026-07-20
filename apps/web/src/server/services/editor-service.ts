@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { formatFileLocation } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
@@ -97,19 +97,19 @@ export class EditorService {
   // `band open` — resolve a CLI-supplied path and emit the SSE event
   // -------------------------------------------------------------------------
 
-  openFile(input: {
+  async openFile(input: {
     workspaceId?: string;
     filePath: string;
     line?: number;
     lineEnd?: number;
     column?: number;
     focus?: boolean;
-  }): {
+  }): Promise<{
     ok: true;
     workspaceId: string;
     filePath: string;
     external: boolean;
-  } {
+  }> {
     const targetWorkspaceId = input.workspaceId ?? this.activeWorkspaceId;
     if (!targetWorkspaceId) {
       throw new EditorOpenError(
@@ -123,9 +123,9 @@ export class EditorService {
       throw new EditorOpenError("NOT_FOUND", `Workspace '${targetWorkspaceId}' not found`);
     }
 
-    const resolved = this.resolveTarget(workspace.worktree.path, input.filePath);
+    const resolved = await this.resolveTarget(workspace.worktree.path, input.filePath);
 
-    // `existsSync` is true for directories too. Without the `isFile`
+    // `stat` follows to a directory too. Without the `isFile`
     // guard, `band open /path/to/some-dir` would pass through to the
     // renderer as an external "file" and the editor would try to open
     // the directory as a text buffer.
@@ -178,19 +178,19 @@ export class EditorService {
    * neither emits an SSE event nor throws for a missing file — the caller
    * only offers to open when `exists && isFile`.
    */
-  resolvePath(input: { workspaceId: string; filePath: string }): {
+  async resolvePath(input: { workspaceId: string; filePath: string }): Promise<{
     exists: boolean;
     isFile: boolean;
     /** True when the path lies outside the workspace worktree. */
     external: boolean;
     /** POSIX workspace-relative path, set only when inside the worktree. */
     workspaceRelativePath: string | null;
-  } {
+  }> {
     const workspace = workspaceService.resolve(input.workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(input.workspaceId);
     }
-    const resolved = this.resolveTarget(workspace.worktree.path, input.filePath);
+    const resolved = await this.resolveTarget(workspace.worktree.path, input.filePath);
     return {
       exists: resolved.exists,
       isFile: resolved.isFile,
@@ -205,17 +205,17 @@ export class EditorService {
    * not-yet-created paths still classify), stat it, and run the
    * segment-aware containment check against the canonicalized worktree root.
    */
-  private resolveTarget(
+  private async resolveTarget(
     root: string,
     filePath: string,
-  ): {
+  ): Promise<{
     canonicalTarget: string;
     exists: boolean;
     isFile: boolean;
     inside: boolean;
     /** POSIX workspace-relative path when `inside`, else null. */
     relativePath: string | null;
-  } {
+  }> {
     // Absolute paths are taken as-is; relative paths resolve against root.
     const absoluteTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
 
@@ -223,24 +223,25 @@ export class EditorService {
     // (macOS's `/var/folders` → `/private/var/folders` in particular)
     // compare equal. The CLI canonicalizes the user's argument before
     // sending, so a stored worktree path under `/var/...` would
-    // otherwise look "outside" its real location.
+    // otherwise look "outside" its real location. Async fs (fs/promises)
+    // so the tRPC query handler never parks the event loop on sync I/O.
     let canonicalRoot = root;
     try {
-      canonicalRoot = realpathSync(root);
+      canonicalRoot = await realpath(root);
     } catch {
       // worktree may have been deleted out from under us — leave as-is
     }
 
-    // Canonicalize the user's path the same way. `realpathSync` fails on
+    // Canonicalize the user's path the same way. `realpath` fails on
     // missing files, so walk up to the deepest ancestor that does exist,
     // canonicalize that, then re-append the trailing segments. That
     // keeps the in-workspace check accurate for paths the user wants to
     // *create* as well.
-    const canonicalTarget = canonicalizeMaybeMissing(absoluteTarget);
+    const canonicalTarget = await canonicalizeMaybeMissing(absoluteTarget);
 
     let targetStat: import("node:fs").Stats | null = null;
     try {
-      targetStat = statSync(canonicalTarget);
+      targetStat = await stat(canonicalTarget);
     } catch {
       // ENOENT or another IO error — reported via `exists: false`.
     }
@@ -285,32 +286,30 @@ export class EditorOpenError extends Error {
 }
 
 /**
- * `realpathSync` resolves symlinks but throws ENOENT for paths that don't
+ * `realpath` resolves symlinks but throws ENOENT for paths that don't
  * exist. We need the symlink-resolution part for paths that may or may not
- * exist (e.g. files the user wants to *open* that don't exist yet). Walk
- * up the path until we hit an ancestor that does exist, canonicalize that,
- * then re-append the trailing segments.
+ * exist (e.g. files the user wants to *open* that don't exist yet). Try to
+ * canonicalize the whole path; on failure walk up to the deepest ancestor
+ * that does resolve, canonicalize that, then re-append the trailing
+ * segments. Async (fs/promises) so callers don't block the event loop.
  */
-function canonicalizeMaybeMissing(p: string): string {
-  if (existsSync(p)) {
-    try {
-      return realpathSync(p);
-    } catch {
-      return p;
-    }
+async function canonicalizeMaybeMissing(p: string): Promise<string> {
+  try {
+    // Succeeds iff `p` exists and every component resolves.
+    return await realpath(p);
+  } catch {
+    // Missing / unresolvable — fall through to the walk-up below.
   }
   const parts = p.split(sep);
   for (let i = parts.length - 1; i > 0; i--) {
     const prefix = parts.slice(0, i).join(sep) || sep;
-    if (existsSync(prefix)) {
-      try {
-        const canonicalPrefix = realpathSync(prefix);
-        // `path.join` collapses the duplicate separator that arises when
-        // `canonicalPrefix === "/"`.
-        return join(canonicalPrefix, ...parts.slice(i));
-      } catch {
-        return p;
-      }
+    try {
+      const canonicalPrefix = await realpath(prefix);
+      // `path.join` collapses the duplicate separator that arises when
+      // `canonicalPrefix === "/"`.
+      return join(canonicalPrefix, ...parts.slice(i));
+    } catch {
+      // keep walking up toward the root
     }
   }
   return p;

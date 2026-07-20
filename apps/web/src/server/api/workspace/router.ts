@@ -395,6 +395,14 @@ export const workspaceRouter = t.router({
   // Quick Open calls this for an absolute-path query so a path that happens
   // to be inside the current workspace opens as a normal file rather than an
   // external tab. Shares `openFile`'s canonicalize + containment logic.
+  //
+  // Intentional tradeoff: this reports `exists`/`isFile` for ANY absolute
+  // path an authenticated caller supplies (not just in-worktree ones), so it
+  // is a filesystem-existence oracle. That is acceptable under Band's threat
+  // model — the same auth scope already reads arbitrary absolute paths via
+  // `host.readFile` — and the `external` flag is load-bearing, not dead code:
+  // it's how the client decides between a workspace-relative and an external
+  // tab. Do not "harden" this by dropping the out-of-worktree classification.
   resolvePath: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
     .query(({ input }) =>

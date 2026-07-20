@@ -189,9 +189,13 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
     const missing = join(tmpHome!, "does-not-exist.md");
     await workspacePage.dispatchOpenFileEvent({ filename: missing, workspaceId: WORKSPACE });
 
-    // No file to auto-open → the dialog is revealed for the user, and offers
-    // no external-open row (the path isn't a real file).
+    // Positive anchor: the dialog is revealed AND settled with the query set
+    // (the missing path is seeded into the input) — so the subsequent
+    // "no offer" assertion proves the resolver found nothing, not that the
+    // query never arrived.
     await expect(workspacePage.quickOpenDialog()).toBeVisible({ timeout: 15_000 });
+    await expect(workspacePage.quickOpenInput).toHaveValue(missing);
+    // No file to auto-open → no external-open row (the path isn't a real file).
     await expect(workspacePage.quickOpenPathItem).toBeHidden();
     expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(missing);
   });
