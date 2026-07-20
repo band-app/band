@@ -1011,9 +1011,10 @@ export class WorkspacePage {
   }
 
   /** Dispatch a window `focus` event in the page — the foreground trigger the
-   *  terminal client uses to repair a possibly-corrupted WebGL surface (same
-   *  handler the desktop shell's `system-resumed` wake event invokes). Lets a
-   *  test drive the sleep/unlock repair path deterministically. */
+   *  terminal client reacts to with a CHEAP repaint (fit + refresh). It must
+   *  NOT rebuild the WebGL surface (that raced the compositor and flickered);
+   *  genuine texture loss is driven by `loseTerminalWebglContext`. Lets a test
+   *  assert the surface survives a foreground return. */
   async simulateWindowForeground(): Promise<void> {
     await test.step("Dispatch window 'focus'", async () => {
       await this.page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -1021,16 +1022,74 @@ export class WorkspacePage {
   }
 
   /** Blur then refocus the terminal's xterm input textarea — fires a real
-   *  `focusin` on the terminal wrapper, the "click into the garbled
-   *  terminal" repair trigger. Blurring first matters: focus() on an
-   *  already-focused element fires nothing, and the repair is throttled, so
-   *  tests poll this until the rebuild is observed. */
+   *  `focusin` on the terminal wrapper. A click into the terminal now does a
+   *  cheap repaint only, never a rebuild, so this is used to assert the surface
+   *  SURVIVES a click. Blurring first matters: focus() on an already-focused
+   *  element fires nothing. */
   async refocusTerminal(): Promise<void> {
     await test.step("Blur + refocus terminal input", async () => {
       await this.terminalInput.first().evaluate((el) => {
         (el as HTMLElement).blur();
         (el as HTMLElement).focus();
       });
+    });
+  }
+
+  /** Wait for `n` animation frames to elapse in the page. Used to let the
+   *  client's rAF-debounced repair path (`scheduleRepair` → `repairAndFit`)
+   *  actually RUN before a "surface was NOT rebuilt" assertion — otherwise the
+   *  assertion reads the pre-repair state and passes vacuously (the rebuild, if
+   *  any, lands a frame or two later). A rebuild completes synchronously inside
+   *  `repairAndFit`, so a few frames deterministically covers it. */
+  async settleAnimationFrames(n = 3): Promise<void> {
+    await this.page.evaluate(
+      (frames) =>
+        new Promise<void>((resolve) => {
+          if (frames <= 0) {
+            resolve();
+            return;
+          }
+          let left = frames;
+          const tick = () => {
+            left -= 1;
+            if (left <= 0) resolve();
+            else requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }),
+      n,
+    );
+  }
+
+  /** Force a genuine WebGL context loss on the workspace's terminal canvas via
+   *  the `WEBGL_lose_context` extension. This fires the real `webglcontextlost`
+   *  event that xterm's WebglAddon listens for, driving the ONE client repair
+   *  path that legitimately rebuilds the surface (`onContextLoss`). Lets a test
+   *  prove genuine loss still rebuilds even though ordinary focus/switch no
+   *  longer do. Throws if no live WebGL canvas/context is found so the test
+   *  fails loudly rather than passing vacuously. */
+  async loseTerminalWebglContext(workspaceId: string): Promise<void> {
+    await test.step(`Force WebGL context loss on ${workspaceId} terminal`, async () => {
+      await this.page.evaluate((id) => {
+        const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+        const canvases = wrapper
+          ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+          : [];
+        // Pick the WebGL canvas by probing for a context, not by DOM order —
+        // xterm could add a non-WebGL canvas sibling. Matches the
+        // context-agnostic `querySelectorAll(".xterm-screen canvas")` the other
+        // surface probes use.
+        for (const canvas of canvases) {
+          const gl = (canvas.getContext("webgl2") ??
+            canvas.getContext("webgl")) as WebGLRenderingContext | null;
+          const ext = gl?.getExtension("WEBGL_lose_context");
+          if (ext) {
+            ext.loseContext();
+            return;
+          }
+        }
+        throw new Error(`no WebGL terminal canvas for workspace ${id}`);
+      }, workspaceId);
     });
   }
 
@@ -1140,6 +1199,75 @@ export class WorkspacePage {
         .map((w) => (w.querySelector(".xterm-rows") as HTMLElement | null)?.textContent ?? "")
         .join("\n");
     }, workspaceId);
+  }
+
+  /** Read the live xterm column count for a workspace's terminal from the
+   *  module-level terminal cache (`globalThis.__bandTerminalCache__`). Lets a
+   *  width-sensitive test calibrate against the ACTUAL fitted width instead of
+   *  guessing cols from the viewport (which varies with font metrics across
+   *  platforms). Returns 0 when the terminal isn't cached / not yet loaded.
+   *
+   *  Assumes ONE terminal per workspace: it returns the first cache entry
+   *  matching `workspaceId`, so with multiple terminal tabs the result is
+   *  whichever the Map iterator yields first. Current callers seed a single
+   *  terminal; add a `terminalId` param if that ever changes. */
+  async terminalCols(workspaceId: string): Promise<number> {
+    return await this.page.evaluate((id) => {
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      if (!cache) return 0;
+      for (const entry of cache.values()) {
+        if (entry.workspaceId === id) {
+          const term = entry.getTerminal() as { cols?: number } | null;
+          if (term && typeof term.cols === "number") return term.cols;
+        }
+      }
+      return 0;
+    }, workspaceId);
+  }
+
+  /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
+   *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
+   *  `readTerminalRenderedText` (which joins everything into one string), this
+   *  preserves the per-row layout so a test can assert WHERE a token landed —
+   *  the observable that reflow-scatter corrupts. Only meaningful under the DOM
+   *  renderer (`useWebGLTerminalRenderer: false`); joins across the workspace's
+   *  wrappers, first wrapper first. */
+  async readTerminalRenderedRows(workspaceId: string): Promise<string[]> {
+    return await this.page.evaluate((id) => {
+      const wrappers = Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`));
+      const rows: string[] = [];
+      for (const w of wrappers) {
+        const rowsEl = w.querySelector(".xterm-rows");
+        if (!rowsEl) continue;
+        for (const child of Array.from(rowsEl.children)) {
+          rows.push((child as HTMLElement).textContent ?? "");
+        }
+      }
+      return rows;
+    }, workspaceId);
+  }
+
+  /** Navigate to a blank page, fully tearing down the mounted client (its
+   *  terminal xterm + WebSocket). Used to drop the live client WITHOUT sending
+   *  a resize, so a subsequent viewport change + re-navigation makes the fresh
+   *  client fit to a DIFFERENT width than the server-side mirror still holds —
+   *  the reconnect width mismatch under test. */
+  async navigateToBlank(): Promise<void> {
+    await test.step("Navigate to a blank page (tear down client)", async () => {
+      await this.page.goto("about:blank");
+    });
+  }
+
+  /** Resize the browser viewport. A thin wrapper so the spec body drives the
+   *  viewport through the page object like every other action. */
+  async setViewport(width: number, height: number): Promise<void> {
+    await test.step(`Set viewport to ${width}x${height}`, async () => {
+      await this.page.setViewportSize({ width, height });
+    });
   }
 
   /** Whether the shared terminal parking container is properly isolated:

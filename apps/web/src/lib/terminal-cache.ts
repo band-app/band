@@ -31,10 +31,11 @@ import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 // `MultiWorkspacePanelHost` hid inactive terminals in place under
 // `content-visibility: hidden`, which dropped the WebGL backing store and
 // produced garbled frames on switch-back that only a manual resize fixed
-// (band-app/band#615). Parking keeps the surface in a normal-visibility subtree;
-// since even a parked surface can still be corrupted by the GPU (sleep/unlock,
-// memory pressure — no context-loss event fires), re-attach rebuilds the WebGL
-// addon and does one unconditional fit + refresh.
+// (band-app/band#615). Parking keeps the surface in a normal-visibility,
+// still-painted subtree, so an ordinary switch/foreground/click does a CHEAP
+// fit + refresh on re-attach and reuses the live WebGL surface (no rebuild, no
+// flicker). The addon is rebuilt only on genuine GPU loss — a `webglcontextlost`
+// event (`onContextLoss`) or a desktop `system-resumed` wake.
 //
 // The entry owns everything terminal-scoped: the xterm + addons, the WebSocket
 // with its reconnect/heartbeat machinery, the ResizeObserver, the zoom/DPR
@@ -139,6 +140,12 @@ const HEARTBEAT_TIMEOUT_MS = 20_000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 
+/** How long the client suppresses container-driven refits while waiting for a
+ *  replay snapshot after an `attach` request. A safety valve only: the server
+ *  acks every attach (even an empty snapshot), so this fires solely if that
+ *  ack is lost, after which normal live resizing resumes. */
+const REPLAY_GUARD_TIMEOUT_MS = 3_000;
+
 /** Number of animation frames `attach` will re-poll for a non-zero live box
  *  before giving up (the panel may be 0×0 for a frame right after mount). */
 const MAX_LAYOUT_FRAMES = 5;
@@ -157,8 +164,8 @@ const MAX_LAYOUT_FRAMES = 5;
  * deleted (`reconcileTerminalWorkspaces`), or this LRU cap is exceeded.
  *
  * The cap also bounds live WebGL contexts (browsers hard-cap ~16); each cached
- * terminal keeps a context alive while parked (the addon is rebuilt on
- * re-attach, since a parked surface can be corrupted by the GPU off-screen).
+ * terminal keeps a context alive while parked (reused on re-attach — the addon
+ * is rebuilt only on genuine GPU loss, not on a plain switch-back).
  */
 const MAX_CACHED_TERMINALS = 8;
 
@@ -330,16 +337,18 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   let lastActive = Date.now();
 
   // WebGL "surface may be corrupted" flag. The GPU can corrupt the glyph
-  // atlas and the renderer's buffers WITHOUT any `webglcontextlost` event
-  // (display sleep / screen unlock, background occlusion, texture memory
-  // pressure), and a damaged surface cannot be repaired in place —
+  // atlas and the renderer's buffers (display sleep / screen unlock, texture
+  // memory pressure), and a damaged surface cannot be repaired in place —
   // `clearTextureAtlas` + full refresh still redraws the damage. The only
   // reliable repair is disposing and recreating the WebGL addon (fresh
   // context, buffers, atlas), which `repairAndFit` does whenever this flag is
-  // set. Set on foreground return / system resume, on detach (a parked
-  // surface can rot off-screen), and on focus entering the terminal
-  // (spontaneous mid-session corruption fires no event at all). The rebuild
-  // costs a few ms of glyph rasterization.
+  // set. Set only on GENUINE loss signals: a desktop `system-resumed` wake
+  // (`handleSurfaceMayBeCorrupt`), an off-screen `onContextLoss`, and a
+  // parked DPR/zoom change (`remeasureAndReattach`, whose new metrics need a
+  // fresh atlas). Ordinary foreground/switch-back/click deliberately do NOT
+  // set it — a still-painted parked surface keeps its context, so those do a
+  // cheap fit + refresh instead (rebuilding there raced the compositor and
+  // flickered). The rebuild costs a few ms of glyph rasterization.
   let webglSuspect = false;
   // Epoch ms of the last WebGL addon build (initial load, DPR/zoom rebuild,
   // or suspect repair). Lets the focus-driven repair below skip a rebuild
@@ -636,6 +645,22 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let lastPongAt = 0;
 
+    // Request-driven replay (reconnect width-sync). The server no longer
+    // replays eagerly on connect; instead we ask for the serialized snapshot
+    // ONLY once we're attached + visible + fitted to the live container, and
+    // the request carries our fitted { cols, rows }. That guarantees the
+    // server serializes the mirror at exactly the width we render it at, so
+    // xterm's wrapped-line reflow can't scatter the replayed cells. Reset per
+    // connection in `onopen`.
+    //  - `attachSent`: the `attach` (or dims-carrying `init`) went out for
+    //    THIS connection; a genuine later resize uses the normal live path.
+    //  - `awaitingReplay`: request sent, snapshot/ack not yet received —
+    //    container-driven refits are suppressed so a ResizeObserver tick can't
+    //    change our width between requesting and rendering the snapshot.
+    let attachSent = false;
+    let awaitingReplay = false;
+    let replayGuardTimer: ReturnType<typeof setTimeout> | null = null;
+
     const clearReconnectTimer = () => {
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
@@ -682,29 +707,48 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       sock.onopen = () => {
         reconnectAttempts = 0;
         lastPongAt = Date.now();
+        // Replay state is per-connection: a reconnect must ask again.
+        attachSent = false;
+        clearReplayGuard();
         if (isReconnect) term.reset();
+
+        // Are we already fitted to a visible live box? If so we can carry our
+        // dims in the handshake and get the replay in one round-trip.
+        const dims = fittedDims();
+
         if (
           !didConnectOnce &&
           paneMetadata &&
           (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)
         ) {
+          // New terminal with spawn options. Send `init` unconditionally so
+          // the PTY spawns and the command runs even if the pane isn't visible
+          // yet. Fold in the fitted dims when we have them so the server can
+          // replay immediately (folding avoids a separate `attach` racing into
+          // the gap before the server's persistent listener is installed).
           const initMsg: Record<string, unknown> = { type: "init" };
           if (paneMetadata.command) initMsg.command = paneMetadata.command;
           if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
           if (paneMetadata.env) initMsg.env = paneMetadata.env;
+          if (dims) {
+            initMsg.cols = dims.cols;
+            initMsg.rows = dims.rows;
+            attachSent = true;
+            awaitingReplay = true;
+            replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+          }
           sock.send(JSON.stringify(initMsg));
+        } else {
+          // Reconnect, or a plain terminal with no spawn options: request the
+          // replay carrying our fitted dims. No-ops when not visible yet — the
+          // ResizeObserver / `attach` path retries once the panel surfaces.
+          requestReplay();
         }
         didConnectOnce = true;
 
-        // Fit to the live box if we're attached+visible; otherwise the initial
-        // resize is sent by `attach` once the panel surfaces.
-        if (attached && hostIsVisible()) {
-          fit.fit();
-          sendPtyResize();
-          if (autoFocusPending && !isReconnect) {
-            term.focus();
-            autoFocusPending = false;
-          }
+        if (dims && autoFocusPending && !isReconnect) {
+          term.focus();
+          autoFocusPending = false;
         }
 
         stopHeartbeat();
@@ -714,12 +758,21 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
       sock.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
+          // A binary frame received while awaiting replay is the snapshot
+          // (serialized at the dims we sent) — lift the refit suppression.
+          // `finishReplay` is a no-op once `awaitingReplay` has cleared, so
+          // later live frames fall straight through to the write below.
+          finishReplay();
           term.write(new Uint8Array(event.data));
         } else {
           try {
             const msg = JSON.parse(event.data as string);
             if (msg.type === "pong") {
               lastPongAt = Date.now();
+            } else if (msg.type === "attached") {
+              // Attach ack — sent even when the snapshot is empty (fresh
+              // spawn), so the guard lifts without waiting for the timeout.
+              finishReplay();
             } else if (msg.type === "title" && typeof msg.title === "string") {
               emitTitle(msg.title);
             } else if (msg.type === "error" && typeof msg.message === "string") {
@@ -776,31 +829,43 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     };
     // Coming back to the foreground (tab re-shown, or — in the Electron app —
     // the window regaining OS focus, which does NOT fire `visibilitychange`).
-    // Besides re-checking the socket, mark the surface suspect and repair:
-    // backgrounding/throttling can drop the rAF frames carrying a TUI's
-    // in-place redraws, and the GPU can silently discard texture memory while
-    // the window is away. `scheduleRepair` is rAF-debounced (self-guards on
-    // attached+visible), so a switch-back that fires both `visibilitychange`
-    // and `focus` coalesces into a single repair — same idiom as `attach`.
+    // Re-check the socket and do a CHEAP repaint: backgrounding/throttling can
+    // drop the rAF frames carrying a TUI's in-place redraws, so `repairAndFit`
+    // fits + unconditionally refreshes every row. It deliberately does NOT mark
+    // the surface suspect — an off-screen parked surface stays painted (see
+    // terminal-parking.ts) so ordinary focus/visibility changes never lose the
+    // GPU context, and rebuilding the WebGL addon here raced the compositor and
+    // produced a blank-then-repaint flicker (#615 repair fallout). Genuine
+    // texture loss has its own signals: `onContextLoss` and `system-resumed`.
+    // `scheduleRepair` is rAF-debounced (self-guards on attached+visible), so a
+    // switch-back that fires both `visibilitychange` and `focus` coalesces into
+    // a single repair — same idiom as `attach`.
     const handleForeground = () => {
       handleResume();
-      webglSuspect = true;
       scheduleRepair();
     };
     const handleVisibility = () => {
       if (!document.hidden) handleForeground();
     };
+    // Genuine GPU texture loss with NO `webglcontextlost` event: display sleep /
+    // screen unlock can discard texture memory while the window keeps OS focus,
+    // so neither `focus` nor `visibilitychange` fires. This is the one non-event
+    // path that must rebuild the surface, so it — and ONLY it, besides
+    // `onContextLoss` — marks the surface suspect before repairing. The desktop
+    // main process forwards powerMonitor's resume/unlock as `system-resumed`.
+    const handleSurfaceMayBeCorrupt = () => {
+      handleResume();
+      webglSuspect = true;
+      scheduleRepair();
+    };
     window.addEventListener("online", handleResume);
     window.addEventListener("focus", handleForeground);
     document.addEventListener("visibilitychange", handleVisibility);
-    // Desktop shell only: wake from system sleep / screen unlock. The window
-    // often kept OS focus through the nap, so neither `focus` nor
-    // `visibilitychange` fires in the renderer — but the GPU may have
-    // discarded texture memory while the display was down. The main process
-    // forwards powerMonitor's resume/unlock as `system-resumed`.
+    // Desktop shell only (`system-resumed` is an Electron IPC event; `isDesktop`
+    // is false in the browser).
     let unlistenSystemResumed: (() => void) | null = null;
     if (isDesktop) {
-      desktopListen("system-resumed", handleForeground)
+      desktopListen("system-resumed", handleSurfaceMayBeCorrupt)
         .then((off) => {
           if (destroyed) off();
           else unlistenSystemResumed = off;
@@ -808,24 +873,17 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         .catch(() => {});
     }
 
-    // Focus entering the terminal itself. When the window already holds OS
-    // focus, spontaneous mid-session corruption produces NO window-level event
-    // at all — the only signal left is the user clicking into the garbled
-    // terminal. `focusin` on the persistent wrapper (fires when xterm's helper
-    // textarea gains focus) turns that reflex into a surface rebuild. Skipped
-    // when ANY path built the addon within the last second — focus lands on
-    // the terminal during ordinary interaction too (auto-focus on connect,
-    // close-search refocus, tap-to-focus), and without the guard each of
-    // those would pay for a second context + atlas right after the first.
+    // Focus entering the terminal itself (the user clicking into it). This does
+    // a CHEAP repaint only — it must NOT rebuild the WebGL addon: a click that
+    // disposes and recreates the surface races the compositor and flickers, and
+    // clicking is not evidence of GPU corruption. Genuine corruption is handled
+    // by `onContextLoss` / `system-resumed`. Still WebGL-gated + throttled off
+    // the last addon build: the DOM renderer needs no repaint-on-click, and a
+    // repaint right after a build (auto-focus on connect, close-search refocus,
+    // tap-to-focus) is redundant with the fit+refresh that build already did.
     const handleFocusIn = () => {
-      // WebGL-only repair: the DOM renderer can't suffer GPU atlas
-      // corruption, and if no WebGL build ever succeeded there is nothing
-      // to rebuild — repairing anyway would refit/refresh on every click
-      // and, in the WebGL-unavailable case, re-attempt (and re-fail)
-      // context creation each time.
       if (!useWebGL || lastWebglBuildAt === 0) return;
       if (Date.now() - lastWebglBuildAt < 1_000) return;
-      webglSuspect = true;
       scheduleRepair();
     };
     wrapper.addEventListener("focusin", handleFocusIn);
@@ -857,6 +915,58 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       if (term.cols <= 0 || term.rows <= 0) return;
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+    };
+
+    // --- Request-driven replay (reconnect width-sync) ---
+    const clearReplayGuard = () => {
+      awaitingReplay = false;
+      if (replayGuardTimer !== null) {
+        clearTimeout(replayGuardTimer);
+        replayGuardTimer = null;
+      }
+    };
+    // Fit to the live container and return the resulting dims, or null when
+    // not attached to a visible box (so we never capture the parking
+    // container's size or a 0×0 pre-layout frame).
+    const fittedDims = (): { cols: number; rows: number } | null => {
+      if (!attached || !hostIsVisible()) return null;
+      fit.fit();
+      if (term.cols <= 0 || term.rows <= 0) return null;
+      return { cols: term.cols, rows: term.rows };
+    };
+    // Ask the server to replay the serialized snapshot at our fitted dims.
+    // Sent at most once per connection (`attachSent`); no-ops until we're
+    // attached + visible + fitted, so `onopen`/`attach`/the ResizeObserver can
+    // all call it and the first one that finds the panel surfaced wins.
+    const requestReplay = () => {
+      if (attachSent) return;
+      const sock = ws;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      const dims = fittedDims();
+      if (!dims) return;
+      attachSent = true;
+      awaitingReplay = true;
+      sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows }));
+      if (replayGuardTimer !== null) clearTimeout(replayGuardTimer);
+      replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+    };
+    // Once the snapshot (or its ack) lands, lift the refit suppression and
+    // reconcile: if the container size drifted during the request→render
+    // window, fit + resize now. A no-op when the width is unchanged (xterm's
+    // resize short-circuits equal dims), so the common case doesn't reflow the
+    // just-written snapshot. Tracked so `cleanup`/`_destroy` can cancel a
+    // pending reconcile and it never runs against a torn-down entry.
+    let reconcileRafId: number | null = null;
+    const finishReplay = () => {
+      if (!awaitingReplay) return;
+      clearReplayGuard();
+      if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
+      reconcileRafId = requestAnimationFrame(() => {
+        reconcileRafId = null;
+        if (!attached || !hostIsVisible()) return;
+        fit.fit();
+        sendPtyResize();
+      });
     };
     const remeasureAndReattach = (opt: { newFontSize?: number } = {}): void => {
       const { newFontSize } = opt;
@@ -900,6 +1010,17 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // Only react when attached to a visible live box — never fit to the
       // parking container's size.
       if (!attached || !hostIsVisible()) return;
+      // First time the panel surfaces on this connection: this IS the fit that
+      // lets us request the replay at the live width. Do that instead of a
+      // bare resize.
+      if (!attachSent) {
+        requestReplay();
+        return;
+      }
+      // Between requesting replay and rendering the snapshot, don't let a
+      // container tick change our width — that would reintroduce the reflow
+      // scatter the request-driven flow exists to prevent.
+      if (awaitingReplay) return;
       const dprChanged = handleDprChange();
       if (!dprChanged) fit.fit();
       sendPtyResize();
@@ -910,7 +1031,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
       if (term.options.fontSize === target) return;
       remeasureAndReattach({ newFontSize: target });
-      if (attached && hostIsVisible()) sendPtyResize();
+      // Don't push a resize mid-replay: the pending snapshot is bound to the
+      // dims we already sent (see the ResizeObserver guard).
+      if (attached && hostIsVisible() && !awaitingReplay) sendPtyResize();
     };
     const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
 
@@ -942,7 +1065,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       }
       webglSuspect = false;
       if (term.rows > 0) term.refresh(0, term.rows - 1);
-      sendPtyResize();
+      // If this connection hasn't requested its replay yet (the panel just
+      // surfaced), do that now — it carries the dims we just fitted to.
+      // Otherwise keep the PTY in sync with the live box, unless we're
+      // mid-replay (the snapshot is bound to the dims already sent).
+      if (!attachSent) {
+        requestReplay();
+        return;
+      }
+      if (!awaitingReplay) sendPtyResize();
     };
 
     hostIsVisible = () =>
@@ -967,6 +1098,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       selectionResizeDisposable.dispose();
       fileLinkProviderDisposable.dispose();
       if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
+      if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
       webglContextLossDisposable?.dispose();
       dprMql?.removeEventListener("change", onDprMediaChange);
       unsubscribeZoom();
@@ -1029,10 +1161,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (destroyed) return;
       attached = false;
       liveContainer = null;
-      // A parked surface can rot off-screen (GPU texture memory reclaimed with
-      // no context-loss event), so treat it as suspect; the next `attach`
-      // rebuilds the addon against the live layout.
-      webglSuspect = true;
+      // Parking moves the wrapper into an off-screen but PAINTED container (see
+      // terminal-parking.ts), so a plain switch-away no longer invalidates the
+      // WebGL surface — the next `attach` does a cheap fit + refresh and reuses
+      // the live canvas, no rebuild (no switch-back flicker). Genuine off-screen
+      // texture loss (sleep/unlock) still rebuilds via `system-resumed`, which
+      // marks every cached entry suspect; and `onContextLoss` covers a real
+      // context drop. So detach intentionally does NOT set `webglSuspect`.
       if (repairRafId !== null) {
         cancelAnimationFrame(repairRafId);
         repairRafId = null;

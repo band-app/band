@@ -24,6 +24,20 @@ const MAX_SCROLLBACK_SIZE = 100_000;
 const HEADLESS_SCROLLBACK_LINES = 10_000;
 
 /**
+ * Upper bounds for a terminal's dimensions. The `cols`/`rows` on a
+ * `resize` come from the client over the WebSocket, and the headless mirror
+ * allocates a buffer proportional to `cols × (rows + scrollback)` — so an
+ * authenticated client sending absurd dims (e.g. `1e9`) could force a huge
+ * allocation. These caps sit well above any real display (a 4K monitor at a
+ * tiny font is ~500 cols) while bounding the worst case; dims are also floored
+ * at 1 so a zero/negative never reaches node-pty. Applied at this single
+ * resource boundary so every caller (WS `attach`, folded `init` dims, the
+ * live `resize` message, the tRPC path) is covered.
+ */
+const MAX_COLS = 1_000;
+const MAX_ROWS = 1_000;
+
+/**
  * Options for spawning a new PTY session.
  *
  * The shape is shared between the tRPC `terminal.create` mutation, the
@@ -551,10 +565,16 @@ export class TerminalPool {
   resize(terminalId: string, cols: number, rows: number): void {
     const session = this.terminals.get(terminalId);
     if (session) {
-      session.pty.resize(cols, rows);
+      // Clamp client-supplied dims to a sane range — floor at 1 (node-pty
+      // rejects zero/negative) and cap so an absurd request can't force a
+      // huge mirror allocation. See MAX_COLS / MAX_ROWS.
+      // `|| 1` also catches NaN / 0 (both coerce to the floor of 1).
+      const safeCols = Math.min(Math.max(Math.trunc(cols) || 1, 1), MAX_COLS);
+      const safeRows = Math.min(Math.max(Math.trunc(rows) || 1, 1), MAX_ROWS);
+      session.pty.resize(safeCols, safeRows);
       // Keep the headless mirror on the same geometry so serialized replays
       // reconstruct the screen at the dims the client renders at.
-      session.headless.resize(cols, rows);
+      session.headless.resize(safeCols, safeRows);
     }
   }
 

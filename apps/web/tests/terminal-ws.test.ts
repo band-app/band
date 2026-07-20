@@ -16,9 +16,8 @@
 //   3. The server process stays alive — a follow-up HTTP request still
 //      returns successfully (the regression killed the entire web server).
 //
-// Per CLAUDE.md, this is a black-box integration test against the
-// production server bundle (`dist/start-server.mjs`), with a real
-// WebSocket client. No mocks.
+// This is a black-box integration test against the production server
+// bundle (`dist/start-server.mjs`), with a real WebSocket client. No mocks.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -210,7 +209,9 @@ describe("terminal WebSocket — close-reason byte cap", () => {
 
     await new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        // Same first-message handshake the other blocks use; the spawn fails on
+        // the stale worktree path before replay, so dims are immaterial here.
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (isBinary) return;
@@ -307,18 +308,20 @@ describe("terminal WebSocket — application-level ping/pong heartbeat", () => {
     let pinged = false;
 
     await new Promise<void>((resolve, reject) => {
-      // Spawn the PTY. The `init` message is consumed by the handler's
-      // one-shot listener; the persistent `message` listener (which serves
-      // ping/pong) is only attached after the async spawn resolves, so we
-      // must wait for the first server frame before pinging — otherwise the
-      // ping races ahead of the listener and is dropped.
+      // Spawn the PTY via an `attach` (the client's first message now carries
+      // its fitted dims and drives the request-driven replay). It's consumed
+      // as the one-shot handler's pending message and processed by the
+      // persistent `message` listener `attachSession` installs, which also
+      // serves ping/pong — so the server's replay ack proves that listener is
+      // live before we ping (a ping sent earlier would race ahead of it and be
+      // dropped).
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!pinged) {
-          // First frame (PTY scrollback / shell prompt) proves the session is
-          // attached and the message listener is live — now ping.
+          // First frame (the `attached` ack / shell prompt) proves the session
+          // is attached and the message listener is live — now ping.
           pinged = true;
           ws.send(JSON.stringify({ type: "ping" }));
           return;
@@ -408,12 +411,12 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
 
     await new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!sentCommand) {
-          // First frame proves the session is attached and the persistent
-          // message listener is live — now send the command.
+          // First frame (the `attached` ack) proves the session is attached
+          // and the persistent message listener is live — now send the command.
           sentCommand = true;
           ws.send(COMMAND);
           return;
@@ -451,9 +454,10 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     const terminalId = "osc-strip-ws";
     await seedOscScrollback(terminalId);
 
-    // Reconnect to the same terminal. The server replays a serialized
-    // reconstruction of the terminal state (headless-xterm snapshot) through
-    // stripTerminalQueries on the `/terminal` WS path.
+    // Reconnect to the same terminal. Replay is request-driven: the client
+    // sends an `attach` carrying its fitted dims, and the server serializes the
+    // mirror at those dims and replays it through stripTerminalQueries on the
+    // `/terminal` WS path.
     const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
     const ws2 = new WebSocket(wsUrl, {
       headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
@@ -468,6 +472,9 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     let replay: Buffer | null = null;
 
     await new Promise<void>((resolve, reject) => {
+      ws2.on("open", () => {
+        ws2.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
+      });
       ws2.on("message", (data: Buffer, isBinary: boolean) => {
         if (!isBinary || replay !== null) return; // skip JSON control frames + post-replay live output
         replay = data;
@@ -704,16 +711,17 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
 
     await new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        // The first message carries the client's dims and drives spawn +
+        // replay (request-driven). Fold in the session's target dims so the
+        // PTY + mirror come up at that width before any output is drawn.
+        const dims = resize ?? { cols: 80, rows: 24 };
+        ws.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!sentCommand) {
-          // First frame proves the session is attached and the persistent
-          // message listener is live — now (resize and) send the command.
+          // First frame (the `attached` ack) proves the session is attached
+          // and the persistent message listener is live — now send the command.
           sentCommand = true;
-          if (resize) {
-            ws.send(JSON.stringify({ type: "resize", cols: resize.cols, rows: resize.rows }));
-          }
           ws.send(command);
           return;
         }
@@ -739,12 +747,20 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
    *  latch matters: the post-replay `nudgeResize` makes the shell redraw its
    *  prompt, and those live frames arrive before `close()` completes — an
    *  unlatched `replay = data` would let them clobber the captured snapshot. */
-  async function captureReplayFrame(terminalId: string): Promise<Buffer> {
+  async function captureReplayFrame(
+    terminalId: string,
+    dims: { cols: number; rows: number } = { cols: 80, rows: 24 },
+  ): Promise<Buffer> {
     const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=${WORKSPACE_ID}&terminalId=${terminalId}`;
     const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
 
     let replay: Buffer | null = null;
     await new Promise<void>((resolve, reject) => {
+      ws.on("open", () => {
+        // Request the replay carrying the reconnecting client's fitted dims;
+        // the server resizes the mirror to these BEFORE serializing.
+        ws.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows }));
+      });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!isBinary || replay !== null) return;
         replay = data;
@@ -801,10 +817,72 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
       { cols: 120, rows: 30 },
     );
 
-    const replay = await captureReplayFrame(terminalId);
+    // Reconnect at the same dims the session drew at. Replay is now
+    // request-driven and resize-before-serialize, so the reconnecting client's
+    // dims set the serialize geometry — attaching at 120x30 keeps row 28 in
+    // range, proving the mirror still holds the deep-row content.
+    const replay = await captureReplayFrame(terminalId, { cols: 120, rows: 30 });
     const text = replay.toString();
     expect(text).toContain("DEEPROW");
     expect(text).toContain("SHALLOWROW");
+  }, 30_000);
+
+  // Reconnect width-sync (the reflow-scatter fix). Render the captured replay
+  // snapshot through a headless xterm at the reconnecting client's width —
+  // exactly what the browser does with the bytes — and assert the TUI grid is
+  // reproduced at THAT width. If the server serialized at the mirror's stale
+  // width instead of resizing to the client's dims first, an alt-screen
+  // (TUI) paragraph re-wraps at the wider client width and words that belong
+  // on a later row scatter onto row 0.
+  async function renderSnapshotRows(snapshot: Buffer, cols: number, rows = 24): Promise<string[]> {
+    // Same CJS/ESM interop dance the pool uses (see terminal-pool.ts): the
+    // class is on the namespace under tsx/esbuild and on `.default` under a
+    // plain Node import.
+    const headlessNs = (await import("@xterm/headless")) as
+      | typeof import("@xterm/headless")
+      | { default: typeof import("@xterm/headless") };
+    const { Terminal } = "Terminal" in headlessNs ? headlessNs : headlessNs.default;
+    const term = new Terminal({ cols, rows, allowProposedApi: true });
+    await new Promise<void>((resolve) => term.write(new Uint8Array(snapshot), resolve));
+    const out: string[] = [];
+    const buf = term.buffer.active;
+    for (let i = 0; i < rows; i++) {
+      const line = buf.getLine(i);
+      out.push(line ? line.translateToString(true) : "");
+    }
+    term.dispose();
+    return out;
+  }
+
+  it("serializes the reconnect snapshot at the client's width, not the stale mirror width", async () => {
+    const terminalId = "serialize-replay-width-sync";
+
+    // Draw a NATURALLY-WRAPPED alt-screen (TUI) paragraph at a NARROW width.
+    // `SCATTERZEBRA` is authored via `SCATTER""ZEBRA` so the shell's echo of
+    // the typed line can never satisfy the wait — only the executed printf
+    // output produces the contiguous marker. It starts at column 90 of the
+    // logical line: past both the 40-col session width AND the mirror's 80-col
+    // default, so it belongs on a LATER row at any sane mirror width — but it
+    // fits within column 120, so a snapshot re-wrapped at the wide client
+    // width would pull it up onto row 0.
+    const filler = "AB ".repeat(30); // 90 chars, cols 0..89
+    const command = `/bin/bash -c 'printf "\\033[?1049h\\033[H${filler}SCATTER""ZEBRA and then plenty more trailing words to overflow the wide client row CD CD CD CD"'\r`;
+    await runAndDisconnect(terminalId, command, "SCATTERZEBRA", { cols: 40, rows: 24 });
+
+    // Reconnect as a WIDE client (120 cols). Request-driven replay resizes the
+    // mirror to 120 BEFORE serializing, so the snapshot reproduces the 40-col
+    // alt grid faithfully inside a 120-wide buffer.
+    const replay = await captureReplayFrame(terminalId, { cols: 120, rows: 24 });
+    const rows = await renderSnapshotRows(replay, 120);
+
+    // Positive anchor: the marker really is in the replayed screen somewhere.
+    expect(rows.join("\n")).toContain("SCATTERZEBRA");
+    // The scatter assertion: a snapshot serialized at the client's width keeps
+    // the marker on its authored (later) row, so row 0 is just early filler.
+    // A stale-width snapshot re-wrapped at 120 would carry the marker onto
+    // row 0 — the reflow scatter this fix eliminates.
+    expect(rows[0]).not.toContain("SCATTERZEBRA");
+    expect(rows[0]).toContain("AB ");
   }, 30_000);
 });
 
@@ -864,7 +942,7 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
     await new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (!sentCommand) {

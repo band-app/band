@@ -111,6 +111,18 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
                 ? (parsed.env as Record<string, string>)
                 : undefined,
           };
+          // The client folds its fitted dims into the `init` when the panel is
+          // already visible at connect, so replay can happen without a separate
+          // round-trip (and without an `attach` racing into the gap between
+          // this one-shot handler and the persistent listener `attachSession`
+          // installs). Synthesize the same `attach` control message the
+          // reconnect path uses so replay flows through a single code path.
+          const cols = Number.isFinite(parsed.cols) ? (parsed.cols as number) : undefined;
+          const rows = Number.isFinite(parsed.rows) ? (parsed.rows as number) : undefined;
+          // Explicit `> 0` (not truthiness) to match `startReplay`'s guard.
+          if (cols !== undefined && rows !== undefined && cols > 0 && rows > 0) {
+            pendingMessage = JSON.stringify({ type: "attach", cols, rows });
+          }
         } else {
           // Not an init message — spawn with defaults and queue for processing
           pendingMessage = message;
@@ -133,12 +145,10 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       return;
     }
 
-    attachSession(ws, terminalId, workspaceId, session, true);
-
-    // Process the queued message (resize, close, or raw input)
-    if (pendingMessage) {
-      handleMessage(ws, terminalId, session, pendingMessage);
-    }
+    // The queued first message (a synthesized `attach`, a `resize`, or raw
+    // input) is processed inside `attachSession` so it goes through the same
+    // `attach`-intercepting path as every later message.
+    attachSession(ws, terminalId, workspaceId, session, true, pendingMessage);
   });
 
   // If the WebSocket closes before any message arrives, do nothing
@@ -157,6 +167,7 @@ function attachSession(
   workspaceId: string,
   session: TerminalSession,
   isNew: boolean,
+  pendingMessage?: string,
 ): void {
   log.debug(
     "Terminal %s: %s (workspace %s)",
@@ -165,14 +176,15 @@ function attachSession(
     workspaceId,
   );
 
-  // Live-output forwarder. Registered by the async replay block below in
-  // the same synchronous slot as the snapshot send, so replayed state and
-  // live bytes can never interleave out of order; `serialize` pauses the
-  // PTY while it drains, which guarantees no output is lost or duplicated
-  // in between. Structural type rather than node-pty's IDisposable — this
-  // tier deliberately never references node-pty (see terminal-service.ts).
+  // Live-output forwarder. Registered by `startReplay` below in the same
+  // synchronous slot as the snapshot send, so replayed state and live bytes
+  // can never interleave out of order; `serialize` pauses the PTY while it
+  // drains, which guarantees no output is lost or duplicated in between.
+  // Structural type rather than node-pty's IDisposable — this tier
+  // deliberately never references node-pty (see terminal-service.ts).
   let dataDisposable: { dispose(): void } | undefined;
   let closed = false;
+  let replayStarted = false;
 
   // Poll the PTY foreground process name and send title updates (text/JSON frames).
   // This mimics how iTerm detects the running command without relying on OSC sequences.
@@ -226,31 +238,32 @@ function attachSession(
     }
   }, HEARTBEAT_INTERVAL_MS);
 
-  // WebSocket input -> PTY
-  ws.on("message", (data: Buffer | string) => {
-    handleMessage(ws, terminalId, session, data.toString());
-  });
-
-  // WebSocket close -> detach listeners but keep PTY alive
-  ws.on("close", () => {
-    closed = true;
-    clearInterval(processInterval);
-    clearInterval(pingInterval);
-    dataDisposable?.dispose();
-    exitDisposable.dispose();
-    log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);
-  });
-
   // Replay a serialized reconstruction of the terminal state so the client
-  // sees previous output, then wire up live forwarding. The raw scrollback
-  // buffer is NOT replayed: its tail slice can start mid-escape-sequence,
-  // which garbles TUI apps that draw with relative cursor motion
-  // (claude-code, vim) after a reload/reconnect. The serialize output
-  // shouldn't contain query escapes, but stripTerminalQueries stays as the
-  // #613 guard (OSC 10/11 color *sets* replayed from scrollback are report
-  // forms it strips too). Sent as a binary frame so the client can
-  // distinguish it from JSON control messages.
-  void (async () => {
+  // sees previous output, then wire up live forwarding. Deferred until the
+  // client sends an `attach` control message carrying its fitted { cols, rows
+  // }: the snapshot MUST be serialized at exactly the width the client will
+  // render it at, or xterm's wrapped-line reflow scatters the cells across
+  // the wrong columns (a reload with a stale mirror width). Resizing the PTY
+  // + mirror to the client dims BEFORE serializing establishes that
+  // invariant. The raw scrollback buffer is NOT replayed: its tail slice can
+  // start mid-escape-sequence, which garbles TUI apps that draw with relative
+  // cursor motion (claude-code, vim). The serialize output shouldn't contain
+  // query escapes, but stripTerminalQueries stays as the #613 guard (OSC
+  // 10/11 color *sets* replayed from scrollback are report forms it strips
+  // too). Sent as a binary frame so the client can distinguish it from JSON
+  // control messages.
+  const startReplay = async (cols?: number, rows?: number): Promise<void> => {
+    if (replayStarted) return;
+    replayStarted = true;
+
+    // Resize the PTY + headless mirror to the client's render width FIRST, so
+    // the serialized snapshot reconstructs the grid at that exact width and
+    // nothing reflows between serialize and display. Falls back to the
+    // mirror's current dims if the client sent none.
+    if (cols !== undefined && rows !== undefined && cols > 0 && rows > 0) {
+      terminalService.resize(terminalId, cols, rows);
+    }
+
     // Replay is best-effort: a serialize failure (e.g. the PTY dying
     // mid-drain) must not abandon the attach, or the client would hold an
     // OPEN socket that accepts keystrokes but never shows output. The
@@ -278,6 +291,14 @@ function attachSession(
       ws.send(Buffer.from(stripTerminalQueries(snapshot)));
     }
 
+    // Acknowledge the attach even when there is no snapshot to send (a fresh
+    // spawn with empty scrollback). The client suppresses container-driven
+    // refits between requesting replay and receiving it; without this ack it
+    // would never learn the request completed and stay suppressed.
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: "attached" }));
+    }
+
     // The snapshot restores the pixels, but a live full-screen TUI doesn't
     // know a client re-attached and won't repaint on its own — and the
     // client's follow-up resize carries unchanged dims, so it produces no
@@ -286,9 +307,53 @@ function attachSession(
     if (!isNew && snapshot) {
       terminalService.nudgeResize(terminalId);
     }
-  })().catch((err) => {
-    log.error("Failed to replay terminal %s: %s", terminalId, err);
+  };
+
+  // WebSocket input -> PTY, with the `attach` control message intercepted to
+  // drive the request-driven replay above. Everything else is forwarded to
+  // the shared message handler.
+  const processMessage = (message: string): void => {
+    if (message.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed.type === "attach") {
+          // Reject non-positive dims at the call site (not just in startReplay's
+          // own guard) so processMessage visibly validates before delegating.
+          const cols =
+            Number.isFinite(parsed.cols) && parsed.cols > 0 ? (parsed.cols as number) : undefined;
+          const rows =
+            Number.isFinite(parsed.rows) && parsed.rows > 0 ? (parsed.rows as number) : undefined;
+          void startReplay(cols, rows).catch((err) => {
+            log.error("Failed to replay terminal %s: %s", terminalId, err);
+          });
+          return;
+        }
+      } catch {
+        // Not valid JSON — fall through to the raw-input path.
+      }
+    }
+    handleMessage(ws, terminalId, session, message);
+  };
+
+  ws.on("message", (data: Buffer | string) => {
+    processMessage(data.toString());
   });
+
+  // WebSocket close -> detach listeners but keep PTY alive
+  ws.on("close", () => {
+    closed = true;
+    clearInterval(processInterval);
+    clearInterval(pingInterval);
+    dataDisposable?.dispose();
+    exitDisposable.dispose();
+    log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);
+  });
+
+  // Process the queued first message (a synthesized `attach` folding the
+  // client's initial dims, a `resize`, or raw input) through the same path.
+  if (pendingMessage) {
+    processMessage(pendingMessage);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -314,8 +379,14 @@ function handleMessage(
         }
         return;
       }
-      if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-        terminalService.resize(terminalId, parsed.cols, parsed.rows);
+      if (
+        parsed.type === "resize" &&
+        Number.isFinite(parsed.cols) &&
+        Number.isFinite(parsed.rows)
+      ) {
+        // Numeric validation matches the `attach` path; the pool clamps to a
+        // sane range (see TerminalPool.resize).
+        terminalService.resize(terminalId, parsed.cols as number, parsed.rows as number);
         return;
       }
       if (parsed.type === "close") {

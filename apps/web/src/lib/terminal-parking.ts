@@ -9,9 +9,10 @@
 // MultiWorkspacePanelHost model) is what fixes the garbled-render-on-switch bug
 // (band-app/band#615): a parked terminal lives in a normal-visibility subtree
 // off to the side, so a workspace switch alone doesn't drop its WebGL backing
-// store. (The GPU can still corrupt a parked surface — sleep/unlock, texture
-// memory pressure, no context-loss event — so `detach` marks the surface
-// suspect and re-attach rebuilds the WebGL addon; see `terminal-cache.ts`.)
+// store — re-attach reuses the same surface with a cheap fit + refresh, no
+// rebuild. (Genuine off-screen GPU loss — sleep/unlock — is caught by the
+// desktop `system-resumed` wake, and a real context drop by `onContextLoss`;
+// see the repair policy in `terminal-cache.ts`.)
 //
 // The container is:
 //   • position:fixed at (-9999px, -9999px) — rendered (so layout/paint keep the
