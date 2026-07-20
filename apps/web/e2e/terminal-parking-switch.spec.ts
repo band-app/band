@@ -253,22 +253,35 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
     // an off-screen parked surface stays painted, so the GPU context is intact.
     await workspacePage.simulateWindowForeground();
     // Let the rAF-debounced repair actually run — a rebuild (pre-relaxation
-    // behavior) would land within a couple of frames of the event; waiting past
-    // that window is what makes the "surface survived" assertion non-vacuous.
+    // behavior) lands on the FIRST rAF after the event, so a fixed frame COUNT
+    // (independent of CI wall-clock speed) deterministically waits past the
+    // rebuild window; that's what makes the "surface survived" assertion
+    // non-vacuous. (Unlike the switch-back test, `sized` is already true here —
+    // the terminal was never parked — so polling on `sized` first would NOT
+    // gate on the repaint and would read a pre-repair frame.)
     await workspacePage.settleAnimationFrames(6);
 
     // The tagged canvas SURVIVES (same surface, reused) and stays correctly
-    // sized. On the pre-relaxation code this went red — focus rebuilt the addon
-    // and the tags vanished.
-    const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
-    expect(s.survivingTags).toBeGreaterThan(0);
-    expect(s.canvasCount).toBeGreaterThan(0);
-    expect(s.backing.length).toBeGreaterThan(0);
-    expect(
-      s.backing.every(
-        (b) => Math.abs(b.w - s.screen.w * s.dpr) <= 2 && Math.abs(b.h - s.screen.h * s.dpr) <= 2,
-      ),
-    ).toBe(true);
+    // sized. Wrapped in a short poll so any residual async settle can't race a
+    // single point-in-time read. On the pre-relaxation code this went red —
+    // focus rebuilt the addon and the tags vanished.
+    await expect
+      .poll(
+        async () => {
+          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          return (
+            s.survivingTags > 0 &&
+            s.canvasCount > 0 &&
+            s.backing.length > 0 &&
+            s.backing.every(
+              (b) =>
+                Math.abs(b.w - s.screen.w * s.dpr) <= 2 && Math.abs(b.h - s.screen.h * s.dpr) <= 2,
+            )
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // Renderer-only cheap repaint: no reconnect, no fresh shell.
     expect(socketCount()).toBe(1);
@@ -308,12 +321,19 @@ test.describe("Terminal parking: workspace switch reuses the cached xterm", () =
       await workspacePage.settleAnimationFrames(4);
     }
 
-    // The tagged canvas SURVIVES throughout — no click ever rebuilt it. On the
-    // pre-relaxation code this went red: the click rebuilt the addon and the
-    // tags vanished.
-    const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
-    expect(s.survivingTags).toBeGreaterThan(0);
-    expect(s.canvasCount).toBeGreaterThan(0);
+    // The tagged canvas SURVIVES throughout — no click ever rebuilt it. Wrapped
+    // in a short poll so a residual async settle can't race a point-in-time
+    // read. On the pre-relaxation code this went red: the click rebuilt the
+    // addon and the tags vanished.
+    await expect
+      .poll(
+        async () => {
+          const s = await workspacePage.readTerminalSurfaceByWorkspace(WORKSPACE_A);
+          return s.survivingTags > 0 && s.canvasCount > 0;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // No reconnect, no fresh shell.
     expect(socketCount()).toBe(1);

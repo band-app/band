@@ -164,19 +164,26 @@ test.describe("Terminal reconnect replay width-sync", () => {
       .poll(() => workspacePage.terminalCols(WORKSPACE), { timeout: 20_000 })
       .toBeGreaterThan(narrowCols + MARKER.length);
 
-    // Positive anchor: the replayed paragraph really did render.
+    // Assert on a SINGLE atomically-captured rows snapshot so the positive
+    // anchor and the scatter check can't race a mid-settle state:
+    //  - positive anchor: the replayed paragraph rendered (MARKER present);
+    //  - scatter check: with the snapshot serialized at the client's width the
+    //    narrow wrap is preserved, so the marker stays off row 0 (row 0 is just
+    //    early filler). A stale-width snapshot re-wrapped at the wide client
+    //    width would carry the marker onto row 0.
     await expect
-      .poll(async () => (await workspacePage.readTerminalRenderedRows(WORKSPACE)).join("\n"), {
-        timeout: 20_000,
-      })
-      .toContain(MARKER);
-
-    // The scatter assertion: with the snapshot serialized at the client's
-    // width, the narrow wrap is preserved, so the marker stays off row 0 (row 0
-    // is just early filler). A stale-width snapshot re-wrapped at the wide
-    // client width would carry the marker onto row 0.
-    const rows = await workspacePage.readTerminalRenderedRows(WORKSPACE);
-    expect(rows[0]).not.toContain(MARKER);
-    expect(rows[0]).toContain("A");
+      .poll(
+        async () => {
+          const rows = await workspacePage.readTerminalRenderedRows(WORKSPACE);
+          const joined = rows.join("\n");
+          return {
+            hasMarker: joined.includes(MARKER),
+            markerOffRow0: !(rows[0] ?? "").includes(MARKER),
+            row0HasFiller: (rows[0] ?? "").includes("A"),
+          };
+        },
+        { timeout: 20_000 },
+      )
+      .toEqual({ hasMarker: true, markerOffRow0: true, row0HasFiller: true });
   });
 });

@@ -1072,15 +1072,23 @@ export class WorkspacePage {
     await test.step(`Force WebGL context loss on ${workspaceId} terminal`, async () => {
       await this.page.evaluate((id) => {
         const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
-        const canvas = wrapper?.querySelector(
-          ".xterm-screen canvas:last-of-type",
-        ) as HTMLCanvasElement | null;
-        if (!canvas) throw new Error(`no terminal canvas for workspace ${id}`);
-        const gl = (canvas.getContext("webgl2") ??
-          canvas.getContext("webgl")) as WebGLRenderingContext | null;
-        const ext = gl?.getExtension("WEBGL_lose_context");
-        if (!ext) throw new Error("WEBGL_lose_context extension unavailable");
-        ext.loseContext();
+        const canvases = wrapper
+          ? Array.from(wrapper.querySelectorAll<HTMLCanvasElement>(".xterm-screen canvas"))
+          : [];
+        // Pick the WebGL canvas by probing for a context, not by DOM order —
+        // xterm could add a non-WebGL canvas sibling. Matches the
+        // context-agnostic `querySelectorAll(".xterm-screen canvas")` the other
+        // surface probes use.
+        for (const canvas of canvases) {
+          const gl = (canvas.getContext("webgl2") ??
+            canvas.getContext("webgl")) as WebGLRenderingContext | null;
+          const ext = gl?.getExtension("WEBGL_lose_context");
+          if (ext) {
+            ext.loseContext();
+            return;
+          }
+        }
+        throw new Error(`no WebGL terminal canvas for workspace ${id}`);
       }, workspaceId);
     });
   }

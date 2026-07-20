@@ -16,9 +16,8 @@
 //   3. The server process stays alive — a follow-up HTTP request still
 //      returns successfully (the regression killed the entire web server).
 //
-// Per CLAUDE.md, this is a black-box integration test against the
-// production server bundle (`dist/start-server.mjs`), with a real
-// WebSocket client. No mocks.
+// This is a black-box integration test against the production server
+// bundle (`dist/start-server.mjs`), with a real WebSocket client. No mocks.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";

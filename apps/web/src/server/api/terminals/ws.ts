@@ -119,7 +119,8 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
           // reconnect path uses so replay flows through a single code path.
           const cols = Number.isFinite(parsed.cols) ? (parsed.cols as number) : undefined;
           const rows = Number.isFinite(parsed.rows) ? (parsed.rows as number) : undefined;
-          if (cols && rows) {
+          // Explicit `> 0` (not truthiness) to match `startReplay`'s guard.
+          if (cols !== undefined && rows !== undefined && cols > 0 && rows > 0) {
             pendingMessage = JSON.stringify({ type: "attach", cols, rows });
           }
         } else {
@@ -374,8 +375,14 @@ function handleMessage(
         }
         return;
       }
-      if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-        terminalService.resize(terminalId, parsed.cols, parsed.rows);
+      if (
+        parsed.type === "resize" &&
+        Number.isFinite(parsed.cols) &&
+        Number.isFinite(parsed.rows)
+      ) {
+        // Numeric validation matches the `attach` path; the pool clamps to a
+        // sane range (see TerminalPool.resize).
+        terminalService.resize(terminalId, parsed.cols as number, parsed.rows as number);
         return;
       }
       if (parsed.type === "close") {

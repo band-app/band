@@ -953,11 +953,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // reconcile: if the container size drifted during the request→render
     // window, fit + resize now. A no-op when the width is unchanged (xterm's
     // resize short-circuits equal dims), so the common case doesn't reflow the
-    // just-written snapshot.
+    // just-written snapshot. Tracked so `cleanup`/`_destroy` can cancel a
+    // pending reconcile and it never runs against a torn-down entry.
+    let reconcileRafId: number | null = null;
     const finishReplay = () => {
       if (!awaitingReplay) return;
       clearReplayGuard();
-      requestAnimationFrame(() => {
+      if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
+      reconcileRafId = requestAnimationFrame(() => {
+        reconcileRafId = null;
         if (!attached || !hostIsVisible()) return;
         fit.fit();
         sendPtyResize();
@@ -1093,6 +1097,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       selectionResizeDisposable.dispose();
       fileLinkProviderDisposable.dispose();
       if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
+      if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
       webglContextLossDisposable?.dispose();
       dprMql?.removeEventListener("change", onDprMediaChange);
       unsubscribeZoom();
