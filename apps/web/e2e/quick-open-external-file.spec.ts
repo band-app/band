@@ -132,6 +132,9 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
     await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
     await expect(workspacePage.quickOpenPathItem).toContainText(externalTsPath);
 
+    // Positive anchor: the dialog is open before we accept + assert dismissal.
+    await expect(workspacePage.quickOpenDialog()).toBeVisible();
+
     // Accept the offer.
     await workspacePage.openQuickOpenPathItem();
 
@@ -175,8 +178,9 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
         timeout: 15_000,
       })
       .toBe(externalMdPath);
-    await expect(workspacePage.quickOpenDialog()).toBeHidden();
+    // Positive DOM anchor (viewer mounted) before the negative dismissal check.
     await new FileViewerPage(page).expectVisible();
+    await expect(workspacePage.quickOpenDialog()).toBeHidden();
   });
 
   test("a band:open-file event for a non-existent absolute path reveals the dialog with no match", async ({

@@ -214,6 +214,10 @@ export function QuickOpenDialog({
 
     if (!isAbsoluteQuery || !adapter.resolveWorkspacePath) {
       // Nothing to probe — mark resolved so the auto-open gate below passes.
+      // Also clear `loading`: if a prior probe left it set and the worktree
+      // search effect can't clear it (an adapter without `searchWorkspaceFiles`
+      // early-returns), the "Searching…" state would otherwise stick.
+      setLoading(false);
       setProbe({ query: searchQuery, resolved: true, hit: null });
       return;
     }
