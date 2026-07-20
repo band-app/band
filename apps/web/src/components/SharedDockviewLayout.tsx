@@ -1,53 +1,21 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { useRouterState } from "@tanstack/react-router";
-import {
-  type DockviewApi,
-  DockviewReact,
-  type DockviewReadyEvent,
-  type DockviewTheme,
-  type IDockviewHeaderActionsProps,
-  type IDockviewPanelHeaderProps,
-  type IDockviewPanelProps,
-} from "dockview";
-import {
-  FolderOpen,
-  GitCompare,
-  Globe,
-  Maximize2,
-  MessageSquare,
-  Minimize2,
-  Terminal as TerminalIcon,
-} from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FolderOpen } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AddToTerminalDetail,
   buildCommands,
   type ChatInsertDetail,
   CommandPaletteDialog,
-  DiffView,
   parseFileLocation,
   QuickOpenDialog,
   recordWorkspaceAccess,
   SearchFilesDialog,
   type SelectionToChatDetail,
-  useDiffTarget,
-  useSettingsQuery,
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import {
-  type ActiveTabState,
-  applyActiveState,
-  applyGroupActiveViewsToApi,
-  applyMaximizedGroupToApi,
-  extractActiveState,
-  walkGridNode,
-} from "../lib/dockview-active-state";
-import {
-  anchorHiddenGridViews,
-  applyMaximizeEdgeVisibility,
-  attachSyncLayout,
   findFocusedInnerDockview,
   prepareMaximizeRestoreAnimation,
   toggleEdgeGroup,
@@ -56,117 +24,50 @@ import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { enqueueExternalOpen } from "../lib/pending-external-open";
 import { trpc } from "../lib/trpc-client";
-import { CodeBrowserView } from "./CodeBrowserView";
-import { DockviewChatContainer } from "./DockviewChatContainer";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
 import {
   getPerWorkspaceState,
   setPerWorkspaceState,
   subscribePerWorkspaceState,
-  usePerWorkspaceState,
 } from "./per-workspace-state-store";
-import { ScreencastPanel } from "./ScreencastPanel";
 import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
+import {
+  firstLeafOfKind,
+  getWorkspaceDockviewApi,
+  getWorkspaceLeafActions,
+  type LeafKind,
+  WorkspaceCenterDockview,
+} from "./WorkspaceCenterDockview";
 
 // ---------------------------------------------------------------------------
-// Custom dockview theme – prevents the default themeAbyss from being applied
-// ---------------------------------------------------------------------------
-
-const bandTheme: DockviewTheme = {
-  name: "band",
-  className: "dockview-theme-band",
-};
-
-// ---------------------------------------------------------------------------
-// Panel icon map
-// ---------------------------------------------------------------------------
-
-const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
-  chat: MessageSquare,
-  changes: GitCompare,
-  files: FolderOpen,
-  terminal: TerminalIcon,
-  browser: Globe,
-};
-
-const PANEL_SHORTCUTS: Record<string, string> = {
-  chat: "⌃⌘I",
-  changes: "⇧⌘G",
-  files: "⇧⌘E",
-  terminal: "⌃`",
-  browser: "⇧⌘B",
-};
-
-// ---------------------------------------------------------------------------
-// Lazy-loaded dockview inner containers
-// ---------------------------------------------------------------------------
-// Terminal: avoid importing @xterm (CJS) during SSR.
-// Browser: avoid running BrowserPaneComponent's `useLayoutEffect`s during
-// TanStack Start's SSR pass (React emits "useLayoutEffect does nothing on
-// the server" warnings for any layout effect that gets rendered into the
-// streaming output). Lazy-wrapping defers the whole subtree until the
-// client takes over, which matches the Terminal pattern and keeps the
-// SSR transcript clean.
-
-const DockviewTerminalContainer = lazy(() =>
-  import("./DockviewTerminalContainer").then((m) => ({
-    default: m.DockviewTerminalContainer,
-  })),
-);
-
-const DockviewBrowserContainer = lazy(() =>
-  import("./DockviewBrowserContainer").then((m) => ({
-    default: m.DockviewBrowserContainer,
-  })),
-);
-
-// ---------------------------------------------------------------------------
-// Per-panel cross-workspace context
+// Per-workspace cross-panel context
 // ---------------------------------------------------------------------------
 //
 // Cross-panel state (currentFile, openFilePath, find-in-file registration) is
-// per-workspace but read/written by panels that live inside the SHARED
-// dockview. The dockview's own params system can't carry this state because
-// the host renders one child per CACHED workspace, not per dockview panel.
-// We use module-level handlers wired by SharedDockviewLayout's effects.
+// per-workspace but read/written by leaves that live inside the per-workspace
+// dockviews cached by `MultiWorkspacePanelHost`. We use module-level handlers
+// wired by `SharedDockviewLayout`'s render so per-workspace callbacks always
+// reference the latest closure without re-rendering every cached child.
 // ---------------------------------------------------------------------------
 
 interface CrossPanelHandlers {
-  /** Called when the Changes panel asks us to open a file in Files. */
+  /** Called when the Changes leaf asks us to open a file in the Files leaf. */
   onOpenFile: (workspaceId: string, filename: string) => void;
-  /** Called when the Files panel reports the active file changed. */
+  /** Called when the Files leaf reports the active file changed. */
   onSelectFile: (workspaceId: string, filePath: string | null) => void;
-  /** Called when the Files panel finishes opening the requested file. */
+  /** Called when the Files leaf finishes opening the requested file. */
   onFileOpened: (workspaceId: string) => void;
-  /** Called by a panel to register/unregister its find-in-file callback. */
+  /** Called by a leaf to register/unregister its find-in-file callback. */
   onFindInFile: (workspaceId: string, fn: (() => void) | null) => void;
-  /**
-   * Bring the Files panel to the foreground without touching its
-   * current-file state. Used by the `band open <external-file>` flow:
-   * the external path is queued via `lib/pending-external-open.ts`
-   * and the `CodeBrowserView` mounted inside the Files panel drains
-   * it, but the panel itself still needs to be `setActive()`'d so
-   * the user actually *sees* the new tab. Guarded on
-   * active-workspace so a CLI call targeting a non-visible workspace
-   * doesn't hijack the panel switcher.
-   */
+  /** Bring the Files leaf to the foreground (external-open flow). */
   onActivateFilesPanel: (workspaceId: string) => void;
-  /**
-   * Bring the Terminal panel to the foreground. Used by the chat tab's
-   * "Continue in terminal" action: the server has already spawned the
-   * resume-command terminal pane (and emitted `terminal-created`), so the
-   * inner terminal dockview will add it; this just surfaces the outer
-   * Terminal panel so the user lands on the resumed session. Guarded on
-   * active-workspace, same as `onActivateFilesPanel`.
-   */
+  /** Bring a Terminal leaf to the foreground ("Continue in terminal"). */
   onActivateTerminalPanel: (workspaceId: string) => void;
 }
 
-// Mutable module-level handlers — SharedDockviewLayout writes them on every
-// render so per-workspace callbacks always reference the latest closure
-// without re-rendering every cached panel child. Exported so non-dockview
-// call sites (e.g. the SSE listener in `__root.tsx`) can drive the dockview
-// without owning a dockview API reference.
+// Mutable module-level handlers — `SharedDockviewLayout` writes them on every
+// render. Exported so non-dockview call sites (the SSE listener in
+// `__root.tsx`, the legacy chat container) can drive the layout.
 export const crossPanelHandlers: CrossPanelHandlers = {
   onOpenFile: () => {},
   onSelectFile: () => {},
@@ -177,681 +78,74 @@ export const crossPanelHandlers: CrossPanelHandlers = {
 };
 
 // ---------------------------------------------------------------------------
-// Panel wrapper components
+// Helpers: resolve + drive the ACTIVE workspace's dockview
 // ---------------------------------------------------------------------------
 
-/** Empty-state shown by every workspace-scoped panel when no workspace is
- *  selected (index route). */
-function NoWorkspaceMessage({ Icon }: { Icon: React.FC<{ className?: string }> }) {
+/** Activate the first leaf of `kind` in a workspace's dockview; returns
+ *  whether a matching leaf was found. */
+function activateLeafOfKind(workspaceId: string | null, kind: LeafKind): boolean {
+  const api = getWorkspaceDockviewApi(workspaceId);
+  const panel = api ? firstLeafOfKind(api, kind) : undefined;
+  if (panel) {
+    panel.api.setActive();
+    return true;
+  }
+  return false;
+}
+
+// Empty state shown by the panel host when no workspace is selected.
+function NoWorkspaceMessage() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-3 text-center px-8">
-        <Icon className="size-8 text-muted-foreground/30" />
+        <FolderOpen className="size-8 text-muted-foreground/30" />
         <p className="text-sm text-muted-foreground">Select a workspace to get started</p>
       </div>
     </div>
   );
 }
 
-function ChatPanelComponent({ api }: IDockviewPanelProps) {
-  // Track physical visibility (not focus/active state).
-  // In a split layout, the Chat panel remains visible when another panel
-  // (Changes, Files, Terminal) is focused. `isVisible` is only false when
-  // the panel is behind another tab in a tabbed group, or when its edge
-  // group is collapsed (dockview reports !isVisible in both cases).
-  const [isVisible, setIsVisible] = useState(api.isVisible);
-
-  useEffect(() => {
-    const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
-    return () => d.dispose();
-  }, [api]);
-
-  return (
-    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={MessageSquare} />}>
-      {(workspaceId, wsActive) => (
-        <DockviewChatContainer
-          workspaceId={workspaceId}
-          visible={isVisible && wsActive}
-          wsActive={wsActive}
-        />
-      )}
-    </MultiWorkspacePanelHost>
-  );
-}
-
-function ChangesPanelComponent(_props: IDockviewPanelProps) {
-  return (
-    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={GitCompare} />}>
-      {(workspaceId, wsActive) => (
-        <DiffView
-          workspaceId={workspaceId}
-          active={wsActive}
-          onOpenFile={(filename) => crossPanelHandlers.onOpenFile(workspaceId, filename)}
-          onFindInFile={(fn) => crossPanelHandlers.onFindInFile(workspaceId, fn)}
-        />
-      )}
-    </MultiWorkspacePanelHost>
-  );
-}
-
-function FilesPanelComponent(_props: IDockviewPanelProps) {
-  return (
-    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={FolderOpen} />}>
-      {(workspaceId, _wsActive) => <FilesPanelChild workspaceId={workspaceId} />}
-    </MultiWorkspacePanelHost>
-  );
-}
-
-/** Reads per-workspace cross-panel state for the Files panel child. */
-function FilesPanelChild({ workspaceId }: { workspaceId: string }) {
-  const state = usePerWorkspaceState(workspaceId);
-  return (
-    <CodeBrowserView
-      workspaceId={workspaceId}
-      file={state.currentFile}
-      openFilePath={state.openFilePath}
-      onSelectFile={(filePath) => crossPanelHandlers.onSelectFile(workspaceId, filePath)}
-      onFileOpened={() => crossPanelHandlers.onFileOpened(workspaceId)}
-      onFindInFile={(fn) => crossPanelHandlers.onFindInFile(workspaceId, fn)}
-    />
-  );
-}
-
-function TerminalPanelComponent({ api }: IDockviewPanelProps) {
-  const [isVisible, setIsVisible] = useState(api.isVisible);
-
-  useEffect(() => {
-    const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
-    return () => d.dispose();
-  }, [api]);
-
-  return (
-    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={TerminalIcon} />}>
-      {(workspaceId, wsActive) => (
-        <Suspense fallback={null}>
-          <DockviewTerminalContainer
-            workspaceId={workspaceId}
-            visible={isVisible && wsActive}
-            wsActive={wsActive}
-          />
-        </Suspense>
-      )}
-    </MultiWorkspacePanelHost>
-  );
-}
-
-function BrowserPanelComponent({ api }: IDockviewPanelProps) {
-  const [isVisible, setIsVisible] = useState(api.isVisible);
-  const { settings } = useSettingsQuery();
-  const cdpEnabled = (settings as { webBrowserCdpEnabled?: boolean }).webBrowserCdpEnabled ?? false;
-
-  useEffect(() => {
-    const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
-    return () => d.dispose();
-  }, [api]);
-
-  return (
-    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={Globe} />}>
-      {(workspaceId, wsActive) => {
-        const visible = isVisible && wsActive;
-        // On the web build the native webview path doesn't exist (no Electron
-        // IPC). Two render modes depending on the CDP screencast experiment
-        // flag (Settings → Browser → "Stream desktop tabs to web"):
-        //   - enabled: surface the desktop app's browser tabs as a CDP
-        //     screencast picker.
-        //   - disabled (default): show the "desktop only" fallback.
-        if (!isDesktop) {
-          if (cdpEnabled) {
-            return <ScreencastPanel workspaceId={workspaceId} visible={visible} />;
-          }
-          return (
-            <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-              <div className="max-w-md text-center">
-                The Browser pane is only available in the desktop app. Enable{" "}
-                <span className="font-medium text-foreground">
-                  Settings → Browser → Stream desktop tabs to web
-                </span>{" "}
-                to use it from a browser tab.
-              </div>
-            </div>
-          );
-        }
-        return (
-          <Suspense fallback={null}>
-            <DockviewBrowserContainer
-              workspaceId={workspaceId}
-              visible={visible}
-              wsActive={wsActive}
-            />
-          </Suspense>
-        );
-      }}
-    </MultiWorkspacePanelHost>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Tab components (icon + title, no close button)
-// ---------------------------------------------------------------------------
-
-function DefaultTab(props: IDockviewPanelHeaderProps) {
-  const Icon = PANEL_ICONS[props.api.component];
-  const shortcut = PANEL_SHORTCUTS[props.api.component];
-  const [title, setTitle] = useState(props.api.title ?? "");
-
-  useEffect(() => {
-    const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ""));
-    return () => d.dispose();
-  }, [props.api]);
-
-  // `data-testid` is keyed by the dockview panel `component` (e.g.
-  // "terminal", "browser", "files"). Owned by us (not by dockview's
-  // CSS class names) so it survives dockview upgrades, and it
-  // disambiguates the OUTER shared-layout tabs from any nested
-  // dockview tabs (which use their own tab renderers, e.g.
-  // `TerminalTab` in `DockviewTerminalContainer`). Used by e2e
-  // specs that need to click a specific outer panel tab.
-  const tab = (
-    <div className="dv-default-tab" data-testid={`workspace__tab--${props.api.component}`}>
-      <div
-        className="dv-default-tab-content"
-        style={{ display: "flex", alignItems: "center", gap: 6 }}
-      >
-        {Icon ? (
-          <Icon className="size-4 shrink-0" />
-        ) : (
-          <span className="inline-block size-4 shrink-0" aria-hidden />
-        )}
-        <span className="truncate">{title}</span>
-      </div>
-    </div>
-  );
-
-  if (!shortcut) return tab;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{tab}</TooltipTrigger>
-      <TooltipContent>
-        {title} ({shortcut})
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function BadgeTab(props: IDockviewPanelHeaderProps) {
-  const Icon = PANEL_ICONS[props.api.component];
-  const shortcut = PANEL_SHORTCUTS[props.api.component];
-  const [title, setTitle] = useState(props.api.title ?? "");
-  const [badge, setBadge] = useState<number | undefined>(props.params?.badge as number | undefined);
-
-  useEffect(() => {
-    const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ""));
-    return () => d.dispose();
-  }, [props.api]);
-
-  useEffect(() => {
-    const d = props.api.onDidParametersChange(() => {
-      setBadge(props.api.getParameters<{ badge?: number }>().badge);
-    });
-    return () => d.dispose();
-  }, [props.api]);
-
-  const hasBadge = badge != null && badge > 0;
-
-  // See `DefaultTab` above for the `data-testid` rationale.
-  const tab = (
-    <div className="dv-default-tab" data-testid={`workspace__tab--${props.api.component}`}>
-      <div
-        className="dv-default-tab-content"
-        style={{ display: "flex", alignItems: "center", gap: 6 }}
-      >
-        {Icon ? (
-          <Icon className="size-4 shrink-0" />
-        ) : (
-          <span className="inline-block size-4 shrink-0" aria-hidden />
-        )}
-        <span className="truncate">{title}</span>
-        {hasBadge && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-            {badge}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-
-  if (!shortcut) return tab;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{tab}</TooltipTrigger>
-      <TooltipContent>
-        {title} ({shortcut})
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Component and tab registries
-// ---------------------------------------------------------------------------
-
-// biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
-const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
-  chat: ChatPanelComponent,
-  changes: ChangesPanelComponent,
-  files: FilesPanelComponent,
-  terminal: TerminalPanelComponent,
-  browser: BrowserPanelComponent,
-};
-
-const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
-  badge: BadgeTab,
-};
-
-// ---------------------------------------------------------------------------
-// Right-side header actions — maximize/restore toggle on every center group.
-// ---------------------------------------------------------------------------
-
-const MainGroupRightActions = memo(function MainGroupRightActions(
-  props: IDockviewHeaderActionsProps,
-) {
-  const isGridGroup = (props.location?.type ?? "grid") === "grid";
-
-  const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
-  useEffect(() => {
-    const refresh = () => setIsMaximized(props.api.isMaximized());
-    refresh();
-    const d = props.containerApi.onDidMaximizedGroupChange(refresh);
-    return () => d.dispose();
-  }, [props.api, props.containerApi]);
-
-  if (!isGridGroup) return null;
-
-  const Icon = isMaximized ? Minimize2 : Maximize2;
-  const label = isMaximized ? "Restore" : "Maximize";
-
-  return (
-    <div className="flex h-full items-center px-1">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={label}
-            onClick={(e) => {
-              if (props.api.isMaximized()) {
-                // Re-commit the hidden views' parked positions before the
-                // restore writes land, so the tween starts from the right
-                // edge (see prepareMaximizeRestoreAnimation).
-                prepareMaximizeRestoreAnimation(e.currentTarget.closest<HTMLElement>(".dv-shell"));
-                props.api.exitMaximized();
-              } else {
-                props.api.maximize();
-              }
-            }}
-            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Icon className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {label}{" "}
-          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-            ⇧⌘M
-          </kbd>
-        </TooltipContent>
-      </Tooltip>
-    </div>
-  );
-});
-
-// ---------------------------------------------------------------------------
-// Diff file count hook (polls every 15s for the active workspace).
-// ---------------------------------------------------------------------------
-
-function useDiffFileCount(workspaceId: string | null): number {
-  const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!workspaceId) {
-      setCount(0);
-      return;
-    }
-    let cancelled = false;
-    const fetchCount = () => {
-      trpc.workspace.getDiffSummary
-        .query({
-          workspaceId,
-          diffMode,
-          compareBranch: compareBranch ?? undefined,
-        })
-        .then((result) => {
-          if (!cancelled) setCount(result.stats?.filesChanged ?? 0);
-        })
-        .catch(() => {});
-    };
-    fetchCount();
-    const interval = setInterval(fetchCount, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [workspaceId, diffMode, compareBranch]);
-  return count;
-}
-
-// ---------------------------------------------------------------------------
-// Required panel definitions & layout persistence
-// ---------------------------------------------------------------------------
-
-const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
-
-/**
- * Panel ids that USED to be required and may live in saved layouts. We strip
- * them on layout restore so old localStorage entries don't break dockview.
- */
-const REMOVED_PANEL_IDS = ["screencast"] as const;
-
-// Bumped v6 → v7 when the project list moved out of the dockview into a
-// standalone sidebar: old saved layouts still contain the `projects` edge
-// panel, so we discard them and rebuild without it.
-const GLOBAL_LAYOUT_KEY = "band:dockview-layout-v7";
-const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
-
-const EDGE_GROUP_IDS = {
-  left: "edge-left",
-  right: "edge-right",
-  bottom: "edge-bottom",
-} as const;
-type EdgeDirection = keyof typeof EDGE_GROUP_IDS;
-
-// biome-ignore lint/suspicious/noExplicitAny: recursive JSON normalizer
-function sortKeys(value: any): any {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value !== null && typeof value === "object") {
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value).sort()) {
-      sorted[key] = sortKeys(value[key]);
-    }
-    return sorted;
-  }
-  return value;
-}
-
-/**
- * Compute a structural fingerprint of the layout that ignores active tab
- * state and container dimensions. Kept around to guard the SAVE path during
- * initial layout setup against spurious writes — no longer drives eviction
- * since there are no per-workspace dockview instances to evict.
- */
-function getStructuralFingerprint(json: Record<string, unknown>): string {
-  const clone = JSON.parse(JSON.stringify(json));
-  delete clone.activePanel;
-  delete clone.activeGroup;
-  const grid = clone.grid;
-  if (grid) {
-    delete grid.width;
-    delete grid.height;
-    walkGridNode(grid.root, (leaf) => {
-      if (leaf.data) delete leaf.data.activeView;
-    });
-  }
-  return JSON.stringify(sortKeys(clone));
-}
-
-/**
- * Strip runtime panel params (file paths, callbacks, workspaceId) from the
- * serialized layout so that the saved JSON only contains structural data.
- */
-function stripPanelParams(json: Record<string, unknown>): Record<string, unknown> {
-  const clone = JSON.parse(JSON.stringify(json));
-  const panels = clone.panels as Record<string, Record<string, unknown>> | undefined;
-  if (panels) {
-    for (const panel of Object.values(panels)) {
-      panel.params = {};
-    }
-  }
-  return clone;
-}
-
-/**
- * Module-level flag: `true` only for the brief synchronous window in
- * which `saveLayout` calls `api.toJSON()`. dockview's `toJSON()`
- * internally exits then re-enters the currently-maximized group as
- * part of its serialization dance, firing
- * `onDidMaximizedGroupChange(false)` followed by
- * `onDidMaximizedGroupChange(true, <group>)`. Those events are not
- * user-initiated and must NOT be persisted — the re-enter event in
- * particular would otherwise contaminate the incoming workspace's
- * localStorage with the outgoing workspace's maximize. The
- * `onDidMaximizedGroupChange` listener (down in `onReady`) checks this
- * flag and skips while it's true.
- *
- * Module scope is safe here because there's exactly one
- * `SharedDockviewLayout` mounted at a time.
- */
-let inSaveLayoutToJSON = false;
-
-/**
- * Persist the current layout.
- * - Full layout (structure + active tabs) → global key
- * - Active tab state → per-workspace key (maximizedGroup is preserved
- *   from whatever's already saved; it's owned by the dedicated
- *   `onDidMaximizedGroupChange` listener — see notes below).
- */
-function saveLayout(
-  api: DockviewApi,
-  workspaceId: string | null,
-  lastStructureRef: React.MutableRefObject<string>,
-): void {
-  try {
-    let json: Record<string, unknown>;
-    inSaveLayoutToJSON = true;
-    try {
-      json = stripPanelParams(api.toJSON() as unknown as Record<string, unknown>);
-    } finally {
-      inSaveLayoutToJSON = false;
-    }
-
-    // Save per-workspace active tab state only when we have a real workspace.
-    //
-    // NOTE: we intentionally DON'T capture `maximizedGroup` here.
-    // `api.toJSON()` above internally exits and re-enters the maximized
-    // group as part of its serialization, which means by the time we
-    // reach this point `findMaximizedGroupId(api)` could observe a
-    // transient "no group maximized" state and clobber the real
-    // value. Maximize state is owned by the dedicated
-    // `onDidMaximizedGroupChange` listener, which patches the
-    // `maximizedGroup` field in isolation. We just need to PRESERVE
-    // whatever maximizedGroup is already on disk so this save doesn't
-    // drop it.
-    if (workspaceId) {
-      const activeState = extractActiveState(json);
-      const existing = loadActiveState(workspaceId);
-      if (existing?.maximizedGroup) {
-        // Only preserve the saved maximize when the named group is
-        // still present in the current layout. If a group has been
-        // deleted (e.g. the user removed all its tabs), dockview may
-        // not fire `onDidMaximizedGroupChange(false)` along the
-        // destruction path, so the stale id would otherwise hang
-        // around in localStorage indefinitely.
-        const groupStillExists = api.groups.some((g) => g.id === existing.maximizedGroup);
-        if (groupStillExists) {
-          activeState.maximizedGroup = existing.maximizedGroup;
-        }
-      }
-      localStorage.setItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`, JSON.stringify(activeState));
-    }
-
-    // Always save full layout to the global key
-    localStorage.setItem(GLOBAL_LAYOUT_KEY, JSON.stringify(json));
-
-    // Track the structural fingerprint so the caller can compare init vs.
-    // user-initiated changes if it ever needs to.
-    lastStructureRef.current = getStructuralFingerprint(json);
-  } catch {
-    // Best-effort persistence
-  }
-}
-
-function stripRemovedPanels(layout: Record<string, unknown>): void {
-  const panels = layout.panels as Record<string, unknown> | undefined;
-  if (panels) {
-    for (const id of REMOVED_PANEL_IDS) {
-      delete panels[id];
-    }
-  }
-  const grid = layout.grid as Record<string, unknown> | undefined;
-  if (grid?.root) {
-    walkGridNode(grid.root, (leaf) => {
-      const data = leaf.data as { views?: string[]; activeView?: string } | undefined;
-      if (!data || !Array.isArray(data.views)) return;
-      data.views = data.views.filter((v) => !(REMOVED_PANEL_IDS as readonly string[]).includes(v));
-      if (data.activeView && (REMOVED_PANEL_IDS as readonly string[]).includes(data.activeView)) {
-        data.activeView = data.views[0];
-      }
-    });
-  }
-}
-
-/** Read the saved active-tab state for a workspace, or null when absent
- *  or unparseable. Defends against malformed payloads (older versions,
- *  hand-edited localStorage, extensions) by requiring `groups` to be a
- *  plain object — every caller indexes into it, and a missing `groups`
- *  key would throw `TypeError: Cannot read properties of undefined`
- *  inside the surrounding try/catch and silently nuke the workspace's
- *  saved layout. */
-function loadActiveState(workspaceId: string | null): ActiveTabState | null {
-  if (!workspaceId) return null;
-  try {
-    const raw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof (parsed as { groups?: unknown }).groups !== "object" ||
-      (parsed as { groups?: unknown }).groups === null
-    ) {
-      return null;
-    }
-    return parsed as ActiveTabState;
-  } catch {
-    return null;
-  }
-}
-
-/** Load layout: global structure + per-workspace active tabs merged.
- *  Note that `maximizedGroup` is NOT folded into the returned JSON — it
- *  has to be re-applied to the live api via `applyMaximizedGroupToApi`
- *  after `fromJSON` because dockview doesn't model maximize in its
- *  serialized form. */
-function loadLayout(workspaceId: string | null): unknown | null {
-  try {
-    const raw = localStorage.getItem(GLOBAL_LAYOUT_KEY);
-    if (!raw) return null;
-    const layout = JSON.parse(raw);
-
-    stripRemovedPanels(layout);
-
-    // Overlay this workspace's saved active tab state (if any).
-    const activeState = loadActiveState(workspaceId);
-    if (activeState) {
-      applyActiveState(layout, activeState);
-    }
-
-    return layout;
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main SharedDockviewLayout — one instance for the whole app
+// Main SharedDockviewLayout — a thin host around one per-workspace dockview
 // ---------------------------------------------------------------------------
 
 /**
- * The single shared dockview that lives at the app shell. Mounts ONE
- * dockview instance for the whole app; per-workspace content is cached
- * inside each panel via `MultiWorkspacePanelHost`.
- *
- * Layout structure (panel positions, tab order, hidden panels) is shared
- * across all workspaces and persisted to `band:dockview-layout-v7`.
- * Per-workspace ACTIVE TAB state is persisted separately under
- * `band:dockview-active:${workspaceId}`.
+ * The app-shell layout. No longer owns a dockview: it renders a single
+ * `MultiWorkspacePanelHost` whose child is a `WorkspaceCenterDockview` per
+ * cached workspace (the LRU keeps ~3 alive for instant switching). This
+ * component keeps the shell-level concerns: the command dialogs, the global
+ * keyboard shortcuts, and the cross-panel handler registry. Panel-activation
+ * shortcuts resolve the active workspace's dockview from
+ * `getWorkspaceDockviewApi`.
  */
 export function SharedDockviewLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const activeWorkspaceId = parseWorkspaceFromPath(pathname);
 
-  const apiRef = useRef<DockviewApi | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Hidden panels from settings — used to gate panel operations.
-  const { settings } = useSettingsQuery();
-  const hiddenPanels = useMemo(
-    () =>
-      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
-    [settings],
-  );
-  const hiddenPanelsRef = useRef(hiddenPanels);
-  hiddenPanelsRef.current = hiddenPanels;
-
-  // Suppress saves during initial layout setup (fromJSON / buildDefaultLayout
-  // fire onDidLayoutChange events that are not user-initiated).
-  const initializedRef = useRef(false);
-
-  // Structural fingerprint of the last persisted layout — purely defensive,
-  // no longer drives any eviction.
-  const lastStructureRef = useRef("");
-
-  // Active workspace id available to async callbacks without re-binding.
   const activeWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
   activeWorkspaceIdRef.current = activeWorkspaceId;
 
-  // Notify the "recent workspaces" picker on every workspace switch. Lives
-  // here (rather than inside each `MultiWorkspacePanelHost`) so the call
-  // fires exactly once per navigation instead of five times.
+  // Notify the "recent workspaces" picker on every workspace switch.
   useEffect(() => {
     if (activeWorkspaceId) recordWorkspaceAccess(activeWorkspaceId);
   }, [activeWorkspaceId]);
 
-  // Per-workspace cross-panel state lives in the module-level pub-sub above.
-  // The recent files hook is workspace-keyed and survives remounts via its
-  // own module-level Map, so reading it here for the ACTIVE workspace is
-  // safe — the dialogs we render below only show the active workspace's
-  // recents.
   const { recentFiles, trackFile } = useRecentFiles(activeWorkspaceId ?? "");
 
-  // The Changes panel tab badge — only the ACTIVE workspace's diff count is
-  // surfaced because the badge lives on the single shared tab header.
-  const diffFileCount = useDiffFileCount(activeWorkspaceId);
-
-  // The currentFile-ref shadows the active workspace's currentFile for the
-  // Format Current File keyboard handler (intentionally not re-subscribed on
-  // every selection change).
+  // Shadow of the active workspace's currentFile for the format/quick-open flows.
   const currentFileRef = useRef<string | undefined>(undefined);
-  // Find-in-file: registry of per-workspace callbacks. The keyboard handler
-  // invokes the ACTIVE workspace's callback.
   const findInFileRegistry = useRef(new Map<string, () => void>());
 
-  // Dialog state — there's only one dialog open at a time across the whole
-  // app, regardless of which workspace is active.
+  // Dialog state — exactly one dialog open at a time across the whole app.
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [lastQuickOpenQuery, setLastQuickOpenQuery] = useState("");
-
-  // Track the currently-displayed currentFile for the ACTIVE workspace so
-  // dialogs can highlight it without subscribing to the per-workspace store.
-  // Updated via cross-panel handlers below.
   const [activeCurrentFile, setActiveCurrentFile] = useState<string | undefined>(undefined);
 
-  // Refresh the active workspace's currentFile shadow when navigating between
-  // workspaces — the store may already hold a value for the new workspace.
+  // Refresh the active workspace's currentFile shadow on navigation.
   useEffect(() => {
     if (!activeWorkspaceId) {
       setActiveCurrentFile(undefined);
@@ -876,16 +170,10 @@ export function SharedDockviewLayout() {
   const handleOpenFile = useCallback(
     (workspaceId: string, filename: string) => {
       const cleanPath = parseFileLocation(filename).filePath;
-      setPerWorkspaceState(workspaceId, {
-        currentFile: cleanPath,
-        openFilePath: filename,
-      });
+      setPerWorkspaceState(workspaceId, { currentFile: cleanPath, openFilePath: filename });
       trackFile(cleanPath);
-      // Activate the Files panel only for the currently visible workspace —
-      // otherwise we'd hijack the active tab in the shared layout because of
-      // an action that fired in a cached but invisible workspace.
       if (workspaceId === activeWorkspaceIdRef.current) {
-        apiRef.current?.getPanel("files")?.api.setActive();
+        activateLeafOfKind(workspaceId, "files");
       }
     },
     [trackFile],
@@ -895,22 +183,10 @@ export function SharedDockviewLayout() {
     setPerWorkspaceState(workspaceId, { openFilePath: null });
   }, []);
 
-  // Open a file that lives OUTSIDE the worktree by absolute path (Quick
-  // Open offers this when the query resolves to an existing file on the
-  // host filesystem — e.g. a `/tmp/notes.md` path pasted in or arriving
-  // from a terminal/chat link). We can't route through `handleOpenFile`:
-  // that path is workspace-relative and `CodeBrowserView` would join it
-  // against the worktree root. Instead reuse the same external-open queue
-  // the CLI's `band open <abs>` uses — `CodeBrowserView` drains it and
-  // mounts the path as an *external* tab (reads via `host.readFile`). The
-  // `location` may carry a `:line[:col]` suffix, which the drain parses.
   const handleOpenExternalFile = useCallback((workspaceId: string, location: string) => {
     enqueueExternalOpen(workspaceId, location);
-    // Reveal the Files panel only for the visible workspace, mirroring
-    // `handleOpenFile` — a cached-but-invisible workspace must not steal
-    // the active tab.
     if (workspaceId === activeWorkspaceIdRef.current) {
-      apiRef.current?.getPanel("files")?.api.setActive();
+      activateLeafOfKind(workspaceId, "files");
     }
   }, []);
 
@@ -928,32 +204,17 @@ export function SharedDockviewLayout() {
   }, []);
 
   const handleActivateFilesPanel = useCallback((workspaceId: string) => {
-    // Only activate when the request targets the currently visible
-    // workspace — same invariant as `handleOpenFile`. A cached but
-    // invisible workspace must not be allowed to flip the panel
-    // switcher.
     if (workspaceId === activeWorkspaceIdRef.current) {
-      apiRef.current?.getPanel("files")?.api.setActive();
+      activateLeafOfKind(workspaceId, "files");
     }
   }, []);
 
   const handleActivateTerminalPanel = useCallback((workspaceId: string) => {
-    // Same active-workspace guard as `handleActivateFilesPanel`, plus the
-    // hidden-panel guard the Ctrl+` shortcut uses so we never try to
-    // activate a panel the user has removed from the layout. Mirror the
-    // shortcut's `band:focus-terminal` dispatch so the freshly-surfaced
-    // terminal grabs keyboard focus.
     if (workspaceId !== activeWorkspaceIdRef.current) return;
-    if (hiddenPanelsRef.current.includes("terminal")) return;
-    apiRef.current?.getPanel("terminal")?.api.setActive();
-    queueMicrotask(() => {
-      window.dispatchEvent(new CustomEvent("band:focus-terminal"));
-    });
+    activateLeafOfKind(workspaceId, "term");
+    queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-terminal")));
   }, []);
 
-  // Mirror the handlers into the module-level registry so panel children
-  // (which can't reach into a closure across the dockview boundary) can
-  // call them.
   crossPanelHandlers.onOpenFile = handleOpenFile;
   crossPanelHandlers.onFileOpened = handleFileOpened;
   crossPanelHandlers.onSelectFile = handleSelectFile;
@@ -968,49 +229,50 @@ export function SharedDockviewLayout() {
   const paletteCommands = useMemo(
     () =>
       buildCommands({
-        getApi: () => apiRef.current,
-        getHiddenPanels: () => hiddenPanelsRef.current,
+        // Adapt the command registry's `getPanel(id)` (id = "chat" / "changes"
+        // / "files" / "terminal" / "browser") to the active workspace's
+        // dockview by resolving the first leaf of that kind.
+        getApi: () => {
+          const api = getWorkspaceDockviewApi(activeWorkspaceIdRef.current);
+          if (!api) return null;
+          return {
+            getPanel: (id: string) => {
+              const kind = (id === "terminal" ? "term" : id) as LeafKind;
+              const panel = firstLeafOfKind(api, kind);
+              return panel ? { api: { setActive: () => panel.api.setActive() } } : undefined;
+            },
+          };
+        },
+        getHiddenPanels: () => [],
         openQuickOpen: () => setQuickOpenOpen(true),
         openSearchFiles: () => setSearchFilesOpen(true),
         findInFile: () => {
           const ws = activeWorkspaceIdRef.current;
           const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
-          if (fn) {
-            fn();
-          } else {
-            window.dispatchEvent(new CustomEvent("band:find-in-file"));
-          }
+          if (fn) fn();
+          else window.dispatchEvent(new CustomEvent("band:find-in-file"));
         },
         formatCurrentFile: () => {
           const ws = activeWorkspaceIdRef.current;
           if (!ws) return;
-          const filePath = currentFileRef.current;
           window.dispatchEvent(
             new CustomEvent("band:format-current-file", {
-              detail: { workspaceId: ws, filePath },
+              detail: { workspaceId: ws, filePath: currentFileRef.current },
             }),
           );
         },
-        newUntitledTab: () => {
-          window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
-        },
+        newUntitledTab: () => window.dispatchEvent(new CustomEvent("band:new-untitled-tab")),
         changeLanguageMode: () => {
           const ws = activeWorkspaceIdRef.current;
           if (!ws) return;
-          const filePath = currentFileRef.current;
           window.dispatchEvent(
             new CustomEvent("band:open-language-picker", {
-              detail: { workspaceId: ws, filePath },
+              detail: { workspaceId: ws, filePath: currentFileRef.current },
             }),
           );
         },
         editorGoBack: () => {
           const ws = activeWorkspaceIdRef.current;
-          // Bail without a target workspace — a `{ workspaceId: null }` detail
-          // is falsy, so the listener guard would treat it as "fall through to
-          // every mounted workspace" and re-introduce the cross-workspace
-          // history-stepping this fix prevents. Mirrors `formatCurrentFile` /
-          // `changeLanguageMode` above.
           if (!ws) return;
           window.dispatchEvent(
             new CustomEvent("band:editor-go-back", { detail: { workspaceId: ws } }),
@@ -1036,11 +298,7 @@ export function SharedDockviewLayout() {
       const ws = activeWorkspaceIdRef.current;
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // ⌘K → workspace picker. We deliberately omit the `terminalFocused`
-      // guard here so the picker opens even while a terminal is focused
-      // (long-standing complaint) — preventDefault/stopPropagation keep the
-      // keystroke from leaking into xterm. (The Ctrl+K branch below DOES bail
-      // on a focused terminal, since Ctrl+K is a terminal editing key.)
+      // ⌘K → workspace picker (fires even with a terminal focused).
       if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         e.stopPropagation();
@@ -1048,12 +306,7 @@ export function SharedDockviewLayout() {
         return;
       }
 
-      // Ctrl+K → workspace picker on non-macOS. `SharedDockviewLayout` also
-      // mounts for wide-viewport web users on Windows/Linux, where ⌘ doesn't
-      // exist and Ctrl is the platform-native modifier. Unlike the ⌘ branch we
-      // DO bail when the terminal is focused: Ctrl+K is "kill to end of line"
-      // in most shells, so hijacking it inside xterm would break a common
-      // editing keystroke.
+      // Ctrl+K → workspace picker on non-macOS (bail on focused terminal).
       if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         if (terminalFocused) return;
         e.preventDefault();
@@ -1062,43 +315,34 @@ export function SharedDockviewLayout() {
         return;
       }
 
-      // Ctrl+` → Terminal panel
+      // Ctrl+` → activate (or create) a Terminal leaf.
       if (e.ctrlKey && !e.metaKey && e.key === "`") {
         e.preventDefault();
         e.stopPropagation();
-        if (!hiddenPanelsRef.current.includes("terminal")) {
-          apiRef.current?.getPanel("terminal")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-terminal"));
-          });
+        if (!activateLeafOfKind(ws, "term")) {
+          getWorkspaceLeafActions(ws)?.onAdd("term");
         }
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-terminal")));
         return;
       }
 
-      // Ctrl+0 → reveal the project-list sidebar and focus it. The sidebar
-      // lives outside the dockview now, so we reveal it via the
-      // `band:show-sidebar` window event and let the sidebar's
-      // `band:focus-projects` listener move keyboard focus into the list.
+      // Ctrl+0 → reveal + focus the project sidebar.
       if (e.ctrlKey && !e.metaKey && e.key === "0") {
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent("band:show-sidebar"));
-        queueMicrotask(() => {
-          window.dispatchEvent(new CustomEvent("band:focus-projects"));
-        });
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-projects")));
         return;
       }
 
-      // ⇧⌥F → Format Current File (matches VS Code; uses e.code so the
-      // macOS Option-layer dead-key doesn't swallow the keystroke).
+      // ⇧⌥F → Format Current File.
       if (e.code === "KeyF" && e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {
         if (terminalFocused) return;
         e.preventDefault();
         if (!ws) return;
-        const filePath = currentFileRef.current;
         window.dispatchEvent(
           new CustomEvent("band:format-current-file", {
-            detail: { workspaceId: ws, filePath },
+            detail: { workspaceId: ws, filePath: currentFileRef.current },
           }),
         );
         return;
@@ -1108,14 +352,13 @@ export function SharedDockviewLayout() {
       if (!mod) return;
       if (terminalFocused && !e.metaKey) return;
 
-      const api = apiRef.current;
       const key = e.key.toLowerCase();
 
       if (key === "n" && e.shiftKey) {
+        // ⇧⌘N → New Chat leaf.
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:new-chat-session"));
+        getWorkspaceLeafActions(ws)?.onAdd("chat");
       } else if (key === "n" && !e.shiftKey && !e.altKey) {
-        // ⌘N → New Untitled File
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
       } else if (key === "p" && e.shiftKey) {
@@ -1130,111 +373,58 @@ export function SharedDockviewLayout() {
       } else if (key === "f" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
-        if (fn) {
-          fn();
-        } else {
-          window.dispatchEvent(new CustomEvent("band:find-in-file"));
-        }
+        if (fn) fn();
+        else window.dispatchEvent(new CustomEvent("band:find-in-file"));
       } else if (key === "o" && !e.shiftKey && !e.altKey) {
-        // ⌘O → Open File… The actual picker invocation lives in
-        // CodeBrowserView and is gated by `capabilities.pickFile`, so
-        // the event is a no-op in the plain web build — preventDefault
-        // here still suppresses the browser's own Cmd+O.
-        //
-        // Address the event to the active workspace: the per-panel
-        // content cache keeps multiple CodeBrowserView instances alive
-        // at once, and an undelimited broadcast would race every
-        // cached instance to open its own picker (the file landed in
-        // the wrong workspace). Same shape as `band:format-current-file`.
         e.preventDefault();
         if (!ws) return;
         window.dispatchEvent(
-          new CustomEvent("band:open-file-external", {
-            detail: { workspaceId: ws },
-          }),
+          new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
         );
-      } else if (key === "i" && e.ctrlKey && e.metaKey && api) {
+      } else if (key === "i" && e.ctrlKey && e.metaKey) {
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("chat")) {
-          api.getPanel("chat")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-chat"));
-          });
-        }
-      } else if (key === "g" && e.shiftKey && api) {
+        activateLeafOfKind(ws, "chat");
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-chat")));
+      } else if (key === "g" && e.shiftKey) {
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("changes")) {
-          api.getPanel("changes")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-changes"));
-          });
-        }
-      } else if (key === "e" && e.shiftKey && api) {
+        activateLeafOfKind(ws, "changes");
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-changes")));
+      } else if (key === "e" && e.shiftKey) {
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("files")) {
-          api.getPanel("files")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-files"));
-          });
-        }
-      } else if (key === "b" && e.shiftKey && api) {
+        activateLeafOfKind(ws, "files");
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-files")));
+      } else if (key === "b" && e.shiftKey) {
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("browser")) {
-          api.getPanel("browser")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-browser"));
-          });
-        }
-      } else if (key === "b" && !e.shiftKey && !e.altKey && api) {
-        // ⌘B → toggle the project-list sidebar. Focus-aware: if an inner
-        // dockview (terminal / chat / browser) is focused AND has panels on
-        // its left edge, toggle that inner edge; otherwise toggle the
-        // sidebar that lives outside the dockview, reached via the
-        // `band:toggle-sidebar` window event.
-        //
-        // The inner branch is driven by `toggleEdgeGroup`'s return value
-        // (`true` when it acted on a non-empty edge, `false` when there was
-        // nothing to act on) — so empty inner edges transparently delegate
-        // to the sidebar. See `dockview-edge-groups.ts` for the registry
-        // that makes the focus lookup possible.
+        activateLeafOfKind(ws, "browser");
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-browser")));
+      } else if (key === "b" && !e.shiftKey && !e.altKey) {
+        // ⌘B → toggle inner-dockview left edge, else the project sidebar.
         e.preventDefault();
         const inner = findFocusedInnerDockview();
         if (inner && toggleEdgeGroup(inner, "left")) return;
         window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
-      } else if (e.code === "KeyB" && e.altKey && !e.shiftKey && api) {
-        // ⌥⌘B → toggle RIGHT edge. Uses `e.code === "KeyB"` instead
-        // of `key === "b"` because macOS substitutes Alt-layer
-        // characters into `e.key` (Alt+B → "∫"), making the letter
-        // check unreliable when Alt is held. `e.code` is keyboard-
-        // layout independent and matches the pattern used by the
-        // ⇧⌥F format-current-file shortcut above.
+      } else if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
+        // ⌥⌘B → toggle right edge of the focused / active dockview.
         e.preventDefault();
         const inner = findFocusedInnerDockview();
         if (inner && toggleEdgeGroup(inner, "right")) return;
-        toggleEdgeGroup(api, "right");
-      } else if (key === "j" && !e.shiftKey && !e.altKey && api) {
-        // ⌘J → toggle BOTTOM edge. Same focus-aware fallback as ⌘B.
-        // Unlike the ⌥⌘B branch above, this branch uses `key` instead
-        // of `e.code` — there's no Alt variant to disambiguate (⌥⌘J
-        // would produce "∆" in `e.key`, but the `!e.altKey` guard
-        // already excludes that case before the letter check runs).
+        const api = getWorkspaceDockviewApi(ws);
+        if (api) toggleEdgeGroup(api, "right");
+      } else if (key === "j" && !e.shiftKey && !e.altKey) {
+        // ⌘J → toggle bottom edge.
         e.preventDefault();
         const inner = findFocusedInnerDockview();
         if (inner && toggleEdgeGroup(inner, "bottom")) return;
-        toggleEdgeGroup(api, "bottom");
-      } else if (key === "m" && e.shiftKey && api) {
+        const api = getWorkspaceDockviewApi(ws);
+        if (api) toggleEdgeGroup(api, "bottom");
+      } else if (key === "m" && e.shiftKey) {
+        // ⇧⌘M → maximize / restore the active group.
         e.preventDefault();
-        const active = api.activeGroup;
-        if (!active) return;
-        if (active.api.location.type !== "grid") {
-          if (api.hasMaximizedGroup()) {
-            prepareMaximizeRestoreAnimation(containerRef.current);
-            api.exitMaximizedGroup();
-          }
-          return;
-        }
+        const api = getWorkspaceDockviewApi(ws);
+        const active = api?.activeGroup;
+        if (!api || !active) return;
         if (active.api.isMaximized()) {
-          prepareMaximizeRestoreAnimation(containerRef.current);
+          prepareMaximizeRestoreAnimation(document.querySelector<HTMLElement>(".dv-shell"));
           active.api.exitMaximized();
         } else {
           active.api.maximize();
@@ -1245,17 +435,7 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("keydown", handler, true);
   }, []);
 
-  // Listen for file link clicks from chat messages → open Quick Open with query.
-  //
-  // Filter by `detail.workspaceId` so a click in workspace A's chat doesn't
-  // open the file against workspace B when B is the currently-active tab.
-  // The dockview keeps up to `maxCachedWorkspaces` workspace subtrees alive
-  // at once, but only this single layout owns the Quick Open dialog —
-  // dropping cross-workspace events here is what keeps the dialog bound
-  // to the correct workspace (see `dispatchOpenFile` in
-  // `file-link-components.tsx` and issue #539). A missing detail
-  // (legacy dispatcher / forward-compat) falls through to the active
-  // workspace so any non-chat caller keeps working.
+  // File link clicks from chat → open Quick Open with query (scoped to active ws).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ filename?: string; workspaceId?: string }>).detail;
@@ -1268,11 +448,7 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:open-file", handler);
   }, [activeWorkspaceId]);
 
-  // File-tree toolbar window-event triggers, plus the workspace picker opener.
-  // The picker state lives here, but the desktop title bar (rendered as a
-  // sibling in __root.tsx, where it has no access to this state) opens it by
-  // dispatching `band:open-workspace-picker` — same cross-component pattern as
-  // the file-tree toolbar events above.
+  // Toolbar / title-bar window-event triggers for the dialogs.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
@@ -1287,45 +463,29 @@ export function SharedDockviewLayout() {
     };
   }, []);
 
-  // Panel activation events from the title bar panel switcher
+  // Panel activation events from the title-bar panel switcher.
   useEffect(() => {
     const handler = (e: Event) => {
       const panelId = (e as CustomEvent<{ panelId: string }>).detail?.panelId;
-      if (panelId && apiRef.current && !hiddenPanelsRef.current.includes(panelId)) {
-        apiRef.current.getPanel(panelId)?.api.setActive();
-      }
+      if (!panelId) return;
+      const kind = (panelId === "terminal" ? "term" : panelId) as LeafKind;
+      activateLeafOfKind(activeWorkspaceIdRef.current, kind);
     };
     window.addEventListener("band:activate-panel", handler);
     return () => window.removeEventListener("band:activate-panel", handler);
   }, []);
 
-  // "Add to Terminal" from the diff/file selection tooltip. The tooltip can't
-  // know which workspace it lives in, so it dispatches the workspace-agnostic
-  // `band:add-to-terminal` intent; here we resolve the active workspace,
-  // surface its terminal panel (changes/files/terminal share one group by
-  // default, so the terminal is usually a hidden tab), then re-dispatch the
-  // scoped `band:terminal-insert` delivery so only that workspace's visible
-  // terminal types the reference. Mirrors the Ctrl+` / "Continue in terminal"
-  // surfacing pattern (`setActive` + microtask dispatch) so the terminal is
-  // visible by the time the panel flushes the reference.
+  // "Add to Terminal" — surface a terminal leaf then dispatch the scoped insert.
   useEffect(() => {
     const handler = (e: Event) => {
       const reference = (e as CustomEvent<AddToTerminalDetail>).detail?.reference;
       const workspaceId = activeWorkspaceIdRef.current;
       if (!reference || !workspaceId) return;
-      if (hiddenPanelsRef.current.includes("terminal")) return;
-      apiRef.current?.getPanel("terminal")?.api.setActive();
-      // Resolve the workspace's last-focused terminal so the reference lands in
-      // the one the user was actually using (not just whichever tab is visible).
-      // The awaited query naturally defers the dispatch past the `setActive`
-      // render, so the target terminal is surfaced by the time it flushes. Falls
-      // back to an undefined terminalId (visible-terminal behavior) on error or
-      // when no focus has been recorded yet.
+      activateLeafOfKind(workspaceId, "term");
       void (async () => {
         let terminalId: string | undefined;
         try {
-          const focus = await trpc.panelFocus.get.query({ workspaceId });
-          terminalId = focus.terminal;
+          terminalId = (await trpc.panelFocus.get.query({ workspaceId })).terminal;
         } catch {
           // best-effort — fall back to visible-terminal delivery
         }
@@ -1340,26 +500,17 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:add-to-terminal", handler);
   }, []);
 
-  // "Add to Chat" from the diff/file selection tooltip. Symmetric to the
-  // terminal handler above: the tooltip dispatches the workspace-agnostic
-  // `band:add-to-chat` intent; here we resolve the active workspace and its
-  // last-focused chat, surface the Chat panel, and re-dispatch the scoped
-  // `band:chat-insert` delivery so only that specific chat pane appends the
-  // reference. Previously every mounted PromptInput in the active workspace
-  // listened to `band:add-to-chat` directly, so the reference was appended to
-  // *all* open chat panes; scoping by chatId fixes that.
+  // "Add to Chat" — surface a chat leaf then dispatch the scoped insert.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<SelectionToChatDetail>).detail;
       const workspaceId = activeWorkspaceIdRef.current;
       if (!detail || !workspaceId) return;
-      if (hiddenPanelsRef.current.includes("chat")) return;
-      apiRef.current?.getPanel("chat")?.api.setActive();
+      activateLeafOfKind(workspaceId, "chat");
       void (async () => {
         let chatId: string | undefined;
         try {
-          const focus = await trpc.panelFocus.get.query({ workspaceId });
-          chatId = focus.chat;
+          chatId = (await trpc.panelFocus.get.query({ workspaceId })).chat;
         } catch {
           // best-effort — fall back to visible-chat delivery
         }
@@ -1377,534 +528,10 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:add-to-chat", handler);
   }, []);
 
-  // ---------------------------------------------------------------------
-  // Layout management
-  // ---------------------------------------------------------------------
-
-  // Add a single missing panel back into the layout at a sensible position.
-  const addMissingPanel = useCallback((api: DockviewApi, panelId: string) => {
-    if (!(panelId in components)) return;
-
-    const anyExisting =
-      api.getPanel("changes") ??
-      api.getPanel("files") ??
-      api.getPanel("terminal") ??
-      api.getPanel("chat");
-
-    const titleMap: Record<string, string> = {
-      chat: "Chat",
-      changes: "Changes",
-      files: "Files",
-      terminal: "Terminal",
-      browser: "Browser",
-    };
-
-    const opts: Record<string, unknown> = {
-      id: panelId,
-      component: panelId,
-      title: titleMap[panelId] ?? panelId,
-      params: {},
-      inactive: true,
-    };
-
-    if (panelId === "changes") {
-      opts.tabComponent = "badge";
-    }
-
-    if (panelId === "chat" && anyExisting) {
-      opts.position = { referencePanel: anyExisting.id, direction: "left" };
-    } else if (anyExisting) {
-      opts.position = { referencePanel: anyExisting.id, direction: "within" };
-    }
-
-    // biome-ignore lint/suspicious/noExplicitAny: dynamic panel options
-    api.addPanel(opts as any);
-  }, []);
-
-  // Build the default layout from scratch.
-  const buildDefaultLayout = useCallback((api: DockviewApi) => {
-    const hidden = hiddenPanelsRef.current;
-
-    api.addPanel({
-      id: "chat",
-      component: "chat",
-      title: "Chat",
-      params: {},
-    });
-
-    let rightGroupRef: string | null = null;
-
-    if (!hidden.includes("changes")) {
-      api.addPanel({
-        id: "changes",
-        component: "changes",
-        tabComponent: "badge",
-        title: "Changes",
-        params: {},
-        position: { referencePanel: "chat", direction: "right" },
-      });
-      rightGroupRef = "changes";
-    }
-
-    if (!hidden.includes("files")) {
-      if (rightGroupRef) {
-        api.addPanel({
-          id: "files",
-          component: "files",
-          title: "Files",
-          params: {},
-          position: { referencePanel: rightGroupRef, direction: "within" },
-          inactive: true,
-        });
-      } else {
-        api.addPanel({
-          id: "files",
-          component: "files",
-          title: "Files",
-          params: {},
-          position: { referencePanel: "chat", direction: "right" },
-        });
-        rightGroupRef = "files";
-      }
-    }
-
-    if (!hidden.includes("terminal")) {
-      if (rightGroupRef) {
-        api.addPanel({
-          id: "terminal",
-          component: "terminal",
-          title: "Terminal",
-          params: {},
-          position: { referencePanel: rightGroupRef, direction: "within" },
-          inactive: true,
-        });
-      } else {
-        api.addPanel({
-          id: "terminal",
-          component: "terminal",
-          title: "Terminal",
-          params: {},
-          position: { referencePanel: "chat", direction: "right" },
-        });
-        rightGroupRef = "terminal";
-      }
-    }
-
-    if (!hidden.includes("browser")) {
-      if (rightGroupRef) {
-        api.addPanel({
-          id: "browser",
-          component: "browser",
-          title: "Browser",
-          params: {},
-          position: { referencePanel: rightGroupRef, direction: "within" },
-          inactive: true,
-        });
-      } else {
-        api.addPanel({
-          id: "browser",
-          component: "browser",
-          title: "Browser",
-          params: {},
-          position: { referencePanel: "chat", direction: "right" },
-        });
-      }
-    }
-
-    try {
-      api.getPanel("chat")?.api.setSize({ width: api.width * 0.5 });
-    } catch {}
-  }, []);
-
-  // onReady: restore or create the layout, heal missing panels, wire up
-  // edge groups, set up persistence. The dockview is initialised exactly
-  // once per app lifetime — the active workspace flows through refs and
-  // ISN'T captured here, so we can keep the dependency list minimal.
-  const onReady = useCallback(
-    (event: DockviewReadyEvent) => {
-      apiRef.current = event.api;
-
-      // Drop orphaned keys from the old custom-collapse system.
-      try {
-        localStorage.removeItem("band:collapsed-groups");
-        localStorage.removeItem("band:group-expanded-widths");
-      } catch {}
-
-      const initialWorkspaceId = activeWorkspaceIdRef.current;
-      let restored = false;
-      const saved = loadLayout(initialWorkspaceId);
-      if (saved) {
-        try {
-          // biome-ignore lint/suspicious/noExplicitAny: localStorage JSON shape
-          event.api.fromJSON(saved as any);
-          restored = true;
-        } catch {}
-      }
-
-      if (!restored) {
-        buildDefaultLayout(event.api);
-      }
-
-      for (const id of REQUIRED_PANEL_IDS) {
-        if (!event.api.getPanel(id) && !hiddenPanelsRef.current.includes(id)) {
-          addMissingPanel(event.api, id);
-        }
-      }
-
-      for (const id of hiddenPanelsRef.current) {
-        const panel = event.api.getPanel(id);
-        if (panel) {
-          event.api.removePanel(panel);
-        }
-      }
-
-      try {
-        if (event.api.getEdgeGroup("top")) event.api.removeEdgeGroup("top");
-      } catch {}
-
-      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
-        const id = EDGE_GROUP_IDS[direction];
-        if (!event.api.groups.some((g) => g.id === id)) {
-          try {
-            event.api.addEdgeGroup(direction, { id, collapsed: true });
-          } catch {}
-        }
-      }
-
-      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
-        const id = EDGE_GROUP_IDS[direction];
-        try {
-          const group = event.api.groups.find((g) => g.id === id);
-          event.api.setEdgeGroupVisible(direction, !!group && group.panels.length > 0);
-        } catch {}
-      }
-
-      // Guard: if a required panel is removed (edge-case drag, API call, etc.)
-      // re-add it immediately so it can't be lost.
-      event.api.onDidRemovePanel((panel) => {
-        const id = panel.id;
-        if (
-          (REQUIRED_PANEL_IDS as readonly string[]).includes(id) &&
-          !hiddenPanelsRef.current.includes(id)
-        ) {
-          setTimeout(() => {
-            if (!event.api.getPanel(id) && !hiddenPanelsRef.current.includes(id)) {
-              addMissingPanel(event.api, id);
-            }
-          }, 0);
-        }
-      });
-
-      // Initialize the structural fingerprint from the just-loaded layout
-      // so the first real structural change can be detected.
-      {
-        const initJson = stripPanelParams(event.api.toJSON() as unknown as Record<string, unknown>);
-        lastStructureRef.current = getStructuralFingerprint(initJson);
-      }
-
-      // Restore the initial workspace's saved state: per-group active
-      // tabs first, then the maximize. ORDER MATTERS (same constraint
-      // as the workspace-switch useEffect below): `setActive()` on a
-      // panel inside a non-maximized group implicitly exits any
-      // existing maximize, so doing it after `applyMaximizedGroupToApi`
-      // would silently undo the maximize. Doing setActive first means
-      // every group ends up on the correct tab; the final
-      // `applyMaximizedGroupToApi` then re-applies the maximize over
-      // the top.
-      //
-      // Without this initial-mount setActive pass the workspace-switch
-      // useEffect doesn't restore per-group active tabs on the FIRST
-      // page load — that effect early-returns while `initializedRef`
-      // is still `false`, and never re-fires because `activeWorkspaceId`
-      // didn't change. Invariant: on first mount, every group's active
-      // tab must be applied here (not deferred to the switch effect),
-      // otherwise a hidden group keeps whatever tab the default layout
-      // left it on and the user sees the wrong tab after exiting
-      // maximize. Has to happen AFTER `fromJSON` + the required-panel
-      // reconciliation above so the target panels actually exist in the
-      // dockview by the time we ask to activate them.
-      const initialActiveState = loadActiveState(initialWorkspaceId);
-      if (initialActiveState) {
-        applyGroupActiveViewsToApi(event.api, initialActiveState);
-      }
-      if (initialActiveState?.maximizedGroup) {
-        applyMaximizedGroupToApi(event.api, initialActiveState.maximizedGroup);
-        // The `onDidMaximizedGroupChange` listener is guarded out here
-        // (`initializedRef.current` is still false), so hide the edge
-        // panels explicitly for a reload that lands on a maximized tab.
-        // The edge-visibility reconciliation above already ran (edges
-        // visible from panel count); this hides them over the top.
-        applyMaximizeEdgeVisibility(event.api, true);
-      }
-
-      // Persist layout on changes. With a single dockview instance shared by
-      // all workspaces, there's no eviction dance — fromJSON is only called
-      // once at init, and onDidLayoutChange events after that are always
-      // user-driven structural edits or tab activations.
-      event.api.onDidLayoutChange(() => {
-        if (!initializedRef.current) return;
-        saveLayout(event.api, activeWorkspaceIdRef.current, lastStructureRef);
-      });
-
-      // `onDidLayoutChange` is NOT fired when the user enters or exits
-      // maximize on a group (dockview wires that event off a different
-      // emitter chain), so we listen explicitly. Without this, the
-      // maximize-state save lags behind by one structural event and
-      // toggling maximize alone wouldn't persist.
-      //
-      // CRITICAL: do NOT call `saveLayout` from here. `saveLayout`
-      // calls `api.toJSON()`, and `toJSON()` on a dockview with a
-      // maximized group internally toggles the maximize state (exits
-      // then re-enters) as part of its serialization dance. That
-      // re-entry fires another `onDidMaximizedGroupChange` event,
-      // which would re-trigger this listener and `saveLayout` again,
-      // producing an infinite event cascade. Instead, just patch the
-      // `maximizedGroup` field of the persisted active state — the
-      // rest of the layout JSON is unchanged by a max toggle and is
-      // already kept in sync by the `onDidLayoutChange` listener
-      // above.
-      event.api.onDidMaximizedGroupChange(
-        (e: { group?: { id?: string }; isMaximized?: boolean }) => {
-          if (!initializedRef.current) return;
-          // Suppress the spurious exit-then-reenter pair dockview fires
-          // from inside `toJSON()`. Without this guard the "re-enter"
-          // event would write the outgoing workspace's maximized group
-          // into the INCOMING workspace's localStorage entry — a real
-          // contamination bug the reviewer flagged in #491. Module-level
-          // flag is set by `saveLayout` for the synchronous duration of
-          // its `toJSON()` call.
-          if (inSaveLayoutToJSON) return;
-          // Collapse the edge panels while a group is maximized so the
-          // maximized tab gets the full area; re-derive them on exit. This
-          // is the hook for the Maximize/Restore button (which calls
-          // `api.maximize()` / `api.exitMaximized()` directly) and for
-          // workspace-switch-driven maximize changes. The initial-mount
-          // path is handled separately below because `initializedRef` is
-          // still false there and this listener is guarded out.
-          applyMaximizeEdgeVisibility(event.api, !!e.isMaximized, containerRef.current);
-          // Synchronously (same task, same style recalc as dockview's own
-          // hide writes) re-anchor the views the maximize just hid, so the
-          // in-flight tween collapses them in place instead of sweeping
-          // them across the maximized group. See anchorHiddenGridViews.
-          if (e.isMaximized && containerRef.current) {
-            anchorHiddenGridViews(containerRef.current);
-          }
-          const workspaceId = activeWorkspaceIdRef.current;
-          if (!workspaceId) return;
-          // Defensive: dockview's event payload types both `group` and
-          // `group.id` as optional. If a future version (or an edge case
-          // during init) ever fires `isMaximized: true` without a group
-          // id, we'd silently overwrite the saved state with `undefined`
-          // and lose the user's maximize. Skip rather than corrupt.
-          if (e.isMaximized && !e.group?.id) return;
-          try {
-            const current = loadActiveState(workspaceId) ?? { groups: {} };
-            const nextMax = e.isMaximized ? e.group?.id : undefined;
-            if (current.maximizedGroup === nextMax) return;
-            current.maximizedGroup = nextMax;
-            localStorage.setItem(
-              `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
-              JSON.stringify(current),
-            );
-          } catch {
-            // Best-effort persistence
-          }
-        },
-      );
-
-      initializedRef.current = true;
-    },
-    [buildDefaultLayout, addMissingPanel],
-  );
-
-  // ---------------------------------------------------------------------
-  // Synchronous layout on container resize
-  // ---------------------------------------------------------------------
-
-  // dockview's built-in resize handling is deferred by one animation frame,
-  // which makes the grid visibly trail the panel edge during the sidebar
-  // toggle tween and sash drags — see attachSyncLayout. `apiRef` is set by
-  // `onReady` during DockviewReact's mount, which runs before this parent
-  // effect, so the api is available on first pass. The observer's initial
-  // notification also reconciles any mount-time container/api size mismatch
-  // (this replaced a one-shot rAF layout-sync effect that did only that).
-  useEffect(() => {
-    const el = containerRef.current;
-    const api = apiRef.current;
-    if (!el || !api) return;
-    return attachSyncLayout(el, api);
-  }, []);
-
-  // ---------------------------------------------------------------------
-  // Reactive: badge update on diff count change
-  // ---------------------------------------------------------------------
-
-  useEffect(() => {
-    const panel = apiRef.current?.getPanel("changes");
-    if (!panel) return;
-    panel.api.updateParameters({ badge: diffFileCount });
-  }, [diffFileCount]);
-
-  // ---------------------------------------------------------------------
-  // Reactive: persist active-tab state on workspace switch
-  // ---------------------------------------------------------------------
-
-  // When the URL changes to a different workspace, dockview's tab state
-  // doesn't automatically swap — we apply the previously-saved active tab
-  // state for the new workspace.
-  //
-  // CRITICAL: only call `setActive()` for panels that are NOT already active
-  // AND that belong to a tab group with siblings. Every `setActive()` call
-  // triggers a dockview focus dance: dockview tears down the previously
-  // active panel content, mounts the new one, and calls .focus() on the
-  // new panel's content area WITHOUT `preventScroll`. Calling it on an
-  // already-active panel in the center group re-focuses its content and can
-  // jump its scroll position. Skipping these no-ops keeps the user's
-  // keyboard focus + scroll intact when they navigate back to a
-  // previously-visited workspace.
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    const api = apiRef.current;
-    if (!api || !activeWorkspaceId) return;
-    const activeState = loadActiveState(activeWorkspaceId);
-    // ORDER MATTERS: restore per-group active tabs FIRST, then apply
-    // the saved maximize state. Doing it the other way around causes
-    // two correctness problems:
-    //
-    //   - `setActive()` on a panel inside a group that's NOT the
-    //     currently-maximized one implicitly exits the maximize so the
-    //     group can come to the foreground. If we'd just applied max,
-    //     that exit immediately undoes it.
-    //   - Skipping `setActive` for non-maximized groups (the obvious
-    //     workaround) is also wrong: those groups would silently
-    //     inherit whatever active tab the PREVIOUS workspace left in
-    //     the shared dockview, so when the user later exits maximize
-    //     they'd see stale tabs.
-    //
-    // Running setActive first means every group ends up on the correct
-    // tab for the incoming workspace. Any intermediate maximize-exit
-    // side effects then get overwritten by the final
-    // `applyMaximizedGroupToApi` call below, which fires its own
-    // `onDidMaximizedGroupChange` event so the persisted state ends up
-    // accurate.
-    if (activeState) {
-      // Intentionally do NOT activate `activeState.activeGroup` here.
-      // The previous code activated the first panel of the saved active
-      // group to focus that group, which re-focused that group's content
-      // and could reset its scroll. The helper skips no-op activations +
-      // single-panel groups for the same reason.
-      applyGroupActiveViewsToApi(api, activeState);
-    }
-    // Apply (or clear) the maximize last. Even when the workspace has
-    // no saved state we still need to clear any maximize carried over
-    // from the workspace we just left — otherwise switching A
-    // (maximized) → B (no state) would leave B rendered under A's
-    // maximize overlay.
-    //
-    // When this is about to EXIT a maximize (switching out of a maximized
-    // workspace), the exit animates via the onDidMaximizedGroupChange
-    // listener — commit the hidden views' parked positions first so the
-    // tween starts from the correct edge.
-    if (api.hasMaximizedGroup()) {
-      prepareMaximizeRestoreAnimation(containerRef.current);
-    }
-    applyMaximizedGroupToApi(api, activeState?.maximizedGroup);
-    // Keep the edge panels in sync with the incoming workspace's maximize
-    // state deterministically. When `applyMaximizedGroupToApi` actually
-    // changes the maximize the listener above also fires, but it's a no-op
-    // when the state is unchanged — and `applyMaximizeEdgeVisibility` is
-    // idempotent, so calling it here is safe either way.
-    applyMaximizeEdgeVisibility(api, !!activeState?.maximizedGroup);
-  }, [activeWorkspaceId]);
-
-  // ---------------------------------------------------------------------
-  // React to hiddenPanels changes
-  // ---------------------------------------------------------------------
-
-  const prevHiddenRef = useRef<string[]>(hiddenPanels);
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    const prev = prevHiddenRef.current;
-    prevHiddenRef.current = hiddenPanels;
-
-    const nowHidden = hiddenPanels.filter((id) => !prev.includes(id));
-    const nowShown = prev.filter((id) => !hiddenPanels.includes(id));
-
-    for (const id of nowHidden) {
-      const panel = api.getPanel(id);
-      if (panel) {
-        api.removePanel(panel);
-      }
-    }
-
-    for (const id of nowShown) {
-      if (!api.getPanel(id)) {
-        addMissingPanel(api, id);
-      }
-    }
-  }, [hiddenPanels, addMissingPanel]);
-
-  // ---------------------------------------------------------------------
-  // Edge group drag visibility
-  // ---------------------------------------------------------------------
-
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-
-    let isDragging = false;
-
-    const refresh = () => {
-      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
-        const id = EDGE_GROUP_IDS[direction];
-        const group = api.groups.find((g) => g.id === id);
-        if (!group) continue;
-        const isEmpty = group.panels.length === 0;
-        try {
-          api.setEdgeGroupVisible(direction, isDragging || !isEmpty);
-        } catch {}
-      }
-    };
-
-    const startDrag = () => {
-      isDragging = true;
-      refresh();
-    };
-    const endDrag = () => {
-      isDragging = false;
-      refresh();
-    };
-
-    refresh();
-
-    const d1 = api.onWillDragPanel(startDrag);
-    const d2 = api.onWillDragGroup(startDrag);
-    const d3 = api.onDidMovePanel(endDrag);
-    const d4 = api.onDidRemovePanel(endDrag);
-
-    const onDragEndNative = () => endDrag();
-    document.addEventListener("drop", onDragEndNative, true);
-    document.addEventListener("dragend", onDragEndNative, true);
-
-    return () => {
-      d1.dispose();
-      d2.dispose();
-      d3.dispose();
-      d4.dispose();
-      document.removeEventListener("drop", onDragEndNative, true);
-      document.removeEventListener("dragend", onDragEndNative, true);
-    };
-  }, []);
-
-  // ---------------------------------------------------------------------
-  // Hide all browser webviews when a dialog is open (active workspace only)
-  // ---------------------------------------------------------------------
-
+  // Hide all browser webviews (desktop) while a dialog is open (active ws only).
   const toolbarDialogOpen = useAnyToolbarDialogOpen();
   useEffect(() => {
-    if (!isDesktop) return;
-    if (!activeWorkspaceId) return;
+    if (!isDesktop || !activeWorkspaceId) return;
     const isDialogOpen =
       quickOpenOpen ||
       searchFilesOpen ||
@@ -1913,12 +540,15 @@ export function SharedDockviewLayout() {
       toolbarDialogOpen;
 
     if (isDialogOpen) {
-      desktopInvoke("browser_hide_all_for_workspace", {
-        workspaceId: activeWorkspaceId,
-      }).catch(() => {});
+      desktopInvoke("browser_hide_all_for_workspace", { workspaceId: activeWorkspaceId }).catch(
+        () => {},
+      );
     } else {
-      const browserPanel = apiRef.current?.getPanel("browser");
-      if (browserPanel?.api.isActive) {
+      const api = getWorkspaceDockviewApi(activeWorkspaceId);
+      const anyBrowserActive = api?.panels.some(
+        (p) => p.api.component === "browser" && p.api.isActive,
+      );
+      if (anyBrowserActive) {
         desktopInvoke("browser_show_all_for_workspace", {
           workspaceId: activeWorkspaceId,
         }).catch(() => {});
@@ -1939,23 +569,18 @@ export function SharedDockviewLayout() {
 
   return (
     <>
-      {/* `absolute inset-0` so we OVERLAY the AppShell's relative div instead
-        of stacking in normal flow next to the <Outlet /> sibling (which
-        itself renders an empty `<div className="h-full">` on desktop for
-        the workspace route). The old DockviewInstanceManager used the same
-        trick — without it, the dockview ends up partly behind the title
-        bar because two `h-full` siblings stack vertically and the second
-        one gets clipped by the parent's overflow-hidden. */}
-      <div ref={containerRef} className="absolute inset-0">
-        <DockviewReact
-          theme={bandTheme}
-          className="h-full"
-          components={components}
-          tabComponents={tabComponents}
-          defaultTabComponent={DefaultTab}
-          rightHeaderActionsComponent={MainGroupRightActions}
-          onReady={onReady}
-        />
+      {/* `absolute inset-0` so we OVERLAY the AppShell's relative div instead of
+        stacking in normal flow next to the <Outlet /> sibling. */}
+      <div className="absolute inset-0">
+        <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage />}>
+          {(workspaceId, wsActive) => (
+            <WorkspaceCenterDockview
+              workspaceId={workspaceId}
+              visible={wsActive}
+              wsActive={wsActive}
+            />
+          )}
+        </MultiWorkspacePanelHost>
       </div>
 
       <QuickOpenDialog

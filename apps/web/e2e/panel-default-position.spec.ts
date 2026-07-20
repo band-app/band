@@ -208,51 +208,57 @@ async function assertSeededPanelInCentralArea(
 // Tests
 // ---------------------------------------------------------------------------
 
-test.describe("Panel default position (regression: edge-group leak)", () => {
-  test("Chat container's default panel lands in a central (grid) group, not an edge group", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. This spec asserts
+// the old per-container inner-dockview persistence model (chatLayout.get /
+// terminalLayout.get via readInnerLayout) and the edge-group-leak behaviour of
+// those inner dockviews. The unified center dockview persists to localStorage
+// (band:dockview-layout-v8:<id>) with no server-side projection to assert on.
+test.describe
+  .skip("Panel default position (regression: edge-group leak)", () => {
+    test("Chat container's default panel lands in a central (grid) group, not an edge group", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+      await workspacePage.goto(WORKSPACE);
+      await workspacePage.waitForReady();
 
-    // Positive anchor: the default chat tab is visible. This proves
-    // the chat container's `onReady` has actually run — without it the
-    // `chatLayout.get` poll below could pass simply because nothing
-    // was ever persisted.
-    await expect(workspacePage.chatTabVisibilityMarker(WORKSPACE, true)).toBeVisible();
+      // Positive anchor: the default chat tab is visible. This proves
+      // the chat container's `onReady` has actually run — without it the
+      // `chatLayout.get` poll below could pass simply because nothing
+      // was ever persisted.
+      await expect(workspacePage.chatTabVisibilityMarker(WORKSPACE, true)).toBeVisible();
 
-    await assertSeededPanelInCentralArea(workspacePage, "chat", WORKSPACE);
+      await assertSeededPanelInCentralArea(workspacePage, "chat", WORKSPACE);
+    });
+
+    test("Terminal container's default panel lands in a central (grid) group, not an edge group", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+
+      await workspacePage.goto(WORKSPACE);
+      await workspacePage.waitForReady();
+
+      // Activate the outer Terminal tab so the inner
+      // `DockviewTerminalContainer` mounts and its `onReady` runs the
+      // `seedFromConfigOrDefault` async path that the bug originated in.
+      await workspacePage.tab("terminal").click();
+
+      // Positive anchor: the default terminal tab is visible. Confirms
+      // the inner container's seed path actually ran AND the tab is
+      // showing in the central area (a panel in a collapsed edge group
+      // resolves to a `visible-true` test id, since the React component
+      // still sees `parentVisible && tabActive`, but the dockview wrapper
+      // hides it — so this also doubles as a coarse pre-check of the
+      // regression assertion below).
+      await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE, true)).toBeVisible();
+
+      await assertSeededPanelInCentralArea(workspacePage, "terminal", WORKSPACE);
+    });
+
+    // Browser container test deliberately omitted — see the
+    // "Out of scope: browser container" section of the file docstring
+    // for the rationale and the migration path when desktop e2e
+    // coverage lands.
   });
-
-  test("Terminal container's default panel lands in a central (grid) group, not an edge group", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
-
-    // Activate the outer Terminal tab so the inner
-    // `DockviewTerminalContainer` mounts and its `onReady` runs the
-    // `seedFromConfigOrDefault` async path that the bug originated in.
-    await workspacePage.tab("terminal").click();
-
-    // Positive anchor: the default terminal tab is visible. Confirms
-    // the inner container's seed path actually ran AND the tab is
-    // showing in the central area (a panel in a collapsed edge group
-    // resolves to a `visible-true` test id, since the React component
-    // still sees `parentVisible && tabActive`, but the dockview wrapper
-    // hides it — so this also doubles as a coarse pre-check of the
-    // regression assertion below).
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE, true)).toBeVisible();
-
-    await assertSeededPanelInCentralArea(workspacePage, "terminal", WORKSPACE);
-  });
-
-  // Browser container test deliberately omitted — see the
-  // "Out of scope: browser container" section of the file docstring
-  // for the rationale and the migration path when desktop e2e
-  // coverage lands.
-});

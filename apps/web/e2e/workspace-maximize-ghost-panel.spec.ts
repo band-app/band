@@ -91,43 +91,49 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Workspace maximize ghost panel (#490 maximize-restore regression)", () => {
-  test("client-side switch back into a maximized workspace re-lays the inner terminal dockview to the full maximized width", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The ghost-panel
+// bug lived in the INNER terminal dockview's stale split width; the unified
+// center dockview has no inner dockviews, and readToolbarRightGap now measures
+// the single grid-group toolbar rather than a per-container inner toolbar, so
+// the geometric assertion no longer maps to a source-side behaviour.
+test.describe
+  .skip("Workspace maximize ghost panel (#490 maximize-restore regression)", () => {
+    test("client-side switch back into a maximized workspace re-lays the inner terminal dockview to the full maximized width", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    // Workspace A: bring the Terminal tab forward and maximize its group
-    // (index 1 — the right group of the default layout; index 0 is chat).
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await workspacePage.activateTab("terminal");
-    await workspacePage.maximizePanel(1);
-    await expect(workspacePage.restoreButton).toBeVisible();
+      // Workspace A: bring the Terminal tab forward and maximize its group
+      // (index 1 — the right group of the default layout; index 0 is chat).
+      await workspacePage.goto(WORKSPACE_A);
+      await workspacePage.waitForReady();
+      await workspacePage.activateTab("terminal");
+      await workspacePage.maximizePanel(1);
+      await expect(workspacePage.restoreButton).toBeVisible();
 
-    // Positive anchor for the geometry probe: with the group maximized,
-    // the inner terminal toolbar must already hug the viewport's right
-    // edge. Also proves the probe measures what we think it measures.
-    await expect
-      .poll(() => workspacePage.readToolbarRightGap(WORKSPACE_A, "terminal"))
-      .toBeLessThan(MAX_TOOLBAR_RIGHT_GAP_PX);
+      // Positive anchor for the geometry probe: with the group maximized,
+      // the inner terminal toolbar must already hug the viewport's right
+      // edge. Also proves the probe measures what we think it measures.
+      await expect
+        .poll(() => workspacePage.readToolbarRightGap(WORKSPACE_A, "terminal"))
+        .toBeLessThan(MAX_TOOLBAR_RIGHT_GAP_PX);
 
-    // Client-side switch to B via the sidebar card — NOT a `goto`. A hard
-    // navigation remounts the React tree and takes the onReady restore
-    // path, which never had this bug; the sidebar click keeps A's panels
-    // cached and drives the workspace-switch effect under test.
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.maximizeButtons.first()).toBeVisible();
-    await expect(workspacePage.restoreButton).not.toBeVisible();
+      // Client-side switch to B via the sidebar card — NOT a `goto`. A hard
+      // navigation remounts the React tree and takes the onReady restore
+      // path, which never had this bug; the sidebar click keeps A's panels
+      // cached and drives the workspace-switch effect under test.
+      await workspacePage.switchWorkspace(WORKSPACE_B);
+      await expect(workspacePage.maximizeButtons.first()).toBeVisible();
+      await expect(workspacePage.restoreButton).not.toBeVisible();
 
-    // Back to A the same way. The maximize must be re-applied…
-    await workspacePage.switchWorkspace(WORKSPACE_A);
-    await expect(workspacePage.restoreButton).toBeVisible();
+      // Back to A the same way. The maximize must be re-applied…
+      await workspacePage.switchWorkspace(WORKSPACE_A);
+      await expect(workspacePage.restoreButton).toBeVisible();
 
-    // …and the inner terminal dockview must be re-laid to the maximized
-    // width: no half-width tab strip, no blank ghost region on the right.
-    await expect
-      .poll(() => workspacePage.readToolbarRightGap(WORKSPACE_A, "terminal"))
-      .toBeLessThan(MAX_TOOLBAR_RIGHT_GAP_PX);
+      // …and the inner terminal dockview must be re-laid to the maximized
+      // width: no half-width tab strip, no blank ghost region on the right.
+      await expect
+        .poll(() => workspacePage.readToolbarRightGap(WORKSPACE_A, "terminal"))
+        .toBeLessThan(MAX_TOOLBAR_RIGHT_GAP_PX);
+    });
   });
-});

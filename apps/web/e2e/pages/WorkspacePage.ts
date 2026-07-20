@@ -15,8 +15,14 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
-/** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
- *  state (matches `ACTIVE_STATE_KEY_PREFIX` in the source). */
+/** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
+ *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
+ *  The unified `WorkspaceCenterDockview` (#643 Phase 1) removed it: active
+ *  tab/group state now lives inside the serialized dockview blob under
+ *  `band:dockview-layout-v8:<workspaceId>`, with no separate active-state
+ *  object and no `maximizedGroup` field. Retained only so the (skipped)
+ *  maximize/persistence specs that still reference the active-state helpers
+ *  keep typechecking — see #643 Phase 5. */
 const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
 
 export interface SavedActiveState {
@@ -131,17 +137,18 @@ export class WorkspacePage {
    *  even when both are mounted (active + cached) at once. */
   chatTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
     return this.cachedPanelEntries(workspaceId).getByTestId(
-      `dockview-chat-tab__visible-${visible ? "true" : "false"}`,
+      `center-chat-leaf__visible-${visible ? "true" : "false"}`,
     );
   }
 
   /** Locator for the terminal tab panel's visibility marker inside a
    *  specific workspace's cached panel host (issue #469). Counterpart of
    *  `chatTabVisibilityMarker` for the terminal container — see that
-   *  method's doc comment for the rationale. */
+   *  method's doc comment for the rationale. The unified center dockview's
+   *  terminal leaf tags its wrapper `center-term-leaf__visible-*`. */
   terminalTabVisibilityMarker(workspaceId: string, visible: boolean): Locator {
     return this.cachedPanelEntries(workspaceId).getByTestId(
-      `dockview-terminal-tab__visible-${visible ? "true" : "false"}`,
+      `center-term-leaf__visible-${visible ? "true" : "false"}`,
     );
   }
 
@@ -606,127 +613,166 @@ export class WorkspacePage {
     });
   }
 
-  /** Locate a tab in the OUTER shared-dockview tab strip by its panel
-   *  component id ("chat" | "changes" | "files" | "terminal" |
-   *  "browser"). `data-testid` is set by `DefaultTab` / `BadgeTab` in
-   *  `SharedDockviewLayout.tsx`, scoped to outer tabs only, so this
-   *  locator never collides with nested dockview tab strips (which
-   *  render their own per-instance tab components and never carry
-   *  `workspace__tab--*` testids). */
+  /** Testid (or testid PREFIX) that identifies a tab of the given leaf kind
+   *  in the unified center dockview (`WorkspaceCenterDockview.tsx`). The two
+   *  singletons carry stable ids (`center-tab--files` / `center-tab--changes`);
+   *  the per-instance kinds carry an instance-suffixed id
+   *  (`center-chat-tab--<id>` / `center-term-tab--<id>` /
+   *  `center-browser-tab--<id>`), so callers that mean "the first tab of that
+   *  kind" match the prefix with a regex + `.first()`. */
+  private centerTabTestidPrefix(
+    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
+  ): string {
+    switch (panelComponent) {
+      case "files":
+        return "center-tab--files";
+      case "changes":
+        return "center-tab--changes";
+      case "chat":
+        return "center-chat-tab--";
+      case "terminal":
+        return "center-term-tab--";
+      case "browser":
+        return "center-browser-tab--";
+    }
+  }
+
+  /** Locate a tab in the center dockview's tab strip by leaf kind. The Files /
+   *  Changes singletons resolve to their stable testid; the per-instance kinds
+   *  (chat / terminal / browser) have no single stable id, so this matches the
+   *  `center-<kind>-tab--` testid PREFIX and takes `.first()` to mean "the
+   *  first tab of that kind" — the workspaces these tests seed have one tab per
+   *  kind. `data-testid` values are set in `WorkspaceCenterDockview.tsx`. */
   tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
-    return this.page.getByTestId(`workspace__tab--${panelComponent}`);
+    if (panelComponent === "files" || panelComponent === "changes") {
+      return this.page.getByTestId(this.centerTabTestidPrefix(panelComponent));
+    }
+    // Anchor the regex to the start so `center-term-tab--` can't match
+    // `center-term-tab__context-menu` etc.
+    return this.page
+      .getByTestId(new RegExp(`^${this.centerTabTestidPrefix(panelComponent)}`))
+      .first();
   }
 
   /** Locate the dockview-owned `.dv-tab` wrapper that contains the named
-   *  outer tab. The `data-testid` we set in `DefaultTab` / `BadgeTab` lives
-   *  on the inner `.dv-default-tab` element; dockview wraps it with its
-   *  own `.dv-tab` parent, which gets `dv-active-tab` added/removed by
-   *  the library as the user (or our code) switches the active panel in
-   *  the group. Using this wrapper is the fastest deterministic signal
-   *  that a specific tab is the active view in its group — much faster
-   *  than waiting for the panel's content (e.g. xterm) to finish
-   *  booting, and it isn't affected by xterm's offscreen helper textarea
-   *  visibility quirks. */
+   *  center tab. The `data-testid` we set on each tab lives on the inner
+   *  `.dv-default-tab` element; dockview wraps it with its own `.dv-tab`
+   *  parent, which gets `dv-active-tab` added/removed by the library as the
+   *  active panel in the group changes. Using this wrapper is the fastest
+   *  deterministic signal that a specific tab is the active view in its group —
+   *  much faster than waiting for the panel's content (e.g. xterm) to boot, and
+   *  it isn't affected by xterm's offscreen helper textarea visibility quirks.
+   *
+   *  For the Files / Changes singletons the testid is exact; for the
+   *  per-instance kinds we match the testid PREFIX via CSS attribute-prefix
+   *  (`^=`) and take `.first()` — mirroring `tab(...)`. */
   tabContainer(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
-    // Anchor on our own testid (the one on `.dv-default-tab`) and walk
-    // up to dockview's `.dv-tab` wrapper via the `:has(...)` pseudo —
-    // a Playwright-supported CSS selector that picks the parent
-    // containing a descendant matching the inner selector. Keeps the
-    // locator scoped to outer tabs only (nested dockviews use their
-    // own per-instance tab renderers and never carry
-    // `workspace__tab--*` testids).
-    return this.page.locator(`.dv-tab:has([data-testid="workspace__tab--${panelComponent}"])`);
+    const prefix = this.centerTabTestidPrefix(panelComponent);
+    if (panelComponent === "files" || panelComponent === "changes") {
+      return this.page.locator(`.dv-tab:has([data-testid="${prefix}"])`);
+    }
+    return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // Inner-dockview header toolbar actions ("+" / split). These live in each
-  // inner container's `rightHeaderActionsComponent` (`RightHeaderActions` in
-  // DockviewChatContainer.tsx etc.). The buttons carry no visible text — the
-  // accessible name comes from the `title` attribute ("New chat tab",
-  // "Split right", "Split down"), so `getByRole("button", { name })` resolves
-  // them. We scope to a workspace's cached panel host and filter to the
-  // visible button so the locator picks the active workspace's CENTRAL group
-  // toolbar, not the collapsed edge groups' hidden buttons nor the OTHER
-  // (hidden) cached workspace's chat header. This is the surface the
-  // wrong-workspace-panel regression test drives.
+  // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
+  // close (×).
+  //
+  // The unified `WorkspaceCenterDockview` no longer has per-container inner
+  // dockviews with their own split/+ toolbars. Every grid group's right
+  // header renders a single `+` menu button (`workspace-center__new-tab-button`)
+  // that opens a dropdown (`workspace-center__new-tab-menu`) with
+  // `--term` / `--chat` / `--browser` items. Split is keyboard-only now
+  // (Cmd/Ctrl+D / Shift+D) — there is NO split button.
+  //
+  // Add-tab / split helpers below are scoped to a workspace's cached panel
+  // host so they target the active workspace's toolbar, not another mounted
+  // workspace's. `.filter({ visible: true })` picks the visible grid group's
+  // toolbar (edge groups render a "+"-only, hidden row).
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The central (grid) group's header toolbar for a given inner container in
-   *  a workspace's panel host. Each container's `RightHeaderActions` tags its
-   *  GRID-group toolbar with `dockview-<container>__toolbar` (edge groups get
-   *  no testid), so `getByTestId` resolves only the central action row — never
-   *  the collapsed edge groups' "+"-only rows whose buttons can overlap
-   *  content and steal a click. The container-specific testid also keeps the
-   *  chat toolbar distinct from the terminal toolbar when both inner dockviews
-   *  are visible at once (default outer layout shows Chat in one group and the
-   *  active right-group tab in another). Scoped to the workspace's cached
-   *  entry + filtered to visible so it never resolves the OTHER (hidden)
-   *  workspace's header. */
-  private centralToolbar(workspaceId: string, container: "chat" | "terminal" | "browser"): Locator {
+  /** The visible "+" new-tab menu button for a workspace's center dockview. */
+  private newTabButton(workspaceId: string): Locator {
     return this.cachedPanelEntries(workspaceId)
-      .getByTestId(`dockview-${container}__toolbar`)
+      .getByTestId("workspace-center__new-tab-button")
       .filter({ visible: true });
   }
 
-  /** The visible "New chat tab" ("+") button for a workspace's chat host. */
+  /** Open the "+" new-tab menu and click the item for `kind`. The menu content
+   *  (`workspace-center__new-tab-menu`) is portalled to the body, so the item
+   *  is located on the page rather than under the cached host. */
+  private async addLeafViaMenu(
+    workspaceId: string,
+    kind: "term" | "chat" | "browser",
+  ): Promise<void> {
+    await this.newTabButton(workspaceId).first().click();
+    const menu = this.page.getByTestId("workspace-center__new-tab-menu");
+    await menu.waitFor({ state: "visible" });
+    await menu.getByTestId(`workspace-center__new-tab--${kind}`).click();
+  }
+
+  /** The visible "+" new-tab menu button for a workspace's chat host.
+   *  Retained for `expect(...).toBeVisible()` anchors; the add flow goes
+   *  through `clickChatAddTab`. */
   chatAddTabButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "New chat tab" });
+    return this.newTabButton(workspaceId);
   }
 
-  /** The visible chat "Split right" button for a workspace's chat host. */
-  chatSplitRightButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "chat").getByRole("button", { name: "Split right" });
-  }
-
-  /** The visible "New terminal" ("+") button for a workspace's terminal host. */
+  /** The visible "+" new-tab menu button for a workspace's terminal host. */
   terminalAddTabButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
-      name: "New terminal",
-    });
+    return this.newTabButton(workspaceId);
   }
 
-  /** The visible terminal "Split right" button for a workspace's terminal host. */
-  terminalSplitRightButton(workspaceId: string): Locator {
-    return this.centralToolbar(workspaceId, "terminal").getByRole("button", {
-      name: "Split right",
-    });
-  }
-
-  /** Click the chat "+" (add tab) button in the given workspace's host. */
+  /** Add a new chat leaf via the "+" menu in the given workspace's dockview. */
   async clickChatAddTab(workspaceId: string): Promise<void> {
-    await test.step(`Click chat "+" in workspace ${workspaceId}`, async () => {
-      await this.chatAddTabButton(workspaceId).first().click();
+    await test.step(`Add a chat via "+" menu in workspace ${workspaceId}`, async () => {
+      await this.addLeafViaMenu(workspaceId, "chat");
     });
   }
 
-  /** Click the chat "Split right" button in the given workspace's host. */
-  async clickChatSplitRight(workspaceId: string): Promise<void> {
-    await test.step(`Click chat "Split right" in workspace ${workspaceId}`, async () => {
-      await this.chatSplitRightButton(workspaceId).first().click();
-    });
-  }
-
-  /** Click the terminal "+" (add tab) button in the given workspace's host. */
+  /** Add a new terminal leaf via the "+" menu in the given workspace's dockview. */
   async clickTerminalAddTab(workspaceId: string): Promise<void> {
-    await test.step(`Click terminal "+" in workspace ${workspaceId}`, async () => {
-      await this.terminalAddTabButton(workspaceId).first().click();
+    await test.step(`Add a terminal via "+" menu in workspace ${workspaceId}`, async () => {
+      await this.addLeafViaMenu(workspaceId, "term");
     });
   }
 
-  /** Click the terminal "Split right" button in the given workspace's host. */
-  async clickTerminalSplitRight(workspaceId: string): Promise<void> {
-    await test.step(`Click terminal "Split right" in workspace ${workspaceId}`, async () => {
-      await this.terminalSplitRightButton(workspaceId).first().click();
-    });
+  // NOTE(#643 Phase 5): split has no toolbar button anymore — it's
+  // Cmd/Ctrl+D (right) / Shift+D (below) only. The helpers below are kept so
+  // the (skipped) split-dependent specs still typecheck; they throw if ever
+  // invoked. Re-point them to the keyboard split — or a future toolbar
+  // affordance — when those specs are reworked in Phase 5.
+
+  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
+  chatSplitRightButton(_workspaceId: string): Locator {
+    throw new Error("chatSplitRightButton: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5");
   }
 
-  /** Click the first terminal tab's "Close terminal" (×) button within the
-   *  given workspace's terminal host. The button is only rendered when a group
-   *  has more than one tab. Scoped to the workspace's cached entry (like the
-   *  sibling terminal-toolbar helpers) so it never targets another mounted
-   *  workspace's terminal. */
+  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
+  terminalSplitRightButton(_workspaceId: string): Locator {
+    throw new Error(
+      "terminalSplitRightButton: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5",
+    );
+  }
+
+  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
+  async clickChatSplitRight(_workspaceId: string): Promise<void> {
+    throw new Error("clickChatSplitRight: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5");
+  }
+
+  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
+  async clickTerminalSplitRight(_workspaceId: string): Promise<void> {
+    throw new Error(
+      "clickTerminalSplitRight: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5",
+    );
+  }
+
+  /** Close the active terminal tab via its per-tab "Close terminal" (×) button
+   *  in the given workspace's center dockview. Each `TerminalTab` renders the
+   *  button with `title="Close terminal"`; scoped to the workspace's cached
+   *  entry so it never targets another mounted workspace's terminal. */
   async closeTerminalTab(workspaceId: string): Promise<void> {
-    await test.step(`Close the first terminal tab in workspace ${workspaceId}`, async () => {
+    await test.step(`Close a terminal tab in workspace ${workspaceId}`, async () => {
       await this.cachedPanelEntries(workspaceId)
         .getByRole("button", { name: "Close terminal" })
         .first()
@@ -1072,16 +1118,18 @@ export class WorkspacePage {
     return this.workspaceCard(workspaceId).and(this.page.locator("[data-active]"));
   }
 
-  /** Activate the outer Terminal tab so the inner
-   *  `DockviewTerminalContainer` mounts and (on cold start) seeds a
-   *  default terminal panel, which boots a real PTY server-side. */
+  /** Activate the first Terminal leaf tab in the center dockview so its
+   *  `TerminalLeaf` becomes the active view and (on cold start) the default
+   *  terminal panel boots a real PTY server-side. */
   async openTerminalTab(): Promise<void> {
     await this.activateTab("terminal");
   }
 
-  /** Activate an outer shared-dockview tab by its panel component id. Wraps the
-   *  raw tab click in a `test.step` so spec bodies switch tabs through the page
-   *  object instead of touching the `tab(...)` locator directly. */
+  /** Activate a center-dockview tab by its leaf kind. For the Files / Changes
+   *  singletons this clicks the stable tab; for chat / terminal / browser it
+   *  clicks the FIRST tab of that kind (see `tab(...)`). Wraps the click in a
+   *  `test.step` so spec bodies switch tabs through the page object instead of
+   *  touching the `tab(...)` locator directly. */
   async activateTab(
     panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
   ): Promise<void> {
@@ -1578,20 +1626,27 @@ export class WorkspacePage {
    *  dockviews render their own `.dv-groupview`s but never carry
    *  `workspace__tab--*` testids, so this stays scoped to the outer layout. */
   groupContaining(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
-    return this.page.locator(
-      `.dv-groupview:has([data-testid="workspace__tab--${panelComponent}"])`,
-    );
+    const prefix = this.centerTabTestidPrefix(panelComponent);
+    // Files / Changes are exact testids; per-instance kinds are prefixes.
+    const attr =
+      panelComponent === "files" || panelComponent === "changes"
+        ? `[data-testid="${prefix}"]`
+        : `[data-testid^="${prefix}"]`;
+    return this.page.locator(`.dv-groupview:has(${attr})`);
   }
 
-  /** Maximize the outer group that hosts the named tab (rather than the Nth
-   *  group, which depends on the default layout's ordering). Each center group
+  /** Maximize the center group that hosts the named tab (rather than the Nth
+   *  group, which depends on the default layout's ordering). Each grid group
    *  renders exactly one Maximize/Restore toggle in its right header actions
-   *  (`MainGroupRightActions` in `SharedDockviewLayout.tsx`). */
+   *  (`RightHeaderActions` in `WorkspaceCenterDockview.tsx`). */
   async maximizeGroupContaining(
     panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
   ): Promise<void> {
     await test.step(`Maximize the group hosting the ${panelComponent} tab`, async () => {
-      await this.groupContaining(panelComponent).getByRole("button", { name: "Maximize" }).click();
+      await this.groupContaining(panelComponent)
+        .first()
+        .getByRole("button", { name: "Maximize" })
+        .click();
     });
   }
 
@@ -1663,9 +1718,18 @@ export class WorkspacePage {
    *  `null` while the toolbar has no box yet (callers poll). */
   async readToolbarRightGap(
     workspaceId: string,
-    container: "terminal" | "browser",
+    _container: "terminal" | "browser",
   ): Promise<number | null> {
-    const box = await this.centralToolbar(workspaceId, container).first().boundingBox();
+    // The unified center dockview has a single grid-group toolbar
+    // (`workspace-center__toolbar`) rather than per-container inner toolbars.
+    // Scoped to the workspace's cached host + filtered to visible so it
+    // resolves the active workspace's grid group. Only referenced by the
+    // (skipped) ghost-panel spec — see #643 Phase 5.
+    const box = await this.cachedPanelEntries(workspaceId)
+      .getByTestId("workspace-center__toolbar")
+      .filter({ visible: true })
+      .first()
+      .boundingBox();
     const viewport = this.page.viewportSize();
     if (!box || !viewport) return null;
     return viewport.width - (box.x + box.width);
@@ -1679,21 +1743,25 @@ export class WorkspacePage {
     return state?.groups[groupId];
   }
 
-  /** Seed the shared global dockview layout (`band:dockview-layout-v7`)
-   *  before the app mounts. Uses `addInitScript`, so it MUST run BEFORE
-   *  the first `goto` — the value is applied to `localStorage` ahead of
-   *  the page script, exactly like `installTerminalSocketInstrumentation`.
+  /** Seed a workspace's persisted center-dockview layout
+   *  (`band:dockview-layout-v8:<workspaceId>`) before the app mounts. Uses
+   *  `addInitScript`, so it MUST run BEFORE the first `goto` — the value is
+   *  applied to `localStorage` ahead of the page script, exactly like
+   *  `installTerminalSocketInstrumentation`.
    *
-   *  The empty default layout leaves all three edge groups collapsed and
-   *  empty (so they render at zero size and there's nothing to observe a
-   *  maximize collapsing). Seeding a layout that docks a panel into an
-   *  edge group is the only non-flaky way to start with a populated,
-   *  visible edge — dockview's edge docking is native HTML5 drag-and-drop,
-   *  which is unreliable to drive through Playwright. */
-  async seedGlobalLayout(layout: unknown): Promise<void> {
-    await this.page.addInitScript((serialized) => {
-      localStorage.setItem("band:dockview-layout-v7", serialized as string);
-    }, JSON.stringify(layout));
+   *  NOTE(#643 Phase 5): the layout model changed from the old global
+   *  `band:dockview-layout-v7` (5 fixed outer panels + edge groups) to a
+   *  per-workspace serialized dockview blob. This helper is only referenced by
+   *  the (skipped) `workspace-maximize-collapses-edges` spec, whose seed shape
+   *  still describes the legacy layout; re-author that seed against the v8
+   *  blob when the spec is reworked. */
+  async seedGlobalLayout(workspaceId: string, layout: unknown): Promise<void> {
+    await this.page.addInitScript(
+      ({ key, serialized }) => {
+        localStorage.setItem(key, serialized as string);
+      },
+      { key: `band:dockview-layout-v8:${workspaceId}`, serialized: JSON.stringify(layout) },
+    );
   }
 
   /** The dockview bottom edge-group container that is currently on-screen.
@@ -2319,34 +2387,35 @@ export class WorkspacePage {
 
   // ──────────────────────────────────────────────────────────────────────
   // Chat tab context menu ("Continue in terminal" / "Copy session ID").
-  // The tab header is a dockview-rendered `.dv-default-tab`; we tag it with
-  // `chat-tab__trigger--<chatId>` in `DockviewChatContainer.tsx`. chatIds
-  // are client-generated, so the locator matches the testid PREFIX and the
+  // In the unified center dockview each `ChatTab` header is a
+  // `.dv-default-tab` tagged `center-chat-tab--<chatId>`. chatIds are
+  // client-generated, so the locator matches the testid PREFIX and the
   // single-chat workspaces these tests use resolve to `.first()`.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The chat tab header (right-click target). The `data-testid` is
-   *  `chat-tab__trigger--<chatId>` where the chatId suffix is generated at
+   *  `center-chat-tab--<chatId>` where the chatId suffix is generated at
    *  runtime, so we match the stable testid PREFIX with a regex (testid-first
    *  locator priority) and take `.first()` — the workspaces these tests seed
-   *  have a single chat tab. */
+   *  have a single chat tab. Anchored to the start so it can't match the
+   *  `center-chat-tab__context-menu*` testids. */
   chatTabTrigger(): Locator {
-    return this.page.getByTestId(/^chat-tab__trigger--/).first();
+    return this.page.getByTestId(/^center-chat-tab--/).first();
   }
 
   /** The opened chat-tab context menu content (portalled to body). */
   get chatTabContextMenu(): Locator {
-    return this.page.getByTestId("chat-tab__context-menu");
+    return this.page.getByTestId("center-chat-tab__context-menu");
   }
 
   /** "Continue in terminal" item. */
   get continueInTerminalItem(): Locator {
-    return this.page.getByTestId("chat-tab__context-menu-item--continue-in-terminal");
+    return this.page.getByTestId("center-chat-tab__context-menu-item--continue-in-terminal");
   }
 
   /** "Copy session ID" item. */
   get copySessionIdItem(): Locator {
-    return this.page.getByTestId("chat-tab__context-menu-item--copy-session-id");
+    return this.page.getByTestId("center-chat-tab__context-menu-item--copy-session-id");
   }
 
   /** Right-click the chat tab header to open its context menu. */
@@ -2358,25 +2427,26 @@ export class WorkspacePage {
 
   // ──────────────────────────────────────────────────────────────────────
   // Terminal tab header context menu ("Copy terminal ID"). Mirrors the
-  // chat-tab surface above: the tab header carries a
-  // `terminal-tab__trigger--<terminalId>` testid whose suffix is generated
-  // at runtime, so we match the stable PREFIX with a regex and take
+  // chat-tab surface above: in the unified center dockview each `TerminalTab`
+  // header carries a `center-term-tab--<terminalId>` testid whose suffix is
+  // generated at runtime, so we match the stable PREFIX with a regex and take
   // `.first()` — the workspaces these tests seed have a single terminal tab.
   // ──────────────────────────────────────────────────────────────────────
 
-  /** The terminal tab header (right-click target). */
+  /** The terminal tab header (right-click target). Anchored to the start so
+   *  it can't match the `center-term-tab__context-menu*` testids. */
   terminalTabTrigger(): Locator {
-    return this.page.getByTestId(/^terminal-tab__trigger--/).first();
+    return this.page.getByTestId(/^center-term-tab--/).first();
   }
 
   /** The opened terminal-tab context menu content (portalled to body). */
   get terminalTabContextMenu(): Locator {
-    return this.page.getByTestId("terminal-tab__context-menu");
+    return this.page.getByTestId("center-term-tab__context-menu");
   }
 
   /** "Copy terminal ID" item. */
   get copyTerminalIdItem(): Locator {
-    return this.page.getByTestId("terminal-tab__context-menu-item--copy-terminal-id");
+    return this.page.getByTestId("center-term-tab__context-menu-item--copy-terminal-id");
   }
 
   /** Read the terminal id the app assigned to the (single) terminal in the

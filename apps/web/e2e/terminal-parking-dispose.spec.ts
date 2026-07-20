@@ -146,7 +146,11 @@ test.afterAll(async () => {
 });
 
 test.describe("Terminal parking: dispose triggers", () => {
-  test("closing a terminal tab disposes its cached instance", async ({ page }) => {
+  // TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. Needs a second
+  // terminal created via the removed "Split right" button and asserts on
+  // countTerminalPanels (server-side inner layout), which no longer projects
+  // the unified center dockview's localStorage layout.
+  test.skip("closing a terminal tab disposes its cached instance", async ({ page }) => {
     // Dedicated workspace — this test splits (mutating the layout), so it must
     // not share a workspace with the other tests.
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);

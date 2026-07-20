@@ -62,7 +62,9 @@ export class FileTreesPage {
     return this.page.getByTestId("changes-tree__copy-absolute-path");
   }
 
-  /** Activate the Files tab and wait for the given row to render. */
+  /** Activate the Files tab and wait for the given row to render. The Files
+   *  singleton tab carries the stable `center-tab--files` testid in the
+   *  unified center dockview (`WorkspaceCenterDockview.tsx`). */
   async openFilesTab(path: string): Promise<void> {
     await test.step("Open the Files tab", async () => {
       await this.workspace.tab("files").click();
@@ -71,7 +73,8 @@ export class FileTreesPage {
   }
 
   /** Activate the Changes tab and wait for the given row to render in the
-   *  changes sidebar tree. */
+   *  changes sidebar tree. The Changes singleton tab carries the stable
+   *  `center-tab--changes` testid in the unified center dockview. */
   async openChangesTab(path: string): Promise<void> {
     await test.step("Open the Changes tab", async () => {
       await this.workspace.tab("changes").click();

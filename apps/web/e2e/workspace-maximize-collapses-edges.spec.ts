@@ -165,30 +165,38 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Maximize collapses edge panels", () => {
-  test("maximizing a tab collapses the edge panel; restoring brings it back", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. This spec seeds
+// the removed global layout (band:dockview-layout-v7) with the legacy 5-panel
+// outer structure and asserts edge-group collapse. The unified center dockview
+// persists a per-workspace v8 blob and the edge-group affordance under test no
+// longer has a source-side projection here.
+test.describe
+  .skip("Maximize collapses edge panels", () => {
+    test("maximizing a tab collapses the edge panel; restoring brings it back", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    // Seed BEFORE navigating so the dockview reads the edge-populated
-    // layout on its onReady (addInitScript runs before the page script).
-    await workspacePage.seedGlobalLayout(LAYOUT_WITH_BOTTOM_EDGE_PANEL);
+      // Seed BEFORE navigating so the dockview reads the edge-populated
+      // layout on its onReady (addInitScript runs before the page script).
+      await workspacePage.seedGlobalLayout(WORKSPACE, LAYOUT_WITH_BOTTOM_EDGE_PANEL);
 
-    await workspacePage.goto(WORKSPACE);
-    await workspacePage.waitForReady();
+      await workspacePage.goto(WORKSPACE);
+      await workspacePage.waitForReady();
 
-    // The bottom edge panel is populated (terminal docked there) and
-    // therefore laid out on-screen at a non-zero size.
-    await expect(workspacePage.bottomEdgeGroup()).toHaveCount(1);
+      // The bottom edge panel is populated (terminal docked there) and
+      // therefore laid out on-screen at a non-zero size.
+      await expect(workspacePage.bottomEdgeGroup()).toHaveCount(1);
 
-    // Maximize a grid group. The edge panel must collapse to zero size so
-    // the maximized tab gets the full area.
-    await workspacePage.maximizePanel(0);
-    await expect(workspacePage.restoreButton).toBeVisible();
-    await expect(workspacePage.bottomEdgeGroup()).toHaveCount(0);
+      // Maximize a grid group. The edge panel must collapse to zero size so
+      // the maximized tab gets the full area.
+      await workspacePage.maximizePanel(0);
+      await expect(workspacePage.restoreButton).toBeVisible();
+      await expect(workspacePage.bottomEdgeGroup()).toHaveCount(0);
 
-    // Restore (un-maximize). The edge panel must come back.
-    await workspacePage.restorePanel();
-    await expect(workspacePage.maximizeButtons.first()).toBeVisible();
-    await expect(workspacePage.bottomEdgeGroup()).toHaveCount(1);
+      // Restore (un-maximize). The edge panel must come back.
+      await workspacePage.restorePanel();
+      await expect(workspacePage.maximizeButtons.first()).toBeVisible();
+      await expect(workspacePage.bottomEdgeGroup()).toHaveCount(1);
+    });
   });
-});

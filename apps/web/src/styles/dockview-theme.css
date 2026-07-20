@@ -128,6 +128,31 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * Unified center dockview (`dockview-center-tabs`): every tab is a fixed
+ * 120px-wide column (including padding via border-box) so the strip never
+ * reflows as titles change; the tab body truncates and shows the full title
+ * on hover. The active tab gets a 2px accent along the strip's bottom edge —
+ * an inset box-shadow (not a border on the tab body) so it overlaps the
+ * container's bottom border instead of floating above it.
+ * --------------------------------------------------------------------------- */
+.dockview-center-tabs .dv-tab {
+  width: 120px;
+  box-sizing: border-box;
+  padding-left: 0.5rem;
+  padding-right: 0.25rem;
+}
+.dockview-center-tabs
+  .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab,
+.dockview-center-tabs
+  .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 0 var(--primary);
+}
+
+/* ---------------------------------------------------------------------------
  * Nested chat tabs — smaller, tighter styling for the inner dockview
  * instance used for multi-chat tabs within the chat panel.
  * --------------------------------------------------------------------------- */

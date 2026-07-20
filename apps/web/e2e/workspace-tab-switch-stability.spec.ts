@@ -127,12 +127,10 @@ test.describe("Tab-switch stability (fix-tab-switch-resize)", () => {
     await workspacePage.goto(WORKSPACE);
     await workspacePage.waitForReady();
 
-    // Look up the OUTER Terminal / Files tabs via their
-    // `workspace__tab--*` testids (owned by `DefaultTab` in
-    // `SharedDockviewLayout.tsx`). Scoped to outer tabs only — nested
-    // dockview tab strips render their own renderers and never carry
-    // these testids — so the locators stay unambiguous even when the
-    // inner Terminal dockview is also displaying a "Terminal" tab.
+    // Look up the center-dockview Terminal / Files tabs via the page
+    // object's `tab(...)` helper. In the unified `WorkspaceCenterDockview`
+    // the Files tab is the `center-tab--files` singleton and the Terminal
+    // tab is the first `center-term-tab--<id>` leaf.
     const terminalTab = workspacePage.tab("terminal");
     const filesTab = workspacePage.tab("files");
 

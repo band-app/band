@@ -144,7 +144,11 @@ test.describe("Terminal parking: full-page navigation", () => {
       .toBe(true);
   });
 
-  test("adding a 2nd terminal, typing, then reloading preserves the active terminal's output", async ({
+  // TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The add-tab via
+  // the "+" menu is migrated, but this test asserts on countTerminalPanels
+  // (server-side inner layout via terminalLayout.get), which no longer projects
+  // the unified center dockview's localStorage layout (band:dockview-layout-v8).
+  test.skip("adding a 2nd terminal, typing, then reloading preserves the active terminal's output", async ({
     page,
   }) => {
     // Repro of a reported flow: open a workspace, add a 2nd terminal via the "+"
