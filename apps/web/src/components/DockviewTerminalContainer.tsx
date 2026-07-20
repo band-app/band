@@ -35,6 +35,7 @@ import {
 } from "../lib/dockview-section-actions";
 import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
+import { SplitCapabilityContext, useSplitCapability } from "./dockview-split-context";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR
@@ -321,6 +322,9 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // edge group; only the split buttons are hidden. Defaults to "grid"
   // when `location` is missing (older dockview versions / tests).
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  // On mobile (allowSplit === false) the split buttons are hidden so panels
+  // stay a single tabbed group — only the "+" add-tab button remains.
+  const { allowSplit } = useSplitCapability();
   // Resolve the owning dockview at click time so the action always targets the
   // workspace that owns THIS group, never a last-writer-wins global.
   const apiId = props.containerApi.id;
@@ -339,7 +343,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       className="flex h-full w-full items-center justify-center"
       data-testid={isGridGroup ? "dockview-terminal__toolbar" : undefined}
     >
-      {isGridGroup && (
+      {isGridGroup && allowSplit && (
         <>
           <button
             type="button"
@@ -397,12 +401,21 @@ interface DockviewTerminalContainerProps {
   workspaceId: string;
   visible: boolean;
   wsActive?: boolean;
+  /**
+   * When `false` (mobile), terminals render as a single tabbed group only:
+   * split buttons + split shortcuts + drag-to-split are disabled, edge groups
+   * are skipped, layout is never persisted (so the shared desktop split layout
+   * survives), and a restored split layout is flattened to tabs. Defaults to
+   * `true` — every desktop render site inherits the full split behaviour.
+   */
+  allowSplit?: boolean;
 }
 
 export function DockviewTerminalContainer({
   workspaceId,
   visible,
   wsActive,
+  allowSplit = true,
 }: DockviewTerminalContainerProps) {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
@@ -445,11 +458,15 @@ export function DockviewTerminalContainer({
   const queryClientRef = useRef(queryClient);
   queryClientRef.current = queryClient;
   const schedulePersist = useCallback(() => {
+    // Mobile (allowSplit === false) never persists: the terminal_layout row is
+    // shared with the desktop split layout, and a flattened single-group
+    // mobile layout must not overwrite it.
+    if (!allowSplit) return;
     if (isRestoringRef.current) return;
     const api = apiRef.current;
     if (!api) return;
     persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
-  }, [workspaceId]);
+  }, [workspaceId, allowSplit]);
 
   // Report the active terminal tab to the server as the workspace's last-focused
   // terminal — the target "Add to Terminal" routes references to. Gated on
@@ -674,6 +691,9 @@ export function DockviewTerminalContainer({
         if (e.metaKey && !e.ctrlKey) {
           e.preventDefault();
           e.stopPropagation();
+          // Split is disabled on mobile (allowSplit === false) — swallow the
+          // key so it doesn't leak to xterm, but don't create a split.
+          if (!allowSplit) return;
           const activeGroup = apiRef.current?.activeGroup;
           if (!activeGroup) return;
           handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
@@ -692,7 +712,7 @@ export function DockviewTerminalContainer({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+  }, [visible, closeTab, handleSplit, handleAddTab, allowSplit]);
 
   // Force a synchronous re-layout of the inner dockview when the outer
   // Terminal panel becomes visible. Background: dockview-core's
@@ -894,6 +914,55 @@ export function DockviewTerminalContainer({
       const savedLayout = initialLayoutRef.current;
       const knownTerminalIds = initialTerminalIdsRef.current;
 
+      if (!allowSplit) {
+        // Mobile: render every live terminal as a tab in a single group.
+        // Ignore any saved split geometry (`fromJSON` would recreate the
+        // splits) and never persist — the terminal_layout row is shared with
+        // the desktop layout, which must survive a mobile visit. No edge
+        // groups / drag-visibility / inner-dockview registration either: those
+        // are split affordances the mobile view deliberately omits.
+        isRestoringRef.current = true;
+        const ids = knownTerminalIds ? [...knownTerminalIds] : [];
+        if (ids.length > 0) {
+          let firstGroupId: string | undefined;
+          for (const id of ids) {
+            const options: Parameters<typeof event.api.addPanel>[0] = {
+              id,
+              component: "terminalTab",
+              tabComponent: "terminalTab",
+              title: "Terminal",
+              params: { workspaceId, terminalId: id },
+            };
+            // Second and later panels are docked as tabs into the first
+            // panel's group (referenceGroup without a direction = tab).
+            if (firstGroupId) {
+              (options as Record<string, unknown>).position = { referenceGroup: firstGroupId };
+            }
+            event.api.addPanel(options);
+            if (!firstGroupId) firstGroupId = event.api.getPanel(id)?.group?.id;
+          }
+        } else {
+          // No live terminals — spawn a single default (createDefaultTerminal
+          // does not persist directly, unlike seedFromConfigOrDefault).
+          createDefaultTerminal(event.api, workspaceId);
+        }
+        setTimeout(() => {
+          isRestoringRef.current = false;
+        }, 0);
+
+        // Report focus (persist is a no-op when !allowSplit).
+        event.api.onDidActivePanelChange(() => reportTerminalFocus());
+
+        // Cold-mount layout catch-up (mirrors the shared path below).
+        if (visibleRef.current && containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            event.api.layout(Math.round(rect.width), Math.round(rect.height), true);
+          }
+        }
+        return;
+      }
+
       if (savedLayout && isDockviewLayout(savedLayout)) {
         // Restore full dockview layout (preserves groups, splits, sizes)
         isRestoringRef.current = true;
@@ -994,13 +1063,15 @@ export function DockviewTerminalContainer({
         }
       }
     },
-    [workspaceId, schedulePersist, reportTerminalFocus],
+    [workspaceId, schedulePersist, reportTerminalFocus, allowSplit],
   );
 
   const visibilityValue = useMemo(
     () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
     [visible, wsActive],
   );
+
+  const splitValue = useMemo(() => ({ allowSplit }), [allowSplit]);
 
   // Don't render dockview until the initial layout is fetched from the server.
   if (!initialData) {
@@ -1009,17 +1080,22 @@ export function DockviewTerminalContainer({
 
   return (
     <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
-      <PanelVisibilityContext.Provider value={visibilityValue}>
-        <DockviewReact
-          theme={terminalTabTheme}
-          className="h-full"
-          components={terminalPanelComponents}
-          tabComponents={terminalTabComponents}
-          defaultTabComponent={TerminalTab}
-          onReady={onReady}
-          rightHeaderActionsComponent={RightHeaderActions}
-        />
-      </PanelVisibilityContext.Provider>
+      <SplitCapabilityContext.Provider value={splitValue}>
+        <PanelVisibilityContext.Provider value={visibilityValue}>
+          <DockviewReact
+            theme={terminalTabTheme}
+            className="h-full"
+            components={terminalPanelComponents}
+            tabComponents={terminalTabComponents}
+            defaultTabComponent={TerminalTab}
+            onReady={onReady}
+            rightHeaderActionsComponent={RightHeaderActions}
+            // Mobile keeps everything in one tabbed group — disable drag so a
+            // drag-drop can't spawn a new group (a split) on touch.
+            disableDnd={!allowSplit}
+          />
+        </PanelVisibilityContext.Provider>
+      </SplitCapabilityContext.Provider>
     </div>
   );
 }

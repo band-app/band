@@ -27,6 +27,7 @@ import {
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
+import { SplitCapabilityContext, useSplitCapability } from "./dockview-split-context";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 
 // ---------------------------------------------------------------------------
@@ -335,6 +336,9 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   // edge group; only the split buttons are hidden. Defaults to "grid"
   // when `location` is missing (older dockview versions / tests).
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  // On mobile (allowSplit === false) the split buttons are hidden so panels
+  // stay a single tabbed group — only the "+" add-tab button remains.
+  const { allowSplit } = useSplitCapability();
   // Resolve the owning dockview at click time so the action always targets the
   // workspace that owns THIS group, never a last-writer-wins global.
   const apiId = props.containerApi.id;
@@ -353,7 +357,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       className="flex h-full w-full items-center justify-center"
       data-testid={isGridGroup ? "dockview-browser__toolbar" : undefined}
     >
-      {isGridGroup && (
+      {isGridGroup && allowSplit && (
         <>
           <button
             type="button"
@@ -411,12 +415,21 @@ interface DockviewBrowserContainerProps {
   workspaceId: string;
   visible: boolean;
   wsActive?: boolean;
+  /**
+   * When `false` (mobile), browsers render as a single tabbed group only: split
+   * buttons + split shortcuts + drag-to-split are disabled, edge groups are
+   * skipped, layout is never persisted (so the shared desktop split layout
+   * survives), and a restored split layout is flattened to tabs. Defaults to
+   * `true` — every desktop render site inherits the full split behaviour.
+   */
+  allowSplit?: boolean;
 }
 
 export function DockviewBrowserContainer({
   workspaceId,
   visible,
   wsActive,
+  allowSplit = true,
 }: DockviewBrowserContainerProps) {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
@@ -467,11 +480,15 @@ export function DockviewBrowserContainer({
   const queryClientRef = useRef(queryClient);
   queryClientRef.current = queryClient;
   const schedulePersist = useCallback(() => {
+    // Mobile (allowSplit === false) never persists: the browser_layout row is
+    // shared with the desktop split layout, and a flattened single-group
+    // mobile layout must not overwrite it.
+    if (!allowSplit) return;
     if (isRestoringRef.current) return;
     const api = apiRef.current;
     if (!api) return;
     persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
-  }, [workspaceId]);
+  }, [workspaceId, allowSplit]);
 
   // Report the active browser tab to the server as the workspace's last-focused
   // browser. Gated on `wsActive` and skipped during layout restore.
@@ -722,6 +739,8 @@ export function DockviewBrowserContainer({
       } else if (key === "d") {
         e.preventDefault();
         e.stopPropagation();
+        // Split is disabled on mobile (allowSplit === false).
+        if (!allowSplit) return;
         const api = apiRef.current;
         if (!api) return;
         const activeGroup = api.activeGroup;
@@ -743,7 +762,7 @@ export function DockviewBrowserContainer({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+  }, [visible, closeTab, handleSplit, handleAddTab, allowSplit]);
 
   // Force a synchronous re-layout of the inner dockview when the outer
   // Browser panel becomes visible. See the matching effect (and its
@@ -1128,6 +1147,45 @@ export function DockviewBrowserContainer({
       const knownBrowserIds = initialBrowserIdsRef.current;
       const knownUrls = initialUrlsRef.current;
 
+      if (!allowSplit) {
+        // Mobile: render every browser as a tab in a single group. Ignore any
+        // saved split geometry (`fromJSON` would recreate the splits) and never
+        // persist — the browser_layout row is shared with the desktop layout,
+        // which must survive a mobile visit. No edge groups / drag-visibility /
+        // inner-dockview registration either: those are split affordances the
+        // mobile view deliberately omits.
+        isRestoringRef.current = true;
+        const ids = knownBrowserIds ? [...knownBrowserIds] : [];
+        if (ids.length > 0) {
+          let firstGroupId: string | undefined;
+          for (const id of ids) {
+            const options: Parameters<typeof event.api.addPanel>[0] = {
+              id,
+              component: "browserTab",
+              tabComponent: "browserTab",
+              title: "Browser",
+              params: { workspaceId, browserId: id, initialUrl: knownUrls?.get(id) },
+            };
+            // Second and later panels are docked as tabs into the first
+            // panel's group (referenceGroup without a direction = tab).
+            if (firstGroupId) {
+              (options as Record<string, unknown>).position = { referenceGroup: firstGroupId };
+            }
+            event.api.addPanel(options);
+            if (!firstGroupId) firstGroupId = event.api.getPanel(id)?.group?.id;
+          }
+        } else {
+          createDefaultPanel(event.api, workspaceId);
+        }
+        setTimeout(() => {
+          isRestoringRef.current = false;
+        }, 0);
+
+        // Report focus (persist is a no-op when !allowSplit).
+        event.api.onDidActivePanelChange(() => reportBrowserFocus());
+        return;
+      }
+
       if (savedLayout && isDockviewLayout(savedLayout)) {
         // Restore full dockview layout (preserves groups, splits, sizes)
         isRestoringRef.current = true;
@@ -1229,13 +1287,15 @@ export function DockviewBrowserContainer({
         }
       }
     },
-    [workspaceId, schedulePersist, reportBrowserFocus],
+    [workspaceId, schedulePersist, reportBrowserFocus, allowSplit],
   );
 
   const visibilityValue = useMemo(
     () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
     [visible, wsActive],
   );
+
+  const splitValue = useMemo(() => ({ allowSplit }), [allowSplit]);
 
   // Don't render dockview until the initial layout is fetched from the server.
   // On subsequent visits, React Query returns cached data instantly — no loading.
@@ -1245,17 +1305,22 @@ export function DockviewBrowserContainer({
 
   return (
     <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
-      <PanelVisibilityContext.Provider value={visibilityValue}>
-        <DockviewReact
-          theme={browserTabTheme}
-          className="h-full"
-          components={browserPanelComponents}
-          tabComponents={browserTabComponents}
-          defaultTabComponent={BrowserTab}
-          onReady={onReady}
-          rightHeaderActionsComponent={RightHeaderActions}
-        />
-      </PanelVisibilityContext.Provider>
+      <SplitCapabilityContext.Provider value={splitValue}>
+        <PanelVisibilityContext.Provider value={visibilityValue}>
+          <DockviewReact
+            theme={browserTabTheme}
+            className="h-full"
+            components={browserPanelComponents}
+            tabComponents={browserTabComponents}
+            defaultTabComponent={BrowserTab}
+            onReady={onReady}
+            rightHeaderActionsComponent={RightHeaderActions}
+            // Mobile keeps everything in one tabbed group — disable drag so a
+            // drag-drop can't spawn a new group (a split) on touch.
+            disableDnd={!allowSplit}
+          />
+        </PanelVisibilityContext.Provider>
+      </SplitCapabilityContext.Provider>
     </div>
   );
 }

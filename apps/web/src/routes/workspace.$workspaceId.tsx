@@ -1,7 +1,7 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { ChevronsUpDown, Menu } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
   DashboardShell,
   DiffView,
@@ -9,19 +9,14 @@ import {
   SearchFilesDialog,
   useDashboardStore,
   useDiffTarget,
-  useSettingsQuery,
   WorkspacePickerDialog,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@/dashboard";
-import { agentTypeSupportsSessionListing } from "../components/ChatPane";
-import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
-import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { SessionListContext, useSessionListContext } from "../hooks/useSessionListContext";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
@@ -30,6 +25,17 @@ import { trpc } from "../lib/trpc-client";
 const DockviewTerminalContainer = lazy(() =>
   import("../components/DockviewTerminalContainer").then((m) => ({
     default: m.DockviewTerminalContainer,
+  })),
+);
+
+// Lazy-load the chat container so the dockview bundle is only pulled in when
+// the Chat tab is first activated (mirrors the terminal tab). On mobile it
+// renders tabs-only (`allowSplit={false}`) — the same inner container the
+// desktop layout uses, so every chat shows up as a tab rather than the old
+// single-pane view.
+const DockviewChatContainer = lazy(() =>
+  import("../components/DockviewChatContainer").then((m) => ({
+    default: m.DockviewChatContainer,
   })),
 );
 
@@ -171,12 +177,6 @@ function WorkspaceLayout() {
 // Mobile layout
 // ---------------------------------------------------------------------------
 
-interface CodingAgentDef {
-  id: string;
-  type: string;
-  label: string;
-}
-
 function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
   const diffFileCount = useDiffFileCount(workspaceId);
@@ -187,58 +187,6 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   // removed when child routes were folded in — see issue #467).
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
   const [currentFile, setCurrentFile] = useState<string | undefined>(undefined);
-
-  const [showSessionList, setShowSessionList] = useState(false);
-
-  // Agent switcher state
-  const [agents, setAgents] = useState<CodingAgentDef[]>([]);
-  const [currentAgentId, setCurrentAgentId] = useState<string>("");
-  const [, setTaskRunning] = useState(false);
-  const [chatKey, setChatKey] = useState(0);
-  const newSessionRef = useRef<(() => void) | null>(null);
-
-  // Load available agents from settings and current workspace agent
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop
-  useEffect(() => {
-    let cancelled = false;
-
-    trpc.settings.get.query().then((settings) => {
-      if (cancelled) return;
-      const raw = (settings as Record<string, unknown>).codingAgents;
-      const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
-      if (codingAgents.length > 0) {
-        const seen = new Set<string>();
-        const unique = codingAgents.filter((a) => {
-          if (seen.has(a.type)) return false;
-          seen.add(a.type);
-          return true;
-        });
-        setAgents(unique);
-      }
-      const defaultAgent = (settings as Record<string, unknown>).defaultCodingAgent as
-        | string
-        | undefined;
-      if (defaultAgent && !currentAgentId) {
-        setCurrentAgentId(defaultAgent);
-      }
-    });
-
-    trpc.statuses.get
-      .query({ workspaceId })
-      .then((status) => {
-        if (cancelled) return;
-        if (status?.agent?.codingAgentId) {
-          setCurrentAgentId(status.agent.codingAgentId);
-        }
-      })
-      .catch(() => {
-        // Status might not exist yet
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, chatKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Workspace switcher (recent / previous workspaces). Tapping the header
   // title opens it so the user can jump to another worktree without first
@@ -302,272 +250,118 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
     };
   }, []);
 
-  const handleSwitchAgent = useCallback(
-    async (agentId: string) => {
-      if (agentId === currentAgentId) return;
-      try {
-        await trpc.workspace.switchAgent.mutate({ workspaceId, agentId });
-        setCurrentAgentId(agentId);
-        setChatKey((k) => k + 1);
-      } catch (err) {
-        console.error("[switchAgent] error:", err);
-      }
-    },
-    [workspaceId, currentAgentId],
-  );
-
-  const handleSetShowSessionList = useCallback((show: boolean) => {
-    setShowSessionList(show);
-  }, []);
-
   const handleSelectFile = useCallback((filePath: string | null) => {
     setCurrentFile(filePath ?? undefined);
   }, []);
 
-  const currentAgent = agents.find((a) => a.id === currentAgentId);
-
   return (
-    <SessionListContext.Provider
-      value={{ showSessionList, setShowSessionList: handleSetShowSessionList }}
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{
+        height: appHeight ? `${appHeight}px` : "100dvh",
+        transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
+      }}
     >
-      <AgentSwitcherContext.Provider
-        value={{
-          chatKey,
-          setTaskRunning,
-          agentType: currentAgent?.type,
-          codingAgentId: currentAgentId,
-          switchAgent: handleSwitchAgent,
-          newSessionRef,
-        }}
-      >
-        <div
-          className="flex flex-col overflow-hidden"
-          style={{
-            height: appHeight ? `${appHeight}px` : "100dvh",
-            transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
-          }}
+      {isDesktop && <DesktopDragRegion />}
+      <header className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]">
+        {/* Hamburger — opens the project list as a left fly-out drawer over
+            this workspace. Purely local state; the route never changes. */}
+        <button
+          type="button"
+          onClick={() => setProjectListOpen(true)}
+          aria-label="Open project list"
+          aria-haspopup="dialog"
+          data-testid="mobile-workspace__project-list-trigger"
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
         >
-          {isDesktop && <DesktopDragRegion />}
-          <header className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]">
-            {/* Hamburger — opens the project list as a left fly-out drawer over
-                this workspace. Purely local state; the route never changes. */}
-            <button
-              type="button"
-              onClick={() => setProjectListOpen(true)}
-              aria-label="Open project list"
-              aria-haspopup="dialog"
-              data-testid="mobile-workspace__project-list-trigger"
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
-            >
-              <Menu className="size-4" />
-            </button>
-            {/* Tapping the title opens the workspace switcher — the fast path
-                to jump to a recent/previous worktree without going back to the
-                full project list. The chevron signals it's interactive. */}
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              aria-haspopup="dialog"
-              aria-label="Switch workspace"
-              className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent active:bg-accent"
-            >
-              <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
-              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
-            <div aria-hidden="true" className="size-7 shrink-0" />
-          </header>
-          <WorkspaceTabNav
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            diffFileCount={diffFileCount}
-          />
-          <main className="flex min-h-0 flex-1 flex-col">
-            {/* Tab content. Conditional render — switching tabs unmounts the
-             *  previous tab, matching the pre-refactor mobile behaviour where
-             *  each tab was its own route. */}
-            {activeTab === "chat" && <MobileChatContent workspaceId={workspaceId} />}
-            {activeTab === "diff" && (
-              <DiffView workspaceId={workspaceId} active onOpenFile={handleOpenFile} />
-            )}
-            {activeTab === "code" && (
-              <CodeBrowserView
-                workspaceId={workspaceId}
-                file={currentFile}
-                onSelectFile={handleSelectFile}
-              />
-            )}
-            {activeTab === "terminal" && (
-              <Suspense fallback={null}>
-                <DockviewTerminalContainer workspaceId={workspaceId} visible={true} />
-              </Suspense>
-            )}
-          </main>
-          <QuickOpenDialog
-            workspaceId={workspaceId}
-            open={quickOpenOpen}
-            onOpenChange={(open) => {
-              setQuickOpenOpen(open);
-              if (!open) setQuickOpenQuery(undefined);
-            }}
-            onOpenFile={handleOpenFile}
-            initialQuery={quickOpenQuery}
-            autoOpen={quickOpenQuery != null}
-          />
-          <SearchFilesDialog
-            workspaceId={workspaceId}
-            open={searchFilesOpen}
-            onOpenChange={setSearchFilesOpen}
-            onOpenFile={handleOpenFile}
-          />
-          <WorkspacePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
-          <Sheet open={projectListOpen} onOpenChange={setProjectListOpen}>
-            {/* The project list fly-out reuses the exact same DashboardShell
-                the `/` home route renders, so labels, add-project, settings
-                and the full workspace tree are all available from here. */}
-            <SheetContent side="left" showCloseButton={false} data-testid="project-list-flyout">
-              <SheetTitle className="sr-only">Projects</SheetTitle>
-              <SheetDescription className="sr-only">
-                Browse projects and open a workspace
-              </SheetDescription>
-              <ToolbarOverflowProvider>
-                <DashboardShell bottomActions={<ToolbarActionBar />} hideTitleBar />
-              </ToolbarOverflowProvider>
-            </SheetContent>
-          </Sheet>
-        </div>
-      </AgentSwitcherContext.Provider>
-    </SessionListContext.Provider>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Mobile chat content
-// ---------------------------------------------------------------------------
-
-function MobileChatContent({ workspaceId }: { workspaceId: string }) {
-  const { settings } = useSettingsQuery();
-  const [chatId, setChatId] = useState<string | undefined>(undefined);
-  const [supportsSessionListing, setSupportsSessionListing] = useState(false);
-  const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
-  const [sessionQueryDone, setSessionQueryDone] = useState(false);
-  // Local remount key for user-initiated session switches. Combined with the
-  // context-owned `chatKey` (which bumps on agent switch) so either kind of
-  // switch forces ChatView to remount and reopen its event-log subscription
-  // against the new session.
-  const [sessionPaneKey, setSessionPaneKey] = useState(0);
-  const { showSessionList, setShowSessionList } = useSessionListContext();
-  const { chatKey, setTaskRunning, agentType, codingAgentId, switchAgent, newSessionRef } =
-    useAgentSwitcherContext();
-
-  // Resolve default chat for mobile view
-  useEffect(() => {
-    let cancelled = false;
-    trpc.chats.list
-      .query({ workspaceId })
-      .then((data) => {
-        if (cancelled) return;
-        if (data.chats.length > 0) {
-          setChatId(data.chats[0].id);
-        } else {
-          return trpc.chats.create.mutate({ workspaceId }).then((result) => {
-            if (!cancelled) setChatId(result.chat.id);
-          });
-        }
-      })
-      .catch((err) => console.error("[MobileChatContent] error resolving chat:", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-
-  // Resolve initial session + session-listing support from the persisted
-  // chat row. This mirrors `useChatPaneState` (ChatPane.tsx): the server
-  // persists `activeSessionId` (and the cached summary) on the chat row
-  // so the hot path is a pure SQLite read with no filesystem walk over
-  // `~/.claude/projects/<workspace>/`. Falls back to the latest session
-  // (mtime-sorted) inside `chats.get` when no activeSessionId is
-  // persisted yet. `sessions.list` is only invoked lazily when the user
-  // opens the history dropdown (see `SessionHistoryMenu` in ChatView).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
-  useEffect(() => {
-    if (!chatId) return;
-    let cancelled = false;
-    trpc.chats.get
-      .query({ chatId })
-      .then((data) => {
-        if (cancelled) return;
-        const chat = data?.chat;
-        // Fall back to the default coding agent when the chat row hasn't
-        // been created yet (lazy creation on first message send) so the
-        // session-history dropdown is available on a brand-new empty chat.
-        const agentId = chat?.agent ?? settings.defaultCodingAgent;
-        const found = agentId ? settings.codingAgents?.find((a) => a.id === agentId) : undefined;
-        setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
-        if (chat?.activeSessionId) setInitialSessionId(chat.activeSessionId);
-        setSessionQueryDone(true);
-      })
-      .catch((err) => {
-        if (!cancelled) setSessionQueryDone(true);
-        console.error("[chats.get] error:", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, chatId, chatKey, settings]);
-
-  // User-initiated session switch from the SessionHistoryMenu. Mirrors the
-  // desktop pane's `onSwitchSession` (see `useChatPaneState` in ChatPane.tsx):
-  // persist the new active session to the server, pin local
-  // `initialSessionId`, then bump `sessionPaneKey` so ChatView remounts and
-  // its useChatSubscription opens a fresh stream against the new session.
-  const onSwitchSession = useCallback(
-    async (sessionId: string | undefined) => {
-      if (!chatId) return;
-      try {
-        await trpc.chats.setActiveSession.mutate({
-          workspaceId,
-          chatId,
-          sessionId: sessionId ?? undefined,
-        });
-      } catch (err) {
-        console.error("[MobileChatContent] error persisting active session:", err);
-        return;
-      }
-      setInitialSessionId(sessionId);
-      // Reset before bumping the pane key so the remounted `ChatView`
-      // doesn't see a stale `sessionQueryDone={true}` on its first render
-      // — the `chats.get` effect re-runs and flips it back to true once
-      // the new session is resolved. Without this, the remount would
-      // bypass the "wait for session" gate. (Pre-existing bug preserved
-      // verbatim when this code moved out of `workspace.$workspaceId.index.tsx`.)
-      setSessionQueryDone(false);
-      setSessionPaneKey((k) => k + 1);
-    },
-    [workspaceId, chatId],
-  );
-
-  if (!chatId) return null;
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <ChatView
-        key={`${chatKey}-${sessionPaneKey}`}
-        chatKey={chatKey}
-        workspaceId={workspaceId}
-        chatId={chatId}
-        workspaceName={workspaceId}
-        supportsSessionListing={supportsSessionListing}
-        initialSessionId={initialSessionId}
-        sessionQueryDone={sessionQueryDone}
-        showSessionList={showSessionList}
-        onShowSessionListChange={setShowSessionList}
-        onStreamingChange={setTaskRunning}
-        onNewSessionRef={newSessionRef}
-        onSwitchSession={onSwitchSession}
-        agentType={agentType}
-        codingAgentId={codingAgentId}
-        onSwitchAgent={switchAgent}
+          <Menu className="size-4" />
+        </button>
+        {/* Tapping the title opens the workspace switcher — the fast path
+            to jump to a recent/previous worktree without going back to the
+            full project list. The chevron signals it's interactive. */}
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          aria-haspopup="dialog"
+          aria-label="Switch workspace"
+          className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent active:bg-accent"
+        >
+          <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </button>
+        <div aria-hidden="true" className="size-7 shrink-0" />
+      </header>
+      <WorkspaceTabNav
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        diffFileCount={diffFileCount}
       />
+      <main className="flex min-h-0 flex-1 flex-col">
+        {/* Tab content. Conditional render — switching tabs unmounts the
+         *  previous tab, matching the pre-refactor mobile behaviour where
+         *  each tab was its own route.
+         *
+         *  Chat and Terminal both mount the shared inner dockview container
+         *  with `allowSplit={false}` so every chat / terminal renders as a
+         *  TAB (never a split) on mobile — see the `dockview-split-context`
+         *  and issue-#467 route unification. */}
+        {activeTab === "chat" && (
+          <Suspense fallback={null}>
+            <DockviewChatContainer workspaceId={workspaceId} visible={true} allowSplit={false} />
+          </Suspense>
+        )}
+        {activeTab === "diff" && (
+          <DiffView workspaceId={workspaceId} active onOpenFile={handleOpenFile} />
+        )}
+        {activeTab === "code" && (
+          <CodeBrowserView
+            workspaceId={workspaceId}
+            file={currentFile}
+            onSelectFile={handleSelectFile}
+          />
+        )}
+        {activeTab === "terminal" && (
+          <Suspense fallback={null}>
+            <DockviewTerminalContainer
+              workspaceId={workspaceId}
+              visible={true}
+              allowSplit={false}
+            />
+          </Suspense>
+        )}
+      </main>
+      <QuickOpenDialog
+        workspaceId={workspaceId}
+        open={quickOpenOpen}
+        onOpenChange={(open) => {
+          setQuickOpenOpen(open);
+          if (!open) setQuickOpenQuery(undefined);
+        }}
+        onOpenFile={handleOpenFile}
+        initialQuery={quickOpenQuery}
+        autoOpen={quickOpenQuery != null}
+      />
+      <SearchFilesDialog
+        workspaceId={workspaceId}
+        open={searchFilesOpen}
+        onOpenChange={setSearchFilesOpen}
+        onOpenFile={handleOpenFile}
+      />
+      <WorkspacePickerDialog open={pickerOpen} onOpenChange={setPickerOpen} />
+      <Sheet open={projectListOpen} onOpenChange={setProjectListOpen}>
+        {/* The project list fly-out reuses the exact same DashboardShell
+            the `/` home route renders, so labels, add-project, settings
+            and the full workspace tree are all available from here. */}
+        <SheetContent side="left" showCloseButton={false} data-testid="project-list-flyout">
+          <SheetTitle className="sr-only">Projects</SheetTitle>
+          <SheetDescription className="sr-only">
+            Browse projects and open a workspace
+          </SheetDescription>
+          <ToolbarOverflowProvider>
+            <DashboardShell bottomActions={<ToolbarActionBar />} hideTitleBar />
+          </ToolbarOverflowProvider>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
