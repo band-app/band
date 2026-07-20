@@ -11,6 +11,7 @@ import {
 import { Columns2, Globe, Plus, Rows2, X } from "lucide-react";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "@/dashboard";
+import { useAppShortcut } from "../hooks/useAppShortcut";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import {
@@ -25,6 +26,7 @@ import {
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
 import { isDesktop } from "../lib/is-desktop";
+import { DOCK_SHORTCUTS } from "../lib/shortcuts";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -611,7 +613,7 @@ export function DockviewBrowserContainer({
       }
 
       // After closing, focus the address bar in the newly active panel so the
-      // section-scoped keydown handler still sees Cmd+W on the next press.
+      // section-scoped shortcuts still see Cmd+W on the next press.
       requestAnimationFrame(() => {
         const activePanel = api.activePanel;
         if (!activePanel) return;
@@ -629,121 +631,229 @@ export function DockviewBrowserContainer({
     [workspaceId],
   );
 
-  // Keyboard shortcuts (capture phase, scoped to this section's focus):
-  // - Cmd/Ctrl+T              → open a new browser tab
-  // - Cmd/Ctrl+W              → close the active browser tab
-  // - Cmd/Ctrl+D              → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
-  // - Cmd/Ctrl+R              → reload the active browser tab (desktop only)
-  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
-  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split browser groups (panels)
-  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
-  useEffect(() => {
-    if (!visible) return;
+  // Keyboard shortcuts, scoped to this section's focus:
+  // - Cmd+T              → open a new browser tab
+  // - Cmd+W              → close the active browser tab
+  // - Cmd+D              → split right (vertical split)
+  // - Cmd+Shift+D        → split down (horizontal split)
+  // - Cmd+R              → reload the active browser tab (desktop only)
+  // - Ctrl+(Shift)+Tab   → cycle tabs in the active group
+  // - Cmd+[ / Cmd+]      → cycle between split browser groups (panels)
+  // - Cmd+Shift+[/]      → cycle tabs in the active group
+  //
+  // Combos come from `DOCK_SHORTCUTS`, shared with the chat, terminal and
+  // file-tab docks. Scoping is `react-hotkeys-hook`'s returned ref rather than
+  // the hand-written `containerRef.contains(document.activeElement)` check that
+  // used to guard a window-level capture listener: each binding listens on this
+  // container's root, so it only fires while that element or a descendant holds
+  // focus. `useAppShortcut` supplies capture-phase listening, form-tag
+  // enablement (the address bar is the usual focus target here) and
+  // `preventDefault`. `stopPropagation` is called by hand wherever the old
+  // handler called it, so the chord never also reaches the focused input.
+  //
+  // `data-band-address-input` is set on the address-bar input in
+  // BrowserPanel.tsx — using the data attribute (rather than
+  // `input[type='text']`) avoids matching the find-bar input.
+  const refocusAddressBar = useCallback(() => {
+    const panel = apiRef.current?.activePanel;
+    if (!panel) return;
+    panel.view.content.element
+      .querySelector<HTMLInputElement>("[data-band-address-input]")
+      ?.focus();
+  }, []);
 
-    // `data-band-address-input` is set on the address-bar input in
-    // BrowserPanel.tsx — using the data attribute (rather than
-    // `input[type='text']`) avoids matching the find-bar input.
-    const refocusAddressBar = () => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      panel.view.content.element
-        .querySelector<HTMLInputElement>("[data-band-address-input]")
-        ?.focus();
-    };
-
-    const cycleTabs = (direction: 1 | -1) => {
+  const cycleTabs = useCallback(
+    (direction: 1 | -1) => {
       cycleTabsInActiveGroup(apiRef.current, direction, () => {
         requestAnimationFrame(refocusAddressBar);
       });
-    };
+    },
+    [refocusAddressBar],
+  );
 
-    const cycleGroups = (direction: 1 | -1) => {
+  const cycleGroups = useCallback(
+    (direction: 1 | -1) => {
       cycleGridGroups(apiRef.current, direction, () => {
         requestAnimationFrame(refocusAddressBar);
       });
-    };
+    },
+    [refocusAddressBar],
+  );
 
-    const handler = (e: KeyboardEvent) => {
-      // Only handle shortcut if this container (or a descendant) has focus
-      if (!containerRef.current?.contains(document.activeElement)) return;
+  // Bindings are only live while the section is visible — same gate the
+  // effect-based handler applied before registering its listener.
+  const shortcutOptions = { enabled: visible };
 
-      const key = e.key.toLowerCase();
+  const cycleForwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabForward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const cycleBackwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabBackward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const previousTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
+  const previousGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(-1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
 
-      // Ctrl+(Shift)+Tab → cycle tabs within the active group
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleTabs(e.shiftKey ? -1 : 1);
-        return;
+  const newTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.newTab,
+    (e) => {
+      e.stopPropagation();
+      handleAddTab().then(() => {
+        // Focus the address bar in the newly created panel.
+        requestAnimationFrame(refocusAddressBar);
+      });
+    },
+    shortcutOptions,
+    [handleAddTab, refocusAddressBar, visible],
+  );
+
+  const closeTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.closeTab,
+    (e) => {
+      const api = apiRef.current;
+      if (!api) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const active = api.activePanel;
+      if (active) {
+        closeTab(active.id);
       }
+    },
+    { ...shortcutOptions, preventDefault: false },
+    [closeTab, visible],
+  );
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+  const splitRightRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitRight,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "right");
+    },
+    shortcutOptions,
+    [handleSplit, visible],
+  );
+  const splitDownRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitDown,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "below");
+    },
+    shortcutOptions,
+    [handleSplit, visible],
+  );
 
-      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
-      if (e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleTabs(key === "]" ? 1 : -1);
-        return;
+  // ⌘R reloads the embedded WebContentsView — desktop only, since the plain web
+  // build has no such view to reload, and unbound there so the browser's own
+  // page reload keeps working. No `DOCK_SHORTCUTS` entry: it is this dock's
+  // alone. `preventDefault` stays conditional on there being a browser id to
+  // reload, matching the old handler's ordering.
+  //
+  // Both modifier spellings are bound rather than `mod+r`: the old handler gated
+  // on `e.metaKey || e.ctrlKey`, so Ctrl+R reloaded on macOS too, and `mod`
+  // would collapse that to ⌘ alone there.
+  const reloadRef = useAppShortcut(
+    { binding: "meta+r, ctrl+r", display: "Cmd+R" },
+    (e) => {
+      const active = apiRef.current?.activePanel;
+      const browserId = (active?.params as BrowserTabParams | undefined)?.browserId;
+      if (!browserId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      desktopInvoke("browser_reload", { browserId }).catch((err) => {
+        console.error("[DockviewBrowserContainer] browser_reload failed:", err);
+      });
+    },
+    { enabled: visible && isDesktop, preventDefault: false },
+    [visible],
+  );
+
+  // All bindings scope to the same root element, so their ref callbacks are
+  // fanned out through one composed callback. The library's setters are stable,
+  // so listing them as deps keeps this callback stable too — an unstable ref
+  // callback would detach and re-attach (and re-register every listener) on
+  // every render.
+  const setContainerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      containerRef.current = element;
+      for (const attach of [
+        cycleForwardRef,
+        cycleBackwardRef,
+        nextTabRef,
+        previousTabRef,
+        nextGroupRef,
+        previousGroupRef,
+        newTabRef,
+        closeTabRef,
+        splitRightRef,
+        splitDownRef,
+        reloadRef,
+      ]) {
+        attach(element);
       }
-
-      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
-      if (!e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleGroups(key === "]" ? 1 : -1);
-        return;
-      }
-
-      if (key === "t" && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAddTab().then(() => {
-          // Focus the address bar in the newly created panel.
-          requestAnimationFrame(() => {
-            const panel = apiRef.current?.activePanel;
-            if (!panel) return;
-            panel.view.content.element
-              .querySelector<HTMLInputElement>("[data-band-address-input]")
-              ?.focus();
-          });
-        });
-      } else if (key === "w" && !e.shiftKey) {
-        const api = apiRef.current;
-        if (!api) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const active = api.activePanel;
-        if (active) {
-          closeTab(active.id);
-        }
-      } else if (key === "d") {
-        e.preventDefault();
-        e.stopPropagation();
-        const api = apiRef.current;
-        if (!api) return;
-        const activeGroup = api.activeGroup;
-        if (!activeGroup) return;
-        const direction = e.shiftKey ? "below" : "right";
-        handleSplit(activeGroup.id, direction);
-      } else if (key === "r" && !e.shiftKey && isDesktop) {
-        const api = apiRef.current;
-        if (!api) return;
-        const active = api.activePanel;
-        const browserId = (active?.params as BrowserTabParams | undefined)?.browserId;
-        if (!browserId) return;
-        e.preventDefault();
-        e.stopPropagation();
-        desktopInvoke("browser_reload", { browserId }).catch((err) => {
-          console.error("[DockviewBrowserContainer] browser_reload failed:", err);
-        });
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+    },
+    [
+      cycleForwardRef,
+      cycleBackwardRef,
+      nextTabRef,
+      previousTabRef,
+      nextGroupRef,
+      previousGroupRef,
+      newTabRef,
+      closeTabRef,
+      splitRightRef,
+      splitDownRef,
+      reloadRef,
+    ],
+  );
 
   // Force a synchronous re-layout of the inner dockview when the outer
   // Browser panel becomes visible. See the matching effect (and its
@@ -1244,7 +1354,7 @@ export function DockviewBrowserContainer({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={setContainerRef} className="flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={browserTabTheme}

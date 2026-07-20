@@ -34,6 +34,7 @@ import {
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@/dashboard";
+import { isTerminalOriginatedEvent, useAppShortcut } from "../hooks/useAppShortcut";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import {
@@ -54,6 +55,7 @@ import {
 } from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { GLOBAL_SHORTCUTS } from "../lib/shortcuts";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewChatContainer } from "./DockviewChatContainer";
@@ -1011,219 +1013,236 @@ export function SharedDockviewLayout() {
   // Global keyboard shortcuts
   // ---------------------------------------------------------------------
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+  // Every global shortcut below is bound through `useAppShortcut`, which
+  // supplies the defaults the old hand-rolled handler implemented inline:
+  // capture-phase listening (so a focused xterm can't swallow the chord),
+  // firing inside form fields / contentEditable, `preventDefault`, and
+  // character-vs-physical key matching per the combo's `useKey`. Combos come
+  // from `GLOBAL_SHORTCUTS` so the command palette advertises exactly what is
+  // bound here. See `apps/web/src/hooks/useAppShortcut.ts`.
+  //
+  // What the wrapper does NOT supply is `stopPropagation` — the library never
+  // calls it. The three chords below stop propagation by hand because they can
+  // fire while a terminal is focused, and without it the keystroke goes on to
+  // reach xterm's own keydown listener and leaks into the shell.
+  //
+  // `TERMINAL_YIELDS` is the shell-key bail: a chord reached via Ctrl defers to
+  // a focused terminal (Ctrl+K is kill-to-end-of-line, Ctrl+D is EOF), while the
+  // same chord reached via ⌘ still fires. On Windows/Linux, where `mod` IS Ctrl,
+  // that means these deliberately yield to the shell — preserved from the
+  // `terminalFocused && !e.metaKey` gate this replaces.
+  const TERMINAL_YIELDS = {
+    ignoreEventWhen: (e: KeyboardEvent) => isTerminalOriginatedEvent(e) && !e.metaKey,
+  };
+
+  // ⌘K → workspace picker. Fires even while a terminal is focused (a
+  // long-standing request); the Ctrl+K spelling on other platforms still yields
+  // to xterm via `TERMINAL_YIELDS`.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.workspacePicker,
+    (e) => {
+      e.stopPropagation();
+      setWorkspacePickerOpen(true);
+    },
+    { ...TERMINAL_YIELDS },
+  );
+
+  // Ctrl+` → Terminal panel.
+  useAppShortcut(GLOBAL_SHORTCUTS.showTerminal, (e) => {
+    e.stopPropagation();
+    if (hiddenPanelsRef.current.includes("terminal")) return;
+    apiRef.current?.getPanel("terminal")?.api.setActive();
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent("band:focus-terminal"));
+    });
+  });
+
+  // Ctrl+0 → reveal the project-list sidebar and focus it. The sidebar lives
+  // outside the dockview, so we reveal it via the `band:show-sidebar` window
+  // event and let the sidebar's `band:focus-projects` listener move keyboard
+  // focus into the list.
+  useAppShortcut(GLOBAL_SHORTCUTS.focusProjects, (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent("band:show-sidebar"));
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent("band:focus-projects"));
+    });
+  });
+
+  // ⇧⌥F → Format Current File (VS Code parity). The only binding with no mod
+  // key in the chord. `useKey: false` matches on the physical key so the macOS
+  // Option-layer dead-key (⌥F → "ƒ") doesn't swallow it — the reason the old
+  // branch tested `e.code` rather than `e.key`.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.formatCurrentFile,
+    () => {
       const ws = activeWorkspaceIdRef.current;
-      const terminalFocused = document.activeElement?.closest(".xterm") != null;
+      if (!ws) return;
+      window.dispatchEvent(
+        new CustomEvent("band:format-current-file", {
+          detail: { workspaceId: ws, filePath: currentFileRef.current },
+        }),
+      );
+    },
+    { useKey: false, ignoreEventWhen: isTerminalOriginatedEvent },
+  );
 
-      // ⌘K → workspace picker. We deliberately omit the `terminalFocused`
-      // guard here so the picker opens even while a terminal is focused
-      // (long-standing complaint) — preventDefault/stopPropagation keep the
-      // keystroke from leaking into xterm. (The Ctrl+K branch below DOES bail
-      // on a focused terminal, since Ctrl+K is a terminal editing key.)
-      if (e.metaKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        e.stopPropagation();
-        setWorkspacePickerOpen(true);
-        return;
-      }
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.newChatSession,
+    () => window.dispatchEvent(new CustomEvent("band:new-chat-session")),
+    { ...TERMINAL_YIELDS },
+  );
 
-      // Ctrl+K → workspace picker on non-macOS. `SharedDockviewLayout` also
-      // mounts for wide-viewport web users on Windows/Linux, where ⌘ doesn't
-      // exist and Ctrl is the platform-native modifier. Unlike the ⌘ branch we
-      // DO bail when the terminal is focused: Ctrl+K is "kill to end of line"
-      // in most shells, so hijacking it inside xterm would break a common
-      // editing keystroke.
-      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k") {
-        if (terminalFocused) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setWorkspacePickerOpen(true);
-        return;
-      }
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.newUntitledTab,
+    () => window.dispatchEvent(new CustomEvent("band:new-untitled-tab")),
+    { ...TERMINAL_YIELDS },
+  );
 
-      // Ctrl+` → Terminal panel
-      if (e.ctrlKey && !e.metaKey && e.key === "`") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!hiddenPanelsRef.current.includes("terminal")) {
-          apiRef.current?.getPanel("terminal")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-terminal"));
-          });
-        }
-        return;
-      }
+  useAppShortcut(GLOBAL_SHORTCUTS.commandPalette, () => setCommandPaletteOpen(true), {
+    ...TERMINAL_YIELDS,
+  });
 
-      // Ctrl+0 → reveal the project-list sidebar and focus it. The sidebar
-      // lives outside the dockview now, so we reveal it via the
-      // `band:show-sidebar` window event and let the sidebar's
-      // `band:focus-projects` listener move keyboard focus into the list.
-      if (e.ctrlKey && !e.metaKey && e.key === "0") {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:show-sidebar"));
-        queueMicrotask(() => {
-          window.dispatchEvent(new CustomEvent("band:focus-projects"));
-        });
-        return;
-      }
+  useAppShortcut(GLOBAL_SHORTCUTS.quickOpen, () => setQuickOpenOpen(true), { ...TERMINAL_YIELDS });
 
-      // ⇧⌥F → Format Current File (matches VS Code; uses e.code so the
-      // macOS Option-layer dead-key doesn't swallow the keystroke).
-      if (e.code === "KeyF" && e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {
-        if (terminalFocused) return;
-        e.preventDefault();
-        if (!ws) return;
-        const filePath = currentFileRef.current;
-        window.dispatchEvent(
-          new CustomEvent("band:format-current-file", {
-            detail: { workspaceId: ws, filePath },
-          }),
-        );
-        return;
-      }
+  useAppShortcut(GLOBAL_SHORTCUTS.searchFiles, () => setSearchFilesOpen(true), {
+    ...TERMINAL_YIELDS,
+  });
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      if (terminalFocused && !e.metaKey) return;
+  // ⌘F → Find in File. Prefers the active editor's registered handler; falls
+  // back to the broadcast event when no editor has registered one.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.findInFile,
+    () => {
+      const ws = activeWorkspaceIdRef.current;
+      const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
+      if (fn) fn();
+      else window.dispatchEvent(new CustomEvent("band:find-in-file"));
+    },
+    { ...TERMINAL_YIELDS },
+  );
 
+  // ⌘O → Open File… The actual picker invocation lives in CodeBrowserView and
+  // is gated by `capabilities.pickFile`, so the event is a no-op in the plain
+  // web build — `preventDefault` still suppresses the browser's own ⌘O.
+  //
+  // Addressed to the active workspace: the per-panel content cache keeps
+  // multiple CodeBrowserView instances alive at once, and an undelimited
+  // broadcast would race every cached instance into opening its own picker (the
+  // file landed in the wrong workspace). Same shape as
+  // `band:format-current-file`.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.openFile,
+    () => {
+      const ws = activeWorkspaceIdRef.current;
+      if (!ws) return;
+      window.dispatchEvent(
+        new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
+      );
+    },
+    { ...TERMINAL_YIELDS },
+  );
+
+  // Panel activation. Each one no-ops when its panel is hidden, then hands
+  // focus to the panel via a `band:focus-*` event on the next microtask (after
+  // dockview has committed the activation).
+  const activatePanel = (panelId: string, focusEvent: string) => () => {
+    if (hiddenPanelsRef.current.includes(panelId)) return;
+    apiRef.current?.getPanel(panelId)?.api.setActive();
+    queueMicrotask(() => {
+      window.dispatchEvent(new CustomEvent(focusEvent));
+    });
+  };
+
+  useAppShortcut(GLOBAL_SHORTCUTS.showChat, activatePanel("chat", "band:focus-chat"), {
+    ...TERMINAL_YIELDS,
+  });
+  useAppShortcut(GLOBAL_SHORTCUTS.showChanges, activatePanel("changes", "band:focus-changes"), {
+    ...TERMINAL_YIELDS,
+  });
+  useAppShortcut(GLOBAL_SHORTCUTS.showFiles, activatePanel("files", "band:focus-files"), {
+    ...TERMINAL_YIELDS,
+  });
+  useAppShortcut(GLOBAL_SHORTCUTS.showBrowser, activatePanel("browser", "band:focus-browser"), {
+    ...TERMINAL_YIELDS,
+  });
+
+  // ⌘B → toggle the project-list sidebar. Unconditional: unlike its two
+  // siblings below it does NOT resolve its target by focus. A shortcut that
+  // means different things depending on invisible focus state is hard to trust,
+  // and the sidebar is overwhelmingly the intended target. The cost is that an
+  // inner dockview's LEFT edge has no keyboard toggle — if that turns out to
+  // matter it gets its own combo rather than focus-dependence here.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.toggleSidebar,
+    () => window.dispatchEvent(new CustomEvent("band:toggle-sidebar")),
+    { ...TERMINAL_YIELDS },
+  );
+
+  // ⌥⌘B → toggle the RIGHT edge, focus-aware: when an inner dockview (terminal /
+  // chat / browser) holds focus and has panels on that edge, toggle its edge;
+  // otherwise fall through to the main layout's. The fallthrough is driven by
+  // `toggleEdgeGroup`'s return value (`true` when it acted on a non-empty edge),
+  // so empty inner edges delegate transparently. See `dockview-edge-groups.ts`
+  // for the registry behind the focus lookup.
+  //
+  // `useKey: false` matches the physical key: macOS substitutes Alt-layer
+  // characters into `e.key` (⌥B → "∫"), which is why the handler this replaces
+  // tested `e.code`.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.toggleRightEdge,
+    () => {
       const api = apiRef.current;
-      const key = e.key.toLowerCase();
+      if (!api) return;
+      const inner = findFocusedInnerDockview();
+      if (inner && toggleEdgeGroup(inner, "right")) return;
+      toggleEdgeGroup(api, "right");
+    },
+    { ...TERMINAL_YIELDS, useKey: false },
+  );
 
-      if (key === "n" && e.shiftKey) {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:new-chat-session"));
-      } else if (key === "n" && !e.shiftKey && !e.altKey) {
-        // ⌘N → New Untitled File
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
-      } else if (key === "p" && e.shiftKey) {
-        e.preventDefault();
-        setCommandPaletteOpen(true);
-      } else if (key === "p" && !e.shiftKey) {
-        e.preventDefault();
-        setQuickOpenOpen(true);
-      } else if (key === "f" && e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        setSearchFilesOpen(true);
-      } else if (key === "f" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
-        if (fn) {
-          fn();
-        } else {
-          window.dispatchEvent(new CustomEvent("band:find-in-file"));
-        }
-      } else if (key === "o" && !e.shiftKey && !e.altKey) {
-        // ⌘O → Open File… The actual picker invocation lives in
-        // CodeBrowserView and is gated by `capabilities.pickFile`, so
-        // the event is a no-op in the plain web build — preventDefault
-        // here still suppresses the browser's own Cmd+O.
-        //
-        // Address the event to the active workspace: the per-panel
-        // content cache keeps multiple CodeBrowserView instances alive
-        // at once, and an undelimited broadcast would race every
-        // cached instance to open its own picker (the file landed in
-        // the wrong workspace). Same shape as `band:format-current-file`.
-        e.preventDefault();
-        if (!ws) return;
-        window.dispatchEvent(
-          new CustomEvent("band:open-file-external", {
-            detail: { workspaceId: ws },
-          }),
-        );
-      } else if (key === "i" && e.ctrlKey && e.metaKey && api) {
-        e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("chat")) {
-          api.getPanel("chat")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-chat"));
-          });
-        }
-      } else if (key === "g" && e.shiftKey && api) {
-        e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("changes")) {
-          api.getPanel("changes")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-changes"));
-          });
-        }
-      } else if (key === "e" && e.shiftKey && api) {
-        e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("files")) {
-          api.getPanel("files")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-files"));
-          });
-        }
-      } else if (key === "b" && e.shiftKey && api) {
-        e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("browser")) {
-          api.getPanel("browser")?.api.setActive();
-          queueMicrotask(() => {
-            window.dispatchEvent(new CustomEvent("band:focus-browser"));
-          });
-        }
-      } else if (key === "b" && !e.shiftKey && !e.altKey && api) {
-        // ⌘B → toggle the project-list sidebar. Focus-aware: if an inner
-        // dockview (terminal / chat / browser) is focused AND has panels on
-        // its left edge, toggle that inner edge; otherwise toggle the
-        // sidebar that lives outside the dockview, reached via the
-        // `band:toggle-sidebar` window event.
-        //
-        // The inner branch is driven by `toggleEdgeGroup`'s return value
-        // (`true` when it acted on a non-empty edge, `false` when there was
-        // nothing to act on) — so empty inner edges transparently delegate
-        // to the sidebar. See `dockview-edge-groups.ts` for the registry
-        // that makes the focus lookup possible.
-        e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "left")) return;
-        window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
-      } else if (e.code === "KeyB" && e.altKey && !e.shiftKey && api) {
-        // ⌥⌘B → toggle RIGHT edge. Uses `e.code === "KeyB"` instead
-        // of `key === "b"` because macOS substitutes Alt-layer
-        // characters into `e.key` (Alt+B → "∫"), making the letter
-        // check unreliable when Alt is held. `e.code` is keyboard-
-        // layout independent and matches the pattern used by the
-        // ⇧⌥F format-current-file shortcut above.
-        e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "right")) return;
-        toggleEdgeGroup(api, "right");
-      } else if (key === "j" && !e.shiftKey && !e.altKey && api) {
-        // ⌘J → toggle BOTTOM edge. Same focus-aware fallback as ⌘B.
-        // Unlike the ⌥⌘B branch above, this branch uses `key` instead
-        // of `e.code` — there's no Alt variant to disambiguate (⌥⌘J
-        // would produce "∆" in `e.key`, but the `!e.altKey` guard
-        // already excludes that case before the letter check runs).
-        e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "bottom")) return;
-        toggleEdgeGroup(api, "bottom");
-      } else if (key === "m" && e.shiftKey && api) {
-        e.preventDefault();
-        const active = api.activeGroup;
-        if (!active) return;
-        if (active.api.location.type !== "grid") {
-          if (api.hasMaximizedGroup()) {
-            prepareMaximizeRestoreAnimation(containerRef.current);
-            api.exitMaximizedGroup();
-          }
-          return;
-        }
-        if (active.api.isMaximized()) {
+  // ⌘J → toggle the OUTERMOST layout's bottom edge, always. Like ⌘B (and unlike
+  // its ⌥⌘B sibling above) it does not consult focus: the bottom panel is a
+  // single shared surface in the user's mental model, so the chord that shows
+  // and hides it should mean one thing everywhere rather than retargeting to
+  // whichever inner dock happens to hold focus.
+  //
+  // `toggleEdgeGroup` already no-ops when that edge is absent or holds no
+  // panels, so "toggle it if there is one" needs no extra guard here.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.toggleBottomEdge,
+    () => {
+      const api = apiRef.current;
+      if (!api) return;
+      toggleEdgeGroup(api, "bottom");
+    },
+    { ...TERMINAL_YIELDS },
+  );
+
+  // ⇧⌘M → maximize / restore the active grid group. A non-grid (edge) group
+  // can't be maximized, so the shortcut only exits an existing maximize there.
+  useAppShortcut(
+    GLOBAL_SHORTCUTS.maximizePanel,
+    () => {
+      const api = apiRef.current;
+      const active = api?.activeGroup;
+      if (!api || !active) return;
+      if (active.api.location.type !== "grid") {
+        if (api.hasMaximizedGroup()) {
           prepareMaximizeRestoreAnimation(containerRef.current);
-          active.api.exitMaximized();
-        } else {
-          active.api.maximize();
+          api.exitMaximizedGroup();
         }
+        return;
       }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+      if (active.api.isMaximized()) {
+        prepareMaximizeRestoreAnimation(containerRef.current);
+        active.api.exitMaximized();
+      } else {
+        active.api.maximize();
+      }
+    },
+    { ...TERMINAL_YIELDS },
+  );
 
   // Listen for file link clicks from chat messages → open Quick Open with query.
   //

@@ -1,6 +1,7 @@
-import { useEffect } from "react";
 import { isDesktop } from "../lib/is-desktop";
+import { ZOOM_SHORTCUTS } from "../lib/shortcuts";
 import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
+import { useAppShortcut } from "./useAppShortcut";
 
 /**
  * Browser-mode keyboard shortcut handler for zoom.
@@ -13,45 +14,14 @@ import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
  *
  * Only active outside the desktop shell — when running inside Electron the
  * native View menu accelerators intercept these keys before they reach the
- * webview (see `apps/desktop/src/main/menu.ts`).
+ * webview (see `apps/desktop/src/main/menu.ts`). `enabled: !isDesktop` is the
+ * hook-friendly form of the early `return` this replaces: the bindings are
+ * declared unconditionally (hooks must be) but stay inert in a desktop shell.
  */
 export function useZoom(): void {
-  useEffect(() => {
-    // In a desktop shell, the View menu accelerators handle Cmd+= / Cmd+-
-    // before they reach the webview, so skip the JS listener.
-    if (isDesktop) return;
+  const enabled = !isDesktop;
 
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-
-      // Cmd+= or Cmd++ → zoom in
-      // On US keyboards, Shift is needed for +, but = and + share a key.
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomIn();
-        return;
-      }
-
-      // Cmd+- → zoom out
-      if (e.key === "-") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomOut();
-        return;
-      }
-
-      // Cmd+Shift+0 → reset. Match on `e.code`: with Shift held, `e.key`
-      // is layout-dependent (")" on US keyboards), but the physical digit
-      // key is always Digit0.
-      if (e.shiftKey && e.code === "Digit0") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomReset();
-      }
-    };
-
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  useAppShortcut(ZOOM_SHORTCUTS.zoomIn, () => zoomIn(), { enabled });
+  useAppShortcut(ZOOM_SHORTCUTS.zoomOut, () => zoomOut(), { enabled });
+  useAppShortcut(ZOOM_SHORTCUTS.resetZoom, () => zoomReset(), { enabled });
 }

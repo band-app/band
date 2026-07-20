@@ -3,7 +3,14 @@
  *
  * All palette-visible commands are defined here so they can be referenced by
  * both the CommandPaletteDialog component and the keyboard shortcut handler.
+ *
+ * The `shortcut` strings are read from `GLOBAL_SHORTCUTS` rather than written
+ * out here. They used to be independent copies, so a rebinding could leave the
+ * palette advertising a combo that no longer did anything — the display string
+ * and the `useHotkeys` binding now come from the same record.
  */
+
+import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,13 +137,13 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // is one of the most discoverable in the app.
       id: "new-untitled-tab",
       label: "New Untitled File",
-      shortcut: "Cmd+N",
+      shortcut: GLOBAL_SHORTCUTS.newUntitledTab.display,
       action: () => deps.newUntitledTab(),
     },
     {
       id: "quick-open",
       label: "Quick Open",
-      shortcut: "Cmd+P",
+      shortcut: GLOBAL_SHORTCUTS.quickOpen.display,
       action: () => deps.openQuickOpen(),
     },
     {
@@ -146,13 +153,13 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // Current File lives at ⇧⌥F (also VS Code parity, see below).
       id: "search-files",
       label: "Search in Files",
-      shortcut: "Cmd+Shift+F",
+      shortcut: GLOBAL_SHORTCUTS.searchFiles.display,
       action: () => deps.openSearchFiles(),
     },
     {
       id: "find-in-file",
       label: "Find in File",
-      shortcut: "Cmd+F",
+      shortcut: GLOBAL_SHORTCUTS.findInFile.display,
       action: () => deps.findInFile(),
     },
     {
@@ -169,7 +176,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // gate so the keystroke reaches us in the first place.
       id: "format-current-file",
       label: "Format Current File",
-      shortcut: "Shift+Alt+F",
+      shortcut: GLOBAL_SHORTCUTS.formatCurrentFile.display,
       action: () => deps.formatCurrentFile(),
     },
     {
@@ -185,31 +192,31 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     {
       id: "show-chat",
       label: "Show Chat",
-      shortcut: "Ctrl+Cmd+I",
+      shortcut: GLOBAL_SHORTCUTS.showChat.display,
       action: () => activatePanel(deps, "chat"),
     },
     {
       id: "show-changes",
       label: "Show Changes",
-      shortcut: "Cmd+Shift+G",
+      shortcut: GLOBAL_SHORTCUTS.showChanges.display,
       action: () => activatePanel(deps, "changes"),
     },
     {
       id: "show-terminal",
       label: "Show Terminal",
-      shortcut: "Ctrl+`",
+      shortcut: GLOBAL_SHORTCUTS.showTerminal.display,
       action: () => activatePanel(deps, "terminal"),
     },
     {
       id: "show-files",
       label: "Show Files",
-      shortcut: "Cmd+Shift+E",
+      shortcut: GLOBAL_SHORTCUTS.showFiles.display,
       action: () => activatePanel(deps, "files"),
     },
     {
       id: "show-browser",
       label: "Show Browser",
-      shortcut: "Cmd+Shift+B",
+      shortcut: GLOBAL_SHORTCUTS.showBrowser.display,
       action: () => activatePanel(deps, "browser"),
     },
     {
@@ -219,7 +226,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // `band:focus-projects` listener then focuses the list.
       id: "focus-projects",
       label: "Focus Projects",
-      shortcut: "Ctrl+0",
+      shortcut: GLOBAL_SHORTCUTS.focusProjects.display,
       action: () => {
         window.dispatchEvent(new CustomEvent("band:show-sidebar"));
         queueMicrotask(() => {

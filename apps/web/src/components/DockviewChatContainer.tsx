@@ -12,6 +12,7 @@ import {
 import { Columns2, Plus, Rows2, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentIcon, type ChatInsertDetail, useAdapter } from "@/dashboard";
+import { useAppShortcut } from "../hooks/useAppShortcut";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -24,6 +25,7 @@ import {
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
+import { DOCK_SHORTCUTS } from "../lib/shortcuts";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -800,8 +802,8 @@ export function DockviewChatContainer({
       api.removePanel(panel);
     }
 
-    // Re-focus the panel content so the section-scoped keydown handler keeps
-    // seeing events on the next press.
+    // Re-focus the panel content so focus stays inside this container and the
+    // section-scoped shortcuts keep firing on the next press.
     requestAnimationFrame(() => {
       apiRef.current?.activeGroup?.model.focusContent();
     });
@@ -816,94 +818,197 @@ export function DockviewChatContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Keyboard shortcuts (capture phase, scoped to this section's focus):
-  // - Cmd/Ctrl+T              → open a new chat tab (default coding agent)
-  // - Cmd/Ctrl+W              → close the active chat tab
-  // - Cmd/Ctrl+D              → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
-  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
-  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split chat groups (panels)
-  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
-  useEffect(() => {
-    if (!visible) return;
+  // Keyboard shortcuts, scoped to this section's focus:
+  // - Cmd+T              → open a new chat tab (default coding agent)
+  // - Cmd+W              → close the active chat tab
+  // - Cmd+D              → split right (vertical split)
+  // - Cmd+Shift+D        → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab   → cycle tabs in the active group
+  // - Cmd+[ / Cmd+]      → cycle between split chat groups (panels)
+  // - Cmd+Shift+[/]      → cycle tabs in the active group
+  //
+  // Combos come from `DOCK_SHORTCUTS` (the chat, terminal, browser and file-tab
+  // docks all bind the same set), and the scoping that used to be a hand-written
+  // `containerRef.contains(document.activeElement)` check inside a window-level
+  // capture listener is now `react-hotkeys-hook`'s returned ref: each binding
+  // listens on this container's root element, so it only fires while that
+  // element or a descendant holds focus and the innermost focused dock wins.
+  // `useAppShortcut` supplies capture-phase listening, form-tag /
+  // contentEditable enablement and `preventDefault`.
+  //
+  // `stopPropagation` is still called by hand in every branch that acts: the
+  // listener sits above the chat prompt in the capture path, and swallowing the
+  // event there is what keeps the chord out of the focused input.
+  const focusActiveGroupContent = useCallback(() => {
+    apiRef.current?.activeGroup?.model.focusContent();
+  }, []);
 
-    const cycleTabs = (direction: 1 | -1) => {
-      cycleTabsInActiveGroup(apiRef.current, direction, () => {
-        apiRef.current?.activeGroup?.model.focusContent();
-      });
-    };
+  const cycleTabs = useCallback(
+    (direction: 1 | -1) => {
+      cycleTabsInActiveGroup(apiRef.current, direction, focusActiveGroupContent);
+    },
+    [focusActiveGroupContent],
+  );
 
-    const cycleGroups = (direction: 1 | -1) => {
-      cycleGridGroups(apiRef.current, direction, () => {
-        apiRef.current?.activeGroup?.model.focusContent();
-      });
-    };
+  const cycleGroups = useCallback(
+    (direction: 1 | -1) => {
+      cycleGridGroups(apiRef.current, direction, focusActiveGroupContent);
+    },
+    [focusActiveGroupContent],
+  );
 
-    const handler = (e: KeyboardEvent) => {
-      // Only handle shortcut if this container (or a descendant) has focus
-      if (!containerRef.current?.contains(document.activeElement)) return;
+  // Bindings are only live while the section is visible — same gate the
+  // effect-based handler applied before registering its listener.
+  const shortcutOptions = { enabled: visible };
 
-      const key = e.key.toLowerCase();
+  const cycleForwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabForward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const cycleBackwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabBackward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const previousTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
+  const previousGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(-1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
 
-      // Ctrl+(Shift)+Tab → cycle tabs within the active group
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleTabs(e.shiftKey ? -1 : 1);
-        return;
+  const newTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.newTab,
+    (e) => {
+      e.stopPropagation();
+      handleAddTab();
+    },
+    shortcutOptions,
+    [handleAddTab, visible],
+  );
+
+  // ⌘W closes only while more than one tab is open, and `preventDefault` is
+  // deliberately conditional on that: on the last tab the keystroke has to stay
+  // untouched so Electron's menu can still close the window.
+  const closeTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.closeTab,
+    (e) => {
+      const api = apiRef.current;
+      if (!api || api.panels.length <= 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const active = api.activePanel;
+      if (active) {
+        closeTab(active.id);
       }
+    },
+    { ...shortcutOptions, preventDefault: false },
+    [closeTab, visible],
+  );
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+  const splitRightRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitRight,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "right");
+    },
+    shortcutOptions,
+    [handleSplit, visible],
+  );
+  const splitDownRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitDown,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "below");
+    },
+    shortcutOptions,
+    [handleSplit, visible],
+  );
 
-      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
-      if (e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleTabs(key === "]" ? 1 : -1);
-        return;
+  // All ten bindings scope to the same root element, so their ref callbacks are
+  // fanned out through one composed callback. The library's setters are stable,
+  // so listing them as deps keeps this callback stable too — an unstable ref
+  // callback would detach and re-attach (and re-register every listener) on
+  // every render.
+  const setContainerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      containerRef.current = element;
+      for (const attach of [
+        cycleForwardRef,
+        cycleBackwardRef,
+        nextTabRef,
+        previousTabRef,
+        nextGroupRef,
+        previousGroupRef,
+        newTabRef,
+        closeTabRef,
+        splitRightRef,
+        splitDownRef,
+      ]) {
+        attach(element);
       }
-
-      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
-      if (!e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleGroups(key === "]" ? 1 : -1);
-        return;
-      }
-
-      if (key === "t" && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAddTab();
-      } else if (key === "w" && !e.shiftKey) {
-        const api = apiRef.current;
-        if (!api || api.panels.length <= 1) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const active = api.activePanel;
-        if (active) {
-          closeTab(active.id);
-        }
-      } else if (key === "d") {
-        e.preventDefault();
-        e.stopPropagation();
-        const api = apiRef.current;
-        if (!api) return;
-        const activeGroup = api.activeGroup;
-        if (!activeGroup) return;
-        const direction = e.shiftKey ? "below" : "right";
-        handleSplit(activeGroup.id, direction);
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+    },
+    [
+      cycleForwardRef,
+      cycleBackwardRef,
+      nextTabRef,
+      previousTabRef,
+      nextGroupRef,
+      previousGroupRef,
+      newTabRef,
+      closeTabRef,
+      splitRightRef,
+      splitDownRef,
+    ],
+  );
 
   // Auto-focus the active chat panel whenever the section becomes visible
   // (e.g. user clicked the outer "Chat" panel tab) so the section-scoped
-  // keydown handler above starts seeing events without the user having to
-  // click into a tab first.
+  // shortcuts above start firing without the user having to click into a tab
+  // first.
   useEffect(() => {
     if (!visible) return;
     const id = requestAnimationFrame(() => {
@@ -1128,7 +1233,7 @@ export function DockviewChatContainer({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={setContainerRef} className="flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={chatTabTheme}

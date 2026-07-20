@@ -589,20 +589,307 @@ export class WorkspacePage {
     });
   }
 
-  /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
-   *  Uses `projectListRoot.press(...)` so Playwright moves focus there
-   *  before dispatching the key, bypassing the chat textarea autofocus
-   *  on the workspace route. The keydown bubbles to the window listener
-   *  in `DashboardShell` where the shortcut is wired up. `index` is
-   *  0-based; 0 picks "All" (⌘0), 1..9 pick the Nth label (⌘1..9). */
+  // ──────────────────────────────────────────────────────────────────────
+  // Keyboard-shortcut matrix (see `shortcut-matrix.spec.ts`).
+  //
+  // The global handler lives on a CAPTURE-phase window keydown listener in
+  // `SharedDockviewLayout.tsx`, so it sees the keystroke before whatever
+  // element happens to own focus. That's the property the migration to
+  // `react-hotkeys-hook` most easily breaks (the library scopes to a
+  // subtree / bails inside form fields by default), which is why every
+  // method below deliberately drives the key from a NON-default focus
+  // anchor deep inside an inner dockview instead of `document.body`.
+  //
+  // The methods split into "focus, then press" (terminal anchor — the page
+  // object owns the terminal locator) and bare "press at current focus"
+  // (chat anchor — `ChatPanePage` owns the prompt locator, so the spec
+  // focuses through that page object first and then presses here). Both
+  // shapes keep raw `page.keyboard` out of test bodies.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Outer-tab shortcut for each panel the global bindings can activate with a
+   *  ⌘⇧ chord. Mirrors `GLOBAL_SHORTCUTS.showFiles` / `showChanges` /
+   *  `showBrowser` in `lib/shortcuts.ts`. Kept as a lookup rather than three
+   *  near-identical methods so a renamed chord is a one-line change. */
+  private static readonly PANEL_SHORTCUTS = {
+    files: "Meta+Shift+e",
+    changes: "Meta+Shift+g",
+    browser: "Meta+Shift+b",
+  } as const;
+
+  /** Move keyboard focus into the terminal's xterm input.
+   *
+   *  `focus()` rather than `click()`: xterm keeps its input as an offscreen
+   *  "helper" textarea that Playwright never reports as visible, so it isn't
+   *  click-targetable. The terminal tab must already be active and xterm
+   *  mounted — call `openTerminalTab()` + `waitForTerminalReady()` first,
+   *  otherwise the wrapper is parked in the `inert` parking container and
+   *  refuses focus. */
+  private async focusTerminalInput(): Promise<void> {
+    await this.terminalInput.first().focus();
+  }
+
+  /** Activate an outer panel via its ⌘⇧ shortcut, fired from inside the
+   *  focused terminal.
+   *
+   *  The terminal is the worst-case anchor on purpose: it's an editable
+   *  textarea owned by a third-party widget, nested two dockviews deep, and
+   *  the handler has an explicit `terminalFocused && !e.metaKey` bail — so a
+   *  regression that makes these chords focus-scoped (or that widens the
+   *  terminal bail to cover ⌘ chords) shows up here and nowhere else. */
+  async activatePanelViaShortcutFromTerminal(
+    panel: keyof typeof WorkspacePage.PANEL_SHORTCUTS,
+  ): Promise<void> {
+    const chord = WorkspacePage.PANEL_SHORTCUTS[panel];
+    await test.step(`Activate the ${panel} tab via ${chord} from the focused terminal`, async () => {
+      await this.focusTerminalInput();
+      await this.page.keyboard.press(chord);
+    });
+  }
+
+  /** Press Ctrl+` (activate the Terminal tab) at whatever currently holds
+   *  focus, without moving it first.
+   *
+   *  Unlike the ⌘⇧ chords above this one canNOT be driven from the terminal:
+   *  the assertion ("the Terminal tab became active") is only meaningful when
+   *  the terminal tab starts INACTIVE, and an inactive terminal's wrapper is
+   *  parked in the `inert` parking container where its input can't take
+   *  focus. The spec therefore focuses the chat prompt through `ChatPanePage`
+   *  — an editable textarea inside the chat inner dockview, equally
+   *  non-default — and calls this to fire the key there. */
+  async pressActivateTerminalShortcut(): Promise<void> {
+    await test.step("Press Ctrl+` at the current focus", async () => {
+      await this.page.keyboard.press("Control+`");
+    });
+  }
+
+  /** Press ⌘B at whatever currently holds focus, without moving it first.
+   *
+   *  Deliberately anchor-free: the whole point of the ⌘B coverage is WHICH
+   *  target the handler picks for a given focus, so the spec establishes the
+   *  focus it wants (chat prompt via `ChatPanePage`) and this method only
+   *  fires the key. Compare `toggleSidebarViaShortcut()`, which anchors on
+   *  the sidebar toggle button and therefore always exercises the
+   *  no-inner-dockview-focused path. */
+  async pressToggleSidebarShortcut(): Promise<void> {
+    await test.step("Press ⌘B at the current focus", async () => {
+      await this.page.keyboard.press("Meta+b");
+    });
+  }
+
+  /** Press ⌘J at whatever currently holds focus, without moving it first.
+   *
+   *  Anchor-free for the same reason as `pressToggleSidebarShortcut()`: the
+   *  property under test is WHICH bottom edge the handler picks for a given
+   *  focus, so the spec establishes the focus it wants (the chat prompt, via
+   *  `ChatPanePage.focusPromptAt`) and this method only fires the key.
+   *
+   *  ⌘J used to be focus-aware — `findFocusedInnerDockview()` first, and a
+   *  focused inner dock with a populated `edge-bottom` claimed the chord. It
+   *  now always toggles the outermost layout's bottom edge, so firing it from
+   *  inside an inner dock is exactly the case that distinguishes the two. */
+  async pressToggleBottomEdgeShortcut(): Promise<void> {
+    await test.step("Press ⌘J at the current focus", async () => {
+      await this.page.keyboard.press("Meta+j");
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // DOCK-SCOPED shortcuts (see `shortcut-matrix.spec.ts`, group C).
+  //
+  // Unlike the global chords above, these are registered by EACH inner
+  // container (`DockviewChatContainer` / `DockviewTerminalContainer`) on its
+  // own capture-phase window listener, gated by
+  // `containerRef.current?.contains(document.activeElement)`. Both listeners
+  // are live at the same time whenever both docks are visible, so the SAME
+  // combo (⌘T) resolves to a different action purely by where focus sits.
+  //
+  // That containment check is exactly what the `react-hotkeys-hook`
+  // migration replaces with the hook's returned ref. The failure mode is one
+  // dock's binding winning globally while the other's goes dead — which is
+  // only observable if the key is fired from a focus anchor INSIDE the dock
+  // under test while the rival dock is also mounted and listening. Every
+  // method below therefore names its anchor explicitly.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Press ⌘T at whatever currently holds focus, without moving it first.
+   *
+   *  Anchor-free on purpose, mirroring `pressToggleSidebarShortcut()`: the
+   *  whole point of the dock-scoped coverage is WHICH dock claims the combo
+   *  for a given focus, so the spec establishes the focus it wants (the chat
+   *  prompt, via `ChatPanePage.focusPromptAt`) and this method only fires the
+   *  key. The terminal-anchored counterpart is
+   *  `newTabViaShortcutFromTerminal()`. */
+  async pressNewTabShortcut(): Promise<void> {
+    await test.step("Press ⌘T at the current focus", async () => {
+      await this.page.keyboard.press("Meta+t");
+    });
+  }
+
+  /** Fire ⌘T (new tab) from inside the focused terminal.
+   *
+   *  Anchored on the xterm helper textarea rather than the pane's render
+   *  surface: `focus()` is the only way in (xterm parks its input offscreen,
+   *  so Playwright never reports it as click-targetable) and it is a
+   *  descendant of the terminal container's ref — which is precisely what
+   *  `containerRef.contains(document.activeElement)` tests. The terminal tab
+   *  must already be active and xterm mounted (`openTerminalTab()` +
+   *  `waitForTerminalReady()`), otherwise the wrapper sits in the `inert`
+   *  parking container and refuses focus. */
+  async newTabViaShortcutFromTerminal(): Promise<void> {
+    await test.step("Press ⌘T from the focused terminal", async () => {
+      await this.focusTerminalInput();
+      await this.page.keyboard.press("Meta+t");
+    });
+  }
+
+  /** Fire ⌘D (split right) from inside the focused terminal.
+   *
+   *  ⌘D and Ctrl+D are NOT interchangeable in `DockviewTerminalContainer`,
+   *  unlike every other chord in that handler: the `key === "d"` branch
+   *  splits on `e.metaKey && !e.ctrlKey`, closes the active tab on
+   *  `e.ctrlKey && !e.metaKey && !e.shiftKey`, and swallows anything else so
+   *  no stray `^D` reaches xterm. So this method must press Meta+d
+   *  specifically — Control+d would exercise the close path instead.
+   *
+   *  Same xterm-helper-textarea anchor as `newTabViaShortcutFromTerminal()`;
+   *  see that method's comment. */
+  async splitRightViaShortcutFromTerminal(): Promise<void> {
+    await test.step("Press ⌘D (split right) from the focused terminal", async () => {
+      await this.focusTerminalInput();
+      await this.page.keyboard.press("Meta+d");
+    });
+  }
+
+  /** Fire ⌘B from inside the focused terminal — the inner dockview whose
+   *  `edge-left` group is empty on a default layout.
+   *
+   *  `toggleEdgeGroup` returns `false` for an empty edge, so the handler
+   *  falls through to the `band:toggle-sidebar` window event and the
+   *  project-list sidebar toggles. This is the fallback path that works
+   *  today and must survive the migration unchanged. */
+  async toggleSidebarViaShortcutFromTerminal(): Promise<void> {
+    await test.step("Toggle the sidebar via ⌘B from the focused terminal", async () => {
+      await this.focusTerminalInput();
+      await this.page.keyboard.press("Meta+b");
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Server-side inner-layout seeding.
+  //
+  // The inner chat/terminal/browser dockviews persist their layout tree
+  // server-side (`chatLayout.save`), NOT in localStorage like the outer
+  // shared layout — so `seedGlobalLayout`'s `addInitScript` trick doesn't
+  // reach them. These helpers POST the real tRPC mutations before `goto`,
+  // which is the same wire shape the app itself writes.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Create a chat pane record server-side via the real `chats.create`
+   *  mutation, pinning its id so a seeded layout can reference it.
+   *
+   *  Pinning the id is load-bearing: `DockviewChatContainer`'s `onReady`
+   *  prunes every restored panel whose id isn't in `chats.list`, so a layout
+   *  referencing invented ids would be silently emptied and replaced with a
+   *  fresh default tab — a vacuous test. Auth via the `band_token` cookie,
+   *  matching the other tRPC HTTP helpers here. */
+  async createChat(workspaceId: string, chatId: string, name: string): Promise<void> {
+    await test.step(`Create chat ${chatId} in ${workspaceId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/chats.create`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: { workspaceId, id: chatId, name },
+      });
+      if (!res.ok()) {
+        throw new Error(`createChat(${chatId}) failed: ${res.status()} ${await res.text()}`);
+      }
+    });
+  }
+
+  /** Persist an inner dockview layout tree server-side via the real
+   *  `<container>Layout.save` mutation — the counterpart of
+   *  `readInnerLayout`.
+   *
+   *  MUST run AFTER any `createChat` calls: `chats.create` itself appends the
+   *  new pane to the saved layout row, so creating a chat after seeding would
+   *  overwrite the hand-built tree. And MUST run BEFORE `goto`, since the
+   *  container fetches its layout once on mount. */
+  async seedInnerLayout(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+    tree: unknown,
+  ): Promise<void> {
+    const procedure =
+      container === "chat"
+        ? "chatLayout.save"
+        : container === "terminal"
+          ? "terminalLayout.save"
+          : "browserLayout.save";
+    await test.step(`Seed ${container} layout for ${workspaceId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/${procedure}`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: { workspaceId, tree },
+      });
+      if (!res.ok()) {
+        throw new Error(
+          `seedInnerLayout(${container}) failed: ${res.status()} ${await res.text()}`,
+        );
+      }
+    });
+  }
+
+  /** The view (panel) ids docked in an inner container's `edge-left` group,
+   *  read back from the SERVER-persisted layout.
+   *
+   *  Used as the round-trip check on a seeded tree: if dockview rejected the
+   *  seed, `onReady` falls back to a default single-panel layout and
+   *  re-persists it, so the left edge reads back empty and the ⌘B focus-aware
+   *  branch under test would have had nothing to act on. Returns `[]` when no
+   *  layout, no edge group, or an empty edge. */
+  async innerEdgeLeftViews(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<string[]> {
+    const tree = await this.readInnerLayout(container, workspaceId);
+    return tree?.edgeGroups?.left?.group?.views ?? [];
+  }
+
+  /** The view (panel) ids docked in an inner container's `edge-bottom` group,
+   *  read back from the SERVER-persisted layout. Bottom-edge counterpart of
+   *  `innerEdgeLeftViews` — see that method for the round-trip rationale.
+   *
+   *  Used by the ⌘J coverage, where a populated INNER bottom edge is what makes
+   *  the test able to tell the always-outer handler apart from the focus-aware
+   *  one it replaced. An empty read means the seed didn't take and the test
+   *  would no longer distinguish them. */
+  async innerEdgeBottomViews(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<string[]> {
+    const tree = await this.readInnerLayout(container, workspaceId);
+    return tree?.edgeGroups?.bottom?.group?.views ?? [];
+  }
+
+  /** Drive the label-filter shortcut as a real user keypress. `index` is
+   *  0-based: 0 picks "All", 1..9 pick the Nth label.
+   *
+   *  Uses `projectListRoot.press(...)` so Playwright moves focus there before
+   *  dispatching the key, bypassing the chat textarea autofocus on the
+   *  workspace route — the shortcut deliberately does not fire from inside a
+   *  text field.
+   *
+   *  Digit 0 is pressed with ⌘, digits 1..9 with Ctrl, because the two halves
+   *  are bound differently: Ctrl+0 belongs to the global "Focus Projects"
+   *  shortcut, so the label filter binds ⌘0 alone for "All" while 1..9 accept
+   *  either modifier. See `LABEL_FILTER_SHORTCUT` in `lib/shortcuts.ts`. */
   async pressLabelShortcut(index: number): Promise<void> {
     if (index < 0 || index > 9) {
       throw new Error(`pressLabelShortcut: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Control+${index} (label shortcut)`, async () => {
+    const combo = index === 0 ? "Meta+0" : `Control+${index}`;
+    await test.step(`Press ${combo} (label shortcut)`, async () => {
       const root = this.projectListRoot();
       await root.waitFor({ state: "visible" });
-      await root.press(`Control+${index}`);
+      await root.press(combo);
     });
   }
 
@@ -1441,6 +1728,44 @@ export class WorkspacePage {
     return this.page.getByTestId("dv-edge-group-edge-bottom").filter({ visible: true });
   }
 
+  /** Rendered height in CSS px of the OUTERMOST shared-dockview layout's
+   *  bottom edge group — the projection the ⌘J coverage keys off.
+   *
+   *  Why height and not `bottomEdgeGroup().toHaveCount(0/1)`, which is how
+   *  `workspace-maximize-collapses-edges.spec.ts` asserts on the same edge:
+   *  the two features hide the edge by DIFFERENT dockview mechanisms.
+   *  Maximizing calls `setEdgeGroupVisible(false)`, which unmounts the shell
+   *  from layout entirely (count 1 → 0). ⌘J calls `group.api.collapse()`,
+   *  which keeps the shell mounted and merely shrinks it to its header strip
+   *  (~200px → ~35px) — so the count probe reads 1 in BOTH states and cannot
+   *  see the toggle at all. Height is the signal that actually moves, and it
+   *  mirrors how `sidebarWidth()` reports the sibling ⌘B collapse.
+   *
+   *  "Outermost" is resolved structurally: every INNER dockview (chat /
+   *  terminal / browser) is rendered inside a `MultiWorkspacePanelHost`
+   *  cached entry, so the one edge shell with no such ancestor belongs to
+   *  `SharedDockviewLayout` itself. That distinction is load-bearing here —
+   *  a test that seeds a populated inner bottom edge puts three
+   *  `dv-edge-group-edge-bottom` elements on the page, and the whole point of
+   *  the ⌘J assertion is WHICH of them moved.
+   *
+   *  Throws when the outer shell isn't uniquely resolvable, so a renamed
+   *  dockview testid or a structural change fails loudly instead of
+   *  reporting a vacuous 0. */
+  async outerBottomEdgeHeight(): Promise<number> {
+    return await this.page.evaluate(() => {
+      const outer = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="dv-edge-group-edge-bottom"]'),
+      ).filter((el) => el.closest('[data-testid^="workspace-panel-host__cached-entry"]') === null);
+      if (outer.length !== 1) {
+        throw new Error(
+          `expected exactly 1 outer bottom edge group, found ${outer.length} — dockview testid renamed or panel-host nesting changed?`,
+        );
+      }
+      return outer[0].getBoundingClientRect().height;
+    });
+  }
+
   /** Reset the per-workspace shared-dockview state entry in
    *  `localStorage` and (re-)navigate to the workspace so the next
    *  mount runs against a clean slate. Two-step (matches
@@ -2275,6 +2600,158 @@ export class WorkspacePage {
     });
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Shortcut matrix, group D (see `shortcut-matrix.spec.ts`).
+  //
+  // Three bindings whose CORRECTNESS is invisible in the DOM chrome the
+  // groups above key off:
+  //
+  //   - ⌘0 vs Ctrl+0. The two used to be the same chord, and Focus Projects
+  //     won only because it ran in capture phase and called
+  //     `stopPropagation()` before the label filter's bubble-phase listener
+  //     saw it. They're separate bindings now (`LABEL_FILTER_SHORTCUT` binds
+  //     ⌘0 only; `GLOBAL_SHORTCUTS.focusProjects` binds Ctrl+0), so the
+  //     observable is the label filter's localStorage entry plus where focus
+  //     landed — not anything the dockview renders.
+  //   - ⌘⇧] / ⌘⇧[. Tab cycling within the focused dock's active group. The
+  //     panel COUNT is unchanged by a cycle, so the persisted layout's
+  //     `activeView` is the only server-side projection that moves.
+  //   - ⌘= / ⌘⇧= / ⌘-. Zoom is applied to `<html>` and mirrored onto the
+  //     `--app-zoom` custom property by `applyZoomLevelToDom` (lib/zoom.ts);
+  //     that variable is the rendered state, so it's what we read.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Read the active project-list label filter from localStorage — `null`
+   *  for "All". `useLabelFilter` writes this key on every change (and
+   *  `removeItem`s it for All), so it is the persisted projection of the
+   *  filter the sidebar is showing.
+   *
+   *  Used by the ⌘0 / Ctrl+0 split coverage in both directions: as the
+   *  positive anchor that a filter really was applied, and as the assertion
+   *  that Ctrl+0 left it alone. */
+  async readLabelFilter(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), LABEL_FILTER_KEY);
+  }
+
+  /** Index of the active tab within the multi-tab group of an inner
+   *  container's SERVER-persisted layout.
+   *
+   *  Tab cycling (⌘⇧] / ⌘⇧[) moves the active view inside one group without
+   *  changing the panel count, so `countTerminalPanels` can't see it. Dockview
+   *  serializes each grid leaf as `{ views, activeView }`, and the position of
+   *  `activeView` within `views` is exactly what `cycleTabs(±1)` advances —
+   *  and it's stable across runs, unlike the server-generated terminal ids.
+   *
+   *  Picks the leaf holding more than one view (the group the test stacked its
+   *  tabs into), falling back to the first leaf so a layout that never grew a
+   *  second tab reports index 0 rather than throwing — the caller's positive
+   *  anchor is what catches that case. Returns -1 when there is no layout or
+   *  no active view, so a missing projection can't read as "index 0". */
+  async innerActiveTabIndex(
+    container: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<number> {
+    const tree = await this.readInnerLayout(container, workspaceId);
+    const root = tree?.grid?.root;
+    if (!root) return -1;
+    const leaves: { id: string; views: string[]; activeView?: string }[] = [];
+    const walk = (node: DockviewGridNode): void => {
+      if (node.type === "leaf") {
+        leaves.push(node.data);
+        return;
+      }
+      for (const child of node.data) walk(child);
+    };
+    walk(root);
+    const group = leaves.find((leaf) => leaf.views.length > 1) ?? leaves[0];
+    if (!group?.activeView) return -1;
+    return group.views.indexOf(group.activeView);
+  }
+
+  /** The tab-cycling chords each dock binds through `DOCK_SHORTCUTS.nextTab`
+   *  / `previousTab`. Spelled with the PHYSICAL key (`BracketRight` /
+   *  `BracketLeft`) because that's how the bindings are spelled and it's the
+   *  whole point of the fix: Shift turns `]` into `}` on a US layout, so the
+   *  character form these used to carry could never match and both chords were
+   *  dead despite being advertised in the command palette. */
+  private static readonly TAB_CYCLE_CHORDS = {
+    next: "Meta+Shift+BracketRight",
+    previous: "Meta+Shift+BracketLeft",
+  } as const;
+
+  /** Cycle the terminal dock's active tab, firing the chord from inside that
+   *  dock.
+   *
+   *  Anchored on the dock's own visible "New terminal" header button rather
+   *  than on the xterm helper textarea the other dock-scoped helpers use.
+   *  Both sit inside the element the container hands to `useAppShortcut`'s
+   *  ref — which is what scopes the binding — but only the header button is
+   *  unambiguous once a SECOND tab exists: `terminalInput.first()` resolves in
+   *  DOM order across every mounted terminal, including the inactive one
+   *  parked in the `inert` parking container, and focusing an inert element
+   *  silently no-ops. That would fire the chord from `document.body` and
+   *  quietly test nothing. The button is non-editable, always rendered while
+   *  the dock is visible, and `centralToolbar` already scopes it to this
+   *  workspace's central group. */
+  async cycleTabViaShortcutFromTerminalDock(
+    workspaceId: string,
+    direction: keyof typeof WorkspacePage.TAB_CYCLE_CHORDS,
+  ): Promise<void> {
+    const chord = WorkspacePage.TAB_CYCLE_CHORDS[direction];
+    await test.step(`Press ${chord} (${direction} tab) from the terminal dock`, async () => {
+      await this.terminalAddTabButton(workspaceId).first().focus();
+      await this.page.keyboard.press(chord);
+    });
+  }
+
+  /** The zoom chords `useZoom` binds in browser mode, mirroring
+   *  `ZOOM_SHORTCUTS` in `lib/shortcuts.ts`. All three are spelled with the
+   *  PHYSICAL key (`Equal` / `Minus`) rather than the produced character,
+   *  matching the bindings: the library splits combos on `"+"` (so a literal
+   *  `meta++` parses to nothing) and compares modifiers for exact equality
+   *  (so a `meta+=` binding can't fire while Shift is held). `inShifted` is
+   *  ⌘+ — the same physical key with Shift, and the half that was silently
+   *  dead before the binding was corrected. */
+  private static readonly ZOOM_CHORDS = {
+    in: "Meta+Equal",
+    inShifted: "Meta+Shift+Equal",
+    out: "Meta+Minus",
+  } as const;
+
+  /** Fire a zoom chord from inside the focused terminal.
+   *
+   *  Same worst-case anchor as `activatePanelViaShortcutFromTerminal`: an
+   *  editable textarea owned by xterm, nested two dockviews deep. `useZoom`
+   *  binds these globally with no terminal bail, so they must fire there —
+   *  and a regression that makes them focus-scoped shows up nowhere else.
+   *  The terminal tab must already be active and xterm mounted
+   *  (`openTerminalTab()` + `waitForTerminalReady()`). */
+  async zoomViaShortcutFromTerminal(
+    direction: keyof typeof WorkspacePage.ZOOM_CHORDS,
+  ): Promise<void> {
+    const chord = WorkspacePage.ZOOM_CHORDS[direction];
+    await test.step(`Press ${chord} (zoom ${direction}) from the focused terminal`, async () => {
+      await this.focusTerminalInput();
+      await this.page.keyboard.press(chord);
+    });
+  }
+
+  /** The zoom factor currently APPLIED to the document — read from the
+   *  `--app-zoom` custom property `applyZoomLevelToDom` mirrors onto `<html>`
+   *  alongside the CSS `zoom` itself (`ZOOM_CSS_VAR` in lib/zoom.ts).
+   *
+   *  Read the applied value rather than any rendered copy: zoom has no UI
+   *  chrome of its own, and the pre-paint init script in `__root.tsx` seeds
+   *  the property on first boot, so this is defined from mount onward and can
+   *  serve as a test's positive anchor. Returns NaN when the property is
+   *  missing, which fails an equality assertion loudly instead of defaulting
+   *  to 1 and passing vacuously. */
+  async appliedZoomLevel(): Promise<number> {
+    return await this.page.evaluate(() =>
+      Number.parseFloat(document.documentElement.style.getPropertyValue("--app-zoom")),
+    );
+  }
+
   /** Poll the DOM-renderer rows until one whose trimmed text equals `text`
    *  is painted, returning its viewport rectangle. */
   private async waitForTerminalRowRect(
@@ -2311,6 +2788,13 @@ export interface DockviewLayoutSnapshot {
     root?: DockviewGridNode;
   };
   panels: Record<string, unknown>;
+  /** dockview serializes its three cardinal edge groups alongside the grid.
+   *  Only the `views` list is modelled — that's the single bit the shortcut
+   *  matrix needs (is the left edge populated?), and `toggleEdgeGroup` keys
+   *  off exactly that (`group.panels.length === 0`). */
+  edgeGroups?: Partial<
+    Record<"left" | "right" | "bottom", { group?: { views?: string[] } } | undefined>
+  >;
 }
 
 export type DockviewGridNode =
