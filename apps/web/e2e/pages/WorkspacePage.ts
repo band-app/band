@@ -1142,6 +1142,70 @@ export class WorkspacePage {
     }, workspaceId);
   }
 
+  /** Read the live xterm column count for a workspace's terminal from the
+   *  module-level terminal cache (`globalThis.__bandTerminalCache__`). Lets a
+   *  width-sensitive test calibrate against the ACTUAL fitted width instead of
+   *  guessing cols from the viewport (which varies with font metrics across
+   *  platforms). Returns 0 when the terminal isn't cached / not yet loaded. */
+  async terminalCols(workspaceId: string): Promise<number> {
+    return await this.page.evaluate((id) => {
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      if (!cache) return 0;
+      for (const entry of cache.values()) {
+        if (entry.workspaceId === id) {
+          const term = entry.getTerminal() as { cols?: number } | null;
+          if (term && typeof term.cols === "number") return term.cols;
+        }
+      }
+      return 0;
+    }, workspaceId);
+  }
+
+  /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
+   *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
+   *  `readTerminalRenderedText` (which joins everything into one string), this
+   *  preserves the per-row layout so a test can assert WHERE a token landed —
+   *  the observable that reflow-scatter corrupts. Only meaningful under the DOM
+   *  renderer (`useWebGLTerminalRenderer: false`); joins across the workspace's
+   *  wrappers, first wrapper first. */
+  async readTerminalRenderedRows(workspaceId: string): Promise<string[]> {
+    return await this.page.evaluate((id) => {
+      const wrappers = Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`));
+      const rows: string[] = [];
+      for (const w of wrappers) {
+        const rowsEl = w.querySelector(".xterm-rows");
+        if (!rowsEl) continue;
+        for (const child of Array.from(rowsEl.children)) {
+          rows.push((child as HTMLElement).textContent ?? "");
+        }
+      }
+      return rows;
+    }, workspaceId);
+  }
+
+  /** Navigate to a blank page, fully tearing down the mounted client (its
+   *  terminal xterm + WebSocket). Used to drop the live client WITHOUT sending
+   *  a resize, so a subsequent viewport change + re-navigation makes the fresh
+   *  client fit to a DIFFERENT width than the server-side mirror still holds —
+   *  the reconnect width mismatch under test. */
+  async navigateToBlank(): Promise<void> {
+    await test.step("Navigate to a blank page (tear down client)", async () => {
+      await this.page.goto("about:blank");
+    });
+  }
+
+  /** Resize the browser viewport. A thin wrapper so the spec body drives the
+   *  viewport through the page object like every other action. */
+  async setViewport(width: number, height: number): Promise<void> {
+    await test.step(`Set viewport to ${width}x${height}`, async () => {
+      await this.page.setViewportSize({ width, height });
+    });
+  }
+
   /** Whether the shared terminal parking container is properly isolated:
    *  `inert` + `aria-hidden` so a parked terminal's hidden textarea can't take
    *  focus or receive keystrokes (band-app/band#617). Returns null when no

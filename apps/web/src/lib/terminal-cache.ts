@@ -139,6 +139,12 @@ const HEARTBEAT_TIMEOUT_MS = 20_000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 
+/** How long the client suppresses container-driven refits while waiting for a
+ *  replay snapshot after an `attach` request. A safety valve only: the server
+ *  acks every attach (even an empty snapshot), so this fires solely if that
+ *  ack is lost, after which normal live resizing resumes. */
+const REPLAY_GUARD_TIMEOUT_MS = 3_000;
+
 /** Number of animation frames `attach` will re-poll for a non-zero live box
  *  before giving up (the panel may be 0×0 for a frame right after mount). */
 const MAX_LAYOUT_FRAMES = 5;
@@ -636,6 +642,22 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let lastPongAt = 0;
 
+    // Request-driven replay (reconnect width-sync). The server no longer
+    // replays eagerly on connect; instead we ask for the serialized snapshot
+    // ONLY once we're attached + visible + fitted to the live container, and
+    // the request carries our fitted { cols, rows }. That guarantees the
+    // server serializes the mirror at exactly the width we render it at, so
+    // xterm's wrapped-line reflow can't scatter the replayed cells. Reset per
+    // connection in `onopen`.
+    //  - `attachSent`: the `attach` (or dims-carrying `init`) went out for
+    //    THIS connection; a genuine later resize uses the normal live path.
+    //  - `awaitingReplay`: request sent, snapshot/ack not yet received —
+    //    container-driven refits are suppressed so a ResizeObserver tick can't
+    //    change our width between requesting and rendering the snapshot.
+    let attachSent = false;
+    let awaitingReplay = false;
+    let replayGuardTimer: ReturnType<typeof setTimeout> | null = null;
+
     const clearReconnectTimer = () => {
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
@@ -682,29 +704,48 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       sock.onopen = () => {
         reconnectAttempts = 0;
         lastPongAt = Date.now();
+        // Replay state is per-connection: a reconnect must ask again.
+        attachSent = false;
+        clearReplayGuard();
         if (isReconnect) term.reset();
+
+        // Are we already fitted to a visible live box? If so we can carry our
+        // dims in the handshake and get the replay in one round-trip.
+        const dims = fittedDims();
+
         if (
           !didConnectOnce &&
           paneMetadata &&
           (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)
         ) {
+          // New terminal with spawn options. Send `init` unconditionally so
+          // the PTY spawns and the command runs even if the pane isn't visible
+          // yet. Fold in the fitted dims when we have them so the server can
+          // replay immediately (folding avoids a separate `attach` racing into
+          // the gap before the server's persistent listener is installed).
           const initMsg: Record<string, unknown> = { type: "init" };
           if (paneMetadata.command) initMsg.command = paneMetadata.command;
           if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
           if (paneMetadata.env) initMsg.env = paneMetadata.env;
+          if (dims) {
+            initMsg.cols = dims.cols;
+            initMsg.rows = dims.rows;
+            attachSent = true;
+            awaitingReplay = true;
+            replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+          }
           sock.send(JSON.stringify(initMsg));
+        } else {
+          // Reconnect, or a plain terminal with no spawn options: request the
+          // replay carrying our fitted dims. No-ops when not visible yet — the
+          // ResizeObserver / `attach` path retries once the panel surfaces.
+          requestReplay();
         }
         didConnectOnce = true;
 
-        // Fit to the live box if we're attached+visible; otherwise the initial
-        // resize is sent by `attach` once the panel surfaces.
-        if (attached && hostIsVisible()) {
-          fit.fit();
-          sendPtyResize();
-          if (autoFocusPending && !isReconnect) {
-            term.focus();
-            autoFocusPending = false;
-          }
+        if (dims && autoFocusPending && !isReconnect) {
+          term.focus();
+          autoFocusPending = false;
         }
 
         stopHeartbeat();
@@ -714,12 +755,20 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
       sock.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
+          // The first binary frame after an attach request is the replay
+          // snapshot, serialized at the dims we sent — lift the refit
+          // suppression once it's in hand.
+          finishReplay();
           term.write(new Uint8Array(event.data));
         } else {
           try {
             const msg = JSON.parse(event.data as string);
             if (msg.type === "pong") {
               lastPongAt = Date.now();
+            } else if (msg.type === "attached") {
+              // Attach ack — sent even when the snapshot is empty (fresh
+              // spawn), so the guard lifts without waiting for the timeout.
+              finishReplay();
             } else if (msg.type === "title" && typeof msg.title === "string") {
               emitTitle(msg.title);
             } else if (msg.type === "error" && typeof msg.message === "string") {
@@ -858,6 +907,54 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (term.cols <= 0 || term.rows <= 0) return;
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
+
+    // --- Request-driven replay (reconnect width-sync) ---
+    const clearReplayGuard = () => {
+      awaitingReplay = false;
+      if (replayGuardTimer !== null) {
+        clearTimeout(replayGuardTimer);
+        replayGuardTimer = null;
+      }
+    };
+    // Fit to the live container and return the resulting dims, or null when
+    // not attached to a visible box (so we never capture the parking
+    // container's size or a 0×0 pre-layout frame).
+    const fittedDims = (): { cols: number; rows: number } | null => {
+      if (!attached || !hostIsVisible()) return null;
+      fit.fit();
+      if (term.cols <= 0 || term.rows <= 0) return null;
+      return { cols: term.cols, rows: term.rows };
+    };
+    // Ask the server to replay the serialized snapshot at our fitted dims.
+    // Sent at most once per connection (`attachSent`); no-ops until we're
+    // attached + visible + fitted, so `onopen`/`attach`/the ResizeObserver can
+    // all call it and the first one that finds the panel surfaced wins.
+    const requestReplay = () => {
+      if (attachSent) return;
+      const sock = ws;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      const dims = fittedDims();
+      if (!dims) return;
+      attachSent = true;
+      awaitingReplay = true;
+      sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows }));
+      if (replayGuardTimer !== null) clearTimeout(replayGuardTimer);
+      replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
+    };
+    // Once the snapshot (or its ack) lands, lift the refit suppression and
+    // reconcile: if the container size drifted during the request→render
+    // window, fit + resize now. A no-op when the width is unchanged (xterm's
+    // resize short-circuits equal dims), so the common case doesn't reflow the
+    // just-written snapshot.
+    const finishReplay = () => {
+      if (!awaitingReplay) return;
+      clearReplayGuard();
+      requestAnimationFrame(() => {
+        if (!attached || !hostIsVisible()) return;
+        fit.fit();
+        sendPtyResize();
+      });
+    };
     const remeasureAndReattach = (opt: { newFontSize?: number } = {}): void => {
       const { newFontSize } = opt;
       // Always apply the new font size so the terminal is correctly scaled when
@@ -900,6 +997,17 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // Only react when attached to a visible live box — never fit to the
       // parking container's size.
       if (!attached || !hostIsVisible()) return;
+      // First time the panel surfaces on this connection: this IS the fit that
+      // lets us request the replay at the live width. Do that instead of a
+      // bare resize.
+      if (!attachSent) {
+        requestReplay();
+        return;
+      }
+      // Between requesting replay and rendering the snapshot, don't let a
+      // container tick change our width — that would reintroduce the reflow
+      // scatter the request-driven flow exists to prevent.
+      if (awaitingReplay) return;
       const dprChanged = handleDprChange();
       if (!dprChanged) fit.fit();
       sendPtyResize();
@@ -910,7 +1018,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
       if (term.options.fontSize === target) return;
       remeasureAndReattach({ newFontSize: target });
-      if (attached && hostIsVisible()) sendPtyResize();
+      // Don't push a resize mid-replay: the pending snapshot is bound to the
+      // dims we already sent (see the ResizeObserver guard).
+      if (attached && hostIsVisible() && !awaitingReplay) sendPtyResize();
     };
     const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
 
@@ -942,7 +1052,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       }
       webglSuspect = false;
       if (term.rows > 0) term.refresh(0, term.rows - 1);
-      sendPtyResize();
+      // If this connection hasn't requested its replay yet (the panel just
+      // surfaced), do that now — it carries the dims we just fitted to.
+      // Otherwise keep the PTY in sync with the live box, unless we're
+      // mid-replay (the snapshot is bound to the dims already sent).
+      if (!attachSent) {
+        requestReplay();
+        return;
+      }
+      if (!awaitingReplay) sendPtyResize();
     };
 
     hostIsVisible = () =>
