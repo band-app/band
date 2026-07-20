@@ -2055,6 +2055,56 @@ export class WorkspacePage {
     });
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Terminal tab header context menu ("Copy terminal ID"). Mirrors the
+  // chat-tab surface above: the tab header carries a
+  // `terminal-tab__trigger--<terminalId>` testid whose suffix is generated
+  // at runtime, so we match the stable PREFIX with a regex and take
+  // `.first()` — the workspaces these tests seed have a single terminal tab.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The terminal tab header (right-click target). */
+  terminalTabTrigger(): Locator {
+    return this.page.getByTestId(/^terminal-tab__trigger--/).first();
+  }
+
+  /** The opened terminal-tab context menu content (portalled to body). */
+  get terminalTabContextMenu(): Locator {
+    return this.page.getByTestId("terminal-tab__context-menu");
+  }
+
+  /** "Copy terminal ID" item. */
+  get copyTerminalIdItem(): Locator {
+    return this.page.getByTestId("terminal-tab__context-menu-item--copy-terminal-id");
+  }
+
+  /** Read the terminal id the app assigned to the (single) terminal in the
+   *  given workspace, straight from the persistent terminal wrapper's
+   *  `data-terminal-id`. Lets a test assert the copied value equals the id
+   *  the app actually rendered, rather than one the test guessed. */
+  async readActiveTerminalId(workspaceId: string): Promise<string> {
+    return await this.page.evaluate((id) => {
+      const wrapper = document.querySelector(`[data-workspace-id="${id}"][data-terminal-id]`);
+      const terminalId = wrapper?.getAttribute("data-terminal-id");
+      if (!terminalId) throw new Error(`no terminal wrapper found for workspace ${id}`);
+      return terminalId;
+    }, workspaceId);
+  }
+
+  /** Right-click the terminal tab header to open its context menu. */
+  async openTerminalTabContextMenu(): Promise<void> {
+    await test.step("Right-click the terminal tab to open its context menu", async () => {
+      await this.terminalTabTrigger().click({ button: "right" });
+    });
+  }
+
+  /** Click the "Copy terminal ID" context-menu item. */
+  async clickCopyTerminalId(): Promise<void> {
+    await test.step("Click Copy terminal ID", async () => {
+      await this.copyTerminalIdItem.click();
+    });
+  }
+
   /** Simulate a NON-secure context (`navigator.clipboard === undefined`,
    *  the LAN-IP / non-HTTPS-tunnel case) and capture the `execCommand("copy")`
    *  fallback's payload into `window.__copied`. Must run BEFORE `goto` (uses
