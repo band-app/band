@@ -176,7 +176,7 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
       })
       .toBe(externalMdPath);
     await expect(workspacePage.quickOpenDialog()).toBeHidden();
-    await expect(page.getByTestId("file-viewer__root")).toBeVisible({ timeout: 15_000 });
+    await new FileViewerPage(page).expectVisible();
   });
 
   test("a band:open-file event for a non-existent absolute path reveals the dialog with no match", async ({
