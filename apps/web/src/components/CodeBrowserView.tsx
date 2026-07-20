@@ -64,12 +64,14 @@ import {
   useSettingsQuery,
   useWorkspacePath,
 } from "@/dashboard";
+import { useAppShortcut } from "../hooks/useAppShortcut";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { pathInside } from "../lib/path-inside";
 import { consumeExternalOpen, subscribeExternalOpens } from "../lib/pending-external-open";
 import { shouldDropPersistedTab } from "../lib/persisted-tab-self-heal";
+import { DOCK_SHORTCUTS } from "../lib/shortcuts";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -1427,16 +1429,26 @@ export function CodeBrowserView({
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
   }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile, workspaceId]);
 
-  // Keyboard shortcuts (capture phase, scoped to this section's focus):
-  // - Cmd/Ctrl+W              → close the active file tab
-  // - Ctrl+(Shift)+Tab        → cycle file tabs
-  // - Cmd/Ctrl+Shift+[/]      → cycle file tabs (matches the per-section
-  //                             convention used by Terminal/Chats/Browser).
-  // - Ctrl+-                  → editor history: go back (VSCode parity)
-  // - Ctrl+Shift+-            → editor history: go forward (VSCode parity)
+  // Keyboard shortcuts, scoped to this section's focus:
+  // - Cmd+W              → close the active file tab
+  // - Ctrl+(Shift)+Tab   → cycle file tabs
+  // - Cmd+Shift+[/]      → cycle file tabs (matches the per-section
+  //                        convention used by Terminal/Chats/Browser).
+  // - Ctrl+-             → editor history: go back (VSCode parity)
+  // - Ctrl+Shift+-       → editor history: go forward (VSCode parity)
   //
-  // The Code section has no sub-dockview groups, so Cmd/Ctrl+[/] is a no-op
-  // here — we still swallow it so it doesn't bubble up to anything else.
+  // The Code section has no sub-dockview groups, so `DOCK_SHORTCUTS.nextGroup`
+  // / `previousGroup` (Cmd+[ / Cmd+]) are deliberately left unbound here.
+  //
+  // The shared combos come from `DOCK_SHORTCUTS`, and the scoping that used to
+  // be a hand-written `containerRef.contains(document.activeElement)` check
+  // inside a window-level capture listener is now `react-hotkeys-hook`'s
+  // returned ref: each binding listens on this view's root element, so it only
+  // fires while that element or a descendant holds focus. `useAppShortcut`
+  // supplies capture-phase listening, form-tag / contentEditable enablement
+  // (the editor is the usual focus target here) and `preventDefault`;
+  // `stopPropagation` is still called by hand wherever the old handler called
+  // it, so the chord never also reaches the editor.
   //
   // The editor-history shortcuts deliberately use **Ctrl** (not Cmd) to
   // mirror VSCode on macOS and — more importantly — to dodge the desktop
@@ -1446,8 +1458,13 @@ export function CodeBrowserView({
   // Windows/Linux the same accelerator binds `Ctrl+-`, so the shortcut
   // will be intercepted by the menu before reaching this handler; that's
   // a known limitation to revisit when we ship outside macOS.
-  useEffect(() => {
-    const cycleFileTabs = (direction: 1 | -1) => {
+  //
+  // They bind the PHYSICAL `Minus` key (`useKey` left unset, the library
+  // default) rather than the produced character, so the Shift-modified `e.key`
+  // — `"_"` on US layouts — doesn't have to be juggled. That is the same test
+  // the old handler's `e.code === "Minus"` performed.
+  const cycleFileTabs = useCallback(
+    (direction: 1 | -1) => {
       const tabs = fileTabs.openTabs;
       if (tabs.length <= 1) return;
       const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
@@ -1464,65 +1481,110 @@ export function CodeBrowserView({
             : tabs.length - 1
           : (currentIndex + direction + tabs.length) % tabs.length;
       handleTabSelect(tabs[nextIndex].filePath);
-    };
+    },
+    [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect],
+  );
 
-    const handler = (e: KeyboardEvent) => {
-      if (!containerRef.current?.contains(document.activeElement)) return;
+  const cycleForwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabForward,
+    (e) => {
+      e.stopPropagation();
+      cycleFileTabs(1);
+    },
+    {},
+    [cycleFileTabs],
+  );
+  const cycleBackwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabBackward,
+    (e) => {
+      e.stopPropagation();
+      cycleFileTabs(-1);
+    },
+    {},
+    [cycleFileTabs],
+  );
+  const nextTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextTab,
+    (e) => {
+      e.stopPropagation();
+      cycleFileTabs(1);
+    },
+    {},
+    [cycleFileTabs],
+  );
+  const previousTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousTab,
+    (e) => {
+      e.stopPropagation();
+      cycleFileTabs(-1);
+    },
+    {},
+    [cycleFileTabs],
+  );
 
-      const key = e.key.toLowerCase();
+  const historyBackRef = useAppShortcut(
+    { binding: "ctrl+minus", display: "Ctrl+-" },
+    (e) => {
+      e.stopPropagation();
+      handleEditorGoBack();
+    },
+    {},
+    [handleEditorGoBack],
+  );
+  const historyForwardRef = useAppShortcut(
+    { binding: "ctrl+shift+minus", display: "Ctrl+Shift+-" },
+    (e) => {
+      e.stopPropagation();
+      handleEditorGoForward();
+    },
+    {},
+    [handleEditorGoForward],
+  );
 
-      // Ctrl+(Shift)+Tab → cycle file tabs
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleFileTabs(e.shiftKey ? -1 : 1);
-        return;
+  // ⌘W only acts — and only suppresses the browser's own ⌘W — when there is an
+  // active tab to close, so `preventDefault` stays conditional.
+  const closeTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.closeTab,
+    (e) => {
+      if (!fileTabs.activeTabPath) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handleTabClose(fileTabs.activeTabPath);
+    },
+    { preventDefault: false },
+    [fileTabs.activeTabPath, handleTabClose],
+  );
+
+  // All bindings scope to the same root element, so their ref callbacks are
+  // fanned out through one composed callback. The library's setters are stable,
+  // so listing them as deps keeps this callback stable too — an unstable ref
+  // callback would detach and re-attach (and re-register every listener) on
+  // every render.
+  const setContainerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      containerRef.current = element;
+      for (const attach of [
+        cycleForwardRef,
+        cycleBackwardRef,
+        nextTabRef,
+        previousTabRef,
+        historyBackRef,
+        historyForwardRef,
+        closeTabRef,
+      ]) {
+        attach(element);
       }
-
-      // Ctrl+- / Ctrl+Shift+- → editor history back/forward.
-      // Match on `e.code === "Minus"` so we don't have to juggle the
-      // Shift-modified `e.key` (which becomes `"_"` on US layouts).
-      // Require Ctrl exclusively (no Cmd, no Alt) to keep it distinct
-      // from the desktop Zoom Out accelerator.
-      if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.shiftKey) {
-          handleEditorGoForward();
-        } else {
-          handleEditorGoBack();
-        }
-        return;
-      }
-
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-
-      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle file tabs
-      if (e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleFileTabs(key === "]" ? 1 : -1);
-        return;
-      }
-
-      // Cmd/Ctrl+W → close the active file tab
-      if (key === "w" && !e.shiftKey && fileTabs.activeTabPath) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleTabClose(fileTabs.activeTabPath);
-      }
-    };
-    window.addEventListener("keydown", handler, { capture: true });
-    return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [
-    fileTabs.openTabs,
-    fileTabs.activeTabPath,
-    handleTabSelect,
-    handleTabClose,
-    handleEditorGoBack,
-    handleEditorGoForward,
-  ]);
+    },
+    [
+      cycleForwardRef,
+      cycleBackwardRef,
+      nextTabRef,
+      previousTabRef,
+      historyBackRef,
+      historyForwardRef,
+      closeTabRef,
+    ],
+  );
 
   // -------------------------------------------------------------------------
   // File tree imperative handle (drives "new file" / "new folder" from toolbar)
@@ -2234,7 +2296,7 @@ export function CodeBrowserView({
     // dockview's content container, which has min-height:0 but not
     // min-width:0 and would otherwise be pushed wider than its allocated
     // group slot — visibly shoving the right-edge tab strip off-screen.
-    <div ref={containerRef} className="h-full w-full min-w-0 overflow-hidden">
+    <div ref={setContainerRef} className="h-full w-full min-w-0 overflow-hidden">
       {useMobileLayout ? (
         // Mobile / narrow container: toggle between file browser and viewer
         viewFilePath ? (

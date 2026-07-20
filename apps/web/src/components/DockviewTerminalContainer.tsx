@@ -20,6 +20,7 @@ import React, {
   useState,
 } from "react";
 import { type TerminalInsertDetail, useAdapter } from "@/dashboard";
+import { useAppShortcut } from "../hooks/useAppShortcut";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -31,6 +32,7 @@ import {
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
+import { DOCK_SHORTCUTS } from "../lib/shortcuts";
 import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -540,135 +542,254 @@ export function DockviewTerminalContainer({
     });
   }, []);
 
-  // Keyboard shortcuts (capture phase, scoped to this section's focus).
-  // The outer modifier guard uses `mod = e.metaKey || e.ctrlKey`, so every
-  // shortcut that names `Cmd+X` below also fires for `Ctrl+X` — that's
-  // intentional for cross-platform support; readers should not assume
-  // platform-specific dispatch.
-  // - Cmd/Ctrl+T              → open a new terminal tab
-  // - Cmd/Ctrl+W              → close the active terminal tab
-  // - Ctrl+D                  → close the active terminal tab (Cmd owns split)
-  // - Cmd/Ctrl+D              → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
-  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
-  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split terminal groups (panels)
-  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
-  useEffect(() => {
-    if (!visible) return;
+  // Keyboard shortcuts, scoped to this section's focus:
+  // - Cmd+T              → open a new terminal tab
+  // - Cmd+W              → close the active terminal tab
+  // - Ctrl+D             → close the active terminal tab (Cmd owns split)
+  // - Cmd+D              → split right (vertical split)
+  // - Cmd+Shift+D        → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab   → cycle tabs in the active group
+  // - Cmd+[ / Cmd+]      → cycle between split terminal groups (panels)
+  // - Cmd+Shift+[/]      → cycle tabs in the active group
+  //
+  // Combos come from `DOCK_SHORTCUTS`, shared with the chat, browser and
+  // file-tab docks. Scoping is `react-hotkeys-hook`'s returned ref rather than
+  // the hand-written `containerRef.contains(document.activeElement)` check that
+  // used to guard a window-level capture listener: each binding listens on this
+  // container's root, so it only fires while that element or a descendant holds
+  // focus. `useAppShortcut` supplies capture-phase listening, form-tag
+  // enablement (xterm's helper `<textarea>` is the usual focus target here) and
+  // `preventDefault`.
+  //
+  // `stopPropagation` is called by hand wherever the old handler called it: the
+  // listener sits above xterm in the capture path, and swallowing the event
+  // there is what keeps the chord from also reaching the shell.
+  const refocusActivePanel = useCallback(() => {
+    const panel = apiRef.current?.activePanel;
+    if (!panel) return;
+    panel.view.content.element
+      .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+      ?.focus();
+  }, []);
 
-    const refocusActivePanel = () => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      panel.view.content.element
-        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-        ?.focus();
-    };
-
-    const cycleTabs = (direction: 1 | -1) => {
+  const cycleTabs = useCallback(
+    (direction: 1 | -1) => {
       cycleTabsInActiveGroup(apiRef.current, direction, () => {
         requestAnimationFrame(refocusActivePanel);
       });
-    };
+    },
+    [refocusActivePanel],
+  );
 
-    const cycleGroups = (direction: 1 | -1) => {
+  const cycleGroups = useCallback(
+    (direction: 1 | -1) => {
       cycleGridGroups(apiRef.current, direction, () => {
         requestAnimationFrame(refocusActivePanel);
       });
-    };
+    },
+    [refocusActivePanel],
+  );
 
-    const handler = (e: KeyboardEvent) => {
-      // Only handle shortcut if this container (or a descendant) has focus
-      if (!containerRef.current?.contains(document.activeElement)) return;
+  // Try to close the active tab; returns whether the close path actually ran.
+  // Callers use the return value to decide whether to swallow the keystroke.
+  // When `false` (no tab to close), the caller must leave the event alone —
+  // Cmd+W on the last tab needs to reach Electron's menu so the window can
+  // close, and Ctrl+D on the last tab needs to reach xterm so the user's shell
+  // can receive EOF.
+  const tryCloseActiveTab = useCallback((): boolean => {
+    const api = apiRef.current;
+    if (!api || api.panels.length <= 1) return false;
+    const active = api.activePanel;
+    if (!active) return false;
+    closeTab(active.id);
+    return true;
+  }, [closeTab]);
 
-      const key = e.key.toLowerCase();
+  // Bindings are only live while the section is visible — same gate the
+  // effect-based handler applied before registering its listener.
+  const shortcutOptions = { enabled: visible };
 
-      // Ctrl+(Shift)+Tab → cycle tabs within the active group
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
+  // ⌘ owns split here, Ctrl owns close, and the two are deliberately NOT
+  // interchangeable — unlike every other chord in this container. The guard
+  // reproduces the old `e.metaKey && !e.ctrlKey` test: `mod` alone would let
+  // Cmd+Ctrl+D split (react-hotkeys-hook stops checking Ctrl once `mod` is in
+  // the combo), and on Windows/Linux, where `mod` IS Ctrl, it would fire the
+  // split and the Ctrl+D close on the very same keystroke.
+  const SPLIT_IS_CMD_ONLY = {
+    ignoreEventWhen: (e: KeyboardEvent) => !e.metaKey || e.ctrlKey,
+  };
+
+  const cycleForwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabForward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const cycleBackwardRef = useAppShortcut(
+    DOCK_SHORTCUTS.cycleTabBackward,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const previousTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousTab,
+    (e) => {
+      e.stopPropagation();
+      cycleTabs(-1);
+    },
+    shortcutOptions,
+    [cycleTabs, visible],
+  );
+  const nextGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.nextGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
+  const previousGroupRef = useAppShortcut(
+    DOCK_SHORTCUTS.previousGroup,
+    (e) => {
+      e.stopPropagation();
+      cycleGroups(-1);
+    },
+    shortcutOptions,
+    [cycleGroups, visible],
+  );
+
+  const newTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.newTab,
+    (e) => {
+      e.stopPropagation();
+      handleAddTab();
+    },
+    shortcutOptions,
+    [handleAddTab, visible],
+  );
+
+  // Conditional `preventDefault`: nothing to close → the keystroke is left
+  // untouched so the OS / Electron menu can handle Cmd+W (close window).
+  const closeTabRef = useAppShortcut(
+    DOCK_SHORTCUTS.closeTab,
+    (e) => {
+      if (tryCloseActiveTab()) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabs(e.shiftKey ? -1 : 1);
-        return;
       }
+    },
+    { ...shortcutOptions, preventDefault: false },
+    [tryCloseActiveTab, visible],
+  );
 
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+  const splitRightRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitRight,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "right");
+    },
+    { ...shortcutOptions, ...SPLIT_IS_CMD_ONLY },
+    [handleSplit, visible],
+  );
+  const splitDownRef = useAppShortcut(
+    DOCK_SHORTCUTS.splitDown,
+    (e) => {
+      e.stopPropagation();
+      const activeGroup = apiRef.current?.activeGroup;
+      if (!activeGroup) return;
+      handleSplit(activeGroup.id, "below");
+    },
+    { ...shortcutOptions, ...SPLIT_IS_CMD_ONLY },
+    [handleSplit, visible],
+  );
 
-      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
-      if (e.shiftKey && (key === "[" || key === "]")) {
+  // Ctrl+D closes the active tab, but only while more than one is open — on a
+  // lone terminal `tryCloseActiveTab` returns false and the conditional
+  // `preventDefault` lets the keystroke through to xterm so the user can exit
+  // their shell with EOF. No entry in `DOCK_SHORTCUTS` covers this: it is the
+  // one chord that is this dock's alone, because it exists to work around ⌘D
+  // already meaning split.
+  const closeTabCtrlDRef = useAppShortcut(
+    { binding: "ctrl+d", display: "Ctrl+D" },
+    (e) => {
+      if (tryCloseActiveTab()) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabs(key === "]" ? 1 : -1);
-        return;
       }
+    },
+    { ...shortcutOptions, preventDefault: false },
+    [tryCloseActiveTab, visible],
+  );
 
-      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
-      if (!e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleGroups(key === "]" ? 1 : -1);
-        return;
+  // The modifier-d combos that neither split nor close (Ctrl+Shift+D,
+  // Cmd+Ctrl+D, Cmd+Ctrl+Shift+D) are swallowed rather than ignored: xterm
+  // turns every Ctrl+D spelling into a `^D`, and letting one leak would kill
+  // the user's shell on a chord that visibly did nothing.
+  const swallowStrayDRef = useAppShortcut(
+    { binding: "ctrl+shift+d, meta+ctrl+d, meta+ctrl+shift+d", display: "Ctrl+Shift+D" },
+    (e) => e.stopPropagation(),
+    shortcutOptions,
+    [visible],
+  );
+
+  // All bindings scope to the same root element, so their ref callbacks are
+  // fanned out through one composed callback. The library's setters are stable,
+  // so listing them as deps keeps this callback stable too — an unstable ref
+  // callback would detach and re-attach (and re-register every listener) on
+  // every render.
+  const setContainerRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      containerRef.current = element;
+      for (const attach of [
+        cycleForwardRef,
+        cycleBackwardRef,
+        nextTabRef,
+        previousTabRef,
+        nextGroupRef,
+        previousGroupRef,
+        newTabRef,
+        closeTabRef,
+        splitRightRef,
+        splitDownRef,
+        closeTabCtrlDRef,
+        swallowStrayDRef,
+      ]) {
+        attach(element);
       }
-
-      // Try to close the active tab; returns whether the close path actually
-      // ran. Callers use the return value to decide whether to swallow the
-      // keystroke. When `false` (no tab to close), the caller should let the
-      // event bubble — Cmd+W on the last tab needs to reach Electron's menu
-      // so the window can close, and Ctrl+D on the last tab needs to reach
-      // xterm so the user's shell can receive EOF.
-      const tryCloseActiveTab = (): boolean => {
-        const api = apiRef.current;
-        if (!api || api.panels.length <= 1) return false;
-        const active = api.activePanel;
-        if (!active) return false;
-        closeTab(active.id);
-        return true;
-      };
-
-      if (key === "t" && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAddTab();
-      } else if (key === "w" && !e.shiftKey) {
-        // Don't preventDefault when there's nothing to close — let the OS /
-        // Electron menu handle Cmd+W (close window) and let plain Ctrl+W
-        // bubble up.
-        if (tryCloseActiveTab()) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      } else if (key === "d") {
-        // Cmd+D / Cmd+Shift+D → split. Ctrl+D → close active tab (Cmd already
-        // owns split, so reuse Ctrl+D for close).
-        //
-        // For the SPLIT branch we always `preventDefault` so unhandled
-        // modifier-d combos that fall through (e.g. Ctrl+Shift+D, Cmd+Ctrl+D)
-        // don't leak a stray `^D` to xterm.
-        //
-        // For the CLOSE branch we conditionally preventDefault — on the last
-        // terminal tab `tryCloseActiveTab` returns false and we let Ctrl+D
-        // through to xterm so the user can exit their shell with EOF.
-        if (e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          const activeGroup = apiRef.current?.activeGroup;
-          if (!activeGroup) return;
-          handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
-        } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          if (tryCloseActiveTab()) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        } else {
-          // Any other modifier-d combo (e.g. Ctrl+Shift+D, Cmd+Ctrl+D):
-          // swallow so xterm doesn't see a stray `^D`. No close, no split.
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+    },
+    [
+      cycleForwardRef,
+      cycleBackwardRef,
+      nextTabRef,
+      previousTabRef,
+      nextGroupRef,
+      previousGroupRef,
+      newTabRef,
+      closeTabRef,
+      splitRightRef,
+      splitDownRef,
+      closeTabCtrlDRef,
+      swallowStrayDRef,
+    ],
+  );
 
   // Force a synchronous re-layout of the inner dockview when the outer
   // Terminal panel becomes visible. Background: dockview-core's
@@ -746,8 +867,8 @@ export function DockviewTerminalContainer({
 
   // Auto-focus the active terminal's xterm textarea whenever the section
   // becomes visible (e.g. user clicked the outer "Terminal" panel tab).
-  // Without this, the section-scoped keydown handler above bails out because
-  // document.activeElement is outside containerRef — meaning shortcuts only
+  // Without this, the section-scoped shortcuts above never fire because
+  // document.activeElement is outside this container — meaning they only
   // worked after the user manually clicked into a tab.
   useEffect(() => {
     if (!visible) return;
@@ -984,7 +1105,7 @@ export function DockviewTerminalContainer({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={setContainerRef} className="flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={terminalTabTheme}

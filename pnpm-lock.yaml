@@ -87,6 +87,9 @@ importers:
       prettier:
         specifier: ^3.8.3
         version: 3.8.3
+      react-hotkeys-hook:
+        specifier: ^5.3.3
+        version: 5.3.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react-resizable-panels:
         specifier: ^4.9.0
         version: 4.9.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -6249,6 +6252,12 @@ packages:
     resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
     peerDependencies:
       react: ^19.2.4
+
+  react-hotkeys-hook@5.3.3:
+    resolution: {integrity: sha512-aswgyWUnE25hmhzHTfKDmKzsaSE5DJ4LKaU/o6rQSXkDd/1Bh9TfAFQbHkf6fLy11HvlYkp+cDDarGdhmCDhoQ==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   react-is@19.2.6:
     resolution: {integrity: sha512-XjBR15BhXuylgWGuslhDKqlSayuqvqBX91BP8pauG8kd1zY8kotkNWbXksTCNRarse4kuGbe2kIY05ARtwNIvw==}
@@ -14127,6 +14136,11 @@ snapshots:
     dependencies:
       react: 19.2.4
       scheduler: 0.27.0
+
+  react-hotkeys-hook@5.3.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   react-is@19.2.6: {}
 

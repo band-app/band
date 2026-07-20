@@ -19,6 +19,8 @@ import {
 } from "@band-app/ui";
 import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppShortcut } from "@/hooks/useAppShortcut";
+import { LABEL_FILTER_SHORTCUT } from "@/lib/shortcuts";
 import { useCapabilities } from "../context";
 import { useAppUpdate } from "../hooks/use-app-update";
 import { useCliSetup } from "../hooks/use-cli-setup";
@@ -288,36 +290,41 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
     return () => window.removeEventListener("band:focus-projects", handler);
   }, []);
 
-  // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
-  // Skips when focus is in an editable element so it doesn't hijack typing.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (e.key < "0" || e.key > "9") return;
-
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
-          return;
-        }
-      }
-
-      const digit = Number(e.key);
+  // Label filter: ⌘0 → all projects, ⌘1..9 / Ctrl+1..9 → nth label.
+  //
+  // Unlike the global shortcuts in `SharedDockviewLayout`, these deliberately
+  // do NOT fire from inside a text field — ⌘1 while typing should stay a
+  // no-op — hence `enableOnFormTags: false`.
+  //
+  // ⌘0 is bound to ⌘ ONLY, while 1..9 accept either modifier. Ctrl+0 belongs to
+  // the global "Focus Projects" shortcut. That split is the existing behaviour,
+  // but it used to be an accident of listener ordering: Focus Projects ran in
+  // capture phase and called `stopPropagation()`, so this bubble-phase listener
+  // simply never saw Ctrl+0. Both are `useHotkeys` on `document` now, where
+  // registration order decides — far too fragile a thing to leave implicit, so
+  // the two shortcuts no longer contend for the same chord at all.
+  //
+  // `preventDefault: false` because the original only suppressed the browser's
+  // default when it actually applied a filter; a ⌘7 with only three labels
+  // defined must fall through untouched.
+  useAppShortcut(
+    LABEL_FILTER_SHORTCUT,
+    (event) => {
+      const digit = Number(event.key);
+      if (!Number.isInteger(digit)) return;
       if (digit === 0) {
-        e.preventDefault();
+        event.preventDefault();
         setLabelFilter(null);
         return;
       }
       const lbl = labels[digit - 1];
-      if (lbl) {
-        e.preventDefault();
-        setLabelFilter(lbl.id);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [labels, setLabelFilter]);
+      if (!lbl) return;
+      event.preventDefault();
+      setLabelFilter(lbl.id);
+    },
+    { enableOnFormTags: false, enableOnContentEditable: false, preventDefault: false },
+    [labels, setLabelFilter],
+  );
 
   return (
     <div

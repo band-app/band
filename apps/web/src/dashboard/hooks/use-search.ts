@@ -1,5 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppShortcut } from "@/hooks/useAppShortcut";
+import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 import type { SearchBarHandle, SearchOptions } from "../components/SearchBar";
 import {
   clearSearch,
@@ -171,19 +173,12 @@ export function useSearch({
     return () => onFindInFile?.(null);
   }, [onFindInFile, handleOpenSearch]);
 
-  // Direct Cmd+F / Ctrl+F handler so the search works even when
-  // the parent layout does not provide a FindInFileContext (e.g. desktop / mobile).
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "f" && !e.shiftKey) {
-        e.preventDefault();
-        handleOpenSearch();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [handleOpenSearch]);
+  // Direct Cmd+F / Ctrl+F binding so the search works even when the parent
+  // layout does not provide a FindInFileContext (e.g. desktop / mobile). Shares
+  // the `findInFile` combo with the global binding in `SharedDockviewLayout`;
+  // that one prefers a registered per-workspace handler and only broadcasts as
+  // a fallback, so the two don't fight over the same keystroke.
+  useAppShortcut(GLOBAL_SHORTCUTS.findInFile, () => handleOpenSearch(), {}, [handleOpenSearch]);
 
   return {
     searchOpen,
