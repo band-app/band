@@ -794,6 +794,151 @@ export class WorkspacePage {
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Mobile workspace tabs + mobile terminal (tabs-only) surface.
+  //
+  // On a mobile viewport the workspace renders `MobileWorkspaceLayout`
+  // (`workspace.$workspaceId.tsx`): a top-level `WorkspaceTabNav`
+  // (Chat / Changes / Files / Terminal) whose buttons carry the tab label as
+  // their system-controlled `aria-label`. The Terminal tab mounts the inner
+  // `DockviewTerminalContainer` DIRECTLY (not inside `MultiWorkspacePanelHost`),
+  // so its toolbar / tab markers are located globally on the page rather than
+  // scoped to a `cachedPanelEntries(...)` host.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** A mobile `WorkspaceTabNav` button by its label (system-controlled
+   *  aria-label set in `WorkspaceTabNav.tsx`). */
+  mobileWorkspaceTab(label: "Chat" | "Changes" | "Files" | "Terminal"): Locator {
+    return this.page.getByRole("button", { name: label });
+  }
+
+  /** Activate a mobile workspace tab. */
+  async openMobileTab(label: "Chat" | "Changes" | "Files" | "Terminal"): Promise<void> {
+    await test.step(`Open mobile ${label} tab`, async () => {
+      await this.mobileWorkspaceTab(label).click();
+    });
+  }
+
+  /** The mobile terminal container's grid-group toolbar (`RightHeaderActions`
+   *  tags only grid groups with `dockview-terminal__toolbar`; the mobile layout
+   *  has no edge groups). One per rendered terminal group — its count is the
+   *  observable "how many split groups" signal. */
+  get mobileTerminalToolbar(): Locator {
+    return this.page.getByTestId("dockview-terminal__toolbar");
+  }
+
+  /** The mobile terminal "New terminal" ("+") button — the add-tab affordance
+   *  that stays available even when split is disabled. */
+  get mobileTerminalNewButton(): Locator {
+    return this.mobileTerminalToolbar.getByRole("button", { name: "New terminal" });
+  }
+
+  /** All "Split right" split buttons on the page. The label is shared across the
+   *  chat/terminal/browser toolbars, so on a mobile viewport (where only one
+   *  splittable container renders) a count of 0 proves the split affordance is
+   *  hidden. Used by both the terminal and chat mobile specs. */
+  get splitRightButtons(): Locator {
+    return this.page.getByRole("button", { name: "Split right" });
+  }
+
+  /** All "Split down" split buttons on the page (see `splitRightButtons`). */
+  get splitDownButtons(): Locator {
+    return this.page.getByRole("button", { name: "Split down" });
+  }
+
+  /** Every terminal tab HEADER, matched on the per-tab testid `TerminalTab`
+   *  sets (`terminal-tab__trigger--<id>`). Dockview always renders every tab's
+   *  header (only inactive panel *bodies* are detached under the default
+   *  `onlyWhenVisible` renderer), so the header count equals the number of
+   *  terminal tabs currently rendered. */
+  get terminalTabHeaders(): Locator {
+    return this.page.getByTestId(/^terminal-tab__trigger--/);
+  }
+
+  /** Wait for the mobile terminal container to render its toolbar (lazy import
+   *  + layout query). */
+  async waitForMobileTerminalReady(): Promise<void> {
+    await this.mobileTerminalToolbar.first().waitFor({ state: "visible", timeout: 15_000 });
+  }
+
+  /** Create a terminal (spawns a real PTY + registers it in the saved layout)
+   *  via the real `terminal.create` tRPC mutation. Auth via the `band_token`
+   *  cookie, matching the other tRPC HTTP helpers. */
+  async createTerminal(workspaceId: string, id: string): Promise<void> {
+    await test.step(`Create terminal ${id} in ${workspaceId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/terminal.create`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: { workspaceId, id },
+      });
+      if (!res.ok()) {
+        throw new Error(`createTerminal(${id}) failed: ${res.status()} ${await res.text()}`);
+      }
+    });
+  }
+
+  /** Overwrite a workspace's persisted terminal layout via the real
+   *  `terminalLayout.save` mutation. Used to seed a "desktop split" layout the
+   *  mobile visit must not clobber. */
+  async saveTerminalLayout(workspaceId: string, tree: unknown): Promise<void> {
+    await test.step(`Save terminal layout for ${workspaceId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/terminalLayout.save`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: { workspaceId, tree },
+      });
+      if (!res.ok()) {
+        throw new Error(
+          `saveTerminalLayout(${workspaceId}) failed: ${res.status()} ${await res.text()}`,
+        );
+      }
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Mobile chat (tabs-only). The mobile Chat tab mounts `DockviewChatContainer`
+  // directly with `allowSplit={false}` — same locators as the desktop chat
+  // toolbar, but located globally on the page (no `cachedPanelEntries` host on
+  // mobile).
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The mobile chat container's grid-group toolbar (one per rendered chat
+   *  group; `dockview-chat__toolbar` tags grid groups only). */
+  get mobileChatToolbar(): Locator {
+    return this.page.getByTestId("dockview-chat__toolbar");
+  }
+
+  /** The mobile chat "New chat tab" ("+") button — the add-tab affordance that
+   *  stays available even when split is disabled. */
+  get mobileChatNewButton(): Locator {
+    return this.mobileChatToolbar.getByRole("button", { name: "New chat tab" });
+  }
+
+  /** Every chat tab HEADER, matched on the per-tab testid `ChatTab` sets
+   *  (`chat-tab__trigger--<id>`). Always rendered for every tab, so the count
+   *  equals the number of chat tabs. */
+  get chatTabHeaders(): Locator {
+    return this.page.getByTestId(/^chat-tab__trigger--/);
+  }
+
+  /** Wait for the mobile chat container to render its toolbar (lazy import +
+   *  layout query). */
+  async waitForMobileChatReady(): Promise<void> {
+    await this.mobileChatToolbar.first().waitFor({ state: "visible", timeout: 15_000 });
+  }
+
+  /** Create a chat via the real `chats.create` tRPC mutation. Auth via the
+   *  `band_token` cookie, matching the other tRPC HTTP helpers. */
+  async createChat(workspaceId: string, id: string): Promise<void> {
+    await test.step(`Create chat ${id} in ${workspaceId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/chats.create`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: { workspaceId, id },
+      });
+      if (!res.ok()) {
+        throw new Error(`createChat(${id}) failed: ${res.status()} ${await res.text()}`);
+      }
+    });
+  }
+
   /** The mobile workspace header's title button. Its aria-label
    *  ("Switch workspace") is system-controlled (set in
    *  `workspace.$workspaceId.tsx` MobileWorkspaceLayout), so
