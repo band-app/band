@@ -1,3 +1,4 @@
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -8,7 +9,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { Columns2, Plus, Rows2, TerminalSquare, X } from "lucide-react";
+import { ClipboardCopy, Columns2, Plus, Rows2, TerminalSquare, X } from "lucide-react";
 import React, {
   lazy,
   Suspense,
@@ -20,6 +21,7 @@ import React, {
   useState,
 } from "react";
 import { type TerminalInsertDetail, useAdapter } from "@/dashboard";
+import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -238,25 +240,47 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TerminalTabParams>) {
     [containerApi, terminalId],
   );
 
+  const handleCopyTerminalId = useCallback(() => {
+    // Use the shared helper, not `navigator.clipboard` directly:
+    // `navigator.clipboard` is undefined in a non-secure context (Band
+    // served over plain HTTP on a LAN IP / non-HTTPS tunnel), so the raw
+    // API silently no-ops there. `writeClipboardText` falls back to the
+    // legacy execCommand path that works without a secure context.
+    void writeClipboardText(terminalId);
+  }, [terminalId]);
+
   const showClose = panelCount > 1;
 
   return (
-    <div className="dv-default-tab">
-      <div className="flex items-center gap-1.5 min-w-0">
-        <TerminalSquare className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{title}</span>
-      </div>
-      {showClose && (
-        <button
-          type="button"
-          className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-colors"
-          onClick={handleClose}
-          title="Close terminal"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="dv-default-tab" data-testid={`terminal-tab__trigger--${terminalId}`}>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <TerminalSquare className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{title}</span>
+          </div>
+          {showClose && (
+            <button
+              type="button"
+              className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-colors"
+              onClick={handleClose}
+              title="Close terminal"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="terminal-tab__context-menu">
+        <ContextMenuItem
+          onClick={handleCopyTerminalId}
+          data-testid="terminal-tab__context-menu-item--copy-terminal-id"
         >
-          <X className="size-3" />
-        </button>
-      )}
-    </div>
+          <ClipboardCopy className="size-4" />
+          Copy terminal ID
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
