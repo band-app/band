@@ -186,6 +186,26 @@ export interface DashboardAdapter {
    */
   readExternalFile?(absolutePath: string): Promise<FileContentResult>;
 
+  /**
+   * Resolve an absolute (or workspace-relative) path against a workspace:
+   * does it exist, is it a regular file, and does it live inside the
+   * worktree (→ `workspaceRelativePath`) or outside it (→ `external`)? Used
+   * by Quick Open to decide whether a pasted / terminal-link path opens as a
+   * normal workspace file or an external tab.
+   *
+   * Resolves even when the path doesn't exist on disk (reports
+   * `{ exists: false }`); may REJECT when `workspaceId` is unknown.
+   */
+  resolveWorkspacePath?(
+    workspaceId: string,
+    path: string,
+  ): Promise<{
+    exists: boolean;
+    isFile: boolean;
+    external: boolean;
+    workspaceRelativePath: string | null;
+  }>;
+
   /** Write a file by absolute filesystem path. Mirror of `saveWorkspaceFile`
    *  for external files. */
   saveExternalFile?(absolutePath: string, content: string): Promise<void>;

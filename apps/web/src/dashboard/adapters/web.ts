@@ -438,6 +438,18 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return (await this.trpc.host.readFile.query({ absolutePath })) as FileContentResult;
   }
 
+  async resolveWorkspacePath(
+    workspaceId: string,
+    path: string,
+  ): Promise<{
+    exists: boolean;
+    isFile: boolean;
+    external: boolean;
+    workspaceRelativePath: string | null;
+  }> {
+    return await this.trpc.workspace.resolvePath.query({ workspaceId, path });
+  }
+
   async saveExternalFile(absolutePath: string, content: string): Promise<void> {
     await this.trpc.host.saveFile.mutate({ absolutePath, content });
   }

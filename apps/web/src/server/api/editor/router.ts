@@ -68,9 +68,9 @@ export const editorRouter = t.router({
           path: ["lineEnd"],
         }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       try {
-        return editorService.openFile(input);
+        return await editorService.openFile(input);
       } catch (err) {
         if (err instanceof EditorOpenError) {
           throw new TRPCError({ code: err.code, message: err.message });

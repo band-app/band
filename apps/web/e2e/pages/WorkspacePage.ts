@@ -1918,6 +1918,22 @@ export class WorkspacePage {
     return this.quickOpenDialog().getByRole("option");
   }
 
+  /** The "Open file" / "Open external file" row shown when the Quick Open
+   *  query is an absolute path that resolves to a real file (inside or
+   *  outside the worktree). `data-testid` set on the `CommandItem` in
+   *  `QuickOpenDialog.tsx` (BEM convention). */
+  get quickOpenPathItem(): Locator {
+    return this.quickOpenDialog().getByTestId("quick-open__path-result");
+  }
+
+  /** Click the offered path row — the way a user accepts the offer to open an
+   *  absolute path that resolves to a real file. */
+  async openQuickOpenPathItem(): Promise<void> {
+    await test.step("Open the offered path", async () => {
+      await this.quickOpenPathItem.click();
+    });
+  }
+
   /** Open Quick Open via the same `band:open-quick-open` window event the file
    *  tree toolbar fires, then wait for the dialog to render. */
   async openQuickOpen(): Promise<void> {
@@ -1935,6 +1951,18 @@ export class WorkspacePage {
       await this.quickOpenInput.focus();
       await this.page.keyboard.press("ControlOrMeta+a");
       await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Set the Quick Open query atomically (like a paste), replacing any
+   *  existing text. Prefer this over `typeQuickOpen` for long strings such as
+   *  absolute paths: character-by-character typing into the controlled cmdk
+   *  input can drop leading characters under the per-keystroke re-render
+   *  churn, and "paste a path" is the real gesture for the external-open
+   *  flow anyway. */
+  async fillQuickOpen(text: string): Promise<void> {
+    await test.step(`Fill Quick Open query "${text}"`, async () => {
+      await this.quickOpenInput.fill(text);
     });
   }
 

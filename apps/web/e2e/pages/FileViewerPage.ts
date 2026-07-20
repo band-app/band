@@ -72,6 +72,15 @@ export class FileViewerPage {
     return (await el.textContent()) ?? "";
   }
 
+  /** Assert (auto-retrying) that the file viewer is mounted and visible.
+   *  Used for previews (e.g. markdown) that render outside the CodeMirror
+   *  `.cm-content` surface, where `expectContent` doesn't apply. */
+  async expectVisible(): Promise<void> {
+    await test.step("File viewer is visible", async () => {
+      await expect(this.root).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
   /** Assert (auto-retrying) that the editor's rendered text contains `text`. */
   async expectContent(text: string): Promise<void> {
     await test.step(`Editor shows "${text}"`, async () => {
