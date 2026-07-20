@@ -758,9 +758,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
       sock.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-          // The first binary frame after an attach request is the replay
-          // snapshot, serialized at the dims we sent — lift the refit
-          // suppression once it's in hand.
+          // A binary frame received while awaiting replay is the snapshot
+          // (serialized at the dims we sent) — lift the refit suppression.
+          // `finishReplay` is a no-op once `awaitingReplay` has cleared, so
+          // later live frames fall straight through to the write below.
           finishReplay();
           term.write(new Uint8Array(event.data));
         } else {

@@ -260,7 +260,7 @@ function attachSession(
     // the serialized snapshot reconstructs the grid at that exact width and
     // nothing reflows between serialize and display. Falls back to the
     // mirror's current dims if the client sent none.
-    if (typeof cols === "number" && typeof rows === "number" && cols > 0 && rows > 0) {
+    if (cols !== undefined && rows !== undefined && cols > 0 && rows > 0) {
       terminalService.resize(terminalId, cols, rows);
     }
 
@@ -317,8 +317,12 @@ function attachSession(
       try {
         const parsed = JSON.parse(message);
         if (parsed.type === "attach") {
-          const cols = Number.isFinite(parsed.cols) ? (parsed.cols as number) : undefined;
-          const rows = Number.isFinite(parsed.rows) ? (parsed.rows as number) : undefined;
+          // Reject non-positive dims at the call site (not just in startReplay's
+          // own guard) so processMessage visibly validates before delegating.
+          const cols =
+            Number.isFinite(parsed.cols) && parsed.cols > 0 ? (parsed.cols as number) : undefined;
+          const rows =
+            Number.isFinite(parsed.rows) && parsed.rows > 0 ? (parsed.rows as number) : undefined;
           void startReplay(cols, rows).catch((err) => {
             log.error("Failed to replay terminal %s: %s", terminalId, err);
           });

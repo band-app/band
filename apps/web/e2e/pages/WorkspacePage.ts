@@ -1205,7 +1205,12 @@ export class WorkspacePage {
    *  module-level terminal cache (`globalThis.__bandTerminalCache__`). Lets a
    *  width-sensitive test calibrate against the ACTUAL fitted width instead of
    *  guessing cols from the viewport (which varies with font metrics across
-   *  platforms). Returns 0 when the terminal isn't cached / not yet loaded. */
+   *  platforms). Returns 0 when the terminal isn't cached / not yet loaded.
+   *
+   *  Assumes ONE terminal per workspace: it returns the first cache entry
+   *  matching `workspaceId`, so with multiple terminal tabs the result is
+   *  whichever the Map iterator yields first. Current callers seed a single
+   *  terminal; add a `terminalId` param if that ever changes. */
   async terminalCols(workspaceId: string): Promise<number> {
     return await this.page.evaluate((id) => {
       const cache = (

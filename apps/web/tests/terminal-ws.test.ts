@@ -209,7 +209,9 @@ describe("terminal WebSocket — close-reason byte cap", () => {
 
     await new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
-        ws.send(JSON.stringify({ type: "init" }));
+        // Same first-message handshake the other blocks use; the spawn fails on
+        // the stale worktree path before replay, so dims are immaterial here.
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
       });
       ws.on("message", (data: Buffer, isBinary: boolean) => {
         if (isBinary) return;
