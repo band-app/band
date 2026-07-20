@@ -92,6 +92,9 @@ test.describe("Terminal tab: Copy terminal ID", () => {
     expect(terminalId).not.toBe("");
 
     await workspacePage.openTerminalTabContextMenu();
+    // Positive anchor: the menu content actually opened before we assert on
+    // (and click) an individual item — mirrors the chat-tab spec.
+    await expect(workspacePage.terminalTabContextMenu).toBeVisible();
     await expect(workspacePage.copyTerminalIdItem).toBeVisible();
     await workspacePage.clickCopyTerminalId();
 
