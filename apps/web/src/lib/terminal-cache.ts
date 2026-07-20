@@ -31,10 +31,11 @@ import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 // `MultiWorkspacePanelHost` hid inactive terminals in place under
 // `content-visibility: hidden`, which dropped the WebGL backing store and
 // produced garbled frames on switch-back that only a manual resize fixed
-// (band-app/band#615). Parking keeps the surface in a normal-visibility subtree;
-// since even a parked surface can still be corrupted by the GPU (sleep/unlock,
-// memory pressure — no context-loss event fires), re-attach rebuilds the WebGL
-// addon and does one unconditional fit + refresh.
+// (band-app/band#615). Parking keeps the surface in a normal-visibility,
+// still-painted subtree, so an ordinary switch/foreground/click does a CHEAP
+// fit + refresh on re-attach and reuses the live WebGL surface (no rebuild, no
+// flicker). The addon is rebuilt only on genuine GPU loss — a `webglcontextlost`
+// event (`onContextLoss`) or a desktop `system-resumed` wake.
 //
 // The entry owns everything terminal-scoped: the xterm + addons, the WebSocket
 // with its reconnect/heartbeat machinery, the ResizeObserver, the zoom/DPR
@@ -163,8 +164,8 @@ const MAX_LAYOUT_FRAMES = 5;
  * deleted (`reconcileTerminalWorkspaces`), or this LRU cap is exceeded.
  *
  * The cap also bounds live WebGL contexts (browsers hard-cap ~16); each cached
- * terminal keeps a context alive while parked (the addon is rebuilt on
- * re-attach, since a parked surface can be corrupted by the GPU off-screen).
+ * terminal keeps a context alive while parked (reused on re-attach — the addon
+ * is rebuilt only on genuine GPU loss, not on a plain switch-back).
  */
 const MAX_CACHED_TERMINALS = 8;
 
@@ -336,16 +337,18 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   let lastActive = Date.now();
 
   // WebGL "surface may be corrupted" flag. The GPU can corrupt the glyph
-  // atlas and the renderer's buffers WITHOUT any `webglcontextlost` event
-  // (display sleep / screen unlock, background occlusion, texture memory
-  // pressure), and a damaged surface cannot be repaired in place —
+  // atlas and the renderer's buffers (display sleep / screen unlock, texture
+  // memory pressure), and a damaged surface cannot be repaired in place —
   // `clearTextureAtlas` + full refresh still redraws the damage. The only
   // reliable repair is disposing and recreating the WebGL addon (fresh
   // context, buffers, atlas), which `repairAndFit` does whenever this flag is
-  // set. Set on foreground return / system resume, on detach (a parked
-  // surface can rot off-screen), and on focus entering the terminal
-  // (spontaneous mid-session corruption fires no event at all). The rebuild
-  // costs a few ms of glyph rasterization.
+  // set. Set only on GENUINE loss signals: a desktop `system-resumed` wake
+  // (`handleSurfaceMayBeCorrupt`), an off-screen `onContextLoss`, and a
+  // parked DPR/zoom change (`remeasureAndReattach`, whose new metrics need a
+  // fresh atlas). Ordinary foreground/switch-back/click deliberately do NOT
+  // set it — a still-painted parked surface keeps its context, so those do a
+  // cheap fit + refresh instead (rebuilding there raced the compositor and
+  // flickered). The rebuild costs a few ms of glyph rasterization.
   let webglSuspect = false;
   // Epoch ms of the last WebGL addon build (initial load, DPR/zoom rebuild,
   // or suspect repair). Lets the focus-driven repair below skip a rebuild
@@ -825,31 +828,43 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     };
     // Coming back to the foreground (tab re-shown, or — in the Electron app —
     // the window regaining OS focus, which does NOT fire `visibilitychange`).
-    // Besides re-checking the socket, mark the surface suspect and repair:
-    // backgrounding/throttling can drop the rAF frames carrying a TUI's
-    // in-place redraws, and the GPU can silently discard texture memory while
-    // the window is away. `scheduleRepair` is rAF-debounced (self-guards on
-    // attached+visible), so a switch-back that fires both `visibilitychange`
-    // and `focus` coalesces into a single repair — same idiom as `attach`.
+    // Re-check the socket and do a CHEAP repaint: backgrounding/throttling can
+    // drop the rAF frames carrying a TUI's in-place redraws, so `repairAndFit`
+    // fits + unconditionally refreshes every row. It deliberately does NOT mark
+    // the surface suspect — an off-screen parked surface stays painted (see
+    // terminal-parking.ts) so ordinary focus/visibility changes never lose the
+    // GPU context, and rebuilding the WebGL addon here raced the compositor and
+    // produced a blank-then-repaint flicker (#615 repair fallout). Genuine
+    // texture loss has its own signals: `onContextLoss` and `system-resumed`.
+    // `scheduleRepair` is rAF-debounced (self-guards on attached+visible), so a
+    // switch-back that fires both `visibilitychange` and `focus` coalesces into
+    // a single repair — same idiom as `attach`.
     const handleForeground = () => {
       handleResume();
-      webglSuspect = true;
       scheduleRepair();
     };
     const handleVisibility = () => {
       if (!document.hidden) handleForeground();
     };
+    // Genuine GPU texture loss with NO `webglcontextlost` event: display sleep /
+    // screen unlock can discard texture memory while the window keeps OS focus,
+    // so neither `focus` nor `visibilitychange` fires. This is the one non-event
+    // path that must rebuild the surface, so it — and ONLY it, besides
+    // `onContextLoss` — marks the surface suspect before repairing. The desktop
+    // main process forwards powerMonitor's resume/unlock as `system-resumed`.
+    const handleSurfaceMayBeCorrupt = () => {
+      handleResume();
+      webglSuspect = true;
+      scheduleRepair();
+    };
     window.addEventListener("online", handleResume);
     window.addEventListener("focus", handleForeground);
     document.addEventListener("visibilitychange", handleVisibility);
-    // Desktop shell only: wake from system sleep / screen unlock. The window
-    // often kept OS focus through the nap, so neither `focus` nor
-    // `visibilitychange` fires in the renderer — but the GPU may have
-    // discarded texture memory while the display was down. The main process
-    // forwards powerMonitor's resume/unlock as `system-resumed`.
+    // Desktop shell only (`system-resumed` is an Electron IPC event; `isDesktop`
+    // is false in the browser).
     let unlistenSystemResumed: (() => void) | null = null;
     if (isDesktop) {
-      desktopListen("system-resumed", handleForeground)
+      desktopListen("system-resumed", handleSurfaceMayBeCorrupt)
         .then((off) => {
           if (destroyed) off();
           else unlistenSystemResumed = off;
@@ -857,24 +872,17 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         .catch(() => {});
     }
 
-    // Focus entering the terminal itself. When the window already holds OS
-    // focus, spontaneous mid-session corruption produces NO window-level event
-    // at all — the only signal left is the user clicking into the garbled
-    // terminal. `focusin` on the persistent wrapper (fires when xterm's helper
-    // textarea gains focus) turns that reflex into a surface rebuild. Skipped
-    // when ANY path built the addon within the last second — focus lands on
-    // the terminal during ordinary interaction too (auto-focus on connect,
-    // close-search refocus, tap-to-focus), and without the guard each of
-    // those would pay for a second context + atlas right after the first.
+    // Focus entering the terminal itself (the user clicking into it). This does
+    // a CHEAP repaint only — it must NOT rebuild the WebGL addon: a click that
+    // disposes and recreates the surface races the compositor and flickers, and
+    // clicking is not evidence of GPU corruption. Genuine corruption is handled
+    // by `onContextLoss` / `system-resumed`. Still WebGL-gated + throttled off
+    // the last addon build: the DOM renderer needs no repaint-on-click, and a
+    // repaint right after a build (auto-focus on connect, close-search refocus,
+    // tap-to-focus) is redundant with the fit+refresh that build already did.
     const handleFocusIn = () => {
-      // WebGL-only repair: the DOM renderer can't suffer GPU atlas
-      // corruption, and if no WebGL build ever succeeded there is nothing
-      // to rebuild — repairing anyway would refit/refresh on every click
-      // and, in the WebGL-unavailable case, re-attempt (and re-fail)
-      // context creation each time.
       if (!useWebGL || lastWebglBuildAt === 0) return;
       if (Date.now() - lastWebglBuildAt < 1_000) return;
-      webglSuspect = true;
       scheduleRepair();
     };
     wrapper.addEventListener("focusin", handleFocusIn);
@@ -1147,10 +1155,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (destroyed) return;
       attached = false;
       liveContainer = null;
-      // A parked surface can rot off-screen (GPU texture memory reclaimed with
-      // no context-loss event), so treat it as suspect; the next `attach`
-      // rebuilds the addon against the live layout.
-      webglSuspect = true;
+      // Parking moves the wrapper into an off-screen but PAINTED container (see
+      // terminal-parking.ts), so a plain switch-away no longer invalidates the
+      // WebGL surface — the next `attach` does a cheap fit + refresh and reuses
+      // the live canvas, no rebuild (no switch-back flicker). Genuine off-screen
+      // texture loss (sleep/unlock) still rebuilds via `system-resumed`, which
+      // marks every cached entry suspect; and `onContextLoss` covers a real
+      // context drop. So detach intentionally does NOT set `webglSuspect`.
       if (repairRafId !== null) {
         cancelAnimationFrame(repairRafId);
         repairRafId = null;

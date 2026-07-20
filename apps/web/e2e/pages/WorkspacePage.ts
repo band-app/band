@@ -1011,9 +1011,10 @@ export class WorkspacePage {
   }
 
   /** Dispatch a window `focus` event in the page — the foreground trigger the
-   *  terminal client uses to repair a possibly-corrupted WebGL surface (same
-   *  handler the desktop shell's `system-resumed` wake event invokes). Lets a
-   *  test drive the sleep/unlock repair path deterministically. */
+   *  terminal client reacts to with a CHEAP repaint (fit + refresh). It must
+   *  NOT rebuild the WebGL surface (that raced the compositor and flickered);
+   *  genuine texture loss is driven by `loseTerminalWebglContext`. Lets a test
+   *  assert the surface survives a foreground return. */
   async simulateWindowForeground(): Promise<void> {
     await test.step("Dispatch window 'focus'", async () => {
       await this.page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -1021,16 +1022,66 @@ export class WorkspacePage {
   }
 
   /** Blur then refocus the terminal's xterm input textarea — fires a real
-   *  `focusin` on the terminal wrapper, the "click into the garbled
-   *  terminal" repair trigger. Blurring first matters: focus() on an
-   *  already-focused element fires nothing, and the repair is throttled, so
-   *  tests poll this until the rebuild is observed. */
+   *  `focusin` on the terminal wrapper. A click into the terminal now does a
+   *  cheap repaint only, never a rebuild, so this is used to assert the surface
+   *  SURVIVES a click. Blurring first matters: focus() on an already-focused
+   *  element fires nothing. */
   async refocusTerminal(): Promise<void> {
     await test.step("Blur + refocus terminal input", async () => {
       await this.terminalInput.first().evaluate((el) => {
         (el as HTMLElement).blur();
         (el as HTMLElement).focus();
       });
+    });
+  }
+
+  /** Wait for `n` animation frames to elapse in the page. Used to let the
+   *  client's rAF-debounced repair path (`scheduleRepair` → `repairAndFit`)
+   *  actually RUN before a "surface was NOT rebuilt" assertion — otherwise the
+   *  assertion reads the pre-repair state and passes vacuously (the rebuild, if
+   *  any, lands a frame or two later). A rebuild completes synchronously inside
+   *  `repairAndFit`, so a few frames deterministically covers it. */
+  async settleAnimationFrames(n = 3): Promise<void> {
+    await this.page.evaluate(
+      (frames) =>
+        new Promise<void>((resolve) => {
+          if (frames <= 0) {
+            resolve();
+            return;
+          }
+          let left = frames;
+          const tick = () => {
+            left -= 1;
+            if (left <= 0) resolve();
+            else requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }),
+      n,
+    );
+  }
+
+  /** Force a genuine WebGL context loss on the workspace's terminal canvas via
+   *  the `WEBGL_lose_context` extension. This fires the real `webglcontextlost`
+   *  event that xterm's WebglAddon listens for, driving the ONE client repair
+   *  path that legitimately rebuilds the surface (`onContextLoss`). Lets a test
+   *  prove genuine loss still rebuilds even though ordinary focus/switch no
+   *  longer do. Throws if no live WebGL canvas/context is found so the test
+   *  fails loudly rather than passing vacuously. */
+  async loseTerminalWebglContext(workspaceId: string): Promise<void> {
+    await test.step(`Force WebGL context loss on ${workspaceId} terminal`, async () => {
+      await this.page.evaluate((id) => {
+        const wrapper = document.querySelector(`[data-workspace-id="${id}"]`);
+        const canvas = wrapper?.querySelector(
+          ".xterm-screen canvas:last-of-type",
+        ) as HTMLCanvasElement | null;
+        if (!canvas) throw new Error(`no terminal canvas for workspace ${id}`);
+        const gl = (canvas.getContext("webgl2") ??
+          canvas.getContext("webgl")) as WebGLRenderingContext | null;
+        const ext = gl?.getExtension("WEBGL_lose_context");
+        if (!ext) throw new Error("WEBGL_lose_context extension unavailable");
+        ext.loseContext();
+      }, workspaceId);
     });
   }
 
