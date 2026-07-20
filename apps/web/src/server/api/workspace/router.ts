@@ -389,6 +389,18 @@ export const workspaceRouter = t.router({
       }),
     ),
 
+  // Resolve an absolute (or workspace-relative) path against this
+  // workspace: does it exist, is it a regular file, and does it live inside
+  // the worktree (→ workspace-relative path) or outside it (→ external tab)?
+  // Quick Open calls this for an absolute-path query so a path that happens
+  // to be inside the current workspace opens as a normal file rather than an
+  // external tab. Shares `openFile`'s canonicalize + containment logic.
+  resolvePath: publicProcedure
+    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
+    .query(({ input }) =>
+      editorService.resolvePath({ workspaceId: input.workspaceId, filePath: input.path }),
+    ),
+
   searchContent: publicProcedure
     .input(
       z.object({

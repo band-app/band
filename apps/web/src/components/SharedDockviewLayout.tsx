@@ -54,6 +54,7 @@ import {
 } from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { enqueueExternalOpen } from "../lib/pending-external-open";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewChatContainer } from "./DockviewChatContainer";
@@ -892,6 +893,25 @@ export function SharedDockviewLayout() {
 
   const handleFileOpened = useCallback((workspaceId: string) => {
     setPerWorkspaceState(workspaceId, { openFilePath: null });
+  }, []);
+
+  // Open a file that lives OUTSIDE the worktree by absolute path (Quick
+  // Open offers this when the query resolves to an existing file on the
+  // host filesystem — e.g. a `/tmp/notes.md` path pasted in or arriving
+  // from a terminal/chat link). We can't route through `handleOpenFile`:
+  // that path is workspace-relative and `CodeBrowserView` would join it
+  // against the worktree root. Instead reuse the same external-open queue
+  // the CLI's `band open <abs>` uses — `CodeBrowserView` drains it and
+  // mounts the path as an *external* tab (reads via `host.readFile`). The
+  // `location` may carry a `:line[:col]` suffix, which the drain parses.
+  const handleOpenExternalFile = useCallback((workspaceId: string, location: string) => {
+    enqueueExternalOpen(workspaceId, location);
+    // Reveal the Files panel only for the visible workspace, mirroring
+    // `handleOpenFile` — a cached-but-invisible workspace must not steal
+    // the active tab.
+    if (workspaceId === activeWorkspaceIdRef.current) {
+      apiRef.current?.getPanel("files")?.api.setActive();
+    }
   }, []);
 
   const handleSelectFile = useCallback(
@@ -1947,6 +1967,9 @@ export function SharedDockviewLayout() {
         }}
         onOpenFile={(filename) => {
           if (activeWorkspaceId) handleOpenFile(activeWorkspaceId, filename);
+        }}
+        onOpenExternalFile={(location) => {
+          if (activeWorkspaceId) handleOpenExternalFile(activeWorkspaceId, location);
         }}
         currentFile={activeCurrentFile}
         initialQuery={quickOpenQuery}

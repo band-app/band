@@ -15,7 +15,7 @@ import { FileInput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { getFileIcon } from "../lib/file-icon";
-import { formatFileLocation, parseFileLocation } from "../lib/file-location";
+import { formatFileLocation, isAbsoluteFilePath, parseFileLocation } from "../lib/file-location";
 import { shouldBailAutoOpen } from "../lib/quick-open-bail";
 
 interface QuickOpenDialogProps {
@@ -23,6 +23,14 @@ interface QuickOpenDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenFile: (path: string) => void;
+  /**
+   * Open a file that lives OUTSIDE the workspace worktree, by absolute
+   * path (optionally with a `:line[:col]` suffix). Offered when the query
+   * is an absolute path to an existing file — e.g. a path pasted in, or a
+   * terminal/chat link to `/tmp/notes.md`. When omitted, the external
+   * "Open file" affordance is not shown.
+   */
+  onOpenExternalFile?: (path: string) => void;
   /** The currently open file path (used for ":line" go-to-line shortcut). */
   currentFile?: string;
   /** When set, the dialog opens with this query pre-filled. Cleared on close. */
@@ -43,6 +51,7 @@ export function QuickOpenDialog({
   open,
   onOpenChange,
   onOpenFile,
+  onOpenExternalFile,
   currentFile,
   initialQuery,
   autoOpen,
@@ -54,8 +63,31 @@ export function QuickOpenDialog({
   const capabilities = useCapabilities();
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<string[]>([]);
+  // Result of probing an absolute-path query against the workspace.
+  // `resolved` gates auto-open (terminal/chat links) until the probe has
+  // settled; `hit` is the file to offer (with the path to open and whether
+  // it lives outside the worktree), or null when the query isn't an absolute
+  // path / the file is missing / isn't a regular file.
+  //
+  // This is a single state object (not `hit` state + a `resolved` ref) on
+  // purpose: a NON-existent path must still fire a re-render when the probe
+  // settles so the auto-open effect re-runs and reveals the dialog. A ref
+  // wouldn't change any effect dependency (hit stays null→null), so the
+  // effect would never re-run and the dialog would hang invisible.
+  //
+  // `query` records which query this result is for. State updates are async,
+  // so a result for a PRIOR query (e.g. the transient empty query the field
+  // holds before `initialQuery` seeds) can linger into the render for the
+  // NEXT query; the auto-open effect must not trust a result whose `query`
+  // doesn't match the current one, or it would act on a stale `resolved`.
+  const [probe, setProbe] = useState<{
+    query: string;
+    resolved: boolean;
+    hit: { openPath: string; external: boolean } | null;
+  }>({ query: "", resolved: false, hit: null });
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const probeStatRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Controlled cmdk selection. We drive the highlighted item ourselves so we
   // can snap it back to the first result whenever the query changes (see the
   // reset effect near the render). The scrollable results list is scrolled to
@@ -89,6 +121,20 @@ export function QuickOpenDialog({
   const parsedQuery = useMemo(() => parseFileLocation(query), [query]);
   const searchQuery = parsedQuery.filePath;
 
+  // An absolute-path query isn't a worktree-relative fuzzy match — resolve
+  // it against the workspace to find out if it exists and whether it lives
+  // inside the worktree (open as a normal file) or outside it (external
+  // tab). Gated on the host exposing the resolver.
+  const isAbsoluteQuery = !!adapter.resolveWorkspacePath && isAbsoluteFilePath(searchQuery);
+
+  // Only trust the probe result when it's for the CURRENT query (see the
+  // `probe` state comment). `probeReady` gates auto-open; `probeHit` is the
+  // offerable file, or null. External hits are only actionable when the host
+  // provides `onOpenExternalFile`.
+  const probeReady = probe.resolved && probe.query === searchQuery;
+  const probeHit =
+    probeReady && probe.hit && (!probe.hit.external || onOpenExternalFile) ? probe.hit : null;
+
   // Whether to show recent files instead of searching
   const showRecent =
     searchQuery === "" && parsedQuery.line == null && recentFiles && recentFiles.length > 0;
@@ -108,6 +154,19 @@ export function QuickOpenDialog({
     if (showRecent) {
       setFiles([]);
       setLoading(false);
+      searchResolved.current = true;
+      return;
+    }
+
+    // Absolute path → skip the worktree fuzzy search entirely. Matching the
+    // absolute string against worktree files would surface unrelated
+    // coincidental fuzzy hits — and with autoOpen (terminal/chat links) a
+    // single such hit would open the WRONG file. The path-resolve probe
+    // effect below owns the loading flag for this case; mark the worktree
+    // search trivially resolved (no worktree match) so the autoOpen gate
+    // depends only on the probe.
+    if (isAbsoluteQuery) {
+      setFiles([]);
       searchResolved.current = true;
       return;
     }
@@ -139,7 +198,58 @@ export function QuickOpenDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open, showRecent]);
+  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open, showRecent, isAbsoluteQuery]);
+
+  // Resolve an absolute-path query against the workspace so we can offer to
+  // open it — as a normal file when it lives inside the worktree, or as an
+  // external tab when outside (e.g. `/tmp/notes.md` pasted in, or a terminal
+  // link that dispatched `band:open-file`). Debounced like the worktree
+  // search; owns the `loading` flag while an absolute query is active.
+  useEffect(() => {
+    if (!open) return;
+
+    if (!isAbsoluteQuery || !adapter.resolveWorkspacePath) {
+      // Nothing to probe — mark resolved so the auto-open gate below passes.
+      setProbe({ query: searchQuery, resolved: true, hit: null });
+      return;
+    }
+
+    let cancelled = false;
+    // Mark unresolved while the debounce + probe are in flight so auto-open
+    // waits (and the empty state reads "Searching…" rather than "No files").
+    setProbe({ query: searchQuery, resolved: false, hit: null });
+    setLoading(true);
+
+    if (probeStatRef.current) clearTimeout(probeStatRef.current);
+    probeStatRef.current = setTimeout(() => {
+      adapter.resolveWorkspacePath!(workspaceId, searchQuery)
+        .then((res) => {
+          if (cancelled) return;
+          const hit =
+            res.exists && res.isFile
+              ? {
+                  // Inside the worktree → open the workspace-relative path so
+                  // it flows through the normal Files-panel / route plumbing.
+                  // Outside → open the absolute path as an external tab.
+                  openPath: res.external ? searchQuery : (res.workspaceRelativePath ?? searchQuery),
+                  external: res.external,
+                }
+              : null;
+          setProbe({ query: searchQuery, resolved: true, hit });
+        })
+        .catch(() => {
+          if (!cancelled) setProbe({ query: searchQuery, resolved: true, hit: null });
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      if (probeStatRef.current) clearTimeout(probeStatRef.current);
+    };
+  }, [adapter, workspaceId, searchQuery, isAbsoluteQuery, open]);
 
   // Auto-open: wait for the initial search to resolve, then either open the
   // single result directly or reveal the dialog for the user to pick.
@@ -199,7 +309,17 @@ export function QuickOpenDialog({
 
   useEffect(() => {
     if (!open || !autoOpen || autoOpened.current) return;
-    if (!searchResolved.current) return; // search hasn't completed yet
+    // Don't decide on the transient empty-query render. `query` starts "" and
+    // is seeded to `initialQuery` in a follow-up effect, so the first render
+    // after open always has an empty query. Auto-open only ever targets a
+    // real filename (or a go-to-line ":N"), so waiting here avoids latching
+    // `autoOpened` on the empty phase — where a just-resolved worktree search
+    // would otherwise reveal the dialog before the seeded query is searched.
+    if (searchQuery === "" && parsedQuery.line == null) return;
+    if (!searchResolved.current) return; // worktree search hasn't completed yet
+    // For an absolute-path query, also wait for the path-resolve probe so we
+    // don't prematurely reveal "No files found" before it resolves.
+    if (isAbsoluteQuery && !probeReady) return;
 
     // Bail if the workspace switched while we were waiting for the
     // search. `onOpenFile` is bound to the parent's *current* workspace
@@ -217,7 +337,18 @@ export function QuickOpenDialog({
     }
 
     autoOpened.current = true;
-    if (files.length === 1) {
+    if (probeHit) {
+      // Absolute path to an existing file — open it directly, never show the
+      // dialog. Inside the worktree → normal (workspace-relative) tab;
+      // outside → external tab.
+      const location = formatFileLocation(probeHit.openPath, parsedQuery.line, {
+        lineEnd: parsedQuery.lineEnd,
+        column: parsedQuery.column,
+      });
+      if (probeHit.external) onOpenExternalFile?.(location);
+      else onOpenFile(location);
+      onOpenChange(false);
+    } else if (files.length === 1) {
       // Single result — open it directly, never show the dialog
       const location = formatFileLocation(files[0], parsedQuery.line, {
         lineEnd: parsedQuery.lineEnd,
@@ -229,7 +360,20 @@ export function QuickOpenDialog({
       // 0 or 2+ results — reveal the dialog so the user can pick
       setDialogVisible(true);
     }
-  }, [autoOpen, files, open, parsedQuery, onOpenFile, onOpenChange, workspaceId]);
+  }, [
+    autoOpen,
+    files,
+    open,
+    parsedQuery,
+    onOpenFile,
+    onOpenExternalFile,
+    onOpenChange,
+    workspaceId,
+    isAbsoluteQuery,
+    probeReady,
+    probeHit,
+    searchQuery,
+  ]);
 
   // Keep a ref to the current query so the close effect can read it without depending on it
   const queryRef = useRef(query);
@@ -244,6 +388,7 @@ export function QuickOpenDialog({
       onQueryChange?.(queryRef.current);
       setQuery("");
       setFiles([]);
+      setProbe({ query: "", resolved: false, hit: null });
       autoOpened.current = false;
       searchResolved.current = false;
       openedWorkspaceIdRef.current = null;
@@ -274,6 +419,20 @@ export function QuickOpenDialog({
     },
     [onOpenFile, onOpenChange, parsedQuery],
   );
+
+  // Open the probed absolute-path hit. Re-attaches any `:line[:col]` suffix
+  // from the query. Inside the worktree → normal tab (`onOpenFile`); outside
+  // → external tab (`onOpenExternalFile`).
+  const handleOpenProbed = useCallback(() => {
+    if (!probeHit) return;
+    const location = formatFileLocation(probeHit.openPath, parsedQuery.line, {
+      lineEnd: parsedQuery.lineEnd,
+      column: parsedQuery.column,
+    });
+    if (probeHit.external) onOpenExternalFile?.(location);
+    else onOpenFile(location);
+    onOpenChange(false);
+  }, [probeHit, onOpenFile, onOpenExternalFile, onOpenChange, parsedQuery]);
 
   // "Open File…" entry — surfaces the OS file picker so the user can
   // open a file from anywhere on the local filesystem. Only available
@@ -327,11 +486,20 @@ export function QuickOpenDialog({
     () => displayFiles.map((file) => file.split("/").pop() || file),
     [displayFiles],
   );
+  // Basename of the external candidate, split on both separators so a
+  // Windows path (`C:\Users\me\notes.md`) shows `notes.md` too.
+  const probeFileName = useMemo(
+    () => (probeHit ? probeHit.openPath.split(/[\\/]/).pop() || probeHit.openPath : ""),
+    [probeHit],
+  );
+  const ProbeFileIcon = getFileIcon(probeFileName);
   // biome-ignore lint/correctness/useExhaustiveDependencies: resultKey is an intentional trigger dependency (fires on any content change, incl. when firstFile is unchanged) — it isn't read in the body
   useEffect(() => {
-    setSelectedValue(firstFile);
+    // For an absolute-path query the probed item is the primary (only)
+    // result, so highlight it — otherwise Enter would do nothing.
+    setSelectedValue(probeHit ? probeHit.openPath : firstFile);
     if (listRef.current) listRef.current.scrollTop = 0;
-  }, [resultKey, firstFile]);
+  }, [resultKey, firstFile, probeHit]);
 
   return (
     <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
@@ -377,6 +545,28 @@ export function QuickOpenDialog({
             ) : (
               <>
                 <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
+                {probeHit && (
+                  <CommandGroup heading={probeHit.external ? "Open external file" : "Open file"}>
+                    <CommandItem
+                      value={probeHit.openPath}
+                      onSelect={handleOpenProbed}
+                      data-testid="quick-open__path-result"
+                    >
+                      <ProbeFileIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                        <span className="shrink-0 text-sm font-medium">{probeFileName}</span>
+                        <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          {probeHit.openPath}
+                        </span>
+                      </div>
+                      {probeHit.external && (
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                          Outside this workspace
+                        </span>
+                      )}
+                    </CommandItem>
+                  </CommandGroup>
+                )}
                 <CommandGroup heading={groupHeading}>
                   {displayFiles.map((file, index) => {
                     const fileName = fileNames[index];

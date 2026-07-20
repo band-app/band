@@ -123,13 +123,101 @@ export class EditorService {
       throw new EditorOpenError("NOT_FOUND", `Workspace '${targetWorkspaceId}' not found`);
     }
 
-    const root = workspace.worktree.path;
+    const resolved = this.resolveTarget(workspace.worktree.path, input.filePath);
 
-    // Resolve the path: absolute paths are taken as-is; relative paths
-    // are resolved against the workspace root.
-    const absoluteTarget = isAbsolute(input.filePath)
-      ? resolve(input.filePath)
-      : resolve(root, input.filePath);
+    // `existsSync` is true for directories too. Without the `isFile`
+    // guard, `band open /path/to/some-dir` would pass through to the
+    // renderer as an external "file" and the editor would try to open
+    // the directory as a text buffer.
+    if (!resolved.exists) {
+      throw new EditorOpenError("NOT_FOUND", `File not found: ${input.filePath}`);
+    }
+    if (!resolved.isFile) {
+      throw new EditorOpenError("BAD_REQUEST", `Not a file: ${input.filePath}`);
+    }
+
+    // Two open modes share this procedure:
+    //   - In-workspace: emit a workspace-relative path so the renderer
+    //     opens it in the workspace's Files panel.
+    //   - External: file exists on disk but lives outside the active
+    //     workspace's root. Pass the absolute path through verbatim so
+    //     the FileViewer mounts it as an *external* tab.
+    const payloadPath = resolved.inside ? resolved.relativePath! : resolved.canonicalTarget;
+
+    const formatted = formatFileLocation(payloadPath, input.line, {
+      lineEnd: input.lineEnd,
+      column: input.column,
+    });
+
+    emit({
+      kind: "open-file",
+      workspaceId: targetWorkspaceId,
+      filePath: formatted,
+      external: !resolved.inside,
+      focus: input.focus ?? true,
+    });
+
+    return {
+      ok: true,
+      workspaceId: targetWorkspaceId,
+      filePath: formatted,
+      external: !resolved.inside,
+    };
+  }
+
+  /**
+   * Resolve a path (absolute or workspace-relative) against a workspace and
+   * report where it lands. Used by the dashboard's Quick Open to decide, for
+   * an absolute-path query, whether to open the file as a normal
+   * workspace-relative tab (when it lives *inside* the worktree) or as an
+   * external tab (outside) — and, either way, whether it exists at all.
+   *
+   * Shares the exact canonicalize + segment-aware containment logic that
+   * `openFile` uses, so an absolute path typed into Quick Open and the same
+   * path passed to `band open` resolve identically. Unlike `openFile` this
+   * neither emits an SSE event nor throws for a missing file — the caller
+   * only offers to open when `exists && isFile`.
+   */
+  resolvePath(input: { workspaceId: string; filePath: string }): {
+    exists: boolean;
+    isFile: boolean;
+    /** True when the path lies outside the workspace worktree. */
+    external: boolean;
+    /** POSIX workspace-relative path, set only when inside the worktree. */
+    workspaceRelativePath: string | null;
+  } {
+    const workspace = workspaceService.resolve(input.workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(input.workspaceId);
+    }
+    const resolved = this.resolveTarget(workspace.worktree.path, input.filePath);
+    return {
+      exists: resolved.exists,
+      isFile: resolved.isFile,
+      external: !resolved.inside,
+      workspaceRelativePath: resolved.inside ? resolved.relativePath : null,
+    };
+  }
+
+  /**
+   * Shared resolution core for {@link openFile} and {@link resolvePath}:
+   * canonicalize the target (following the deepest existing ancestor so
+   * not-yet-created paths still classify), stat it, and run the
+   * segment-aware containment check against the canonicalized worktree root.
+   */
+  private resolveTarget(
+    root: string,
+    filePath: string,
+  ): {
+    canonicalTarget: string;
+    exists: boolean;
+    isFile: boolean;
+    inside: boolean;
+    /** POSIX workspace-relative path when `inside`, else null. */
+    relativePath: string | null;
+  } {
+    // Absolute paths are taken as-is; relative paths resolve against root.
+    const absoluteTarget = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
 
     // Canonicalize the workspace root so symlinked path prefixes
     // (macOS's `/var/folders` → `/private/var/folders` in particular)
@@ -150,65 +238,34 @@ export class EditorService {
     // *create* as well.
     const canonicalTarget = canonicalizeMaybeMissing(absoluteTarget);
 
-    // `existsSync` is true for directories too. Without the `isFile`
-    // guard, `band open /path/to/some-dir` would pass through to the
-    // renderer as an external "file" and the editor would try to open
-    // the directory as a text buffer.
     let targetStat: import("node:fs").Stats | null = null;
     try {
       targetStat = statSync(canonicalTarget);
     } catch {
-      // ENOENT or another IO error — surfaced as "File not found" below.
-    }
-    if (!targetStat) {
-      throw new EditorOpenError("NOT_FOUND", `File not found: ${input.filePath}`);
-    }
-    if (!targetStat.isFile()) {
-      throw new EditorOpenError("BAD_REQUEST", `Not a file: ${input.filePath}`);
+      // ENOENT or another IO error — reported via `exists: false`.
     }
 
     // Segment-aware containment check (same invariant as the untitled
     // save flow in CodeBrowserView): a naive `startsWith` would treat
     // `/a/band-fork/x.ts` as inside `/a/band`.
     const normalizedRoot = canonicalRoot.replace(/\/+$/, "");
-    const isInside =
+    const inside =
       canonicalTarget === normalizedRoot || canonicalTarget.startsWith(`${normalizedRoot}${sep}`);
 
-    // Two open modes share this procedure:
-    //   - In-workspace: emit a workspace-relative path so the renderer
-    //     opens it in the workspace's Files panel.
-    //   - External: file exists on disk but lives outside the active
-    //     workspace's root. Pass the absolute path through verbatim so
-    //     the FileViewer mounts it as an *external* tab.
-    let payloadPath: string;
-    if (isInside) {
-      const relativePath =
-        canonicalTarget === normalizedRoot ? "" : canonicalTarget.slice(normalizedRoot.length + 1);
-      // POSIX separators on the wire — tanstack-router and
-      // `parseFileLocation` both work off `/`-separated paths.
-      payloadPath = relativePath.split(sep).join("/");
-    } else {
-      payloadPath = canonicalTarget;
-    }
-
-    const formatted = formatFileLocation(payloadPath, input.line, {
-      lineEnd: input.lineEnd,
-      column: input.column,
-    });
-
-    emit({
-      kind: "open-file",
-      workspaceId: targetWorkspaceId,
-      filePath: formatted,
-      external: !isInside,
-      focus: input.focus ?? true,
-    });
+    // POSIX separators on the wire — tanstack-router and
+    // `parseFileLocation` both work off `/`-separated paths.
+    const relativePath = inside
+      ? (canonicalTarget === normalizedRoot ? "" : canonicalTarget.slice(normalizedRoot.length + 1))
+          .split(sep)
+          .join("/")
+      : null;
 
     return {
-      ok: true,
-      workspaceId: targetWorkspaceId,
-      filePath: formatted,
-      external: !isInside,
+      canonicalTarget,
+      exists: !!targetStat,
+      isFile: !!targetStat?.isFile(),
+      inside,
+      relativePath,
     };
   }
 }
