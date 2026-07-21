@@ -126,15 +126,7 @@ async function openMarkdownPreview(page: Page): Promise<void> {
   });
 }
 
-// TODO(#643): find-in-markdown-PREVIEW is not yet implemented in the unified
-// file leaf. `useLeafFind` wires a CodeMirror source search ("Find in file…");
-// searching the rendered `MarkdownPreview` (the "Find in preview…" bar the old
-// FileViewer shipped) is a deferred feature. The open flow above is already
-// migrated to the new mobile Explorer sheet, so this only needs the preview
-// find wired up before it can be re-enabled.
-test.skip("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({
-  page,
-}) => {
+test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({ page }) => {
   await openMarkdownPreview(page);
 
   // The find bar uses a single placeholder string in both source and

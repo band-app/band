@@ -72,10 +72,12 @@ import {
   DiffFileContent,
   FileViewer,
   getFileIcon,
+  getFilePreviewType,
   getLspLanguageId,
   getStoredViewMode,
   releaseLspClient,
   SearchBar,
+  type SearchOptions,
   storeViewMode,
   type TerminalInsertDetail,
   toFileUri,
@@ -116,7 +118,11 @@ import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
-import { MarkdownPreview } from "./MarkdownPreview";
+import {
+  MarkdownPreview,
+  type MarkdownPreviewHandle,
+  type MarkdownPreviewMatchInfo,
+} from "./MarkdownPreview";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
@@ -738,7 +744,18 @@ function removeFileTabState(ws: string, path: string): void {
 //   - registering the leaf's open fn with the shell's per-workspace
 //     `crossPanelHandlers.onFindInFile` registry while the leaf is visible so
 //     the global ⌘F (SharedDockviewLayout) resolves to it.
-function useLeafFind(workspaceId: string, visible: boolean) {
+function useLeafFind(
+  workspaceId: string,
+  visible: boolean,
+  // When set + `active`, ⌘F drives the rendered markdown preview (a DOM find)
+  // instead of the CodeMirror editor — the file leaf passes this while a
+  // markdown file is shown in preview mode.
+  previewSearch?: {
+    active: boolean;
+    ref: React.RefObject<MarkdownPreviewHandle | null>;
+    matchInfo: MarkdownPreviewMatchInfo;
+  },
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The set of CodeMirror EditorViews to search. `file` leaves have one;
   // `diff` leaves have one (unified) or two (split) — kept untyped to avoid a
@@ -789,18 +806,37 @@ function useLeafFind(workspaceId: string, visible: boolean) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, search.handleOpenSearch]);
 
+  // When a markdown file is shown as preview, the same SearchBar drives the
+  // preview's DOM find (via the MarkdownPreview handle) instead of CodeMirror.
+  const previewActive = previewSearch?.active ?? false;
+  const runPreviewSearch = useCallback(
+    (q: string, opts: SearchOptions) => previewSearch?.ref.current?.search(q, opts),
+    [previewSearch?.ref],
+  );
+
   const searchBar = search.searchOpen ? (
     <SearchBar
       ref={search.searchBarRef}
       query={search.searchQuery}
-      onQueryChange={search.setSearchQuery}
+      onQueryChange={(q) => {
+        search.setSearchQuery(q);
+        if (previewActive) runPreviewSearch(q, search.searchOptions);
+      }}
       options={search.searchOptions}
-      onOptionsChange={search.setSearchOptions}
-      placeholder="Find in file..."
-      matchInfo={search.matchInfo}
-      onNext={search.handleNext}
-      onPrevious={search.handlePrevious}
-      onClose={search.handleCloseSearch}
+      onOptionsChange={(o) => {
+        search.setSearchOptions(o);
+        if (previewActive) runPreviewSearch(search.searchQuery, o);
+      }}
+      placeholder={previewActive ? "Find in preview..." : "Find in file..."}
+      matchInfo={previewActive && previewSearch ? previewSearch.matchInfo : search.matchInfo}
+      onNext={previewActive ? () => previewSearch?.ref.current?.next() : search.handleNext}
+      onPrevious={
+        previewActive ? () => previewSearch?.ref.current?.previous() : search.handlePrevious
+      }
+      onClose={() => {
+        if (previewActive) previewSearch?.ref.current?.clear();
+        search.handleCloseSearch();
+      }}
     />
   ) : undefined;
 
@@ -920,23 +956,10 @@ function useActiveFileTracking(
   }, [visible, tabActive, workspaceId, filePath]);
 }
 
-// Stable module-level renderer so the `renderMarkdown` prop identity never
-// changes (an inline arrow would make FileViewer's `showMarkdownToggle` — and
-// anything keyed on it — churn every render).
-const renderMarkdownPreview = (content: string) => <MarkdownPreview content={content} />;
-
 function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
-  const { containerRef, setViews, searchBar } = useLeafFind(params.workspaceId ?? "", visible);
-  useActiveFileTracking(api, params.workspaceId ?? "", params.filePath ?? "", visible);
-  const capabilities = useCapabilities();
   const workspaceIdRaw = params.workspaceId ?? "";
   const filePathRaw = params.filePath ?? "";
-  const untitled = params.untitled === true || isUntitledPath(filePathRaw);
-  const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
-  const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
-
-  const workspacePath = useWorkspacePath(workspaceIdRaw);
 
   // FileViewer's markdown code/preview toggle and language override are
   // CONTROLLED props — they must reflect React state, not a bare localStorage
@@ -945,6 +968,31 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const [viewMode, setViewMode] = useState<"preview" | "source" | undefined>(
     () => getFileTabState(workspaceIdRaw, filePathRaw)?.viewMode,
   );
+
+  // Markdown preview find target: the rendered MarkdownPreview exposes an
+  // imperative search handle, and reports its match counter here. `⌘F` routes
+  // to it (instead of CodeMirror) while a markdown file is shown as preview
+  // (markdown defaults to preview, so anything but explicit "source").
+  const markdownRef = useRef<MarkdownPreviewHandle | null>(null);
+  const [previewMatchInfo, setPreviewMatchInfo] = useState<MarkdownPreviewMatchInfo>({
+    total: 0,
+    current: 0,
+  });
+  const previewFindActive = getFilePreviewType(filePathRaw) === "markdown" && viewMode !== "source";
+
+  const { containerRef, setViews, searchBar } = useLeafFind(workspaceIdRaw, visible, {
+    active: previewFindActive,
+    ref: markdownRef,
+    matchInfo: previewMatchInfo,
+  });
+  useActiveFileTracking(api, workspaceIdRaw, filePathRaw, visible);
+  const capabilities = useCapabilities();
+  const untitled = params.untitled === true || isUntitledPath(filePathRaw);
+  const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
+  const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+
+  const workspacePath = useWorkspacePath(workspaceIdRaw);
+
   const [languageOverride, setLanguageOverride] = useState<string | undefined>(
     () => getFileTabState(workspaceIdRaw, filePathRaw)?.language,
   );
@@ -964,6 +1012,21 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
     (view: any) => setViews(view ? [view] : []),
     [setViews],
+  );
+
+  // Stable renderer (identity never changes — markdownRef/setPreviewMatchInfo
+  // are stable) so FileViewer's `showMarkdownToggle` doesn't churn each render.
+  // Threads the imperative find handle + match-counter so ⌘F can drive the
+  // rendered preview (see `useLeafFind`'s `previewSearch`).
+  const renderMarkdown = useCallback(
+    (content: string) => (
+      <MarkdownPreview
+        ref={markdownRef}
+        content={content}
+        onMatchInfoChange={setPreviewMatchInfo}
+      />
+    ),
+    [],
   );
 
   // Save-as flow for untitled buffers. `capabilities.pickSaveFile` bundles the
@@ -1110,7 +1173,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         }}
         // Markdown files get a code/preview toggle in the title bar; the
         // preview reuses the shared MarkdownPreview renderer.
-        renderMarkdown={renderMarkdownPreview}
+        renderMarkdown={renderMarkdown}
         onEditorView={handleEditorView}
         toolbar={searchBar}
         // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
