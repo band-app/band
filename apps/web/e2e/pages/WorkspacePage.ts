@@ -915,15 +915,16 @@ export class WorkspacePage {
     await this.maximizeButtons.first().waitFor({ state: "visible", timeout: 15_000 });
   }
 
-  /** Wait for the mobile workspace layout to be interactive. The
-   *  mobile route doesn't render the dockview's header buttons, so
-   *  `waitForReady` (which keys off Maximize) won't work — instead
-   *  we anchor on the workspace tab nav's "Files" button, set by
-   *  `WorkspaceTabNav.tsx`. The aria-label is system-controlled,
-   *  not localisable copy. */
+  /** Wait for the mobile workspace layout to be interactive. The mobile route
+   *  (`MobileWorkspaceLayout`) doesn't render the dockview's header Maximize
+   *  buttons, so `waitForReady` won't work — instead we anchor on the mobile
+   *  bottom bar (`mobile-workspace__bottom-bar`, Editor | Explorer | Changes),
+   *  which is always present once the mobile layout has mounted. (#643 Phase 4
+   *  replaced the old per-app `WorkspaceTabNav` — whose "Files" button this used
+   *  to key off — with `<WorkspaceCenterDockview mobile>` + this bottom bar.) */
   async waitForMobileReady(): Promise<void> {
     await this.page
-      .getByRole("button", { name: "Files" })
+      .getByTestId("mobile-workspace__bottom-bar")
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
