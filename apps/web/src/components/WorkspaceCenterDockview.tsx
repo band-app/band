@@ -1329,21 +1329,41 @@ export function WorkspaceCenterDockview({
   initialDataRef.current = initialData ?? null;
 
   // ---- persistence ----
-  const schedulePersist = useCallback(() => {
-    if (isRestoringRef.current) return;
+  // Write the current layout to localStorage now.
+  const writeLayout = useCallback(() => {
     const api = apiRef.current;
     if (!api) return;
+    try {
+      const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
+      localStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
+    } catch {
+      // best-effort
+    }
+  }, [workspaceId]);
+
+  // Debounced save — used for the high-frequency `onDidLayoutChange` (drag /
+  // resize / move) so we don't write on every pixel.
+  const schedulePersist = useCallback(() => {
+    if (isRestoringRef.current || !apiRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      try {
-        const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
-        localStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
-      } catch {
-        // best-effort
-      }
+      writeLayout();
     }, 400);
-  }, [workspaceId]);
+  }, [writeLayout]);
+
+  // Immediate save — used for discrete STRUCTURAL changes (add / close a leaf,
+  // add / remove a group). Closing a tab must persist right away: a debounced
+  // write can be lost to a fast reload, an unmount, or a continuous stream of
+  // layout events resetting the timer. Cancels any pending debounce first.
+  const flushPersist = useCallback(() => {
+    if (isRestoringRef.current || !apiRef.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    writeLayout();
+  }, [writeLayout]);
 
   const reportFocus = useCallback(() => {
     if (isRestoringRef.current || wsActiveRef.current === false) return;
@@ -1672,21 +1692,22 @@ export function WorkspaceCenterDockview({
         innerRegisterDisposerRef.current = registerInnerDockview(containerRef.current, api);
       }
 
-      // Persistence + focus reporting.
-      const persist = () => schedulePersist();
-      api.onDidLayoutChange(persist);
-      api.onDidAddPanel(persist);
+      // Persistence + focus reporting. Structural changes (add/remove leaf or
+      // group) flush immediately so a close survives an instant reload; the
+      // high-frequency layout stream (resize/move) is debounced.
+      api.onDidLayoutChange(() => schedulePersist());
+      api.onDidAddPanel(() => flushPersist());
       api.onDidRemovePanel((panel) => {
         // Drop the preview pointer if the previewing leaf was closed, so a
         // later single-click opens fresh instead of trying to reuse a dead id.
         if (previewFileIdRef.current === panel.id) previewFileIdRef.current = null;
         if (previewDiffIdRef.current === panel.id) previewDiffIdRef.current = null;
-        persist();
+        flushPersist();
       });
-      api.onDidAddGroup(persist);
-      api.onDidRemoveGroup(persist);
+      api.onDidAddGroup(() => flushPersist());
+      api.onDidRemoveGroup(() => flushPersist());
       api.onDidActivePanelChange(() => {
-        persist();
+        schedulePersist();
         reportFocus();
       });
 
@@ -1702,7 +1723,7 @@ export function WorkspaceCenterDockview({
         }
       }
     },
-    [workspaceId, buildDefaultLayout, reconcile, schedulePersist, reportFocus],
+    [workspaceId, buildDefaultLayout, reconcile, schedulePersist, flushPersist, reportFocus],
   );
 
   // Live sync: add/remove leaves when instances are created/killed externally (CLI).
@@ -1908,7 +1929,20 @@ export function WorkspaceCenterDockview({
       edgeDragDisposerRef.current = null;
       innerRegisterDisposerRef.current?.();
       innerRegisterDisposerRef.current = null;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      // Flush a pending debounced save rather than dropping it, so a layout
+      // tweak right before a workspace switch / unmount still persists.
+      if (saveTimerRef.current && api) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        try {
+          localStorage.setItem(
+            layoutKey(workspaceId),
+            JSON.stringify(stripParams(api.toJSON() as unknown as Record<string, unknown>)),
+          );
+        } catch {
+          // best-effort
+        }
+      }
     };
   }, [workspaceId]);
 
