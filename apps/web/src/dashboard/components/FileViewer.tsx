@@ -58,6 +58,15 @@ interface FileViewerProps {
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
   /** When true, hides the title bar (path, size, nav arrows). */
   hideTitleBar?: boolean;
+  /**
+   * When true, keeps the title bar (and all action buttons — nav, save,
+   * format, markdown toggle, language) but hides only the redundant
+   * path/size/(modified) label, replacing it with a flex spacer so the
+   * action buttons stay right-aligned. Used by the center `file` leaf,
+   * where the dockview tab already shows the filename. Additive/default-
+   * false so mobile `CodeBrowserView` is unchanged.
+   */
+  hidePathLabel?: boolean;
   /** Controlled view mode for markdown files (preview vs source). When provided, FileViewer uses this instead of internal state. */
   viewMode?: "preview" | "source";
   /** Called when the user toggles between preview and source mode. */
@@ -224,6 +233,7 @@ export function FileViewer({
   canGoForward,
   onCursorLineChange,
   hideTitleBar,
+  hidePathLabel,
   viewMode: controlledViewMode,
   onViewModeChange,
   lspExtension,
@@ -876,10 +886,16 @@ export function FileViewer({
               </Tooltip>
             </div>
           )}
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">
-            {untitled ? "Untitled" : filePath}
-            {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
-          </span>
+          {hidePathLabel ? (
+            // Keep the action buttons right-aligned without the redundant
+            // path label (the dockview tab already shows the filename).
+            <span className="min-w-0 flex-1" />
+          ) : (
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">
+              {untitled ? "Untitled" : filePath}
+              {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
+            </span>
+          )}
           {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
           {formatStatus && (
             <span
@@ -947,7 +963,7 @@ export function FileViewer({
               </button>
             </div>
           )}
-          {data && (
+          {data && !hidePathLabel && (
             <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
           )}
         </div>

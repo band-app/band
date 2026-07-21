@@ -55,10 +55,12 @@ import {
   DiffFileContent,
   FileViewer,
   getStoredViewMode,
+  SearchBar,
   storeViewMode,
   type TerminalInsertDetail,
   useAdapter,
   useDiffTarget,
+  useSearch,
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
@@ -87,6 +89,7 @@ import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 // `crossPanelHandlers` is a module-level mutable registry exported from
 // SharedDockviewLayout. Importing it closes an ESM cycle (SharedDockviewLayout
@@ -539,11 +542,103 @@ function basename(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+// ---------------------------------------------------------------------------
+// Self-contained find-in-file for the file / diff leaves
+// ---------------------------------------------------------------------------
+//
+// `FileViewer` has no built-in find, so we replicate the small slice of
+// CodeBrowserView / DiffView's wiring here: a `useSearch` over the leaf's
+// CodeMirror editor view(s) plus a `SearchBar`. `useSearch` already ships a
+// window-level Cmd/Ctrl+F handler and reports its "open find" fn through
+// `onFindInFile`, so all we add on top is:
+//   - scoping open-on-⌘F to focus inside THIS leaf (capture-phase keydown on
+//     the leaf container, mirroring the terminal/chat leaf handlers), and
+//   - registering the leaf's open fn with the shell's per-workspace
+//     `crossPanelHandlers.onFindInFile` registry while the leaf is visible so
+//     the global ⌘F (SharedDockviewLayout) resolves to it.
+function useLeafFind(workspaceId: string, visible: boolean) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // The set of CodeMirror EditorViews to search. `file` leaves have one;
+  // `diff` leaves have one (unified) or two (split) — kept untyped to avoid a
+  // direct @codemirror/view dependency in this component (same pattern as
+  // CodeBrowserView).
+  // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped to avoid cross-package dependency
+  const viewsRef = useRef<any[]>([]);
+  const getViews = useCallback(() => viewsRef.current, []);
+
+  // Only the visible leaf registers with the shell's per-workspace registry,
+  // so the global ⌘F resolves to the leaf the user is looking at (the registry
+  // holds a single fn per workspace). Hidden leaves pass `null` and unregister.
+  const onFindInFile = useMemo(
+    () =>
+      visible
+        ? (fn: (() => void) | null) => crossPanelHandlers.onFindInFile(workspaceId, fn)
+        : null,
+    [visible, workspaceId],
+  );
+
+  const search = useSearch({ getViews, onFindInFile });
+
+  // Re-dispatch the active query to newly-registered views (e.g. a split-diff
+  // second pane, or the editor after content loads).
+  const setViews = useCallback(
+    // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+    (views: any[]) => {
+      viewsRef.current = views;
+      if (views.length > 0) search.dispatchToViews(views);
+    },
+    [search.dispatchToViews],
+  );
+
+  // Open on Cmd/Ctrl+F only when focus is inside this leaf. `useSearch`'s own
+  // window handler is unscoped (it would open every mounted leaf's bar), so we
+  // stop it here and drive just this leaf's open. Esc closes via the SearchBar.
+  useEffect(() => {
+    if (!visible) return;
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.shiftKey || e.key.toLowerCase() !== "f") return;
+      if (!containerRef.current?.contains(document.activeElement)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      search.handleOpenSearch();
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [visible, search.handleOpenSearch]);
+
+  const searchBar = search.searchOpen ? (
+    <SearchBar
+      ref={search.searchBarRef}
+      query={search.searchQuery}
+      onQueryChange={search.setSearchQuery}
+      options={search.searchOptions}
+      onOptionsChange={search.setSearchOptions}
+      placeholder="Find in file..."
+      matchInfo={search.matchInfo}
+      onNext={search.handleNext}
+      onPrevious={search.handlePrevious}
+      onClose={search.handleCloseSearch}
+    />
+  ) : undefined;
+
+  return { containerRef, setViews, searchBar };
+}
+
 function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
+  const { containerRef, setViews, searchBar } = useLeafFind(params.workspaceId ?? "", visible);
+
+  const handleEditorView = useCallback(
+    // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+    (view: any) => setViews(view ? [view] : []),
+    [setViews],
+  );
+
   if (!params.workspaceId || !params.filePath) return null;
   return (
     <div
+      ref={containerRef}
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
@@ -555,8 +650,15 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
         editable
         external={params.external ?? params.filePath.startsWith("/")}
         // The dockview tab already shows the filename (full path on hover), so
-        // the FileViewer's own path/size title bar is redundant in a leaf.
-        hideTitleBar
+        // hide only FileViewer's redundant path/size label — keep the title bar
+        // and its action buttons (save, format, markdown code/preview toggle,
+        // language). Nav arrows stay hidden (no onGoBack/onGoForward passed).
+        hidePathLabel
+        // Markdown files get a code/preview toggle in the title bar; the
+        // preview reuses the shared MarkdownPreview renderer.
+        renderMarkdown={(content) => <MarkdownPreview content={content} />}
+        onEditorView={handleEditorView}
+        toolbar={searchBar}
       />
     </div>
   );
@@ -570,6 +672,7 @@ const FULL_FILE_CONTEXT = 99999;
 function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath } = params;
+  const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
 
@@ -612,6 +715,7 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
 
   return (
     <div
+      ref={containerRef}
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
@@ -657,9 +761,15 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
           </button>
         </div>
       </div>
+      {searchBar}
       <div className="min-h-0 flex-1 overflow-auto">
         {diff ? (
-          <DiffFileContent hunks={diff} filename={filePath} viewMode={viewMode} />
+          <DiffFileContent
+            hunks={diff}
+            filename={filePath}
+            viewMode={viewMode}
+            onEditorViews={setViews}
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
             {loading ? "Loading diff…" : "No changes"}
