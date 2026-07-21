@@ -111,6 +111,7 @@ import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./Brow
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
+import { setPerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
 // SharedDockviewLayout. Importing it closes an ESM cycle (SharedDockviewLayout
 // → WorkspaceCenterDockview → SharedDockviewLayout), but we only read it inside
@@ -804,9 +805,38 @@ function useFileLeafLsp(
   return lspExtension;
 }
 
-function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
+// ---------------------------------------------------------------------------
+// Active-file tracking (feeds the per-workspace `currentFile` store)
+// ---------------------------------------------------------------------------
+//
+// Re-enables Quick Open's current-file highlight + the Explorer/Changes tree
+// highlight, both of which subscribe to `currentFile`. A `file` / `diff` leaf
+// publishes its path to the store only when it is BOTH the active tab in its
+// group AND visible (`usePanelVisibility().visible` already folds in
+// "outer panel visible AND workspace active"), so a hidden or cached
+// workspace's leaves never clobber the active workspace's current file.
+function useActiveFileTracking(
+  api: IDockviewPanelProps["api"],
+  workspaceId: string,
+  filePath: string,
+  visible: boolean,
+): void {
+  const [tabActive, setTabActive] = useState(api.isActive);
+  useEffect(() => {
+    const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
+    return () => d.dispose();
+  }, [api]);
+
+  useEffect(() => {
+    if (!visible || !tabActive || !workspaceId || !filePath) return;
+    setPerWorkspaceState(workspaceId, { currentFile: filePath });
+  }, [visible, tabActive, workspaceId, filePath]);
+}
+
+function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
   const { containerRef, setViews, searchBar } = useLeafFind(params.workspaceId ?? "", visible);
+  useActiveFileTracking(api, params.workspaceId ?? "", params.filePath ?? "", visible);
   const capabilities = useCapabilities();
   const workspaceIdRaw = params.workspaceId ?? "";
   const filePathRaw = params.filePath ?? "";
@@ -918,11 +948,12 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
 // "Show full file" step.
 const FULL_FILE_CONTEXT = 99999;
 
-function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
+function DiffLeaf({ params, api }: IDockviewPanelProps<DiffLeafParams>) {
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath } = params;
   const adapter = useAdapter();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
+  useActiveFileTracking(api, workspaceId ?? "", filePath ?? "", visible);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
@@ -941,6 +972,9 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
         compareBranch: compareBranch ?? undefined,
       }),
     enabled: !!workspaceId && !!filePath,
+    // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
+    // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
+    refetchInterval: visible ? 10_000 : false,
   });
 
   const mergeBase = summaryQuery.data?.mergeBase;
@@ -957,6 +991,7 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
         contextLines: FULL_FILE_CONTEXT,
       }),
     enabled: !!workspaceId && !!filePath && !!mergeBase,
+    refetchInterval: visible ? 10_000 : false,
   });
 
   if (!workspaceId || !filePath) return null;
