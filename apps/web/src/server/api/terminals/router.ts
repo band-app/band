@@ -13,14 +13,10 @@ import { stripTerminalQueries } from "./strip-queries";
  *
  * The wire shape (procedure names + input/output) is preserved exactly to
  * keep the dashboard and any external consumers backwards-compatible
- * across the lift. The router used to live inline in
- * `apps/web/src/trpc/router.ts` under two keys:
- *
- *   - `terminal`         → PTY lifecycle, scrollback, live stream
- *   - `terminalLayout`   → dockview layout tree CRUD
- *
- * Both are re-exported here as separate routers and re-merged at the
- * `server/api/router.ts` entry point so the legacy keys keep working.
+ * across the lift. The router covers the `terminal` key — PTY lifecycle,
+ * scrollback, and the live stream. (The former `terminalLayout` dockview
+ * layout-tree CRUD was retired once clients moved center-layout
+ * persistence into localStorage — issue #643 Phase 4.)
  */
 
 const terminalRouter = t.router({
@@ -168,29 +164,13 @@ const terminalRouter = t.router({
     }),
 });
 
-const terminalLayoutRouter = t.router({
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { tree: terminalService.getLayout(input.workspaceId) };
-  }),
-
-  save: publicProcedure
-    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
-    .mutation(({ input }) => {
-      terminalService.saveLayout(input.workspaceId, input.tree);
-      return { ok: true };
-    }),
-});
-
 /**
  * Composite export so the root API router (`server/api/router.ts`) can
- * merge both legacy keys (`terminal` and `terminalLayout`) in a single
- * step. Keeping them as a single grouped object also means future
- * additions land in one obvious place.
+ * merge the `terminal` key in a single step. Keeping it as a grouped
+ * object also means future additions land in one obvious place.
  */
 export const terminalsRouters = {
   terminal: terminalRouter,
-  terminalLayout: terminalLayoutRouter,
 };
 
 export type TerminalRouter = typeof terminalRouter;
-export type TerminalLayoutRouter = typeof terminalLayoutRouter;

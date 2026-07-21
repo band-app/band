@@ -13,15 +13,15 @@ import {
   trpcData,
 } from "./helpers/server";
 
-// Integration tests for the remaining `chats.*` / `chatLayout.*` tRPC
-// procedures that Phase 5 of issue #316 migrated out of the legacy router
-// without dedicated coverage — see issue #529.
+// Integration tests for the remaining `chats.*` tRPC procedures that Phase 5
+// of issue #316 migrated out of the legacy router without dedicated coverage
+// — see issue #529. (The `chatLayout.*` layout-tree procedures once covered
+// here were retired in issue #643 Phase 4, when clients moved center-layout
+// persistence into localStorage.)
 //
 // Coverage:
-//   • `chatLayout.get` returns `{ tree: null }` when no layout has been saved.
-//   • `chatLayout.save` round-trips an arbitrary dockview tree.
-//   • `chats.create` writes its panel into the saved `chat_layout` row,
-//     and `chatLayout.get` surfaces it without a separate `chatLayout.save`.
+//   • `chats.create` writes its panel into the server-side saved `chat_layout`
+//     row (the row `getOrCreateDefault` reads to resolve the default chat).
 //   • `chats.stop` aborts a running task, transitions the chat to
 //     `status: "stopped"`, and unblocks a follow-up `chats.send` once the
 //     chat is resumed.
@@ -88,7 +88,7 @@ function writeScenario(tmpHome: string, events: object[]): string {
 
 // ---------------------------------------------------------------------------
 // SQLite peek — direct `panel_states` reads so a test can prove
-// `chats.create` and `chatLayout.save` actually wrote to disk.
+// `chats.create` actually wrote the saved chat-layout row to disk.
 //
 // The dockview layout row is keyed `${panelType}_${workspaceId}` per
 // `DockviewLayoutManager.layoutId` — mirrored here rather than re-derived
@@ -124,190 +124,7 @@ interface ChatRecord {
 }
 
 // ---------------------------------------------------------------------------
-// chatLayout.get / chatLayout.save — explicit layout-tree CRUD
-// ---------------------------------------------------------------------------
-
-describe("chatLayout — get/save round-trip", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  const workspaceId = "layoutproj-main";
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome("band-chat-layout-");
-    const repoPath = createGitRepo(tmpHome, "layoutproj");
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: "layoutproj",
-          path: repoPath,
-          defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
-        },
-      ],
-    });
-    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("rejects chatLayout.get without the band_token cookie (401)", async () => {
-    // Negative-auth check — the shared `trpcQuery` always sends the
-    // cookie, so we have to call `fetch` directly to omit it. Mirrors
-    // the 401 guard in `chat-labels.test.ts` / `browsers.test.ts`.
-    const res = await fetch(
-      `${server.url}/trpc/chatLayout.get?input=${encodeURIComponent(JSON.stringify({ workspaceId }))}`,
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("rejects chatLayout.save without the band_token cookie (401)", async () => {
-    const res = await fetch(`${server.url}/trpc/chatLayout.save`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId, tree: {} }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("chatLayout.get returns { tree: null } when no layout has been saved", async () => {
-    const res = await trpcQuery(server.url, "chatLayout.get", { workspaceId });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ tree: unknown }>(res);
-    expect(data.tree).toBeNull();
-  });
-
-  it("chatLayout.save persists an arbitrary tree and chatLayout.get returns it", async () => {
-    // The router accepts `z.unknown()` — the dashboard hands it dockview's
-    // `toJSON()` output verbatim. Save a minimal shape that mirrors what
-    // `DockviewLayoutManager.addPanel` emits when no layout exists yet,
-    // so the assertion is grounded in the real persisted shape.
-    const tree = {
-      grid: {
-        root: {
-          type: "branch",
-          data: [
-            {
-              type: "leaf",
-              data: { id: "group_a", views: ["chat_a"], activeView: "chat_a" },
-              size: 500,
-            },
-          ],
-          size: 500,
-        },
-        height: 500,
-        width: 500,
-        orientation: "HORIZONTAL",
-      },
-      panels: {
-        chat_a: {
-          id: "chat_a",
-          contentComponent: "chatTab",
-          tabComponent: "chatTab",
-          title: "Tab",
-          params: { workspaceId, chatId: "chat_a" },
-        },
-      },
-      activeGroup: "group_a",
-    };
-
-    const saveRes = await trpcMutate(server.url, "chatLayout.save", {
-      workspaceId,
-      tree,
-    });
-    expect(saveRes.status).toBe(200);
-    const saveData = await trpcData<{ ok: boolean }>(saveRes);
-    expect(saveData.ok).toBe(true);
-
-    // The row is on disk. Mirrors the `readBrowserLayoutRow` assertion
-    // shape in `browsers.test.ts` so a regression that breaks the
-    // persistence path (not just the read path) is caught.
-    const row = readChatLayoutRow(tmpHome, workspaceId);
-    expect(row).toBeDefined();
-    expect(JSON.parse(row!.state)).toEqual(tree);
-
-    const getRes = await trpcQuery(server.url, "chatLayout.get", { workspaceId });
-    expect(getRes.status).toBe(200);
-    const getData = await trpcData<{ tree: typeof tree }>(getRes);
-    expect(getData.tree).toEqual(tree);
-  });
-
-  it("chatLayout.save overwrites a previously-saved tree (upsert)", async () => {
-    // Save once, then save a different tree and confirm the second wins.
-    // Without this, a bug that fell back to insert-only would leak rows
-    // and a future read might return whichever the layer happened to
-    // pick — the upsert path matters for normal dashboard use (every
-    // dockview reflow round-trips through `chatLayout.save`).
-    const first = {
-      grid: {
-        root: {
-          type: "branch",
-          data: [
-            {
-              type: "leaf",
-              data: { id: "group_first", views: ["chat_first"], activeView: "chat_first" },
-              size: 500,
-            },
-          ],
-          size: 500,
-        },
-        height: 500,
-        width: 500,
-        orientation: "HORIZONTAL",
-      },
-      panels: {
-        chat_first: {
-          id: "chat_first",
-          contentComponent: "chatTab",
-          tabComponent: "chatTab",
-          title: "First",
-          params: { workspaceId, chatId: "chat_first" },
-        },
-      },
-      activeGroup: "group_first",
-    };
-    const second = {
-      ...first,
-      activeGroup: "group_second",
-      panels: {
-        chat_second: {
-          id: "chat_second",
-          contentComponent: "chatTab",
-          tabComponent: "chatTab",
-          title: "Second",
-          params: { workspaceId, chatId: "chat_second" },
-        },
-      },
-      grid: {
-        ...first.grid,
-        root: {
-          type: "branch",
-          data: [
-            {
-              type: "leaf",
-              data: { id: "group_second", views: ["chat_second"], activeView: "chat_second" },
-              size: 500,
-            },
-          ],
-          size: 500,
-        },
-      },
-    };
-
-    await trpcMutate(server.url, "chatLayout.save", { workspaceId, tree: first });
-    await trpcMutate(server.url, "chatLayout.save", { workspaceId, tree: second });
-
-    const getRes = await trpcQuery(server.url, "chatLayout.get", { workspaceId });
-    const getData = await trpcData<{ tree: typeof second }>(getRes);
-    expect(getData.tree).toEqual(second);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// chats.create writes through to chatLayout
+// chats.create writes through to the server-side saved chat layout
 // ---------------------------------------------------------------------------
 
 describe("chatLayout — populated by chats.create", () => {
@@ -343,10 +160,8 @@ describe("chatLayout — populated by chats.create", () => {
   });
 
   it("chats.create registers the chat panel in the saved chat layout", async () => {
-    // Precondition: no layout row yet.
-    const beforeRes = await trpcQuery(server.url, "chatLayout.get", { workspaceId });
-    const beforeData = await trpcData<{ tree: unknown }>(beforeRes);
-    expect(beforeData.tree).toBeNull();
+    // Precondition: no layout row on disk yet.
+    expect(readChatLayoutRow(tmpHome, workspaceId)).toBeUndefined();
 
     const createRes = await trpcMutate(server.url, "chats.create", {
       workspaceId,
@@ -357,9 +172,13 @@ describe("chatLayout — populated by chats.create", () => {
 
     // `chatService.create` calls `addToLayout` so a CLI-spawned chat
     // shows up in the dashboard without the user having to manually
-    // add a tab — see `ChatService.create`. Without this assertion a
-    // regression that splits the responsibilities back to the router
-    // (the pre-Phase-5 shape) would go unnoticed.
+    // add a tab — see `ChatService.create`. This server-side layout row
+    // is what `getOrCreateDefault` reads to resolve the workspace's
+    // default chat; without this assertion a regression that dropped the
+    // `addToLayout` write would go unnoticed. (The former `chatLayout.get`
+    // tRPC read of this row was retired in issue #643 Phase 4 — clients
+    // now persist center layout in localStorage — so the row is verified
+    // directly on disk here rather than through the public API.)
     const layoutRow = readChatLayoutRow(tmpHome, workspaceId);
     expect(layoutRow).toBeDefined();
     const layout = JSON.parse(layoutRow!.state) as {
@@ -367,14 +186,6 @@ describe("chatLayout — populated by chats.create", () => {
     };
     expect(layout.panels[chat.id]).toBeDefined();
     expect(layout.panels[chat.id].params?.chatId).toBe(chat.id);
-
-    // Same view through the public API — `chatLayout.get` returns the
-    // tree without any need to re-call `chatLayout.save`.
-    const layoutRes = await trpcQuery(server.url, "chatLayout.get", { workspaceId });
-    const layoutData = await trpcData<{
-      tree: { panels: Record<string, { params?: { chatId?: string } }> };
-    }>(layoutRes);
-    expect(layoutData.tree.panels[chat.id]).toBeDefined();
   });
 });
 

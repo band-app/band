@@ -249,6 +249,11 @@ async function mountBothTerminalsAndSettle(
   return { baseVisible, baseCached };
 }
 
+// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The whole premise
+// (per-container inner-dockview add/split toolbars + a module-level singleton
+// bug + server-side per-container layout counts) is gone: the unified center
+// dockview has one `+` menu and split is keyboard-only, and layout persists to
+// localStorage (band:dockview-layout-v8:<id>), not chatLayout/terminalLayout.
 test.describe("Inner-dockview toolbar targets the visible workspace", () => {
   test("clicking the chat '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
     page,

@@ -136,6 +136,11 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the bare
+// per-path `file` leaf that replaced the desktop CodeBrowserView has NO LSP
+// (no go-to-definition), so this cross-workspace go-to-def scoping scenario
+// has no affordance to drive. Re-enable when LSP navigation is wired into the
+// new file leaf.
 test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file leak)", () => {
   test("a go-to-definition addressed to workspace A does NOT leak the file into active workspace B (no ENOENT, no poisoned tabs)", async ({
     page,

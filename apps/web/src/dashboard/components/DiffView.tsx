@@ -72,11 +72,13 @@ export interface DiffStats {
 // Alias of the canonical `DiffViewMode` defined in
 // `../lib/diff-row-height` so the two definitions can't drift. If a new
 // mode is ever added (e.g. "inline"), updating the lib propagates here.
-type ViewMode = DiffViewMode;
+export type ViewMode = DiffViewMode;
 
 const VIEW_MODE_KEY = "band:diff-view-mode";
 
-function getStoredViewMode(): ViewMode {
+/** Read the persisted split/unified diff preference (shared with the center
+ *  `diff` leaf so both honor one setting). */
+export function getStoredViewMode(): ViewMode {
   try {
     const v = localStorage.getItem(VIEW_MODE_KEY);
     if (v === "split" || v === "unified") return v;
@@ -84,7 +86,8 @@ function getStoredViewMode(): ViewMode {
   return "unified";
 }
 
-function storeViewMode(mode: ViewMode) {
+/** Persist the split/unified diff preference. */
+export function storeViewMode(mode: ViewMode) {
   try {
     localStorage.setItem(VIEW_MODE_KEY, mode);
   } catch {}
@@ -399,18 +402,22 @@ const diffTheme = EditorView.theme({
   },
 });
 
-function DiffFileContent({
+export function DiffFileContent({
   hunks,
   filename,
   viewMode,
   onEditorViews,
   onLoadMoreContext,
+  copyReferenceOnly = false,
 }: {
   hunks: string;
   filename: string;
   viewMode: ViewMode;
   onEditorViews?: (views: EditorView[]) => void;
   onLoadMoreContext?: () => void;
+  /** When true, the selection tooltip shows only "Copy reference" (no Add to
+   *  Chat/Terminal) — used by the desktop diff leaf (#643). */
+  copyReferenceOnly?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
@@ -474,7 +481,7 @@ function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(oldLineNumbers),
               hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, oldLineNumbers),
+              selectionToChatExtension(filename, oldLineNumbers, { copyReferenceOnly }),
               ...sharedExtensions,
             ],
           },
@@ -484,7 +491,7 @@ function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(newLineNumbers),
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, newLineNumbers),
+              selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
               ...sharedExtensions,
             ],
           },
@@ -500,7 +507,7 @@ function DiffFileContent({
           makeLineNumbers(newLineNumbers),
           hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
-          selectionToChatExtension(filename, newLineNumbers),
+          selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
@@ -567,7 +574,7 @@ function DiffFileContent({
       }
       onEditorViewsRef.current?.([]);
     };
-  }, [hunks, filename, viewMode, isDark]);
+  }, [hunks, filename, viewMode, isDark, copyReferenceOnly]);
 
   return <div ref={containerRef} />;
 }

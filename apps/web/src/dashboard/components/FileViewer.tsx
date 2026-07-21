@@ -8,6 +8,7 @@ import {
   Code,
   Eye,
   FileWarning,
+  GitCompare,
   Loader2,
   Save,
 } from "lucide-react";
@@ -58,6 +59,15 @@ interface FileViewerProps {
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
   /** When true, hides the title bar (path, size, nav arrows). */
   hideTitleBar?: boolean;
+  /**
+   * When true, keeps the title bar (and all action buttons — nav, save,
+   * format, markdown toggle, language) but hides only the redundant
+   * path/size/(modified) label, replacing it with a flex spacer so the
+   * action buttons stay right-aligned. Used by the center `file` leaf,
+   * where the dockview tab already shows the filename. Additive/default-
+   * false so mobile `CodeBrowserView` is unchanged.
+   */
+  hidePathLabel?: boolean;
   /** Controlled view mode for markdown files (preview vs source). When provided, FileViewer uses this instead of internal state. */
   viewMode?: "preview" | "source";
   /** Called when the user toggles between preview and source mode. */
@@ -117,6 +127,26 @@ interface FileViewerProps {
    * so the close path can keep the tab open.
    */
   onSaveAs?: (content: string) => Promise<string | null>;
+  /**
+   * When provided, renders a "View changes" button in the title bar that
+   * opens the file's diff. The inverse of the diff leaf's "Edit" button — used
+   * by the center `file` leaf to jump to the changeset for the open file.
+   */
+  onViewDiff?: () => void;
+  /**
+   * Reports the viewer's current title-bar action state (save + markdown
+   * toggle availability) whenever it changes. Lets a host that renders its own
+   * chrome — the center `file` leaf, which lifts these into the dockview group
+   * header — drive Save and the markdown toggle from outside while the viewer's
+   * own title bar is hidden (`hideTitleBar`).
+   */
+  onActionsChange?: (actions: {
+    isDirty: boolean;
+    canSave: boolean;
+    saving: boolean;
+    save: () => void;
+    showMarkdownToggle: boolean;
+  }) => void;
   /**
    * Called when the workspace/external loader rejects (typically
    * `ENOENT: no such file or directory ...` from the server's `stat`
@@ -224,6 +254,7 @@ export function FileViewer({
   canGoForward,
   onCursorLineChange,
   hideTitleBar,
+  hidePathLabel,
   viewMode: controlledViewMode,
   onViewModeChange,
   lspExtension,
@@ -236,6 +267,8 @@ export function FileViewer({
   languageOverride,
   onLanguageOverrideChange,
   onSaveAs,
+  onViewDiff,
+  onActionsChange,
   onLoadError,
 }: FileViewerProps) {
   const adapter = useAdapter();
@@ -515,6 +548,26 @@ export function FileViewer({
       setSaving(false);
     }
   }, [adapter, workspaceId, filePath, external, untitled, onSaveAs]);
+
+  // Report title-bar action state to a host that renders its own chrome (the
+  // center `file` leaf lifts Save + the markdown toggle into the group header).
+  const onActionsChangeRef = useRef(onActionsChange);
+  onActionsChangeRef.current = onActionsChange;
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  // Depend on the BOOLEAN, not the raw `showMarkdownToggle` (which is the
+  // inline `renderMarkdown` function for markdown files — a new reference every
+  // render, which would fire this effect every render → setState loop).
+  const canShowMarkdownToggle = !!showMarkdownToggle;
+  useEffect(() => {
+    onActionsChangeRef.current?.({
+      isDirty,
+      canSave,
+      saving,
+      save: () => handleSaveRef.current(),
+      showMarkdownToggle: canShowMarkdownToggle,
+    });
+  }, [isDirty, canSave, saving, canShowMarkdownToggle]);
 
   /**
    * Format the editor buffer in-place via Prettier.
@@ -823,9 +876,9 @@ export function FileViewer({
     // flex slot, which would propagate up and shove neighbouring layout
     // (e.g. the right-edge tab strip) off-screen.
     <div data-testid="file-viewer__root" className="flex h-full min-w-0 flex-col overflow-hidden">
-      {/* Title bar — full version (mobile / non-tab views) */}
+      {/* Title bar. h-8 lines up with the diff leaf header. */}
       {!hideTitleBar && (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 px-3">
           {onBack && (
             <button
               type="button"
@@ -876,10 +929,31 @@ export function FileViewer({
               </Tooltip>
             </div>
           )}
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">
-            {untitled ? "Untitled" : filePath}
-            {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
-          </span>
+          {hidePathLabel ? (
+            // Keep the action buttons right-aligned without the redundant
+            // path label (the dockview tab already shows the filename).
+            <span className="min-w-0 flex-1" />
+          ) : (
+            <span
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={untitled ? "Untitled" : filePath}
+              data-testid="file-viewer__path"
+            >
+              {untitled ? "Untitled" : filePath}
+              {isDirty && <span className="ml-1">(modified)</span>}
+            </span>
+          )}
+          {onViewDiff && (
+            <button
+              type="button"
+              onClick={onViewDiff}
+              title="View changes"
+              data-testid="file-viewer__view-diff"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <GitCompare className="size-3.5" />
+            </button>
+          )}
           {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
           {formatStatus && (
             <span
@@ -947,7 +1021,7 @@ export function FileViewer({
               </button>
             </div>
           )}
-          {data && (
+          {data && !hidePathLabel && (
             <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
           )}
         </div>

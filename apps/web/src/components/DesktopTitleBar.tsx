@@ -1,14 +1,5 @@
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@band-app/ui";
-import { ChevronLeft, ChevronRight, ChevronsUpDown, PanelLeft, PanelTop } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import { ChevronLeft, ChevronRight, ChevronsUpDown, PanelLeft, PanelRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
@@ -69,12 +60,12 @@ interface WorkspaceTitleBarProps {
    *  mirroring the mobile header's tap-to-switch affordance. When omitted, the
    *  name stays a non-interactive label. */
   onWorkspaceNameClick?: () => void;
-  /** Panel definitions for the panel switcher dropdown. */
-  panelItems?: PanelItem[];
-  /** Panel IDs that are currently hidden from the layout. */
-  hiddenPanels?: string[];
-  /** Callback to toggle a panel's visibility on/off. */
-  onTogglePanelVisibility?: (panelId: string) => void;
+  /** Toggle the right sidepanel (Explorer / Changes). When provided alongside a
+   *  `workspaceName`, a toggle button renders at the bar's right edge. */
+  onToggleRightPanel?: () => void;
+  /** Whether the right sidepanel is currently visible (drives the toggle's
+   *  pressed state). */
+  rightPanelVisible?: boolean;
 }
 
 /** Sidebar toggle + back/forward arrows. Rendered once by `AppShell` in a
@@ -189,9 +180,8 @@ export function WorkspaceTitleBar({
   workspacePath,
   onCopyPath,
   onWorkspaceNameClick,
-  panelItems,
-  hiddenPanels,
-  onTogglePanelVisibility,
+  onToggleRightPanel,
+  rightPanelVisible,
 }: WorkspaceTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
 
@@ -206,7 +196,7 @@ export function WorkspaceTitleBar({
   // EditorPicker invokes native IPC (open in VS Code/Finder/etc.) — keep it
   // desktop-only so it doesn't render a non-functional button in the web app.
   const hasEditorPicker = isDesktop && workspaceName && workspacePath;
-  const hasPanels = workspaceName && panelItems && panelItems.length > 0 && onTogglePanelVisibility;
+  const hasRightToggle = !!(workspaceName && onToggleRightPanel);
 
   return (
     <div
@@ -269,7 +259,7 @@ export function WorkspaceTitleBar({
           overlay (positioned siblings later in the DOM paint on top) so a
           long workspace name can never sit over these buttons and steal
           their clicks on a narrow bar. */}
-      {(hasEditorPicker || hasPanels) && (
+      {(hasEditorPicker || hasRightToggle) && (
         <div
           className="relative ml-auto flex shrink-0 items-center gap-1 pointer-events-auto"
           style={NO_DRAG_STYLE}
@@ -278,43 +268,29 @@ export function WorkspaceTitleBar({
             <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />
           )}
 
-          {hasPanels && (
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                    >
-                      <PanelTop className="size-5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Switch Panel</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end">
-                {panelItems?.map((item) => {
-                  const Icon = item.icon;
-                  const isVisible = !hiddenPanels?.includes(item.id);
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={item.id}
-                      checked={isVisible}
-                      onCheckedChange={() => {
-                        onTogglePanelVisibility?.(item.id);
-                      }}
-                    >
-                      <Icon className="size-4" />
-                      {item.label}
-                      {item.shortcut && (
-                        <DropdownMenuShortcut>{item.shortcut}</DropdownMenuShortcut>
-                      )}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {hasRightToggle && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Toggle Explorer / Changes panel"
+                  // `aria-pressed` still reflects panel state for a11y, but the
+                  // icon stays muted whether open or closed (matches the sidebar
+                  // toggle) so it doesn't read as a selected/active control.
+                  aria-pressed={rightPanelVisible}
+                  onClick={onToggleRightPanel}
+                  className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+                >
+                  <PanelRight className="size-5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Toggle Explorer / Changes{" "}
+                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                  ⇧⌘E
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
       )}
