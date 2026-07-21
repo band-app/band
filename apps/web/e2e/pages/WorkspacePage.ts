@@ -896,6 +896,17 @@ export class WorkspacePage {
     });
   }
 
+  /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
+   *  rendered as a strip in `RightSidepanel.tsx`; only the active tab's body
+   *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
+   *  callers that assert on the Changes section MUST select it first — the
+   *  panel defaults to Explorer. */
+  async selectRightPanelTab(tab: "explorer" | "changes"): Promise<void> {
+    await test.step(`Select the right sidepanel ${tab} tab`, async () => {
+      await this.page.getByTestId(`right-sidepanel__tab--${tab}`).click();
+    });
+  }
+
   /** Wait for the shared dockview to render its header buttons. The
    *  app boot is multi-stage (settings query → workspaces fetch →
    *  dockview mount) and any test that interacts with the buttons must

@@ -89,6 +89,8 @@ export class FileTreesPage {
   async openChangesTab(path: string): Promise<void> {
     await test.step("Open the Changes section (right sidepanel)", async () => {
       await this.workspace.revealRightPanel();
+      // The panel defaults to Explorer; select Changes so its body mounts.
+      await this.workspace.selectRightPanelTab("changes");
       await this.workspace.changesSection.waitFor({ state: "visible", timeout: 15_000 });
       await this.changesTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
