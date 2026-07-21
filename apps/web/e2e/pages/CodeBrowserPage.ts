@@ -92,10 +92,17 @@ export class CodeBrowserPage {
    *  "hidden" as far as Playwright is concerned, so anchoring on it would hang
    *  exactly in the tests that reload with the explorer collapsed. */
   async openFilesTab(): Promise<void> {
-    await test.step("Open the Files tab", async () => {
-      await this.workspace.activateTab("files");
-      await this.editorPanel.waitFor({ state: "visible", timeout: 15_000 });
-    });
+    // NOTE(#643 Phase 5): the desktop `CodeBrowserView` (the two-panel
+    // explorer+editor Files tab this page object models) was removed in Phase 2
+    // — the file tree moved to the right sidepanel and files now open as bare
+    // per-path `file` leaves with no docked explorer. There is no longer a
+    // `files` center tab to activate. Every spec that used this page object is
+    // `test.describe.skip`-ped until the explorer docking/collapse/fixed-width
+    // affordances are reworked in Phase 5; this method only needs to keep the
+    // file typechecking, so it throws if ever invoked.
+    throw new Error(
+      "CodeBrowserPage.openFilesTab: the docked Files-tab explorer was removed in #643 Phase 2 — see Phase 5",
+    );
   }
 
   /** Bounding box of the explorer panel. Waits for it to be laid out first, so
@@ -277,9 +284,15 @@ export class CodeBrowserPage {
   }
 
   /** Maximize the outer dockview group that hosts the Files tab — the
-   *  container-widening event the fixed-pixel width has to survive. */
+   *  container-widening event the fixed-pixel width has to survive.
+   *
+   *  NOTE(#643 Phase 5): the `files` center group was removed in Phase 2, so
+   *  there is no group to maximize by that kind. Throws if invoked; the
+   *  fixed-width specs that call it are skipped until Phase 5. */
   async maximizeFilesGroup(): Promise<void> {
-    await this.workspace.maximizeGroupContaining("files");
+    throw new Error(
+      "CodeBrowserPage.maximizeFilesGroup: the Files center group was removed in #643 Phase 2 — see Phase 5",
+    );
   }
 
   /** Exit maximize (delegates to the shared header Restore button). */

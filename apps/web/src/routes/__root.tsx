@@ -33,6 +33,7 @@ import {
   SidebarTitleBar,
   WorkspaceTitleBar,
 } from "../components/DesktopTitleBar";
+import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -44,10 +45,16 @@ import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
+  loadRightPanelCollapsed,
+  loadRightPanelWidth,
   loadSidebarCollapsed,
   loadSidebarWidth,
+  RIGHT_PANEL_MAX_SIZE,
+  RIGHT_PANEL_MIN_SIZE,
   SIDEBAR_MAX_SIZE,
   SIDEBAR_MIN_SIZE,
+  saveRightPanelCollapsed,
+  saveRightPanelWidth,
   saveSidebarCollapsed,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
@@ -443,6 +450,15 @@ function AppShell() {
   const sidebarElRef = useRef<HTMLDivElement | null>(null);
   const mainElRef = useRef<HTMLDivElement | null>(null);
 
+  // Right sidepanel (Explorer + Changes) — mirrors the sidebar plumbing above.
+  const rightPanelRef = usePanelRef();
+  const rightPanelElRef = useRef<HTMLDivElement | null>(null);
+  const rightInit = useRef({
+    collapsed: loadRightPanelCollapsed(),
+    width: loadRightPanelWidth(),
+  });
+  const [rightVisible, setRightVisible] = useState(() => !rightInit.current.collapsed);
+
   // Read the persisted sidebar state ONCE at mount (these `<Group>`/`useState`
   // seeds are only consumed on the first render). Stashing them in a ref keeps
   // the localStorage reads off the re-render path, matching the `sidebarVisible`
@@ -459,15 +475,22 @@ function AppShell() {
 
   // Memoized at mount — values come from an immutable ref, and `<Group>`
   // only reads `defaultLayout` on its first render.
-  const sidebarDefaultLayout = useMemo(
-    () =>
-      sidebarInit.current.collapsed
-        ? { sidebar: 0, main: 100 }
-        : sidebarInit.current.width
-          ? { sidebar: sidebarInit.current.width, main: 100 - sidebarInit.current.width }
-          : undefined,
-    [],
-  );
+  const sidebarDefaultLayout = useMemo(() => {
+    const sidebarW = sidebarInit.current.collapsed ? 0 : (sidebarInit.current.width ?? 18);
+    const rightW = rightInit.current.collapsed ? 0 : (rightInit.current.width ?? 22);
+    // When both panels fall back to library defaults (no persisted width and
+    // both visible) there's no reason to force a layout — let the panels size
+    // themselves from their `defaultSize`/`minSize`. Only supply an explicit
+    // 3-key layout once the user has customised or collapsed something.
+    const hasCustom =
+      sidebarInit.current.collapsed ||
+      rightInit.current.collapsed ||
+      sidebarInit.current.width != null ||
+      rightInit.current.width != null;
+    if (!hasCustom) return undefined;
+    const main = Math.max(0, 100 - sidebarW - rightW);
+    return { sidebar: sidebarW, main, rightpanel: rightW };
+  }, []);
 
   // Skip the first layout callback: it fires during mount with the restored
   // layout, which we don't want to re-persist.
@@ -476,21 +499,32 @@ function AppShell() {
   // so coalesce the persist to at most one localStorage write per frame.
   const pendingSidebarWidthRef = useRef<number | null>(null);
   const sidebarWidthRafRef = useRef<number | null>(null);
+  const pendingRightWidthRef = useRef<number | null>(null);
   const handleSidebarLayoutChanged = useCallback((layout: Record<string, number>) => {
     if (skipFirstSidebarLayout.current) {
       skipFirstSidebarLayout.current = false;
       return;
     }
-    // Only persist a real (visible) width — a 0 here means the panel is
+    // Only persist real (visible) widths — a 0 here means the panel is
     // collapsed, and storing that would lose the user's chosen width on the
-    // next expand.
-    if (layout.sidebar == null || layout.sidebar <= 0) return;
-    pendingSidebarWidthRef.current = layout.sidebar;
+    // next expand. Coalesce both panels' writes into a single RAF.
+    if (layout.sidebar != null && layout.sidebar > 0) {
+      pendingSidebarWidthRef.current = layout.sidebar;
+    }
+    if (layout.rightpanel != null && layout.rightpanel > 0) {
+      pendingRightWidthRef.current = layout.rightpanel;
+    }
+    if (pendingSidebarWidthRef.current == null && pendingRightWidthRef.current == null) return;
     if (sidebarWidthRafRef.current != null) return;
     sidebarWidthRafRef.current = requestAnimationFrame(() => {
       sidebarWidthRafRef.current = null;
       if (pendingSidebarWidthRef.current != null) {
         saveSidebarWidth(pendingSidebarWidthRef.current);
+        pendingSidebarWidthRef.current = null;
+      }
+      if (pendingRightWidthRef.current != null) {
+        saveRightPanelWidth(pendingRightWidthRef.current);
+        pendingRightWidthRef.current = null;
       }
     });
   }, []);
@@ -513,6 +547,20 @@ function AppShell() {
       lastSidebarVisibleRef.current = visible;
       setSidebarVisible(visible);
       saveSidebarCollapsed(!visible);
+    },
+    [],
+  );
+
+  // Same collapsed/expanded tracking for the right sidepanel.
+  const lastRightVisibleRef = useRef(!rightInit.current.collapsed);
+  const handleRightResize = useCallback(
+    (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+      if (prev === undefined) return;
+      const visible = size.asPercentage > 0;
+      if (visible === lastRightVisibleRef.current) return;
+      lastRightVisibleRef.current = visible;
+      setRightVisible(visible);
+      saveRightPanelCollapsed(!visible);
     },
     [],
   );
@@ -560,6 +608,39 @@ function AppShell() {
     else panel.collapse();
   }, [sidebarPanelRef, animateSidebarToggle]);
 
+  // Mirror of `animateSidebarToggle` for the right sidepanel: arm a one-shot
+  // width transition on the right panel + the main panel so a programmatic
+  // toggle slides instead of snapping. Keyed on the right panel's own
+  // `transitionend` for cleanup.
+  const animateRightToggle = useCallback(() => {
+    const right = rightPanelElRef.current;
+    if (!right) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const els = [right, mainElRef.current];
+    for (const el of els) {
+      if (el)
+        el.style.transition =
+          "flex-grow 200ms cubic-bezier(0.77, 0, 0.175, 1), flex-basis 200ms cubic-bezier(0.77, 0, 0.175, 1)";
+    }
+    let timer = 0;
+    const clear = (e?: TransitionEvent) => {
+      if (e && (e.target !== right || e.propertyName !== "flex-grow")) return;
+      for (const el of els) if (el) el.style.transition = "";
+      right.removeEventListener("transitionend", clear);
+      if (timer) window.clearTimeout(timer);
+    };
+    timer = window.setTimeout(clear, 280);
+    right.addEventListener("transitionend", clear);
+  }, []);
+
+  const toggleRightPanel = useCallback(() => {
+    const panel = rightPanelRef.current;
+    if (!panel) return;
+    animateRightToggle();
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [rightPanelRef, animateRightToggle]);
+
   // ⌘B toggles the sidebar; ⌃0 / "Focus Projects" reveal it before focusing
   // the list.
   useEffect(() => {
@@ -577,6 +658,23 @@ function AppShell() {
       window.removeEventListener("band:show-sidebar", onShow);
     };
   }, [toggleSidebar, sidebarPanelRef, animateSidebarToggle]);
+
+  // ⇧⌘E / ⇧⌘G (and the title-bar switcher) toggle / reveal the right sidepanel.
+  useEffect(() => {
+    const onToggle = () => toggleRightPanel();
+    const onShow = () => {
+      if (rightPanelRef.current?.isCollapsed()) {
+        animateRightToggle();
+        rightPanelRef.current.expand();
+      }
+    };
+    window.addEventListener("band:toggle-right-panel", onToggle);
+    window.addEventListener("band:show-right-panel", onShow);
+    return () => {
+      window.removeEventListener("band:toggle-right-panel", onToggle);
+      window.removeEventListener("band:show-right-panel", onShow);
+    };
+  }, [toggleRightPanel, rightPanelRef, animateRightToggle]);
 
   // Cancel a pending sidebar-width RAF on unmount so it can't fire (and write
   // localStorage) after the component is gone — matches the cleanup discipline
@@ -687,6 +785,26 @@ function AppShell() {
                   <SharedDockviewLayout />
                   <BrowserHostBridge />
                 </div>
+              </div>
+            </Panel>
+            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+            <Panel
+              id="rightpanel"
+              panelRef={rightPanelRef}
+              elementRef={rightPanelElRef}
+              defaultSize={RIGHT_PANEL_MIN_SIZE}
+              minSize={RIGHT_PANEL_MIN_SIZE}
+              maxSize={RIGHT_PANEL_MAX_SIZE}
+              collapsible
+              collapsedSize="0%"
+              onResize={handleRightResize}
+            >
+              <div
+                className="h-full flex flex-col overflow-hidden border-l border-border bg-sidebar"
+                data-testid="app-shell__right-panel"
+                data-visible={rightVisible ? "true" : "false"}
+              >
+                <RightSidepanel visible={rightVisible} />
               </div>
             </Panel>
           </Group>

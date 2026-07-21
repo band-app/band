@@ -100,200 +100,210 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Files-tab explorer keeps its pixel width across maximize", () => {
-  test("maximizing and restoring the Files tab leaves the explorer's width untouched", async ({
-    page,
-  }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the docked
+// CodeBrowserView fixed-pixel-width explorer column (persisted under
+// `band-file-tree-width-px:*`) was removed in Phase 2. The sidepanel width is
+// managed by the outer app-shell right Panel, not this per-Files-tab column.
+// Re-enable when the sidepanel explorer is reworked.
+test.describe
+  .skip("Files-tab explorer keeps its pixel width across maximize", () => {
+    test("maximizing and restoring the Files tab leaves the explorer's width untouched", async ({
+      page,
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
 
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
+      await workspace.goto(WORKSPACE);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
 
-    const explorerBefore = await codeBrowser.explorerWidth();
-    const editorBefore = await codeBrowser.editorWidth();
+      const explorerBefore = await codeBrowser.explorerWidth();
+      const editorBefore = await codeBrowser.editorWidth();
 
-    // Maximize the group hosting the Files tab — the container-widening event.
-    await codeBrowser.maximizeFilesGroup();
-    await expect(workspace.restoreButton).toBeVisible();
+      // Maximize the group hosting the Files tab — the container-widening event.
+      await codeBrowser.maximizeFilesGroup();
+      await expect(workspace.restoreButton).toBeVisible();
 
-    // The editor absorbs the delta: polling on ITS growth is both the wait for
-    // the new layout to settle and the proof that the maximize actually
-    // resized the container (without it, an inert maximize would let the
-    // explorer assertion below pass for the wrong reason).
-    await expect
-      .poll(() => codeBrowser.editorWidth())
-      .toBeGreaterThan(editorBefore + MIN_EDITOR_GROWTH_PX);
+      // The editor absorbs the delta: polling on ITS growth is both the wait for
+      // the new layout to settle and the proof that the maximize actually
+      // resized the container (without it, an inert maximize would let the
+      // explorer assertion below pass for the wrong reason).
+      await expect
+        .poll(() => codeBrowser.editorWidth())
+        .toBeGreaterThan(editorBefore + MIN_EDITOR_GROWTH_PX);
 
-    expect(Math.abs((await codeBrowser.explorerWidth()) - explorerBefore)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
+      expect(Math.abs((await codeBrowser.explorerWidth()) - explorerBefore)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
 
-    // Restore — the editor shrinks back and the explorer is still untouched.
-    await codeBrowser.restoreFilesGroup();
-    await expect(workspace.maximizeButtons.first()).toBeVisible();
-    await expect
-      .poll(() => codeBrowser.editorWidth())
-      .toBeLessThan(editorBefore + MIN_EDITOR_GROWTH_PX);
+      // Restore — the editor shrinks back and the explorer is still untouched.
+      await codeBrowser.restoreFilesGroup();
+      await expect(workspace.maximizeButtons.first()).toBeVisible();
+      await expect
+        .poll(() => codeBrowser.editorWidth())
+        .toBeLessThan(editorBefore + MIN_EDITOR_GROWTH_PX);
 
-    expect(Math.abs((await codeBrowser.explorerWidth()) - explorerBefore)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
+      expect(Math.abs((await codeBrowser.explorerWidth()) - explorerBefore)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+    });
+
+    // Regression guard: the live layout used to be right while the width
+    // PERSISTED during the maximize/restore layout event was not, so the dragged
+    // width was silently lost on the next reload. See the note at the bottom.
+    test("a width the user dragged to is the width preserved across maximize and reload", async ({
+      page,
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      // Drag to a width that is clearly not the default, so "preserved" can't
+      // mean "reset to the default that happened to match".
+      await codeBrowser.dragSeparatorBy(DRAG_DX);
+      await expect
+        .poll(() => codeBrowser.explorerWidth())
+        .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + DRAG_DX / 2);
+
+      const draggedWidth = await codeBrowser.explorerWidth();
+      const editorBefore = await codeBrowser.editorWidth();
+
+      await codeBrowser.maximizeFilesGroup();
+      await expect(workspace.restoreButton).toBeVisible();
+      await expect
+        .poll(() => codeBrowser.editorWidth())
+        .toBeGreaterThan(editorBefore + MIN_EDITOR_GROWTH_PX);
+
+      expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+
+      await codeBrowser.restoreFilesGroup();
+      await expect(workspace.maximizeButtons.first()).toBeVisible();
+      await expect
+        .poll(() => codeBrowser.editorWidth())
+        .toBeLessThan(editorBefore + MIN_EDITOR_GROWTH_PX);
+
+      expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+
+      // The persisted value must still be the dragged pixel width — it is what
+      // seeds the panel's `defaultSize` on the next mount. The write is debounced
+      // (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll rather than reading once.
+      await expect
+        .poll(async () => {
+          const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
+          return persisted === null
+            ? null
+            : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
+        })
+        .toBe(true);
+
+      // …and the user-visible consequence of getting that wrong: reload and the
+      // explorer must come back at the width the user dragged it to.
+      await workspace.reload();
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+      expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+    });
+
+    test("a legacy percentage width is ignored, not restored as a pixel width", async ({
+      page,
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      // Users upgrading from the percentage era have `band-file-tree-width:<ws>`
+      // = "15" (meaning 15% of the group). The key was deliberately renamed to
+      // `-px`, because reusing it would restore that 15 as a 15-PIXEL explorer —
+      // a sliver, below even the 10rem minSize. Seed the legacy key before the app
+      // mounts and assert the explorer falls back to the 240px default.
+      await codeBrowser.seedLegacyWidthValue(WORKSPACE, "15");
+
+      await workspace.goto(WORKSPACE);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      expect(
+        Math.abs((await codeBrowser.explorerWidth()) - DEFAULT_TREE_WIDTH_PX),
+      ).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+
+      // The legacy value is not migrated into the new key — and nothing else is
+      // written there either. Only a width the *user* chose is persisted, so
+      // merely opening the tab leaves the key empty; the explorer falls back to
+      // the default every mount until someone drags it.
+      expect(await codeBrowser.readPersistedWidthPx(WORKSPACE)).toBeNull();
+
+      // Once the user does drag, the new key takes over and the legacy one is
+      // still never consulted.
+      await codeBrowser.dragSeparatorBy(DRAG_DX);
+      const dragged = await codeBrowser.explorerWidth();
+      await expect
+        .poll(async () => {
+          const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
+          return persisted === null ? null : Math.abs(persisted - dragged) <= WIDTH_TOLERANCE_PX;
+        })
+        .toBe(true);
+    });
+
+    test("a width squeezed out by a narrower window is reclaimed when the window widens back", async ({
+      page,
+    }) => {
+      // `preserve-pixel-size` holds the explorer's width through a container
+      // resize — but `maxSize` (50% of the group) still binds. Narrow the window
+      // far enough and the layout engine MUST squeeze the explorer below the width
+      // the user chose. It keeps no memory of the width it took away, so widening
+      // back used to strand the explorer at the squeezed size, and the next persist
+      // would then make that stranded width the user's "chosen" one.
+      //
+      // The fix: a container-driven `onResize` (group width changed) never
+      // overwrites the chosen width — it re-asserts it instead, clamped to whatever
+      // room there is now: `resize(min(chosenWidth, 50% of group))`.
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      // Drag the explorer wide (~500px) — inside `maxSize` at this viewport, but
+      // well over half the group once the window narrows.
+      await codeBrowser.dragSeparatorBy(WIDE_DRAG_DX);
+      await expect
+        .poll(() => codeBrowser.explorerWidth())
+        .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + WIDE_DRAG_DX / 2);
+      const chosenWidth = await codeBrowser.explorerWidth();
+
+      // Let the debounced write land, so the persisted value under test is the
+      // user's chosen width before any squeeze happens.
+      await expect
+        .poll(() => codeBrowser.readPersistedWidthPx(WORKSPACE))
+        .toBe(Math.round(chosenWidth));
+
+      // Narrow the window. The Group stays mounted (the Files container remains
+      // above the 600px mobile threshold), but 50% of it is now less than the
+      // chosen width, so the explorer is squeezed.
+      await codeBrowser.setWindowWidth(NARROW_VIEWPORT_PX);
+      await expect.poll(() => codeBrowser.explorerWidth()).toBeLessThan(chosenWidth - 20);
+
+      // Widen back: the explorer must RECLAIM the width it chose, not stay stranded
+      // at the squeezed size.
+      await codeBrowser.setWindowWidth(WIDE_VIEWPORT_PX);
+      await expect
+        .poll(async () => Math.abs((await codeBrowser.explorerWidth()) - chosenWidth))
+        .toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+
+      // And the squeeze never overwrote the user's chosen width on disk — otherwise
+      // the next reload would come back at the squeezed size.
+      expect(await codeBrowser.readPersistedWidthPx(WORKSPACE)).toBe(Math.round(chosenWidth));
+    });
   });
-
-  // Regression guard: the live layout used to be right while the width
-  // PERSISTED during the maximize/restore layout event was not, so the dragged
-  // width was silently lost on the next reload. See the note at the bottom.
-  test("a width the user dragged to is the width preserved across maximize and reload", async ({
-    page,
-  }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    // Drag to a width that is clearly not the default, so "preserved" can't
-    // mean "reset to the default that happened to match".
-    await codeBrowser.dragSeparatorBy(DRAG_DX);
-    await expect
-      .poll(() => codeBrowser.explorerWidth())
-      .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + DRAG_DX / 2);
-
-    const draggedWidth = await codeBrowser.explorerWidth();
-    const editorBefore = await codeBrowser.editorWidth();
-
-    await codeBrowser.maximizeFilesGroup();
-    await expect(workspace.restoreButton).toBeVisible();
-    await expect
-      .poll(() => codeBrowser.editorWidth())
-      .toBeGreaterThan(editorBefore + MIN_EDITOR_GROWTH_PX);
-
-    expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
-
-    await codeBrowser.restoreFilesGroup();
-    await expect(workspace.maximizeButtons.first()).toBeVisible();
-    await expect
-      .poll(() => codeBrowser.editorWidth())
-      .toBeLessThan(editorBefore + MIN_EDITOR_GROWTH_PX);
-
-    expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
-
-    // The persisted value must still be the dragged pixel width — it is what
-    // seeds the panel's `defaultSize` on the next mount. The write is debounced
-    // (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll rather than reading once.
-    await expect
-      .poll(async () => {
-        const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
-        return persisted === null ? null : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
-      })
-      .toBe(true);
-
-    // …and the user-visible consequence of getting that wrong: reload and the
-    // explorer must come back at the width the user dragged it to.
-    await workspace.reload();
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-    expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
-  });
-
-  test("a legacy percentage width is ignored, not restored as a pixel width", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    // Users upgrading from the percentage era have `band-file-tree-width:<ws>`
-    // = "15" (meaning 15% of the group). The key was deliberately renamed to
-    // `-px`, because reusing it would restore that 15 as a 15-PIXEL explorer —
-    // a sliver, below even the 10rem minSize. Seed the legacy key before the app
-    // mounts and assert the explorer falls back to the 240px default.
-    await codeBrowser.seedLegacyWidthValue(WORKSPACE, "15");
-
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    expect(
-      Math.abs((await codeBrowser.explorerWidth()) - DEFAULT_TREE_WIDTH_PX),
-    ).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
-
-    // The legacy value is not migrated into the new key — and nothing else is
-    // written there either. Only a width the *user* chose is persisted, so
-    // merely opening the tab leaves the key empty; the explorer falls back to
-    // the default every mount until someone drags it.
-    expect(await codeBrowser.readPersistedWidthPx(WORKSPACE)).toBeNull();
-
-    // Once the user does drag, the new key takes over and the legacy one is
-    // still never consulted.
-    await codeBrowser.dragSeparatorBy(DRAG_DX);
-    const dragged = await codeBrowser.explorerWidth();
-    await expect
-      .poll(async () => {
-        const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE);
-        return persisted === null ? null : Math.abs(persisted - dragged) <= WIDTH_TOLERANCE_PX;
-      })
-      .toBe(true);
-  });
-
-  test("a width squeezed out by a narrower window is reclaimed when the window widens back", async ({
-    page,
-  }) => {
-    // `preserve-pixel-size` holds the explorer's width through a container
-    // resize — but `maxSize` (50% of the group) still binds. Narrow the window
-    // far enough and the layout engine MUST squeeze the explorer below the width
-    // the user chose. It keeps no memory of the width it took away, so widening
-    // back used to strand the explorer at the squeezed size, and the next persist
-    // would then make that stranded width the user's "chosen" one.
-    //
-    // The fix: a container-driven `onResize` (group width changed) never
-    // overwrites the chosen width — it re-asserts it instead, clamped to whatever
-    // room there is now: `resize(min(chosenWidth, 50% of group))`.
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    // Drag the explorer wide (~500px) — inside `maxSize` at this viewport, but
-    // well over half the group once the window narrows.
-    await codeBrowser.dragSeparatorBy(WIDE_DRAG_DX);
-    await expect
-      .poll(() => codeBrowser.explorerWidth())
-      .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + WIDE_DRAG_DX / 2);
-    const chosenWidth = await codeBrowser.explorerWidth();
-
-    // Let the debounced write land, so the persisted value under test is the
-    // user's chosen width before any squeeze happens.
-    await expect
-      .poll(() => codeBrowser.readPersistedWidthPx(WORKSPACE))
-      .toBe(Math.round(chosenWidth));
-
-    // Narrow the window. The Group stays mounted (the Files container remains
-    // above the 600px mobile threshold), but 50% of it is now less than the
-    // chosen width, so the explorer is squeezed.
-    await codeBrowser.setWindowWidth(NARROW_VIEWPORT_PX);
-    await expect.poll(() => codeBrowser.explorerWidth()).toBeLessThan(chosenWidth - 20);
-
-    // Widen back: the explorer must RECLAIM the width it chose, not stay stranded
-    // at the squeezed size.
-    await codeBrowser.setWindowWidth(WIDE_VIEWPORT_PX);
-    await expect
-      .poll(async () => Math.abs((await codeBrowser.explorerWidth()) - chosenWidth))
-      .toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
-
-    // And the squeeze never overwrote the user's chosen width on disk — otherwise
-    // the next reload would come back at the squeezed size.
-    expect(await codeBrowser.readPersistedWidthPx(WORKSPACE)).toBe(Math.round(chosenWidth));
-  });
-});
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────

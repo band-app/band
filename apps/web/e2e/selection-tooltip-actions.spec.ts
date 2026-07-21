@@ -99,78 +99,88 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Diff selection tooltip — copy reference / add to chat / add to terminal", () => {
-  test("offers all three actions and delivers the file reference to each target", async ({
-    page,
-  }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const chat = new ChatPanePage(page, server.url, TOKEN);
-    const tooltip = new SelectionTooltipPage(page);
-
-    // Both init-script captures must be registered before the navigation that
-    // `openWithFileExpanded` performs.
-    await workspace.installClipboardCapture();
-    await workspace.installTerminalSendCapture();
-
-    const changes = await ChangesPanelPage.openWithFileExpanded({
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the multi-file
+// DiffView with its selection tooltip ("Copy reference" / "Add to chat" / "Add
+// to terminal") was the desktop `center-tab--changes` singleton, removed in
+// Phase 2. Desktop now opens a bare per-path `diff` leaf (`DiffFileContent`)
+// with no selection tooltip; the DiffView selection tooltip survives only on
+// the mobile layout. Re-enable (repointed at the diff leaf once it gains the
+// tooltip, or moved to a mobile-viewport spec) in Phase 5.
+test.describe
+  .skip("Diff selection tooltip — copy reference / add to chat / add to terminal", () => {
+    test("offers all three actions and delivers the file reference to each target", async ({
       page,
-      baseUrl: server.url,
-      token: TOKEN,
-      workspaceId,
-      filename: FILE_PATH,
-      fileStatus: "M",
-      viewMode: "unified",
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const chat = new ChatPanePage(page, server.url, TOKEN);
+      const tooltip = new SelectionTooltipPage(page);
+
+      // Both init-script captures must be registered before the navigation that
+      // `openWithFileExpanded` performs.
+      await workspace.installClipboardCapture();
+      await workspace.installTerminalSendCapture();
+
+      const changes = await ChangesPanelPage.openWithFileExpanded({
+        page,
+        baseUrl: server.url,
+        token: TOKEN,
+        workspaceId,
+        filename: FILE_PATH,
+        fileStatus: "M",
+        viewMode: "unified",
+      });
+      await workspace.waitForReady();
+
+      // Boot the terminal (open socket → live PTY) so "Add to Terminal" has a
+      // session to deliver into, then return to the Changes tab to drive the
+      // tooltip. The terminal stays mounted as a hidden tab with its socket open.
+      await workspace.openTerminalTab();
+      await workspace.waitForTerminalReady();
+      // NOTE(#643 Phase 5): used to return to the `center-tab--changes` tab;
+      // removed in Phase 2 (describe is skipped, body never runs).
+      await workspace.revealRightPanel();
+
+      // ── All three actions are present on a selection ──────────────────────
+      await changes.selectWordInDiff(FIRST_LINE);
+      await tooltip.waitVisible();
+      await expect(tooltip.addToChat).toBeVisible();
+      await expect(tooltip.addToTerminal).toBeVisible();
+      await expect(tooltip.copyReference).toBeVisible();
+
+      // ── Copy reference → bare `path:line` on the clipboard ────────────────
+      await tooltip.clickCopyReference();
+      await expect
+        .poll(async () => (await workspace.readCopied()).at(-1), {
+          message: "file reference copied to clipboard",
+          timeout: 15_000,
+        })
+        .toBe(EXPECTED_REFERENCE);
+
+      // ── Add to Chat → bare reference appended to the chat input ───────────
+      await changes.selectWordInDiff(FIRST_LINE);
+      await tooltip.waitVisible();
+      await tooltip.clickAddToChat();
+      await expect
+        .poll(async () => await chat.promptValue(), {
+          message: "file reference appended to chat input",
+          timeout: 15_000,
+        })
+        // Chat wraps the reference in a markdown code span (so it renders as a
+        // clickable file link) and appends a trailing space to separate it from
+        // whatever the user types next.
+        .toBe(`\`${EXPECTED_REFERENCE}\` `);
+
+      // ── Add to Terminal → reference typed into the PTY session ────────────
+      await changes.selectWordInDiff(FIRST_LINE);
+      await tooltip.waitVisible();
+      await tooltip.clickAddToTerminal();
+      await expect
+        .poll(async () => await workspace.readTerminalSent(), {
+          message: "file reference written to the terminal socket",
+          timeout: 15_000,
+        })
+        // Terminal receives the same bare reference + trailing space, no newline
+        // (type-only — the agent/user decides when to submit).
+        .toContain(`${EXPECTED_REFERENCE} `);
     });
-    await workspace.waitForReady();
-
-    // Boot the terminal (open socket → live PTY) so "Add to Terminal" has a
-    // session to deliver into, then return to the Changes tab to drive the
-    // tooltip. The terminal stays mounted as a hidden tab with its socket open.
-    await workspace.openTerminalTab();
-    await workspace.waitForTerminalReady();
-    await workspace.activateTab("changes");
-
-    // ── All three actions are present on a selection ──────────────────────
-    await changes.selectWordInDiff(FIRST_LINE);
-    await tooltip.waitVisible();
-    await expect(tooltip.addToChat).toBeVisible();
-    await expect(tooltip.addToTerminal).toBeVisible();
-    await expect(tooltip.copyReference).toBeVisible();
-
-    // ── Copy reference → bare `path:line` on the clipboard ────────────────
-    await tooltip.clickCopyReference();
-    await expect
-      .poll(async () => (await workspace.readCopied()).at(-1), {
-        message: "file reference copied to clipboard",
-        timeout: 15_000,
-      })
-      .toBe(EXPECTED_REFERENCE);
-
-    // ── Add to Chat → bare reference appended to the chat input ───────────
-    await changes.selectWordInDiff(FIRST_LINE);
-    await tooltip.waitVisible();
-    await tooltip.clickAddToChat();
-    await expect
-      .poll(async () => await chat.promptValue(), {
-        message: "file reference appended to chat input",
-        timeout: 15_000,
-      })
-      // Chat wraps the reference in a markdown code span (so it renders as a
-      // clickable file link) and appends a trailing space to separate it from
-      // whatever the user types next.
-      .toBe(`\`${EXPECTED_REFERENCE}\` `);
-
-    // ── Add to Terminal → reference typed into the PTY session ────────────
-    await changes.selectWordInDiff(FIRST_LINE);
-    await tooltip.waitVisible();
-    await tooltip.clickAddToTerminal();
-    await expect
-      .poll(async () => await workspace.readTerminalSent(), {
-        message: "file reference written to the terminal socket",
-        timeout: 15_000,
-      })
-      // Terminal receives the same bare reference + trailing space, no newline
-      // (type-only — the agent/user decides when to submit).
-      .toContain(`${EXPECTED_REFERENCE} `);
   });
-});

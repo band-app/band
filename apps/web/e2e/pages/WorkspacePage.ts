@@ -613,21 +613,19 @@ export class WorkspacePage {
     });
   }
 
-  /** Testid (or testid PREFIX) that identifies a tab of the given leaf kind
-   *  in the unified center dockview (`WorkspaceCenterDockview.tsx`). The two
-   *  singletons carry stable ids (`center-tab--files` / `center-tab--changes`);
-   *  the per-instance kinds carry an instance-suffixed id
-   *  (`center-chat-tab--<id>` / `center-term-tab--<id>` /
+  /** Testid PREFIX that identifies a tab of the given leaf kind in the unified
+   *  center dockview (`WorkspaceCenterDockview.tsx`). Every leaf kind carries an
+   *  instance-suffixed id (`center-chat-tab--<id>` / `center-term-tab--<id>` /
    *  `center-browser-tab--<id>`), so callers that mean "the first tab of that
-   *  kind" match the prefix with a regex + `.first()`. */
-  private centerTabTestidPrefix(
-    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
-  ): string {
+   *  kind" match the prefix with a regex + `.first()`.
+   *
+   *  NOTE(#643 Phase 2): the `files` / `changes` singleton leaves were removed —
+   *  the file tree + changes tree now live in the right sidepanel
+   *  (`RightSidepanel.tsx`), and opening an entry there creates a per-path
+   *  `file` / `diff` leaf instead (see `fileTab` / `diffTab`). So this helper no
+   *  longer knows about `files` / `changes`. */
+  private centerTabTestidPrefix(panelComponent: "chat" | "terminal" | "browser"): string {
     switch (panelComponent) {
-      case "files":
-        return "center-tab--files";
-      case "changes":
-        return "center-tab--changes";
       case "chat":
         return "center-chat-tab--";
       case "terminal":
@@ -637,21 +635,43 @@ export class WorkspacePage {
     }
   }
 
-  /** Locate a tab in the center dockview's tab strip by leaf kind. The Files /
-   *  Changes singletons resolve to their stable testid; the per-instance kinds
-   *  (chat / terminal / browser) have no single stable id, so this matches the
-   *  `center-<kind>-tab--` testid PREFIX and takes `.first()` to mean "the
-   *  first tab of that kind" — the workspaces these tests seed have one tab per
-   *  kind. `data-testid` values are set in `WorkspaceCenterDockview.tsx`. */
-  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
-    if (panelComponent === "files" || panelComponent === "changes") {
-      return this.page.getByTestId(this.centerTabTestidPrefix(panelComponent));
-    }
+  /** Locate a tab in the center dockview's tab strip by leaf kind. The
+   *  per-instance kinds (chat / terminal / browser) have no single stable id, so
+   *  this matches the `center-<kind>-tab--` testid PREFIX and takes `.first()`
+   *  to mean "the first tab of that kind" — the workspaces these tests seed have
+   *  one tab per kind. `data-testid` values are set in
+   *  `WorkspaceCenterDockview.tsx`. */
+  tab(panelComponent: "chat" | "terminal" | "browser"): Locator {
     // Anchor the regex to the start so `center-term-tab--` can't match
     // `center-term-tab__context-menu` etc.
     return this.page
       .getByTestId(new RegExp(`^${this.centerTabTestidPrefix(panelComponent)}`))
       .first();
+  }
+
+  /** Locate the per-path `file` leaf tab opened from the sidepanel Explorer
+   *  (`center-file-tab--<path>`, set in `WorkspaceCenterDockview.tsx`). */
+  fileTab(path: string): Locator {
+    return this.page.getByTestId(`center-file-tab--${path}`);
+  }
+
+  /** Locate the per-path `diff` leaf tab opened from the sidepanel Changes
+   *  section (`center-diff-tab--<path>`). */
+  diffTab(path: string): Locator {
+    return this.page.getByTestId(`center-diff-tab--${path}`);
+  }
+
+  /** The `file` leaf body's visibility marker (`center-file-leaf__visible-*`),
+   *  optionally scoped to a workspace's cached panel host. */
+  fileLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
+    const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
+    return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
+  }
+
+  /** The `diff` leaf body's visibility marker (`center-diff-leaf__visible-*`). */
+  diffLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
+    const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
+    return scope.getByTestId(`center-diff-leaf__visible-${visible ? "true" : "false"}`);
   }
 
   /** Locate the dockview-owned `.dv-tab` wrapper that contains the named
@@ -663,14 +683,10 @@ export class WorkspacePage {
    *  much faster than waiting for the panel's content (e.g. xterm) to boot, and
    *  it isn't affected by xterm's offscreen helper textarea visibility quirks.
    *
-   *  For the Files / Changes singletons the testid is exact; for the
-   *  per-instance kinds we match the testid PREFIX via CSS attribute-prefix
-   *  (`^=`) and take `.first()` — mirroring `tab(...)`. */
-  tabContainer(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+   *  We match the testid PREFIX via CSS attribute-prefix (`^=`) and take
+   *  `.first()` — mirroring `tab(...)`. */
+  tabContainer(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
-    if (panelComponent === "files" || panelComponent === "changes") {
-      return this.page.locator(`.dv-tab:has([data-testid="${prefix}"])`);
-    }
     return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
@@ -817,6 +833,54 @@ export class WorkspacePage {
   async reload(): Promise<void> {
     await test.step("Reload the dashboard", async () => {
       await this.page.reload();
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Right sidepanel (#643 Phase 2). The file tree + changes tree moved out
+  // of the center dockview into a persistent right `Panel` rendered in
+  // `__root.tsx` (`app-shell__right-panel`, `data-visible="true|false"`),
+  // whose body is `RightSidepanel.tsx` (root `right-sidepanel`, with an
+  // Explorer body `right-sidepanel__explorer` and a Changes body
+  // `right-sidepanel__changes`). The panel is VISIBLE by default (persisted
+  // key `band:right-panel-collapsed`, default false). Reveal it with the
+  // `band:show-right-panel` event; ⇧⌘E toggles it, ⇧⌘G reveals it.
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** The right-panel wrapper `Panel` in `__root.tsx` (`AppShell`). Its
+   *  `data-visible` attribute reflects whether the panel is expanded. */
+  get rightPanel(): Locator {
+    return this.page.getByTestId("app-shell__right-panel");
+  }
+
+  /** The `RightSidepanel` root (`right-sidepanel`). */
+  get rightSidepanel(): Locator {
+    return this.page.getByTestId("right-sidepanel");
+  }
+
+  /** The Explorer section body (renders `FileBrowser`). Present only while the
+   *  Explorer section is expanded. */
+  get explorerSection(): Locator {
+    return this.page.getByTestId("right-sidepanel__explorer");
+  }
+
+  /** The Changes section body (renders `ChangesFileTree`). Present only while
+   *  the Changes section is expanded AND there is at least one change. */
+  get changesSection(): Locator {
+    return this.page.getByTestId("right-sidepanel__changes");
+  }
+
+  /** Reveal the right sidepanel by dispatching the same `band:show-right-panel`
+   *  event the ⇧⌘G shortcut fires (handled by the window listener in
+   *  `__root.tsx`). Idempotent — dispatching while already visible is a no-op.
+   *  Waits for the panel to report `data-visible="true"` so callers can
+   *  interact with the sections immediately afterwards. */
+  async revealRightPanel(): Promise<void> {
+    await test.step("Reveal the right sidepanel", async () => {
+      await this.page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+      });
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
     });
   }
 
@@ -1125,14 +1189,11 @@ export class WorkspacePage {
     await this.activateTab("terminal");
   }
 
-  /** Activate a center-dockview tab by its leaf kind. For the Files / Changes
-   *  singletons this clicks the stable tab; for chat / terminal / browser it
-   *  clicks the FIRST tab of that kind (see `tab(...)`). Wraps the click in a
-   *  `test.step` so spec bodies switch tabs through the page object instead of
-   *  touching the `tab(...)` locator directly. */
-  async activateTab(
-    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
-  ): Promise<void> {
+  /** Activate a center-dockview tab by its leaf kind. Clicks the FIRST tab of
+   *  that kind (see `tab(...)`). Wraps the click in a `test.step` so spec bodies
+   *  switch tabs through the page object instead of touching the `tab(...)`
+   *  locator directly. */
+  async activateTab(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
     await test.step(`Activate the ${panelComponent} tab`, async () => {
       await this.tab(panelComponent).click();
     });
@@ -1625,23 +1686,16 @@ export class WorkspacePage {
    *  `:has(...)` is the only way to address a specific group. Nested (inner)
    *  dockviews render their own `.dv-groupview`s but never carry
    *  `workspace__tab--*` testids, so this stays scoped to the outer layout. */
-  groupContaining(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+  groupContaining(panelComponent: "chat" | "terminal" | "browser"): Locator {
     const prefix = this.centerTabTestidPrefix(panelComponent);
-    // Files / Changes are exact testids; per-instance kinds are prefixes.
-    const attr =
-      panelComponent === "files" || panelComponent === "changes"
-        ? `[data-testid="${prefix}"]`
-        : `[data-testid^="${prefix}"]`;
-    return this.page.locator(`.dv-groupview:has(${attr})`);
+    return this.page.locator(`.dv-groupview:has([data-testid^="${prefix}"])`);
   }
 
   /** Maximize the center group that hosts the named tab (rather than the Nth
    *  group, which depends on the default layout's ordering). Each grid group
    *  renders exactly one Maximize/Restore toggle in its right header actions
    *  (`RightHeaderActions` in `WorkspaceCenterDockview.tsx`). */
-  async maximizeGroupContaining(
-    panelComponent: "chat" | "changes" | "files" | "terminal" | "browser",
-  ): Promise<void> {
+  async maximizeGroupContaining(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
     await test.step(`Maximize the group hosting the ${panelComponent} tab`, async () => {
       await this.groupContaining(panelComponent)
         .first()

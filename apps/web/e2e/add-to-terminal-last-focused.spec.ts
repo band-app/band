@@ -151,7 +151,11 @@ test.describe
       const targetTerminalId = firstTerminalId;
 
       // Trigger "Add to Terminal" from the diff selection tooltip.
-      await workspace.activateTab("changes");
+      // NOTE(#643 Phase 2/5): the multi-file DiffView selection tooltip is now
+      // mobile-only (desktop opens a bare per-path `diff` leaf), and this
+      // describe was already skipped for the removed terminal split button. The
+      // body is never reached; this reveal only keeps it typechecking.
+      await workspace.revealRightPanel();
       await changes.selectWordInDiff(FIRST_LINE);
       await tooltip.waitVisible();
       await tooltip.clickAddToTerminal();

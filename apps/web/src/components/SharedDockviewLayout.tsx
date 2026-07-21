@@ -22,14 +22,9 @@ import {
 } from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { enqueueExternalOpen } from "../lib/pending-external-open";
 import { trpc } from "../lib/trpc-client";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
-import {
-  getPerWorkspaceState,
-  setPerWorkspaceState,
-  subscribePerWorkspaceState,
-} from "./per-workspace-state-store";
+import { getPerWorkspaceState, subscribePerWorkspaceState } from "./per-workspace-state-store";
 import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 import {
   firstLeafOfKind,
@@ -169,30 +164,32 @@ export function SharedDockviewLayout() {
 
   const handleOpenFile = useCallback(
     (workspaceId: string, filename: string) => {
-      const cleanPath = parseFileLocation(filename).filePath;
-      setPerWorkspaceState(workspaceId, { currentFile: cleanPath, openFilePath: filename });
-      trackFile(cleanPath);
-      if (workspaceId === activeWorkspaceIdRef.current) {
-        activateLeafOfKind(workspaceId, "files");
-      }
+      const loc = parseFileLocation(filename);
+      trackFile(loc.filePath);
+      getWorkspaceLeafActions(workspaceId)?.openFile(loc.filePath, {
+        line: loc.line,
+        column: loc.column,
+      });
     },
     [trackFile],
   );
 
-  const handleFileOpened = useCallback((workspaceId: string) => {
-    setPerWorkspaceState(workspaceId, { openFilePath: null });
+  const handleFileOpened = useCallback((_workspaceId: string) => {
+    // No-op now that files open as dedicated `file` leaves; kept so the
+    // cross-panel handler surface stays stable for any legacy callers.
   }, []);
 
   const handleOpenExternalFile = useCallback((workspaceId: string, location: string) => {
-    enqueueExternalOpen(workspaceId, location);
-    if (workspaceId === activeWorkspaceIdRef.current) {
-      activateLeafOfKind(workspaceId, "files");
-    }
+    const loc = parseFileLocation(location);
+    getWorkspaceLeafActions(workspaceId)?.openFile(loc.filePath, {
+      line: loc.line,
+      column: loc.column,
+      external: true,
+    });
   }, []);
 
   const handleSelectFile = useCallback(
-    (workspaceId: string, filePath: string | null) => {
-      setPerWorkspaceState(workspaceId, { currentFile: filePath ?? undefined });
+    (_workspaceId: string, filePath: string | null) => {
       if (filePath) trackFile(filePath);
     },
     [trackFile],
@@ -203,10 +200,9 @@ export function SharedDockviewLayout() {
     else findInFileRegistry.current.delete(workspaceId);
   }, []);
 
-  const handleActivateFilesPanel = useCallback((workspaceId: string) => {
-    if (workspaceId === activeWorkspaceIdRef.current) {
-      activateLeafOfKind(workspaceId, "files");
-    }
+  const handleActivateFilesPanel = useCallback((_workspaceId: string) => {
+    // "Reveal files" now means reveal the right sidepanel (Explorer).
+    window.dispatchEvent(new CustomEvent("band:show-right-panel"));
   }, []);
 
   const handleActivateTerminalPanel = useCallback((workspaceId: string) => {
@@ -229,14 +225,17 @@ export function SharedDockviewLayout() {
   const paletteCommands = useMemo(
     () =>
       buildCommands({
-        // Adapt the command registry's `getPanel(id)` (id = "chat" / "changes"
-        // / "files" / "terminal" / "browser") to the active workspace's
-        // dockview by resolving the first leaf of that kind.
+        // Adapt the command registry's `getPanel(id)` (id = "chat" /
+        // "terminal" / "browser") to the active workspace's dockview by
+        // resolving the first leaf of that kind. "files" / "changes" moved to
+        // the right sidepanel and no longer map to a center leaf — return
+        // undefined so the command falls through to its reveal path.
         getApi: () => {
           const api = getWorkspaceDockviewApi(activeWorkspaceIdRef.current);
           if (!api) return null;
           return {
             getPanel: (id: string) => {
+              if (id === "files" || id === "changes") return undefined;
               const kind = (id === "terminal" ? "term" : id) as LeafKind;
               const panel = firstLeafOfKind(api, kind);
               return panel ? { api: { setActive: () => panel.api.setActive() } } : undefined;
@@ -386,13 +385,13 @@ export function SharedDockviewLayout() {
         activateLeafOfKind(ws, "chat");
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-chat")));
       } else if (key === "g" && e.shiftKey) {
+        // ⇧⌘G → reveal the right sidepanel (Changes lives there now).
         e.preventDefault();
-        activateLeafOfKind(ws, "changes");
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-changes")));
+        window.dispatchEvent(new CustomEvent("band:show-right-panel"));
       } else if (key === "e" && e.shiftKey) {
+        // ⇧⌘E → toggle the right sidepanel (Explorer lives there now).
         e.preventDefault();
-        activateLeafOfKind(ws, "files");
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-files")));
+        window.dispatchEvent(new CustomEvent("band:toggle-right-panel"));
       } else if (key === "b" && e.shiftKey) {
         e.preventDefault();
         activateLeafOfKind(ws, "browser");
@@ -468,6 +467,12 @@ export function SharedDockviewLayout() {
     const handler = (e: Event) => {
       const panelId = (e as CustomEvent<{ panelId: string }>).detail?.panelId;
       if (!panelId) return;
+      // "files" / "changes" moved to the right sidepanel — reveal it instead
+      // of activating a (now non-existent) center leaf.
+      if (panelId === "files" || panelId === "changes") {
+        window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+        return;
+      }
       const kind = (panelId === "terminal" ? "term" : panelId) as LeafKind;
       activateLeafOfKind(activeWorkspaceIdRef.current, kind);
     };

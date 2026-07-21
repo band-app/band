@@ -72,7 +72,7 @@ export interface DiffStats {
 // Alias of the canonical `DiffViewMode` defined in
 // `../lib/diff-row-height` so the two definitions can't drift. If a new
 // mode is ever added (e.g. "inline"), updating the lib propagates here.
-type ViewMode = DiffViewMode;
+export type ViewMode = DiffViewMode;
 
 const VIEW_MODE_KEY = "band:diff-view-mode";
 
@@ -399,7 +399,7 @@ const diffTheme = EditorView.theme({
   },
 });
 
-function DiffFileContent({
+export function DiffFileContent({
   hunks,
   filename,
   viewMode,

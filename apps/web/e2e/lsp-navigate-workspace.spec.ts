@@ -136,124 +136,130 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
-test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file leak)", () => {
-  test("a go-to-definition addressed to workspace A does NOT leak the file into active workspace B (no ENOENT, no poisoned tabs)", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const fileTrees = new FileTreesPage(page, workspacePage);
-    // Scope the viewer to B's subtree: A's FileViewer stays mounted (hidden)
-    // in the LRU cache, so an unscoped `file-viewer__root` would also resolve
-    // to A's — and after the dispatch A's viewer legitimately shows
-    // `only-in-a.ts`, which would fool a `.first()` content assertion.
-    const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the bare
+// per-path `file` leaf that replaced the desktop CodeBrowserView has NO LSP
+// (no go-to-definition), so this cross-workspace go-to-def scoping scenario
+// has no affordance to drive. Re-enable when LSP navigation is wired into the
+// new file leaf.
+test.describe
+  .skip("Files-panel LSP navigate workspace scoping (cross-workspace file leak)", () => {
+    test("a go-to-definition addressed to workspace A does NOT leak the file into active workspace B (no ENOENT, no poisoned tabs)", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+      const fileTrees = new FileTreesPage(page, workspacePage);
+      // Scope the viewer to B's subtree: A's FileViewer stays mounted (hidden)
+      // in the LRU cache, so an unscoped `file-viewer__root` would also resolve
+      // to A's — and after the dispatch A's viewer legitimately shows
+      // `only-in-a.ts`, which would fool a `.first()` content assertion.
+      const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
 
-    // Land on A and activate its Files tab so A's CodeBrowserView mounts and
-    // its `band:lsp-navigate` listener is live. Waiting for the (unclicked)
-    // tree row confirms the tree loaded without opening the file — A's tab
-    // list stays empty until the dispatch, which is what makes the positive
-    // anchor below meaningful.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await fileTrees.openFilesTab(ONLY_IN_A);
+      // Land on A and activate its Files tab so A's CodeBrowserView mounts and
+      // its `band:lsp-navigate` listener is live. Waiting for the (unclicked)
+      // tree row confirms the tree loaded without opening the file — A's tab
+      // list stays empty until the dispatch, which is what makes the positive
+      // anchor below meaningful.
+      await workspacePage.goto(WORKSPACE_A);
+      await workspacePage.waitForReady();
+      await fileTrees.openFilesTab(ONLY_IN_A);
 
-    // Switch to B via the sidebar (client-side nav) so A stays mounted +
-    // cached (its listener still alive) while B becomes active.
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    // `.count()` is a one-shot read with no auto-retry — poll so an async LRU
-    // mount of A's cached panels can't lose a race with this assertion.
-    await expect
-      .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
-      .toBeGreaterThan(0);
-
-    // Open a healthy file in B so B's FileViewer is mounted and shows valid
-    // content — the clean baseline the leak would corrupt. We open
-    // `only-in-b.ts` (a name unique to B) rather than `shared.ts`, because A's
-    // hidden-but-mounted file tree also carries a `shared.ts` row, and the
-    // per-path `file-tree__row--*` testid isn't workspace-scoped — a shared
-    // name would resolve to two rows (A's hidden + B's visible).
-    await fileTrees.openFilesTab(ONLY_IN_B);
-    await fileTrees.openFile(ONLY_IN_B);
-    await fileViewer.expectContent("only in workspace B");
-    await expect(fileViewer.errorBanner).not.toBeVisible();
-
-    // Fire the go-to-definition as it belongs to workspace A while B is the
-    // active workspace.
-    await workspacePage.dispatchLspNavigateEvent({
-      filePath: ONLY_IN_A,
-      workspaceId: WORKSPACE_A,
-    });
-
-    // Positive anchor: the event was live and A's listener handled it — A's
-    // persisted tab list gains `only-in-a.ts`. Without this, the negative
-    // assertions on B could pass trivially on a broken build where the event
-    // never reached any listener.
-    await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
-        timeout: 5000,
-      })
-      .toContain(ONLY_IN_A);
-
-    // Negative — the leak, as a poll-for-appearance. `expect.poll(...).not
-    // .toContain(...)` would pass trivially at t=0 (B's tab list has only
-    // `shared.ts`), so instead poll for the leak's ARRIVAL within a bounded
-    // window and assert it never came. The bug opens `only-in-a.ts` as a
-    // fresh (non-restored) tab, which is NOT covered by the self-heal guard,
-    // so the leak would be persistent — the poll catches it deterministically.
-    let leaked = false;
-    try {
+      // Switch to B via the sidebar (client-side nav) so A stays mounted +
+      // cached (its listener still alive) while B becomes active.
+      await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
+      await workspacePage.switchWorkspace(WORKSPACE_B);
+      await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+      // `.count()` is a one-shot read with no auto-retry — poll so an async LRU
+      // mount of A's cached panels can't lose a race with this assertion.
       await expect
-        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_B))?.tabs ?? [], {
-          timeout: 2000,
+        .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
+        .toBeGreaterThan(0);
+
+      // Open a healthy file in B so B's FileViewer is mounted and shows valid
+      // content — the clean baseline the leak would corrupt. We open
+      // `only-in-b.ts` (a name unique to B) rather than `shared.ts`, because A's
+      // hidden-but-mounted file tree also carries a `shared.ts` row, and the
+      // per-path `file-tree__row--*` testid isn't workspace-scoped — a shared
+      // name would resolve to two rows (A's hidden + B's visible).
+      await fileTrees.openFilesTab(ONLY_IN_B);
+      await fileTrees.openFile(ONLY_IN_B);
+      await fileViewer.expectContent("only in workspace B");
+      await expect(fileViewer.errorBanner).not.toBeVisible();
+
+      // Fire the go-to-definition as it belongs to workspace A while B is the
+      // active workspace.
+      await workspacePage.dispatchLspNavigateEvent({
+        filePath: ONLY_IN_A,
+        workspaceId: WORKSPACE_A,
+      });
+
+      // Positive anchor: the event was live and A's listener handled it — A's
+      // persisted tab list gains `only-in-a.ts`. Without this, the negative
+      // assertions on B could pass trivially on a broken build where the event
+      // never reached any listener.
+      await expect
+        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
+          timeout: 5000,
         })
         .toContain(ONLY_IN_A);
-      leaked = true;
-    } catch {
-      // Poll exhausted its budget without observing the leak — the contract.
-    }
-    expect(leaked).toBe(false);
 
-    // B's Files panel must not have stat'd the A-only path against B's root:
-    // the viewer still shows B's healthy file (positive anchor) and there's no
-    // ENOENT banner. Content-first, then error-absence — same order as the
-    // pre-dispatch baseline above.
-    await fileViewer.expectContent("only in workspace B");
-    await expect(fileViewer.errorBanner).not.toBeVisible();
+      // Negative — the leak, as a poll-for-appearance. `expect.poll(...).not
+      // .toContain(...)` would pass trivially at t=0 (B's tab list has only
+      // `shared.ts`), so instead poll for the leak's ARRIVAL within a bounded
+      // window and assert it never came. The bug opens `only-in-a.ts` as a
+      // fresh (non-restored) tab, which is NOT covered by the self-heal guard,
+      // so the leak would be persistent — the poll catches it deterministically.
+      let leaked = false;
+      try {
+        await expect
+          .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_B))?.tabs ?? [], {
+            timeout: 2000,
+          })
+          .toContain(ONLY_IN_A);
+        leaked = true;
+      } catch {
+        // Poll exhausted its budget without observing the leak — the contract.
+      }
+      expect(leaked).toBe(false);
+
+      // B's Files panel must not have stat'd the A-only path against B's root:
+      // the viewer still shows B's healthy file (positive anchor) and there's no
+      // ENOENT banner. Content-first, then error-absence — same order as the
+      // pre-dispatch baseline above.
+      await fileViewer.expectContent("only in workspace B");
+      await expect(fileViewer.errorBanner).not.toBeVisible();
+    });
+
+    test("a navigate with no workspaceId falls through to the active workspace (backwards-compat)", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+      const fileTrees = new FileTreesPage(page, workspacePage);
+      // Unscoped viewer is fine here: this test only ever mounts workspace B
+      // (a single `goto`, no switch), so there's no LRU sibling whose
+      // `file-viewer__root` could also match — unlike the first test.
+      const fileViewer = new FileViewerPage(page);
+
+      // A single active workspace B with a healthy file open.
+      await workspacePage.goto(WORKSPACE_B);
+      await workspacePage.waitForReady();
+      await fileTrees.openFilesTab(ONLY_IN_B);
+      await fileTrees.openFile(ONLY_IN_B);
+      await fileViewer.expectContent("only in workspace B");
+
+      // Contract: a navigate with no `workspaceId` (older dispatcher / forward-
+      // compat) must still drive the active workspace's CodeBrowserView. Fire
+      // one for a file that exists in B — it should become a pinned tab there.
+      await workspacePage.dispatchLspNavigateEvent({ filePath: SHARED });
+
+      await expect
+        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_B))?.tabs ?? [], {
+          timeout: 5000,
+        })
+        .toContain(SHARED);
+      // The fall-through opened B's OWN `shared.ts`, which resolves against B's
+      // root — the viewer renders its content (positive anchor) and shows no
+      // error banner.
+      await fileViewer.expectContent("different file in B");
+      await expect(fileViewer.errorBanner).not.toBeVisible();
+    });
   });
-
-  test("a navigate with no workspaceId falls through to the active workspace (backwards-compat)", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const fileTrees = new FileTreesPage(page, workspacePage);
-    // Unscoped viewer is fine here: this test only ever mounts workspace B
-    // (a single `goto`, no switch), so there's no LRU sibling whose
-    // `file-viewer__root` could also match — unlike the first test.
-    const fileViewer = new FileViewerPage(page);
-
-    // A single active workspace B with a healthy file open.
-    await workspacePage.goto(WORKSPACE_B);
-    await workspacePage.waitForReady();
-    await fileTrees.openFilesTab(ONLY_IN_B);
-    await fileTrees.openFile(ONLY_IN_B);
-    await fileViewer.expectContent("only in workspace B");
-
-    // Contract: a navigate with no `workspaceId` (older dispatcher / forward-
-    // compat) must still drive the active workspace's CodeBrowserView. Fire
-    // one for a file that exists in B — it should become a pinned tab there.
-    await workspacePage.dispatchLspNavigateEvent({ filePath: SHARED });
-
-    await expect
-      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_B))?.tabs ?? [], {
-        timeout: 5000,
-      })
-      .toContain(SHARED);
-    // The fall-through opened B's OWN `shared.ts`, which resolves against B's
-    // root — the viewer renders its content (positive anchor) and shows no
-    // error banner.
-    await fileViewer.expectContent("different file in B");
-    await expect(fileViewer.errorBanner).not.toBeVisible();
-  });
-});

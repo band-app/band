@@ -23,7 +23,7 @@ import {
 } from "dockview";
 import {
   ClipboardCopy,
-  FolderOpen,
+  FileCode,
   GitCompare,
   Globe,
   Maximize2,
@@ -49,7 +49,8 @@ import {
 import {
   AgentIcon,
   type ChatInsertDetail,
-  DiffView,
+  DiffFileContent,
+  FileViewer,
   type TerminalInsertDetail,
   useAdapter,
   useDiffTarget,
@@ -79,9 +80,7 @@ import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
-import { CodeBrowserView } from "./CodeBrowserView";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
-import { usePerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
 // SharedDockviewLayout. Importing it closes an ESM cycle (SharedDockviewLayout
 // → WorkspaceCenterDockview → SharedDockviewLayout), but we only read it inside
@@ -100,30 +99,22 @@ const TerminalPanel = lazy(() =>
 //
 // The unified center dockview holds LEAF panels. Each panel's dockview
 // `component` field is the leaf KIND; its `id` is the instance id
-// (chatId / terminalId / browserId) for the per-instance kinds, or the fixed
-// string "files" / "changes" for the two temporary singletons (they move to
-// the right sidepanel in Phase 2). Keeping the instance id AS the panel id
-// means all the focus / insert / status-event plumbing carries over unchanged
-// from the legacy per-app inner dockviews.
+// (chatId / terminalId / browserId) for the per-instance kinds, or the
+// prefixed `file:<path>` / `diff:<path>` for the per-path file/diff leaves
+// opened from the right sidepanel (Explorer + Changes). Keeping the instance
+// id AS the panel id means all the focus / insert / status-event plumbing
+// carries over unchanged from the legacy per-app inner dockviews.
 // ---------------------------------------------------------------------------
 
-export type LeafKind = "chat" | "term" | "browser" | "files" | "changes";
-
-const FILES_LEAF_ID = "files";
-const CHANGES_LEAF_ID = "changes";
+export type LeafKind = "chat" | "term" | "browser" | "file" | "diff";
 
 const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   chat: MessageSquare,
-  changes: GitCompare,
-  files: FolderOpen,
   term: TerminalIcon,
   browser: Globe,
 };
 
-const PANEL_SHORTCUTS: Record<string, string> = {
-  changes: "⇧⌘G",
-  files: "⇧⌘E",
-};
+const PANEL_SHORTCUTS: Record<string, string> = {};
 
 // Every tab is a fixed 120px-wide row so the tab strip doesn't reflow as
 // titles load/change. The title fills the remaining space and truncates; the
@@ -156,6 +147,19 @@ function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
     return () => d.dispose();
   }, [api]);
   return isActive;
+}
+
+/** Track a leaf's `preview` param (italic tab) reactively — it flips to
+ *  `false` when the preview tab is pinned via `updateParameters`. */
+function useTabPreview(api: IDockviewPanelHeaderProps["api"]): boolean {
+  const [preview, setPreview] = useState(() => api.getParameters<{ preview?: boolean }>().preview);
+  useEffect(() => {
+    const d = api.onDidParametersChange(() => {
+      setPreview(api.getParameters<{ preview?: boolean }>().preview);
+    });
+    return () => d.dispose();
+  }, [api]);
+  return preview === true;
 }
 
 const bandTheme: DockviewTheme = {
@@ -239,6 +243,11 @@ function reinjectParams(
       else if (comp === "term") panel.params = { workspaceId, terminalId: id };
       else if (comp === "browser")
         panel.params = { workspaceId, browserId: id, initialUrl: urls.get(id) };
+      // `"file:".length === 5` and `"diff:".length === 5` — strip the prefix
+      // back into the filePath param. Line/column are transient (jump targets)
+      // and intentionally not persisted.
+      else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
+      else if (comp === "diff") panel.params = { workspaceId, filePath: id.slice(5) };
       else panel.params = { workspaceId };
     }
   }
@@ -320,9 +329,19 @@ interface BrowserLeafParams {
   browserId: string;
   initialUrl?: string;
 }
-interface SingletonLeafParams {
+interface FileLeafParams {
   workspaceId: string;
-  badge?: number;
+  filePath: string;
+  line?: number;
+  column?: number;
+  external?: boolean;
+  /** Preview (italic, reused) tab — set by a single-click, cleared on pin. */
+  preview?: boolean;
+}
+interface DiffLeafParams {
+  workspaceId: string;
+  filePath: string;
+  preview?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,36 +476,82 @@ function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Files + Changes singleton leaves (temporary — move to right sidepanel later)
+// File + Diff per-path leaves (opened from the right sidepanel)
 // ---------------------------------------------------------------------------
 
-function FilesLeaf({ params }: IDockviewPanelProps<SingletonLeafParams>) {
-  const workspaceId = params.workspaceId;
-  const state = usePerWorkspaceState(workspaceId);
-  if (!workspaceId) return null;
+/** Last path segment (POSIX or Windows separators), for a tab title. */
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
+  const { visible } = usePanelVisibility();
+  if (!params.workspaceId || !params.filePath) return null;
   return (
-    <CodeBrowserView
-      workspaceId={workspaceId}
-      file={state.currentFile}
-      openFilePath={state.openFilePath}
-      onSelectFile={(filePath) => crossPanelHandlers.onSelectFile(workspaceId, filePath)}
-      onFileOpened={() => crossPanelHandlers.onFileOpened(workspaceId)}
-      onFindInFile={(fn) => crossPanelHandlers.onFindInFile(workspaceId, fn)}
-    />
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
+    >
+      <FileViewer
+        workspaceId={params.workspaceId}
+        filePath={params.filePath}
+        line={params.line}
+        column={params.column}
+        editable
+        external={params.external ?? params.filePath.startsWith("/")}
+      />
+    </div>
   );
 }
 
-function ChangesLeaf({ params }: IDockviewPanelProps<SingletonLeafParams>) {
-  const workspaceId = params.workspaceId;
-  const { wsActive } = usePanelVisibility();
-  if (!workspaceId) return null;
+function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
+  const { visible } = usePanelVisibility();
+  const { workspaceId, filePath } = params;
+  const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
+
+  const summaryQuery = useQuery({
+    queryKey: ["diffLeafSummary", workspaceId, diffMode, compareBranch],
+    queryFn: () =>
+      trpc.workspace.getDiffSummary.query({
+        workspaceId,
+        diffMode,
+        compareBranch: compareBranch ?? undefined,
+      }),
+    enabled: !!workspaceId && !!filePath,
+  });
+
+  const mergeBase = summaryQuery.data?.mergeBase;
+
+  const fileDiffQuery = useQuery({
+    queryKey: ["diffLeafFile", workspaceId, filePath, mergeBase],
+    queryFn: () =>
+      trpc.workspace.getFileDiff.query({
+        workspaceId,
+        filePath,
+        mergeBase: mergeBase ?? "",
+      }),
+    enabled: !!workspaceId && !!filePath && !!mergeBase,
+  });
+
+  if (!workspaceId || !filePath) return null;
+
+  const diff = fileDiffQuery.data?.diff;
+  const loading = summaryQuery.isLoading || fileDiffQuery.isLoading;
+
   return (
-    <DiffView
-      workspaceId={workspaceId}
-      active={wsActive}
-      onOpenFile={(filename) => crossPanelHandlers.onOpenFile(workspaceId, filename)}
-      onFindInFile={(fn) => crossPanelHandlers.onFindInFile(workspaceId, fn)}
-    />
+    <div
+      className="flex h-full w-full flex-col overflow-auto"
+      data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
+    >
+      {diff ? (
+        <DiffFileContent hunks={diff} filename={filePath} viewMode="unified" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          {loading ? "Loading diff…" : "No changes"}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -506,6 +571,11 @@ interface LeafActions {
   onAdd: (kind: LeafKind, groupId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
   onClose: (id: string, kind: LeafKind) => void;
+  openFile: (
+    filePath: string,
+    opts?: { line?: number; column?: number; external?: boolean; preview?: boolean },
+  ) => void;
+  openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
 }
 
 const leafActionsByApiId = new Map<string, { current: LeafActions }>();
@@ -837,6 +907,76 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserLeafParams>) {
   );
 }
 
+function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
+  const filePath = props.params.filePath;
+  const containerApi = props.containerApi;
+  const isActive = useTabActive(props.api);
+  const isPreview = useTabPreview(props.api);
+  const title = basename(filePath);
+
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(`file:${filePath}`, "file");
+    },
+    [containerApi, filePath],
+  );
+
+  return (
+    <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
+      <div className={TAB_CONTENT_WRAP}>
+        <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
+          {title}
+        </span>
+      </div>
+      <button
+        type="button"
+        className={closeButtonClass(isActive)}
+        onClick={handleClose}
+        title="Close file"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
+  const filePath = props.params.filePath;
+  const containerApi = props.containerApi;
+  const isActive = useTabActive(props.api);
+  const isPreview = useTabPreview(props.api);
+  const title = basename(filePath);
+
+  const handleClose = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(`diff:${filePath}`, "diff");
+    },
+    [containerApi, filePath],
+  );
+
+  return (
+    <div className={TAB_ROOT_CLASS} data-testid={`center-diff-tab--${filePath}`}>
+      <div className={TAB_CONTENT_WRAP}>
+        <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
+          {title}
+        </span>
+      </div>
+      <button
+        type="button"
+        className={closeButtonClass(isActive)}
+        onClick={handleClose}
+        title="Close diff"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Header actions: the "+" new-tab menu renders in the LEFT slot (right after
 // the last tab, browser-style); the maximize toggle stays in the RIGHT slot.
@@ -944,14 +1084,16 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
   chat: ChatLeaf,
   term: TerminalLeaf,
   browser: BrowserLeaf,
-  files: FilesLeaf,
-  changes: ChangesLeaf,
+  file: FileLeaf,
+  diff: DiffLeaf,
 };
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   chat: ChatTab,
   term: TerminalTab,
   browser: BrowserTab,
+  file: FileTab,
+  diff: DiffTab,
   icon: IconTab,
 };
 
@@ -1011,23 +1153,6 @@ function addBrowserLeaf(
   } as AddPanelOptions);
 }
 
-function addSingletonLeaf(
-  api: DockviewApi,
-  workspaceId: string,
-  kind: "files" | "changes",
-  position?: AddPanelOptions["position"],
-): void {
-  api.addPanel({
-    id: kind === "files" ? FILES_LEAF_ID : CHANGES_LEAF_ID,
-    component: kind,
-    tabComponent: "icon",
-    title: kind === "files" ? "Files" : "Changes",
-    params: { workspaceId },
-    position,
-    inactive: true,
-  } as AddPanelOptions);
-}
-
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -1054,6 +1179,13 @@ export function WorkspaceCenterDockview({
   const edgeDragDisposerRef = useRef<(() => void) | null>(null);
   const innerRegisterDisposerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // VS Code-style preview tabs: at most one previewing file leaf and one
+  // previewing diff leaf per dockview. A single-click in the sidepanel opens
+  // a leaf in "preview" mode (italic tab) that the NEXT single-click reuses
+  // (closes + replaces); a double-click — or editing — pins it. These refs
+  // hold the id of the current preview leaf of each kind, or null.
+  const previewFileIdRef = useRef<string | null>(null);
+  const previewDiffIdRef = useRef<string | null>(null);
 
   const { data: initialData } = useQuery<CenterLayoutData>({
     queryKey: centerLayoutKey(workspaceId),
@@ -1085,12 +1217,6 @@ export function WorkspaceCenterDockview({
 
   const initialDataRef = useRef<CenterLayoutData | null>(null);
   initialDataRef.current = initialData ?? null;
-
-  // Diff badge count for the Changes tab (active workspace only).
-  const diffFileCount = useDiffFileCount(visible ? workspaceId : null);
-  useEffect(() => {
-    apiRef.current?.getPanel(CHANGES_LEAF_ID)?.api.updateParameters({ badge: diffFileCount });
-  }, [diffFileCount]);
 
   // ---- persistence ----
   const schedulePersist = useCallback(() => {
@@ -1181,7 +1307,9 @@ export function WorkspaceCenterDockview({
   const handleClose = useCallback((id: string, kind: LeafKind) => {
     const api = apiRef.current;
     if (!api) return;
-    if (kind === "files" || kind === "changes") return; // singletons don't close
+    // Never close the last remaining tab — the workspace center must always
+    // hold at least one leaf (an empty dockview has no tab strip to reopen from).
+    if (api.panels.length <= 1) return;
     selectNeighbourBeforeRemove(api, id);
     const panel = api.getPanel(id);
     if (panel) api.removePanel(panel);
@@ -1193,14 +1321,109 @@ export function WorkspaceCenterDockview({
     } else if (kind === "browser") {
       trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
     }
+    // file / diff leaves are pure client views — no server mutation on close.
   }, []);
+
+  // ---- open a per-path file / diff leaf (driven by the right sidepanel) ----
+  const handleOpenFile = useCallback(
+    (
+      filePath: string,
+      opts?: { line?: number; column?: number; external?: boolean; preview?: boolean },
+    ) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const preview = opts?.preview ?? false;
+      const id = `file:${filePath}`;
+      const existing = api.getPanel(id);
+      if (existing) {
+        // Pinning (double-click / intentional open) an already-open preview
+        // clears its preview flag so the next single-click won't replace it.
+        if (!preview && previewFileIdRef.current === id) previewFileIdRef.current = null;
+        // Spread current params so we never drop workspaceId/filePath/external
+        // regardless of dockview's updateParameters merge semantics.
+        const cur = existing.api.getParameters<FileLeafParams>();
+        existing.api.updateParameters({
+          ...cur,
+          line: opts?.line,
+          column: opts?.column,
+          preview: preview ? cur.preview : false,
+        });
+        existing.api.setActive();
+        return;
+      }
+      // Opening a NEW preview replaces the current preview leaf (close the old
+      // one) so previews reuse a single slot.
+      if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
+        const prev = api.getPanel(previewFileIdRef.current);
+        if (prev) api.removePanel(prev);
+      }
+      api.addPanel({
+        id,
+        component: "file",
+        tabComponent: "file",
+        title: basename(filePath),
+        params: {
+          workspaceId,
+          filePath,
+          line: opts?.line,
+          column: opts?.column,
+          external: opts?.external,
+          preview,
+        },
+        position: centralPanelPosition(api),
+      } as AddPanelOptions);
+      previewFileIdRef.current = preview ? id : previewFileIdRef.current;
+    },
+    [workspaceId],
+  );
+
+  const handleOpenDiff = useCallback(
+    (filePath: string, opts?: { preview?: boolean }) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const preview = opts?.preview ?? false;
+      const id = `diff:${filePath}`;
+      const existing = api.getPanel(id);
+      if (existing) {
+        if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
+        if (!preview) {
+          const cur = existing.api.getParameters<DiffLeafParams>();
+          existing.api.updateParameters({ ...cur, preview: false });
+        }
+        existing.api.setActive();
+        return;
+      }
+      if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
+        const prev = api.getPanel(previewDiffIdRef.current);
+        if (prev) api.removePanel(prev);
+      }
+      api.addPanel({
+        id,
+        component: "diff",
+        tabComponent: "diff",
+        title: basename(filePath),
+        params: { workspaceId, filePath, preview },
+        position: centralPanelPosition(api),
+      } as AddPanelOptions);
+      previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
+    },
+    [workspaceId],
+  );
 
   const actionsRef = useRef<LeafActions>({
     onAdd: () => {},
     onSplit: () => {},
     onClose: () => {},
+    openFile: () => {},
+    openDiff: () => {},
   });
-  actionsRef.current = { onAdd: handleAdd, onSplit: handleSplit, onClose: handleClose };
+  actionsRef.current = {
+    onAdd: handleAdd,
+    onSplit: handleSplit,
+    onClose: handleClose,
+    openFile: handleOpenFile,
+    openDiff: handleOpenDiff,
+  };
 
   // ---- default layout ----
   const buildDefaultLayout = useCallback(
@@ -1219,40 +1442,35 @@ export function WorkspaceCenterDockview({
         if (!anchorId) anchorId = chatId;
       }
 
-      // Right group anchored to the first chat: changes, files, terminals, browsers.
-      addSingletonLeaf(api, workspaceId, "changes", {
-        referencePanel: anchorId ?? undefined,
-        direction: "right",
-      } as AddPanelOptions["position"]);
-      addSingletonLeaf(api, workspaceId, "files", {
-        referencePanel: CHANGES_LEAF_ID,
-        direction: "within",
-      });
+      // Right group anchored to the first chat: terminals, then browsers all
+      // stacked into the same group. `rightGroupAnchor` tracks the id of the
+      // first panel placed in that group so every later leaf lands `within` it.
+      let rightGroupAnchor: string | null = null;
+      const rightPosition = (): AddPanelOptions["position"] =>
+        rightGroupAnchor
+          ? { referencePanel: rightGroupAnchor, direction: "within" }
+          : ({
+              referencePanel: anchorId ?? undefined,
+              direction: "right",
+            } as AddPanelOptions["position"]);
 
       const termIds = [...data.terminalIds];
       if (termIds.length === 0) {
         const id = newTerminalId();
-        addTermLeaf(api, workspaceId, id, undefined, {
-          referencePanel: CHANGES_LEAF_ID,
-          direction: "within",
-        });
+        addTermLeaf(api, workspaceId, id, undefined, rightPosition());
+        rightGroupAnchor = id;
         trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
       } else {
         for (const id of termIds) {
-          addTermLeaf(api, workspaceId, id, undefined, {
-            referencePanel: CHANGES_LEAF_ID,
-            direction: "within",
-          });
+          addTermLeaf(api, workspaceId, id, undefined, rightPosition());
+          rightGroupAnchor ??= id;
         }
       }
 
       if (isDesktop) {
-        const browserIds = [...data.browserIds];
-        for (const id of browserIds) {
-          addBrowserLeaf(api, workspaceId, id, data.urls.get(id), {
-            referencePanel: CHANGES_LEAF_ID,
-            direction: "within",
-          });
+        for (const id of [...data.browserIds]) {
+          addBrowserLeaf(api, workspaceId, id, data.urls.get(id), rightPosition());
+          rightGroupAnchor ??= id;
         }
       }
 
@@ -1287,12 +1505,12 @@ export function WorkspaceCenterDockview({
             addBrowserLeaf(api, workspaceId, browserId, data.urls.get(browserId));
         }
       }
-      // Ensure the two singleton leaves exist.
-      if (!api.getPanel(FILES_LEAF_ID)) addSingletonLeaf(api, workspaceId, "files");
-      if (!api.getPanel(CHANGES_LEAF_ID)) addSingletonLeaf(api, workspaceId, "changes");
+      // Restored `file` / `diff` leaves are pure client views with no server
+      // record — leave them exactly as they were persisted (do NOT prune).
       // Guarantee at least one chat leaf survives — if every chat was pruned
       // (all server records gone), the workspace would otherwise show only the
-      // files/changes singletons. Mirrors the legacy all-orphaned fallback.
+      // restored file/diff leaves (or nothing). Mirrors the legacy all-orphaned
+      // fallback.
       if (!api.panels.some((p) => (p.api.component as LeafKind) === "chat")) {
         const chatId = newChatId();
         markChatFresh(chatId);
@@ -1348,7 +1566,13 @@ export function WorkspaceCenterDockview({
       const persist = () => schedulePersist();
       api.onDidLayoutChange(persist);
       api.onDidAddPanel(persist);
-      api.onDidRemovePanel(persist);
+      api.onDidRemovePanel((panel) => {
+        // Drop the preview pointer if the previewing leaf was closed, so a
+        // later single-click opens fresh instead of trying to reuse a dead id.
+        if (previewFileIdRef.current === panel.id) previewFileIdRef.current = null;
+        if (previewDiffIdRef.current === panel.id) previewDiffIdRef.current = null;
+        persist();
+      });
       api.onDidAddGroup(persist);
       api.onDidRemoveGroup(persist);
       api.onDidActivePanelChange(() => {
@@ -1438,7 +1662,10 @@ export function WorkspaceCenterDockview({
 
     const activeKind = (): LeafKind => {
       const comp = apiRef.current?.activePanel?.api.component as LeafKind | undefined;
-      return comp && comp !== "files" && comp !== "changes" ? comp : "term";
+      // ⌘T duplicates the active leaf's kind — but `file` / `diff` leaves are
+      // opened per-path from the sidepanel, not created blank, so fall back to
+      // a new terminal for those.
+      return comp === "chat" || comp === "term" || comp === "browser" ? comp : "term";
     };
 
     const handler = (e: KeyboardEvent) => {
@@ -1481,7 +1708,7 @@ export function WorkspaceCenterDockview({
       } else if (key === "w" && !e.shiftKey) {
         const active = api.activePanel;
         const kind = active?.api.component as LeafKind | undefined;
-        if (!active || !kind || kind === "files" || kind === "changes") return;
+        if (!active || !kind) return;
         e.preventDefault();
         e.stopPropagation();
         handleClose(active.id, kind);
@@ -1492,7 +1719,7 @@ export function WorkspaceCenterDockview({
         if (e.metaKey && !e.ctrlKey) {
           e.preventDefault();
           e.stopPropagation();
-          if (groupId && kind && kind !== "files" && kind !== "changes") {
+          if (groupId && (kind === "chat" || kind === "term" || kind === "browser")) {
             handleSplit(kind, groupId, e.shiftKey ? "below" : "right");
           }
         } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -1600,35 +1827,4 @@ export function WorkspaceCenterDockview({
       </PanelVisibilityContext.Provider>
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Diff file count (polls every 15s for the given workspace; null = disabled)
-// ---------------------------------------------------------------------------
-
-function useDiffFileCount(workspaceId: string | null): number {
-  const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!workspaceId) {
-      setCount(0);
-      return;
-    }
-    let cancelled = false;
-    const fetchCount = () => {
-      trpc.workspace.getDiffSummary
-        .query({ workspaceId, diffMode, compareBranch: compareBranch ?? undefined })
-        .then((result) => {
-          if (!cancelled) setCount(result.stats?.filesChanged ?? 0);
-        })
-        .catch(() => {});
-    };
-    fetchCount();
-    const interval = setInterval(fetchCount, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [workspaceId, diffMode, compareBranch]);
-  return count;
 }

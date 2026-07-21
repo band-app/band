@@ -146,195 +146,202 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
-test.describe("chat file-link workspace scoping (issue #539)", () => {
-  // NOTE: the original "event addressed to an inactive workspace is
-  // ignored" test (which dispatched `{ filename: "only-in-a.ts",
-  // workspaceId: A }` while B was active and asserted dialog
-  // visibility) was deleted as redundant — the cross-workspace
-  // tab-leak test below covers the same listener-filter contract
-  // with a stronger, persistent-state assertion that actually
-  // distinguishes bug code from fix code. The visibility-snapshot
-  // approach happened to pass on bug code because `only-in-a.ts`
-  // doesn't exist in B's index, so B's auto-open shortcut took the
-  // 0-result branch and never leaked anything observable through the
-  // dialog's `open` state.
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
+// asserts the old `useFileTabs` / per-workspace `openTabs` self-heal that the
+// desktop CodeBrowserView flow owned. That flow was removed in Phase 2 (files
+// now open as bare per-path leaves with no `openTabs` persistence), so the
+// behaviour under test no longer exists. Re-enable when the file-tab model is
+// reworked.
+test.describe
+  .skip("chat file-link workspace scoping (issue #539)", () => {
+    // NOTE: the original "event addressed to an inactive workspace is
+    // ignored" test (which dispatched `{ filename: "only-in-a.ts",
+    // workspaceId: A }` while B was active and asserted dialog
+    // visibility) was deleted as redundant — the cross-workspace
+    // tab-leak test below covers the same listener-filter contract
+    // with a stronger, persistent-state assertion that actually
+    // distinguishes bug code from fix code. The visibility-snapshot
+    // approach happened to pass on bug code because `only-in-a.ts`
+    // doesn't exist in B's index, so B's auto-open shortcut took the
+    // 0-result branch and never leaked anything observable through the
+    // dialog's `open` state.
 
-  test("event with no workspaceId in its detail falls through to the active workspace (backwards-compat)", async ({
-    page: _page,
-  }) => {
-    const workspacePage = new WorkspacePage(_page, server.url, TOKEN);
+    test("event with no workspaceId in its detail falls through to the active workspace (backwards-compat)", async ({
+      page: _page,
+    }) => {
+      const workspacePage = new WorkspacePage(_page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_B);
-    await workspacePage.waitForReady();
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+      await workspacePage.goto(WORKSPACE_B);
+      await workspacePage.waitForReady();
+      await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
 
-    // Contract: dispatching without `workspaceId` must open the
-    // dialog. The 0-result filename forces the auto-open shortcut
-    // into its reveal branch so the assertion has something to wait
-    // on.
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "does-not-resolve-anywhere-67890.ts",
+      // Contract: dispatching without `workspaceId` must open the
+      // dialog. The 0-result filename forces the auto-open shortcut
+      // into its reveal branch so the assertion has something to wait
+      // on.
+      await workspacePage.dispatchOpenFileEvent({
+        filename: "does-not-resolve-anywhere-67890.ts",
+      });
+
+      await expect(workspacePage.quickOpenDialog()).toBeVisible();
     });
 
-    await expect(workspacePage.quickOpenDialog()).toBeVisible();
-  });
+    test("persisted active tab pointing at a non-existent path self-heals on mount (ENOENT defensive)", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-  test("persisted active tab pointing at a non-existent path self-heals on mount (ENOENT defensive)", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+      // Two-step seeding: navigate once so localStorage is accessible on
+      // the same origin, write the stale tab, then navigate again so the
+      // workspace remounts and CodeBrowserView reads the just-seeded
+      // state on its initial render. The stale path mimics what older
+      // builds (pre-#539 fix) could leak into `band-open-tabs:<ws>` —
+      // a workspace-relative path from a DIFFERENT workspace that
+      // doesn't exist on disk in this one. The third fix in #539 is
+      // defensive: even with the dispatcher + listener-filter fixes,
+      // anything already persisted from older builds self-heals on the
+      // next mount rather than leaving a broken tab pinned forever.
+      await workspacePage.goto(WORKSPACE_A);
+      await workspacePage.waitForReady();
 
-    // Two-step seeding: navigate once so localStorage is accessible on
-    // the same origin, write the stale tab, then navigate again so the
-    // workspace remounts and CodeBrowserView reads the just-seeded
-    // state on its initial render. The stale path mimics what older
-    // builds (pre-#539 fix) could leak into `band-open-tabs:<ws>` —
-    // a workspace-relative path from a DIFFERENT workspace that
-    // doesn't exist on disk in this one. The third fix in #539 is
-    // defensive: even with the dispatcher + listener-filter fixes,
-    // anything already persisted from older builds self-heals on the
-    // next mount rather than leaving a broken tab pinned forever.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
+      const STALE_PATH = "path/from/another/workspace/that-does-not-exist.ts";
+      await workspacePage.writeOpenTabsState(WORKSPACE_A, {
+        tabs: [STALE_PATH],
+        active: STALE_PATH,
+      });
 
-    const STALE_PATH = "path/from/another/workspace/that-does-not-exist.ts";
-    await workspacePage.writeOpenTabsState(WORKSPACE_A, {
-      tabs: [STALE_PATH],
-      active: STALE_PATH,
-    });
+      // Positive anchor for the seed: confirm the write landed in
+      // localStorage before relying on the negative self-heal poll
+      // below. Without this, a silent seed failure (storage quota,
+      // wrong key shape, etc.) would make the post-self-heal poll
+      // trivially pass on a broken build because the path was never
+      // there to drop.
+      expect(await workspacePage.readOpenTabsState(WORKSPACE_A)).toEqual({
+        tabs: [STALE_PATH],
+        active: STALE_PATH,
+      });
 
-    // Positive anchor for the seed: confirm the write landed in
-    // localStorage before relying on the negative self-heal poll
-    // below. Without this, a silent seed failure (storage quota,
-    // wrong key shape, etc.) would make the post-self-heal poll
-    // trivially pass on a broken build because the path was never
-    // there to drop.
-    expect(await workspacePage.readOpenTabsState(WORKSPACE_A)).toEqual({
-      tabs: [STALE_PATH],
-      active: STALE_PATH,
-    });
+      // Reload so CodeBrowserView re-mounts with the seeded localStorage
+      // entry as its initial state. The component reads the persisted
+      // active tab on mount, which immediately drives the FileViewer
+      // to attempt loading the stale path against workspace A's
+      // worktree root.
+      await workspacePage.reload();
+      await workspacePage.waitForReady();
+      // NOTE(#643 Phase 5): this used to click the `center-tab--files` singleton
+      // so the FileViewer panel mounted and its load effect fired. That tab was
+      // removed in Phase 2; the body is never reached at runtime (describe is
+      // skipped). Reveal the sidepanel as the closest surviving surface.
+      await workspacePage.revealRightPanel();
 
-    // Reload so CodeBrowserView re-mounts with the seeded localStorage
-    // entry as its initial state. The component reads the persisted
-    // active tab on mount, which immediately drives the FileViewer
-    // to attempt loading the stale path against workspace A's
-    // worktree root.
-    await workspacePage.reload();
-    await workspacePage.waitForReady();
-    // Click into the Files tab so the FileViewer panel actually
-    // mounts and the load effect fires. The dockview keeps panel
-    // content cached but a panel that's never been activated may
-    // defer its first mount.
-    await workspacePage.tab("files").click();
-
-    // The self-heal should drop the stale tab from the persisted state.
-    // `expect.poll` retries until the FileViewer's catch branch fires,
-    // CodeBrowserView's `handleFileLoadError` calls `handleTabClose`,
-    // the openTabs state updates, and the persist effect in
-    // `useFileTabs` writes the new state to localStorage. 5 s is well
-    // beyond the actual round-trip (load failure surfaces in tens of
-    // ms on a tiny worktree) but bounded so a regression that fails
-    // to self-heal trips deterministically.
-    await expect
-      .poll(
-        async () => {
-          const state = await workspacePage.readOpenTabsState(WORKSPACE_A);
-          return state?.tabs ?? null;
-        },
-        { timeout: 5000 },
-      )
-      .not.toContain(STALE_PATH);
-
-    // Counter-anchor: a freshly-explicit user-driven tab (one the user
-    // navigated to themselves, not restored from persistence) is not
-    // covered by the `initialRestoredTabRef` guard, so any future
-    // load failure on it must NOT auto-close. We don't drive that
-    // scenario here (it'd require simulating a transient server
-    // failure, out of scope), but the negative claim is anchored in
-    // the code comment at `CodeBrowserView.tsx` ~line 1108-1133.
-  });
-
-  // The `QuickOpenDialog.openedWorkspaceIdRef` bail (defence layer 3
-  // in the issue #539 fix) has an exercise path that resists
-  // black-box integration testing: it only fires when the workspace
-  // flips BEFORE the dialog's first `searchWorkspaceFiles` resolves,
-  // which on a tiny test fixture happens within the first few
-  // milliseconds — faster than Playwright's await granularity can
-  // reliably interleave. A test that dispatches the event then
-  // immediately clicks the workspace card passes both with and
-  // without the bail because by the time the click commits, the
-  // search has already resolved and `autoOpened.current` is true, so
-  // the bail check is never reached. The correctness of the ref
-  // isolation (only capture on `open: false → true`, never on
-  // mid-flight `workspaceId` changes) is documented inline at the
-  // capture-effect site and exercised by the `shouldBailAutoOpen`
-  // pure-helper unit suite.
-
-  test("cross-workspace event with a matching filename does NOT leak the file into the wrong workspace's persisted tab list", async ({
-    page,
-  }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-
-    // Both worktrees have a file at `shared.ts`. Without the fix, the
-    // SharedDockviewLayout listener would catch a workspace-agnostic
-    // `band:open-file` event addressed to A while B is active, route
-    // it through QuickOpenDialog.autoOpen, find `shared.ts` in B's
-    // index, and write the path into `band-open-tabs:<B>` — the
-    // exact symptom in the issue #539 description ("workspace B's
-    // Files panel tries to open the same workspace-relative path
-    // against B's root"). With the fix, the listener filters on
-    // `detail.workspaceId` and silently drops the cross-workspace
-    // event before the dialog can open.
-    //
-    // Verified against origin/main (the bug code): without the fix,
-    // after dispatching `{ filename: "shared.ts", workspaceId: A }`
-    // while B is active and waiting ~2 s for the full debounce +
-    // search + autoOpen + persist effect, B's tab list reads
-    // `{"tabs":["shared.ts"],"active":"shared.ts"}`. The fix code
-    // leaves B's tab list empty.
-    await workspacePage.goto(WORKSPACE_A);
-    await workspacePage.waitForReady();
-    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-    await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
-
-    await workspacePage.writeOpenTabsState(WORKSPACE_B, { tabs: [], active: null });
-
-    await workspacePage.dispatchOpenFileEvent({
-      filename: "shared.ts",
-      workspaceId: WORKSPACE_A,
-    });
-
-    // Positive-shaped poll for the leak's APPEARANCE within a
-    // bounded window, then assert the poll exhausted its budget
-    // without finding it. `expect.poll(state).not.toContain(...)`
-    // would succeed trivially at t=0 because the seed above leaves
-    // B's tab list empty — the poll returns success before the
-    // bug's full lifecycle (150 ms debounce + search + autoOpen +
-    // per-workspace-state propagation + CodeBrowserView
-    // openTabPinned + useFileTabs persist) has had time to write
-    // the leak (~200-300 ms post-dispatch). The
-    // poll-for-appearance shape catches the regression by FAILING
-    // fast when the leak arrives; the try/catch converts
-    // "timed out without finding the leak" into "test passed".
-    let leaked = false;
-    try {
+      // The self-heal should drop the stale tab from the persisted state.
+      // `expect.poll` retries until the FileViewer's catch branch fires,
+      // CodeBrowserView's `handleFileLoadError` calls `handleTabClose`,
+      // the openTabs state updates, and the persist effect in
+      // `useFileTabs` writes the new state to localStorage. 5 s is well
+      // beyond the actual round-trip (load failure surfaces in tens of
+      // ms on a tiny worktree) but bounded so a regression that fails
+      // to self-heal trips deterministically.
       await expect
         .poll(
           async () => {
-            const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
-            return state?.tabs ?? [];
+            const state = await workspacePage.readOpenTabsState(WORKSPACE_A);
+            return state?.tabs ?? null;
           },
-          { timeout: 2000 },
+          { timeout: 5000 },
         )
-        .toContain("shared.ts");
-      leaked = true;
-    } catch {
-      // poll exhausted budget without observing shared.ts land in
-      // B's tab list — exactly the contract we want to confirm.
-    }
-    expect(leaked).toBe(false);
+        .not.toContain(STALE_PATH);
+
+      // Counter-anchor: a freshly-explicit user-driven tab (one the user
+      // navigated to themselves, not restored from persistence) is not
+      // covered by the `initialRestoredTabRef` guard, so any future
+      // load failure on it must NOT auto-close. We don't drive that
+      // scenario here (it'd require simulating a transient server
+      // failure, out of scope), but the negative claim is anchored in
+      // the code comment at `CodeBrowserView.tsx` ~line 1108-1133.
+    });
+
+    // The `QuickOpenDialog.openedWorkspaceIdRef` bail (defence layer 3
+    // in the issue #539 fix) has an exercise path that resists
+    // black-box integration testing: it only fires when the workspace
+    // flips BEFORE the dialog's first `searchWorkspaceFiles` resolves,
+    // which on a tiny test fixture happens within the first few
+    // milliseconds — faster than Playwright's await granularity can
+    // reliably interleave. A test that dispatches the event then
+    // immediately clicks the workspace card passes both with and
+    // without the bail because by the time the click commits, the
+    // search has already resolved and `autoOpened.current` is true, so
+    // the bail check is never reached. The correctness of the ref
+    // isolation (only capture on `open: false → true`, never on
+    // mid-flight `workspaceId` changes) is documented inline at the
+    // capture-effect site and exercised by the `shouldBailAutoOpen`
+    // pure-helper unit suite.
+
+    test("cross-workspace event with a matching filename does NOT leak the file into the wrong workspace's persisted tab list", async ({
+      page,
+    }) => {
+      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+
+      // Both worktrees have a file at `shared.ts`. Without the fix, the
+      // SharedDockviewLayout listener would catch a workspace-agnostic
+      // `band:open-file` event addressed to A while B is active, route
+      // it through QuickOpenDialog.autoOpen, find `shared.ts` in B's
+      // index, and write the path into `band-open-tabs:<B>` — the
+      // exact symptom in the issue #539 description ("workspace B's
+      // Files panel tries to open the same workspace-relative path
+      // against B's root"). With the fix, the listener filters on
+      // `detail.workspaceId` and silently drops the cross-workspace
+      // event before the dialog can open.
+      //
+      // Verified against origin/main (the bug code): without the fix,
+      // after dispatching `{ filename: "shared.ts", workspaceId: A }`
+      // while B is active and waiting ~2 s for the full debounce +
+      // search + autoOpen + persist effect, B's tab list reads
+      // `{"tabs":["shared.ts"],"active":"shared.ts"}`. The fix code
+      // leaves B's tab list empty.
+      await workspacePage.goto(WORKSPACE_A);
+      await workspacePage.waitForReady();
+      await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
+      await workspacePage.switchWorkspace(WORKSPACE_B);
+      await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+      expect(await workspacePage.cachedPanelEntries(WORKSPACE_A).count()).toBeGreaterThan(0);
+      expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
+
+      await workspacePage.writeOpenTabsState(WORKSPACE_B, { tabs: [], active: null });
+
+      await workspacePage.dispatchOpenFileEvent({
+        filename: "shared.ts",
+        workspaceId: WORKSPACE_A,
+      });
+
+      // Positive-shaped poll for the leak's APPEARANCE within a
+      // bounded window, then assert the poll exhausted its budget
+      // without finding it. `expect.poll(state).not.toContain(...)`
+      // would succeed trivially at t=0 because the seed above leaves
+      // B's tab list empty — the poll returns success before the
+      // bug's full lifecycle (150 ms debounce + search + autoOpen +
+      // per-workspace-state propagation + CodeBrowserView
+      // openTabPinned + useFileTabs persist) has had time to write
+      // the leak (~200-300 ms post-dispatch). The
+      // poll-for-appearance shape catches the regression by FAILING
+      // fast when the leak arrives; the try/catch converts
+      // "timed out without finding the leak" into "test passed".
+      let leaked = false;
+      try {
+        await expect
+          .poll(
+            async () => {
+              const state = await workspacePage.readOpenTabsState(WORKSPACE_B);
+              return state?.tabs ?? [];
+            },
+            { timeout: 2000 },
+          )
+          .toContain("shared.ts");
+        leaked = true;
+      } catch {
+        // poll exhausted budget without observing shared.ts land in
+        // B's tab list — exactly the contract we want to confirm.
+      }
+      expect(leaked).toBe(false);
+    });
   });
-});

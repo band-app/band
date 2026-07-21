@@ -90,122 +90,129 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.describe("Files-tab explorer docking side", () => {
-  test("defaults to the left edge", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the docked
+// two-panel CodeBrowserView (with a left/right-dockable explorer column) was
+// removed in Phase 2, so there is no explorer docking side to test. Re-enable
+// (repoint or delete) when the sidepanel explorer affordances are reworked.
+test.describe
+  .skip("Files-tab explorer docking side", () => {
+    test("defaults to the left edge", async ({ page }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
 
-    await workspace.goto(WORKSPACE_A);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
+      await workspace.goto(WORKSPACE_A);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
 
-    const explorer = await codeBrowser.explorerBox();
-    const editor = await codeBrowser.editorBox();
-    expect(explorer.x).toBeLessThan(editor.x);
+      const explorer = await codeBrowser.explorerBox();
+      const editor = await codeBrowser.editorBox();
+      expect(explorer.x).toBeLessThan(editor.x);
 
-    // Nothing persisted yet — "left" is the unset fallback, not a stored value.
-    expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBeNull();
+      // Nothing persisted yet — "left" is the unset fallback, not a stored value.
+      expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBeNull();
+    });
+
+    test('"Explorer on Right" moves it to the right edge and persists the choice', async ({
+      page,
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE_A);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+      expect(await codeBrowser.explorerIsRightOfEditor()).toBe(false);
+
+      await codeBrowser.moveExplorerRight();
+
+      // The Group remounts with the panels in the opposite order, so poll the
+      // geometry rather than reading it once.
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
+      expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
+    });
+
+    test("the chosen side survives a full page reload", async ({ page }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE_A);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+      await codeBrowser.moveExplorerRight();
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
+
+      await workspace.reload();
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
+      expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
+    });
+
+    test("the side is per-workspace — moving it in one workspace leaves the other on the left", async ({
+      page,
+    }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE_A);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+      await codeBrowser.moveExplorerRight();
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
+
+      // Workspace B has never been moved: it renders with the explorer on the
+      // left and has no persisted side of its own.
+      await workspace.goto(WORKSPACE_B);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(false);
+      expect(await codeBrowser.readPersistedSide(WORKSPACE_B)).toBeNull();
+      // …and A's choice was not clobbered by the visit to B.
+      expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
+    });
+
+    test("moving between sides keeps the explorer's dragged width", async ({ page }) => {
+      const workspace = new WorkspacePage(page, server.url, TOKEN);
+      const codeBrowser = new CodeBrowserPage(page, workspace);
+
+      await workspace.goto(WORKSPACE_A);
+      await workspace.waitForReady();
+      await codeBrowser.openFilesTab();
+
+      // Drag the explorer to a width that is unmistakably not the 240 px default,
+      // so the assertions below can't pass just because both sides happen to fall
+      // back to the same default.
+      await codeBrowser.dragSeparatorBy(DRAG_DX);
+      await expect
+        .poll(() => codeBrowser.explorerWidth())
+        .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + DRAG_DX / 2);
+      const draggedWidth = await codeBrowser.explorerWidth();
+
+      // Move right: same width, opposite edge.
+      await codeBrowser.moveExplorerRight();
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
+      expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+
+      // …and back to the left: still the same width.
+      await codeBrowser.moveExplorerLeft();
+      await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(false);
+      expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
+        WIDTH_TOLERANCE_PX,
+      );
+
+      // The dragged width — not the default — is what got persisted. The width
+      // write is debounced (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll for it.
+      await expect
+        .poll(async () => {
+          const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE_A);
+          return persisted === null
+            ? null
+            : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
+        })
+        .toBe(true);
+    });
   });
-
-  test('"Explorer on Right" moves it to the right edge and persists the choice', async ({
-    page,
-  }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE_A);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-    expect(await codeBrowser.explorerIsRightOfEditor()).toBe(false);
-
-    await codeBrowser.moveExplorerRight();
-
-    // The Group remounts with the panels in the opposite order, so poll the
-    // geometry rather than reading it once.
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
-    expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
-  });
-
-  test("the chosen side survives a full page reload", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE_A);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-    await codeBrowser.moveExplorerRight();
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
-
-    await workspace.reload();
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
-    expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
-  });
-
-  test("the side is per-workspace — moving it in one workspace leaves the other on the left", async ({
-    page,
-  }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE_A);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-    await codeBrowser.moveExplorerRight();
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
-
-    // Workspace B has never been moved: it renders with the explorer on the
-    // left and has no persisted side of its own.
-    await workspace.goto(WORKSPACE_B);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(false);
-    expect(await codeBrowser.readPersistedSide(WORKSPACE_B)).toBeNull();
-    // …and A's choice was not clobbered by the visit to B.
-    expect(await codeBrowser.readPersistedSide(WORKSPACE_A)).toBe("right");
-  });
-
-  test("moving between sides keeps the explorer's dragged width", async ({ page }) => {
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    const codeBrowser = new CodeBrowserPage(page, workspace);
-
-    await workspace.goto(WORKSPACE_A);
-    await workspace.waitForReady();
-    await codeBrowser.openFilesTab();
-
-    // Drag the explorer to a width that is unmistakably not the 240 px default,
-    // so the assertions below can't pass just because both sides happen to fall
-    // back to the same default.
-    await codeBrowser.dragSeparatorBy(DRAG_DX);
-    await expect
-      .poll(() => codeBrowser.explorerWidth())
-      .toBeGreaterThan(DEFAULT_TREE_WIDTH_PX + DRAG_DX / 2);
-    const draggedWidth = await codeBrowser.explorerWidth();
-
-    // Move right: same width, opposite edge.
-    await codeBrowser.moveExplorerRight();
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(true);
-    expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
-
-    // …and back to the left: still the same width.
-    await codeBrowser.moveExplorerLeft();
-    await expect.poll(() => codeBrowser.explorerIsRightOfEditor()).toBe(false);
-    expect(Math.abs((await codeBrowser.explorerWidth()) - draggedWidth)).toBeLessThanOrEqual(
-      WIDTH_TOLERANCE_PX,
-    );
-
-    // The dragged width — not the default — is what got persisted. The width
-    // write is debounced (`WIDTH_PERSIST_DEBOUNCE_MS`), so poll for it.
-    await expect
-      .poll(async () => {
-        const persisted = await codeBrowser.readPersistedWidthPx(WORKSPACE_A);
-        return persisted === null ? null : Math.abs(persisted - draggedWidth) <= WIDTH_TOLERANCE_PX;
-      })
-      .toBe(true);
-  });
-});

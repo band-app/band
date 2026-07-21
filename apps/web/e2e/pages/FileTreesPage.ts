@@ -2,9 +2,16 @@
  * Page object for the two workspace file trees and their right-click
  * "Copy relative path" / "Copy absolute path" context-menu actions:
  *
- *   - Files view  → `FileBrowser` (the "files" outer dockview tab).
- *   - Changes view → `ChangesFileTree` (the sidebar inside the "changes"
- *     outer dockview tab's DiffView).
+ *   - Files view  → `FileBrowser` (the Explorer section of the right
+ *     sidepanel).
+ *   - Changes view → `ChangesFileTree` (the Changes section of the right
+ *     sidepanel).
+ *
+ * Both trees moved out of the center dockview and into the persistent right
+ * sidepanel in #643 Phase 2 (`RightSidepanel.tsx`, rendered in `__root.tsx`).
+ * The sidepanel is visible by default; `openFilesTab` / `openChangesTab`
+ * therefore reveal it (via `WorkspacePage.revealRightPanel`) and interact with
+ * the always-mounted tree rows rather than clicking a center tab.
  *
  * Row buttons carry a `data-testid` of `file-tree__row--<path>` /
  * `changes-tree__row--<path>` (set in the respective components), and each
@@ -14,9 +21,9 @@
  * This is a SECONDARY page object: it owns no routes and constructs no URLs,
  * so it intentionally does NOT follow the `(page, baseUrl, …)` + `goto()`
  * convention of primary page objects. All navigation (URL construction,
- * `goto`) and clipboard capture live on `WorkspacePage` — the suite's single
- * owner of the `workspace__tab--*` locators — which is passed in and delegated
- * to for tab switching rather than re-deriving the tab testids here.
+ * `goto`) and clipboard capture live on `WorkspacePage`, which is passed in and
+ * delegated to for revealing the sidepanel rather than re-deriving its testids
+ * here.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
@@ -62,22 +69,27 @@ export class FileTreesPage {
     return this.page.getByTestId("changes-tree__copy-absolute-path");
   }
 
-  /** Activate the Files tab and wait for the given row to render. The Files
-   *  singleton tab carries the stable `center-tab--files` testid in the
-   *  unified center dockview (`WorkspaceCenterDockview.tsx`). */
+  /** Reveal the right sidepanel and wait for the given Files-tree row to render
+   *  in the Explorer section. The Explorer section is open by default; the tree
+   *  rows are `FileBrowser`'s `file-tree__row--<path>` buttons (#643 Phase 2
+   *  moved the tree here from the removed `center-tab--files` singleton). */
   async openFilesTab(path: string): Promise<void> {
-    await test.step("Open the Files tab", async () => {
-      await this.workspace.tab("files").click();
+    await test.step("Open the Explorer section (right sidepanel)", async () => {
+      await this.workspace.revealRightPanel();
+      await this.workspace.explorerSection.waitFor({ state: "visible", timeout: 15_000 });
       await this.fileTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
 
-  /** Activate the Changes tab and wait for the given row to render in the
-   *  changes sidebar tree. The Changes singleton tab carries the stable
-   *  `center-tab--changes` testid in the unified center dockview. */
+  /** Reveal the right sidepanel and wait for the given Changes-tree row to
+   *  render in the Changes section. The Changes section is open by default (and
+   *  its body only mounts when there is at least one change); the rows are
+   *  `ChangesFileTree`'s `changes-tree__row--<path>` buttons (#643 Phase 2 moved
+   *  the tree here from the removed `center-tab--changes` singleton). */
   async openChangesTab(path: string): Promise<void> {
-    await test.step("Open the Changes tab", async () => {
-      await this.workspace.tab("changes").click();
+    await test.step("Open the Changes section (right sidepanel)", async () => {
+      await this.workspace.revealRightPanel();
+      await this.workspace.changesSection.waitFor({ state: "visible", timeout: 15_000 });
       await this.changesTreeRow(path).waitFor({ state: "visible", timeout: 15_000 });
     });
   }
