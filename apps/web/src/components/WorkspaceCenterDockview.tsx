@@ -948,7 +948,11 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
 // "Show full file" step.
 const FULL_FILE_CONTEXT = 99999;
 
-function DiffLeaf({ params, api }: IDockviewPanelProps<DiffLeafParams>) {
+function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
+  // On desktop the diff selection tooltip offers only "Copy reference"; the
+  // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
+  // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
+  const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath } = params;
   const adapter = useAdapter();
@@ -1069,6 +1073,7 @@ function DiffLeaf({ params, api }: IDockviewPanelProps<DiffLeafParams>) {
             filename={filePath}
             viewMode={viewMode}
             onEditorViews={setViews}
+            copyReferenceOnly={!isMobile}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">

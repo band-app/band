@@ -408,12 +408,16 @@ export function DiffFileContent({
   viewMode,
   onEditorViews,
   onLoadMoreContext,
+  copyReferenceOnly = false,
 }: {
   hunks: string;
   filename: string;
   viewMode: ViewMode;
   onEditorViews?: (views: EditorView[]) => void;
   onLoadMoreContext?: () => void;
+  /** When true, the selection tooltip shows only "Copy reference" (no Add to
+   *  Chat/Terminal) — used by the desktop diff leaf (#643). */
+  copyReferenceOnly?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
@@ -477,7 +481,7 @@ export function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(oldLineNumbers),
               hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, oldLineNumbers),
+              selectionToChatExtension(filename, oldLineNumbers, { copyReferenceOnly }),
               ...sharedExtensions,
             ],
           },
@@ -487,7 +491,7 @@ export function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(newLineNumbers),
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, newLineNumbers),
+              selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
               ...sharedExtensions,
             ],
           },
@@ -503,7 +507,7 @@ export function DiffFileContent({
           makeLineNumbers(newLineNumbers),
           hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
-          selectionToChatExtension(filename, newLineNumbers),
+          selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
@@ -570,7 +574,7 @@ export function DiffFileContent({
       }
       onEditorViewsRef.current?.([]);
     };
-  }, [hunks, filename, viewMode, isDark]);
+  }, [hunks, filename, viewMode, isDark, copyReferenceOnly]);
 
   return <div ref={containerRef} />;
 }
