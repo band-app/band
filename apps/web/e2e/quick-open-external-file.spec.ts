@@ -112,141 +112,136 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
-// TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
-// asserts on the removed per-workspace `band-open-tabs:<ws>` persistence
-// (`readOpenTabsState` / `readOpenTabPaths`) and the `center-tab--files`
-// singleton (`tabContainer("files")`). Desktop no longer runs the
-// `useFileTabs` / CodeBrowserView flow; Quick Open now opens a bare per-path
-// `file` leaf (`center-file-tab--<path>`) with no `openTabs` blob. Re-enable
-// (repointed at the file leaf + FileViewer content) in Phase 5.
-test.describe
-  .skip("Quick Open — open a file outside the worktree by absolute path", () => {
-    test("typing an existing absolute path offers to open it and lands an external tab", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
+// #643: Quick Open resolves an absolute path to a single file and opens it as a
+// per-path `file` leaf (center-file-tab--<path>) in the unified center
+// dockview; the open is observable through that tab and the persisted layout.
+test.describe("Quick Open — open a file outside the worktree by absolute path", () => {
+  test("typing an existing absolute path offers to open it and lands an external tab", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
 
-      // Nothing open before we begin — poll for settled state.
-      await expect
-        .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
-        .not.toContain(externalTsPath);
+    // Nothing open before we begin — poll for settled state.
+    await expect
+      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .not.toContain(externalTsPath);
 
-      await workspacePage.openQuickOpen();
-      await workspacePage.fillQuickOpen(externalTsPath);
+    await workspacePage.openQuickOpen();
+    await workspacePage.fillQuickOpen(externalTsPath);
 
-      // The offer appears once the probe resolves, and shows the path.
-      await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
-      await expect(workspacePage.quickOpenPathItem).toContainText(externalTsPath);
+    // The offer appears once the probe resolves, and shows the path.
+    await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
+    await expect(workspacePage.quickOpenPathItem).toContainText(externalTsPath);
 
-      // Positive anchor: the dialog is open before we accept + assert dismissal.
-      await expect(workspacePage.quickOpenDialog()).toBeVisible();
+    // Positive anchor: the dialog is open before we accept + assert dismissal.
+    await expect(workspacePage.quickOpenDialog()).toBeVisible();
 
-      // Accept the offer.
-      await workspacePage.openQuickOpenPathItem();
+    // Accept the offer.
+    await workspacePage.openQuickOpenPathItem();
 
-      // Observable outcome: the absolute path is now the active external tab,
-      // the Files panel is active, and the editor shows the file's contents.
-      await expect
-        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
-          timeout: 15_000,
-        })
-        .toBe(externalTsPath);
-      // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
-      // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
-      await expect(workspacePage.fileTab(externalTsPath)).toBeAttached({
+    // Observable outcome: the absolute path is now the active external tab,
+    // the Files panel is active, and the editor shows the file's contents.
+    await expect
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
         timeout: 15_000,
-      });
-      await expect(workspacePage.quickOpenDialog()).toBeHidden();
-
-      const fileViewer = new FileViewerPage(page);
-      await fileViewer.expectContent(TS_MARKER);
+      })
+      .toBe(externalTsPath);
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
+    await expect(workspacePage.fileTab(externalTsPath)).toBeAttached({
+      timeout: 15_000,
     });
+    await expect(workspacePage.quickOpenDialog()).toBeHidden();
 
-    test("a band:open-file event with an absolute .md path auto-opens it as an external tab (link path)", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-
-      // The same event a terminal or chat file link dispatches — here the
-      // user's literal example: an absolute path to a `.md` file, with a
-      // `:line` suffix that `parseFileLocation` strips off the tab path.
-      await workspacePage.dispatchOpenFileEvent({
-        filename: `${externalMdPath}:2`,
-        workspaceId: WORKSPACE,
-      });
-
-      // Single external match → opened directly, the dialog never shows. The
-      // absolute path (suffix stripped) is the active tab. Markdown renders as
-      // a preview rather than a CodeMirror buffer, so we assert the tab opened
-      // and the viewer mounted rather than editor text.
-      await expect
-        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
-          timeout: 15_000,
-        })
-        .toBe(externalMdPath);
-      // Positive DOM anchor (viewer mounted) before the negative dismissal check.
-      await new FileViewerPage(page).expectVisible();
-      await expect(workspacePage.quickOpenDialog()).toBeHidden();
-    });
-
-    test("a band:open-file event for a non-existent absolute path reveals the dialog with no match", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-
-      const missing = join(tmpHome!, "does-not-exist.md");
-      await workspacePage.dispatchOpenFileEvent({ filename: missing, workspaceId: WORKSPACE });
-
-      // Positive anchor: the dialog is revealed AND settled with the query set
-      // (the missing path is seeded into the input) — so the subsequent
-      // "no offer" assertion proves the resolver found nothing, not that the
-      // query never arrived.
-      await expect(workspacePage.quickOpenDialog()).toBeVisible({ timeout: 15_000 });
-      await expect(workspacePage.quickOpenInput).toHaveValue(missing);
-      // No file to auto-open → no external-open row (the path isn't a real file).
-      await expect(workspacePage.quickOpenPathItem).toBeHidden();
-      expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(missing);
-    });
-
-    test("typing an absolute path INSIDE the worktree opens it as a normal (relative) tab", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-
-      // An absolute path that happens to point inside the current worktree.
-      const insideAbs = join(worktreePath, "inside.ts");
-      await workspacePage.openQuickOpen();
-      await workspacePage.fillQuickOpen(insideAbs);
-
-      // The offer resolves the path back to its workspace-relative form —
-      // NOT the absolute path — because the file lives inside the worktree.
-      await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
-      await expect(workspacePage.quickOpenPathItem).toContainText("inside.ts");
-      await workspacePage.openQuickOpenPathItem();
-
-      // Observable outcome: it opens as a NORMAL workspace tab keyed by the
-      // relative path (not an external tab keyed by the absolute path).
-      await expect
-        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
-          timeout: 15_000,
-        })
-        .toBe("inside.ts");
-      expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(insideAbs);
-      // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
-      // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
-      await expect(workspacePage.fileTab("inside.ts")).toBeAttached({
-        timeout: 15_000,
-      });
-
-      const fileViewer = new FileViewerPage(page);
-      await fileViewer.expectContent("export const inside");
-    });
+    const fileViewer = new FileViewerPage(page);
+    await fileViewer.expectContent(TS_MARKER);
   });
+
+  test("a band:open-file event with an absolute .md path auto-opens it as an external tab (link path)", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+
+    // The same event a terminal or chat file link dispatches — here the
+    // user's literal example: an absolute path to a `.md` file, with a
+    // `:line` suffix that `parseFileLocation` strips off the tab path.
+    await workspacePage.dispatchOpenFileEvent({
+      filename: `${externalMdPath}:2`,
+      workspaceId: WORKSPACE,
+    });
+
+    // Single external match → opened directly, the dialog never shows. The
+    // absolute path (suffix stripped) is the active tab. Markdown renders as
+    // a preview rather than a CodeMirror buffer, so we assert the tab opened
+    // and the viewer mounted rather than editor text.
+    await expect
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+        timeout: 15_000,
+      })
+      .toBe(externalMdPath);
+    // Positive DOM anchor (viewer mounted) before the negative dismissal check.
+    await new FileViewerPage(page).expectVisible();
+    await expect(workspacePage.quickOpenDialog()).toBeHidden();
+  });
+
+  test("a band:open-file event for a non-existent absolute path reveals the dialog with no match", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+
+    const missing = join(tmpHome!, "does-not-exist.md");
+    await workspacePage.dispatchOpenFileEvent({ filename: missing, workspaceId: WORKSPACE });
+
+    // Positive anchor: the dialog is revealed AND settled with the query set
+    // (the missing path is seeded into the input) — so the subsequent
+    // "no offer" assertion proves the resolver found nothing, not that the
+    // query never arrived.
+    await expect(workspacePage.quickOpenDialog()).toBeVisible({ timeout: 15_000 });
+    await expect(workspacePage.quickOpenInput).toHaveValue(missing);
+    // No file to auto-open → no external-open row (the path isn't a real file).
+    await expect(workspacePage.quickOpenPathItem).toBeHidden();
+    expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(missing);
+  });
+
+  test("typing an absolute path INSIDE the worktree opens it as a normal (relative) tab", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+
+    // An absolute path that happens to point inside the current worktree.
+    const insideAbs = join(worktreePath, "inside.ts");
+    await workspacePage.openQuickOpen();
+    await workspacePage.fillQuickOpen(insideAbs);
+
+    // The offer resolves the path back to its workspace-relative form —
+    // NOT the absolute path — because the file lives inside the worktree.
+    await expect(workspacePage.quickOpenPathItem).toBeVisible({ timeout: 15_000 });
+    await expect(workspacePage.quickOpenPathItem).toContainText("inside.ts");
+    await workspacePage.openQuickOpenPathItem();
+
+    // Observable outcome: it opens as a NORMAL workspace tab keyed by the
+    // relative path (not an external tab keyed by the absolute path).
+    await expect
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+        timeout: 15_000,
+      })
+      .toBe("inside.ts");
+    expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(insideAbs);
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
+    await expect(workspacePage.fileTab("inside.ts")).toBeAttached({
+      timeout: 15_000,
+    });
+
+    const fileViewer = new FileViewerPage(page);
+    await fileViewer.expectContent("export const inside");
+  });
+});

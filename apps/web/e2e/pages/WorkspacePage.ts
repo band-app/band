@@ -2446,10 +2446,7 @@ export class WorkspacePage {
         if (activeGroup) {
           const stack: unknown[] = [parsed.grid?.root];
           while (stack.length) {
-            const node = stack.pop() as
-              | { type?: string; data?: unknown }
-              | null
-              | undefined;
+            const node = stack.pop() as { type?: string; data?: unknown } | null | undefined;
             if (!node || typeof node !== "object") continue;
             if (node.type === "leaf") {
               const d = node.data as { id?: string; activeView?: string } | undefined;

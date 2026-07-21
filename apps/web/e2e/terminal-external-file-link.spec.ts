@@ -95,49 +95,45 @@ test.afterAll(async () => {
   rmSync(externalDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-// TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
-// asserts on the removed `center-tab--files` singleton (`tabContainer("files")`)
-// and the per-workspace `band-open-tabs:<ws>` persistence (`readOpenTabsState`).
-// Desktop no longer runs the `useFileTabs` / CodeBrowserView flow; a terminal
-// file link now opens a bare per-path `file` leaf with no `openTabs` blob.
-// Re-enable (repointed at `center-file-tab--<path>` + FileViewer) in Phase 5.
-test.describe
-  .skip("Terminal links to files outside the worktree", () => {
-    test("clicking an absolute path printed in the terminal opens it as an external tab", async ({
-      page,
-    }) => {
-      // The xterm boot + PTY handshake carries the same generous budget the
-      // other terminal specs use under CI worker contention.
-      test.setTimeout(120_000);
+// #643: a terminal link to a file outside the worktree opens a per-path `file`
+// leaf (center-file-tab--<path>) in the unified center dockview; the open is
+// observable through that tab and the persisted layout (readOpenTabPaths).
+test.describe("Terminal links to files outside the worktree", () => {
+  test("clicking an absolute path printed in the terminal opens it as an external tab", async ({
+    page,
+  }) => {
+    // The xterm boot + PTY handshake carries the same generous budget the
+    // other terminal specs use under CI worker contention.
+    test.setTimeout(120_000);
 
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-      await workspacePage.openTerminalTab();
-      await workspacePage.waitForTerminalReady(75_000);
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+    await workspacePage.openTerminalTab();
+    await workspacePage.waitForTerminalReady(75_000);
 
-      // Positive anchor: the external file is not open before the click.
-      await expect
-        .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
-        .not.toContain(externalPath);
+    // Positive anchor: the external file is not open before the click.
+    await expect
+      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .not.toContain(externalPath);
 
-      // Print the absolute path on its own line; the shell echoes it as a bare
-      // output line the link provider turns into a clickable link.
-      await workspacePage.runInTerminal(`echo ${externalPath}`);
-      await workspacePage.clickTerminalFileLink(externalPath);
+    // Print the absolute path on its own line; the shell echoes it as a bare
+    // output line the link provider turns into a clickable link.
+    await workspacePage.runInTerminal(`echo ${externalPath}`);
+    await workspacePage.clickTerminalFileLink(externalPath);
 
-      // Observable outcome: the click routed the absolute path through Quick
-      // Open, which opened it as an external tab (Files tab active + the
-      // absolute path persisted into the workspace's open-tabs entry).
-      // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
-      // the per-path `center-file-tab--<path>` leaf. Describe is skipped.
-      await expect(workspacePage.fileTab(externalPath)).toBeAttached({
-        timeout: 15_000,
-      });
-      await expect
-        .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
-          timeout: 15_000,
-        })
-        .toBe(externalPath);
+    // Observable outcome: the click routed the absolute path through Quick
+    // Open, which opened it as an external tab (Files tab active + the
+    // absolute path persisted into the workspace's open-tabs entry).
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf. Describe is skipped.
+    await expect(workspacePage.fileTab(externalPath)).toBeAttached({
+      timeout: 15_000,
     });
+    await expect
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE))?.active, {
+        timeout: 15_000,
+      })
+      .toBe(externalPath);
   });
+});
