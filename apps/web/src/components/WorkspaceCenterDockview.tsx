@@ -36,7 +36,6 @@ import {
   Code,
   Columns2,
   Eye,
-  FileCode,
   GitCompare,
   Globe,
   Loader2,
@@ -71,6 +70,7 @@ import {
   createLspExtension,
   DiffFileContent,
   FileViewer,
+  getFileIcon,
   getLspLanguageId,
   getStoredViewMode,
   releaseLspClient,
@@ -191,10 +191,7 @@ function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
  *  `initialPreview` (the params dockview passes to the tab at first render)
  *  because `api.getParameters()` can be empty on the very first render of a
  *  freshly-added panel's tab. */
-function useTabPreview(
-  api: IDockviewPanelHeaderProps["api"],
-  initialPreview?: boolean,
-): boolean {
+function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: boolean): boolean {
   const [preview, setPreview] = useState(
     () => api.getParameters<{ preview?: boolean }>().preview ?? initialPreview,
   );
@@ -1741,6 +1738,9 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api, props.params.preview);
   const title = basename(filePath);
+  // Same file-type icon the Explorer/Changes trees use, so a file reads
+  // identically in the tree and its tab (#643).
+  const FileTypeIcon = getFileIcon(title);
 
   // Dirty indicator. `FileLeaf` (a separate dockview React tree) dispatches
   // `band:dirty-change` on every edited-content change; re-read the fresh
@@ -1769,7 +1769,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
     >
       <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
         <div className={TAB_CONTENT_WRAP}>
-          <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
+          <FileTypeIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
             {title}
           </span>
@@ -2447,7 +2447,7 @@ export function WorkspaceCenterDockview({
         api.getPanel(chatIds[0])?.api.setSize({ width: api.width * 0.5 });
       } catch {}
     },
-    [workspaceId],
+    [workspaceId, mobile],
   );
 
   // ---- reconcile a restored layout against live instances ----
