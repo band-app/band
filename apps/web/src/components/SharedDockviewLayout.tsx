@@ -472,9 +472,11 @@ export function SharedDockviewLayout() {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ filePath?: string; workspaceId?: string }>).detail;
       if (!detail?.filePath) return;
-      // Ignore events addressed to a different (cached, hidden) workspace so a
-      // nav in workspace A can't open the A-relative path in B/C.
-      if (detail.workspaceId && detail.workspaceId !== activeWorkspaceId) return;
+      // Open in the ADDRESSED workspace (falling through to the active one when
+      // the event carries no id, for backwards-compat). Targeting the owning
+      // workspace directly is what prevents an A-relative path from leaking
+      // into a cached hidden workspace B/C — the nav opens in A even when A is
+      // not the active workspace.
       getWorkspaceLeafActions(detail.workspaceId ?? activeWorkspaceId)?.openFile(detail.filePath, {
         preview: false,
       });

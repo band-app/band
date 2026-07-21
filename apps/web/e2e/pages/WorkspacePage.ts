@@ -1822,24 +1822,56 @@ export class WorkspacePage {
   }
 
   /** Seed a workspace's persisted center-dockview layout
-   *  (`band:dockview-layout-v8:<workspaceId>`) before the app mounts. Uses
+   *  (`band:dockview-layout-v9:<workspaceId>`) before the app mounts. Uses
    *  `addInitScript`, so it MUST run BEFORE the first `goto` — the value is
-   *  applied to `localStorage` ahead of the page script, exactly like
-   *  `installTerminalSocketInstrumentation`.
-   *
-   *  NOTE(#643 Phase 5): the layout model changed from the old global
-   *  `band:dockview-layout-v7` (5 fixed outer panels + edge groups) to a
-   *  per-workspace serialized dockview blob. This helper is only referenced by
-   *  the (skipped) `workspace-maximize-collapses-edges` spec, whose seed shape
-   *  still describes the legacy layout; re-author that seed against the v8
-   *  blob when the spec is reworked. */
+   *  applied to `localStorage` ahead of the page script. Pass a raw dockview
+   *  `toJSON()`-shaped blob. */
   async seedGlobalLayout(workspaceId: string, layout: unknown): Promise<void> {
     await this.page.addInitScript(
       ({ key, serialized }) => {
         localStorage.setItem(key, serialized as string);
       },
-      { key: `band:dockview-layout-v8:${workspaceId}`, serialized: JSON.stringify(layout) },
+      { key: `band:dockview-layout-v9:${workspaceId}`, serialized: JSON.stringify(layout) },
     );
+  }
+
+  /** Seed a center-dockview layout holding the given `file` leaves (one group,
+   *  stacked as tabs) before the app mounts — a compact wrapper over
+   *  `seedGlobalLayout` for the common "restore these open files" case. Panel
+   *  ids are `file:<path>`, matching what the app persists. `activePath`
+   *  defaults to the first file. Must run BEFORE `goto`. */
+  async seedFileLeaves(
+    workspaceId: string,
+    filePaths: string[],
+    activePath = filePaths[0],
+  ): Promise<void> {
+    const panels: Record<string, unknown> = {};
+    const views: string[] = [];
+    for (const p of filePaths) {
+      const id = `file:${p}`;
+      views.push(id);
+      panels[id] = {
+        id,
+        contentComponent: "file",
+        tabComponent: "file",
+        title: p.split("/").pop() ?? p,
+      };
+    }
+    const layout = {
+      grid: {
+        root: {
+          type: "leaf",
+          data: { views, activeView: `file:${activePath}`, id: "1" },
+          size: 1000,
+        },
+        width: 1000,
+        height: 800,
+        orientation: "HORIZONTAL",
+      },
+      panels,
+      activeGroup: "1",
+    };
+    await this.seedGlobalLayout(workspaceId, layout);
   }
 
   /** The dockview bottom edge-group container that is currently on-screen.

@@ -1100,6 +1100,14 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // `onActionsChange` (see `usePublishHeaderActions` above).
         hideTitleBar
         onActionsChange={setFileActions}
+        // Self-heal: a persisted file leaf whose path no longer exists (ENOENT)
+        // drops itself on mount, so a stale/relocated path doesn't stay pinned
+        // behind an error banner (the #539 defensive guard, in the leaf model).
+        onLoadError={(err) => {
+          if (!/ENOENT|no such file|not found/i.test(err.message)) return;
+          removeFileTabState(workspaceId, filePath);
+          getWorkspaceLeafActions(workspaceId)?.onClose(`file:${filePath}`, "file");
+        }}
         // Markdown files get a code/preview toggle in the title bar; the
         // preview reuses the shared MarkdownPreview renderer.
         renderMarkdown={renderMarkdownPreview}
