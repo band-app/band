@@ -127,80 +127,78 @@ test.afterAll(async () => {
 // back/forward history wired in, so this cross-workspace Go-Back scoping
 // scenario has no affordance to drive. Re-enable when editor history is wired
 // into the new file leaf.
-test.describe
-  .skip("Editor-history workspace scoping (cross-workspace history leak)", () => {
-    test("a Go Back addressed to workspace A does NOT step active workspace B's history", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const fileTrees = new FileTreesPage(page, workspacePage);
-      // Scope the viewer to B's subtree: A stays mounted (hidden) in the LRU
-      // cache, so an unscoped `file-viewer__root` could resolve to more than one.
-      const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
+test.describe("Editor-history workspace scoping (cross-workspace history leak)", () => {
+  test("a Go Back addressed to workspace A does NOT step active workspace B's history", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const fileTrees = new FileTreesPage(page, workspacePage);
+    // Scope the viewer to B's subtree: A stays mounted (hidden) in the LRU
+    // cache, so an unscoped `file-viewer__root` could resolve to more than one.
+    const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
 
-      // Land on A and activate its Files tab so A's CodeBrowserView mounts and
-      // its editor-history listener is live — a genuine cross-workspace sibling.
-      await workspacePage.goto(WORKSPACE_A);
-      await workspacePage.waitForReady();
-      await fileTrees.openFilesTab(ONLY_IN_A);
+    // Land on A and activate its Files tab so A's CodeBrowserView mounts and
+    // its editor-history listener is live — a genuine cross-workspace sibling.
+    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.waitForReady();
+    await fileTrees.openFilesTab(ONLY_IN_A);
 
-      // Switch to B via the sidebar (client-side nav) so A stays mounted +
-      // cached while B becomes active.
-      await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
-      await workspacePage.switchWorkspace(WORKSPACE_B);
-      await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-      await expect
-        .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
-        .toBeGreaterThan(0);
+    // Switch to B via the sidebar (client-side nav) so A stays mounted +
+    // cached while B becomes active.
+    await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
+    await workspacePage.switchWorkspace(WORKSPACE_B);
+    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    await workspacePage.waitForReady();
+    await expect
+      .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
+      .toBeGreaterThan(0);
 
-      // NOTE(#643 Phase 5): this used to activate B's Files tab so B's
-      // CodeBrowserView mounted (registering its editor-history + lsp-navigate
-      // listeners). That desktop view — and its editor history — were removed in
-      // Phase 2, which is why this whole describe is skipped. The sidepanel reveal
-      // is the closest surviving surface; the body is never reached at runtime.
-      await workspacePage.revealRightPanel();
+    // NOTE(#643 Phase 5): this used to activate B's Files tab so B's
+    // CodeBrowserView mounted (registering its editor-history + lsp-navigate
+    // listeners). That desktop view — and its editor history — were removed in
+    // Phase 2, which is why this whole describe is skipped. The sidepanel reveal
+    // is the closest surviving surface; the body is never reached at runtime.
+    await workspacePage.revealRightPanel();
 
-      // Build B's back-navigable history by driving two cross-file navigations
-      // into B — the same `band:lsp-navigate` path go-to-definition uses, which
-      // opens the file AND pushes a departure+arrival onto B's editor-history
-      // stack. Using the event (rather than two file-tree clicks) keeps the
-      // setup deterministic: the second tree click is unreliable because opening
-      // the first file re-lays B's file tree. After both, B shows b-two and a
-      // Go Back lands on b-one.
-      await workspacePage.dispatchLspNavigateEvent({ filePath: B_ONE, workspaceId: WORKSPACE_B });
-      await fileViewer.expectContent(B_ONE_TEXT);
-      await workspacePage.dispatchLspNavigateEvent({ filePath: B_TWO, workspaceId: WORKSPACE_B });
-      await fileViewer.expectContent(B_TWO_TEXT);
+    // Build B's back-navigable history by driving two cross-file navigations
+    // into B — the same `band:lsp-navigate` path go-to-definition uses, which
+    // opens the file AND pushes a departure+arrival onto B's editor-history
+    // stack. Using the event (rather than two file-tree clicks) keeps the
+    // setup deterministic: the second tree click is unreliable because opening
+    // the first file re-lays B's file tree. After both, B shows b-two and a
+    // Go Back lands on b-one.
+    await workspacePage.dispatchLspNavigateEvent({ filePath: B_ONE, workspaceId: WORKSPACE_B });
+    await fileViewer.expectContent(B_ONE_TEXT);
+    await workspacePage.dispatchLspNavigateEvent({ filePath: B_TWO, workspaceId: WORKSPACE_B });
+    await fileViewer.expectContent(B_TWO_TEXT);
 
-      // Guard under test: a Go Back addressed to A must be ignored by B — B's
-      // viewer stays on b-two. Poll for b-one's ARRIVAL within a bounded window
-      // (a plain `expectNotContent` would pass trivially at t=0) and assert it
-      // never came. On bug code B's unguarded handler steps its own stack back
-      // to b-one, which this poll catches.
-      await workspacePage.dispatchEditorHistoryEvent({
-        direction: "back",
-        workspaceId: WORKSPACE_A,
-      });
-      let leaked = false;
-      try {
-        await expect
-          .poll(async () => fileViewer.readText(), { timeout: 2000 })
-          .toContain(B_ONE_TEXT);
-        leaked = true;
-      } catch {
-        // Poll exhausted its budget without B stepping back — the contract.
-      }
-      expect(leaked).toBe(false);
-      // B is still showing b-two (positive anchor that nothing moved).
-      await fileViewer.expectContent(B_TWO_TEXT);
-
-      // Positive control: a Go Back addressed to B itself DOES step B's history
-      // — proving the event mechanism is live, so the negative above is
-      // meaningful rather than a dead event.
-      await workspacePage.dispatchEditorHistoryEvent({
-        direction: "back",
-        workspaceId: WORKSPACE_B,
-      });
-      await fileViewer.expectContent(B_ONE_TEXT);
+    // Guard under test: a Go Back addressed to A must be ignored by B — B's
+    // viewer stays on b-two. Poll for b-one's ARRIVAL within a bounded window
+    // (a plain `expectNotContent` would pass trivially at t=0) and assert it
+    // never came. On bug code B's unguarded handler steps its own stack back
+    // to b-one, which this poll catches.
+    await workspacePage.dispatchEditorHistoryEvent({
+      direction: "back",
+      workspaceId: WORKSPACE_A,
     });
+    let leaked = false;
+    try {
+      await expect.poll(async () => fileViewer.readText(), { timeout: 2000 }).toContain(B_ONE_TEXT);
+      leaked = true;
+    } catch {
+      // Poll exhausted its budget without B stepping back — the contract.
+    }
+    expect(leaked).toBe(false);
+    // B is still showing b-two (positive anchor that nothing moved).
+    await fileViewer.expectContent(B_TWO_TEXT);
+
+    // Positive control: a Go Back addressed to B itself DOES step B's history
+    // — proving the event mechanism is live, so the negative above is
+    // meaningful rather than a dead event.
+    await workspacePage.dispatchEditorHistoryEvent({
+      direction: "back",
+      workspaceId: WORKSPACE_B,
+    });
+    await fileViewer.expectContent(B_ONE_TEXT);
   });
+});

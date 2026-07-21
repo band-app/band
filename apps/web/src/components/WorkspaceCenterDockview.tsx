@@ -1353,6 +1353,7 @@ interface LeafActions {
       external?: boolean;
       preview?: boolean;
       untitled?: boolean;
+      fromHistory?: boolean;
     },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
@@ -2114,6 +2115,10 @@ export function WorkspaceCenterDockview({
   // hold the id of the current preview leaf of each kind, or null.
   const previewFileIdRef = useRef<string | null>(null);
   const previewDiffIdRef = useRef<string | null>(null);
+  // Per-workspace editor navigation history (file paths). `index` points at the
+  // current entry; Go Back/Forward step it. Driven by openFile (incl. LSP
+  // go-to-definition) and consumed by the band:editor-go-back/forward listeners.
+  const editorHistoryRef = useRef<{ stack: string[]; index: number }>({ stack: [], index: -1 });
 
   // Close-confirm for a dirty file leaf: holds the pending {id, path} while the
   // "Unsaved changes" dialog is open, or null when no confirm is in flight.
@@ -2324,10 +2329,23 @@ export function WorkspaceCenterDockview({
         external?: boolean;
         preview?: boolean;
         untitled?: boolean;
+        // Set when the open is a Go Back/Forward history step, so it doesn't
+        // itself push onto the history stack.
+        fromHistory?: boolean;
       },
     ) => {
       const api = apiRef.current;
       if (!api) return;
+      // Record forward navigations on the editor history stack (skip history
+      // steps + no-op re-opens of the current file).
+      if (!opts?.fromHistory) {
+        const h = editorHistoryRef.current;
+        if (h.stack[h.index] !== filePath) {
+          h.stack = h.stack.slice(0, h.index + 1);
+          h.stack.push(filePath);
+          h.index = h.stack.length - 1;
+        }
+      }
       const preview = opts?.preview ?? false;
       const id = `file:${filePath}`;
       const existing = api.getPanel(id);
@@ -2692,6 +2710,30 @@ export function WorkspaceCenterDockview({
     return () => {
       window.removeEventListener("band:chat-insert", onChatInsert);
       window.removeEventListener("band:terminal-insert", onTerminalInsert);
+    };
+  }, [workspaceId]);
+
+  // Editor navigation history: Go Back / Go Forward (command palette) step this
+  // workspace's file history. Scoped by workspaceId so a Go Back addressed to
+  // workspace A can't step a cached, hidden workspace B's stack (a missing id
+  // falls through to the active workspace, for backwards-compat).
+  useEffect(() => {
+    const step = (delta: 1 | -1) => (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string }>).detail;
+      if (detail?.workspaceId ? detail.workspaceId !== workspaceId : !wsActiveRef.current) return;
+      const h = editorHistoryRef.current;
+      const next = h.index + delta;
+      if (next < 0 || next >= h.stack.length) return;
+      h.index = next;
+      actionsRef.current.openFile(h.stack[next], { fromHistory: true });
+    };
+    const onBack = step(-1);
+    const onForward = step(1);
+    window.addEventListener("band:editor-go-back", onBack);
+    window.addEventListener("band:editor-go-forward", onForward);
+    return () => {
+      window.removeEventListener("band:editor-go-back", onBack);
+      window.removeEventListener("band:editor-go-forward", onForward);
     };
   }, [workspaceId]);
 
