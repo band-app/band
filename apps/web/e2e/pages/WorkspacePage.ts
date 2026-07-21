@@ -753,34 +753,39 @@ export class WorkspacePage {
     });
   }
 
-  // NOTE(#643 Phase 5): split has no toolbar button anymore — it's
-  // Cmd/Ctrl+D (right) / Shift+D (below) only. The helpers below are kept so
-  // the (skipped) split-dependent specs still typecheck; they throw if ever
-  // invoked. Re-point them to the keyboard split — or a future toolbar
-  // affordance — when those specs are reworked in Phase 5.
+  // Split in the unified center dockview has no toolbar button — it's the
+  // Cmd+D shortcut (split the active leaf to the right) handled in
+  // `WorkspaceCenterDockview`. To split a specific kind in a specific
+  // workspace we activate that kind's tab in the workspace's cached host
+  // (which also makes the workspace visible/active, so its keydown handler is
+  // the one that responds) and then press Cmd+D.
 
-  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
-  chatSplitRightButton(_workspaceId: string): Locator {
-    throw new Error("chatSplitRightButton: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5");
+  /** Activate the given kind's first tab in a workspace's center dockview and
+   *  split it to the right via Cmd+D. */
+  private async splitLeafRight(
+    kind: "chat" | "terminal" | "browser",
+    workspaceId: string,
+  ): Promise<void> {
+    const prefix = this.centerTabTestidPrefix(kind);
+    await this.cachedPanelEntries(workspaceId)
+      .getByTestId(new RegExp(`^${prefix}`))
+      .first()
+      .click();
+    await this.page.keyboard.press("Meta+d");
   }
 
-  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
-  terminalSplitRightButton(_workspaceId: string): Locator {
-    throw new Error(
-      "terminalSplitRightButton: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5",
-    );
+  /** Split the active chat leaf to the right (Cmd+D) in the given workspace. */
+  async clickChatSplitRight(workspaceId: string): Promise<void> {
+    await test.step(`Split the chat leaf right (Cmd+D) in workspace ${workspaceId}`, async () => {
+      await this.splitLeafRight("chat", workspaceId);
+    });
   }
 
-  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
-  async clickChatSplitRight(_workspaceId: string): Promise<void> {
-    throw new Error("clickChatSplitRight: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5");
-  }
-
-  /** @deprecated No split BUTTON in the unified dockview — skipped specs only. */
-  async clickTerminalSplitRight(_workspaceId: string): Promise<void> {
-    throw new Error(
-      "clickTerminalSplitRight: split is keyboard-only (Cmd/Ctrl+D) — see #643 Phase 5",
-    );
+  /** Split the active terminal leaf to the right (Cmd+D) in the given workspace. */
+  async clickTerminalSplitRight(workspaceId: string): Promise<void> {
+    await test.step(`Split the terminal leaf right (Cmd+D) in workspace ${workspaceId}`, async () => {
+      await this.splitLeafRight("terminal", workspaceId);
+    });
   }
 
   /** Close the active terminal tab via its per-tab "Close terminal" (×) button
@@ -796,17 +801,24 @@ export class WorkspacePage {
     });
   }
 
-  /** Count the panels in a workspace's persisted inner layout for the given
-   *  container. Returns 0 when no layout has been persisted yet. Reads the
-   *  server-side layout (via `readInnerLayout`) so it reflects which
-   *  workspace's dockview an add/split actually mutated — the crux of the
-   *  wrong-workspace regression. */
+  /** Count the leaves of the given kind in a workspace's unified center
+   *  dockview by counting its rendered tab headers
+   *  (`center-<kind>-tab--<id>`). dockview always renders every leaf's tab
+   *  header (it only detaches inactive *content*), so this reflects the true
+   *  leaf count regardless of which tab is active. Scoped to the workspace's
+   *  cached panel host so it targets the right (visible) workspace — the crux
+   *  of the wrong-workspace regression — not another cached-but-hidden one.
+   *
+   *  (Replaces the old server-side `readInnerLayout` read: #643 retired the
+   *  per-app inner layouts; the center dockview persists only to localStorage.) */
   async countInnerPanels(
     container: "chat" | "terminal" | "browser",
     workspaceId: string,
   ): Promise<number> {
-    const tree = await this.readInnerLayout(container, workspaceId);
-    return tree ? Object.keys(tree.panels).length : 0;
+    const prefix = this.centerTabTestidPrefix(container);
+    return await this.cachedPanelEntries(workspaceId)
+      .getByTestId(new RegExp(`^${prefix}`))
+      .count();
   }
 
   /** Convenience: panel count for a workspace's persisted chat layout. */
