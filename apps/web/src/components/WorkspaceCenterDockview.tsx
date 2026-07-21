@@ -187,9 +187,17 @@ function useTabActive(api: IDockviewPanelHeaderProps["api"]): boolean {
 }
 
 /** Track a leaf's `preview` param (italic tab) reactively — it flips to
- *  `false` when the preview tab is pinned via `updateParameters`. */
-function useTabPreview(api: IDockviewPanelHeaderProps["api"]): boolean {
-  const [preview, setPreview] = useState(() => api.getParameters<{ preview?: boolean }>().preview);
+ *  `false` when the preview tab is pinned via `updateParameters`. Seeds from
+ *  `initialPreview` (the params dockview passes to the tab at first render)
+ *  because `api.getParameters()` can be empty on the very first render of a
+ *  freshly-added panel's tab. */
+function useTabPreview(
+  api: IDockviewPanelHeaderProps["api"],
+  initialPreview?: boolean,
+): boolean {
+  const [preview, setPreview] = useState(
+    () => api.getParameters<{ preview?: boolean }>().preview ?? initialPreview,
+  );
   useEffect(() => {
     const d = api.onDidParametersChange(() => {
       setPreview(api.getParameters<{ preview?: boolean }>().preview);
@@ -409,6 +417,22 @@ function activeOrCentralPosition(api: DockviewApi): AddPanelOptions["position"] 
   const active = api.activeGroup;
   if (active && active.api.location.type === "grid") return { referenceGroup: active.id };
   return centralPanelPosition(api);
+}
+
+/** Collapse every grid group into the first one — mobile is tabs-only, so a
+ *  default or restored (desktop-created) split must render as a single tab
+ *  strip. No-op when there's already one grid group. */
+function flattenToSingleGroup(api: DockviewApi): void {
+  const grid = api.groups.filter((g) => g.api.location.type === "grid");
+  if (grid.length <= 1) return;
+  const target = grid[0];
+  for (const group of grid.slice(1)) {
+    for (const panel of [...group.panels]) {
+      try {
+        panel.api.moveTo({ group: target });
+      } catch {}
+    }
+  }
 }
 
 function loadSavedLayout(workspaceId: string): Record<string, unknown> | null {
@@ -1177,30 +1201,36 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     workspaceId && filePath
       ? () => (
           <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => setMode("unified")}
-              aria-pressed={viewMode === "unified"}
-              title="Unified view"
-              data-testid="center-diff-leaf__view--unified"
-              className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
-                viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              <AlignJustify className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("split")}
-              aria-pressed={viewMode === "split"}
-              title="Side-by-side view"
-              data-testid="center-diff-leaf__view--split"
-              className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
-                viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              <Columns2 className="size-3.5" />
-            </button>
+            {/* Split view is desktop-only — mobile renders a single unified
+                column (no side-by-side). */}
+            {!isMobile && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMode("unified")}
+                  aria-pressed={viewMode === "unified"}
+                  title="Unified view"
+                  data-testid="center-diff-leaf__view--unified"
+                  className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                    viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <AlignJustify className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("split")}
+                  aria-pressed={viewMode === "split"}
+                  title="Side-by-side view"
+                  data-testid="center-diff-leaf__view--split"
+                  className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                    viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <Columns2 className="size-3.5" />
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() =>
@@ -1246,7 +1276,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           <DiffFileContent
             hunks={diff}
             filename={filePath}
-            viewMode={viewMode}
+            // Mobile is always unified — no room for a side-by-side split.
+            viewMode={isMobile ? "unified" : viewMode}
             onEditorViews={setViews}
             copyReferenceOnly={!isMobile}
           />
@@ -1708,7 +1739,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   const { workspaceId, filePath } = props.params;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
-  const isPreview = useTabPreview(props.api);
+  const isPreview = useTabPreview(props.api, props.params.preview);
   const title = basename(filePath);
 
   // Dirty indicator. `FileLeaf` (a separate dockview React tree) dispatches
@@ -1776,7 +1807,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
   const { workspaceId, filePath } = props.params;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
-  const isPreview = useTabPreview(props.api);
+  const isPreview = useTabPreview(props.api, props.params.preview);
   const title = basename(filePath);
 
   const handleClose = useCallback(
@@ -2379,7 +2410,10 @@ export function WorkspaceCenterDockview({
       // Right group anchored to the first chat: terminals, then browsers all
       // stacked into the same group. `rightGroupAnchor` tracks the id of the
       // first panel placed in that group so every later leaf lands `within` it.
-      let rightGroupAnchor: string | null = null;
+      // On mobile everything is ONE group (no split), so seed the anchor with
+      // the chat so terminals/browsers stack into the chat's group instead of
+      // splitting off to the right.
+      let rightGroupAnchor: string | null = mobile ? anchorId : null;
       const rightPosition = (): AddPanelOptions["position"] =>
         rightGroupAnchor
           ? { referencePanel: rightGroupAnchor, direction: "within" }
@@ -2487,6 +2521,10 @@ export function WorkspaceCenterDockview({
       } else {
         buildDefaultLayout(api, data);
       }
+
+      // Mobile is tabs-only: collapse any split (default or a restored desktop
+      // layout) into a single group.
+      if (mobile) flattenToSingleGroup(api);
 
       // Edge groups + drag visibility + shortcut registry.
       ensureEdgeGroups(api);
