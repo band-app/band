@@ -274,13 +274,12 @@ export function WorkspaceTitleBar({
                 <button
                   type="button"
                   aria-label="Toggle Explorer / Changes panel"
+                  // `aria-pressed` still reflects panel state for a11y, but the
+                  // icon stays muted whether open or closed (matches the sidebar
+                  // toggle) so it doesn't read as a selected/active control.
                   aria-pressed={rightPanelVisible}
                   onClick={onToggleRightPanel}
-                  className={`flex items-center justify-center rounded-md p-1 transition-colors hover:bg-accent/50 ${
-                    rightPanelVisible
-                      ? "text-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                 >
                   <PanelRight className="size-5" />
                 </button>

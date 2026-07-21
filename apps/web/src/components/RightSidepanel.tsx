@@ -64,7 +64,7 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       data-testid={testid}
-      className={`flex h-full flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
+      className={`flex h-full w-[120px] items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
         active
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"

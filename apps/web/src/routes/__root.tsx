@@ -770,7 +770,7 @@ function AppShell() {
                       onResize={handleRightResize}
                     >
                       <div
-                        className="h-full flex flex-col overflow-hidden border-l border-border bg-sidebar"
+                        className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
                         data-testid="app-shell__right-panel"
                         data-visible={rightVisible ? "true" : "false"}
                       >

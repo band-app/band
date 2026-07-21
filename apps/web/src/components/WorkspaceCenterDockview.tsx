@@ -54,6 +54,7 @@ import {
   type TerminalInsertDetail,
   useAdapter,
   useDiffTarget,
+  useWorkspacePath,
 } from "@/dashboard";
 import { writeClipboardText } from "../lib/clipboard";
 import {
@@ -957,8 +958,55 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserLeafParams>) {
   );
 }
 
+/** Right-click menu on a file/diff tab: copy the workspace-relative or absolute
+ *  path. `absolute` needs the workspace root (from `useWorkspacePath`); it's
+ *  disabled until that resolves, or when the path is already absolute (external
+ *  file), in which case relative == absolute == the path itself. */
+function TabPathContextMenu({
+  workspaceId,
+  filePath,
+  testidPrefix,
+  children,
+}: {
+  workspaceId: string;
+  filePath: string;
+  testidPrefix: string;
+  children: React.ReactNode;
+}) {
+  const workspacePath = useWorkspacePath(workspaceId);
+  const isAbsolute = filePath.startsWith("/");
+  const absolute = isAbsolute
+    ? filePath
+    : workspacePath
+      ? `${workspacePath.replace(/\/+$/, "")}/${filePath}`
+      : null;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent data-testid={`${testidPrefix}__context-menu`}>
+        <ContextMenuItem
+          onClick={() => void writeClipboardText(filePath)}
+          data-testid={`${testidPrefix}__context-menu-item--copy-relative-path`}
+        >
+          <ClipboardCopy className="size-4" />
+          Copy relative path
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!absolute}
+          onClick={() => absolute && void writeClipboardText(absolute)}
+          data-testid={`${testidPrefix}__context-menu-item--copy-absolute-path`}
+        >
+          <ClipboardCopy className="size-4" />
+          Copy absolute path
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
-  const filePath = props.params.filePath;
+  const { workspaceId, filePath } = props.params;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api);
@@ -973,27 +1021,33 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   );
 
   return (
-    <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
-      <div className={TAB_CONTENT_WRAP}>
-        <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
-          {title}
-        </span>
+    <TabPathContextMenu
+      workspaceId={workspaceId}
+      filePath={filePath}
+      testidPrefix={`center-file-tab--${filePath}`}
+    >
+      <div className={TAB_ROOT_CLASS} data-testid={`center-file-tab--${filePath}`}>
+        <div className={TAB_CONTENT_WRAP}>
+          <FileCode className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
+            {title}
+          </span>
+        </div>
+        <button
+          type="button"
+          className={closeButtonClass(isActive)}
+          onClick={handleClose}
+          title="Close file"
+        >
+          <X className="size-3" />
+        </button>
       </div>
-      <button
-        type="button"
-        className={closeButtonClass(isActive)}
-        onClick={handleClose}
-        title="Close file"
-      >
-        <X className="size-3" />
-      </button>
-    </div>
+    </TabPathContextMenu>
   );
 }
 
 function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
-  const filePath = props.params.filePath;
+  const { workspaceId, filePath } = props.params;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api);
@@ -1008,22 +1062,28 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
   );
 
   return (
-    <div className={TAB_ROOT_CLASS} data-testid={`center-diff-tab--${filePath}`}>
-      <div className={TAB_CONTENT_WRAP}>
-        <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
-          {title}
-        </span>
+    <TabPathContextMenu
+      workspaceId={workspaceId}
+      filePath={filePath}
+      testidPrefix={`center-diff-tab--${filePath}`}
+    >
+      <div className={TAB_ROOT_CLASS} data-testid={`center-diff-tab--${filePath}`}>
+        <div className={TAB_CONTENT_WRAP}>
+          <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
+            {title}
+          </span>
+        </div>
+        <button
+          type="button"
+          className={closeButtonClass(isActive)}
+          onClick={handleClose}
+          title="Close diff"
+        >
+          <X className="size-3" />
+        </button>
       </div>
-      <button
-        type="button"
-        className={closeButtonClass(isActive)}
-        onClick={handleClose}
-        title="Close diff"
-      >
-        <X className="size-3" />
-      </button>
-    </div>
+    </TabPathContextMenu>
   );
 }
 
