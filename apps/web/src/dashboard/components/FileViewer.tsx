@@ -134,6 +134,20 @@ interface FileViewerProps {
    */
   onViewDiff?: () => void;
   /**
+   * Reports the viewer's current title-bar action state (save + markdown
+   * toggle availability) whenever it changes. Lets a host that renders its own
+   * chrome — the center `file` leaf, which lifts these into the dockview group
+   * header — drive Save and the markdown toggle from outside while the viewer's
+   * own title bar is hidden (`hideTitleBar`).
+   */
+  onActionsChange?: (actions: {
+    isDirty: boolean;
+    canSave: boolean;
+    saving: boolean;
+    save: () => void;
+    showMarkdownToggle: boolean;
+  }) => void;
+  /**
    * Called when the workspace/external loader rejects (typically
    * `ENOENT: no such file or directory ...` from the server's `stat`
    * call). The parent can use this to self-heal stale tab state — e.g.
@@ -254,6 +268,7 @@ export function FileViewer({
   onLanguageOverrideChange,
   onSaveAs,
   onViewDiff,
+  onActionsChange,
   onLoadError,
 }: FileViewerProps) {
   const adapter = useAdapter();
@@ -533,6 +548,26 @@ export function FileViewer({
       setSaving(false);
     }
   }, [adapter, workspaceId, filePath, external, untitled, onSaveAs]);
+
+  // Report title-bar action state to a host that renders its own chrome (the
+  // center `file` leaf lifts Save + the markdown toggle into the group header).
+  const onActionsChangeRef = useRef(onActionsChange);
+  onActionsChangeRef.current = onActionsChange;
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  // Depend on the BOOLEAN, not the raw `showMarkdownToggle` (which is the
+  // inline `renderMarkdown` function for markdown files — a new reference every
+  // render, which would fire this effect every render → setState loop).
+  const canShowMarkdownToggle = !!showMarkdownToggle;
+  useEffect(() => {
+    onActionsChangeRef.current?.({
+      isDirty,
+      canSave,
+      saving,
+      save: () => handleSaveRef.current(),
+      showMarkdownToggle: canShowMarkdownToggle,
+    });
+  }, [isDirty, canSave, saving, canShowMarkdownToggle]);
 
   /**
    * Format the editor buffer in-place via Prettier.

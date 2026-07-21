@@ -33,15 +33,19 @@ import {
 import {
   AlignJustify,
   ClipboardCopy,
+  Code,
   Columns2,
+  Eye,
   FileCode,
   GitCompare,
   Globe,
+  Loader2,
   Maximize2,
   MessageSquare,
   Minimize2,
   Plus,
   RotateCcw,
+  Save,
   SquarePen,
   Terminal as TerminalIcon,
   TerminalSquare,
@@ -56,6 +60,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -230,6 +235,52 @@ const workspaceLeafActions = new Map<string, { current: LeafActions }>();
 
 export function getWorkspaceLeafActions(workspaceId: string | null): LeafActions | undefined {
   return workspaceId ? workspaceLeafActions.get(workspaceId)?.current : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Per-panel header actions
+// ---------------------------------------------------------------------------
+//
+// Each leaf can publish a node of action buttons (save, view toggle, revert…)
+// that the group header (`RightHeaderActions`) renders next to the Maximize
+// action for whichever tab is active — so the tab content holds no toolbar of
+// its own. Leaves publish via `usePublishHeaderActions`; the header subscribes
+// to a change event and re-reads the active panel's entry each render.
+// ---------------------------------------------------------------------------
+
+const leafHeaderActionsByPanelId = new Map<string, () => React.ReactNode>();
+const HEADER_ACTIONS_EVENT = "band:leaf-header-actions-changed";
+
+function notifyHeaderActionsChanged(): void {
+  window.dispatchEvent(new CustomEvent(HEADER_ACTIONS_EVENT));
+}
+
+/** Publish this leaf's header-action buttons while mounted (and while `render`
+ *  is non-null). `render` is re-published whenever `deps` change so the header
+ *  reflects live state (e.g. a markdown toggle's current mode). */
+function usePublishHeaderActions(
+  panelId: string,
+  render: (() => React.ReactNode) | null,
+  // biome-ignore lint/suspicious/noExplicitAny: caller-controlled dep list
+  deps: any[],
+): void {
+  const renderRef = useRef(render);
+  renderRef.current = render;
+  // `render` is re-read from a ref (so we always publish the latest closure)
+  // and re-published when the caller's `deps` change.
+  useEffect(() => {
+    const render = renderRef.current;
+    if (render) {
+      leafHeaderActionsByPanelId.set(panelId, render);
+    } else {
+      leafHeaderActionsByPanelId.delete(panelId);
+    }
+    notifyHeaderActionsChanged();
+    return () => {
+      leafHeaderActionsByPanelId.delete(panelId);
+      notifyHeaderActionsChanged();
+    };
+  }, [panelId, ...deps]);
 }
 
 // Per-workspace monotonic counter for untitled scratch buffers, mirroring
@@ -847,6 +898,11 @@ function useActiveFileTracking(
   }, [visible, tabActive, workspaceId, filePath]);
 }
 
+// Stable module-level renderer so the `renderMarkdown` prop identity never
+// changes (an inline arrow would make FileViewer's `showMarkdownToggle` — and
+// anything keyed on it — churn every render).
+const renderMarkdownPreview = (content: string) => <MarkdownPreview content={content} />;
+
 function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
   const { containerRef, setViews, searchBar } = useLeafFind(params.workspaceId ?? "", visible);
@@ -870,6 +926,17 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const [languageOverride, setLanguageOverride] = useState<string | undefined>(
     () => getFileTabState(workspaceIdRaw, filePathRaw)?.language,
   );
+
+  // FileViewer reports its Save + markdown-toggle availability here; the file
+  // leaf lifts those (plus "View changes") into the dockview group header so
+  // the tab content carries no toolbar (#643).
+  const [fileActions, setFileActions] = useState<{
+    isDirty: boolean;
+    canSave: boolean;
+    saving: boolean;
+    save: () => void;
+    showMarkdownToggle: boolean;
+  } | null>(null);
 
   const handleEditorView = useCallback(
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
@@ -905,6 +972,81 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
+  // Publish this file leaf's actions (markdown toggle, Save, View changes) to
+  // the group header — the FileViewer's own title bar is hidden (#643).
+  const canViewDiff = !untitled && !external;
+  usePublishHeaderActions(
+    api.id,
+    workspaceIdRaw && filePathRaw
+      ? () => (
+          <div className="flex items-center gap-0.5">
+            {fileActions?.showMarkdownToggle && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode("preview");
+                    updateFileTabState(workspaceIdRaw, filePathRaw, { viewMode: "preview" });
+                  }}
+                  title="Preview"
+                  data-testid="center-file-leaf__view--preview"
+                  className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                    viewMode !== "source" ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <Eye className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode("source");
+                    updateFileTabState(workspaceIdRaw, filePathRaw, { viewMode: "source" });
+                  }}
+                  title="Source"
+                  data-testid="center-file-leaf__view--source"
+                  className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                    viewMode === "source" ? "bg-accent text-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <Code className="size-3.5" />
+                </button>
+              </>
+            )}
+            {fileActions?.canSave && fileActions.isDirty && (
+              <button
+                type="button"
+                onClick={() => fileActions.save()}
+                disabled={fileActions.saving}
+                title="Save (Cmd+S)"
+                data-testid="center-file-leaf__save"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                {fileActions.saving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+              </button>
+            )}
+            {canViewDiff && (
+              <button
+                type="button"
+                onClick={() =>
+                  getWorkspaceLeafActions(workspaceIdRaw)?.openDiff(filePathRaw, { preview: false })
+                }
+                title="View changes"
+                data-testid="center-file-leaf__view-diff"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <GitCompare className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )
+      : null,
+    [fileActions, viewMode, canViewDiff, workspaceIdRaw, filePathRaw],
+  );
+
   if (!params.workspaceId || !params.filePath) return null;
   const workspaceId = params.workspaceId;
   const filePath = params.filePath;
@@ -931,21 +1073,14 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // tabs save in place (FileViewer handles that itself), so only wire
         // `onSaveAs` when this is an untitled buffer and the shell can save.
         onSaveAs={untitled && pickSaveFile ? handleSaveAs : undefined}
-        // "View changes" jumps to the file's diff leaf — the inverse of the diff
-        // leaf's "Edit" button. Not offered for untitled/external buffers (no
-        // workspace-relative diff target).
-        onViewDiff={
-          untitled || external
-            ? undefined
-            : () => getWorkspaceLeafActions(workspaceId)?.openDiff(filePath, { preview: false })
-        }
-        // Show the full workspace-relative path in the title bar (left), like
-        // the diff leaf. The title bar keeps its right-aligned action buttons
-        // (save, format, markdown toggle, language, view-changes). Nav arrows
-        // stay hidden (no onGoBack/onGoForward passed).
+        // The tab content carries no toolbar: hide FileViewer's title bar and
+        // lift its Save + markdown toggle into the group header via
+        // `onActionsChange` (see `usePublishHeaderActions` above).
+        hideTitleBar
+        onActionsChange={setFileActions}
         // Markdown files get a code/preview toggle in the title bar; the
         // preview reuses the shared MarkdownPreview renderer.
-        renderMarkdown={(content) => <MarkdownPreview content={content} />}
+        renderMarkdown={renderMarkdownPreview}
         onEditorView={handleEditorView}
         toolbar={searchBar}
         // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
@@ -1034,6 +1169,66 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     refetchInterval: visible ? 10_000 : false,
   });
 
+  // Publish this diff leaf's actions (view toggle, open-for-edit, revert) to the
+  // group header — the tab content itself carries no toolbar (#643).
+  const canRevert = !!adapter.revertFile;
+  usePublishHeaderActions(
+    api.id,
+    workspaceId && filePath
+      ? () => (
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setMode("unified")}
+              aria-pressed={viewMode === "unified"}
+              title="Unified view"
+              data-testid="center-diff-leaf__view--unified"
+              className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <AlignJustify className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("split")}
+              aria-pressed={viewMode === "split"}
+              title="Side-by-side view"
+              data-testid="center-diff-leaf__view--split"
+              className={`inline-flex size-7 items-center justify-center rounded transition-colors hover:bg-accent ${
+                viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <Columns2 className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+              }
+              title="Open file for editing"
+              data-testid="center-diff-leaf__open-file"
+              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <SquarePen className="size-3.5" />
+            </button>
+            {canRevert && (
+              <button
+                type="button"
+                onClick={() => setRevertOpen(true)}
+                title="Revert file"
+                data-testid="center-diff-leaf__revert"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )
+      : null,
+    [viewMode, workspaceId, filePath, canRevert],
+  );
+
   if (!workspaceId || !filePath) return null;
 
   const diff = fileDiffQuery.data?.diff;
@@ -1045,65 +1240,6 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {/* Header: full file path (left) + view toggle & file actions, icon-only
-          (right). The toggle shares the `band:diff-view-mode` pref with DiffView. */}
-      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
-        <span
-          className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
-          title={filePath}
-          data-testid="center-diff-leaf__path"
-        >
-          {filePath}
-        </span>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => setMode("unified")}
-            aria-pressed={viewMode === "unified"}
-            title="Unified view"
-            data-testid="center-diff-leaf__view--unified"
-            className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
-              viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            <AlignJustify className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("split")}
-            aria-pressed={viewMode === "split"}
-            title="Side-by-side view"
-            data-testid="center-diff-leaf__view--split"
-            className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
-              viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            <Columns2 className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
-            }
-            title="Open file for editing"
-            data-testid="center-diff-leaf__open-file"
-            className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <SquarePen className="size-3.5" />
-          </button>
-          {adapter.revertFile && (
-            <button
-              type="button"
-              onClick={() => setRevertOpen(true)}
-              title="Revert file"
-              data-testid="center-diff-leaf__revert"
-              className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <RotateCcw className="size-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
       {searchBar}
       <div className="min-h-0 flex-1 overflow-auto">
         {diff ? (
@@ -1701,6 +1837,18 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     return () => d.dispose();
   }, [props.api, props.containerApi]);
 
+  // Re-render when the active tab changes (in any group) or a leaf republishes
+  // its header actions, so this group's active-tab actions stay current.
+  const [, bumpActions] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    const d = props.containerApi.onDidActivePanelChange(() => bumpActions());
+    window.addEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+    return () => {
+      d.dispose();
+      window.removeEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+    };
+  }, [props.containerApi]);
+
   // Edge groups don't maximize — the add menu (left slot) is enough there.
   if (!isGridGroup) return null;
 
@@ -1711,8 +1859,13 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const MaxIcon = isMaximized ? Minimize2 : Maximize2;
   const maxLabel = isMaximized ? "Restore" : "Maximize";
 
+  // The active tab's own action buttons render to the LEFT of Maximize.
+  const activeId = props.group.activePanel?.id;
+  const renderLeafActions = activeId ? leafHeaderActionsByPanelId.get(activeId) : undefined;
+
   return (
-    <div className="flex h-full items-center px-1" data-testid="workspace-center__toolbar">
+    <div className="flex h-full items-center gap-0.5 px-1" data-testid="workspace-center__toolbar">
+      {renderLeafActions?.()}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -2288,11 +2441,11 @@ export function WorkspaceCenterDockview({
       }
       // Restored `file` / `diff` leaves are pure client views with no server
       // record — leave them exactly as they were persisted (do NOT prune).
-      // Guarantee at least one chat leaf survives — if every chat was pruned
-      // (all server records gone), the workspace would otherwise show only the
-      // restored file/diff leaves (or nothing). Mirrors the legacy all-orphaned
-      // fallback.
-      if (!api.panels.some((p) => (p.api.component as LeafKind) === "chat")) {
+      // Only seed a fresh chat when the dockview would otherwise be EMPTY (an
+      // empty grid has no tab strip to reopen from). A workspace with terminals
+      // or file/diff leaves but no chat is intentional — a user who closed the
+      // chat should not have it forced back on the next reload (#643).
+      if (api.panels.length === 0) {
         const chatId = newChatId();
         markChatFresh(chatId);
         addChatLeaf(api, workspaceId, chatId);
