@@ -1,8 +1,15 @@
 import {
+  Button,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -64,6 +71,7 @@ import {
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
+import type { TabFileState } from "../hooks/useTabState";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -543,6 +551,64 @@ function basename(filePath: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Per-file editor-state persistence (localStorage) — FRESH reads/writes
+// ---------------------------------------------------------------------------
+//
+// Format-compatible with mobile's `useTabState` (same `band-tab-state:<ws>`
+// key + `TabFileState` shape). But `useTabState` caches its state in a
+// per-instance `useRef` loaded once from localStorage, and dockview renders
+// the tab header (`FileTab`) and the leaf content (`FileLeaf`) as SEPARATE
+// React trees — so a `useTabState` instance in one is invisible to the other.
+// These module-level helpers read/write localStorage FRESH on every call,
+// sidestepping that cross-instance staleness while staying interoperable with
+// mobile's store.
+// ---------------------------------------------------------------------------
+
+const TAB_STATE_KEY = (ws: string): string => `band-tab-state:${ws}`;
+
+function readTabStates(ws: string): Record<string, TabFileState> {
+  try {
+    const raw = localStorage.getItem(TAB_STATE_KEY(ws));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return {};
+    return parsed as Record<string, TabFileState>;
+  } catch {
+    return {};
+  }
+}
+
+function writeTabStates(ws: string, states: Record<string, TabFileState>): void {
+  try {
+    localStorage.setItem(TAB_STATE_KEY(ws), JSON.stringify(states));
+  } catch {
+    // storage unavailable — best-effort
+  }
+}
+
+function getFileTabState(ws: string, path: string): TabFileState | undefined {
+  return readTabStates(ws)[path];
+}
+
+function updateFileTabState(ws: string, path: string, patch: Partial<TabFileState>): void {
+  const states = readTabStates(ws);
+  states[path] = { ...(states[path] ?? {}), ...patch };
+  writeTabStates(ws, states);
+}
+
+function isFileDirty(ws: string, path: string): boolean {
+  return getFileTabState(ws, path)?.editedContent != null;
+}
+
+function removeFileTabState(ws: string, path: string): void {
+  const states = readTabStates(ws);
+  if (path in states) {
+    delete states[path];
+    writeTabStates(ws, states);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Self-contained find-in-file for the file / diff leaves
 // ---------------------------------------------------------------------------
 //
@@ -636,6 +702,9 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
   );
 
   if (!params.workspaceId || !params.filePath) return null;
+  const workspaceId = params.workspaceId;
+  const filePath = params.filePath;
+  const persisted = getFileTabState(workspaceId, filePath);
   return (
     <div
       ref={containerRef}
@@ -643,12 +712,12 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
       <FileViewer
-        workspaceId={params.workspaceId}
-        filePath={params.filePath}
+        workspaceId={workspaceId}
+        filePath={filePath}
         line={params.line}
         column={params.column}
         editable
-        external={params.external ?? params.filePath.startsWith("/")}
+        external={params.external ?? filePath.startsWith("/")}
         // The dockview tab already shows the filename (full path on hover), so
         // hide only FileViewer's redundant path/size label — keep the title bar
         // and its action buttons (save, format, markdown code/preview toggle,
@@ -659,6 +728,28 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
         renderMarkdown={(content) => <MarkdownPreview content={content} />}
         onEditorView={handleEditorView}
         toolbar={searchBar}
+        // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
+        // from the fresh module-level store and write back on every change so a
+        // reload restores unsaved edits, the markdown code/preview choice, and
+        // the manual language override. The dirty CustomEvent lets the tab
+        // header (a separate React tree) re-check its dirty dot.
+        //
+        // Cursor/scroll `editorState` persistence is DEFERRED: FileViewer
+        // exposes no `onEditorStateChange`-style callback to capture it, and we
+        // deliberately don't fabricate one here.
+        initialEditedContent={persisted?.editedContent ?? null}
+        onEditedContentChange={(content) => {
+          updateFileTabState(workspaceId, filePath, {
+            editedContent: content ?? undefined,
+          });
+          window.dispatchEvent(new CustomEvent("band:dirty-change"));
+        }}
+        viewMode={persisted?.viewMode}
+        onViewModeChange={(mode) => updateFileTabState(workspaceId, filePath, { viewMode: mode })}
+        languageOverride={persisted?.language}
+        onLanguageOverrideChange={(languageId) =>
+          updateFileTabState(workspaceId, filePath, { language: languageId })
+        }
       />
     </div>
   );
@@ -1186,6 +1277,17 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
   const isPreview = useTabPreview(props.api);
   const title = basename(filePath);
 
+  // Dirty indicator. `FileLeaf` (a separate dockview React tree) dispatches
+  // `band:dirty-change` on every edited-content change; re-read the fresh
+  // per-file store when that fires. Seeded synchronously so a restored dirty
+  // file shows the dot immediately on mount.
+  const [dirty, setDirty] = useState(() => isFileDirty(workspaceId, filePath));
+  useEffect(() => {
+    const recheck = () => setDirty(isFileDirty(workspaceId, filePath));
+    window.addEventListener("band:dirty-change", recheck);
+    return () => window.removeEventListener("band:dirty-change", recheck);
+  }, [workspaceId, filePath]);
+
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -1207,6 +1309,22 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
             {title}
           </span>
         </div>
+        {/* VS Code-style close slot. When the file is dirty and the tab is NOT
+            active, render a filled dot in the same slot as the close X: the dot
+            is visible at rest and fades out on hover (`group-hover:opacity-0`),
+            while the X (via `closeButtonClass` on an inactive tab:
+            `opacity-0 group-hover:opacity-100`) fades in on hover — so they
+            swap cleanly. On the active tab the X is always shown (opacity-70),
+            so the dot is suppressed entirely to avoid overlapping the X. */}
+        {dirty && !isActive ? (
+          <span
+            aria-hidden
+            data-testid={`center-file-tab__dirty--${filePath}`}
+            className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center opacity-100 transition-opacity group-hover:opacity-0"
+          >
+            <span className="size-2 rounded-full bg-foreground/70" />
+          </span>
+        ) : null}
         <button
           type="button"
           className={closeButtonClass(isActive)}
@@ -1471,6 +1589,10 @@ export function WorkspaceCenterDockview({
   const previewFileIdRef = useRef<string | null>(null);
   const previewDiffIdRef = useRef<string | null>(null);
 
+  // Close-confirm for a dirty file leaf: holds the pending {id, path} while the
+  // "Unsaved changes" dialog is open, or null when no confirm is in flight.
+  const [pendingClose, setPendingClose] = useState<{ id: string; path: string } | null>(null);
+
   const { data: initialData } = useQuery<CenterLayoutData>({
     queryKey: centerLayoutKey(workspaceId),
     queryFn: async () => {
@@ -1608,25 +1730,51 @@ export function WorkspaceCenterDockview({
     [workspaceId],
   );
 
-  const handleClose = useCallback((id: string, kind: LeafKind) => {
-    const api = apiRef.current;
-    if (!api) return;
-    // Never close the last remaining tab — the workspace center must always
-    // hold at least one leaf (an empty dockview has no tab strip to reopen from).
-    if (api.panels.length <= 1) return;
-    selectNeighbourBeforeRemove(api, id);
-    const panel = api.getPanel(id);
-    if (panel) api.removePanel(panel);
-    if (kind === "term") {
-      disposeTerminal(id);
-      trpc.terminal.kill.mutate({ terminalId: id }).catch(() => {});
-    } else if (kind === "chat") {
-      trpc.chats.remove.mutate({ chatId: id }).catch(() => {});
-    } else if (kind === "browser") {
-      trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
-    }
-    // file / diff leaves are pure client views — no server mutation on close.
-  }, []);
+  // Actually remove a leaf (panel + any server-side instance). Shared by the
+  // normal close path and the "Close without saving" confirm button. For a
+  // `file` leaf, also drop its persisted editor state so the next open starts
+  // clean (mirrors mobile's `removeFile` on tab close).
+  const doCloseLeaf = useCallback(
+    (id: string, kind: LeafKind) => {
+      const api = apiRef.current;
+      if (!api) return;
+      selectNeighbourBeforeRemove(api, id);
+      const panel = api.getPanel(id);
+      if (panel) api.removePanel(panel);
+      if (kind === "term") {
+        disposeTerminal(id);
+        trpc.terminal.kill.mutate({ terminalId: id }).catch(() => {});
+      } else if (kind === "chat") {
+        trpc.chats.remove.mutate({ chatId: id }).catch(() => {});
+      } else if (kind === "browser") {
+        trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
+      } else if (kind === "file") {
+        removeFileTabState(workspaceId, id.slice(5));
+      }
+      // file / diff leaves are otherwise pure client views — no server mutation.
+    },
+    [workspaceId],
+  );
+
+  const handleClose = useCallback(
+    (id: string, kind: LeafKind) => {
+      const api = apiRef.current;
+      if (!api) return;
+      // Never close the last remaining tab — the workspace center must always
+      // hold at least one leaf (an empty dockview has no tab strip to reopen from).
+      if (api.panels.length <= 1) return;
+      // Closing a dirty file prompts first; the confirm button does the removal.
+      if (kind === "file") {
+        const path = id.slice(5); // strip the `file:` prefix
+        if (isFileDirty(workspaceId, path)) {
+          setPendingClose({ id, path });
+          return;
+        }
+      }
+      doCloseLeaf(id, kind);
+    },
+    [workspaceId, doCloseLeaf],
+  );
 
   // ---- open a per-path file / diff leaf (driven by the right sidepanel) ----
   const handleOpenFile = useCallback(
@@ -2143,6 +2291,36 @@ export function WorkspaceCenterDockview({
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
+
+      {/* Unsaved-changes confirm for a dirty file leaf. Mirrors the mobile
+          FileTabBar confirm: Cancel keeps the tab, "Close without saving"
+          removes the panel and drops the persisted edited content (via
+          `doCloseLeaf` → `removeFileTabState`). */}
+      <Dialog open={pendingClose !== null} onOpenChange={(open) => !open && setPendingClose(null)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogDescription>
+              {pendingClose ? basename(pendingClose.path) : ""} has unsaved changes. Close without
+              saving?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingClose(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingClose) doCloseLeaf(pendingClose.id, "file");
+                setPendingClose(null);
+              }}
+            >
+              Close without saving
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
