@@ -2483,7 +2483,7 @@ export class WorkspacePage {
             }
           }
         }
-        const active = activeId && activeId.startsWith("file:") ? activeId.slice(5) : null;
+        const active = activeId?.startsWith("file:") ? activeId.slice(5) : null;
         return { tabs, active };
       } catch {
         return null;
