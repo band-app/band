@@ -22,7 +22,9 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import {
+  AlignJustify,
   ClipboardCopy,
+  Columns2,
   FileCode,
   GitCompare,
   Globe,
@@ -51,10 +53,13 @@ import {
   type ChatInsertDetail,
   DiffFileContent,
   FileViewer,
+  getStoredViewMode,
+  storeViewMode,
   type TerminalInsertDetail,
   useAdapter,
   useDiffTarget,
   useWorkspacePath,
+  type ViewMode,
 } from "@/dashboard";
 import { writeClipboardText } from "../lib/clipboard";
 import {
@@ -556,10 +561,21 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
   );
 }
 
+// Full-file context: `getFileDiff`'s max contextLines renders the whole file
+// with the changes in place (not just the changed hunks) — matches DiffView's
+// "Show full file" step.
+const FULL_FILE_CONTEXT = 99999;
+
 function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath } = params;
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
+
+  const setMode = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    storeViewMode(mode);
+  }, []);
 
   const summaryQuery = useQuery({
     queryKey: ["diffLeafSummary", workspaceId, diffMode, compareBranch],
@@ -581,6 +597,9 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
         workspaceId,
         filePath,
         mergeBase: mergeBase ?? "",
+        // Show the full file, with the diff in place — clicking a changed file
+        // opens its whole contents, not just the changed hunks.
+        contextLines: FULL_FILE_CONTEXT,
       }),
     enabled: !!workspaceId && !!filePath && !!mergeBase,
   });
@@ -592,16 +611,46 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-auto"
+      className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {diff ? (
-        <DiffFileContent hunks={diff} filename={filePath} viewMode="unified" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-          {loading ? "Loading diff…" : "No changes"}
-        </div>
-      )}
+      {/* Split / unified toggle (shares the `band:diff-view-mode` preference
+          with the standalone DiffView). */}
+      <div className="flex h-8 shrink-0 items-center justify-end gap-0.5 border-b border-border px-2">
+        <button
+          type="button"
+          onClick={() => setMode("unified")}
+          aria-pressed={viewMode === "unified"}
+          title="Unified view"
+          data-testid="center-diff-leaf__view--unified"
+          className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
+            viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <AlignJustify className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("split")}
+          aria-pressed={viewMode === "split"}
+          title="Side-by-side view"
+          data-testid="center-diff-leaf__view--split"
+          className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
+            viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <Columns2 className="size-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {diff ? (
+          <DiffFileContent hunks={diff} filename={filePath} viewMode={viewMode} />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+            {loading ? "Loading diff…" : "No changes"}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

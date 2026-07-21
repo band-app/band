@@ -76,7 +76,9 @@ export type ViewMode = DiffViewMode;
 
 const VIEW_MODE_KEY = "band:diff-view-mode";
 
-function getStoredViewMode(): ViewMode {
+/** Read the persisted split/unified diff preference (shared with the center
+ *  `diff` leaf so both honor one setting). */
+export function getStoredViewMode(): ViewMode {
   try {
     const v = localStorage.getItem(VIEW_MODE_KEY);
     if (v === "split" || v === "unified") return v;
@@ -84,7 +86,8 @@ function getStoredViewMode(): ViewMode {
   return "unified";
 }
 
-function storeViewMode(mode: ViewMode) {
+/** Persist the split/unified diff preference. */
+export function storeViewMode(mode: ViewMode) {
   try {
     localStorage.setItem(VIEW_MODE_KEY, mode);
   } catch {}

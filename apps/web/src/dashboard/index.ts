@@ -13,7 +13,14 @@ export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
 export { CommitDialog } from "./components/CommitDialog";
 export { DashboardShell } from "./components/DashboardShell";
-export { DiffFileContent, type DiffStats, DiffView, type ViewMode } from "./components/DiffView";
+export {
+  DiffFileContent,
+  type DiffStats,
+  DiffView,
+  getStoredViewMode,
+  storeViewMode,
+  type ViewMode,
+} from "./components/DiffView";
 export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
