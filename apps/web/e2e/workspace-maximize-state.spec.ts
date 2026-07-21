@@ -77,14 +77,10 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-// Each test starts on a clean slate so it doesn't observe state another
-// test wrote. `beforeEach` clears the per-workspace localStorage entries
-// — the shared layout key is left alone so the default dockview
-// structure (which the maximize feature reads on first load) is still
-// seeded by the previous test's onReady. This matches the doctrine's
-// "test independence" rule from §7 of the doctrine: each test gets a
-// fresh page (Playwright default) and we clear the per-test surface we
-// care about explicitly.
+// Each test starts on a clean slate so it doesn't observe state another test
+// wrote. `beforeEach` clears each workspace's persisted center layout — which
+// now carries the maximize state — so a test rebuilds the default dockview on
+// first load rather than inheriting a prior test's maximized/persisted layout.
 test.beforeEach(async ({ page }) => {
   // The page hasn't navigated yet so localStorage isn't accessible
   // until we go to ANY page in the origin. Land on the workspace URL
@@ -104,13 +100,6 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-// TODO(#643 Phase 5): the maximized-group id now persists to the v9 layout blob
-// (readMaximizedGroup reads it, verified), but re-APPLYING the maximize to the
-// UI on remount is an unresolved dockview timing issue — `group.api.maximize()`
-// in onReady/rAF records state but the group doesn't visibly maximize after a
-// full page load. Re-enable once the restore reliably re-maximizes on mount.
-// (The AC that relies on the removed per-group active-view model also needs
-// repointing to the grid `activeView` in the v9 blob.)
 test.describe("Workspace maximize state (issue #490)", () => {
   test("AC1 + regression — maximizing in A, switching to B, and switching back to A restores A's maximize without contaminating B", async ({
     page,
