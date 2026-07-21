@@ -201,10 +201,20 @@ export function getWorkspaceLeafActions(workspaceId: string | null): LeafActions
 }
 
 // ---------------------------------------------------------------------------
-// Per-workspace layout persistence (localStorage, clean break at v8)
+// Per-workspace layout persistence (localStorage)
 // ---------------------------------------------------------------------------
+//
+// Bumped v8 → v9 for Phase 2: v8 layouts (written during Phase 1) held `files`
+// / `changes` singleton panels whose component types no longer exist, so
+// restoring one would render an unregistered component and crash. Clean break —
+// stale v8 blobs are simply ignored and a default layout is rebuilt.
 
-const LAYOUT_KEY_PREFIX = "band:dockview-layout-v8:";
+const LAYOUT_KEY_PREFIX = "band:dockview-layout-v9:";
+
+// Leaf component names this dockview can actually render. A saved layout that
+// references anything else (a removed kind, a hand-edited blob) is sanitized on
+// load so `fromJSON` never instantiates a panel we can't mount.
+const KNOWN_LEAF_COMPONENTS = new Set<string>(["chat", "term", "browser", "file", "diff"]);
 
 function layoutKey(workspaceId: string): string {
   return `${LAYOUT_KEY_PREFIX}${workspaceId}`;
@@ -214,6 +224,43 @@ function isDockviewLayout(obj: unknown): boolean {
   if (typeof obj !== "object" || obj === null) return false;
   const o = obj as Record<string, unknown>;
   return typeof o.grid === "object" && typeof o.panels === "object";
+}
+
+/** Recursively strip a set of view ids from a dockview grid branch. */
+function pruneGridViews(node: unknown, removed: Set<string>): void {
+  if (!node || typeof node !== "object") return;
+  const n = node as Record<string, unknown>;
+  const data = n.data as { views?: string[]; activeView?: string } | undefined;
+  if (data && Array.isArray(data.views)) {
+    data.views = data.views.filter((v) => !removed.has(v));
+    if (data.activeView && removed.has(data.activeView)) data.activeView = data.views[0];
+  }
+  if (Array.isArray(n.children)) {
+    for (const child of n.children) pruneGridViews(child, removed);
+  }
+}
+
+/** Drop panels whose `component` isn't a renderable leaf kind (e.g. a stale
+ *  `files`/`changes` singleton from an older layout) so `fromJSON` can't mount
+ *  an unregistered component. Mutates + returns the layout clone. */
+function sanitizeSavedLayout(layout: Record<string, unknown>): Record<string, unknown> {
+  const panels = layout.panels as Record<string, { component?: string }> | undefined;
+  if (!panels) return layout;
+  const removed = new Set<string>();
+  for (const [id, panel] of Object.entries(panels)) {
+    if (!panel?.component || !KNOWN_LEAF_COMPONENTS.has(panel.component)) {
+      removed.add(id);
+      delete panels[id];
+    }
+  }
+  if (removed.size > 0) {
+    const grid = layout.grid as { root?: unknown } | undefined;
+    if (grid?.root) pruneGridViews(grid.root, removed);
+    if (typeof layout.activePanel === "string" && removed.has(layout.activePanel)) {
+      layout.activePanel = undefined;
+    }
+  }
+  return layout;
 }
 
 /** Serialize structure only — runtime params (callbacks, urls) are re-derived
@@ -1541,7 +1588,7 @@ export function WorkspaceCenterDockview({
         try {
           api.fromJSON(
             // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON requires any
-            reinjectParams(saved, workspaceId, data.urls) as any,
+            reinjectParams(sanitizeSavedLayout(saved), workspaceId, data.urls) as any,
           );
           reconcile(api, data);
         } catch (err) {

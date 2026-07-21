@@ -8,13 +8,6 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import {
-  FolderOpen,
-  GitCompare,
-  Globe,
-  MessageSquare,
-  Terminal as TerminalIcon,
-} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resizable-panels";
 import {
@@ -22,17 +15,11 @@ import {
   DashboardShell,
   useDashboardStore,
   useSettingsQuery,
-  useUpdateSettings,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import {
-  NavControls,
-  type PanelItem,
-  SidebarTitleBar,
-  WorkspaceTitleBar,
-} from "../components/DesktopTitleBar";
+import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -300,13 +287,6 @@ function ZoomSync() {
 }
 
 function AppShell() {
-  const { settings } = useSettingsQuery();
-  const updateSettings = useUpdateSettings();
-  const hiddenPanels = useMemo(
-    () =>
-      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
-    [settings],
-  );
   // Show desktop split layout when:
   // - In a regular browser on a wide screen, OR
   // - Inside the desktop shell (always full-editor since side-panel mode was extracted)
@@ -382,20 +362,6 @@ function AppShell() {
     // deps — see the comment on the setActiveWorkspace effect above.
   }, []);
 
-  // Panel items for the title bar panel switcher dropdown
-  const panelItems: PanelItem[] = useMemo(
-    () => [
-      { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "⌃⌘I" },
-      { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⇧⌘G" },
-      { id: "files", label: "Files", icon: FolderOpen, shortcut: "⇧⌘E" },
-      { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌃`" },
-      // Browser pane works on both desktop (native webviews) and web (CDP
-      // screencast of the desktop app's tabs — see ScreencastPanel).
-      { id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" },
-    ],
-    [],
-  );
-
   // Copy the workspace path to clipboard
   const handleCopyPath = useCallback(() => {
     if (!workspacePath) return;
@@ -409,29 +375,6 @@ function AppShell() {
   const handleWorkspaceNameClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("band:open-workspace-picker"));
   }, []);
-
-  // Toggle panel visibility on/off (persisted in settings)
-  const handleTogglePanelVisibility = useCallback(
-    (panelId: string) => {
-      const current =
-        ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ??
-        [];
-      const isHidden = current.includes(panelId);
-      const next = isHidden ? current.filter((id) => id !== panelId) : [...current, panelId];
-      updateSettings.mutate({
-        ...settings,
-        hiddenPanels: next,
-      } as typeof settings);
-      // If the panel is being shown, activate it
-      if (isHidden) {
-        // Dispatch after a tick so the layout has time to add the panel
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("band:activate-panel", { detail: { panelId } }));
-        }, 100);
-      }
-    },
-    [settings, updateSettings],
-  );
 
   // ──────────────────────────────────────────────────────────────────────
   // Project-list sidebar (separate from the dockview). Collapsing/expanding
@@ -451,8 +394,11 @@ function AppShell() {
   const mainElRef = useRef<HTMLDivElement | null>(null);
 
   // Right sidepanel (Explorer + Changes) — mirrors the sidebar plumbing above.
+  // It lives in a nested group inside the main column, so its toggle animates
+  // against the inner `center` panel element, not the outer `main`.
   const rightPanelRef = usePanelRef();
   const rightPanelElRef = useRef<HTMLDivElement | null>(null);
+  const centerElRef = useRef<HTMLDivElement | null>(null);
   const rightInit = useRef({
     collapsed: loadRightPanelCollapsed(),
     width: loadRightPanelWidth(),
@@ -475,21 +421,25 @@ function AppShell() {
 
   // Memoized at mount — values come from an immutable ref, and `<Group>`
   // only reads `defaultLayout` on its first render.
-  const sidebarDefaultLayout = useMemo(() => {
-    const sidebarW = sidebarInit.current.collapsed ? 0 : (sidebarInit.current.width ?? 18);
-    const rightW = rightInit.current.collapsed ? 0 : (rightInit.current.width ?? 22);
-    // When both panels fall back to library defaults (no persisted width and
-    // both visible) there's no reason to force a layout — let the panels size
-    // themselves from their `defaultSize`/`minSize`. Only supply an explicit
-    // 3-key layout once the user has customised or collapsed something.
-    const hasCustom =
-      sidebarInit.current.collapsed ||
-      rightInit.current.collapsed ||
-      sidebarInit.current.width != null ||
-      rightInit.current.width != null;
-    if (!hasCustom) return undefined;
-    const main = Math.max(0, 100 - sidebarW - rightW);
-    return { sidebar: sidebarW, main, rightpanel: rightW };
+  const sidebarDefaultLayout = useMemo(
+    () =>
+      sidebarInit.current.collapsed
+        ? { sidebar: 0, main: 100 }
+        : sidebarInit.current.width
+          ? { sidebar: sidebarInit.current.width, main: 100 - sidebarInit.current.width }
+          : undefined,
+    [],
+  );
+
+  // The right sidepanel lives in a NESTED [center | rightpanel] group inside the
+  // main column, BELOW the workspace title bar — so it aligns with the dockview
+  // content, not the title-bar row. This is that inner group's initial layout.
+  const centerDefaultLayout = useMemo(() => {
+    if (rightInit.current.collapsed) return { center: 100, rightpanel: 0 };
+    if (rightInit.current.width != null) {
+      return { center: 100 - rightInit.current.width, rightpanel: rightInit.current.width };
+    }
+    return undefined;
   }, []);
 
   // Skip the first layout callback: it fires during mount with the restored
@@ -499,22 +449,16 @@ function AppShell() {
   // so coalesce the persist to at most one localStorage write per frame.
   const pendingSidebarWidthRef = useRef<number | null>(null);
   const sidebarWidthRafRef = useRef<number | null>(null);
-  const pendingRightWidthRef = useRef<number | null>(null);
   const handleSidebarLayoutChanged = useCallback((layout: Record<string, number>) => {
     if (skipFirstSidebarLayout.current) {
       skipFirstSidebarLayout.current = false;
       return;
     }
-    // Only persist real (visible) widths — a 0 here means the panel is
+    // Only persist a real (visible) width — a 0 here means the panel is
     // collapsed, and storing that would lose the user's chosen width on the
-    // next expand. Coalesce both panels' writes into a single RAF.
-    if (layout.sidebar != null && layout.sidebar > 0) {
-      pendingSidebarWidthRef.current = layout.sidebar;
-    }
-    if (layout.rightpanel != null && layout.rightpanel > 0) {
-      pendingRightWidthRef.current = layout.rightpanel;
-    }
-    if (pendingSidebarWidthRef.current == null && pendingRightWidthRef.current == null) return;
+    // next expand.
+    if (layout.sidebar == null || layout.sidebar <= 0) return;
+    pendingSidebarWidthRef.current = layout.sidebar;
     if (sidebarWidthRafRef.current != null) return;
     sidebarWidthRafRef.current = requestAnimationFrame(() => {
       sidebarWidthRafRef.current = null;
@@ -522,6 +466,24 @@ function AppShell() {
         saveSidebarWidth(pendingSidebarWidthRef.current);
         pendingSidebarWidthRef.current = null;
       }
+    });
+  }, []);
+
+  // The nested center|rightpanel group persists the right panel's width, same
+  // RAF-coalesced pattern as the sidebar above.
+  const skipFirstCenterLayout = useRef(true);
+  const pendingRightWidthRef = useRef<number | null>(null);
+  const rightWidthRafRef = useRef<number | null>(null);
+  const handleCenterLayoutChanged = useCallback((layout: Record<string, number>) => {
+    if (skipFirstCenterLayout.current) {
+      skipFirstCenterLayout.current = false;
+      return;
+    }
+    if (layout.rightpanel == null || layout.rightpanel <= 0) return;
+    pendingRightWidthRef.current = layout.rightpanel;
+    if (rightWidthRafRef.current != null) return;
+    rightWidthRafRef.current = requestAnimationFrame(() => {
+      rightWidthRafRef.current = null;
       if (pendingRightWidthRef.current != null) {
         saveRightPanelWidth(pendingRightWidthRef.current);
         pendingRightWidthRef.current = null;
@@ -616,7 +578,7 @@ function AppShell() {
     const right = rightPanelElRef.current;
     if (!right) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const els = [right, mainElRef.current];
+    const els = [right, centerElRef.current];
     for (const el of els) {
       if (el)
         el.style.transition =
@@ -682,6 +644,7 @@ function AppShell() {
   useEffect(
     () => () => {
       if (sidebarWidthRafRef.current != null) cancelAnimationFrame(sidebarWidthRafRef.current);
+      if (rightWidthRafRef.current != null) cancelAnimationFrame(rightWidthRafRef.current);
     },
     [],
   );
@@ -772,39 +735,50 @@ function AppShell() {
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}
                   onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
                   onWorkspaceNameClick={activeWorkspaceId ? handleWorkspaceNameClick : undefined}
-                  panelItems={activeWorkspaceId ? panelItems : undefined}
-                  hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
-                  onTogglePanelVisibility={
-                    activeWorkspaceId ? handleTogglePanelVisibility : undefined
-                  }
+                  onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
+                  rightPanelVisible={rightVisible}
                 />
-                {/* `relative` anchors SharedDockviewLayout's `absolute inset-0`
-                    overlay to the area BELOW the title bar. */}
-                <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
-                  <Outlet />
-                  <SharedDockviewLayout />
-                  <BrowserHostBridge />
+                {/* Below the title bar the dockview and the right sidepanel share
+                    one horizontal row, so the sidepanel aligns with the dockview
+                    content rather than spanning up alongside the title-bar row. */}
+                <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+                  <Group
+                    orientation="horizontal"
+                    defaultLayout={centerDefaultLayout}
+                    onLayoutChanged={handleCenterLayoutChanged}
+                    className="h-full w-full"
+                  >
+                    <Panel id="center" elementRef={centerElRef} minSize="30%">
+                      {/* `relative` anchors SharedDockviewLayout's `absolute
+                          inset-0` overlay to the dockview area. */}
+                      <div className="h-full min-w-0 overflow-hidden relative">
+                        <Outlet />
+                        <SharedDockviewLayout />
+                        <BrowserHostBridge />
+                      </div>
+                    </Panel>
+                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                    <Panel
+                      id="rightpanel"
+                      panelRef={rightPanelRef}
+                      elementRef={rightPanelElRef}
+                      defaultSize={RIGHT_PANEL_MIN_SIZE}
+                      minSize={RIGHT_PANEL_MIN_SIZE}
+                      maxSize={RIGHT_PANEL_MAX_SIZE}
+                      collapsible
+                      collapsedSize="0%"
+                      onResize={handleRightResize}
+                    >
+                      <div
+                        className="h-full flex flex-col overflow-hidden border-l border-border bg-sidebar"
+                        data-testid="app-shell__right-panel"
+                        data-visible={rightVisible ? "true" : "false"}
+                      >
+                        <RightSidepanel visible={rightVisible} />
+                      </div>
+                    </Panel>
+                  </Group>
                 </div>
-              </div>
-            </Panel>
-            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-            <Panel
-              id="rightpanel"
-              panelRef={rightPanelRef}
-              elementRef={rightPanelElRef}
-              defaultSize={RIGHT_PANEL_MIN_SIZE}
-              minSize={RIGHT_PANEL_MIN_SIZE}
-              maxSize={RIGHT_PANEL_MAX_SIZE}
-              collapsible
-              collapsedSize="0%"
-              onResize={handleRightResize}
-            >
-              <div
-                className="h-full flex flex-col overflow-hidden border-l border-border bg-sidebar"
-                data-testid="app-shell__right-panel"
-                data-visible={rightVisible ? "true" : "false"}
-              >
-                <RightSidepanel visible={rightVisible} />
               </div>
             </Panel>
           </Group>

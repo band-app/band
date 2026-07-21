@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, GitCompare } from "lucide-react";
+import type React from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
   ChangesFileTree,
@@ -43,12 +44,14 @@ const EMPTY_STATUSES: Record<string, FileStatus> = {};
 
 function TabButton({
   label,
+  icon: Icon,
   active,
   onClick,
   badge,
   testid,
 }: {
   label: string;
+  icon: React.FC<{ className?: string }>;
   active: boolean;
   onClick: () => void;
   badge?: number;
@@ -61,12 +64,13 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       data-testid={testid}
-      className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
+      className={`flex h-full flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
         active
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
       }`}
     >
+      <Icon className="size-3.5 shrink-0" />
       <span className="truncate">{label}</span>
       {badge != null && badge > 0 && (
         <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-medium text-blue-600 dark:text-blue-400">
@@ -150,15 +154,17 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
-      <div role="tablist" className="flex shrink-0 border-b border-border">
+      <div role="tablist" className="flex h-9 shrink-0 border-b border-border">
         <TabButton
           label="Explorer"
+          icon={FolderOpen}
           active={activeTab === "explorer"}
           onClick={() => setActiveTab("explorer")}
           testid="right-sidepanel__tab--explorer"
         />
         <TabButton
           label="Changes"
+          icon={GitCompare}
           badge={changeCount}
           active={activeTab === "changes"}
           onClick={() => setActiveTab("changes")}
