@@ -144,13 +144,7 @@ test.describe("Terminal parking: full-page navigation", () => {
       .toBe(true);
   });
 
-  // TODO(#643 Phase 5): the add-tab flow is migrated (countTerminalPanels now
-  // counts center-term-tab headers), but clicking the `+` new-tab menu button
-  // hangs on Playwright's actionability check here — the header `+` appears to
-  // be pointer-intercepted in this layout. Re-enable once the `+`-menu click is
-  // made robust (or the 2nd terminal is created via Cmd+D split like the
-  // dispose spec).
-  test.skip("adding a 2nd terminal, typing, then reloading preserves the active terminal's output", async ({
+  test("adding a 2nd terminal, typing, then reloading preserves the active terminal's output", async ({
     page,
   }) => {
     // Repro of a reported flow: open a workspace, add a 2nd terminal via the "+"

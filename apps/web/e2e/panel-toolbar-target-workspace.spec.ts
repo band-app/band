@@ -254,105 +254,104 @@ async function mountBothTerminalsAndSettle(
 // bug + server-side per-container layout counts) is gone: the unified center
 // dockview has one `+` menu and split is keyboard-only, and layout persists to
 // localStorage (band:dockview-layout-v8:<id>), not chatLayout/terminalLayout.
-test.describe
-  .skip("Inner-dockview toolbar targets the visible workspace", () => {
-    test("clicking the chat '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const { baseVisible, baseCached } = await mountBothAndSettle(
-        workspacePage,
-        ADD_VISIBLE,
-        ADD_CACHED,
-      );
+test.describe("Inner-dockview toolbar targets the visible workspace", () => {
+  test("clicking the chat '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const { baseVisible, baseCached } = await mountBothAndSettle(
+      workspacePage,
+      ADD_VISIBLE,
+      ADD_CACHED,
+    );
 
-      await workspacePage.clickChatAddTab(ADD_VISIBLE);
+    await workspacePage.clickChatAddTab(ADD_VISIBLE);
 
-      // The visible workspace gained a chat panel...
-      await expect
-        .poll(() => workspacePage.countChatPanels(ADD_VISIBLE), { timeout: 10_000 })
-        .toBe(baseVisible + 1);
+    // The visible workspace gained a chat panel...
+    await expect
+      .poll(() => workspacePage.countChatPanels(ADD_VISIBLE), { timeout: 10_000 })
+      .toBe(baseVisible + 1);
 
-      // ...and the hidden, cached workspace was NOT touched. On the buggy
-      // module-level-singleton code the panel landed in the cached workspace
-      // instead. Poll (not a bare read) so a debounce-delayed wrong-workspace
-      // persist can't slip in after a stale baseline read and pass falsely.
-      await expect
-        .poll(() => workspacePage.countChatPanels(ADD_CACHED), { timeout: 3_000 })
-        .toBe(baseCached);
-    });
-
-    test("clicking the chat 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const { baseVisible, baseCached } = await mountBothAndSettle(
-        workspacePage,
-        SPLIT_VISIBLE,
-        SPLIT_CACHED,
-      );
-
-      await workspacePage.clickChatSplitRight(SPLIT_VISIBLE);
-
-      // Split adds a panel (in a new group) to the VISIBLE workspace...
-      await expect
-        .poll(() => workspacePage.countChatPanels(SPLIT_VISIBLE), { timeout: 10_000 })
-        .toBe(baseVisible + 1);
-
-      // ...and leaves the cached workspace untouched (poll to absorb a
-      // debounce-delayed wrong-workspace persist — see the add-tab test).
-      await expect
-        .poll(() => workspacePage.countChatPanels(SPLIT_CACHED), { timeout: 3_000 })
-        .toBe(baseCached);
-    });
-
-    test("clicking the terminal '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
-        workspacePage,
-        TERM_ADD_VISIBLE,
-        TERM_ADD_CACHED,
-      );
-
-      await workspacePage.clickTerminalAddTab(TERM_ADD_VISIBLE);
-
-      // The visible workspace gained a terminal panel...
-      await expect
-        .poll(() => workspacePage.countTerminalPanels(TERM_ADD_VISIBLE), { timeout: 10_000 })
-        .toBe(baseVisible + 1);
-
-      // ...and the hidden, cached workspace was NOT touched. The buggy
-      // module-level singleton resolved the cached workspace's handler at
-      // click time, creating the terminal there — this assertion fails on
-      // the broken code. Poll to absorb a debounce-delayed persist.
-      await expect
-        .poll(() => workspacePage.countTerminalPanels(TERM_ADD_CACHED), { timeout: 3_000 })
-        .toBe(baseCached);
-    });
-
-    test("clicking the terminal 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
-      page,
-    }) => {
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
-        workspacePage,
-        TERM_SPLIT_VISIBLE,
-        TERM_SPLIT_CACHED,
-      );
-
-      await workspacePage.clickTerminalSplitRight(TERM_SPLIT_VISIBLE);
-
-      // Split adds a panel (in a new group) to the VISIBLE workspace...
-      await expect
-        .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
-        .toBe(baseVisible + 1);
-
-      // ...and leaves the cached workspace untouched (poll to absorb a
-      // debounce-delayed wrong-workspace persist — see the add-tab test).
-      await expect
-        .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_CACHED), { timeout: 3_000 })
-        .toBe(baseCached);
-    });
+    // ...and the hidden, cached workspace was NOT touched. On the buggy
+    // module-level-singleton code the panel landed in the cached workspace
+    // instead. Poll (not a bare read) so a debounce-delayed wrong-workspace
+    // persist can't slip in after a stale baseline read and pass falsely.
+    await expect
+      .poll(() => workspacePage.countChatPanels(ADD_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
   });
+
+  test("clicking the chat 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const { baseVisible, baseCached } = await mountBothAndSettle(
+      workspacePage,
+      SPLIT_VISIBLE,
+      SPLIT_CACHED,
+    );
+
+    await workspacePage.clickChatSplitRight(SPLIT_VISIBLE);
+
+    // Split adds a panel (in a new group) to the VISIBLE workspace...
+    await expect
+      .poll(() => workspacePage.countChatPanels(SPLIT_VISIBLE), { timeout: 10_000 })
+      .toBe(baseVisible + 1);
+
+    // ...and leaves the cached workspace untouched (poll to absorb a
+    // debounce-delayed wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.countChatPanels(SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
+  });
+
+  test("clicking the terminal '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
+      workspacePage,
+      TERM_ADD_VISIBLE,
+      TERM_ADD_CACHED,
+    );
+
+    await workspacePage.clickTerminalAddTab(TERM_ADD_VISIBLE);
+
+    // The visible workspace gained a terminal panel...
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_ADD_VISIBLE), { timeout: 10_000 })
+      .toBe(baseVisible + 1);
+
+    // ...and the hidden, cached workspace was NOT touched. The buggy
+    // module-level singleton resolved the cached workspace's handler at
+    // click time, creating the terminal there — this assertion fails on
+    // the broken code. Poll to absorb a debounce-delayed persist.
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_ADD_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
+  });
+
+  test("clicking the terminal 'Split right' splits in the VISIBLE workspace, not the cached one", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
+      workspacePage,
+      TERM_SPLIT_VISIBLE,
+      TERM_SPLIT_CACHED,
+    );
+
+    await workspacePage.clickTerminalSplitRight(TERM_SPLIT_VISIBLE);
+
+    // Split adds a panel (in a new group) to the VISIBLE workspace...
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
+      .toBe(baseVisible + 1);
+
+    // ...and leaves the cached workspace untouched (poll to absorb a
+    // debounce-delayed wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(baseCached);
+  });
+});

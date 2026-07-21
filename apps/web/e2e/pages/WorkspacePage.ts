@@ -643,9 +643,12 @@ export class WorkspacePage {
    *  `WorkspaceCenterDockview.tsx`. */
   tab(panelComponent: "chat" | "terminal" | "browser"): Locator {
     // Anchor the regex to the start so `center-term-tab--` can't match
-    // `center-term-tab__context-menu` etc.
+    // `center-term-tab__context-menu` etc. Filter to VISIBLE so a multi-
+    // workspace test resolves the ACTIVE workspace's tab — cached (hidden)
+    // workspaces keep their tab headers in the DOM under `visibility:hidden`.
     return this.page
       .getByTestId(new RegExp(`^${this.centerTabTestidPrefix(panelComponent)}`))
+      .filter({ visible: true })
       .first();
   }
 
@@ -721,7 +724,13 @@ export class WorkspacePage {
     workspaceId: string,
     kind: "term" | "chat" | "browser",
   ): Promise<void> {
-    await this.newTabButton(workspaceId).first().click();
+    // Open the Radix menu via keyboard (focus + Enter) rather than a mouse
+    // click: a dockview splitview sash (`dv-sash`) overlaps the header `+`
+    // button's centre in the hit-test, so a coordinate click lands on the sash
+    // (a real user click on the button body still works). Enter on the focused
+    // trigger opens the menu with no hit-test.
+    await this.newTabButton(workspaceId).first().focus();
+    await this.page.keyboard.press("Enter");
     const menu = this.page.getByTestId("workspace-center__new-tab-menu");
     await menu.waitFor({ state: "visible" });
     await menu.getByTestId(`workspace-center__new-tab--${kind}`).click();
