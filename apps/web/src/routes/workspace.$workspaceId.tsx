@@ -1,43 +1,34 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { ChevronsUpDown, Menu } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { ChevronsUpDown, FolderOpen, GitCompare, Menu, SquareTerminal } from "lucide-react";
+import type React from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
+  ChangesFileTree,
   DashboardShell,
-  DiffView,
+  FileBrowser,
+  type FileStatus,
+  parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
   useDashboardStore,
   useDiffTarget,
+  useWorkspacePath,
   WorkspacePickerDialog,
-  type WorkspaceTab,
-  WorkspaceTabNav,
 } from "@/dashboard";
-import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
+import {
+  getWorkspaceLeafActions,
+  WorkspaceCenterDockview,
+} from "../components/WorkspaceCenterDockview";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
-// Lazy-load to avoid importing @xterm/xterm (CJS) in SSR context. The
-// Terminal tab is mounted on demand the first time the user activates it.
-const DockviewTerminalContainer = lazy(() =>
-  import("../components/DockviewTerminalContainer").then((m) => ({
-    default: m.DockviewTerminalContainer,
-  })),
-);
-
-// Lazy-load the chat container so the dockview bundle is only pulled in when
-// the Chat tab is first activated (mirrors the terminal tab). On mobile it
-// renders tabs-only (`allowSplit={false}`) — the same inner container the
-// desktop layout uses, so every chat shows up as a tab rather than the old
-// single-pane view.
-const DockviewChatContainer = lazy(() =>
-  import("../components/DockviewChatContainer").then((m) => ({
-    default: m.DockviewChatContainer,
-  })),
-);
+/** Stable empty fileStatuses reference so a "no changes" render doesn't churn. */
+const EMPTY_STATUSES: Record<string, FileStatus> = {};
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
   component: WorkspaceLayout,
@@ -90,35 +81,34 @@ function useAppHeight() {
   return { height, offsetTop };
 }
 
-function useDiffFileCount(workspaceId: string): number {
-  // Track the same diff target (mode + compare branch) the user picked in the
-  // Changes tab — without this, the badge always queried the default branch
-  // and ignored Uncommitted / non-default branch selections (issue #396).
+/** Live changes summary for the mobile Changes sheet + bar badge. Tracks the
+ *  same diff target (mode + compare branch) the user picked, mirroring the
+ *  desktop RightSidepanel query so the badge count matches the tree. */
+function useChangesSummary(workspaceId: string) {
   const { diffMode, compareBranch } = useDiffTarget(workspaceId);
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    const fetchCount = () => {
-      trpc.workspace.getDiffSummary
-        .query({
-          workspaceId,
-          diffMode,
-          compareBranch: compareBranch ?? undefined,
-        })
-        .then((result) => {
-          if (!cancelled) setCount(result.stats?.filesChanged ?? 0);
-        })
-        .catch(() => {});
-    };
-    fetchCount();
-    const interval = setInterval(fetchCount, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [workspaceId, diffMode, compareBranch]);
-  return count;
+  const summaryQuery = useQuery({
+    queryKey: ["mobileChanges", workspaceId, diffMode, compareBranch],
+    queryFn: () =>
+      trpc.workspace.getDiffSummary.query({
+        workspaceId,
+        diffMode,
+        compareBranch: compareBranch ?? undefined,
+      }),
+    refetchInterval: 15_000,
+  });
+  // The server types `fileStatuses` values as plain `string`; the tree wants
+  // the `FileStatus` union. Same runtime values — cast at this single seam.
+  const fileStatuses = (summaryQuery.data?.fileStatuses ?? EMPTY_STATUSES) as Record<
+    string,
+    FileStatus
+  >;
+  return { fileStatuses, changeCount: Object.keys(fileStatuses).length };
 }
+
+// Which mobile view the bottom bar is showing. "editor" is the dockview;
+// "explorer" / "changes" open a bottom sheet holding the tree and, on select,
+// return the bar to "editor" (the opened file/diff leaf is now the active tab).
+type MobileView = "editor" | "explorer" | "changes";
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -177,16 +167,73 @@ function WorkspaceLayout() {
 // Mobile layout
 // ---------------------------------------------------------------------------
 
+/** One entry in the mobile bottom bar (icon + label + optional count badge). */
+function MobileBarButton({
+  label,
+  icon: Icon,
+  active,
+  onClick,
+  badge,
+  testid,
+}: {
+  label: string;
+  icon: React.FC<{ className?: string }>;
+  active: boolean;
+  onClick: () => void;
+  badge?: number;
+  testid: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={testid}
+      className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+        active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      <span className="relative">
+        <Icon className="size-5" />
+        {badge != null && badge > 0 && (
+          <span className="absolute -top-1.5 -right-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[9px] font-medium text-blue-600 dark:text-blue-400">
+            {badge}
+          </span>
+        )}
+      </span>
+      {label}
+    </button>
+  );
+}
+
 function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
-  const diffFileCount = useDiffFileCount(workspaceId);
+  const workspacePath = useWorkspacePath(workspaceId);
+  const { fileStatuses, changeCount } = useChangesSummary(workspaceId);
 
-  // Active tab + selected file are now PURELY local state — no URL involvement.
-  // Always start on Chat (we deliberately do not persist the last tab across
-  // workspace visits; the previous sessionStorage `band-tab:` mechanism was
-  // removed when child routes were folded in — see issue #467).
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
-  const [currentFile, setCurrentFile] = useState<string | undefined>(undefined);
+  // The dockview (WorkspaceCenterDockview, mobile mode) is always the main
+  // editor surface. The bottom bar's "Editor" entry just closes any open
+  // tree sheet; "Explorer" / "Changes" open a bottom sheet with the tree.
+  const [view, setView] = useState<MobileView>("editor");
+
+  // Open a file leaf in the center dockview, then return the bar to Editor.
+  // Used by the Explorer sheet + the file-link / Quick Open flows.
+  const openFileLeaf = useCallback(
+    (filePath: string, opts?: { line?: number; column?: number }) => {
+      getWorkspaceLeafActions(workspaceId)?.openFile(filePath, opts);
+      setView("editor");
+    },
+    [workspaceId],
+  );
+
+  // Open a diff leaf in the center dockview, then return the bar to Editor.
+  const openDiffLeaf = useCallback(
+    (filePath: string) => {
+      getWorkspaceLeafActions(workspaceId)?.openDiff(filePath);
+      setView("editor");
+    },
+    [workspaceId],
+  );
 
   // Workspace switcher (recent / previous workspaces). Tapping the header
   // title opens it so the user can jump to another worktree without first
@@ -207,12 +254,16 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   // Search-in-Files state for the file-tree toolbar (mobile / non-dockview).
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
 
-  // Open a file in the Files tab. Switches tab + sets the selected file in
-  // a single transition.
-  const handleOpenFile = useCallback((filename: string) => {
-    setCurrentFile(filename);
-    setActiveTab("code");
-  }, []);
+  // Open a file (from Quick Open / Search in Files / a chat file link) as a
+  // file leaf in the center dockview. `filename` may carry a `:line[:column]`
+  // suffix — parse it into a jump target before opening.
+  const handleOpenFile = useCallback(
+    (filename: string) => {
+      const { filePath, line, column } = parseFileLocation(filename);
+      openFileLeaf(filePath, { line, column });
+    },
+    [openFileLeaf],
+  );
 
   // Listen for file link clicks from chat messages → open Quick Open with query.
   //
@@ -233,12 +284,12 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
     return () => window.removeEventListener("band:open-file", handler);
   }, [workspaceId]);
 
-  // Window-event triggers for the file-tree toolbar's Quick Open / Search
-  // in Files buttons. We use a window event (rather than threading the
-  // setters through a React Context) because the toolbar is rendered by
-  // CodeBrowserView several levels down, and routing the setter via
-  // context proved unreliable on the iOS Simulator's tree. The toolbar
-  // dispatches the event; this layout owns the dialog state.
+  // Window-event triggers for the Quick Open / Search in Files dialogs. We use
+  // a window event (rather than threading the setters through a React Context)
+  // because the dispatchers live several levels down (file-tree toolbars, chat
+  // file links), and routing the setter via context proved unreliable on the
+  // iOS Simulator's tree. The dispatcher fires the event; this layout owns the
+  // dialog state.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
@@ -248,10 +299,6 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
       window.removeEventListener("band:open-quick-open", openQO);
       window.removeEventListener("band:open-search-files", openSF);
     };
-  }, []);
-
-  const handleSelectFile = useCallback((filePath: string | null) => {
-    setCurrentFile(filePath ?? undefined);
   }, []);
 
   return (
@@ -291,45 +338,100 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
         </button>
         <div aria-hidden="true" className="size-7 shrink-0" />
       </header>
-      <WorkspaceTabNav
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        diffFileCount={diffFileCount}
-      />
+      {/* The unified center dockview is the ONLY editor surface on mobile —
+       *  chat / terminal / browser leaves plus per-path file / diff leaves,
+       *  all as tabs (mobile mode disables drag→split and the maximize
+       *  toggle). It stays mounted regardless of the bottom-bar view; the
+       *  Explorer / Changes sheets float over it and open leaves into it. */}
       <main className="flex min-h-0 flex-1 flex-col">
-        {/* Tab content. Conditional render — switching tabs unmounts the
-         *  previous tab, matching the pre-refactor mobile behaviour where
-         *  each tab was its own route.
-         *
-         *  Chat and Terminal both mount the shared inner dockview container
-         *  with `allowSplit={false}` so every chat / terminal renders as a
-         *  TAB (never a split) on mobile — see the `dockview-split-context`
-         *  and issue-#467 route unification. */}
-        {activeTab === "chat" && (
-          <Suspense fallback={null}>
-            <DockviewChatContainer workspaceId={workspaceId} visible={true} allowSplit={false} />
-          </Suspense>
-        )}
-        {activeTab === "diff" && (
-          <DiffView workspaceId={workspaceId} active onOpenFile={handleOpenFile} />
-        )}
-        {activeTab === "code" && (
-          <CodeBrowserView
-            workspaceId={workspaceId}
-            file={currentFile}
-            onSelectFile={handleSelectFile}
-          />
-        )}
-        {activeTab === "terminal" && (
-          <Suspense fallback={null}>
-            <DockviewTerminalContainer
-              workspaceId={workspaceId}
-              visible={true}
-              allowSplit={false}
-            />
-          </Suspense>
-        )}
+        <WorkspaceCenterDockview workspaceId={workspaceId} visible wsActive mobile />
       </main>
+      {/* Bottom bar: Editor | Explorer | Changes. Editor closes any open tree
+       *  sheet; the other two open a bottom sheet with the corresponding tree.
+       *  Changes carries a badge with the live changed-file count. */}
+      <nav
+        className="flex h-[calc(3rem+env(safe-area-inset-bottom))] shrink-0 items-stretch border-t border-border/50 pb-[env(safe-area-inset-bottom)]"
+        data-testid="mobile-workspace__bottom-bar"
+      >
+        <MobileBarButton
+          label="Editor"
+          icon={SquareTerminal}
+          active={view === "editor"}
+          onClick={() => setView("editor")}
+          testid="mobile-workspace__bar--editor"
+        />
+        <MobileBarButton
+          label="Explorer"
+          icon={FolderOpen}
+          active={view === "explorer"}
+          onClick={() => setView("explorer")}
+          testid="mobile-workspace__bar--explorer"
+        />
+        <MobileBarButton
+          label="Changes"
+          icon={GitCompare}
+          active={view === "changes"}
+          badge={changeCount}
+          onClick={() => setView("changes")}
+          testid="mobile-workspace__bar--changes"
+        />
+      </nav>
+      {/* Explorer sheet — the file tree. Selecting a file opens it as a leaf in
+       *  the dockview and closes the sheet (openFileLeaf resets view to
+       *  "editor"). Single vs pinned map to preview vs pinned leaves. */}
+      <Sheet
+        open={view === "explorer"}
+        onOpenChange={(open) => setView(open ? "explorer" : "editor")}
+      >
+        <SheetContent
+          side="bottom"
+          className="h-[75dvh] p-0"
+          data-testid="mobile-workspace__explorer-sheet"
+        >
+          <SheetTitle className="border-b border-border/50 px-4 py-3 text-sm">Explorer</SheetTitle>
+          <SheetDescription className="sr-only">
+            Browse workspace files and open one in the editor
+          </SheetDescription>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <FileBrowser
+              workspaceId={workspaceId}
+              workspacePath={workspacePath}
+              onOpenFile={(p) => openFileLeaf(p)}
+              onOpenFilePinned={(p) => openFileLeaf(p)}
+              compact
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      {/* Changes sheet — the diff tree. Selecting a file opens its diff leaf in
+       *  the dockview and closes the sheet. */}
+      <Sheet
+        open={view === "changes"}
+        onOpenChange={(open) => setView(open ? "changes" : "editor")}
+      >
+        <SheetContent
+          side="bottom"
+          className="h-[75dvh] p-0"
+          data-testid="mobile-workspace__changes-sheet"
+        >
+          <SheetTitle className="border-b border-border/50 px-4 py-3 text-sm">Changes</SheetTitle>
+          <SheetDescription className="sr-only">
+            Browse changed files and open one as a diff
+          </SheetDescription>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {changeCount === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No changes</p>
+            ) : (
+              <ChangesFileTree
+                fileStatuses={fileStatuses}
+                onSelectFile={openDiffLeaf}
+                onSelectFilePinned={openDiffLeaf}
+                workspacePath={workspacePath}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
       <QuickOpenDialog
         workspaceId={workspaceId}
         open={quickOpenOpen}

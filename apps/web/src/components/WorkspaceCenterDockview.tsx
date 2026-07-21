@@ -1143,6 +1143,13 @@ interface LeafActions {
 
 const leafActionsByApiId = new Map<string, { current: LeafActions }>();
 
+// Mobile flag keyed by the owning dockview's `api.id`. Header action components
+// must be STABLE references (dockview caches them), so they can't read a
+// per-instance `mobile` prop directly — they look it up here by
+// `containerApi.id`. Set on `onReady`, cleared on unmount. Desktop dockviews
+// never add themselves, so `has(id)` is false → maximize toggle stays.
+const mobileByApiId = new Set<string>();
+
 // ---------------------------------------------------------------------------
 // Tab headers
 // ---------------------------------------------------------------------------
@@ -1653,6 +1660,10 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   // Edge groups don't maximize — the add menu (left slot) is enough there.
   if (!isGridGroup) return null;
 
+  // Mobile / tabs-only mode: no maximize toggle (the layout is a single
+  // full-screen group; there's nothing to maximize against).
+  if (mobileByApiId.has(props.containerApi.id)) return null;
+
   const MaxIcon = isMaximized ? Minimize2 : Maximize2;
   const maxLabel = isMaximized ? "Restore" : "Maximize";
 
@@ -1810,12 +1821,18 @@ interface WorkspaceCenterDockviewProps {
   workspaceId: string;
   visible: boolean;
   wsActive: boolean;
+  /** Mobile / tabs-only mode: disables drag→split (`disableDnd`) and hides the
+   *  maximize toggle in the right header actions. Everything else (leaves,
+   *  tabs, close, dirty dot, find, preview, `+` New-tab menu) is unchanged.
+   *  Defaults to false (desktop behaviour). */
+  mobile?: boolean;
 }
 
 export function WorkspaceCenterDockview({
   workspaceId,
   visible,
   wsActive,
+  mobile = false,
 }: WorkspaceCenterDockviewProps) {
   const adapter = useAdapter();
   const apiRef = useRef<DockviewApi | null>(null);
@@ -2233,6 +2250,7 @@ export function WorkspaceCenterDockview({
       workspaceDockviewApis.set(workspaceId, api);
       workspaceLeafActions.set(workspaceId, actionsRef);
       leafActionsByApiId.set(api.id, actionsRef);
+      if (mobile) mobileByApiId.add(api.id);
 
       const data = initialDataRef.current ?? {
         chatIds: new Set<string>(),
@@ -2299,7 +2317,15 @@ export function WorkspaceCenterDockview({
         }
       }
     },
-    [workspaceId, buildDefaultLayout, reconcile, schedulePersist, flushPersist, reportFocus],
+    [
+      workspaceId,
+      mobile,
+      buildDefaultLayout,
+      reconcile,
+      schedulePersist,
+      flushPersist,
+      reportFocus,
+    ],
   );
 
   // Live sync: add/remove leaves when instances are created/killed externally (CLI).
@@ -2496,6 +2522,7 @@ export function WorkspaceCenterDockview({
       const api = apiRef.current;
       if (api) {
         leafActionsByApiId.delete(api.id);
+        mobileByApiId.delete(api.id);
         if (workspaceDockviewApis.get(workspaceId) === api) {
           workspaceDockviewApis.delete(workspaceId);
           workspaceLeafActions.delete(workspaceId);
@@ -2542,6 +2569,8 @@ export function WorkspaceCenterDockview({
           defaultTabComponent={IconTab}
           leftHeaderActionsComponent={LeftHeaderActions}
           rightHeaderActionsComponent={RightHeaderActions}
+          // Mobile: no drag→split. Every leaf stays a tab in a single group.
+          disableDnd={mobile}
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
