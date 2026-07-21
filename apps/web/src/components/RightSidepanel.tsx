@@ -180,6 +180,9 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
               workspacePath={workspacePath}
               onOpenFile={(p) => openFile(p, false)}
               onOpenFilePinned={(p) => openFile(p, true)}
+              // Match the ChangesFileTree row size (text-[13px] / h-28) so the
+              // Explorer and Changes trees read identically in the sidepanel.
+              compact
             />
           </div>
         ) : (
