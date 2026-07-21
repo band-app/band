@@ -2096,6 +2096,10 @@ export function WorkspaceCenterDockview({
   const apiRef = useRef<DockviewApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isRestoringRef = useRef(false);
+  // True while writeLayout runs. dockview's serialize() exits + re-adds the
+  // maximized view, firing onDidMaximizedGroupChange mid-write — this flag stops
+  // that from re-triggering a persist (which would loop forever).
+  const isPersistingRef = useRef(false);
   const wsActiveRef = useRef(wsActive);
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
@@ -2152,15 +2156,22 @@ export function WorkspaceCenterDockview({
     const api = apiRef.current;
     if (!api) return;
     try {
+      // Capture the maximized group BEFORE toJSON: dockview's serialize()
+      // temporarily exits the maximized view (to record un-maximized grid
+      // dimensions) and re-adds it, so reading isMaximized after toJSON misses
+      // it. dockview's toJSON also doesn't persist maximize, so we stamp it on
+      // the blob ourselves — a maximized editor should survive a reload (#490).
+      const maximizedId = api.groups.find((g) => g.api.isMaximized())?.id;
+      // Guard so the exit/re-enter serialize() fires (onDidMaximizedGroupChange)
+      // during toJSON don't re-enter writeLayout → infinite loop.
+      isPersistingRef.current = true;
       const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
-      // dockview's toJSON() doesn't serialize the maximized group, so record it
-      // on the blob ourselves — a maximized editor should survive a reload
-      // (issue #490), restored in onReady.
-      const maximized = api.groups.find((g) => g.api.isMaximized());
-      if (maximized) json.maximizedGroup = maximized.id;
+      if (maximizedId) json.maximizedGroup = maximizedId;
       localStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
     } catch {
       // best-effort
+    } finally {
+      isPersistingRef.current = false;
     }
   }, [workspaceId]);
 
@@ -2599,7 +2610,12 @@ export function WorkspaceCenterDockview({
       api.onDidRemoveGroup(() => flushPersist());
       // Maximize/restore isn't an onDidLayoutChange, so persist it explicitly
       // (immediately) — a maximized editor must survive a reload (#490).
-      api.onDidMaximizedGroupChange(() => flushPersist());
+      api.onDidMaximizedGroupChange(() => {
+        // Ignore the transient exit/re-enter that writeLayout's own toJSON
+        // triggers — only a real user maximize/restore should persist.
+        if (isPersistingRef.current) return;
+        flushPersist();
+      });
       api.onDidActivePanelChange(() => {
         schedulePersist();
         reportFocus();

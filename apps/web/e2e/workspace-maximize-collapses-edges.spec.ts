@@ -165,11 +165,13 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. This spec seeds
-// the removed global layout (band:dockview-layout-v7) with the legacy 5-panel
-// outer structure and asserts edge-group collapse. The unified center dockview
-// persists a per-workspace v8 blob and the edge-group affordance under test no
-// longer has a source-side projection here.
+// TODO(#643): the edge-collapse-on-maximize behaviour still exists, but the
+// LAYOUT_WITH_BOTTOM_EDGE_PANEL seed is the legacy 5-panel outer structure
+// (contentComponent "changes"/"files"/"terminal" singletons) that sanitize now
+// strips. Re-author the seed as a v9 blob with a real leaf docked in the bottom
+// EDGE group (dockview's shell-manager edge format) so the bottom edge is
+// populated before maximize. Core maximize persistence is covered by
+// workspace-maximize-state (AC1-4).
 test.describe
   .skip("Maximize collapses edge panels", () => {
     test("maximizing a tab collapses the edge panel; restoring brings it back", async ({

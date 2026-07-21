@@ -916,12 +916,18 @@ export class WorkspacePage {
     });
   }
 
-  /** Wait for the shared dockview to render its header buttons. The
-   *  app boot is multi-stage (settings query → workspaces fetch →
-   *  dockview mount) and any test that interacts with the buttons must
-   *  wait for them to be in the DOM. */
+  /** Wait for the shared dockview to render its header. The app boot is
+   *  multi-stage (settings query → workspaces fetch → dockview mount) and any
+   *  test that interacts with the header must wait for it to be in the DOM.
+   *  Anchors on the header toolbar container rather than the Maximize button
+   *  specifically — a workspace restored in a maximized state shows only a
+   *  "Restore" button, so keying off "Maximize" would hang. */
   async waitForReady(): Promise<void> {
-    await this.maximizeButtons.first().waitFor({ state: "visible", timeout: 15_000 });
+    await this.page
+      .getByTestId("workspace-center__toolbar")
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 15_000 });
   }
 
   /** Wait for the mobile workspace layout to be interactive. The mobile route
