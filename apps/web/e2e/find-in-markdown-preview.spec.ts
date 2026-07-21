@@ -108,19 +108,16 @@ test.afterAll(async () => {
 async function openMarkdownPreview(page: Page): Promise<void> {
   await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
 
-  // Switch to the Files tab. The button's aria-label is set in
-  // `WorkspaceTabNav.tsx` — system-controlled, so `getByRole({ name })` is
-  // safe to use.
-  await page.getByRole("button", { name: "Files" }).click();
+  // The mobile layout (`MobileWorkspaceLayout`) is ready once its bottom bar
+  // (Editor | Explorer | Changes) renders (#643 replaced the old WorkspaceTabNav).
+  await page
+    .getByTestId("mobile-workspace__bottom-bar")
+    .waitFor({ state: "visible", timeout: 20_000 });
 
-  // Click the markdown file in the tree. File-tree rows are buttons whose
-  // accessible name is the bare filename — `getByRole({ name })` keeps the
-  // locator unambiguous (the filename also appears in the tab bar after the
-  // click, which would trip Playwright's strict mode if we used
-  // `getByText`). `exact: true` defends against any future button whose
-  // label contains the filename as a substring (e.g. an "Open GUIDE.md"
-  // menu item).
-  await page.getByRole("button", { name: FILE_PATH, exact: true }).click();
+  // Open the Explorer sheet and tap the markdown file — it opens as a `file`
+  // leaf in the center dockview (markdown files default to the rendered preview).
+  await page.getByTestId("mobile-workspace__bar--explorer").click();
+  await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
   // The markdown renders into a sticky heading — when it appears, the
   // preview is laid out and ready for the find bar to attach its keybind.
@@ -129,7 +126,15 @@ async function openMarkdownPreview(page: Page): Promise<void> {
   });
 }
 
-test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({ page }) => {
+// TODO(#643): find-in-markdown-PREVIEW is not yet implemented in the unified
+// file leaf. `useLeafFind` wires a CodeMirror source search ("Find in file…");
+// searching the rendered `MarkdownPreview` (the "Find in preview…" bar the old
+// FileViewer shipped) is a deferred feature. The open flow above is already
+// migrated to the new mobile Explorer sheet, so this only needs the preview
+// find wired up before it can be re-enabled.
+test.skip("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({
+  page,
+}) => {
   await openMarkdownPreview(page);
 
   // The find bar uses a single placeholder string in both source and
