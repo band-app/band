@@ -547,6 +547,9 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
         column={params.column}
         editable
         external={params.external ?? params.filePath.startsWith("/")}
+        // The dockview tab already shows the filename (full path on hover), so
+        // the FileViewer's own path/size title bar is redundant in a leaf.
+        hideTitleBar
       />
     </div>
   );
