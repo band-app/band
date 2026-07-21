@@ -26,6 +26,7 @@ import {
   type DockviewReadyEvent,
   type DockviewTheme,
   type IDockviewHeaderActionsProps,
+  type IDockviewPanel,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
@@ -289,11 +290,14 @@ function pruneGridViews(node: unknown, removed: Set<string>): void {
  *  `files`/`changes` singleton from an older layout) so `fromJSON` can't mount
  *  an unregistered component. Mutates + returns the layout clone. */
 function sanitizeSavedLayout(layout: Record<string, unknown>): Record<string, unknown> {
-  const panels = layout.panels as Record<string, { component?: string }> | undefined;
+  const panels = layout.panels as Record<string, { contentComponent?: string }> | undefined;
   if (!panels) return layout;
   const removed = new Set<string>();
   for (const [id, panel] of Object.entries(panels)) {
-    if (!panel?.component || !KNOWN_LEAF_COMPONENTS.has(panel.component)) {
+    // dockview serializes each panel's kind as `contentComponent` (its
+    // `toJSON()` shape), NOT `component`. Reading the wrong key here strips
+    // EVERY panel as "unknown", which resets the layout on every reload.
+    if (!panel?.contentComponent || !KNOWN_LEAF_COMPONENTS.has(panel.contentComponent)) {
       removed.add(id);
       delete panels[id];
     }
@@ -330,7 +334,8 @@ function reinjectParams(
   const panels = clone.panels as Record<string, Record<string, unknown>> | undefined;
   if (panels) {
     for (const [id, panel] of Object.entries(panels)) {
-      const comp = panel.component as LeafKind;
+      // dockview's serialized panel records its kind under `contentComponent`.
+      const comp = panel.contentComponent as LeafKind;
       if (comp === "chat") panel.params = { workspaceId, chatId: id };
       else if (comp === "term") panel.params = { workspaceId, terminalId: id };
       else if (comp === "browser")
@@ -344,6 +349,15 @@ function reinjectParams(
     }
   }
   return clone;
+}
+
+/** Where a newly-opened file/diff leaf should go: the group the user is
+ *  currently working in (the active grid group), falling back to the central
+ *  group. Prevents every open from landing in the first tab group. */
+function activeOrCentralPosition(api: DockviewApi): AddPanelOptions["position"] {
+  const active = api.activeGroup;
+  if (active && active.api.location.type === "grid") return { referenceGroup: active.id };
+  return centralPanelPosition(api);
 }
 
 function loadSavedLayout(workspaceId: string): Record<string, unknown> | null {
@@ -846,6 +860,17 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
 
   const workspacePath = useWorkspacePath(workspaceIdRaw);
 
+  // FileViewer's markdown code/preview toggle and language override are
+  // CONTROLLED props — they must reflect React state, not a bare localStorage
+  // read (which never re-renders, so the toggle would appear to do nothing).
+  // Seed from the persisted tab state, then update state + persist on change.
+  const [viewMode, setViewMode] = useState<"preview" | "source" | undefined>(
+    () => getFileTabState(workspaceIdRaw, filePathRaw)?.viewMode,
+  );
+  const [languageOverride, setLanguageOverride] = useState<string | undefined>(
+    () => getFileTabState(workspaceIdRaw, filePathRaw)?.language,
+  );
+
   const handleEditorView = useCallback(
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
     (view: any) => setViews(view ? [view] : []),
@@ -906,11 +931,18 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // tabs save in place (FileViewer handles that itself), so only wire
         // `onSaveAs` when this is an untitled buffer and the shell can save.
         onSaveAs={untitled && pickSaveFile ? handleSaveAs : undefined}
-        // The dockview tab already shows the filename (full path on hover), so
-        // hide only FileViewer's redundant path/size label — keep the title bar
-        // and its action buttons (save, format, markdown code/preview toggle,
-        // language). Nav arrows stay hidden (no onGoBack/onGoForward passed).
-        hidePathLabel
+        // "View changes" jumps to the file's diff leaf — the inverse of the diff
+        // leaf's "Edit" button. Not offered for untitled/external buffers (no
+        // workspace-relative diff target).
+        onViewDiff={
+          untitled || external
+            ? undefined
+            : () => getWorkspaceLeafActions(workspaceId)?.openDiff(filePath, { preview: false })
+        }
+        // Show the full workspace-relative path in the title bar (left), like
+        // the diff leaf. The title bar keeps its right-aligned action buttons
+        // (save, format, markdown toggle, language, view-changes). Nav arrows
+        // stay hidden (no onGoBack/onGoForward passed).
         // Markdown files get a code/preview toggle in the title bar; the
         // preview reuses the shared MarkdownPreview renderer.
         renderMarkdown={(content) => <MarkdownPreview content={content} />}
@@ -932,12 +964,16 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
           });
           window.dispatchEvent(new CustomEvent("band:dirty-change"));
         }}
-        viewMode={persisted?.viewMode}
-        onViewModeChange={(mode) => updateFileTabState(workspaceId, filePath, { viewMode: mode })}
-        languageOverride={persisted?.language}
-        onLanguageOverrideChange={(languageId) =>
-          updateFileTabState(workspaceId, filePath, { language: languageId })
-        }
+        viewMode={viewMode}
+        onViewModeChange={(mode) => {
+          setViewMode(mode);
+          updateFileTabState(workspaceId, filePath, { viewMode: mode });
+        }}
+        languageOverride={languageOverride}
+        onLanguageOverrideChange={(languageId) => {
+          setLanguageOverride(languageId ?? undefined);
+          updateFileTabState(workspaceId, filePath, { language: languageId });
+        }}
       />
     </div>
   );
@@ -1009,36 +1045,17 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {/* Header: open-for-editing (left) + split/unified toggle (right). The
-          toggle shares the `band:diff-view-mode` preference with DiffView. */}
-      <div className="flex h-8 shrink-0 items-center justify-between gap-1 border-b border-border px-2">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() =>
-              getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
-            }
-            title="Open file for editing"
-            data-testid="center-diff-leaf__open-file"
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <SquarePen className="size-3.5" />
-            Edit
-          </button>
-          {adapter.revertFile && (
-            <button
-              type="button"
-              onClick={() => setRevertOpen(true)}
-              title="Revert file"
-              data-testid="center-diff-leaf__revert"
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <RotateCcw className="size-3.5" />
-              Revert
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-0.5">
+      {/* Header: full file path (left) + view toggle & file actions, icon-only
+          (right). The toggle shares the `band:diff-view-mode` pref with DiffView. */}
+      <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
+        <span
+          className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+          title={filePath}
+          data-testid="center-diff-leaf__path"
+        >
+          {filePath}
+        </span>
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={() => setMode("unified")}
@@ -1063,6 +1080,28 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           >
             <Columns2 className="size-3.5" />
           </button>
+          <button
+            type="button"
+            onClick={() =>
+              getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+            }
+            title="Open file for editing"
+            data-testid="center-diff-leaf__open-file"
+            className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <SquarePen className="size-3.5" />
+          </button>
+          {adapter.revertFile && (
+            <button
+              type="button"
+              onClick={() => setRevertOpen(true)}
+              title="Revert file"
+              data-testid="center-diff-leaf__revert"
+              className="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <RotateCcw className="size-3.5" />
+            </button>
+          )}
         </div>
       </div>
       {searchBar}
@@ -2078,11 +2117,18 @@ export function WorkspaceCenterDockview({
         existing.api.setActive();
         return;
       }
-      // Opening a NEW preview replaces the current preview leaf (close the old
-      // one) so previews reuse a single slot.
+      // Placement: default to the group the user is working in (active grid
+      // group), not always the first central group. When replacing a preview,
+      // reuse the OLD preview's group so a moved preview stays where the user
+      // put it (add the new leaf into that group first, then close the old one).
+      let position: AddPanelOptions["position"] = activeOrCentralPosition(api);
+      let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewFileIdRef.current && previewFileIdRef.current !== id) {
         const prev = api.getPanel(previewFileIdRef.current);
-        if (prev) api.removePanel(prev);
+        if (prev) {
+          position = { referenceGroup: prev.group.id };
+          previewToRemove = prev;
+        }
       }
       api.addPanel({
         id,
@@ -2098,8 +2144,9 @@ export function WorkspaceCenterDockview({
           untitled: opts?.untitled,
           preview,
         },
-        position: centralPanelPosition(api),
+        position,
       } as AddPanelOptions);
+      if (previewToRemove) api.removePanel(previewToRemove);
       previewFileIdRef.current = preview ? id : previewFileIdRef.current;
     },
     [workspaceId],
@@ -2121,9 +2168,14 @@ export function WorkspaceCenterDockview({
         existing.api.setActive();
         return;
       }
+      let position: AddPanelOptions["position"] = activeOrCentralPosition(api);
+      let previewToRemove: IDockviewPanel | null = null;
       if (preview && previewDiffIdRef.current && previewDiffIdRef.current !== id) {
         const prev = api.getPanel(previewDiffIdRef.current);
-        if (prev) api.removePanel(prev);
+        if (prev) {
+          position = { referenceGroup: prev.group.id };
+          previewToRemove = prev;
+        }
       }
       api.addPanel({
         id,
@@ -2131,8 +2183,9 @@ export function WorkspaceCenterDockview({
         tabComponent: "diff",
         title: basename(filePath),
         params: { workspaceId, filePath, preview },
-        position: centralPanelPosition(api),
+        position,
       } as AddPanelOptions);
+      if (previewToRemove) api.removePanel(previewToRemove);
       previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
     },
     [workspaceId],

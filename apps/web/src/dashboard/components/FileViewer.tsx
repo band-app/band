@@ -8,6 +8,7 @@ import {
   Code,
   Eye,
   FileWarning,
+  GitCompare,
   Loader2,
   Save,
 } from "lucide-react";
@@ -126,6 +127,12 @@ interface FileViewerProps {
    * so the close path can keep the tab open.
    */
   onSaveAs?: (content: string) => Promise<string | null>;
+  /**
+   * When provided, renders a "View changes" button in the title bar that
+   * opens the file's diff. The inverse of the diff leaf's "Edit" button — used
+   * by the center `file` leaf to jump to the changeset for the open file.
+   */
+  onViewDiff?: () => void;
   /**
    * Called when the workspace/external loader rejects (typically
    * `ENOENT: no such file or directory ...` from the server's `stat`
@@ -246,6 +253,7 @@ export function FileViewer({
   languageOverride,
   onLanguageOverrideChange,
   onSaveAs,
+  onViewDiff,
   onLoadError,
 }: FileViewerProps) {
   const adapter = useAdapter();
@@ -833,9 +841,9 @@ export function FileViewer({
     // flex slot, which would propagate up and shove neighbouring layout
     // (e.g. the right-edge tab strip) off-screen.
     <div data-testid="file-viewer__root" className="flex h-full min-w-0 flex-col overflow-hidden">
-      {/* Title bar — full version (mobile / non-tab views) */}
+      {/* Title bar. h-8 lines up with the diff leaf header. */}
       {!hideTitleBar && (
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 px-3">
           {onBack && (
             <button
               type="button"
@@ -891,10 +899,25 @@ export function FileViewer({
             // path label (the dockview tab already shows the filename).
             <span className="min-w-0 flex-1" />
           ) : (
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">
+            <span
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={untitled ? "Untitled" : filePath}
+              data-testid="file-viewer__path"
+            >
               {untitled ? "Untitled" : filePath}
-              {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
+              {isDirty && <span className="ml-1">(modified)</span>}
             </span>
+          )}
+          {onViewDiff && (
+            <button
+              type="button"
+              onClick={onViewDiff}
+              title="View changes"
+              data-testid="file-viewer__view-diff"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <GitCompare className="size-3.5" />
+            </button>
           )}
           {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
           {formatStatus && (
