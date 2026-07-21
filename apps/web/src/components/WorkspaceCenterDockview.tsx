@@ -42,6 +42,7 @@ import {
   Maximize2,
   MessageSquare,
   Minimize2,
+  MoreVertical,
   Plus,
   RotateCcw,
   Save,
@@ -1883,16 +1884,37 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   // Edge groups don't maximize — the add menu (left slot) is enough there.
   if (!isGridGroup) return null;
 
-  // Mobile / tabs-only mode: no maximize toggle (the layout is a single
-  // full-screen group; there's nothing to maximize against).
-  if (mobileByApiId.has(props.containerApi.id)) return null;
+  // The active tab's own action buttons (view toggle, save, revert…).
+  const activeId = props.group.activePanel?.id;
+  const renderLeafActions = activeId ? leafHeaderActionsByPanelId.get(activeId) : undefined;
+
+  // Mobile / tabs-only: no Maximize (single full-screen group). The active
+  // tab's actions fold behind a ⋮ menu so the narrow tab strip stays uncluttered.
+  if (mobileByApiId.has(props.containerApi.id)) {
+    if (!renderLeafActions) return null;
+    return (
+      <div className="flex h-full items-center px-1" data-testid="workspace-center__toolbar">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Tab actions"
+              data-testid="workspace-center__tab-actions-button"
+              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <MoreVertical className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-0 p-1">
+            <div className="flex items-center gap-0.5">{renderLeafActions()}</div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  }
 
   const MaxIcon = isMaximized ? Minimize2 : Maximize2;
   const maxLabel = isMaximized ? "Restore" : "Maximize";
-
-  // The active tab's own action buttons render to the LEFT of Maximize.
-  const activeId = props.group.activePanel?.id;
-  const renderLeafActions = activeId ? leafHeaderActionsByPanelId.get(activeId) : undefined;
 
   return (
     <div className="flex h-full items-center gap-0.5 px-1" data-testid="workspace-center__toolbar">
