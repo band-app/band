@@ -2153,6 +2153,11 @@ export function WorkspaceCenterDockview({
     if (!api) return;
     try {
       const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
+      // dockview's toJSON() doesn't serialize the maximized group, so record it
+      // on the blob ourselves — a maximized editor should survive a reload
+      // (issue #490), restored in onReady.
+      const maximized = api.groups.find((g) => g.api.isMaximized());
+      if (maximized) json.maximizedGroup = maximized.id;
       localStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
     } catch {
       // best-effort
@@ -2556,6 +2561,19 @@ export function WorkspaceCenterDockview({
       // layout) into a single group.
       if (mobile) flattenToSingleGroup(api);
 
+      // Restore a persisted maximized group (issue #490): dockview's fromJSON
+      // preserves group ids, so re-maximize the one writeLayout recorded. Skip
+      // on mobile (single group — nothing to maximize against). Deferred to the
+      // next frame so the grid is laid out (maximizing a 0×0 group is a no-op).
+      if (!mobile && saved && typeof saved.maximizedGroup === "string") {
+        const maxId = saved.maximizedGroup;
+        requestAnimationFrame(() => {
+          try {
+            api.groups.find((grp) => grp.id === maxId)?.api.maximize();
+          } catch {}
+        });
+      }
+
       // Edge groups + drag visibility + shortcut registry.
       ensureEdgeGroups(api);
       edgeDragDisposerRef.current?.();
@@ -2579,6 +2597,9 @@ export function WorkspaceCenterDockview({
       });
       api.onDidAddGroup(() => flushPersist());
       api.onDidRemoveGroup(() => flushPersist());
+      // Maximize/restore isn't an onDidLayoutChange, so persist it explicitly
+      // (immediately) — a maximized editor must survive a reload (#490).
+      api.onDidMaximizedGroupChange(() => flushPersist());
       api.onDidActivePanelChange(() => {
         schedulePersist();
         reportFocus();

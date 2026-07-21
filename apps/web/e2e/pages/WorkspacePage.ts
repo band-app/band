@@ -1770,11 +1770,21 @@ export class WorkspacePage {
     );
   }
 
-  /** Convenience: read just the `maximizedGroup` field of the saved
-   *  state. */
+  /** Read the persisted maximized-group id from the center-dockview layout blob
+   *  (`band:dockview-layout-v9:<ws>`). `WorkspaceCenterDockview.writeLayout`
+   *  records the maximized group id there (dockview's own toJSON omits it);
+   *  `undefined` when nothing is maximized. */
   async readMaximizedGroup(workspaceId: string): Promise<string | undefined> {
-    const state = await this.readActiveState(workspaceId);
-    return state?.maximizedGroup;
+    return await this.page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return undefined;
+      try {
+        const parsed = JSON.parse(raw) as { maximizedGroup?: unknown };
+        return typeof parsed.maximizedGroup === "string" ? parsed.maximizedGroup : undefined;
+      } catch {
+        return undefined;
+      }
+    }, `band:dockview-layout-v9:${workspaceId}`);
   }
 
   /** Replace the persisted active-state for a workspace. Used to seed

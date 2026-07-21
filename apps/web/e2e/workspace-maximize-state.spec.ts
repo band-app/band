@@ -101,12 +101,13 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The maximize
-// BUTTON still works, but this spec asserts the removed per-workspace
-// active-state persistence model (band:dockview-active:<id> with
-// activeGroup/groups/maximizedGroup via readActiveState/readMaximizedGroup).
-// The unified center dockview folds active/maximized state into the serialized
-// dockview blob (band:dockview-layout-v8:<id>) with no maximizedGroup field.
+// TODO(#643 Phase 5): the maximized-group id now persists to the v9 layout blob
+// (readMaximizedGroup reads it, verified), but re-APPLYING the maximize to the
+// UI on remount is an unresolved dockview timing issue — `group.api.maximize()`
+// in onReady/rAF records state but the group doesn't visibly maximize after a
+// full page load. Re-enable once the restore reliably re-maximizes on mount.
+// (The AC that relies on the removed per-group active-view model also needs
+// repointing to the grid `activeView` in the v9 blob.)
 test.describe
   .skip("Workspace maximize state (issue #490)", () => {
     test("AC1 + regression — maximizing in A, switching to B, and switching back to A restores A's maximize without contaminating B", async ({
