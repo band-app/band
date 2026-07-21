@@ -114,6 +114,17 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
     saveActiveTab(activeTab);
   }, [activeTab]);
 
+  // ⇧⌘E / ⇧⌘G (and the title-bar switcher) select a specific tab. The shell
+  // dispatches `band:right-sidepanel-set-tab` alongside `band:show-right-panel`.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: RightTab }>).detail?.tab;
+      if (tab === "explorer" || tab === "changes") setActiveTab(tab);
+    };
+    window.addEventListener("band:right-sidepanel-set-tab", handler);
+    return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
+  }, []);
+
   const workspacePath = useWorkspacePath(workspaceId);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId);
 

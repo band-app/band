@@ -32,6 +32,7 @@ import {
   MessageSquare,
   Minimize2,
   Plus,
+  SquarePen,
   Terminal as TerminalIcon,
   TerminalSquare,
   X,
@@ -614,33 +615,47 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {/* Split / unified toggle (shares the `band:diff-view-mode` preference
-          with the standalone DiffView). */}
-      <div className="flex h-8 shrink-0 items-center justify-end gap-0.5 border-b border-border px-2">
+      {/* Header: open-for-editing (left) + split/unified toggle (right). The
+          toggle shares the `band:diff-view-mode` preference with DiffView. */}
+      <div className="flex h-8 shrink-0 items-center justify-between gap-1 border-b border-border px-2">
         <button
           type="button"
-          onClick={() => setMode("unified")}
-          aria-pressed={viewMode === "unified"}
-          title="Unified view"
-          data-testid="center-diff-leaf__view--unified"
-          className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
-            viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
-          }`}
+          onClick={() =>
+            getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+          }
+          title="Open file for editing"
+          data-testid="center-diff-leaf__open-file"
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <AlignJustify className="size-3.5" />
+          <SquarePen className="size-3.5" />
+          Edit
         </button>
-        <button
-          type="button"
-          onClick={() => setMode("split")}
-          aria-pressed={viewMode === "split"}
-          title="Side-by-side view"
-          data-testid="center-diff-leaf__view--split"
-          className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
-            viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
-          }`}
-        >
-          <Columns2 className="size-3.5" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setMode("unified")}
+            aria-pressed={viewMode === "unified"}
+            title="Unified view"
+            data-testid="center-diff-leaf__view--unified"
+            className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
+              viewMode === "unified" ? "bg-accent text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            <AlignJustify className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("split")}
+            aria-pressed={viewMode === "split"}
+            title="Side-by-side view"
+            data-testid="center-diff-leaf__view--split"
+            className={`inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-accent ${
+              viewMode === "split" ? "bg-accent text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            <Columns2 className="size-3.5" />
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {diff ? (

@@ -88,6 +88,16 @@ function activateLeafOfKind(workspaceId: string | null, kind: LeafKind): boolean
   return false;
 }
 
+/** Reveal the right sidepanel and (optionally) select its Explorer/Changes tab.
+ *  `__root` listens for `band:show-right-panel`; `RightSidepanel` listens for
+ *  `band:right-sidepanel-set-tab`. */
+function revealRightPanel(tab?: "explorer" | "changes"): void {
+  window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+  if (tab) {
+    window.dispatchEvent(new CustomEvent("band:right-sidepanel-set-tab", { detail: { tab } }));
+  }
+}
+
 // Empty state shown by the panel host when no workspace is selected.
 function NoWorkspaceMessage() {
   return (
@@ -201,8 +211,8 @@ export function SharedDockviewLayout() {
   }, []);
 
   const handleActivateFilesPanel = useCallback((_workspaceId: string) => {
-    // "Reveal files" now means reveal the right sidepanel (Explorer).
-    window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+    // "Reveal files" now means reveal the right sidepanel's Explorer tab.
+    revealRightPanel("explorer");
   }, []);
 
   const handleActivateTerminalPanel = useCallback((workspaceId: string) => {
@@ -385,13 +395,13 @@ export function SharedDockviewLayout() {
         activateLeafOfKind(ws, "chat");
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-chat")));
       } else if (key === "g" && e.shiftKey) {
-        // ⇧⌘G → reveal the right sidepanel (Changes lives there now).
+        // ⇧⌘G → reveal the right sidepanel's Changes tab.
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+        revealRightPanel("changes");
       } else if (key === "e" && e.shiftKey) {
-        // ⇧⌘E → toggle the right sidepanel (Explorer lives there now).
+        // ⇧⌘E → reveal the right sidepanel's Explorer tab.
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:toggle-right-panel"));
+        revealRightPanel("explorer");
       } else if (key === "b" && e.shiftKey) {
         e.preventDefault();
         activateLeafOfKind(ws, "browser");
@@ -467,10 +477,14 @@ export function SharedDockviewLayout() {
     const handler = (e: Event) => {
       const panelId = (e as CustomEvent<{ panelId: string }>).detail?.panelId;
       if (!panelId) return;
-      // "files" / "changes" moved to the right sidepanel — reveal it instead
-      // of activating a (now non-existent) center leaf.
-      if (panelId === "files" || panelId === "changes") {
-        window.dispatchEvent(new CustomEvent("band:show-right-panel"));
+      // "files" / "changes" moved to the right sidepanel — reveal it (and select
+      // the matching tab) instead of activating a (now non-existent) center leaf.
+      if (panelId === "files") {
+        revealRightPanel("explorer");
+        return;
+      }
+      if (panelId === "changes") {
+        revealRightPanel("changes");
         return;
       }
       const kind = (panelId === "terminal" ? "term" : panelId) as LeafKind;
