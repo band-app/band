@@ -89,51 +89,46 @@ test.afterAll(async () => {
   rmSync(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-// TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
-// asserts on the removed `center-tab--files` singleton (`tabContainer("files")`)
-// and the per-workspace `band-open-tabs:<ws>` persistence (`readOpenTabPaths`).
-// Desktop no longer runs the `useFileTabs` / CodeBrowserView flow; a terminal
-// file link now opens a bare per-path `file` leaf with no `openTabs` blob.
-// Re-enable (repointed at `center-file-tab--<path>` + FileViewer) in Phase 5.
-test.describe
-  .skip("Terminal file links", () => {
-    test("clicking a file path printed in the terminal opens it in the file browser", async ({
-      page,
-    }) => {
-      // The xterm boot + PTY handshake carries the same generous budget the
-      // other terminal specs use under CI worker contention.
-      test.setTimeout(120_000);
+// #643: the file explorer moved to the right sidepanel and desktop file
+// editors are now per-path `file` leaves in the unified center dockview. A
+// terminal file link therefore opens a `center-file-tab--<path>` leaf; the
+// open is observable through that tab and through the file's presence in the
+// persisted center-dockview layout (`readOpenTabPaths` → the `file:` panels).
+test.describe("Terminal file links", () => {
+  test("clicking a file path printed in the terminal opens it in the file browser", async ({
+    page,
+  }) => {
+    // The xterm boot + PTY handshake carries the same generous budget the
+    // other terminal specs use under CI worker contention.
+    test.setTimeout(120_000);
 
-      const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-      await workspacePage.goto(WORKSPACE);
-      await workspacePage.waitForReady();
-      await workspacePage.openTerminalTab();
-      await workspacePage.waitForTerminalReady(75_000);
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+    await workspacePage.openTerminalTab();
+    await workspacePage.waitForTerminalReady(75_000);
 
-      // Positive anchor: no file is open in the browser before the click.
-      // Poll so we assert against settled state, not a pre-hydration read.
-      await expect
-        .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
-        .not.toContain(REL_PATH);
+    // Positive anchor: no file leaf is open before the click. Poll so we
+    // assert against settled state, not a pre-hydration read.
+    await expect
+      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
+      .not.toContain(REL_PATH);
 
-      // Print the path on its own line. `runInTerminal` types the command and
-      // submits it; the shell echoes `LINK_PATH` as a bare output line at
-      // column 0, which the link provider turns into a clickable link.
-      await workspacePage.runInTerminal(`echo ${LINK_PATH}`);
+    // Print the path on its own line. `runInTerminal` types the command and
+    // submits it; the shell echoes `LINK_PATH` as a bare output line at
+    // column 0, which the link provider turns into a clickable link.
+    await workspacePage.runInTerminal(`echo ${LINK_PATH}`);
 
-      await workspacePage.clickTerminalFileLink(LINK_PATH);
+    await workspacePage.clickTerminalFileLink(LINK_PATH);
 
-      // Observable outcome: the click routed the path into the file browser,
-      // which switched to the Files tab and opened the file (persisted into the
-      // workspace's open-tabs localStorage entry, line suffix stripped). This is
-      // the same open-file surface a chat file-link click drives.
-      // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
-      // the per-path `center-file-tab--<path>` leaf. Describe is skipped.
-      await expect(workspacePage.fileTab(REL_PATH)).toBeAttached({
-        timeout: 15_000,
-      });
-      await expect
-        .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 15_000 })
-        .toContain(REL_PATH);
+    // Observable outcome: the click routed the path through the open-file event
+    // into a per-path `file` leaf (line suffix stripped) — the same open-file
+    // surface a chat file-link click drives.
+    await expect(workspacePage.fileTab(REL_PATH)).toBeAttached({
+      timeout: 15_000,
     });
+    await expect
+      .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 15_000 })
+      .toContain(REL_PATH);
   });
+});

@@ -2405,12 +2405,22 @@ export class WorkspacePage {
     });
   }
 
-  /** Read the persisted open-tabs state for a workspace out of
-   *  localStorage. Returns `null` when the entry is missing or
-   *  malformed (matches the runtime parse semantics in
-   *  `parseTabState`). Used by self-heal regression tests to assert
-   *  that a stale tab was actually removed from storage, not just
-   *  hidden from the UI. */
+  /** Read the persisted open *file* tabs for a workspace out of the unified
+   *  center-dockview layout blob (`band:dockview-layout-v9:<workspaceId>`).
+   *
+   *  In the flattened layout (#643) there is no separate `band-open-tabs`
+   *  store — file editors are ordinary dockview leaves whose panel id is
+   *  `file:<path>`, serialized by `api.toJSON()` into `layout.panels`, with the
+   *  globally-active panel recorded as the top-level `layout.activePanel`
+   *  string. This reader projects that blob back to the old `{ tabs, active }`
+   *  shape the file-tab specs assert on: `tabs` = every `file:` panel's path,
+   *  `active` = the active panel's path when it is a file leaf (else `null`).
+   *
+   *  dockview's `toJSON()` records the active *group* id (`activeGroup`), not a
+   *  panel id, and each group's active panel is the `activeView` of the
+   *  matching leaf in `grid.root`. So the globally-active panel is the
+   *  active group's `activeView`; we walk the grid tree to resolve it.
+   *  Returns `null` when the blob is missing or malformed. */
   async readOpenTabsState(
     workspaceId: string,
   ): Promise<{ tabs: string[]; active: string | null } | null> {
@@ -2418,25 +2428,46 @@ export class WorkspacePage {
       const raw = localStorage.getItem(key);
       if (!raw) return null;
       try {
-        const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
-        if (!Array.isArray(parsed.tabs)) return null;
-        const tabs: string[] = [];
-        for (const t of parsed.tabs) {
-          if (typeof t === "string") tabs.push(t);
-          else if (
-            t !== null &&
-            typeof t === "object" &&
-            typeof (t as { filePath?: unknown }).filePath === "string"
-          ) {
-            tabs.push((t as { filePath: string }).filePath);
+        const parsed = JSON.parse(raw) as {
+          panels?: unknown;
+          activeGroup?: unknown;
+          grid?: { root?: unknown };
+        };
+        const panels = parsed.panels;
+        if (panels === null || typeof panels !== "object") return null;
+        const tabs = Object.keys(panels as Record<string, unknown>)
+          .filter((id) => id.startsWith("file:"))
+          .map((id) => id.slice(5));
+
+        // Resolve the active panel id: find the leaf whose group id equals
+        // `activeGroup`, then read that leaf's `activeView`.
+        let activeId: string | null = null;
+        const activeGroup = typeof parsed.activeGroup === "string" ? parsed.activeGroup : null;
+        if (activeGroup) {
+          const stack: unknown[] = [parsed.grid?.root];
+          while (stack.length) {
+            const node = stack.pop() as
+              | { type?: string; data?: unknown }
+              | null
+              | undefined;
+            if (!node || typeof node !== "object") continue;
+            if (node.type === "leaf") {
+              const d = node.data as { id?: string; activeView?: string } | undefined;
+              if (d && d.id === activeGroup && typeof d.activeView === "string") {
+                activeId = d.activeView;
+                break;
+              }
+            } else if (node.type === "branch" && Array.isArray(node.data)) {
+              for (const child of node.data) stack.push(child);
+            }
           }
         }
-        const active = typeof parsed.active === "string" ? parsed.active : null;
+        const active = activeId && activeId.startsWith("file:") ? activeId.slice(5) : null;
         return { tabs, active };
       } catch {
         return null;
       }
-    }, `band-open-tabs:${workspaceId}`);
+    }, `band:dockview-layout-v9:${workspaceId}`);
   }
 
   // ──────────────────────────────────────────────────────────────────────
