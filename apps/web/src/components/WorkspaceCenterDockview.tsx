@@ -39,6 +39,7 @@ import {
   MessageSquare,
   Minimize2,
   Plus,
+  RotateCcw,
   SquarePen,
   Terminal as TerminalIcon,
   TerminalSquare,
@@ -763,9 +764,11 @@ const FULL_FILE_CONTEXT = 99999;
 function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath } = params;
+  const adapter = useAdapter();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
+  const [revertOpen, setRevertOpen] = useState(false);
 
   const setMode = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -813,18 +816,32 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
       {/* Header: open-for-editing (left) + split/unified toggle (right). The
           toggle shares the `band:diff-view-mode` preference with DiffView. */}
       <div className="flex h-8 shrink-0 items-center justify-between gap-1 border-b border-border px-2">
-        <button
-          type="button"
-          onClick={() =>
-            getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
-          }
-          title="Open file for editing"
-          data-testid="center-diff-leaf__open-file"
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <SquarePen className="size-3.5" />
-          Edit
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() =>
+              getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+            }
+            title="Open file for editing"
+            data-testid="center-diff-leaf__open-file"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <SquarePen className="size-3.5" />
+            Edit
+          </button>
+          {adapter.revertFile && (
+            <button
+              type="button"
+              onClick={() => setRevertOpen(true)}
+              title="Revert file"
+              data-testid="center-diff-leaf__revert"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <RotateCcw className="size-3.5" />
+              Revert
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -867,6 +884,38 @@ function DiffLeaf({ params }: IDockviewPanelProps<DiffLeafParams>) {
           </div>
         )}
       </div>
+
+      <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revert file</DialogTitle>
+            <DialogDescription>
+              Discard all changes to <span className="font-mono">{basename(filePath)}</span>? This
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRevertOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void adapter.revertFile
+                  ?.call(adapter, workspaceId, filePath, diffMode, compareBranch ?? undefined)
+                  .then(() => {
+                    setRevertOpen(false);
+                    fileDiffQuery.refetch();
+                    summaryQuery.refetch();
+                  })
+                  .catch((err) => console.error("[DiffLeaf] revert failed:", err));
+              }}
+            >
+              Revert
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

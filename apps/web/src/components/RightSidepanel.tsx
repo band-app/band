@@ -7,6 +7,7 @@ import {
   ChangesFileTree,
   FileBrowser,
   type FileStatus,
+  useAdapter,
   useDiffTarget,
   useWorkspacePath,
 } from "@/dashboard";
@@ -127,6 +128,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
 
   const workspacePath = useWorkspacePath(workspaceId);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId);
+  const adapter = useAdapter();
 
   // Fetch the changes summary for both the Changes tab badge and the tree.
   // Poll only while the panel is visible — react-resizable-panels keeps this
@@ -162,6 +164,22 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
       getWorkspaceLeafActions(workspaceId)?.openDiff(path, { preview: !pinned }),
     [workspaceId],
   );
+
+  // "Reset changes" in the Changes tree right-click menu — revert each path to
+  // its diff-target baseline, then refresh the summary. Undefined when the
+  // adapter can't revert (hides the menu item).
+  const onRevertPaths = adapter.revertFile
+    ? async (paths: string[]) => {
+        const revert = adapter.revertFile;
+        if (!revert) return;
+        await Promise.allSettled(
+          paths.map((p) =>
+            revert.call(adapter, workspaceId, p, diffMode, compareBranch ?? undefined),
+          ),
+        );
+        summaryQuery.refetch();
+      }
+    : undefined;
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
@@ -205,6 +223,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
                 fileStatuses={fileStatuses}
                 onSelectFile={(p) => openDiff(p, false)}
                 onSelectFilePinned={(p) => openDiff(p, true)}
+                onRevertPaths={onRevertPaths}
                 workspacePath={workspacePath}
               />
             )}
