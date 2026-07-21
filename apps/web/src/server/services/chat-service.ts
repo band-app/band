@@ -727,14 +727,16 @@ export class ChatService {
   // Layout integration (absorbed from the now-deleted `lib/chat-layout-manager.ts`)
   // -------------------------------------------------------------------------
 
-  /** Get the saved chat layout tree for a workspace, or null when absent. */
+  /**
+   * Get the saved chat layout tree for a workspace, or null when absent.
+   *
+   * Server-internal only — used by `getOrCreateDefault` to resolve the
+   * layout's active panel. Clients persist center layout in localStorage;
+   * the former `chatLayout.get` tRPC procedure was retired in issue #643
+   * Phase 4.
+   */
   getLayout(workspaceId: string): unknown | null {
     return this.layoutManager.get(workspaceId);
-  }
-
-  /** Upsert the saved chat layout tree for a workspace. */
-  saveLayout(workspaceId: string, tree: unknown): void {
-    this.layoutManager.save(workspaceId, tree);
   }
 
   /** Delete the saved chat layout for a workspace. */
