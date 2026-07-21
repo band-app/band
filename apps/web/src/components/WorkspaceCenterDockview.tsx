@@ -18,6 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
+import type { Extension } from "@codemirror/state";
 import { useQuery } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -59,19 +60,28 @@ import {
 } from "react";
 import {
   AgentIcon,
+  buildLspWsUrl,
   type ChatInsertDetail,
+  createLspExtension,
   DiffFileContent,
   FileViewer,
+  getLspLanguageId,
   getStoredViewMode,
+  releaseLspClient,
   SearchBar,
   storeViewMode,
   type TerminalInsertDetail,
+  toFileUri,
+  toLspServerLang,
   useAdapter,
+  useCapabilities,
   useDiffTarget,
   useSearch,
+  useSettingsQuery,
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
+import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import { writeClipboardText } from "../lib/clipboard";
 import {
@@ -94,6 +104,7 @@ import {
   newChatId,
   newTerminalId,
 } from "../lib/leaf-instance-ids";
+import { pathInside } from "../lib/path-inside";
 import { disposeTerminal } from "../lib/terminal-cache";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -217,6 +228,20 @@ const workspaceLeafActions = new Map<string, { current: LeafActions }>();
 
 export function getWorkspaceLeafActions(workspaceId: string | null): LeafActions | undefined {
   return workspaceId ? workspaceLeafActions.get(workspaceId)?.current : undefined;
+}
+
+// Per-workspace monotonic counter for untitled scratch buffers, mirroring
+// `useFileTabs`'s `untitledCounterRef` — the file leaf isn't backed by
+// `useFileTabs` (dockview owns the tab list), so the shell mints the
+// `untitled:N` path itself. In-memory only: a reload restarts at 1, which is
+// acceptable since untitled buffers aren't persisted across reloads here.
+const untitledCounters = new Map<string, number>();
+
+/** Mint the next `untitled:N` path for a workspace (1-based, monotonic). */
+export function nextUntitledPath(workspaceId: string): string {
+  const n = (untitledCounters.get(workspaceId) ?? 0) + 1;
+  untitledCounters.set(workspaceId, n);
+  return `${UNTITLED_PREFIX}${n}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +426,8 @@ interface FileLeafParams {
   line?: number;
   column?: number;
   external?: boolean;
+  /** Untitled scratch buffer (`untitled:N` path) — no backing file until saved. */
+  untitled?: boolean;
   /** Preview (italic, reused) tab — set by a single-click, cleared on pin. */
   preview?: boolean;
 }
@@ -692,14 +719,135 @@ function useLeafFind(workspaceId: string, visible: boolean) {
   return { containerRef, setViews, searchBar };
 }
 
+// ---------------------------------------------------------------------------
+// Per-file LSP extension for the file leaf
+// ---------------------------------------------------------------------------
+//
+// Mirrors CodeBrowserView's LSP wiring (createLspExtension on mount /
+// path+language change, releaseLspClient on cleanup). External + untitled
+// paths get no LSP (external files are outside the project root; untitled
+// buffers have no file URI). `createLspExtension` / `releaseLspClient`
+// refcount a shared client per WS url, so multiple file leaves open at once
+// acquire/release safely — same guarantee CodeBrowserView relies on.
+
+// Maps a file extension to the CodeMirror language name used by the LSP layer
+// (identical table to CodeBrowserView's).
+const LSP_EXT_LANG_MAP: Record<string, string> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mts: "typescript",
+  cts: "typescript",
+  mjs: "javascript",
+  cjs: "javascript",
+};
+
+function fileCmLang(filePath: string): string | undefined {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  return ext ? LSP_EXT_LANG_MAP[ext] : undefined;
+}
+
+function useFileLeafLsp(
+  workspaceId: string,
+  filePath: string,
+  external: boolean,
+): Extension | null {
+  const { settings } = useSettingsQuery();
+  const workspacePath = useWorkspacePath(workspaceId);
+  const [lspExtension, setLspExtension] = useState<Extension | null>(null);
+
+  // External / untitled files skip LSP entirely (no useful project context /
+  // no file URI). Only TS/JS-family files have a mapped server language.
+  const lspServerLang = useMemo(() => {
+    if (!settings.enableLSP) return null;
+    if (external || isUntitledPath(filePath)) return null;
+    const cmLang = fileCmLang(filePath);
+    return cmLang ? toLspServerLang(cmLang) : null;
+  }, [filePath, external, settings.enableLSP]);
+
+  const lspWsUrl = useMemo(
+    () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
+    [workspaceId, lspServerLang],
+  );
+
+  useEffect(() => {
+    if (!lspWsUrl || !workspacePath) {
+      setLspExtension(null);
+      return;
+    }
+    let cancelled = false;
+    const rootUri = toFileUri(workspacePath);
+    const documentUri = toFileUri(workspacePath, filePath);
+    const cmLang = fileCmLang(filePath);
+    const languageId = cmLang ? getLspLanguageId(cmLang) : undefined;
+    createLspExtension(lspWsUrl, rootUri, documentUri, languageId, workspaceId)
+      .then((ext) => {
+        if (!cancelled) setLspExtension(ext);
+      })
+      .catch((err) => {
+        console.warn("[FileLeaf] LSP extension creation failed:", err);
+        if (!cancelled) setLspExtension(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lspWsUrl, workspacePath, filePath, workspaceId]);
+
+  // Release the shared client for the *previous* url on change / unmount.
+  useEffect(() => {
+    return () => {
+      if (lspWsUrl) releaseLspClient(lspWsUrl);
+    };
+  }, [lspWsUrl]);
+
+  return lspExtension;
+}
+
 function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
   const { visible } = usePanelVisibility();
   const { containerRef, setViews, searchBar } = useLeafFind(params.workspaceId ?? "", visible);
+  const capabilities = useCapabilities();
+  const workspaceIdRaw = params.workspaceId ?? "";
+  const filePathRaw = params.filePath ?? "";
+  const untitled = params.untitled === true || isUntitledPath(filePathRaw);
+  const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
+  const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+
+  const workspacePath = useWorkspacePath(workspaceIdRaw);
 
   const handleEditorView = useCallback(
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
     (view: any) => setViews(view ? [view] : []),
     [setViews],
+  );
+
+  // Save-as flow for untitled buffers. `capabilities.pickSaveFile` bundles the
+  // OS "Save As" dialog + the disk write and resolves with the absolute path
+  // (null on cancel). On success we open the now-real file as its own leaf
+  // (workspace-relative when it landed inside the workspace, external
+  // otherwise) and close this untitled leaf — mirrors CodeBrowserView's
+  // untitled→file transition, just at the leaf granularity.
+  const pickSaveFile = capabilities.pickSaveFile;
+  const handleSaveAs = useCallback(
+    async (content: string): Promise<string | null> => {
+      if (!pickSaveFile) return null;
+      const chosen = await pickSaveFile({ content, defaultPath: workspacePath ?? undefined });
+      if (!chosen) return null;
+      const chosenPosix = chosen.replace(/\\/g, "/");
+      const relative = workspacePath != null ? pathInside(workspacePath, chosenPosix) : null;
+      const isExternal = relative === null;
+      const newPath = relative ?? chosenPosix;
+      const actions = getWorkspaceLeafActions(workspaceIdRaw);
+      // Drop the untitled buffer's persisted edited-content so the close
+      // confirm doesn't treat the (now-saved) tab as dirty, then swap leaves.
+      removeFileTabState(workspaceIdRaw, filePathRaw);
+      actions?.openFile(newPath, { external: isExternal, preview: false });
+      actions?.onClose(`file:${filePathRaw}`, "file");
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
+      return chosenPosix;
+    },
+    [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
   if (!params.workspaceId || !params.filePath) return null;
@@ -718,7 +866,16 @@ function FileLeaf({ params }: IDockviewPanelProps<FileLeafParams>) {
         line={params.line}
         column={params.column}
         editable
-        external={params.external ?? filePath.startsWith("/")}
+        external={external}
+        untitled={untitled}
+        // LSP is workspace-scoped: external files have no project root and
+        // untitled buffers have no file URI, so `useFileLeafLsp` returns null
+        // for both — pass it straight through.
+        lspExtension={lspExtension}
+        // Untitled buffers save through the OS "Save As" dialog; file-backed
+        // tabs save in place (FileViewer handles that itself), so only wire
+        // `onSaveAs` when this is an untitled buffer and the shell can save.
+        onSaveAs={untitled && pickSaveFile ? handleSaveAs : undefined}
         // The dockview tab already shows the filename (full path on hover), so
         // hide only FileViewer's redundant path/size label — keep the title bar
         // and its action buttons (save, format, markdown code/preview toggle,
@@ -938,7 +1095,13 @@ interface LeafActions {
   onClose: (id: string, kind: LeafKind) => void;
   openFile: (
     filePath: string,
-    opts?: { line?: number; column?: number; external?: boolean; preview?: boolean },
+    opts?: {
+      line?: number;
+      column?: number;
+      external?: boolean;
+      preview?: boolean;
+      untitled?: boolean;
+    },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
 }
@@ -1829,7 +1992,13 @@ export function WorkspaceCenterDockview({
   const handleOpenFile = useCallback(
     (
       filePath: string,
-      opts?: { line?: number; column?: number; external?: boolean; preview?: boolean },
+      opts?: {
+        line?: number;
+        column?: number;
+        external?: boolean;
+        preview?: boolean;
+        untitled?: boolean;
+      },
     ) => {
       const api = apiRef.current;
       if (!api) return;
@@ -1869,6 +2038,7 @@ export function WorkspaceCenterDockview({
           line: opts?.line,
           column: opts?.column,
           external: opts?.external,
+          untitled: opts?.untitled,
           preview,
         },
         position: centralPanelPosition(api),

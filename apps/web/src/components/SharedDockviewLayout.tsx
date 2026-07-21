@@ -11,6 +11,7 @@ import {
   recordWorkspaceAccess,
   SearchFilesDialog,
   type SelectionToChatDetail,
+  useCapabilities,
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
@@ -31,6 +32,7 @@ import {
   getWorkspaceDockviewApi,
   getWorkspaceLeafActions,
   type LeafKind,
+  nextUntitledPath,
   WorkspaceCenterDockview,
 } from "./WorkspaceCenterDockview";
 
@@ -136,6 +138,10 @@ export function SharedDockviewLayout() {
   }, [activeWorkspaceId]);
 
   const { recentFiles, trackFile } = useRecentFiles(activeWorkspaceId ?? "");
+
+  // Desktop shell capabilities: `pickFile` (OS "Open File…" dialog) gates ⌘O.
+  const capabilities = useCapabilities();
+  const pickFile = capabilities.pickFile;
 
   // Shadow of the active workspace's currentFile for the format/quick-open flows.
   const currentFileRef = useRef<string | undefined>(undefined);
@@ -546,6 +552,52 @@ export function SharedDockviewLayout() {
     window.addEventListener("band:add-to-chat", handler);
     return () => window.removeEventListener("band:add-to-chat", handler);
   }, []);
+
+  // ⌘N → New Untitled File. The shell already dispatches
+  // `band:new-untitled-tab` on ⌘N (and from the command palette); open a fresh
+  // untitled `file` leaf in the active workspace's dockview. The desktop
+  // Save-As flow lives in `FileLeaf` (`onSaveAs` → `capabilities.pickSaveFile`).
+  // Web builds without `pickSaveFile` still get a scratch buffer they can edit;
+  // only persistence is desktop-only (same as CodeBrowserView).
+  useEffect(() => {
+    const handler = () => {
+      const ws = activeWorkspaceIdRef.current;
+      if (!ws) return;
+      const filePath = nextUntitledPath(ws);
+      getWorkspaceLeafActions(ws)?.openFile(filePath, { untitled: true, preview: false });
+    };
+    window.addEventListener("band:new-untitled-tab", handler);
+    return () => window.removeEventListener("band:new-untitled-tab", handler);
+  }, []);
+
+  // ⌘O → Open File… — desktop-only (gated on `capabilities.pickFile`). Runs the
+  // OS file picker, then opens the chosen absolute path as an external `file`
+  // leaf (reads/writes hit the host's external-file capability). Mirrors
+  // CodeBrowserView's `handleOpenExternalFile`, but routed to the active
+  // workspace's leaf actions so multi-workspace setups open in the right one.
+  useEffect(() => {
+    if (!pickFile) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string } | undefined>).detail;
+      const ws = detail?.workspaceId ?? activeWorkspaceIdRef.current;
+      if (!ws || (detail?.workspaceId && detail.workspaceId !== activeWorkspaceIdRef.current)) {
+        return;
+      }
+      void (async () => {
+        const absolutePath = await pickFile();
+        if (!absolutePath) return;
+        const loc = parseFileLocation(absolutePath);
+        getWorkspaceLeafActions(ws)?.openFile(loc.filePath, {
+          line: loc.line,
+          column: loc.column,
+          external: true,
+          preview: false,
+        });
+      })();
+    };
+    window.addEventListener("band:open-file-external", handler);
+    return () => window.removeEventListener("band:open-file-external", handler);
+  }, [pickFile]);
 
   // Hide all browser webviews (desktop) while a dialog is open (active ws only).
   const toolbarDialogOpen = useAnyToolbarDialogOpen();
