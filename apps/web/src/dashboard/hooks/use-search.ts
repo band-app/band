@@ -26,6 +26,20 @@ interface UseSearchOptions {
   collectMatches?: (query: string, opts: SearchOptions) => SearchMatch[];
   /** Called when the find-in-file open callback changes (for Cmd+F integration). */
   onFindInFile?: ((fn: (() => void) | null) => void) | null;
+  /**
+   * Whether this hook registers its own unscoped, window-level Cmd/Ctrl+F
+   * handler that opens the bar on ANY find keypress. Defaults to `true` for
+   * standalone consumers (e.g. mobile `CodeBrowserView`, `DiffView`) that have
+   * no outer focus-scoping layer.
+   *
+   * Set to `false` when a parent already owns a focus-scoped find keybind
+   * (e.g. `useLeafFind` in the unified center dockview). Multiple leaves are
+   * mounted — and, with split groups, several are visible — at once, so an
+   * unscoped opener would open EVERY mounted leaf's bar on a single Cmd+F
+   * (including leaves whose tab isn't focused, e.g. when focus is in a
+   * terminal). The parent's focus-in-container handler is the single opener.
+   */
+  registerGlobalFindKey?: boolean;
 }
 
 export interface UseSearchReturn {
@@ -62,6 +76,7 @@ export function useSearch({
   getViews,
   collectMatches,
   onFindInFile,
+  registerGlobalFindKey = true,
 }: UseSearchOptions): UseSearchReturn {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQueryText] = useState("");
@@ -173,7 +188,11 @@ export function useSearch({
 
   // Direct Cmd+F / Ctrl+F handler so the search works even when
   // the parent layout does not provide a FindInFileContext (e.g. desktop / mobile).
+  // Skipped when the parent owns a focus-scoped find keybind (see
+  // `registerGlobalFindKey`) — an unscoped opener would open every mounted
+  // leaf's bar at once.
   useEffect(() => {
+    if (!registerGlobalFindKey) return;
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "f" && !e.shiftKey) {
@@ -183,7 +202,7 @@ export function useSearch({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleOpenSearch]);
+  }, [handleOpenSearch, registerGlobalFindKey]);
 
   return {
     searchOpen,

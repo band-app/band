@@ -677,6 +677,231 @@ export class WorkspacePage {
     return scope.getByTestId(`center-diff-leaf__visible-${visible ? "true" : "false"}`);
   }
 
+  /** The unified find bar's input when it targets a file editor or the
+   *  rendered markdown preview (`Find in file...` / `Find in preview...`). The
+   *  terminal's own find bar uses a distinct `Find in terminal...` placeholder,
+   *  so this never matches it — letting a test assert the editor/preview bar did
+   *  NOT open while a terminal is focused. Placeholder-based to mirror
+   *  `find-in-markdown-preview.spec.ts`. */
+  get findInFileOrPreviewBar(): Locator {
+    return this.page.getByPlaceholder(/Find in (file|preview)\.\.\./);
+  }
+
+  /** Press the real Cmd/Ctrl+F find shortcut against whatever currently holds
+   *  focus (the caller focuses the intended surface first). `process.platform`
+   *  is the test-runner OS, matching `find-in-markdown-preview.spec.ts`. */
+  async pressFindShortcut(): Promise<void> {
+    await test.step("Press Cmd/Ctrl+F", async () => {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await this.page.keyboard.press(`${modifier}+f`);
+    });
+  }
+
+  /** Open a file into a center `file` leaf via the real `band:open-file` event
+   *  and wait until its body reports visible. */
+  async openFileLeaf(filename: string, workspaceId?: string): Promise<void> {
+    await this.dispatchOpenFileEvent({ filename, workspaceId });
+    await this.fileLeafVisibilityMarker(true, workspaceId)
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 });
+  }
+
+  /** Activate the terminal tab (make it the visible view in its group) and move
+   *  focus into its input, so a subsequent shortcut originates from the
+   *  terminal. */
+  async focusTerminal(): Promise<void> {
+    await test.step("Activate + focus the terminal", async () => {
+      await this.tab("terminal").click();
+      await this.terminalInput.first().waitFor({ state: "visible", timeout: 20_000 });
+      await this.terminalInput.first().focus();
+    });
+  }
+
+  /** Activate the `file` leaf tab for `path` and move focus into its CodeMirror
+   *  editor, so a subsequent find shortcut originates from the editor. */
+  async focusFileEditor(path: string): Promise<void> {
+    await test.step(`Activate + focus the file editor for ${path}`, async () => {
+      await this.fileTab(path).click();
+      const marker = this.fileLeafVisibilityMarker(true).first();
+      await marker.waitFor({ state: "visible", timeout: 20_000 });
+      // CodeMirror's editable surface reports role="textbox" (third-party
+      // markup, like xterm's textarea) — focus it via role rather than a CSS
+      // class so the keybind originates inside the editor.
+      await marker.getByRole("textbox").first().click();
+    });
+  }
+
+  /** Move the editor cursor to the end of the document (which also scrolls the
+   *  editor to the bottom), so a reload/reopen can be shown to restore the
+   *  cursor + scroll position. Editor must be focused first. */
+  async pressEditorToDocEnd(): Promise<void> {
+    await test.step("Move editor cursor to document end", async () => {
+      // CodeMirror's default doc-end binding: Cmd+Down (mac) / Ctrl+End (else).
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
+      );
+    });
+  }
+
+  /** The scroll offset of the visible file leaf's CodeMirror scroller. 0 means
+   *  the editor is at the top; a restored scroll position reads > 0. */
+  async editorScrollTop(): Promise<number> {
+    return await this.fileLeafVisibilityMarker(true)
+      .first()
+      .locator(".cm-scroller")
+      .first()
+      .evaluate((el) => (el as HTMLElement).scrollTop);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Nested terminal PANES (tmux-style split within a terminal tab).
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** Every visible terminal pane body (`term-pane__<terminalId>`), across the
+   *  currently-shown terminal leaf. Count === number of split panes. */
+  terminalPanes(): Locator {
+    return this.page.getByTestId(/^term-pane__/).filter({ visible: true });
+  }
+
+  /** Visible center TERMINAL tabs in the outer dockview strip — used to prove a
+   *  split creates PANES, not a new terminal tab. */
+  terminalTabs(): Locator {
+    return this.page.getByTestId(/^center-term-tab--/).filter({ visible: true });
+  }
+
+  private get modifier(): "Meta" | "Control" {
+    return process.platform === "darwin" ? "Meta" : "Control";
+  }
+
+  /** Split the focused terminal pane to the RIGHT (⌘D). Assumes the terminal is
+   *  already focused (call `focusTerminal` first, or a prior split leaves the
+   *  new pane focused). */
+  async splitTerminalRight(): Promise<void> {
+    await test.step("Split terminal pane right (⌘D)", async () => {
+      await this.page.keyboard.press(`${this.modifier}+d`);
+    });
+  }
+
+  /** Split the focused terminal pane BELOW (⌘⇧D). */
+  async splitTerminalBelow(): Promise<void> {
+    await test.step("Split terminal pane below (⌘⇧D)", async () => {
+      await this.page.keyboard.press(`${this.modifier}+Shift+d`);
+    });
+  }
+
+  /** Cycle to the next terminal pane (⌘]). */
+  async cyclePaneForward(): Promise<void> {
+    await test.step("Cycle terminal pane forward (⌘])", async () => {
+      await this.page.keyboard.press(`${this.modifier}+]`);
+    });
+  }
+
+  /** The xterm input textarea of the nth visible terminal pane (0-based, in
+   *  DOM/visual order). */
+  paneInput(index: number): Locator {
+    return this.terminalPanes().nth(index).getByRole("textbox", { name: "Terminal input" });
+  }
+
+  /** Move focus into the nth terminal pane (activates it in the nested split). */
+  async focusPane(index: number): Promise<void> {
+    await test.step(`Focus terminal pane ${index}`, async () => {
+      await this.paneInput(index).focus();
+    });
+  }
+
+  /** The DOM-order index of the terminal pane that currently holds focus
+   *  (`document.activeElement`), or -1. Robust way to assert focus moved between
+   *  panes (e.g. after a ⌘] cycle) without depending on shell-set titles. */
+  async focusedPaneIndex(): Promise<number> {
+    return await this.page.evaluate(() => {
+      const panes = Array.from(document.querySelectorAll('[data-testid^="term-pane__"]'));
+      const active = document.activeElement;
+      return active ? panes.findIndex((p) => p.contains(active)) : -1;
+    });
+  }
+
+  /** Wait until the nth pane's xterm has drawn its shell prompt (any rendered
+   *  text) — a readiness barrier before typing, so an escape sequence isn't lost
+   *  to a not-yet-ready shell. */
+  async waitForPanePrompt(index: number, timeoutMs = 20_000): Promise<void> {
+    await test.step(`Wait for shell prompt in pane ${index}`, async () => {
+      await expect
+        .poll(
+          async () =>
+            (await this.terminalPanes().nth(index).locator(".xterm-rows").innerText()).trim()
+              .length,
+          { timeout: timeoutMs },
+        )
+        .toBeGreaterThan(0);
+    });
+  }
+
+  /** Type + submit a line into a SPECIFIC pane (focuses that pane first, unlike
+   *  `runInTerminal` which always targets the first pane). */
+  async typeInPane(index: number, line: string): Promise<void> {
+    await test.step(`Type in terminal pane ${index}: ${line}`, async () => {
+      await this.paneInput(index).focus();
+      await this.page.keyboard.press("Enter");
+      await this.page.keyboard.type(line);
+      await this.page.keyboard.press("Enter");
+    });
+  }
+
+  /** The draggable pane header (`term-pane-header__<id>`) of the nth visible
+   *  pane. Present only when a leaf has >1 pane (a lone pane hides its header). */
+  paneHeader(index: number): Locator {
+    return this.page
+      .getByTestId(/^term-pane-header__/)
+      .filter({ visible: true })
+      .nth(index);
+  }
+
+  /** Drag one pane's header onto another pane to reorder — dockview moves the
+   *  dragged pane next to the target. Uses a manual pointer-move sequence
+   *  (dockview drives its DnD off pointer events) with intermediate steps so the
+   *  drag registers. */
+  async dragPaneHeaderOnto(fromIndex: number, toIndex: number): Promise<void> {
+    await test.step(`Drag pane header ${fromIndex} onto pane ${toIndex}`, async () => {
+      const from = this.paneHeader(fromIndex);
+      const target = this.terminalPanes().nth(toIndex);
+      const fromBox = await from.boundingBox();
+      const toBox = await target.boundingBox();
+      if (!fromBox || !toBox) throw new Error("pane header/target not laid out for drag");
+      await this.page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + fromBox.height / 2);
+      await this.page.mouse.down();
+      // Move in steps so dockview's drag detection + overlay tracking engage.
+      const tx = toBox.x + toBox.width / 2;
+      const ty = toBox.y + toBox.height / 2;
+      await this.page.mouse.move(fromBox.x + fromBox.width / 2 + 12, fromBox.y + 6, { steps: 4 });
+      await this.page.mouse.move(tx, ty, { steps: 12 });
+      // Nudge to the target's left edge so the drop reorders rather than centers.
+      await this.page.mouse.move(toBox.x + 10, ty, { steps: 6 });
+      await this.page.mouse.up();
+    });
+  }
+
+  /** The visible pane titles, in DOM order — read from each pane header's text.
+   *  Lets a drag-reorder test assert the order changed. */
+  async paneTitles(): Promise<string[]> {
+    return await this.page
+      .getByTestId(/^term-pane-header__/)
+      .filter({ visible: true })
+      .allInnerTexts();
+  }
+
+  /** Close the focused terminal pane (Ctrl+D — closes the pane when >1 exist). */
+  async closeFocusedPane(): Promise<void> {
+    await test.step("Close focused terminal pane (Ctrl+D)", async () => {
+      await this.page.keyboard.press("Control+d");
+    });
+  }
+
+  /** The outer terminal tab's rendered title text (which tracks the last-focused
+   *  pane's title). */
+  async activeTerminalTabTitle(): Promise<string> {
+    return (await this.terminalTabs().first().innerText()).trim();
+  }
+
   /** Locate the dockview-owned `.dv-tab` wrapper that contains the named
    *  center tab. The `data-testid` we set on each tab lives on the inner
    *  `.dv-default-tab` element; dockview wraps it with its own `.dv-tab`
@@ -790,10 +1015,19 @@ export class WorkspacePage {
     });
   }
 
-  /** Split the active terminal leaf to the right (Cmd+D) in the given workspace. */
+  /** Split the focused terminal into a nested PANE to the right (Cmd+D) in the
+   *  given workspace. A terminal split now happens INSIDE the terminal leaf's
+   *  nested dockview, so the keystroke must originate from focus inside that
+   *  workspace's xterm — activate its terminal tab, focus the xterm, then ⌘D. */
   async clickTerminalSplitRight(workspaceId: string): Promise<void> {
-    await test.step(`Split the terminal leaf right (Cmd+D) in workspace ${workspaceId}`, async () => {
-      await this.splitLeafRight("terminal", workspaceId);
+    await test.step(`Split the terminal pane right (Cmd+D) in workspace ${workspaceId}`, async () => {
+      const host = this.cachedPanelEntries(workspaceId);
+      await host
+        .getByTestId(new RegExp(`^${this.centerTabTestidPrefix("terminal")}`))
+        .first()
+        .click();
+      await host.getByRole("textbox", { name: "Terminal input" }).first().focus();
+      await this.page.keyboard.press(`${this.modifier}+d`);
     });
   }
 

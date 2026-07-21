@@ -162,18 +162,22 @@ test.describe("Terminal parking: dispose triggers", () => {
       .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(1);
 
-    // Split so there are two terminals visible side-by-side (both mounted +
-    // attached → two wrappers), which also enables the close (×) control.
-    await workspacePage.clickTerminalSplitRight(WORKSPACE_CLOSE);
-    await expect
-      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_CLOSE), { timeout: 20_000 })
-      .toBe(2);
+    // Split the terminal into a nested PANE (⌘D from inside the focused
+    // terminal) → two panes side-by-side in ONE terminal tab, both mounted +
+    // attached (two cached xterm wrappers). A split is a pane now, not a new
+    // terminal tab, so the tab count stays 1.
+    await workspacePage.focusTerminal();
+    await workspacePage.splitTerminalRight();
     await expect
       .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(2);
+    await expect
+      .poll(() => workspacePage.countTerminalPanels(WORKSPACE_CLOSE), { timeout: 20_000 })
+      .toBe(1);
 
-    // Close one → its cached xterm is disposed (wrapper removed from the DOM).
-    await workspacePage.closeTerminalTab(WORKSPACE_CLOSE);
+    // Close the focused pane (Ctrl+D) → its cached xterm is disposed (wrapper
+    // removed from the DOM).
+    await workspacePage.closeFocusedPane();
     await expect
       .poll(() => workspacePage.terminalWrapperCount(WORKSPACE_CLOSE), { timeout: 20_000 })
       .toBe(1);

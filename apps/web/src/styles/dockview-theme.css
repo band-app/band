@@ -322,6 +322,46 @@
   box-shadow: none;
 }
 
+/* ---------------------------------------------------------------------------
+ * Nested terminal SPLIT — the per-terminal-leaf inner dockview whose panels
+ * are tmux-style split PANES (not tabs). Each pane is a single-panel group
+ * with a slim draggable header; sashes stay VISIBLE (panes resize), unlike the
+ * tab variants above. When there's a single pane the header is hidden entirely
+ * (`--single`), so an unsplit terminal shows no redundant inner title bar.
+ * --------------------------------------------------------------------------- */
+
+.dockview-terminal-split {
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+}
+
+/* Slim pane header; the header IS dockview's drag source, so hint it. */
+.dockview-terminal-split .dv-tab {
+  padding-left: 0.5rem;
+  padding-right: 0.25rem;
+  cursor: grab;
+  font-weight: 600;
+}
+.dockview-terminal-split .dv-tab:active {
+  cursor: grabbing;
+}
+
+/* No active-tab shadow — a single pane per group needs no active emphasis. */
+.dockview-terminal-split .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab,
+.dockview-terminal-split
+  .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: none;
+}
+
+/* Single pane → hide the whole pane header (no split affordances needed). */
+.dockview-terminal-split--single .dv-tabs-and-actions-container {
+  display: none;
+}
+
 /* Scoped edge-collapse animation for tab maximize/restore. The class is
    added by applyMaximizeEdgeVisibility for the duration of the toggle only,
    so sash dragging (which writes width per pointermove) is never affected.

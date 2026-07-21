@@ -335,23 +335,30 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
     page,
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
+    const { baseVisible } = await mountBothTerminalsAndSettle(
       workspacePage,
       TERM_SPLIT_VISIBLE,
       TERM_SPLIT_CACHED,
     );
+    const wrappersVisibleBefore = await workspacePage.terminalWrapperCount(TERM_SPLIT_VISIBLE);
+    const wrappersCachedBefore = await workspacePage.terminalWrapperCount(TERM_SPLIT_CACHED);
 
     await workspacePage.clickTerminalSplitRight(TERM_SPLIT_VISIBLE);
 
-    // Split adds a panel (in a new group) to the VISIBLE workspace...
+    // A terminal split is now a nested PANE: the VISIBLE workspace gains a new
+    // xterm wrapper (pane)...
     await expect
-      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
-      .toBe(baseVisible + 1);
-
-    // ...and leaves the cached workspace untouched (poll to absorb a
-    // debounce-delayed wrong-workspace persist — see the add-tab test).
+      .poll(() => workspacePage.terminalWrapperCount(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
+      .toBe(wrappersVisibleBefore + 1);
+    // ...while its terminal TAB count is unchanged (a split is a pane, not a
+    // new terminal tab).
     await expect
-      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_CACHED), { timeout: 3_000 })
-      .toBe(baseCached);
+      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 3_000 })
+      .toBe(baseVisible);
+    // ...and the cached workspace is untouched (poll to absorb a debounce-delayed
+    // wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.terminalWrapperCount(TERM_SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(wrappersCachedBefore);
   });
 });

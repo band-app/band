@@ -53,9 +53,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import {
-  lazy,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -78,6 +76,7 @@ import {
   releaseLspClient,
   SearchBar,
   type SearchOptions,
+  serializeEditorState,
   storeViewMode,
   type TerminalInsertDetail,
   toFileUri,
@@ -115,6 +114,18 @@ import {
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
 import { disposeTerminal } from "../lib/terminal-cache";
+import {
+  clearLeafOwners,
+  deleteNestedLayout,
+  findFocusedTerminalSplitDockview,
+  isOwnedPane,
+  leafOwnsAnyLive,
+  ownerOfTerminal,
+  seedOwnersFromStorage,
+  terminalSplitApiForLeaf,
+  terminalsOwnedByLeaf,
+  unregisterPaneOwner,
+} from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
@@ -131,11 +142,7 @@ import { setPerWorkspaceState } from "./per-workspace-state-store";
 // callbacks (call time, never module eval), so the live binding is always
 // populated by then — same pattern the legacy containers use.
 import { crossPanelHandlers } from "./SharedDockviewLayout";
-
-// Lazy-load TerminalPanel to avoid importing @xterm (CJS) during SSR.
-const TerminalPanel = lazy(() =>
-  import("./TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
-);
+import { TerminalSplitLeaf } from "./TerminalSplitLeaf";
 
 // ---------------------------------------------------------------------------
 // Leaf kinds
@@ -600,33 +607,44 @@ function ChatLeafContent({
 // Terminal leaf
 // ---------------------------------------------------------------------------
 
-function TerminalLeaf({ params, api }: IDockviewPanelProps<TermLeafParams>) {
+function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLeafParams>) {
   const { visible } = usePanelVisibility();
 
+  // The OUTER tab title tracks the last-focused pane inside the nested split.
   const onTitleChange = useCallback((title: string) => api.setTitle(title), [api]);
 
-  if (!params.workspaceId || !params.terminalId) return null;
+  const ws = params.workspaceId;
+  const tid = params.terminalId;
+  // A lone-pane close / ⌘W routes here → close the whole terminal tab (the
+  // outer `doCloseLeaf` kills every pane's PTY it owns).
+  const onCloseLeaf = useCallback(() => {
+    if (ws && tid) getWorkspaceLeafActions(ws)?.onClose(tid, "term");
+  }, [ws, tid]);
 
-  const paneMetadata =
-    params.command || params.cwd || params.env
-      ? { command: params.command, cwd: params.cwd, env: params.env }
-      : undefined;
+  // Mobile is single-pane / no-split — the workspace dockview tags itself in
+  // `mobileByApiId` on `onReady`.
+  const mobile = mobileByApiId.has(containerApi.id);
+
+  if (!ws || !tid) return null;
 
   return (
     <div
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-term-leaf__visible-${visible ? "true" : "false"}`}
     >
-      <Suspense fallback={null}>
-        <TerminalPanel
-          workspaceId={params.workspaceId}
-          terminalId={params.terminalId}
-          visible={visible}
-          paneMetadata={paneMetadata}
-          autoFocus={params.autoFocus}
-          onTitleChange={onTitleChange}
-        />
-      </Suspense>
+      <TerminalSplitLeaf
+        workspaceId={ws}
+        leafId={tid}
+        primaryTerminalId={tid}
+        command={params.command}
+        cwd={params.cwd}
+        env={params.env}
+        autoFocus={params.autoFocus}
+        visible={visible}
+        mobile={mobile}
+        onActivePaneTitleChange={onTitleChange}
+        onCloseLeaf={onCloseLeaf}
+      />
     </div>
   );
 }
@@ -776,7 +794,13 @@ function useLeafFind(
     [visible, workspaceId],
   );
 
-  const search = useSearch({ getViews, onFindInFile });
+  // `registerGlobalFindKey: false` — this hook owns a focus-scoped Cmd+F
+  // handler below. `useSearch`'s built-in window handler is unscoped and would
+  // open EVERY mounted leaf's find bar on a single Cmd+F (with split groups
+  // several leaves are visible at once, and even a Cmd+F from a focused
+  // terminal reached every leaf's opener). The scoped handler is the single
+  // opener; it only fires when focus is inside this leaf's container.
+  const search = useSearch({ getViews, onFindInFile, registerGlobalFindKey: false });
 
   // Re-dispatch the active query to newly-registered views (e.g. a split-diff
   // second pane, or the editor after content loads).
@@ -1008,11 +1032,47 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     showMarkdownToggle: boolean;
   } | null>(null);
 
+  // Hold the live EditorView so we can serialize its cursor/selection/scroll on
+  // hide/unmount/reload and restore it next open (see `persistEditorState`).
+  // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
+  const editorViewRef = useRef<any>(null);
   const handleEditorView = useCallback(
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
-    (view: any) => setViews(view ? [view] : []),
+    (view: any) => {
+      editorViewRef.current = view;
+      setViews(view ? [view] : []);
+    },
     [setViews],
   );
+
+  // Capture the editor's cursor/selection/undo-history + scroll offset into the
+  // per-tab store so reopening the file (or reloading) lands the user back where
+  // they were. `FileViewer` restores it via `savedEditorState`/`savedScrollTop`
+  // below. Mirrors CodeBrowserView's serialize-on-unmount (pre-#643).
+  const persistEditorState = useCallback(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    try {
+      const { editorState, scrollTop } = serializeEditorState(view);
+      updateFileTabState(workspaceIdRaw, filePathRaw, { editorState, scrollTop });
+    } catch {
+      // editor not ready — nothing to capture
+    }
+  }, [workspaceIdRaw, filePathRaw]);
+
+  // Persist on hide (visibility-effect cleanup runs when `visible` flips or on
+  // unmount) and on page hide (covers a reload/close while this leaf is the
+  // active, visible tab — its cleanup wouldn't otherwise fire in time).
+  const persistEditorStateRef = useRef(persistEditorState);
+  persistEditorStateRef.current = persistEditorState;
+  useEffect(() => {
+    const onPageHide = () => persistEditorStateRef.current();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      persistEditorStateRef.current();
+    };
+  }, []);
 
   // Stable renderer (identity never changes — markdownRef/setPreviewMatchInfo
   // are stable) so FileViewer's `showMarkdownToggle` doesn't churn each render.
@@ -1176,15 +1236,18 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         renderMarkdown={renderMarkdown}
         onEditorView={handleEditorView}
         toolbar={searchBar}
+        // Cursor/selection/undo-history + scroll restore: seeded from the per-tab
+        // store; `CodeMirrorEditor` applies them on view creation. Captured back
+        // by `persistEditorState` on hide/unmount/reload. Read fresh each render
+        // — harmless, since `CodeMirrorEditor` consumes the value via a ref only
+        // at view-creation time (it doesn't recreate on prop change).
+        savedEditorState={persisted?.editorState}
+        savedScrollTop={persisted?.scrollTop}
         // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
         // from the fresh module-level store and write back on every change so a
         // reload restores unsaved edits, the markdown code/preview choice, and
         // the manual language override. The dirty CustomEvent lets the tab
         // header (a separate React tree) re-check its dirty dot.
-        //
-        // Cursor/scroll `editorState` persistence is DEFERRED: FileViewer
-        // exposes no `onEditorStateChange`-style callback to capture it, and we
-        // deliberately don't fabricate one here.
         initialEditedContent={persisted?.editedContent ?? null}
         onEditedContentChange={(content) => {
           updateFileTabState(workspaceId, filePath, {
@@ -2348,8 +2411,16 @@ export function WorkspaceCenterDockview({
       const panel = api.getPanel(id);
       if (panel) api.removePanel(panel);
       if (kind === "term") {
-        disposeTerminal(id);
-        trpc.terminal.kill.mutate({ terminalId: id }).catch(() => {});
+        // A terminal leaf hosts N nested panes — kill EVERY owned pane's PTY,
+        // not just the outer panel id (which may be a pane the user already
+        // closed). Then drop the leaf's nested-layout blob + ownership.
+        const owned = terminalsOwnedByLeaf(id);
+        for (const terminalId of owned.length ? owned : [id]) {
+          disposeTerminal(terminalId);
+          trpc.terminal.kill.mutate({ terminalId }).catch(() => {});
+        }
+        clearLeafOwners(id);
+        deleteNestedLayout(workspaceId, id);
       } else if (kind === "chat") {
         trpc.chats.remove.mutate({ chatId: id }).catch(() => {});
       } else if (kind === "browser") {
@@ -2584,15 +2655,27 @@ export function WorkspaceCenterDockview({
       for (const panel of [...api.panels]) {
         const kind = panel.api.component as LeafKind;
         if (kind === "chat" && !data.chatIds.has(panel.id)) api.removePanel(panel);
-        else if (kind === "term" && !data.terminalIds.has(panel.id)) api.removePanel(panel);
-        else if (kind === "browser" && !data.browserIds.has(panel.id)) api.removePanel(panel);
+        else if (kind === "term") {
+          // A term leaf owns N nested panes — it survives as long as ANY of its
+          // panes' terminals is still live (ownership-based), not just the outer
+          // panel id (which may be a pane the user closed). Owner map is
+          // pre-seeded from persisted split blobs in onReady, so this is
+          // populated before the nested leaves mount.
+          const selfLive = data.terminalIds.has(panel.id);
+          if (!selfLive && !leafOwnsAnyLive(panel.id, data.terminalIds)) api.removePanel(panel);
+        } else if (kind === "browser" && !data.browserIds.has(panel.id)) api.removePanel(panel);
       }
       // Add live instances missing from the restored layout (CLI-created while closed).
       for (const chatId of data.chatIds) {
         if (!api.getPanel(chatId)) addChatLeaf(api, workspaceId, chatId);
       }
       for (const terminalId of data.terminalIds) {
-        if (!api.getPanel(terminalId)) addTermLeaf(api, workspaceId, terminalId);
+        // Skip terminals that are panes of an existing terminal leaf — they live
+        // inside a nested dockview, not as top-level tabs. Only genuine
+        // top-level terminals (no owner) seed a new leaf.
+        if (!isOwnedPane(terminalId) && !api.getPanel(terminalId)) {
+          addTermLeaf(api, workspaceId, terminalId);
+        }
       }
       if (isDesktop) {
         for (const browserId of data.browserIds) {
@@ -2631,8 +2714,19 @@ export function WorkspaceCenterDockview({
         urls: new Map<string, string>(),
       };
 
+      // Pre-seed terminal-pane ownership from persisted split blobs BEFORE
+      // reconcile: the nested `TerminalSplitLeaf`s haven't mounted yet, so
+      // without this reconcile would see a pane's terminalId in `terminal.list`,
+      // find no owner, and wrongly add it as a top-level tab.
+      seedOwnersFromStorage(workspaceId);
+
       isRestoringRef.current = true;
       const saved = loadSavedLayout(workspaceId);
+      // Track whether we BUILT a fresh default (vs restored a persisted layout).
+      // Only a freshly-built default needs the one-shot persist below — a
+      // restored layout is already durable, and re-flushing it on mount would
+      // race the deferred maximize re-apply and clobber the saved maximizedGroup.
+      let builtDefault = false;
       if (saved) {
         try {
           api.fromJSON(
@@ -2644,9 +2738,11 @@ export function WorkspaceCenterDockview({
           console.error("[WorkspaceCenterDockview] fromJSON failed, rebuilding:", err);
           for (const p of [...api.panels]) api.removePanel(p);
           buildDefaultLayout(api, data);
+          builtDefault = true;
         }
       } else {
         buildDefaultLayout(api, data);
+        builtDefault = true;
       }
 
       // Mobile is tabs-only: collapse any split (default or a restored desktop
@@ -2704,6 +2800,14 @@ export function WorkspaceCenterDockview({
 
       setTimeout(() => {
         isRestoringRef.current = false;
+        // Persist a freshly-built DEFAULT layout once, immediately. It is
+        // otherwise only written on the NEXT outer-layout change — but splitting
+        // a terminal is a NESTED change that never touches the outer layout, so
+        // without this a fresh workspace that only split terminals would lose its
+        // outer layout (and thus the primary terminal id the nested split blob is
+        // keyed by) on reload. A RESTORED layout is skipped: it's already durable
+        // and re-flushing would race the deferred maximize re-apply.
+        if (builtDefault) flushPersist();
       }, 0);
 
       // Cold-mount layout catch-up.
@@ -2738,11 +2842,32 @@ export function WorkspaceCenterDockview({
         const panel = api.getPanel(event.chatId);
         if (panel) api.removePanel(panel);
       } else if (event.kind === "terminal-created" && typeof event.terminalId === "string") {
-        if (!api.getPanel(event.terminalId)) addTermLeaf(api, workspaceId, event.terminalId);
+        // A pane created by an in-tab split registers ownership before its
+        // `terminal.create`, so its echo lands here already-owned — don't add a
+        // stray top-level tab. Only genuine CLI-created terminals (no owner)
+        // seed a new leaf.
+        if (!isOwnedPane(event.terminalId) && !api.getPanel(event.terminalId)) {
+          addTermLeaf(api, workspaceId, event.terminalId);
+        }
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
         disposeTerminal(event.terminalId);
-        const panel = api.getPanel(event.terminalId);
-        if (panel) api.removePanel(panel);
+        // Every terminal is a PANE of some terminal leaf (the primary pane's id
+        // === the outer leaf id). Resolve the owning leaf, then remove the killed
+        // pane from its nested dockview — and remove the OUTER leaf only once no
+        // panes remain. Keying only on `api.getPanel(id)` would wrongly nuke the
+        // whole leaf when the (primary) pane is closed while others survive.
+        const killedId = event.terminalId;
+        const leafId = ownerOfTerminal(killedId) ?? (api.getPanel(killedId) ? killedId : undefined);
+        if (leafId) {
+          const nested = terminalSplitApiForLeaf(leafId);
+          const pane = nested?.getPanel(killedId);
+          if (nested && pane) nested.removePanel(pane);
+          if (!nested || nested.panels.length === 0) {
+            const outer = api.getPanel(leafId);
+            if (outer) api.removePanel(outer);
+          }
+        }
+        unregisterPaneOwner(killedId);
       } else if (
         isDesktop &&
         event.kind === "browser-created" &&
@@ -2840,6 +2965,17 @@ export function WorkspaceCenterDockview({
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
+      // Defer the pane-level keys to a focused terminal leaf's nested dockview:
+      // it owns ⌘D / ⌘⇧D (split), plain ⌘[ / ⌘] (cycle panes), ⌘W / Ctrl+D
+      // (close pane). Bail WITHOUT preventDefault so the nested capture handler
+      // (registered later on the same window) still fires and acts.
+      if (
+        findFocusedTerminalSplitDockview() &&
+        (key === "d" || key === "w" || ((key === "[" || key === "]") && !e.shiftKey))
+      ) {
+        return;
+      }
+
       if (e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
@@ -2866,27 +3002,18 @@ export function WorkspaceCenterDockview({
         e.preventDefault();
         e.stopPropagation();
         handleClose(active.id, kind);
-      } else if (key === "d") {
+      } else if (key === "d" && e.metaKey && !e.ctrlKey) {
+        // ⌘D / ⌘⇧D splits chat / browser leaves into sibling groups. Terminals
+        // split INTO nested panes instead (handled by the terminal leaf's own
+        // dockview, reached via the deferral above), so `term` is intentionally
+        // absent here.
         const active = api.activePanel;
         const groupId = api.activeGroup?.id;
         const kind = active?.api.component as LeafKind | undefined;
-        if (e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (groupId && (kind === "chat" || kind === "term" || kind === "browser")) {
-            handleSplit(kind, groupId, e.shiftKey ? "below" : "right");
-          }
-        } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          // Ctrl+D closes a terminal (only when there's more than one to close).
-          if (
-            active &&
-            kind === "term" &&
-            api.panels.filter((p) => p.api.component === "term").length > 1
-          ) {
-            e.preventDefault();
-            e.stopPropagation();
-            handleClose(active.id, "term");
-          }
+        e.preventDefault();
+        e.stopPropagation();
+        if (groupId && (kind === "chat" || kind === "browser")) {
+          handleSplit(kind, groupId, e.shiftKey ? "below" : "right");
         }
       }
     };

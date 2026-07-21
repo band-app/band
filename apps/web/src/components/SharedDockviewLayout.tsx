@@ -386,6 +386,13 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         setSearchFilesOpen(true);
       } else if (key === "f" && !e.shiftKey && !e.altKey) {
+        // ⌘F is find-in-file, but ONLY when the editor/preview is the focused
+        // surface. With a focused terminal, ⌘F belongs to the terminal's own
+        // find — don't also open the (visible-but-unfocused) file/diff leaf's
+        // bar. The find-in-file registry is keyed by visibility, not focus, so
+        // without this guard a split layout (file + terminal both visible)
+        // would open the file's find whenever ⌘F was pressed in the terminal.
+        if (terminalFocused) return;
         e.preventDefault();
         const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
         if (fn) fn();
