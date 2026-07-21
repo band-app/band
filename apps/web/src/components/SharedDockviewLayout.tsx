@@ -463,6 +463,26 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:open-file", handler);
   }, [activeWorkspaceId]);
 
+  // LSP cross-file go-to-definition → open the resolved file directly. The LSP
+  // client resolves an exact workspace-relative path (no Quick Open picker) and
+  // waits for the new editor view to mount before scrolling to the definition.
+  // The old listener lived in CodeBrowserView (removed in #643); without this,
+  // clicking "Go to definition" across files did nothing.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ filePath?: string; workspaceId?: string }>).detail;
+      if (!detail?.filePath) return;
+      // Ignore events addressed to a different (cached, hidden) workspace so a
+      // nav in workspace A can't open the A-relative path in B/C.
+      if (detail.workspaceId && detail.workspaceId !== activeWorkspaceId) return;
+      getWorkspaceLeafActions(detail.workspaceId ?? activeWorkspaceId)?.openFile(detail.filePath, {
+        preview: false,
+      });
+    };
+    window.addEventListener("band:lsp-navigate", handler);
+    return () => window.removeEventListener("band:lsp-navigate", handler);
+  }, [activeWorkspaceId]);
+
   // Toolbar / title-bar window-event triggers for the dialogs.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
