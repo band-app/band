@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toWorkspaceId, useProjects, useSettingsQuery } from "@/dashboard";
+import { reconcileBrowserWorkspaces } from "../lib/browser-view-registry";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { reconcileTerminalWorkspaces } from "../lib/terminal-cache";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
@@ -17,9 +18,10 @@ interface CachedEntry {
   lastAccessed: number;
 }
 
-// Same defaults the old DockviewInstanceManager used — the only thing we're
-// caching today is per-panel content rather than entire dockview instances.
-const DEFAULT_MAX_CACHED_WORKSPACES = 3;
+// The only thing we're caching today is per-panel content rather than entire
+// dockview instances, so a larger default keeps more workspaces' live state
+// (terminals, browser webviews, editor buffers) warm for instant switching.
+const DEFAULT_MAX_CACHED_WORKSPACES = 8;
 const MIN_MAX_CACHED_WORKSPACES = 1;
 
 // Hoisted style objects so the cached-entry divs receive
@@ -218,6 +220,9 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     // disappearance path, mirroring the panel-cache reconcile below. The active
     // workspace is never disposed even if mid-delete (see the guard inside).
     reconcileTerminalWorkspaces(validIds, activeWorkspaceId);
+    // Same lifetime for parked browser webviews (desktop): a panel-LRU eviction
+    // keeps them alive; only a deleted workspace destroys its webview.
+    reconcileBrowserWorkspaces(validIds, activeWorkspaceId);
     setCache((prev) => {
       // Steady-state fast-path: the projects query refetches every 30 s,
       // so this effect fires repeatedly with no actual eviction work to
