@@ -6,18 +6,9 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { TerminalSquare, X } from "lucide-react";
+import { Columns2, Rows2, X } from "lucide-react";
 import type React from "react";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { cycleGridGroups, selectNeighbourBeforeRemove } from "../lib/dockview-section-actions";
 import { newTerminalId } from "../lib/leaf-instance-ids";
 import { disposeTerminal } from "../lib/terminal-cache";
@@ -60,10 +51,15 @@ const nestedTheme: DockviewTheme = {
   className: "dockview-theme-band dockview-terminal-split",
 };
 
-// Per-nested-dockview close handler, keyed by the nested dockview's `api.id` so
-// the STABLE pane-header component resolves to the right leaf's closer (mirrors
-// the `leafActionsByApiId` pattern in the outer dockview).
-const paneCloseByApiId = new Map<string, { current: (terminalId: string) => void }>();
+// Per-pane header actions (close + split-in-direction), keyed by the nested
+// dockview's `api.id` so the STABLE pane-header component resolves to the right
+// leaf's handlers (mirrors the `leafActionsByApiId` pattern in the outer
+// dockview). Split acts on the pane the icon belongs to, not the active pane.
+interface PaneActions {
+  close: (terminalId: string) => void;
+  split: (terminalId: string, direction: "right" | "below") => void;
+}
+const paneActionsByApiId = new Map<string, { current: PaneActions }>();
 
 // ---------------------------------------------------------------------------
 // Pane content
@@ -104,62 +100,65 @@ function TerminalPanePanel({ params, api }: IDockviewPanelProps<PaneParams>) {
 }
 
 // ---------------------------------------------------------------------------
-// Pane header (the nested `tabComponent`): terminal icon + title + close.
-// The header element is dockview's drag source, so this is also what the user
-// grabs to reorder panes. The close (×) shows only when there's >1 pane —
-// a lone pane is closed via the OUTER terminal tab (matching the old inner
-// terminal container). When there's a single pane the whole header is hidden
-// via CSS (`.dockview-terminal-split--single`), so an unsplit terminal shows
-// no redundant inner title bar.
+// Pane header (the nested `tabComponent`). No title — just a thin, transparent
+// strip that IS dockview's drag source (grab it to reorder the pane). A small
+// action cluster sits in the top-left corner: split right (vertical), split
+// down (horizontal), and close. The cluster is hidden by default and revealed
+// when the pane is active OR the header is hovered (CSS in
+// `dockview-theme.css`). When there's a single pane the whole header is hidden
+// via CSS (`.dockview-terminal-split--single`).
 // ---------------------------------------------------------------------------
 
 function TerminalPaneHeader(props: IDockviewPanelHeaderProps<PaneParams>) {
-  const [title, setTitle] = useState(props.api.title ?? "Terminal");
-  const [paneCount, setPaneCount] = useState(props.containerApi.panels.length);
-
-  useEffect(() => {
-    const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? "Terminal"));
-    return () => d.dispose();
-  }, [props.api]);
-
-  useEffect(() => {
-    const cApi = props.containerApi;
-    const update = () => setPaneCount(cApi.panels.length);
-    const d1 = cApi.onDidAddPanel(update);
-    const d2 = cApi.onDidRemovePanel(update);
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
-  }, [props.containerApi]);
-
   const apiId = props.containerApi.id;
   const terminalId = props.params.terminalId;
-  const handleClose = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      paneCloseByApiId.get(apiId)?.current?.(terminalId);
-    },
-    [apiId, terminalId],
-  );
+
+  // Run a pane action; stop propagation so the click doesn't reach the tab's
+  // drag/select handlers.
+  const run = (fn: (a: PaneActions) => void) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const actions = paneActionsByApiId.get(apiId)?.current;
+    if (actions) fn(actions);
+  };
+  // A mousedown on a button must not start a dockview tab drag.
+  const stopDrag = (e: React.MouseEvent) => e.stopPropagation();
 
   return (
-    <div className="dv-default-tab" data-testid={`term-pane-header__${terminalId}`}>
-      <div className="flex min-w-0 items-center gap-1.5">
-        <TerminalSquare className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{title}</span>
-      </div>
-      {paneCount > 1 && (
+    <div className="term-pane-header" data-testid={`term-pane-header__${terminalId}`}>
+      <div className="term-pane-header__actions">
         <button
           type="button"
-          className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 transition-colors hover:bg-accent hover:opacity-100"
-          onClick={handleClose}
+          onMouseDown={stopDrag}
+          onClick={run((a) => a.split(terminalId, "right"))}
+          title="Split right"
+          aria-label="Split right"
+          data-testid={`term-pane-split-right__${terminalId}`}
+        >
+          <Columns2 className="size-3" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={stopDrag}
+          onClick={run((a) => a.split(terminalId, "below"))}
+          title="Split down"
+          aria-label="Split down"
+          data-testid={`term-pane-split-down__${terminalId}`}
+        >
+          <Rows2 className="size-3" />
+        </button>
+        <button
+          type="button"
+          className="term-pane-header__close"
+          onMouseDown={stopDrag}
+          onClick={run((a) => a.close(terminalId))}
           title="Close pane"
+          aria-label="Close pane"
           data-testid={`term-pane-close__${terminalId}`}
         >
           <X className="size-3" />
         </button>
-      )}
+      </div>
     </div>
   );
 }
@@ -318,9 +317,9 @@ export function TerminalSplitLeaf({
   const closePane = useCallback((terminalId: string) => {
     const api = apiRef.current;
     if (!api) return;
-    // A lone pane is never closed from inside the nested dockview: the ×
-    // button is hidden and ⌘W delegates to the outer tab. This guard is a
-    // belt-and-braces backstop.
+    // Closing the LONE pane closes the whole terminal leaf via the outer tab
+    // (which drops the workspace to its empty state). Both the pane × button and
+    // ⌘W route here, so this delegation is the real close path, not just a guard.
     if (api.panels.length <= 1) {
       onCloseLeafRef.current();
       return;
@@ -342,11 +341,13 @@ export function TerminalSplitLeaf({
   closePaneRef.current = closePane;
 
   // ---- split ----
-  const splitFocused = useCallback(
-    (direction: "right" | "below") => {
+  // Split a SPECIFIC pane (its group) — used by the pane-header split icons and,
+  // via `splitFocused`, by the ⌘D / ⌘⇧D keybinds (which target the active pane).
+  const splitPane = useCallback(
+    (terminalId: string, direction: "right" | "below") => {
       const api = apiRef.current;
       if (!api || mobile) return;
-      const referenceGroup = api.activeGroup?.id;
+      const referenceGroup = api.getPanel(terminalId)?.group?.id;
       if (!referenceGroup) return;
       const id = newTerminalId();
       // Register ownership BEFORE creating the PTY so the `terminal-created`
@@ -356,6 +357,16 @@ export function TerminalSplitLeaf({
       trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
     },
     [workspaceId, leafId, mobile],
+  );
+  const splitPaneRef = useRef(splitPane);
+  splitPaneRef.current = splitPane;
+
+  const splitFocused = useCallback(
+    (direction: "right" | "below") => {
+      const active = apiRef.current?.activePanel?.id;
+      if (active) splitPane(active, direction);
+    },
+    [splitPane],
   );
 
   // ---- center-merge guard: keep 1 pane per group ----
@@ -385,7 +396,17 @@ export function TerminalSplitLeaf({
     (event: DockviewReadyEvent) => {
       const api = event.api;
       apiRef.current = api;
-      paneCloseByApiId.set(api.id, { current: closePaneRef.current });
+      // Register this leaf's pane actions (close + split) under the nested
+      // dockview's id. Forward through the refs rather than snapshotting them:
+      // `splitPane` is re-created when `mobile` flips, so a captured closure
+      // would leave the header icons calling a stale callback after a viewport
+      // crossing.
+      paneActionsByApiId.set(api.id, {
+        current: {
+          close: (id: string) => closePaneRef.current(id),
+          split: (id: string, dir: "right" | "below") => splitPaneRef.current(id, dir),
+        },
+      });
 
       isRestoringRef.current = true;
       const saved = mobile ? null : readNestedLayout(workspaceId, leafId);
@@ -572,15 +593,23 @@ export function TerminalSplitLeaf({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, mobile, splitFocused]);
 
+  // Keep the latest `flushPersist` reachable from the unmount cleanup below
+  // without putting it in the dep list (which would re-run the teardown).
+  const flushPersistRef = useRef(flushPersist);
+  flushPersistRef.current = flushPersist;
+
   // Detach on unmount.
   useEffect(() => {
     return () => {
       const api = apiRef.current;
-      if (api) paneCloseByApiId.delete(api.id);
+      if (api) paneActionsByApiId.delete(api.id);
       splitDisposerRef.current?.();
       splitDisposerRef.current = null;
       activeTitleDisposerRef.current?.dispose();
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+      // Flush a pending debounced save rather than dropping it — otherwise the
+      // last pane-resize geometry is lost on a workspace switch / LRU eviction.
+      // (`flushPersist` clears the timer itself.) Mirrors the outer dockview.
+      if (persistTimerRef.current) flushPersistRef.current();
     };
   }, []);
 
@@ -618,7 +647,20 @@ export function TerminalSplitLeaf({
   const visibilityValue = useMemo(() => ({ visible, wsActive: visible }), [visible]);
 
   return (
-    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
+    <div
+      ref={containerRef}
+      className="flex h-full w-full flex-col overflow-hidden"
+      // Hide the pane action clusters for the duration of a tab drag (the only
+      // draggable here is a pane header). Capture-phase + a direct class toggle
+      // (no React state) so it can't re-render / disrupt the nested dockview
+      // mid-drag; `dragend` always fires on the source, so it self-clears.
+      onDragStartCapture={() =>
+        containerRef.current?.classList.add("dockview-terminal-split--dragging")
+      }
+      onDragEndCapture={() =>
+        containerRef.current?.classList.remove("dockview-terminal-split--dragging")
+      }
+    >
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={nestedTheme}

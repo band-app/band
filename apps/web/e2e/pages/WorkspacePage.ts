@@ -687,6 +687,13 @@ export class WorkspacePage {
     return this.page.getByPlaceholder(/Find in (file|preview)\.\.\./);
   }
 
+  /** The terminal's own find bar input (`Find in terminal...`, see
+   *  `TerminalPanel.tsx`). Distinct placeholder from the file/preview bar, so a
+   *  test can assert which surface's find bar a Cmd+F opened. */
+  get findInTerminalBar(): Locator {
+    return this.page.getByPlaceholder("Find in terminal...");
+  }
+
   /** Press the real Cmd/Ctrl+F find shortcut against whatever currently holds
    *  focus (the caller focuses the intended surface first). `process.platform`
    *  is the test-runner OS, matching `find-in-markdown-preview.spec.ts`. */
@@ -880,13 +887,26 @@ export class WorkspacePage {
     });
   }
 
-  /** The visible pane titles, in DOM order — read from each pane header's text.
-   *  Lets a drag-reorder test assert the order changed. */
-  async paneTitles(): Promise<string[]> {
-    return await this.page
-      .getByTestId(/^term-pane-header__/)
-      .filter({ visible: true })
-      .allInnerTexts();
+  /** The visible panes' terminalIds, in DOM order (parsed from each pane's
+   *  `term-pane__<terminalId>` testid). Lets a drag-reorder test assert the
+   *  order changed — the header carries no title text to key off anymore. */
+  async paneOrder(): Promise<string[]> {
+    const ids = await this.terminalPanes().evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-testid")?.replace("term-pane__", "") ?? ""),
+    );
+    return ids.filter(Boolean);
+  }
+
+  /** Click a pane header's split icon (right / down) for the nth visible pane.
+   *  The action cluster is only shown on active/hover, so hover the header first
+   *  to reveal it, then click the scoped button by its aria-label. */
+  async clickPaneSplit(index: number, direction: "right" | "down"): Promise<void> {
+    await test.step(`Click pane ${index} split-${direction} icon`, async () => {
+      const header = this.paneHeader(index);
+      await header.hover();
+      const label = direction === "right" ? "Split right" : "Split down";
+      await header.getByRole("button", { name: label }).click();
+    });
   }
 
   /** Close the focused terminal pane (Ctrl+D — closes the pane when >1 exist). */
@@ -956,9 +976,14 @@ export class WorkspacePage {
     // trigger opens the menu with no hit-test.
     await this.newTabButton(workspaceId).first().focus();
     await this.page.keyboard.press("Enter");
-    const menu = this.page.getByTestId("workspace-center__new-tab-menu");
-    await menu.waitFor({ state: "visible" });
-    await menu.getByTestId(`workspace-center__new-tab--${kind}`).click();
+    // The menu is portalled to <body>, and with several workspaces cached each
+    // dockview contributes its own (closed) menu — so scope to the VISIBLE
+    // (open) menu item rather than a bare testid that matches all of them.
+    await this.page
+      .getByTestId(`workspace-center__new-tab--${kind}`)
+      .filter({ visible: true })
+      .first()
+      .click();
   }
 
   /** The visible "+" new-tab menu button for a workspace's chat host.
@@ -977,6 +1002,21 @@ export class WorkspacePage {
   async clickChatAddTab(workspaceId: string): Promise<void> {
     await test.step(`Add a chat via "+" menu in workspace ${workspaceId}`, async () => {
       await this.addLeafViaMenu(workspaceId, "chat");
+    });
+  }
+
+  /** Create a chat leaf AND make it the active/shown tab. The default center
+   *  layout is a single terminal, so tests that need a chat create one; a fresh
+   *  chat can sit behind the active terminal tab, so activate it too. */
+  async openChat(workspaceId: string): Promise<void> {
+    await test.step(`Open + activate a chat in workspace ${workspaceId}`, async () => {
+      await this.clickChatAddTab(workspaceId);
+      const chatTab = this.cachedPanelEntries(workspaceId)
+        .getByTestId(/^center-chat-tab--/)
+        .filter({ visible: true })
+        .first();
+      await chatTab.waitFor({ state: "visible", timeout: 15_000 });
+      await chatTab.click();
     });
   }
 

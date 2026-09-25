@@ -79,9 +79,18 @@ test("the file leaf restores cursor + scroll position across a reload", async ({
   await workspacePage.goto(WORKSPACE);
   await workspacePage.waitForReady();
 
-  // Open the long file and move the cursor to the end — the editor scrolls to
-  // the bottom (scrollTop > 0).
+  // Open the long file. The default layout is a single terminal, so the file
+  // opens as a tab in the terminal's group. Close the terminal so the file is
+  // the sole leaf — otherwise on reload the terminal's nested-pane restore
+  // races to grab active and can hide the file behind its tab, which is
+  // orthogonal to the cursor/scroll-restore behaviour under test here.
   await workspacePage.openFileLeaf(FILE, WORKSPACE);
+  await workspacePage.closeTerminalTab(WORKSPACE);
+  await expect(workspacePage.fileLeafVisibilityMarker(true).first()).toBeVisible({
+    timeout: 20_000,
+  });
+
+  // Move the cursor to the end — the editor scrolls to the bottom (scrollTop > 0).
   await workspacePage.focusFileEditor(FILE);
   await workspacePage.pressEditorToDocEnd();
   await expect.poll(() => workspacePage.editorScrollTop(), { timeout: 10_000 }).toBeGreaterThan(0);

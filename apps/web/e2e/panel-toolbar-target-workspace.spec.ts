@@ -172,14 +172,15 @@ async function mountBothAndSettle(
 ): Promise<{ baseVisible: number; baseCached: number }> {
   await workspacePage.goto(visible);
   await workspacePage.waitForReady();
-  // The default chat tab is visible — proves the chat container's onReady
-  // ran (its layout will persist) before we move on.
+  // The default layout is a single terminal — open a chat leaf so this test has
+  // one to target. Its visible-true marker proves the chat mounted (its layout
+  // persists) before we move on.
+  await workspacePage.openChat(visible);
   await expect(workspacePage.chatTabVisibilityMarker(visible, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(cached);
   await workspacePage.waitForReady();
-  // The cached workspace's chat container is now mounted and visible — its
-  // onReady ran too, so it has a persisted baseline.
+  await workspacePage.openChat(cached);
   await expect(workspacePage.chatTabVisibilityMarker(cached, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(visible);

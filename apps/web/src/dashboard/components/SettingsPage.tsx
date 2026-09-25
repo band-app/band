@@ -555,12 +555,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 variant="responsive"
                 htmlFor="max-cached-workspaces"
                 label="Cached workspaces"
-                description="How many recently visited workspaces to keep alive in memory for instant switching. Higher values use more memory. Leave empty for the default (3)."
+                description="How many recently visited workspaces to keep alive in memory for instant switching. Higher values use more memory. Leave empty for the default (8)."
               >
                 <Input
                   id="max-cached-workspaces"
                   type="number"
-                  placeholder="3 (default)"
+                  placeholder="8 (default)"
                   value={maxCachedWorkspaces}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setMaxCachedWorkspaces(e.target.value)

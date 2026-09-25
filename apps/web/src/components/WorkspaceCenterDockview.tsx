@@ -113,7 +113,7 @@ import {
   newTerminalId,
 } from "../lib/leaf-instance-ids";
 import { pathInside } from "../lib/path-inside";
-import { disposeTerminal } from "../lib/terminal-cache";
+import { disposeTerminal, hasTerminal } from "../lib/terminal-cache";
 import {
   clearLeafOwners,
   deleteNestedLayout,
@@ -1060,9 +1060,11 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     }
   }, [workspaceIdRaw, filePathRaw]);
 
-  // Persist on hide (visibility-effect cleanup runs when `visible` flips or on
-  // unmount) and on page hide (covers a reload/close while this leaf is the
-  // active, visible tab — its cleanup wouldn't otherwise fire in time).
+  // Persist on unmount (the `[]`-dep cleanup below — a `file` leaf uses
+  // dockview's default `onlyWhenVisible` renderer, so closing or navigating away
+  // from the tab tears the leaf down) and on page hide (covers a reload/close
+  // while this leaf is the active, visible tab — its cleanup wouldn't otherwise
+  // fire in time). Note this does NOT fire on a bare `visible` flip.
   const persistEditorStateRef = useRef(persistEditorState);
   persistEditorStateRef.current = persistEditorState;
   useEffect(() => {
@@ -1986,6 +1988,10 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
 // ---------------------------------------------------------------------------
 
 const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
+  // Only grid groups get the "+" new-tab menu. Edge groups (the ⌘B/⌘J side
+  // panels) are collapsed to zero size when empty, so adding a leaf there would
+  // drop it into an invisible 0-px group — mirror RightHeaderActions' guard.
+  if ((props.location?.type ?? "grid") !== "grid") return null;
   return (
     <div className="flex h-full items-center px-0.5">
       <NewTabMenu apiId={props.containerApi.id} groupId={props.group.id} />
@@ -2097,7 +2103,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
           <Plus className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" data-testid="workspace-center__new-tab-menu">
+      <DropdownMenuContent align="start" side="bottom" data-testid="workspace-center__new-tab-menu">
         <DropdownMenuItem onClick={() => add("term")} data-testid="workspace-center__new-tab--term">
           <TerminalIcon className="size-4" />
           New Terminal
@@ -2178,6 +2184,12 @@ function addTermLeaf(
     title: "Terminal",
     params: { workspaceId, terminalId, ...extra },
     position: position ?? centralPanelPosition(api),
+    // Keep the terminal MOUNTED when its tab is inactive (dockview hides it via
+    // CSS) instead of the default `onlyWhenVisible` detach. Switching center tabs
+    // then never unmounts the nested split / re-attaches the xterm, so a live TUI
+    // doesn't repaint on every tab switch. The instance + PTY socket already
+    // survive via the parking cache; this just avoids the visible re-attach.
+    renderer: "always",
   } as AddPanelOptions);
 }
 
@@ -2249,6 +2261,12 @@ export function WorkspaceCenterDockview({
   // Close-confirm for a dirty file leaf: holds the pending {id, path} while the
   // "Unsaved changes" dialog is open, or null when no confirm is in flight.
   const [pendingClose, setPendingClose] = useState<{ id: string; path: string } | null>(null);
+
+  // True when the dockview has zero leaves (the user closed everything). Drives
+  // the centered "New Terminal / Chat / Browser" empty state instead of forcing
+  // a leaf back — a closed-out workspace should stay closed until the user picks
+  // what to open next.
+  const [isEmpty, setIsEmpty] = useState(false);
 
   const { data: initialData } = useQuery<CenterLayoutData>({
     queryKey: centerLayoutKey(workspaceId),
@@ -2437,9 +2455,8 @@ export function WorkspaceCenterDockview({
     (id: string, kind: LeafKind) => {
       const api = apiRef.current;
       if (!api) return;
-      // Never close the last remaining tab — the workspace center must always
-      // hold at least one leaf (an empty dockview has no tab strip to reopen from).
-      if (api.panels.length <= 1) return;
+      // Closing the LAST leaf is allowed: the dockview drops to its centered
+      // empty state (New Terminal / Chat / Browser), so there's always a way back.
       // Closing a dirty file prompts first; the confirm button does the removal.
       if (kind === "file") {
         const path = id.slice(5); // strip the `file:` prefix
@@ -2591,61 +2608,57 @@ export function WorkspaceCenterDockview({
   // ---- default layout ----
   const buildDefaultLayout = useCallback(
     (api: DockviewApi, data: CenterLayoutData) => {
-      // Chats on the left.
-      const chatIds = data.chatIds.size ? [...data.chatIds] : [newChatId()];
-      if (!data.chatIds.size) markChatFresh(chatIds[0]);
+      // Default layout for an EMPTY workspace: a single terminal tab, full
+      // width. But if the workspace already has live instances (CLI-created
+      // chats/browsers/extra terminals, or a seeded session), surface THOSE and
+      // do NOT fabricate a terminal — a fresh empty shell must never bury the
+      // user's existing chat/browser behind it on every load. They stack as tabs
+      // into the one group (a user can split them out later).
       let anchorId: string | null = null;
-      for (const chatId of chatIds) {
-        addChatLeaf(
-          api,
-          workspaceId,
-          chatId,
-          anchorId ? { referencePanel: anchorId, direction: "within" } : undefined,
-        );
-        if (!anchorId) anchorId = chatId;
-      }
-
-      // Right group anchored to the first chat: terminals, then browsers all
-      // stacked into the same group. `rightGroupAnchor` tracks the id of the
-      // first panel placed in that group so every later leaf lands `within` it.
-      // On mobile everything is ONE group (no split), so seed the anchor with
-      // the chat so terminals/browsers stack into the chat's group instead of
-      // splitting off to the right.
-      let rightGroupAnchor: string | null = mobile ? anchorId : null;
-      const rightPosition = (): AddPanelOptions["position"] =>
-        rightGroupAnchor
-          ? { referencePanel: rightGroupAnchor, direction: "within" }
-          : ({
-              referencePanel: anchorId ?? undefined,
-              direction: "right",
-            } as AddPanelOptions["position"]);
+      let activeId: string | null = null;
+      const stack = (): AddPanelOptions["position"] | undefined =>
+        anchorId ? { referencePanel: anchorId, direction: "within" } : undefined;
 
       const termIds = [...data.terminalIds];
-      if (termIds.length === 0) {
+      const hasPreExisting =
+        termIds.length > 0 || data.chatIds.size > 0 || (isDesktop && data.browserIds.size > 0);
+
+      if (!hasPreExisting) {
+        // Truly empty → the single-terminal default (freshly created + booted).
         const id = newTerminalId();
-        addTermLeaf(api, workspaceId, id, undefined, rightPosition());
-        rightGroupAnchor = id;
+        addTermLeaf(api, workspaceId, id, { autoFocus: true }, stack());
+        anchorId = id;
+        activeId = id;
         trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
       } else {
+        // Surface pre-existing live instances. A terminal is preferred active
+        // (matches the empty default's feel); otherwise the first surfaced leaf.
         for (const id of termIds) {
-          addTermLeaf(api, workspaceId, id, undefined, rightPosition());
-          rightGroupAnchor ??= id;
+          addTermLeaf(api, workspaceId, id, undefined, stack());
+          anchorId ??= id;
+          activeId ??= id;
+        }
+        for (const chatId of data.chatIds) {
+          addChatLeaf(api, workspaceId, chatId, stack());
+          anchorId ??= chatId;
+          activeId ??= chatId;
+        }
+        if (isDesktop) {
+          for (const id of [...data.browserIds]) {
+            addBrowserLeaf(api, workspaceId, id, data.urls.get(id), stack());
+            anchorId ??= id;
+            activeId ??= id;
+          }
         }
       }
 
-      if (isDesktop) {
-        for (const id of [...data.browserIds]) {
-          addBrowserLeaf(api, workspaceId, id, data.urls.get(id), rightPosition());
-          rightGroupAnchor ??= id;
-        }
+      if (activeId) {
+        try {
+          api.getPanel(activeId)?.api.setActive();
+        } catch {}
       }
-
-      try {
-        api.getPanel(chatIds[0])?.api.setActive();
-        api.getPanel(chatIds[0])?.api.setSize({ width: api.width * 0.5 });
-      } catch {}
     },
-    [workspaceId, mobile],
+    [workspaceId],
   );
 
   // ---- reconcile a restored layout against live instances ----
@@ -2661,8 +2674,17 @@ export function WorkspaceCenterDockview({
           // panel id (which may be a pane the user closed). Owner map is
           // pre-seeded from persisted split blobs in onReady, so this is
           // populated before the nested leaves mount.
-          const selfLive = data.terminalIds.has(panel.id);
-          if (!selfLive && !leafOwnsAnyLive(panel.id, data.terminalIds)) api.removePanel(panel);
+          // A leaf also survives if its terminal is still alive in the CLIENT
+          // cache (PARKED across a workspace switch). On return to an LRU-evicted
+          // workspace the server's `terminal.list` can momentarily omit the
+          // parked terminal; without this cache check reconcile would prune the
+          // restored leaf and the empty-fallback below would fabricate a phantom
+          // duplicate terminal (regression of the band-app/band#617 fix).
+          const selfLive = data.terminalIds.has(panel.id) || hasTerminal(panel.id);
+          const ownsLive =
+            leafOwnsAnyLive(panel.id, data.terminalIds) ||
+            terminalsOwnedByLeaf(panel.id).some(hasTerminal);
+          if (!selfLive && !ownsLive) api.removePanel(panel);
         } else if (kind === "browser" && !data.browserIds.has(panel.id)) api.removePanel(panel);
       }
       // Add live instances missing from the restored layout (CLI-created while closed).
@@ -2685,15 +2707,9 @@ export function WorkspaceCenterDockview({
       }
       // Restored `file` / `diff` leaves are pure client views with no server
       // record — leave them exactly as they were persisted (do NOT prune).
-      // Only seed a fresh chat when the dockview would otherwise be EMPTY (an
-      // empty grid has no tab strip to reopen from). A workspace with terminals
-      // or file/diff leaves but no chat is intentional — a user who closed the
-      // chat should not have it forced back on the next reload (#643).
-      if (api.panels.length === 0) {
-        const chatId = newChatId();
-        markChatFresh(chatId);
-        addChatLeaf(api, workspaceId, chatId);
-      }
+      // A dockview that ends up EMPTY here (the user closed every leaf) is left
+      // empty on purpose: the centered empty state offers New Terminal / Chat /
+      // Browser rather than forcing a leaf back on the next reload (#643).
     },
     [workspaceId],
   );
@@ -2774,13 +2790,18 @@ export function WorkspaceCenterDockview({
       // Persistence + focus reporting. Structural changes (add/remove leaf or
       // group) flush immediately so a close survives an instant reload; the
       // high-frequency layout stream (resize/move) is debounced.
+      const syncEmpty = () => setIsEmpty(api.panels.length === 0);
       api.onDidLayoutChange(() => schedulePersist());
-      api.onDidAddPanel(() => flushPersist());
+      api.onDidAddPanel(() => {
+        syncEmpty();
+        flushPersist();
+      });
       api.onDidRemovePanel((panel) => {
         // Drop the preview pointer if the previewing leaf was closed, so a
         // later single-click opens fresh instead of trying to reuse a dead id.
         if (previewFileIdRef.current === panel.id) previewFileIdRef.current = null;
         if (previewDiffIdRef.current === panel.id) previewDiffIdRef.current = null;
+        syncEmpty();
         flushPersist();
       });
       api.onDidAddGroup(() => flushPersist());
@@ -2809,6 +2830,11 @@ export function WorkspaceCenterDockview({
         // and re-flushing would race the deferred maximize re-apply.
         if (builtDefault) flushPersist();
       }, 0);
+
+      // Seed the initial empty state: the add/remove-panel subscriptions above
+      // are attached AFTER the build/restore, so a restored layout that ended up
+      // empty never fires onDidAddPanel — set it directly from the panel count.
+      setIsEmpty(api.panels.length === 0);
 
       // Cold-mount layout catch-up.
       if (visibleRef.current && containerRef.current) {
@@ -3107,7 +3133,7 @@ export function WorkspaceCenterDockview({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={containerRef} className="relative flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={bandTheme}
@@ -3122,6 +3148,49 @@ export function WorkspaceCenterDockview({
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
+
+      {/* Empty state: shown when every leaf is closed. Offers the same three
+          "New …" actions as the header "+" menu, centered in the vacant area,
+          so a closed-out workspace is a deliberate blank slate rather than a
+          dead end. */}
+      {isEmpty && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center"
+          data-testid="workspace-center__empty-state"
+        >
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => handleAdd("term")}
+              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="workspace-center__empty-new-term"
+            >
+              <TerminalIcon className="size-4" />
+              New Terminal
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdd("chat")}
+              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="workspace-center__empty-new-chat"
+            >
+              <MessageSquare className="size-4" />
+              New Chat
+            </button>
+            {isDesktop && (
+              <button
+                type="button"
+                onClick={() => handleAdd("browser")}
+                className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                data-testid="workspace-center__empty-new-browser"
+              >
+                <Globe className="size-4" />
+                New Browser
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Unsaved-changes confirm for a dirty file leaf. Mirrors the mobile
           FileTabBar confirm: Cancel keeps the tab, "Close without saving"

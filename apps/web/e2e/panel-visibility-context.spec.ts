@@ -126,16 +126,14 @@ test.describe("Panel visibility context (issue #469)", () => {
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    // Navigate to A. The default layout puts the Chat panel in its own
-    // group on the left so it's mounted and visible immediately —
-    // `parentVisible` from context is `true` AND the inner default chat
-    // tab is the active inner tab, so the leaf gets `visible=true`.
+    // Navigate to A and open a chat leaf (the default layout is a single
+    // terminal now). Its ChatTabContent wrapper's `visible` = `parentVisible
+    // (true) && tabActive(true)`, so the active chat gets `visible=true`.
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
+    await workspacePage.openChat(WORKSPACE_A);
 
     // Positive anchor: A's active chat tab has the visible-true marker.
-    // The marker is set on the inner ChatTabContent wrapper div whose
-    // `visible` value is `parentVisible(true) && tabActive(true)`.
     await expect(workspacePage.chatTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible();
 
     // Switch to B via the sidebar card. This uses TanStack Router's
@@ -144,6 +142,8 @@ test.describe("Panel visibility context (issue #469)", () => {
     // false→true for B. The full-page `goto()` would tear down the
     // React tree and defeat the regression lever.
     await workspacePage.switchWorkspace(WORKSPACE_B);
+    await workspacePage.waitForReady();
+    await workspacePage.openChat(WORKSPACE_B);
 
     // Anchor on B's visible-true marker first — proves the new
     // workspace actually rendered before we assert on A's now-hidden

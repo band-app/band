@@ -87,43 +87,47 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Cmd+F in the terminal does not open the find bar in an unfocused file leaf", async ({
-  page,
-}) => {
+test("Cmd+F opens the find bar for the focused surface, not another leaf", async ({ page }) => {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   await workspacePage.goto(WORKSPACE);
   await workspacePage.waitForReady();
 
-  // Open a file into a center `file` leaf, then focus the terminal. The default
-  // layout is a split — chat/file on the left group, terminal on the right — so
-  // the file leaf's find-capable editor stays MOUNTED and VISIBLE while the
-  // terminal is the focused surface. That "visible but not focused" file leaf is
-  // exactly what the buggy global handler opened.
+  // Open a file into a center `file` leaf. The default layout is a single
+  // terminal, so the file opens as a tab in the terminal's group — file and
+  // terminal are co-grouped tabs, and dockview mounts only the ACTIVE tab's
+  // content. So the two surfaces can never be focused simultaneously; the
+  // contract this guards is that Cmd+F is scoped to whichever surface holds
+  // focus, and never cross-opens the other leaf's bar. (The retired global
+  // handler ignored focus and fired for every mounted leaf — the bug fixed by
+  // `use-search`'s `registerGlobalFindKey` opt-out + the terminal-focus guard in
+  // `SharedDockviewLayout`.)
   await workspacePage.openFileLeaf(FILE, WORKSPACE);
-  await workspacePage.focusTerminal();
-  await expect(workspacePage.fileLeafVisibilityMarker(true)).toHaveCount(1);
 
-  // Contract: Cmd+F from the focused terminal must not open the file's find
-  // bar. `handleOpenSearch` renders the bar a frame later, so a bare
-  // `toHaveCount(0)` could pass trivially at t=0 (before a buggy bar mounts) —
-  // poll for its ARRIVAL within a bounded window and assert it never came.
+  // Focus the terminal → Cmd+F opens the TERMINAL's own find bar, and never the
+  // file/preview bar. `handleOpenSearch` renders a frame later, so poll for the
+  // wrong (file) bar's ARRIVAL within a bounded window and assert it never came,
+  // rather than a bare t=0 `toHaveCount(0)` that could pass trivially.
+  await workspacePage.focusTerminal();
   await workspacePage.pressFindShortcut();
-  let leaked = false;
+  await expect(workspacePage.findInTerminalBar).toHaveCount(1);
+  await expect(workspacePage.findInTerminalBar).toBeFocused();
+  let leakedToFile = false;
   try {
     await expect
       .poll(async () => workspacePage.findInFileOrPreviewBar.count(), { timeout: 1500 })
       .toBeGreaterThan(0);
-    leaked = true;
+    leakedToFile = true;
   } catch {
-    // Poll exhausted its budget without the bar appearing — the contract.
+    // Poll exhausted its budget without the file bar appearing — the contract.
   }
-  expect(leaked).toBe(false);
+  expect(leakedToFile).toBe(false);
 
-  // Positive control: focusing the editor and pressing Cmd+F DOES open its find
-  // bar — proving the leaf's find is live, so the negative above is meaningful
-  // rather than a dead keybind.
+  // Symmetric positive control: activate + focus the file editor → Cmd+F opens
+  // its find bar (not the terminal's), proving the scoping holds both ways and
+  // the negative above is a real guard rather than a dead keybind.
   await workspacePage.focusFileEditor(FILE);
   await workspacePage.pressFindShortcut();
   await expect(workspacePage.findInFileOrPreviewBar).toHaveCount(1);
   await expect(workspacePage.findInFileOrPreviewBar).toBeFocused();
+  await expect(workspacePage.findInTerminalBar).toHaveCount(0);
 });
