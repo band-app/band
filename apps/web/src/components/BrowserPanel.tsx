@@ -850,14 +850,15 @@ export function BrowserPaneComponent({
     if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    void desktopListen<{ browser_id: string }>("browser-view-destroyed", (event) => {
-      if (event.payload.browser_id !== browserIdRef.current) return;
-      createdRef.current = false;
-      setCreated(false);
-    }).then((u) => {
+    (async () => {
+      const u = await desktopListen<{ browser_id: string }>("browser-view-destroyed", (event) => {
+        if (event.payload.browser_id !== browserIdRef.current) return;
+        createdRef.current = false;
+        setCreated(false);
+      });
       if (disposed) u();
       else unlisten = u;
-    });
+    })();
     return () => {
       disposed = true;
       unlisten?.();
@@ -1044,7 +1045,6 @@ export function BrowserPaneComponent({
   // ------- workspace-level visibility -------
   useEffect(() => {
     if (!isDesktop || !created) return;
-    const wsActive = params.wsActive !== false;
     const logFail = (cmd: string) => (err: unknown) =>
       console.error(`[BrowserPane] ${cmd} failed`, err);
 
@@ -1061,7 +1061,7 @@ export function BrowserPaneComponent({
       }
       invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     }
-  }, [params.wsActive, api, created, getBounds, invoke, browserId]);
+  }, [wsActive, api, created, getBounds, invoke, browserId]);
 
   // ------- keep webview bounds in sync on resize -------
   useEffect(() => {

@@ -113,7 +113,11 @@ function runColdParkPass(): void {
   if (nextDeadline !== Number.POSITIVE_INFINITY) {
     state.timer = setTimeout(runColdParkPass, nextDeadline - nowMs);
   }
-  const changed = cold.size !== state.cold.size || [...cold].some((id) => !state.cold.has(id));
+  let changed = cold.size !== state.cold.size;
+  for (const id of cold) {
+    if (changed) break;
+    if (!state.cold.has(id)) changed = true;
+  }
   if (!changed) return;
   state.cold = cold;
   for (const listener of [...state.listeners]) listener();
