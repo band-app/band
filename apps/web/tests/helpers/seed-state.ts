@@ -164,6 +164,22 @@ export function readProjectKind(tmpHome: string, projectName: string): string | 
 }
 
 /**
+ * Delete a worktree's row while no server is running, modelling a workspace
+ * removed behind the server's back (another process, a crash mid-remove).
+ * Only the row: remove the worktree from git and disk separately.
+ */
+export function deleteWorktree(tmpHome: string, projectName: string, name: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite
+      .prepare("DELETE FROM worktrees WHERE project_name = ? AND name = ?")
+      .run(projectName, name);
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
  * Count rows in `branch_statuses` for a given workspaceId. Used to
  * verify the `branch-status-poller` skips plain projects (so no
  * branch-status row is ever written for their implicit workspace).

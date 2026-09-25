@@ -103,75 +103,29 @@ const terminalRouter = t.router({
     )
     .subscription(async function* (opts) {
       const { terminalId, replay } = opts.input;
-
-      // Subscribe to exits BEFORE attaching so an exit landing in between
-      // still ends the stream.
-      let exited = false;
-      let resolve: (() => void) | null = null;
-      const unsubscribeExit = terminalService.onExit(terminalId, () => {
-        exited = true;
-        resolve?.();
-      });
-      const onAbort = () => resolve?.();
-      opts.signal?.addEventListener("abort", onAbort);
-
-      // `attach` hands back a snapshot plus a live feed cut at exactly that
-      // snapshot (see `TerminalBackend.attach`), so every chunk after it
-      // lands in the queue — including ones arriving while the snapshot
-      // `yield` below is suspended waiting on the consumer.
-      let attachment: Awaited<ReturnType<typeof terminalService.attach>>;
-      try {
-        attachment = await terminalService.attach(terminalId);
-      } catch (err) {
-        unsubscribeExit();
-        opts.signal?.removeEventListener("abort", onAbort);
-        throw err;
-      }
-      if (!attachment) {
-        unsubscribeExit();
-        opts.signal?.removeEventListener("abort", onAbort);
-        yield { type: "error" as const, data: `Terminal not found: ${terminalId}` };
-        return;
-      }
-
-      const queue: string[] = [];
-      try {
-        attachment.start((data: string) => {
-          queue.push(data);
-          resolve?.();
-        });
-
-        // Replay a serialized reconstruction of the terminal state first,
-        // same as the `/terminal` WebSocket path: the raw scrollback tail
-        // can be cut mid-escape-sequence and garble TUI apps drawn with
-        // relative cursor motion. Query/report escapes are still stripped
-        // (band-app/band#613) — serialize shouldn't emit them, but the
-        // guard is cheap and keeps this path aligned with the WS replay.
-        // With `replay: false` the snapshot is simply not sent; live output
-        // still starts from the same cut.
-        if (replay && attachment.snapshot.length > 0) {
-          yield { type: "output" as const, data: stripTerminalQueries(attachment.snapshot) };
-        }
-
-        while (!opts.signal?.aborted) {
-          while (queue.length > 0) {
-            yield { type: "output" as const, data: queue.shift()! };
-          }
-
-          if (exited) {
+      for await (const event of terminalService.stream(terminalId, opts.signal)) {
+        switch (event.kind) {
+          case "missing":
+            yield { type: "error" as const, data: `Terminal not found: ${terminalId}` };
+            return;
+          case "snapshot":
+            // Replay a serialized reconstruction of the terminal state first,
+            // same as the `/terminal` WebSocket path: the raw scrollback tail
+            // can be cut mid-escape-sequence and garble TUI apps drawn with
+            // relative cursor motion. Query/report escapes are still stripped
+            // (band-app/band#613). With `replay: false` the snapshot is not
+            // sent; live output still starts from the same cut.
+            if (replay && event.data.length > 0) {
+              yield { type: "output" as const, data: stripTerminalQueries(event.data) };
+            }
+            break;
+          case "output":
+            yield { type: "output" as const, data: event.data };
+            break;
+          case "exit":
             yield { type: "exit" as const };
             return;
-          }
-
-          await new Promise<void>((r) => {
-            resolve = r;
-          });
-          resolve = null;
         }
-      } finally {
-        attachment.detach();
-        unsubscribeExit();
-        opts.signal?.removeEventListener("abort", onAbort);
       }
     }),
 });

@@ -11,6 +11,7 @@ import type {
   TerminalExitEvent,
   TerminalListEntry,
 } from "../infra/terminals/terminal-backend";
+import { TitlePoller } from "../infra/terminals/title-poller";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
@@ -23,6 +24,13 @@ import { workspaceService } from "./workspace-service";
 // `terminals/ws.ts`) can reference them without reaching into infra.
 // Routers must not import from infra, so they get these types here.
 export type { SpawnOptions, TerminalAttachment, TerminalExitEvent, TerminalListEntry };
+
+/** One step of {@link TerminalService.stream}. */
+export type TerminalStreamEvent =
+  | { kind: "missing" }
+  | { kind: "snapshot"; data: string }
+  | { kind: "output"; data: string }
+  | { kind: "exit" };
 
 const log = createLogger("terminal-service");
 
@@ -97,10 +105,8 @@ export class TerminalService {
   private unsubscribeExit: (() => void) | null = null;
   /** terminalId -> exit listeners, so an exit only reaches its own viewers. */
   private readonly exitListeners = new Map<string, Set<(event: TerminalExitEvent) => void>>();
-  /** terminalId -> title listeners, fed by one shared poll (see {@link onTitle}). */
-  private readonly titleListeners = new Map<string, Set<(title: string) => void>>();
-  private titleTimer: NodeJS.Timeout | null = null;
-  private titlePolling = false;
+  /** Tab titles for every open terminal, from one shared poll of the current backend. */
+  private readonly titles = new TitlePoller(() => this.backend.listAll());
 
   constructor(backend: TerminalBackend = new InProcessTerminalBackend()) {
     this.setBackend(backend);
@@ -336,44 +342,69 @@ export class TerminalService {
   }
 
   /**
-   * Receive a terminal's foreground process name (its tab title) every
-   * {@link TITLE_POLL_MS}, the way iTerm tracks the running command without
-   * OSC sequences. One `listAll` per tick serves every open terminal, rather
-   * than one daemon round trip per viewer. The poll runs only while someone
-   * is listening. Returns an unsubscribe function.
+   * Receive a terminal's foreground process name (its tab title) every few
+   * seconds. Returns an unsubscribe function. See {@link TitlePoller}.
    */
   onTitle(terminalId: string, listener: (title: string) => void): () => void {
-    const unsubscribe = addKeyed(this.titleListeners, terminalId, listener);
-    this.titleTimer ??= setInterval(() => this.pollTitles(), TITLE_POLL_MS);
-    return () => {
-      unsubscribe();
-      if (this.titleListeners.size === 0 && this.titleTimer) {
-        clearInterval(this.titleTimer);
-        this.titleTimer = null;
-      }
-    };
+    return this.titles.watch(terminalId, listener);
   }
 
-  private pollTitles(): void {
-    // Skip a tick rather than stack polls behind a slow backend.
-    if (this.titlePolling) return;
-    this.titlePolling = true;
-    this.backend
-      .listAll()
-      .then((entries) => {
-        for (const entry of entries) {
-          if (!entry.title) continue;
-          for (const listener of this.titleListeners.get(entry.terminalId) ?? []) {
-            listener(entry.title);
+  /**
+   * A terminal's snapshot, then its live output, then its exit, as one
+   * async stream (the `terminal.stream` subscription). Yields `missing` and
+   * ends if the terminal isn't live. Ends quietly when `signal` aborts.
+   *
+   * The exit subscription exists before the attach, so an exit landing in
+   * between still ends the stream. Every wait re-checks the queue and flags
+   * before parking, so an exit, chunk or abort that arrives while the
+   * consumer holds the generator at a `yield` is seen, not slept through.
+   */
+  async *stream(terminalId: string, signal?: AbortSignal): AsyncGenerator<TerminalStreamEvent> {
+    let exited = false;
+    let wake: (() => void) | null = null;
+    const notify = () => {
+      const resolve = wake;
+      wake = null;
+      resolve?.();
+    };
+    const unsubscribeExit = this.onExit(terminalId, () => {
+      exited = true;
+      notify();
+    });
+    signal?.addEventListener("abort", notify);
+    try {
+      const attachment = await this.attach(terminalId);
+      if (!attachment) {
+        yield { kind: "missing" };
+        return;
+      }
+      const queue: string[] = [];
+      try {
+        attachment.start((data) => {
+          queue.push(data);
+          notify();
+        });
+        yield { kind: "snapshot", data: attachment.snapshot };
+        while (!signal?.aborted) {
+          while (queue.length > 0) {
+            yield { kind: "output", data: queue.shift()! };
           }
+          if (exited) {
+            yield { kind: "exit" };
+            return;
+          }
+          await new Promise<void>((resolve) => {
+            if (exited || queue.length > 0 || signal?.aborted) resolve();
+            else wake = resolve;
+          });
         }
-      })
-      .catch(() => {
-        // A failed poll just skips this tick's title updates.
-      })
-      .finally(() => {
-        this.titlePolling = false;
-      });
+      } finally {
+        attachment.detach();
+      }
+    } finally {
+      unsubscribeExit();
+      signal?.removeEventListener("abort", notify);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -444,12 +475,6 @@ export class TerminalService {
     return result.data;
   }
 }
-
-/**
- * Tab-title poll cadence. A 1 s poll picked up `cd`/`vim` transitions ~2 s
- * sooner but kept the event loop awake at 1 Hz; 3 s still reads as immediate.
- */
-const TITLE_POLL_MS = 3_000;
 
 /** Add `listener` under `key`; the returned function removes it (and an emptied key). */
 function addKeyed<T>(map: Map<string, Set<T>>, key: string, listener: T): () => void {

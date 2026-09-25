@@ -65,8 +65,10 @@ export function daemonPaths(runDir: string, version = PROTOCOL_VERSION): DaemonP
  * Fallback socket directory for homes whose run dir makes the socket path
  * too long (deep `$TMPDIR`-based homes, mostly tests). `/tmp` rather than
  * `os.tmpdir()`: macOS gives each launch context its own `$TMPDIR`, and two
- * servers on one home must agree on the path. Created and verified 0700 by
- * `ensurePrivateDir`.
+ * servers on one home must agree on the path. `/tmp` is shared, so this
+ * directory is private ONLY because of the uid/mode checks in `endpoint.ts`
+ * (`ensurePrivateDir` for the daemon, `checkEndpointOwner` for clients).
+ * Never drop those checks.
  */
 export function shortSocketDir(): string {
   return join("/tmp", `band-${process.getuid?.() ?? "user"}`);

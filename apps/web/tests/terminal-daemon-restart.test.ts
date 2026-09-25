@@ -2,11 +2,10 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { toWorkspaceId } from "@/dashboard";
-import { seedSettings, seedState } from "./helpers/seed-state";
+import { deleteWorktree, seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
   getRandomPort,
@@ -277,12 +276,7 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     // daemon and both shells keep running), remove the worktree and its row.
     await server.close({ keepTerminalDaemon: true });
     git(repo, ["worktree", "remove", "--force", join(tmpHome, `${PROJ}-offline-delete`)]);
-    const db = new DatabaseSync(join(tmpHome, ".band", "band.db"));
-    db.prepare("DELETE FROM worktrees WHERE project_name = ? AND name = ?").run(
-      PROJ,
-      "offline-delete",
-    );
-    db.close();
+    deleteWorktree(tmpHome, PROJ, "offline-delete");
     server = await startServer({ tmpHome, port });
 
     await waitFor(async () => (isAlive(gonePid) ? undefined : true), { label: "orphan exit" });

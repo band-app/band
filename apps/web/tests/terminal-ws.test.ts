@@ -591,6 +591,61 @@ describe("terminal WebSocket — OSC color-query stripping on scrollback replay"
     expect(firstOutput).not.toContain("\x1b]12");
   });
 
+  // `terminal.stream` must end with an `exit` event when the shell exits, not
+  // wait forever. The replay above is the positive anchor that the
+  // subscription is live before the shell is told to exit.
+  it("terminal.stream delivers an exit event and ends when the shell exits", async () => {
+    const terminalId = "stream-exit";
+    await seedOscScrollback(terminalId);
+
+    class CookieWebSocket extends WebSocket {
+      constructor(address: string, protocols?: string | string[]) {
+        super(address, protocols, {
+          headers: { Cookie: `band_token=${DEFAULT_TOKEN}` },
+        });
+      }
+    }
+    const wsClient = createWSClient({
+      url: `ws://127.0.0.1:${server.port}/trpc`,
+      WebSocket: CookieWebSocket as unknown as typeof globalThis.WebSocket,
+    });
+    const client = createTRPCClient<AppRouter>({ links: [wsLink({ client: wsClient })] });
+
+    const events: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`No exit event from terminal.stream within 10 s: ${events}`)),
+        10_000,
+      );
+      let sentExit = false;
+      const sub = client.terminal.stream.subscribe(
+        { terminalId, replay: true },
+        {
+          onData: (evt) => {
+            events.push(evt.type);
+            if (evt.type === "output" && !sentExit) {
+              sentExit = true;
+              void client.terminal.send.mutate({ terminalId, data: "exit\r" });
+            }
+            if (evt.type === "exit") {
+              clearTimeout(timer);
+              sub.unsubscribe();
+              resolve();
+            }
+          },
+          onError: (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        },
+      );
+    });
+    wsClient.close();
+
+    expect(events[0]).toBe("output");
+    expect(events.at(-1)).toBe("exit");
+  });
+
   // Third scrollback surface (band-app/band#613): the `terminal.output` tRPC
   // query returns the buffered scrollback on demand. A client rendering that
   // into a terminal emulator would hit the same OSC leak, so it strips too.

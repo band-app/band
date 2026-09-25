@@ -185,12 +185,15 @@ export async function startServer(
           r();
           return;
         }
-        child.on("exit", () => r());
-        killGroup("SIGTERM");
         // Hard backstop: if the group hasn't drained in 5 s,
         // escalate to SIGKILL so test teardown can't hang
         // forever waiting on a stuck PTY or language server.
-        setTimeout(() => killGroup("SIGKILL"), 5_000).unref();
+        const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
+        child.on("exit", () => {
+          clearTimeout(fallback);
+          r();
+        });
+        killGroup("SIGTERM");
       });
       if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(home);
     };
