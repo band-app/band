@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toWorkspaceId, useProjects } from "@/dashboard";
+import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { reconcileTerminalWorkspaces, setActiveTerminalWorkspace } from "../lib/terminal-cache";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
@@ -84,11 +85,13 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     });
   }
 
-  // Tell the terminal parking policy which workspace is on screen, so it can
-  // stamp when each workspace was hidden (see `runParkingPass` in
-  // `terminal-cache.ts`).
+  // Tell the memory policies which workspace is on screen: the terminal
+  // parking policy stamps when each workspace was hidden (`runParkingPass` in
+  // `terminal-cache.ts`), and the browser guest budget orders workspaces by
+  // activation (`browser-guest-retention.ts`).
   useEffect(() => {
     setActiveTerminalWorkspace(activeWorkspaceId);
+    activateBrowserGuestWorkspace(activeWorkspaceId);
   }, [activeWorkspaceId]);
 
   // Fade-in cue on workspace switch. Content-correctness is synchronous
