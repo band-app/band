@@ -256,7 +256,7 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
   // DockviewInstanceManager keeps one per cached workspace. They all
   // race to own the same window global: each mount overwrites the
   // previous registration. The cleanup must only delete the key if
-  // we still own it; otherwise a stale unmount (LRU eviction or
+  // we still own it; otherwise a stale unmount (workspace deletion or
   // workspace switch) wipes a newer instance's registration and
   // leaves the macOS Settings… menu silently broken until full reload.
   useEffect(() => {

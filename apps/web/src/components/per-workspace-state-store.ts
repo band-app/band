@@ -10,7 +10,7 @@ import { useSyncExternalStore } from "react";
 // cached panel children — only subscribers of that workspaceId rerun.
 //
 // Lifecycle: entries are removed from `states` when
-// `MultiWorkspacePanelHost` evicts the workspace from its LRU cache
+// `MultiWorkspacePanelHost` unmounts a deleted workspace
 // (`clearPerWorkspaceState`), so the map can't grow unbounded over a long
 // session. `listeners` self-cleans when the last subscriber unsubscribes.
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ export function subscribePerWorkspaceState(workspaceId: string, cb: () => void):
 
 /**
  * Drop a workspace's cross-panel state. Called from MultiWorkspacePanelHost
- * when a workspace is evicted from the LRU cache — the panel children for
+ * when a deleted workspace leaves the mounted set — the panel children for
  * that workspace are about to unmount, so their state map entry is dead
  * weight. Without this, `states` grows unbounded over a long session.
  */

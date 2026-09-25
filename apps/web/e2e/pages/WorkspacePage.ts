@@ -116,7 +116,7 @@ export class WorkspacePage {
   /** Locate the per-panel-host cached entry div for the given workspaceId
    *  (issue #508). `MultiWorkspacePanelHost` renders one of these per
    *  workspace it currently caches; the test asserts on their presence /
-   *  absence to verify the LRU map's contents through a public DOM
+   *  absence to verify the mounted set's contents through a public DOM
    *  surface, without exporting internals. There are multiple panel
    *  hosts (chat / changes / files / terminal / browser), so each cached
    *  workspaceId can produce up to five matching elements — the test
@@ -342,10 +342,9 @@ export class WorkspacePage {
   /** Click a workspace card to switch to that workspace via the dashboard
    *  sidebar's client-side navigation. Unlike `goto()`, which does a full
    *  browser navigation that resets React state (including the
-   *  `MultiWorkspacePanelHost` LRU cache), this uses TanStack Router's
+   *  `MultiWorkspacePanelHost` mounted set), this uses TanStack Router's
    *  in-app navigation — the previously-active workspace's panels stay
-   *  mounted, which is what makes them cache candidates in the first
-   *  place. */
+   *  mounted, which is what keeps a return switch instant. */
   async switchWorkspace(workspaceId: string): Promise<void> {
     await test.step(`Switch workspace to ${workspaceId} via sidebar click`, async () => {
       await this.workspaceCard(workspaceId).click();

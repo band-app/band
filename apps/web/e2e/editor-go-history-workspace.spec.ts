@@ -9,8 +9,8 @@
  * This is the milder sibling of the `band:lsp-navigate` leak covered by
  * `lsp-navigate-workspace.spec.ts`: pre-fix, both editor-history events were
  * dispatched on `window` with NO workspace id, and every mounted
- * `CodeBrowserView` (the LRU cache in `MultiWorkspacePanelHost` keeps up to
- * `maxCachedWorkspaces` subtrees alive, hidden with `visibility:hidden`)
+ * `CodeBrowserView` (`MultiWorkspacePanelHost` keeps every visited
+ * workspace's subtree alive, hidden with `visibility:hidden`)
  * handled them with no guard. So a Go Back in A also ran the handler in hidden
  * workspace B, walking B's own history stack behind the user's back. Unlike
  * the LSP leak there's no ENOENT (each workspace's stack only holds its own
@@ -72,7 +72,7 @@ const B_TWO_TEXT = "workspace B file two";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout, where multiple
-// workspaces are alive at once under `MultiWorkspacePanelHost`'s LRU cache.
+// workspaces are alive at once under `MultiWorkspacePanelHost`.
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server!: ServerHandle;
@@ -111,9 +111,9 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin `maxCachedWorkspaces` to 3 so neither A nor B is LRU-evicted — the
-  // bug only manifests when BOTH workspace trees are alive at once.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  // The bug only manifests when BOTH workspace trees are alive at once, which
+  // `MultiWorkspacePanelHost` guarantees for every visited workspace.
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 
@@ -133,8 +133,7 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     const fileTrees = new FileTreesPage(page, workspacePage);
-    // Scope the viewer to B's subtree: A stays mounted (hidden) in the LRU
-    // cache, so an unscoped `file-viewer__root` could resolve to more than one.
+    // Scope the viewer to B's subtree: A stays mounted (hidden), so an unscoped `file-viewer__root` could resolve to more than one.
     const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
 
     // Land on A and activate its Files tab so A's CodeBrowserView mounts and

@@ -73,7 +73,6 @@ export const settingsUpdateInput = z
     labels: z.array(z.object({ id: z.string(), name: z.string(), color: z.string() })).optional(),
     tokenSecret: z.string().optional(),
     autoStartTunnel: z.boolean().optional(),
-    maxCachedWorkspaces: z.number().optional(),
     claudeCodePartialMessages: z.boolean().optional(),
     // Dashboard-UI-controlled boolean toggles. Enumerated so typos in keys
     // the SettingsPage actually writes are caught by Zod rather than

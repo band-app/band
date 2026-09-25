@@ -9,7 +9,7 @@
  * `{ filename }`. The single window-event listener in
  * `SharedDockviewLayout.tsx` was bound to the currently-active workspace,
  * so any chat-link click anywhere in the tree (A's chat or B's chat or
- * any LRU-cached workspace's chat) opened the file against whichever
+ * any hidden mounted workspace's chat) opened the file against whichever
  * workspace happened to be focused — typically NOT the intended one —
  * and the QuickOpenDialog's auto-open path persisted a bogus tab into
  * `band-open-tabs:<active-workspace>`. The fix:
@@ -72,8 +72,7 @@ const WORKSPACE_B = toWorkspaceId(PROJECT, BRANCH_B);
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout where multiple
-// workspaces can be alive at once under `MultiWorkspacePanelHost`'s LRU
-// cache. The mobile layout mounts one workspace at a time, so there's no
+// workspaces can be alive at once under `MultiWorkspacePanelHost`. The mobile layout mounts one workspace at a time, so there's no
 // cross-workspace event leak to guard against there in the same way.
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -130,11 +129,10 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin `maxCachedWorkspaces` to 3 — same as the cache-eviction spec —
-  // so neither A nor B is LRU-evicted at the assertion point. The bug
-  // only manifests when BOTH workspace trees are alive simultaneously
-  // and the event listener has to decide which one to route to.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  // The bug only manifests when BOTH workspace trees are alive
+  // simultaneously (every visited workspace stays mounted) and the event
+  // listener has to decide which one to route to.
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 

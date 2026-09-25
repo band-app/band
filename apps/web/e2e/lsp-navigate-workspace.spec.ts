@@ -7,9 +7,8 @@
  *
  * Pre-fix, `BandWorkspace.displayFile` in `codemirror-lsp.ts` dispatched
  * `band:lsp-navigate` with only `{ filePath }`, and every mounted
- * `CodeBrowserView` (the LRU cache in `MultiWorkspacePanelHost` keeps up to
- * `maxCachedWorkspaces` workspace subtrees alive, hidden with
- * `visibility:hidden`) listened with NO workspace guard. So a
+ * `CodeBrowserView` (`MultiWorkspacePanelHost` keeps every visited
+ * workspace's subtree alive, hidden with `visibility:hidden`) listened with NO workspace guard. So a
  * go-to-definition in A also ran the handler in hidden workspace B: B's
  * `FileViewer` stat'd `<B-root>/<A-relative-path>` → `ENOENT`, and
  * `fileTabs.openTabPinned` persisted the stale path into
@@ -77,7 +76,7 @@ const ONLY_IN_B = "only-in-b.ts";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The bug only manifests in the desktop layout, where multiple
-// workspaces are alive at once under `MultiWorkspacePanelHost`'s LRU cache.
+// workspaces are alive at once under `MultiWorkspacePanelHost`.
 // The mobile layout mounts one workspace at a time, so there's no
 // cross-workspace event leak to guard against there in the same way.
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -123,11 +122,10 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin `maxCachedWorkspaces` to 3 — same as the #539 spec — so neither A
-  // nor B is LRU-evicted at the assertion point. The bug only manifests
-  // when BOTH workspace trees are alive simultaneously and the listener has
-  // to decide which one to route to.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  // The bug only manifests when BOTH workspace trees are alive
+  // simultaneously (every visited workspace stays mounted) and the listener
+  // has to decide which one to route to.
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 
@@ -147,8 +145,8 @@ test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file 
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     const fileTrees = new FileTreesPage(page, workspacePage);
-    // Scope the viewer to B's subtree: A's FileViewer stays mounted (hidden)
-    // in the LRU cache, so an unscoped `file-viewer__root` would also resolve
+    // Scope the viewer to B's subtree: A's FileViewer stays mounted (hidden),
+    // so an unscoped `file-viewer__root` would also resolve
     // to A's — and after the dispatch A's viewer legitimately shows
     // `only-in-a.ts`, which would fool a `.first()` content assertion.
     const fileViewer = new FileViewerPage(page, workspacePage.cachedPanelEntries(WORKSPACE_B));
@@ -167,7 +165,7 @@ test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file 
     await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
     await workspacePage.switchWorkspace(WORKSPACE_B);
     await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
-    // `.count()` is a one-shot read with no auto-retry — poll so an async LRU
+    // `.count()` is a one-shot read with no auto-retry — poll so an async
     // mount of A's cached panels can't lose a race with this assertion.
     await expect
       .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
@@ -234,7 +232,7 @@ test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file 
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     const fileTrees = new FileTreesPage(page, workspacePage);
     // Unscoped viewer is fine here: this test only ever mounts workspace B
-    // (a single `goto`, no switch), so there's no LRU sibling whose
+    // (a single `goto`, no switch), so there's no mounted sibling whose
     // `file-viewer__root` could also match — unlike the first test.
     const fileViewer = new FileViewerPage(page);
 

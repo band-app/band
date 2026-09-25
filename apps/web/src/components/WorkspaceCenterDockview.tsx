@@ -2778,8 +2778,8 @@ export function WorkspaceCenterDockview({
           // pre-seeded from persisted split blobs in onReady, so this is
           // populated before the nested leaves mount.
           // A leaf also survives if its terminal is still alive in the CLIENT
-          // cache (PARKED across a workspace switch). On return to an LRU-evicted
-          // workspace the server's `terminal.list` can momentarily omit the
+          // cache (PARKED across a workspace switch). On a remount of the
+          // workspace (full page load) the server's `terminal.list` can momentarily omit the
           // parked terminal; without this cache check reconcile would prune the
           // restored leaf and the empty-fallback below would fabricate a phantom
           // duplicate terminal (regression of the band-app/band#617 fix).
