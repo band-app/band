@@ -737,6 +737,9 @@ function readTabStates(ws: string): Record<string, TabFileState> {
 // undo history) under `editorState`. Strip it on first read and write the
 // slimmer blob back once, so existing users stop re-parsing megabytes per
 // render and a stale document snapshot can never be restored.
+// `migrateLegacyTabStates` does the same eagerly for EVERY workspace's blob
+// once per page load, so file text viewed in a workspace the user never
+// reopens doesn't sit in browser storage indefinitely.
 type LegacyTabFileState = TabFileState & { editorState?: unknown };
 function dropLegacyEditorState(
   ws: string,
@@ -751,6 +754,27 @@ function dropLegacyEditorState(
   }
   if (changed) writeTabStates(ws, states);
   return states;
+}
+
+let legacyTabStatesMigrated = false;
+function migrateLegacyTabStates(): void {
+  if (legacyTabStatesMigrated) return;
+  legacyTabStatesMigrated = true;
+  try {
+    const prefix = TAB_STATE_KEY("");
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) {
+      // Cheap pre-check: only parse (and rewrite) blobs that carry the field.
+      if (!localStorage.getItem(key)?.includes('"editorState"')) continue;
+      readTabStates(key.slice(prefix.length));
+    }
+  } catch {
+    // storage unavailable — best-effort
+  }
 }
 
 function writeTabStates(ws: string, states: Record<string, TabFileState>): void {
@@ -774,6 +798,13 @@ function updateFileTabState(ws: string, path: string, patch: Partial<TabFileStat
 function isFileDirty(ws: string, path: string): boolean {
   return getFileTabState(ws, path)?.editedContent != null;
 }
+
+// File leaves closed by the user. `doCloseLeaf` drops the leaf's tab state
+// synchronously, but React unmounts the leaf afterwards and its cleanup would
+// persist the cursor position right back, so a closed file would not start
+// clean on its next open. The cleanup consumes this marker and skips the write.
+const closedFileLeaves = new Set<string>();
+const closedFileLeafKey = (ws: string, path: string): string => `${ws}\u0000${path}`;
 
 function removeFileTabState(ws: string, path: string): void {
   const states = readTabStates(ws);
@@ -1067,8 +1098,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     showMarkdownToggle: boolean;
   } | null>(null);
 
-  // Hold the live EditorView so we can serialize its cursor/selection/scroll on
-  // hide/unmount/reload and restore it next open (see `persistEditorState`).
+  // Hold the live EditorView so we can serialize its cursor selection + scroll
+  // offset on unmount/pagehide and restore it next open (see `persistEditorState`).
   // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
   const editorViewRef = useRef<any>(null);
   const handleEditorView = useCallback(
@@ -1109,9 +1140,14 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      // A leaf the user closed must not write its position back (see
+      // `closedFileLeaves`); consume the marker so a later open persists again.
+      if (closedFileLeaves.delete(closedFileLeafKey(workspaceIdRaw, filePathRaw))) return;
       persistEditorStateRef.current();
     };
-  }, []);
+    // A file leaf's workspace + path never change, so this still runs only on
+    // mount/unmount.
+  }, [workspaceIdRaw, filePathRaw]);
 
   // Stable renderer (identity never changes — markdownRef/setPreviewMatchInfo
   // are stable) so FileViewer's `showMarkdownToggle` doesn't churn each render.
@@ -1292,14 +1328,15 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
         // from the fresh module-level store and write back on every change so a
         // reload restores unsaved edits, the markdown code/preview choice, and
-        // the manual language override. The dirty CustomEvent lets the tab
-        // header (a separate React tree) re-check its dirty dot.
+        // the manual language override. FileViewer dispatches the
+        // `band:dirty-change` event after every call, which lets the tab header
+        // (a separate React tree) re-check its dirty dot; dispatching it here
+        // too would double the per-keystroke re-checks.
         initialEditedContent={persisted?.editedContent ?? null}
         onEditedContentChange={(content) => {
           updateFileTabState(workspaceId, filePath, {
             editedContent: content ?? undefined,
           });
-          window.dispatchEvent(new CustomEvent("band:dirty-change"));
         }}
         viewMode={viewMode}
         onViewModeChange={(mode) => {
@@ -2228,11 +2265,11 @@ function addTermLeaf(
     title: "Terminal",
     params: { workspaceId, terminalId, ...extra },
     position: position ?? centralPanelPosition(api),
-    // Keep the terminal MOUNTED when its tab is inactive (dockview hides it via
-    // CSS) instead of the default `onlyWhenVisible` detach. Switching center tabs
-    // then never unmounts the nested split / re-attaches the xterm, so a live TUI
-    // doesn't repaint on every tab switch. The instance + PTY socket already
-    // survive via the parking cache; this just avoids the visible re-attach.
+    // Keep the leaf MOUNTED when its tab is inactive (dockview hides it via CSS)
+    // instead of the default `onlyWhenVisible` detach, so switching center tabs
+    // never unmounts and rebuilds the nested split dockview. The xterm itself is
+    // still parked and re-attached through the terminal cache, driven by
+    // `TerminalLeaf`'s folded `visible` (selected tab AND visible workspace).
     renderer: "always",
   } as AddPanelOptions);
 }
@@ -2392,6 +2429,12 @@ export function WorkspaceCenterDockview({
     writeLayout();
   }, [writeLayout]);
 
+  // Strip legacy full-document editor state from every workspace's tab-state
+  // blob, once per page load (see `migrateLegacyTabStates`).
+  useEffect(() => {
+    migrateLegacyTabStates();
+  }, []);
+
   // A reload doesn't unmount React, so the unmount flush below never runs for
   // it. Without this, a debounced save still pending at reload time (tab
   // switches and resizes are debounced, and terminal title updates keep
@@ -2503,6 +2546,7 @@ export function WorkspaceCenterDockview({
       } else if (kind === "browser") {
         trpc.browsers.remove.mutate({ browserId: id }).catch(() => {});
       } else if (kind === "file") {
+        closedFileLeaves.add(closedFileLeafKey(workspaceId, id.slice(5)));
         removeFileTabState(workspaceId, id.slice(5));
       }
       // file / diff leaves are otherwise pure client views — no server mutation.

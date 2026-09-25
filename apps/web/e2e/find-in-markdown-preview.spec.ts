@@ -27,6 +27,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { FileViewerPage } from "./pages/FileViewerPage";
 
 // Force the mobile layout (viewport < 1024 px) so the workspace route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
@@ -139,7 +140,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
   // the way a user clicks into what they're reading. (Tapping the file in the
   // Explorer sheet leaves focus on the tree row, outside the leaf.)
-  await page.getByRole("heading", { level: 1, name: "Test Document" }).click();
+  await new FileViewerPage(page).clickIntoPreview("Test Document");
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar

@@ -49,7 +49,10 @@ const FILE = "long.ts";
 // stale-snapshot test can assert on its full text.
 const SHORT_FILE = "version.ts";
 const SHORT_BEFORE = "export const version = 1;";
-const SHORT_AFTER = "export const version = 2;";
+// Shorter than SHORT_BEFORE on purpose: the cursor saved at the old end of the
+// file is then past the new end, so reopening exercises the selection clamp
+// (an unclamped out-of-range selection throws when dispatched).
+const SHORT_AFTER = "export const v = 2;";
 const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -159,4 +162,32 @@ test("a reopened file leaf shows the file's current on-disk content, not a stale
   await expect(leaf).toBeVisible({ timeout: 20_000 });
   await viewer.expectContent(SHORT_AFTER);
   await viewer.expectNotContent(SHORT_BEFORE);
+});
+
+test("legacy full-document editor state is stripped from stored tab state on load", async ({
+  page,
+}) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await workspacePage.goto(WORKSPACE);
+  await workspacePage.waitForReady();
+
+  // An entry as an earlier build left it: the whole document (and undo history)
+  // under `editorState`. It belongs to a workspace this session never opens,
+  // the case an on-read cleanup alone would never reach.
+  const OTHER_WORKSPACE = "never-opened-workspace";
+  await workspacePage.writeTabStateEntry(OTHER_WORKSPACE, "secret.env", {
+    editorState: { doc: "API_KEY=do-not-keep-me", selection: { ranges: [], main: 0 } },
+    scrollTop: 42,
+  });
+
+  await workspacePage.reload();
+  await workspacePage.waitForReady();
+
+  // The document copy is gone and the rest of the entry survives, so the blob
+  // was rewritten, not dropped.
+  await expect
+    .poll(() => workspacePage.readTabStateEntry(OTHER_WORKSPACE, "secret.env"), {
+      timeout: 10_000,
+    })
+    .toEqual({ scrollTop: 42 });
 });

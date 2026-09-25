@@ -211,12 +211,13 @@ export function CodeMirrorEditor({
           savedSelectionRef.current != null
             ? selectionFromJSON(savedSelectionRef.current, viewRef.current.state.doc.length)
             : null;
-        if (selection) {
+        // An explicit line (Quick Open `:line`, go-to-definition, a search hit)
+        // is a navigation request and wins over a restored position.
+        if (lineRef.current) {
+          scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
+        } else if (selection) {
           viewRef.current.dispatch({ selection });
           restoreScroll = savedScrollTopRef.current ?? undefined;
-        } else if (lineRef.current) {
-          // Scroll to line only on a fresh open (not when restoring a position)
-          scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
         }
       }
 

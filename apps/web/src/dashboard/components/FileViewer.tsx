@@ -844,6 +844,7 @@ export function FileViewer({
     // Clear dirty state
     setEditedContent(null);
     onEditedContentChangeRef.current?.(null);
+    window.dispatchEvent(new CustomEvent("band:dirty-change"));
     onBack?.();
   }, [isDirty, onBack]);
 

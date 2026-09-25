@@ -93,11 +93,11 @@ test("Cmd+F opens the find bar for the focused surface, not another leaf", async
   await workspacePage.waitForReady();
 
   // Open a file into a center `file` leaf. The default layout is a single
-  // terminal, so the file opens as a tab in the terminal's group — file and
-  // terminal are co-grouped tabs, and dockview mounts only the ACTIVE tab's
-  // content. So the two surfaces can never be focused simultaneously; the
-  // contract this guards is that Cmd+F is scoped to whichever surface holds
-  // focus, and never cross-opens the other leaf's bar. (The retired global
+  // terminal, so the file opens as a tab in the terminal's group: file and
+  // terminal are co-grouped tabs. The terminal stays mounted (hidden) while the
+  // file is shown, via `renderer: "always"`, but only one of them can hold
+  // focus at a time. The contract this guards is that Cmd+F is scoped to
+  // whichever surface holds focus, and never cross-opens the other leaf's bar. (The retired global
   // handler ignored focus and fired for every mounted leaf — the bug fixed by
   // `use-search`'s `registerGlobalFindKey` opt-out + the terminal-focus guard in
   // `SharedDockviewLayout`.)

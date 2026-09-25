@@ -1035,15 +1035,26 @@ export class WorkspacePage {
    *  sniffed from network traffic (a freshly created chat need not fetch
    *  itself). For specs that address the chat server-side, e.g. `queue.push`. */
   async openChatAndGetId(workspaceId: string): Promise<string> {
+    const chatTabs = this.cachedPanelEntries(workspaceId).getByTestId(/^center-chat-tab--/);
+    const idsOf = async (): Promise<string[]> =>
+      (await chatTabs.evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? "")))
+        .map((t) => t.slice("center-chat-tab--".length))
+        .filter(Boolean);
+    const before = new Set(await idsOf());
     await this.openChat(workspaceId);
-    const testId = await this.cachedPanelEntries(workspaceId)
-      .getByTestId(/^center-chat-tab--/)
-      .filter({ visible: true })
-      .first()
-      .getAttribute("data-testid");
-    const chatId = testId?.slice("center-chat-tab--".length);
-    if (!chatId) throw new Error(`no chat tab id in workspace ${workspaceId}`);
-    return chatId;
+    // The id that wasn't there before is the chat this call created, even when
+    // the workspace already held other chats.
+    let created: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          created = (await idsOf()).find((id) => !before.has(id));
+          return created;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+    return created as string;
   }
 
   /** Add a new terminal leaf via the "+" menu in the given workspace's dockview. */
@@ -1701,6 +1712,60 @@ export class WorkspacePage {
     } catch {
       return false;
     }
+  }
+
+  /** Click the Nth visible terminal tab in the center strip to make it the
+   *  selected tab of its group. */
+  async activateTerminalTab(index: number): Promise<void> {
+    await test.step(`Activate terminal tab ${index}`, async () => {
+      await this.terminalTabs().nth(index).click();
+    });
+  }
+
+  /** terminalIds of a workspace's terminals whose wrapper is attached to a live
+   *  panel, i.e. NOT inside the off-screen parking container. */
+  async liveTerminalIds(workspaceId: string): Promise<string[]> {
+    return await this.page.evaluate(
+      (id) =>
+        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`))
+          .filter((el) => !el.closest('[data-testid="terminal-parking"]'))
+          .map((el) => (el as HTMLElement).dataset.terminalId ?? "")
+          .filter(Boolean),
+      workspaceId,
+    );
+  }
+
+  /** How many of a workspace's terminal wrappers sit in the parking container. */
+  async parkedTerminalCount(workspaceId: string): Promise<number> {
+    return await this.page.evaluate(
+      (id) =>
+        Array.from(document.querySelectorAll(`[data-workspace-id="${id}"]`)).filter((el) =>
+          el.closest('[data-testid="terminal-parking"]'),
+        ).length,
+      workspaceId,
+    );
+  }
+
+  /** Write one file's entry in a workspace's per-tab state blob
+   *  (`band-tab-state:<ws>`), as an earlier build would have left it. */
+  async writeTabStateEntry(workspaceId: string, path: string, entry: unknown): Promise<void> {
+    await this.page.evaluate(
+      ([ws, p, e]) => {
+        const key = `band-tab-state:${ws}`;
+        const states = JSON.parse(localStorage.getItem(key) ?? "{}");
+        states[p as string] = e;
+        localStorage.setItem(key, JSON.stringify(states));
+      },
+      [workspaceId, path, entry] as const,
+    );
+  }
+
+  /** Read one file's entry from a workspace's per-tab state blob. */
+  async readTabStateEntry(workspaceId: string, path: string): Promise<unknown> {
+    return await this.page.evaluate(
+      ([ws, p]) => JSON.parse(localStorage.getItem(`band-tab-state:${ws}`) ?? "{}")[p as string],
+      [workspaceId, path] as const,
+    );
   }
 
   /** Whether the given workspace's terminal wrapper currently lives inside the

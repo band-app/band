@@ -97,11 +97,9 @@ export {
   collectSearchMatches,
   cursorLineTracker,
   dispatchSearch,
-  historyField,
   restoreScrollPosition,
   scrollToLine,
   scrollToSearchMatch,
-  serializeEditorState,
   serializeViewPosition,
 } from "./lib/codemirror-setup";
 export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
