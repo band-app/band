@@ -131,7 +131,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
 
   let idleSince: number | null = null;
   const idleTimer = setInterval(() => {
-    if (pool.listAll().length > 0 || clients.size > 0) {
+    if (pool.size > 0 || clients.size > 0) {
       idleSince = null;
       return;
     }
@@ -264,6 +264,14 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
 
   function handleControl(client: Client, frame: unknown): void {
     const message = frame as (ControlRequest | ControlNotify) & { id?: unknown };
+    // Authenticated, but still only as trustworthy as its framing: reject a
+    // frame whose ids aren't strings before they reach the pool or the disk.
+    if (!hasValidIds(frame as Record<string, unknown>)) {
+      if (typeof message.id === "number") {
+        send(client, "control", { id: message.id, ok: false, error: "Malformed request" });
+      }
+      return;
+    }
     if (typeof message.id !== "number") {
       handleNotify(client, message as ControlNotify);
       return;
@@ -368,6 +376,24 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     const actual = Buffer.from(candidate);
     return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
+}
+
+/**
+ * Minimal runtime shape check for control frames: every id or path field the
+ * message carries must be a string, and dims must be finite numbers. Beyond
+ * that the pool validates (it clamps dims and confines `cwd` to the root).
+ */
+function hasValidIds(message: Record<string, unknown>): boolean {
+  if (typeof message.t !== "string") return false;
+  for (const key of ["terminalId", "workspaceId", "workspaceRoot", "data"]) {
+    if (key in message && typeof message[key] !== "string") return false;
+  }
+  for (const key of ["cols", "rows", "lines"]) {
+    if (key in message && message[key] !== undefined && !Number.isFinite(message[key])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function parseHello(frame: unknown): HelloMessage | null {

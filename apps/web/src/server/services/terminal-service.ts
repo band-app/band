@@ -245,13 +245,15 @@ export class TerminalService {
    */
   async reconcile(): Promise<void> {
     const entries = await this.backend.listAll();
-    for (const entry of entries) {
-      if (workspaceService.resolve(entry.workspaceId)) continue;
-      log.info(
-        { terminalId: entry.terminalId, workspaceId: entry.workspaceId },
-        "killing terminal of a deleted workspace",
-      );
-      await this.backend.kill(entry.terminalId);
+    // One kill per deleted workspace, not per terminal: each is a daemon round trip.
+    const deleted = new Set(
+      entries
+        .map((entry) => entry.workspaceId)
+        .filter((workspaceId) => !workspaceService.resolve(workspaceId)),
+    );
+    for (const workspaceId of deleted) {
+      log.info({ workspaceId }, "killing terminals of a deleted workspace");
+      await this.backend.killWorkspace(workspaceId);
     }
   }
 

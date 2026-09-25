@@ -16,7 +16,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
-import { isAlive, stopTerminalDaemon } from "./helpers/terminal-daemon";
+import { isAlive } from "./helpers/terminal-daemon";
 import { waitFor } from "./helpers/wait-for";
 
 // Terminals live in a detached terminal daemon, so restarting the web server
@@ -133,9 +133,9 @@ describe("terminal daemon — shells survive a server restart", () => {
   });
 
   afterAll(async () => {
+    // Also stops the daemon, even if a test failed mid-restart: close() on an
+    // already-stopped server returns at once and still stops the daemon.
     await server?.close();
-    // Belt and braces for a test that failed between the restart's two halves.
-    await stopTerminalDaemon(tmpHome);
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
@@ -249,7 +249,6 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
 
   afterAll(async () => {
     await server?.close();
-    await stopTerminalDaemon(tmpHome);
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 

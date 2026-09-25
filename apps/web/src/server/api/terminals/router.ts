@@ -136,12 +136,12 @@ const terminalRouter = t.router({
       }
 
       const queue: string[] = [];
-      attachment.start((data: string) => {
-        queue.push(data);
-        resolve?.();
-      });
-
       try {
+        attachment.start((data: string) => {
+          queue.push(data);
+          resolve?.();
+        });
+
         // Replay a serialized reconstruction of the terminal state first,
         // same as the `/terminal` WebSocket path: the raw scrollback tail
         // can be cut mid-escape-sequence and garble TUI apps drawn with

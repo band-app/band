@@ -113,6 +113,11 @@ async function startServer(
           home,
           close: async () => {
             await new Promise<void>((r) => {
+              // Already gone: `exit` won't fire again, so waiting would hang.
+              if (child.exitCode !== null || child.signalCode !== null) {
+                r();
+                return;
+              }
               child.on("exit", () => r());
               child.kill("SIGTERM");
             });

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { checkEndpointOwner } from "./endpoint";
 import {
@@ -97,7 +97,7 @@ export class DaemonClient {
     const controlFrames = new FrameSink(control);
     let stream: Socket | null = null;
     try {
-      const token = readToken(paths.token);
+      const token = await readToken(paths.token);
       const ready = await handshake(control, controlFrames, {
         t: "hello",
         protocol: PROTOCOL_VERSION,
@@ -209,7 +209,7 @@ export async function retireDaemon(paths: DaemonPaths, buildId: string): Promise
     await handshake(socket, frames, {
       t: "hello",
       protocol: PROTOCOL_VERSION,
-      token: readToken(paths.token),
+      token: await readToken(paths.token),
       role: "control",
       clientId: randomUUID(),
       buildId,
@@ -321,9 +321,9 @@ function handshake(
   });
 }
 
-function readToken(path: string): string {
+async function readToken(path: string): Promise<string> {
   try {
-    return readFileSync(path, "utf8").trim();
+    return (await readFile(path, "utf8")).trim();
   } catch (err) {
     // The socket answered but no token file exists: send an empty token and
     // let the daemon's rejection say so, rather than guess.

@@ -694,6 +694,11 @@ export class TerminalPool {
     return result;
   }
 
+  /** Number of live sessions. */
+  get size(): number {
+    return this.terminals.size;
+  }
+
   /** Every live session across all workspaces. */
   listAll(): TerminalListEntry[] {
     const result: TerminalListEntry[] = [];
