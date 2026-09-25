@@ -94,8 +94,10 @@ test("returning to the first of six visited workspaces does not remount it", asy
 
   expect(await workspacePage.isMountedWorkspaceMarked(first)).toBe(true);
   // Only the shown workspace takes focus; the one just left is inert.
-  expect(await workspacePage.isMountedWorkspaceInert(first)).toBe(false);
-  expect(await workspacePage.isMountedWorkspaceInert(others[others.length - 1])).toBe(true);
+  await expect(workspacePage.cachedPanelEntries(first)).not.toHaveAttribute("inert");
+  await expect(workspacePage.cachedPanelEntries(others[others.length - 1])).toHaveAttribute(
+    "inert",
+  );
   expect(await workspacePage.markedTerminalWrapperCount(first)).toBe(1);
   expect(await workspacePage.readTerminalRenderedText(first)).toContain("NO_REMOUNT_42");
   expect(socketOpens()).toBe(1);

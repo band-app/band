@@ -132,12 +132,6 @@ export class WorkspacePage {
     });
   }
 
-  /** Whether the workspace's mounted entry is `inert` (hidden workspaces are,
-   *  so they cannot take focus or clicks). */
-  async isMountedWorkspaceInert(workspaceId: string): Promise<boolean> {
-    return await this.cachedPanelEntries(workspaceId).evaluate((el) => el.hasAttribute("inert"));
-  }
-
   /** Whether the workspace's mounted entry still carries the mark set by
    *  `markMountedWorkspace`. */
   async isMountedWorkspaceMarked(workspaceId: string): Promise<boolean> {

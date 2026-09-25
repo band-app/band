@@ -78,7 +78,10 @@ export function isWorkspaceColdParked(workspaceId: string): boolean {
   return getState().cold.has(workspaceId);
 }
 
-/** Notified whenever the cold set changes. */
+/** Notified whenever the cold set changes. Listeners run synchronously inside
+ *  the pass, so they must not call `setActiveWorkspace` or
+ *  `forgetMissingWorkspaces` directly; defer that work (as `terminal-cache.ts`
+ *  does with a microtask). */
 export function subscribeWorkspaceColdPark(listener: () => void): () => void {
   const { listeners } = getState();
   listeners.add(listener);
