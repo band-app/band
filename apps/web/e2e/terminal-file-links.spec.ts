@@ -89,6 +89,11 @@ test.afterAll(async () => {
   rmSync(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
+// #643: the file explorer moved to the right sidepanel and desktop file
+// editors are now per-path `file` leaves in the unified center dockview. A
+// terminal file link therefore opens a `center-file-tab--<path>` leaf; the
+// open is observable through that tab and through the file's presence in the
+// persisted center-dockview layout (`readOpenTabPaths` → the `file:` panels).
 test.describe("Terminal file links", () => {
   test("clicking a file path printed in the terminal opens it in the file browser", async ({
     page,
@@ -103,8 +108,8 @@ test.describe("Terminal file links", () => {
     await workspacePage.openTerminalTab();
     await workspacePage.waitForTerminalReady(75_000);
 
-    // Positive anchor: no file is open in the browser before the click.
-    // Poll so we assert against settled state, not a pre-hydration read.
+    // Positive anchor: no file leaf is open before the click. Poll so we
+    // assert against settled state, not a pre-hydration read.
     await expect
       .poll(async () => await workspacePage.readOpenTabPaths(WORKSPACE), { timeout: 5_000 })
       .not.toContain(REL_PATH);
@@ -116,11 +121,10 @@ test.describe("Terminal file links", () => {
 
     await workspacePage.clickTerminalFileLink(LINK_PATH);
 
-    // Observable outcome: the click routed the path into the file browser,
-    // which switched to the Files tab and opened the file (persisted into the
-    // workspace's open-tabs localStorage entry, line suffix stripped). This is
-    // the same open-file surface a chat file-link click drives.
-    await expect(workspacePage.tabContainer("files")).toHaveClass(/\bdv-active-tab\b/, {
+    // Observable outcome: the click routed the path through the open-file event
+    // into a per-path `file` leaf (line suffix stripped) — the same open-file
+    // surface a chat file-link click drives.
+    await expect(workspacePage.fileTab(REL_PATH)).toBeAttached({
       timeout: 15_000,
     });
     await expect

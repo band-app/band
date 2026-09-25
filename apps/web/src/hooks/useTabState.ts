@@ -12,8 +12,14 @@ export interface TabFileState {
   viewMode?: "preview" | "source";
   /** Unsaved file content — stored for dirty detection and persistence across reloads. */
   editedContent?: string;
-  /** Serialized CodeMirror EditorState (doc, selection, undo history) via toJSON. */
-  editorState?: unknown;
+  /**
+   * Cursor selection as `EditorSelection.toJSON()` (character offsets only, via
+   * `serializeViewPosition`). Deliberately NOT the full `EditorState`: that
+   * carried the whole document plus undo history, bloating this blob past the
+   * localStorage quota and letting a stale copy of the file be saved back over
+   * newer on-disk content after a reload.
+   */
+  selection?: unknown;
   /** Scroll position (scrollDOM.scrollTop) to restore after editor creation. */
   scrollTop?: number;
   /**

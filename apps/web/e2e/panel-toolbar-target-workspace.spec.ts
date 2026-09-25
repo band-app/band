@@ -172,14 +172,15 @@ async function mountBothAndSettle(
 ): Promise<{ baseVisible: number; baseCached: number }> {
   await workspacePage.goto(visible);
   await workspacePage.waitForReady();
-  // The default chat tab is visible — proves the chat container's onReady
-  // ran (its layout will persist) before we move on.
+  // The default layout is a single terminal — open a chat leaf so this test has
+  // one to target. Its visible-true marker proves the chat mounted (its layout
+  // persists) before we move on.
+  await workspacePage.openChat(visible);
   await expect(workspacePage.chatTabVisibilityMarker(visible, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(cached);
   await workspacePage.waitForReady();
-  // The cached workspace's chat container is now mounted and visible — its
-  // onReady ran too, so it has a persisted baseline.
+  await workspacePage.openChat(cached);
   await expect(workspacePage.chatTabVisibilityMarker(cached, true)).toBeVisible();
 
   await workspacePage.switchWorkspace(visible);
@@ -249,6 +250,11 @@ async function mountBothTerminalsAndSettle(
   return { baseVisible, baseCached };
 }
 
+// TODO(#643 Phase 5): re-point to Cmd+D split / new toolbar. The whole premise
+// (per-container inner-dockview add/split toolbars + a module-level singleton
+// bug + server-side per-container layout counts) is gone: the unified center
+// dockview has one `+` menu and split is keyboard-only, and layout persists to
+// localStorage (band:dockview-layout-v8:<id>), not chatLayout/terminalLayout.
 test.describe("Inner-dockview toolbar targets the visible workspace", () => {
   test("clicking the chat '+' creates the tab in the VISIBLE workspace, not the cached one", async ({
     page,
@@ -330,23 +336,30 @@ test.describe("Inner-dockview toolbar targets the visible workspace", () => {
     page,
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const { baseVisible, baseCached } = await mountBothTerminalsAndSettle(
+    const { baseVisible } = await mountBothTerminalsAndSettle(
       workspacePage,
       TERM_SPLIT_VISIBLE,
       TERM_SPLIT_CACHED,
     );
+    const wrappersVisibleBefore = await workspacePage.terminalWrapperCount(TERM_SPLIT_VISIBLE);
+    const wrappersCachedBefore = await workspacePage.terminalWrapperCount(TERM_SPLIT_CACHED);
 
     await workspacePage.clickTerminalSplitRight(TERM_SPLIT_VISIBLE);
 
-    // Split adds a panel (in a new group) to the VISIBLE workspace...
+    // A terminal split is now a nested PANE: the VISIBLE workspace gains a new
+    // xterm wrapper (pane)...
     await expect
-      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
-      .toBe(baseVisible + 1);
-
-    // ...and leaves the cached workspace untouched (poll to absorb a
-    // debounce-delayed wrong-workspace persist — see the add-tab test).
+      .poll(() => workspacePage.terminalWrapperCount(TERM_SPLIT_VISIBLE), { timeout: 10_000 })
+      .toBe(wrappersVisibleBefore + 1);
+    // ...while its terminal TAB count is unchanged (a split is a pane, not a
+    // new terminal tab).
     await expect
-      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_CACHED), { timeout: 3_000 })
-      .toBe(baseCached);
+      .poll(() => workspacePage.countTerminalPanels(TERM_SPLIT_VISIBLE), { timeout: 3_000 })
+      .toBe(baseVisible);
+    // ...and the cached workspace is untouched (poll to absorb a debounce-delayed
+    // wrong-workspace persist — see the add-tab test).
+    await expect
+      .poll(() => workspacePage.terminalWrapperCount(TERM_SPLIT_CACHED), { timeout: 3_000 })
+      .toBe(wrappersCachedBefore);
   });
 });

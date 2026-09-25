@@ -1,8 +1,8 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { consumeChatFresh } from "../lib/leaf-instance-ids";
 import { trpc } from "../lib/trpc-client";
 import { ChatView } from "./ChatView";
-import { consumeChatFresh } from "./DockviewChatContainer";
 
 // Query keys — kept in one place so the agent-switch handler can invalidate
 // the chats.get cache after a successful switch and refetches honour the

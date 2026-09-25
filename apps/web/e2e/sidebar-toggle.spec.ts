@@ -21,6 +21,8 @@
  * cross-checked against the toggle button's `aria-pressed` state.
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import {
@@ -46,13 +48,19 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
+  // A real directory, not `/tmp/fake/...`: the default center layout is a
+  // single terminal, and a shell can't start in a directory that doesn't
+  // exist. Its PTY dies, the leaf is removed, and the center drops to its
+  // empty state, so `waitForReady` never sees the toolbar after a reload.
+  const projectPath = join(tmpHome, PROJECT);
+  mkdirSync(projectPath, { recursive: true });
   seedState(tmpHome, {
     projects: [
       {
         name: PROJECT,
-        path: `/tmp/fake/${PROJECT}`,
+        path: projectPath,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT}` }],
+        worktrees: [{ branch: "main", path: projectPath }],
       },
     ],
   });

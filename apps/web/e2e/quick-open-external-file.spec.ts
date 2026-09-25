@@ -112,6 +112,9 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
+// #643: Quick Open resolves an absolute path to a single file and opens it as a
+// per-path `file` leaf (center-file-tab--<path>) in the unified center
+// dockview; the open is observable through that tab and the persisted layout.
 test.describe("Quick Open — open a file outside the worktree by absolute path", () => {
   test("typing an existing absolute path offers to open it and lands an external tab", async ({
     page,
@@ -145,7 +148,9 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
         timeout: 15_000,
       })
       .toBe(externalTsPath);
-    await expect(workspacePage.tabContainer("files")).toHaveClass(/\bdv-active-tab\b/, {
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
+    await expect(workspacePage.fileTab(externalTsPath)).toBeAttached({
       timeout: 15_000,
     });
     await expect(workspacePage.quickOpenDialog()).toBeHidden();
@@ -230,7 +235,9 @@ test.describe("Quick Open — open a file outside the worktree by absolute path"
       })
       .toBe("inside.ts");
     expect(await workspacePage.readOpenTabPaths(WORKSPACE)).not.toContain(insideAbs);
-    await expect(workspacePage.tabContainer("files")).toHaveClass(/\bdv-active-tab\b/, {
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf is active. Describe is skipped.
+    await expect(workspacePage.fileTab("inside.ts")).toBeAttached({
       timeout: 15_000,
     });
 

@@ -25,6 +25,9 @@ import { FileStatusBadge } from "./FileStatusBadge";
 interface ChangesFileTreeProps {
   fileStatuses: Record<string, FileStatus>;
   onSelectFile: (filePath: string) => void;
+  /** Double-click a file — pins the diff (vs the single-click preview). Optional
+   *  so the mobile DiffView, which passes only `onSelectFile`, is unaffected. */
+  onSelectFilePinned?: (filePath: string) => void;
   activeFile?: string | null;
   /**
    * Revert every path in the list — used by the right-click "Reset
@@ -47,6 +50,7 @@ interface ChangesTreeNodeProps {
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onSelectFile: (filePath: string) => void;
+  onSelectFilePinned?: (filePath: string) => void;
   onRequestReset: (node: FileTreeNode) => void;
   canReset: boolean;
   workspacePath?: string;
@@ -70,6 +74,7 @@ function ChangesTreeNode({
   expandedPaths,
   onToggle,
   onSelectFile,
+  onSelectFilePinned,
   onRequestReset,
   canReset,
   workspacePath,
@@ -101,6 +106,10 @@ function ChangesTreeNode({
     }
   };
 
+  const handleDoubleClick = () => {
+    if (!isDir) onSelectFilePinned?.(node.path);
+  };
+
   const button = (
     <button
       ref={isActive ? btnRef : undefined}
@@ -111,6 +120,7 @@ function ChangesTreeNode({
       data-band-active={isActive ? "true" : undefined}
       data-testid={`changes-tree__row--${node.path}`}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       // Suppress the iOS text-selection / callout that fires on
       // long-press alongside the Radix contextmenu event.
       className={`flex h-[28px] w-full select-none items-center gap-1 pr-3 text-left text-[13px] hover:bg-accent/50 [-webkit-touch-callout:none] ${
@@ -203,6 +213,7 @@ function ChangesTreeNode({
             expandedPaths={expandedPaths}
             onToggle={onToggle}
             onSelectFile={onSelectFile}
+            onSelectFilePinned={onSelectFilePinned}
             onRequestReset={onRequestReset}
             canReset={canReset}
             workspacePath={workspacePath}
@@ -230,6 +241,7 @@ function collectDirPaths(nodes: FileTreeNode[]): string[] {
 export function ChangesFileTree({
   fileStatuses,
   onSelectFile,
+  onSelectFilePinned,
   activeFile,
   onRevertPaths,
   workspacePath,
@@ -353,6 +365,7 @@ export function ChangesFileTree({
           expandedPaths={expandedPaths}
           onToggle={handleToggle}
           onSelectFile={onSelectFile}
+          onSelectFilePinned={onSelectFilePinned}
           onRequestReset={handleRequestReset}
           canReset={canReset}
           workspacePath={workspacePath}

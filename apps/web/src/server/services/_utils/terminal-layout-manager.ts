@@ -10,9 +10,6 @@ import { DockviewLayoutManager } from "./dockview-layout-manager";
 
 const manager = new DockviewLayoutManager("terminal_layout");
 
-export const getTerminalLayout = (workspaceId: string) => manager.get(workspaceId);
-export const saveTerminalLayout = (workspaceId: string, tree: unknown) =>
-  manager.save(workspaceId, tree);
 export const deleteTerminalLayout = (workspaceId: string) => manager.delete(workspaceId);
 
 /**

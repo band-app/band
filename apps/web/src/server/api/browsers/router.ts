@@ -7,13 +7,11 @@
  * to `BrowserService` (and `watcher.emit` for lifecycle events), and
  * returns. No business logic lives here.
  *
- * Two sub-routers are exported:
+ * One sub-router is exported:
  *   - `browsersRouter` covers the per-tab CRUD lifecycle at the
  *     `browsers.*` tRPC namespace.
- *   - `browserLayoutRouter` covers the saved dockview layout tree at the
- *     `browserLayout.*` tRPC namespace.
  *
- * Both are merged into the root router by `server/api/router.ts`. The
+ * It is merged into the root router by `server/api/router.ts`. The
  * `browserHost.*` namespace and the `history.*` namespace remain in the
  * legacy router until their own refactor phases — both live in `lib/` and
  * touch the desktop IPC bridge / a dedicated history table that aren't
@@ -25,25 +23,6 @@ import { z } from "zod";
 import { browserService } from "../../services/browser-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
-
-// ---------------------------------------------------------------------------
-// Browser Layout (split pane tree persistence)
-// ---------------------------------------------------------------------------
-
-export const browserLayoutRouter = t.router({
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { tree: browserService.getLayout(input.workspaceId) };
-  }),
-
-  save: publicProcedure
-    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
-    .mutation(({ input }) => {
-      browserService.saveLayout(input.workspaceId, input.tree);
-      return { ok: true };
-    }),
-});
-
-export type BrowserLayoutRouter = typeof browserLayoutRouter;
 
 // ---------------------------------------------------------------------------
 // Browsers (multi-tab browser management)

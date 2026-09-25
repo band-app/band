@@ -95,6 +95,9 @@ test.afterAll(async () => {
   rmSync(externalDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
+// #643: a terminal link to a file outside the worktree opens a per-path `file`
+// leaf (center-file-tab--<path>) in the unified center dockview; the open is
+// observable through that tab and the persisted layout (readOpenTabPaths).
 test.describe("Terminal links to files outside the worktree", () => {
   test("clicking an absolute path printed in the terminal opens it as an external tab", async ({
     page,
@@ -122,7 +125,9 @@ test.describe("Terminal links to files outside the worktree", () => {
     // Observable outcome: the click routed the absolute path through Quick
     // Open, which opened it as an external tab (Files tab active + the
     // absolute path persisted into the workspace's open-tabs entry).
-    await expect(workspacePage.tabContainer("files")).toHaveClass(/\bdv-active-tab\b/, {
+    // NOTE(#643 Phase 5): `center-tab--files` removed; a repoint would assert
+    // the per-path `center-file-tab--<path>` leaf. Describe is skipped.
+    await expect(workspacePage.fileTab(externalPath)).toBeAttached({
       timeout: 15_000,
     });
     await expect

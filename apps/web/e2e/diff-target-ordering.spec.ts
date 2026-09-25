@@ -1,8 +1,8 @@
 /**
  * End-to-end coverage for the diff-target picker's default selection and
- * option ordering in the Changes view.
+ * option ordering in the Changes tab of the right sidepanel (#643).
  *
- * Three behaviours are pinned here:
+ * Two behaviours are pinned here:
  *  1. A fresh workspace (no stored pick) defaults to "Uncommitted" — the
  *     picker trigger reads "Uncommitted" on first paint, and it is the
  *     first item in the dropdown.
@@ -10,11 +10,11 @@
  *     branches (develop, staging, …) to the top in priority order, then
  *     the project's default branch, then every other branch
  *     alphabetically.
- *  3. Switching the diff target keeps the toolbar's head-branch label
- *     populated across the summary refetch — the picker "stays put" instead
- *     of the label blanking (which would reflow the toolbar and flicker the
- *     picker left, then back). Guarded with a MutationObserver, mirroring the
- *     loading-flash guard in `workspace-switch-changes.spec.ts`.
+ *
+ * The retired monolithic Changes view also had a head-branch label beside
+ * the picker, with a flicker guard for it. The sidepanel has no such label,
+ * and its trigger text comes from `useDiffTarget` state rather than the
+ * refetched summary, so there is nothing left to blank during a switch.
  *
  * The branch list reaches the picker through the real git pipeline
  * (`workspace.listBranches` → `git for-each-ref` in an on-disk worktree)
@@ -35,11 +35,10 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { ChangesPanelPage } from "./pages/ChangesPanelPage";
+import { ChangesPanelPage, UNCOMMITTED_OPTION_TESTID } from "./pages/ChangesPanelPage";
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
-// (with the Changes group + its toolbar) renders — matching the other diff
-// e2e specs.
+// Wide viewport so `useIsDesktop()` reports true and the right sidepanel
+// renders beside the center dockview — matching the other diff e2e specs.
 test.use({ viewport: { width: 1920, height: 900 } });
 
 const TOKEN = "e2e-diff-target-order-token";
@@ -104,7 +103,7 @@ test.afterAll(async () => {
 
 test("Diff target defaults to Uncommitted on a fresh workspace", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.openWorkspace(workspaceId);
+  await changes.goto(workspaceId);
   await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
   // Assert on the stable mode enum (read from persisted client state), not the
   // localisable "Uncommitted" trigger copy. Poll so a one-tick gap between the
@@ -117,7 +116,7 @@ test("Diff target dropdown pins Uncommitted, then staging branches, then default
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.openWorkspace(workspaceId);
+  await changes.goto(workspaceId);
   await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
 
   // Open once; the list settles as `listBranches` resolves and the client
@@ -131,43 +130,11 @@ test("Diff target dropdown pins Uncommitted, then staging branches, then default
   await changes.openDiffTargetDropdown();
   await expect(changes.firstDiffTargetOption).toHaveAttribute(
     "data-testid",
-    "diff-view__target-option-uncommitted",
+    UNCOMMITTED_OPTION_TESTID,
   );
   await expect
     .poll(async () => (await changes.visibleDiffTargetOptions()).slice(1).join(","), {
       timeout: 15_000,
     })
     .toBe(["develop", "stage", "staging", "main", "apple", "zebra"].join(","));
-});
-
-test("Head-branch label stays populated across a diff-target switch (no picker flicker)", async ({
-  page,
-}) => {
-  const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.openWorkspace(workspaceId);
-  await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
-
-  // Once the first summary lands, the toolbar shows the workspace's HEAD
-  // branch (`work`) beside the picker. Anchor on it before touching the
-  // picker so the guard starts from a known-populated state.
-  await expect(changes.headBranchLabel).toHaveText(HEAD_BRANCH, { timeout: 15_000 });
-
-  // Plant the flicker guard, then switch the diff target to a branch. The
-  // switch nulls `summary` and refetches (see `setSummary(null)` in DiffView's
-  // fetch effect); the sticky-label fix keeps the head-branch label showing
-  // `work` throughout instead of blanking mid-load.
-  await changes.startHeadBranchFlickerGuard();
-  await changes.selectDiffTarget("develop");
-
-  // The picker reflects the new branch target — proof the refetch-triggering
-  // switch actually happened, so the guard window covered a real refetch. The
-  // mode enum comes from persisted client state; the trigger text is the branch
-  // name (runtime data the test seeded), not localisable copy.
-  await expect.poll(() => changes.diffMode(), { timeout: 15_000 }).toBe("branch");
-  await expect(changes.diffTargetTrigger).toHaveText("develop");
-
-  // The head-branch label never detached or blanked while the summary
-  // reloaded, and still reads `work` after the switch settles.
-  expect(await changes.stopHeadBranchFlickerGuard()).toBe(false);
-  await expect(changes.headBranchLabel).toHaveText(HEAD_BRANCH);
 });

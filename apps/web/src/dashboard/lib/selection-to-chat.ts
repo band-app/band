@@ -171,8 +171,17 @@ const ICON_COPY: IconChild[] = [
  *   to actual file line numbers. When provided, the dispatched event will use
  *   the mapped line numbers instead of the raw document line numbers. This is
  *   used by the diff view where trimmed content starts at a line offset.
+ * @param opts.copyReferenceOnly - When true, the tooltip shows ONLY the
+ *   "Copy reference" button (no "Add to Chat" / "Add to Terminal"). The desktop
+ *   diff leaf uses this — those two routing actions are reserved for the mobile
+ *   diff tooltip (#643).
  */
-export function selectionToChatExtension(filePath: string, lineNumberMap?: number[]): Extension {
+export function selectionToChatExtension(
+  filePath: string,
+  lineNumberMap?: number[],
+  opts?: { copyReferenceOnly?: boolean },
+): Extension {
+  const copyReferenceOnly = opts?.copyReferenceOnly ?? false;
   // --- StateField: holds the current tooltip (set via effect) ----------------
 
   const tooltipField = StateField.define<Tooltip | null>({
@@ -286,29 +295,31 @@ export function selectionToChatExtension(filePath: string, lineNumberMap?: numbe
             return btn;
           }
 
-          dom.appendChild(
-            makeButton("Add to Chat", ICON_CHAT, "selection-tooltip__add-to-chat", (detail) => {
-              window.dispatchEvent(new CustomEvent("band:add-to-chat", { detail }));
-            }),
-          );
+          if (!copyReferenceOnly) {
+            dom.appendChild(
+              makeButton("Add to Chat", ICON_CHAT, "selection-tooltip__add-to-chat", (detail) => {
+                window.dispatchEvent(new CustomEvent("band:add-to-chat", { detail }));
+              }),
+            );
 
-          dom.appendChild(
-            makeButton(
-              "Add to Terminal",
-              ICON_TERMINAL,
-              "selection-tooltip__add-to-terminal",
-              (detail) => {
-                // Trailing space mirrors the chat reference's typing ergonomics;
-                // no newline so the terminal agent decides when to submit.
-                const reference = `${buildLineReference(detail.filePath, detail.startLine, detail.endLine)} `;
-                window.dispatchEvent(
-                  new CustomEvent<AddToTerminalDetail>("band:add-to-terminal", {
-                    detail: { reference },
-                  }),
-                );
-              },
-            ),
-          );
+            dom.appendChild(
+              makeButton(
+                "Add to Terminal",
+                ICON_TERMINAL,
+                "selection-tooltip__add-to-terminal",
+                (detail) => {
+                  // Trailing space mirrors the chat reference's typing ergonomics;
+                  // no newline so the terminal agent decides when to submit.
+                  const reference = `${buildLineReference(detail.filePath, detail.startLine, detail.endLine)} `;
+                  window.dispatchEvent(
+                    new CustomEvent<AddToTerminalDetail>("band:add-to-terminal", {
+                      detail: { reference },
+                    }),
+                  );
+                },
+              ),
+            );
+          }
 
           dom.appendChild(
             makeButton(

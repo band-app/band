@@ -20,10 +20,13 @@
  *   - Phase 2 (issue #313): `projects.*`.
  *   - Phase 3 (issue #314): `workspaces.*`.
  *   - Phase 4 (issue #315): `cronjobs.*`.
- *   - Phase 5 (issue #316): `chats.*`, `chatLayout.*`, `browsers.*`,
- *     `browserLayout.*`.
+ *   - Phase 5 (issue #316): `chats.*`, `browsers.*`. (The `chatLayout.*` /
+ *     `browserLayout.*` layout-tree namespaces added here were retired in
+ *     issue #643 Phase 4 once clients moved center-layout persistence into
+ *     localStorage.)
  *   - Phase 6 (issue #317): `tasks.*`, `sessions.*`.
- *   - Phase 7 (issue #318): `terminals/` (exposes `terminal` + `terminalLayout`).
+ *   - Phase 7 (issue #318): `terminals/` (exposes `terminal`; the
+ *     `terminalLayout` namespace was retired in issue #643 Phase 4).
  *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
  *     `editor.*`, `tunnel.*`, `prereqs.*`, `skills.*`, `modes.*`,
  *     `models.*`, `statuses.*`, `status.*`.
@@ -39,9 +42,9 @@
  */
 
 import { browserHostRouter, hostRouter } from "./browser-host/router";
-import { browserLayoutRouter, browsersRouter } from "./browsers/router";
+import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
-import { chatLayoutRouter, chatsRouter } from "./chats/router";
+import { chatsRouter } from "./chats/router";
 import { cliRouter } from "./cli/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
@@ -73,10 +76,8 @@ export const appRouter = t.router({
   workspace: workspaceRouter,
   cronjobs: cronjobsRouter,
   chats: chatsRouter,
-  chatLayout: chatLayoutRouter,
   chat: chatRouter,
   browsers: browsersRouter,
-  browserLayout: browserLayoutRouter,
   panelFocus: panelFocusRouter,
   tasks: tasksRouter,
   sessions: sessionsRouter,

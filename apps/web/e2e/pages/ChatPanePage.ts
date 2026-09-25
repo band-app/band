@@ -100,9 +100,43 @@ export class ChatPanePage {
     });
   }
 
-  /** Wait for the chat pane to be interactive (prompt textarea
-   *  visible). */
+  /** Wait for the chat pane to be interactive (prompt textarea visible).
+   *
+   *  The center dockview's default layout is a single TERMINAL tab (no chat),
+   *  so this first ensures a chat leaf exists + is the active tab: if a chat is
+   *  already present (a seeded live chat surfaced by the default layout, just
+   *  not the active tab) it's activated; otherwise a fresh chat is created via
+   *  the "+" new-tab menu — the same way a user opens one. Then it waits for the
+   *  prompt. */
   async waitForReady(): Promise<void> {
+    // The dockview is ready once its "+" new-tab button renders.
+    const addBtn = this.page
+      .getByTestId("workspace-center__new-tab-button")
+      .filter({ visible: true })
+      .first();
+    await addBtn.waitFor({ state: "visible", timeout: 15_000 });
+
+    const chatTab = this.page
+      .getByTestId(/^center-chat-tab--/)
+      .filter({ visible: true })
+      .first();
+    const hasChat = await chatTab
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!hasChat) {
+      // No chat leaf (the default layout is a single terminal) — create one.
+      await addBtn.focus();
+      await this.page.keyboard.press("Enter");
+      const menu = this.page.getByTestId("workspace-center__new-tab-menu");
+      await menu.waitFor({ state: "visible" });
+      await menu.getByTestId("workspace-center__new-tab--chat").click();
+      await chatTab.waitFor({ state: "visible", timeout: 15_000 });
+    }
+    // Activate the chat tab so its pane (and prompt) is the shown content — a
+    // just-created / surfaced chat sits behind the active terminal tab.
+    await chatTab.click();
+
     await this.promptInput.waitFor({ state: "visible", timeout: 15_000 });
   }
 

@@ -8,13 +8,6 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import {
-  FolderOpen,
-  GitCompare,
-  Globe,
-  MessageSquare,
-  Terminal as TerminalIcon,
-} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resizable-panels";
 import {
@@ -22,17 +15,12 @@ import {
   DashboardShell,
   useDashboardStore,
   useSettingsQuery,
-  useUpdateSettings,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import {
-  NavControls,
-  type PanelItem,
-  SidebarTitleBar,
-  WorkspaceTitleBar,
-} from "../components/DesktopTitleBar";
+import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
+import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -44,10 +32,16 @@ import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
+  loadRightPanelCollapsed,
+  loadRightPanelWidth,
   loadSidebarCollapsed,
   loadSidebarWidth,
+  RIGHT_PANEL_MAX_SIZE,
+  RIGHT_PANEL_MIN_SIZE,
   SIDEBAR_MAX_SIZE,
   SIDEBAR_MIN_SIZE,
+  saveRightPanelCollapsed,
+  saveRightPanelWidth,
   saveSidebarCollapsed,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
@@ -293,13 +287,6 @@ function ZoomSync() {
 }
 
 function AppShell() {
-  const { settings } = useSettingsQuery();
-  const updateSettings = useUpdateSettings();
-  const hiddenPanels = useMemo(
-    () =>
-      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
-    [settings],
-  );
   // Show desktop split layout when:
   // - In a regular browser on a wide screen, OR
   // - Inside the desktop shell (always full-editor since side-panel mode was extracted)
@@ -375,20 +362,6 @@ function AppShell() {
     // deps — see the comment on the setActiveWorkspace effect above.
   }, []);
 
-  // Panel items for the title bar panel switcher dropdown
-  const panelItems: PanelItem[] = useMemo(
-    () => [
-      { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "⌃⌘I" },
-      { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⇧⌘G" },
-      { id: "files", label: "Files", icon: FolderOpen, shortcut: "⇧⌘E" },
-      { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌃`" },
-      // Browser pane works on both desktop (native webviews) and web (CDP
-      // screencast of the desktop app's tabs — see ScreencastPanel).
-      { id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" },
-    ],
-    [],
-  );
-
   // Copy the workspace path to clipboard
   const handleCopyPath = useCallback(() => {
     if (!workspacePath) return;
@@ -402,29 +375,6 @@ function AppShell() {
   const handleWorkspaceNameClick = useCallback(() => {
     window.dispatchEvent(new CustomEvent("band:open-workspace-picker"));
   }, []);
-
-  // Toggle panel visibility on/off (persisted in settings)
-  const handleTogglePanelVisibility = useCallback(
-    (panelId: string) => {
-      const current =
-        ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ??
-        [];
-      const isHidden = current.includes(panelId);
-      const next = isHidden ? current.filter((id) => id !== panelId) : [...current, panelId];
-      updateSettings.mutate({
-        ...settings,
-        hiddenPanels: next,
-      } as typeof settings);
-      // If the panel is being shown, activate it
-      if (isHidden) {
-        // Dispatch after a tick so the layout has time to add the panel
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("band:activate-panel", { detail: { panelId } }));
-        }, 100);
-      }
-    },
-    [settings, updateSettings],
-  );
 
   // ──────────────────────────────────────────────────────────────────────
   // Project-list sidebar (separate from the dockview). Collapsing/expanding
@@ -442,6 +392,18 @@ function AppShell() {
   // programmatic toggle.
   const sidebarElRef = useRef<HTMLDivElement | null>(null);
   const mainElRef = useRef<HTMLDivElement | null>(null);
+
+  // Right sidepanel (Explorer + Changes) — mirrors the sidebar plumbing above.
+  // It lives in a nested group inside the main column, so its toggle animates
+  // against the inner `center` panel element, not the outer `main`.
+  const rightPanelRef = usePanelRef();
+  const rightPanelElRef = useRef<HTMLDivElement | null>(null);
+  const centerElRef = useRef<HTMLDivElement | null>(null);
+  const rightInit = useRef({
+    collapsed: loadRightPanelCollapsed(),
+    width: loadRightPanelWidth(),
+  });
+  const [rightVisible, setRightVisible] = useState(() => !rightInit.current.collapsed);
 
   // Read the persisted sidebar state ONCE at mount (these `<Group>`/`useState`
   // seeds are only consumed on the first render). Stashing them in a ref keeps
@@ -469,6 +431,17 @@ function AppShell() {
     [],
   );
 
+  // The right sidepanel lives in a NESTED [center | rightpanel] group inside the
+  // main column, BELOW the workspace title bar — so it aligns with the dockview
+  // content, not the title-bar row. This is that inner group's initial layout.
+  const centerDefaultLayout = useMemo(() => {
+    if (rightInit.current.collapsed) return { center: 100, rightpanel: 0 };
+    if (rightInit.current.width != null) {
+      return { center: 100 - rightInit.current.width, rightpanel: rightInit.current.width };
+    }
+    return undefined;
+  }, []);
+
   // Skip the first layout callback: it fires during mount with the restored
   // layout, which we don't want to re-persist.
   const skipFirstSidebarLayout = useRef(true);
@@ -491,6 +464,29 @@ function AppShell() {
       sidebarWidthRafRef.current = null;
       if (pendingSidebarWidthRef.current != null) {
         saveSidebarWidth(pendingSidebarWidthRef.current);
+        pendingSidebarWidthRef.current = null;
+      }
+    });
+  }, []);
+
+  // The nested center|rightpanel group persists the right panel's width, same
+  // RAF-coalesced pattern as the sidebar above.
+  const skipFirstCenterLayout = useRef(true);
+  const pendingRightWidthRef = useRef<number | null>(null);
+  const rightWidthRafRef = useRef<number | null>(null);
+  const handleCenterLayoutChanged = useCallback((layout: Record<string, number>) => {
+    if (skipFirstCenterLayout.current) {
+      skipFirstCenterLayout.current = false;
+      return;
+    }
+    if (layout.rightpanel == null || layout.rightpanel <= 0) return;
+    pendingRightWidthRef.current = layout.rightpanel;
+    if (rightWidthRafRef.current != null) return;
+    rightWidthRafRef.current = requestAnimationFrame(() => {
+      rightWidthRafRef.current = null;
+      if (pendingRightWidthRef.current != null) {
+        saveRightPanelWidth(pendingRightWidthRef.current);
+        pendingRightWidthRef.current = null;
       }
     });
   }, []);
@@ -513,6 +509,20 @@ function AppShell() {
       lastSidebarVisibleRef.current = visible;
       setSidebarVisible(visible);
       saveSidebarCollapsed(!visible);
+    },
+    [],
+  );
+
+  // Same collapsed/expanded tracking for the right sidepanel.
+  const lastRightVisibleRef = useRef(!rightInit.current.collapsed);
+  const handleRightResize = useCallback(
+    (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+      if (prev === undefined) return;
+      const visible = size.asPercentage > 0;
+      if (visible === lastRightVisibleRef.current) return;
+      lastRightVisibleRef.current = visible;
+      setRightVisible(visible);
+      saveRightPanelCollapsed(!visible);
     },
     [],
   );
@@ -560,6 +570,39 @@ function AppShell() {
     else panel.collapse();
   }, [sidebarPanelRef, animateSidebarToggle]);
 
+  // Mirror of `animateSidebarToggle` for the right sidepanel: arm a one-shot
+  // width transition on the right panel + the main panel so a programmatic
+  // toggle slides instead of snapping. Keyed on the right panel's own
+  // `transitionend` for cleanup.
+  const animateRightToggle = useCallback(() => {
+    const right = rightPanelElRef.current;
+    if (!right) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const els = [right, centerElRef.current];
+    for (const el of els) {
+      if (el)
+        el.style.transition =
+          "flex-grow 200ms cubic-bezier(0.77, 0, 0.175, 1), flex-basis 200ms cubic-bezier(0.77, 0, 0.175, 1)";
+    }
+    let timer = 0;
+    const clear = (e?: TransitionEvent) => {
+      if (e && (e.target !== right || e.propertyName !== "flex-grow")) return;
+      for (const el of els) if (el) el.style.transition = "";
+      right.removeEventListener("transitionend", clear);
+      if (timer) window.clearTimeout(timer);
+    };
+    timer = window.setTimeout(clear, 280);
+    right.addEventListener("transitionend", clear);
+  }, []);
+
+  const toggleRightPanel = useCallback(() => {
+    const panel = rightPanelRef.current;
+    if (!panel) return;
+    animateRightToggle();
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [rightPanelRef, animateRightToggle]);
+
   // ⌘B toggles the sidebar; ⌃0 / "Focus Projects" reveal it before focusing
   // the list.
   useEffect(() => {
@@ -578,12 +621,30 @@ function AppShell() {
     };
   }, [toggleSidebar, sidebarPanelRef, animateSidebarToggle]);
 
+  // ⇧⌘E / ⇧⌘G (and the title-bar switcher) toggle / reveal the right sidepanel.
+  useEffect(() => {
+    const onToggle = () => toggleRightPanel();
+    const onShow = () => {
+      if (rightPanelRef.current?.isCollapsed()) {
+        animateRightToggle();
+        rightPanelRef.current.expand();
+      }
+    };
+    window.addEventListener("band:toggle-right-panel", onToggle);
+    window.addEventListener("band:show-right-panel", onShow);
+    return () => {
+      window.removeEventListener("band:toggle-right-panel", onToggle);
+      window.removeEventListener("band:show-right-panel", onShow);
+    };
+  }, [toggleRightPanel, rightPanelRef, animateRightToggle]);
+
   // Cancel a pending sidebar-width RAF on unmount so it can't fire (and write
   // localStorage) after the component is gone — matches the cleanup discipline
   // of the other effects in this file.
   useEffect(
     () => () => {
       if (sidebarWidthRafRef.current != null) cancelAnimationFrame(sidebarWidthRafRef.current);
+      if (rightWidthRafRef.current != null) cancelAnimationFrame(rightWidthRafRef.current);
     },
     [],
   );
@@ -674,18 +735,49 @@ function AppShell() {
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}
                   onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
                   onWorkspaceNameClick={activeWorkspaceId ? handleWorkspaceNameClick : undefined}
-                  panelItems={activeWorkspaceId ? panelItems : undefined}
-                  hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
-                  onTogglePanelVisibility={
-                    activeWorkspaceId ? handleTogglePanelVisibility : undefined
-                  }
+                  onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
+                  rightPanelVisible={rightVisible}
                 />
-                {/* `relative` anchors SharedDockviewLayout's `absolute inset-0`
-                    overlay to the area BELOW the title bar. */}
-                <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
-                  <Outlet />
-                  <SharedDockviewLayout />
-                  <BrowserHostBridge />
+                {/* Below the title bar the dockview and the right sidepanel share
+                    one horizontal row, so the sidepanel aligns with the dockview
+                    content rather than spanning up alongside the title-bar row. */}
+                <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+                  <Group
+                    orientation="horizontal"
+                    defaultLayout={centerDefaultLayout}
+                    onLayoutChanged={handleCenterLayoutChanged}
+                    className="h-full w-full"
+                  >
+                    <Panel id="center" elementRef={centerElRef} minSize="30%">
+                      {/* `relative` anchors SharedDockviewLayout's `absolute
+                          inset-0` overlay to the dockview area. */}
+                      <div className="h-full min-w-0 overflow-hidden relative">
+                        <Outlet />
+                        <SharedDockviewLayout />
+                        <BrowserHostBridge />
+                      </div>
+                    </Panel>
+                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                    <Panel
+                      id="rightpanel"
+                      panelRef={rightPanelRef}
+                      elementRef={rightPanelElRef}
+                      defaultSize={RIGHT_PANEL_MIN_SIZE}
+                      minSize={RIGHT_PANEL_MIN_SIZE}
+                      maxSize={RIGHT_PANEL_MAX_SIZE}
+                      collapsible
+                      collapsedSize="0%"
+                      onResize={handleRightResize}
+                    >
+                      <div
+                        className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
+                        data-testid="app-shell__right-panel"
+                        data-visible={rightVisible ? "true" : "false"}
+                      >
+                        <RightSidepanel visible={rightVisible} />
+                      </div>
+                    </Panel>
+                  </Group>
                 </div>
               </div>
             </Panel>

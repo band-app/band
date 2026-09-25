@@ -356,16 +356,6 @@ export class BrowserService {
   // Layout integration (absorbed from the now-deleted `lib/browser-layout-manager.ts`)
   // -------------------------------------------------------------------------
 
-  /** Get the saved browser layout tree for a workspace, or null when absent. */
-  getLayout(workspaceId: string): unknown | null {
-    return this.layoutManager.get(workspaceId);
-  }
-
-  /** Upsert the saved browser layout tree for a workspace. */
-  saveLayout(workspaceId: string, tree: unknown): void {
-    this.layoutManager.save(workspaceId, tree);
-  }
-
   /** Delete the saved browser layout for a workspace. */
   deleteLayout(workspaceId: string): void {
     this.layoutManager.delete(workspaceId);

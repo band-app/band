@@ -12,9 +12,7 @@ import {
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
-  getTerminalLayout,
   removeTerminalFromLayout,
-  saveTerminalLayout,
 } from "./_utils/terminal-layout-manager";
 import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
@@ -240,21 +238,15 @@ export class TerminalService {
   // -------------------------------------------------------------------------
   // Layout persistence (dockview tree)
   //
-  // Thin pass-throughs to `lib/terminal-layout-manager` so the API tier
-  // doesn't reach across into `lib/` directly. The layout helpers will be
-  // folded into a dedicated infra adapter in a follow-up phase (when the
-  // chats/browsers domains get their own infra adapters); leaving them in
-  // `lib/` for now is the minimum-disruption shape during the phased
-  // migration.
+  // Only the workspace-deletion cleanup remains: `deleteLayout` drops the
+  // saved `terminal_layout` row so a deleted workspace doesn't leak it. The
+  // former get/save pass-throughs (which backed the `terminalLayout.*` tRPC
+  // procedures) were retired in issue #643 Phase 4 once clients moved
+  // center-layout persistence into localStorage. The spawn/kill paths still
+  // register/unregister panels via `addTerminalToLayout` /
+  // `removeTerminalFromLayout` so `getOrCreateDefault`-style lookups keep
+  // working server-side.
   // -------------------------------------------------------------------------
-
-  getLayout(workspaceId: string): unknown {
-    return getTerminalLayout(workspaceId);
-  }
-
-  saveLayout(workspaceId: string, tree: unknown): void {
-    saveTerminalLayout(workspaceId, tree);
-  }
 
   deleteLayout(workspaceId: string): void {
     deleteTerminalLayout(workspaceId);

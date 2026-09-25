@@ -72,6 +72,16 @@ export class FileViewerPage {
     return (await el.textContent()) ?? "";
   }
 
+  /** Click into a rendered markdown preview (on its heading) so focus moves
+   *  inside the file leaf, the way a user clicks into what they're reading.
+   *  Cmd/Ctrl+F is scoped to the focused leaf. `headingName` is text from the
+   *  fixture file the test wrote. */
+  async clickIntoPreview(headingName: string): Promise<void> {
+    await test.step(`Click into the markdown preview ("${headingName}")`, async () => {
+      await this.root.getByRole("heading", { name: headingName }).first().click();
+    });
+  }
+
   /** Assert (auto-retrying) that the file viewer is mounted and visible.
    *  Used for previews (e.g. markdown) that render outside the CodeMirror
    *  `.cm-content` surface, where `expectContent` doesn't apply. */

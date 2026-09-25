@@ -3,6 +3,16 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# Native packages allowed to run install scripts. Without an approval entry a
+# package counts as unapproved and `pnpm install` exits 1 with
+# ERR_PNPM_IGNORED_BUILDS; `node-pty` and `better-sqlite3` in particular must
+# build or the server can't boot.
+#
+# BOTH keys are listed on purpose and must be kept in sync: pnpm 11 replaced the
+# `onlyBuiltDependencies` list with the `allowBuilds` map, but CI still pins
+# pnpm 10 (`pnpm/action-setup` in ci.yml / release.yml / nightly.yml), which
+# only understands the old key. Each version reads the one it knows and ignores
+# the other. Drop `onlyBuiltDependencies` once every workflow is on pnpm 11.
 onlyBuiltDependencies:
   - '@nothumanwork/cursor-agents-sdk'
   - better-sqlite3
@@ -10,6 +20,14 @@ onlyBuiltDependencies:
   - esbuild
   - node-pty
   - sharp
+
+allowBuilds:
+  '@nothumanwork/cursor-agents-sdk': true
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+  node-pty: true
+  sharp: true
 
 # Force pnpm to install optional dependencies for the off-host architectures
 # we ship in the Electron desktop bundle. The release workflow runs on

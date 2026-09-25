@@ -7,13 +7,11 @@
  * to `ChatService` (and a few sibling helpers that haven't migrated yet),
  * and returns. No business logic lives here.
  *
- * Two sub-routers are exported:
+ * One sub-router is exported:
  *   - `chatsRouter` covers the per-pane CRUD + message lifecycle
  *     (`chats.list`, `chats.create`, …) at the `chats.*` tRPC namespace.
- *   - `chatLayoutRouter` covers the saved dockview layout tree at the
- *     `chatLayout.*` tRPC namespace.
  *
- * Both are merged into the root router by `server/api/router.ts`. The
+ * It is merged into the root router by `server/api/router.ts`. The
  * sibling helpers (`scheduleActiveSessionRefresh`, `submitTask`, …) now
  * live under `server/services/`; routing through them here keeps the same
  * shape as the pre-migration legacy procedures.
@@ -29,25 +27,6 @@ import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("chats-router");
-
-// ---------------------------------------------------------------------------
-// Chat Layout (split pane tree persistence)
-// ---------------------------------------------------------------------------
-
-export const chatLayoutRouter = t.router({
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { tree: chatService.getLayout(input.workspaceId) };
-  }),
-
-  save: publicProcedure
-    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
-    .mutation(({ input }) => {
-      chatService.saveLayout(input.workspaceId, input.tree);
-      return { ok: true };
-    }),
-});
-
-export type ChatLayoutRouter = typeof chatLayoutRouter;
 
 // ---------------------------------------------------------------------------
 // Chats (multi-pane chat management)

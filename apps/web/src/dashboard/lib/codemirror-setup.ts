@@ -717,6 +717,44 @@ export function serializeEditorState(view: EditorView): {
 }
 
 /**
+ * Capture only where the user is in the document: the selection (cursor
+ * positions, as character offsets) and the scroll offset. Unlike
+ * `serializeEditorState`, this carries NO document text and NO undo history, so
+ * it is small enough to persist per file in localStorage and can never replay a
+ * stale copy of the file over newer on-disk content. Restore it with
+ * `selectionFromJSON` against whatever document the editor was built from.
+ */
+export function serializeViewPosition(view: EditorView): {
+  selection: unknown;
+  scrollTop: number;
+} {
+  return {
+    selection: view.state.selection.toJSON(),
+    scrollTop: view.scrollDOM.scrollTop,
+  };
+}
+
+/**
+ * Rebuild a selection saved by `serializeViewPosition`, clamping every range to
+ * `docLength`: the file may have shrunk since the selection was captured (an
+ * agent edited it, a checkout changed it), and dispatching an out-of-range
+ * selection throws. Returns null for anything that isn't a valid saved
+ * selection, so a malformed or legacy localStorage value is simply ignored.
+ */
+export function selectionFromJSON(json: unknown, docLength: number): EditorSelection | null {
+  try {
+    const parsed = EditorSelection.fromJSON(json);
+    const clamp = (pos: number) => Math.max(0, Math.min(pos, docLength));
+    return EditorSelection.create(
+      parsed.ranges.map((r) => EditorSelection.range(clamp(r.anchor), clamp(r.head))),
+      parsed.mainIndex,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Restore the scroll position of an editor view.
  * Call after creating a view from `EditorState.fromJSON()`.
  */

@@ -146,6 +146,12 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — this spec
+// asserts the old `useFileTabs` / per-workspace `openTabs` self-heal that the
+// desktop CodeBrowserView flow owned. That flow was removed in Phase 2 (files
+// now open as bare per-path leaves with no `openTabs` persistence), so the
+// behaviour under test no longer exists. Re-enable when the file-tab model is
+// reworked.
 test.describe("chat file-link workspace scoping (issue #539)", () => {
   // NOTE: the original "event addressed to an inactive workspace is
   // ignored" test (which dispatched `{ filename: "only-in-a.ts",
@@ -184,74 +190,37 @@ test.describe("chat file-link workspace scoping (issue #539)", () => {
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    // Two-step seeding: navigate once so localStorage is accessible on
-    // the same origin, write the stale tab, then navigate again so the
-    // workspace remounts and CodeBrowserView reads the just-seeded
-    // state on its initial render. The stale path mimics what older
-    // builds (pre-#539 fix) could leak into `band-open-tabs:<ws>` —
-    // a workspace-relative path from a DIFFERENT workspace that
-    // doesn't exist on disk in this one. The third fix in #539 is
-    // defensive: even with the dispatcher + listener-filter fixes,
-    // anything already persisted from older builds self-heals on the
-    // next mount rather than leaving a broken tab pinned forever.
+    // Seed a restored center layout that holds a REAL file leaf (only-in-a.ts,
+    // which exists in A's worktree) plus a STALE one whose path doesn't exist
+    // on disk — mimicking a path persisted by an older build or left behind by
+    // a file that was since deleted/relocated. Seeding happens before the
+    // first mount (addInitScript), so the file leaves restore on the initial
+    // render and each FileViewer immediately tries to load its path.
+    const STALE_PATH = "path/from/another/workspace/that-does-not-exist.ts";
+    const REAL_PATH = "only-in-a.ts";
+    await workspacePage.seedFileLeaves(WORKSPACE_A, [REAL_PATH, STALE_PATH], STALE_PATH);
+
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
 
-    const STALE_PATH = "path/from/another/workspace/that-does-not-exist.ts";
-    await workspacePage.writeOpenTabsState(WORKSPACE_A, {
-      tabs: [STALE_PATH],
-      active: STALE_PATH,
-    });
-
-    // Positive anchor for the seed: confirm the write landed in
-    // localStorage before relying on the negative self-heal poll
-    // below. Without this, a silent seed failure (storage quota,
-    // wrong key shape, etc.) would make the post-self-heal poll
-    // trivially pass on a broken build because the path was never
-    // there to drop.
-    expect(await workspacePage.readOpenTabsState(WORKSPACE_A)).toEqual({
-      tabs: [STALE_PATH],
-      active: STALE_PATH,
-    });
-
-    // Reload so CodeBrowserView re-mounts with the seeded localStorage
-    // entry as its initial state. The component reads the persisted
-    // active tab on mount, which immediately drives the FileViewer
-    // to attempt loading the stale path against workspace A's
-    // worktree root.
-    await workspacePage.reload();
-    await workspacePage.waitForReady();
-    // Click into the Files tab so the FileViewer panel actually
-    // mounts and the load effect fires. The dockview keeps panel
-    // content cached but a panel that's never been activated may
-    // defer its first mount.
-    await workspacePage.tab("files").click();
-
-    // The self-heal should drop the stale tab from the persisted state.
-    // `expect.poll` retries until the FileViewer's catch branch fires,
-    // CodeBrowserView's `handleFileLoadError` calls `handleTabClose`,
-    // the openTabs state updates, and the persist effect in
-    // `useFileTabs` writes the new state to localStorage. 5 s is well
-    // beyond the actual round-trip (load failure surfaces in tens of
-    // ms on a tiny worktree) but bounded so a regression that fails
-    // to self-heal trips deterministically.
+    // Positive anchor: the seed took and restored — the real file leaf is
+    // present. Without this, the negative self-heal assertion could pass
+    // trivially on a build where the layout never restored at all.
     await expect
-      .poll(
-        async () => {
-          const state = await workspacePage.readOpenTabsState(WORKSPACE_A);
-          return state?.tabs ?? null;
-        },
-        { timeout: 5000 },
-      )
-      .not.toContain(STALE_PATH);
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
+        timeout: 15_000,
+      })
+      .toContain(REAL_PATH);
 
-    // Counter-anchor: a freshly-explicit user-driven tab (one the user
-    // navigated to themselves, not restored from persistence) is not
-    // covered by the `initialRestoredTabRef` guard, so any future
-    // load failure on it must NOT auto-close. We don't drive that
-    // scenario here (it'd require simulating a transient server
-    // failure, out of scope), but the negative claim is anchored in
-    // the code comment at `CodeBrowserView.tsx` ~line 1108-1133.
+    // The stale leaf self-heals: its FileViewer hits ENOENT, the leaf's
+    // `onLoadError` drops the tab, and the layout persists without it. 5 s is
+    // well beyond the actual round-trip (a load failure surfaces in tens of ms
+    // on a tiny worktree) but bounded so a regression trips deterministically.
+    await expect
+      .poll(async () => (await workspacePage.readOpenTabsState(WORKSPACE_A))?.tabs ?? [], {
+        timeout: 5000,
+      })
+      .not.toContain(STALE_PATH);
   });
 
   // The `QuickOpenDialog.openedWorkspaceIdRef` bail (defence layer 3

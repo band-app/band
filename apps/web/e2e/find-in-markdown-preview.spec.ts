@@ -27,6 +27,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { FileViewerPage } from "./pages/FileViewerPage";
 
 // Force the mobile layout (viewport < 1024 px) so the workspace route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
@@ -108,19 +109,16 @@ test.afterAll(async () => {
 async function openMarkdownPreview(page: Page): Promise<void> {
   await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
 
-  // Switch to the Files tab. The button's aria-label is set in
-  // `WorkspaceTabNav.tsx` — system-controlled, so `getByRole({ name })` is
-  // safe to use.
-  await page.getByRole("button", { name: "Files" }).click();
+  // The mobile layout (`MobileWorkspaceLayout`) is ready once its bottom bar
+  // (Editor | Explorer | Changes) renders (#643 replaced the old WorkspaceTabNav).
+  await page
+    .getByTestId("mobile-workspace__bottom-bar")
+    .waitFor({ state: "visible", timeout: 20_000 });
 
-  // Click the markdown file in the tree. File-tree rows are buttons whose
-  // accessible name is the bare filename — `getByRole({ name })` keeps the
-  // locator unambiguous (the filename also appears in the tab bar after the
-  // click, which would trip Playwright's strict mode if we used
-  // `getByText`). `exact: true` defends against any future button whose
-  // label contains the filename as a substring (e.g. an "Open GUIDE.md"
-  // menu item).
-  await page.getByRole("button", { name: FILE_PATH, exact: true }).click();
+  // Open the Explorer sheet and tap the markdown file — it opens as a `file`
+  // leaf in the center dockview (markdown files default to the rendered preview).
+  await page.getByTestId("mobile-workspace__bar--explorer").click();
+  await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
   // The markdown renders into a sticky heading — when it appears, the
   // preview is laid out and ready for the find bar to attach its keybind.
@@ -138,6 +136,11 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // active surface.
   const findInput = page.getByPlaceholder(/Find in (preview|file)\.\.\./);
   await expect(findInput).toHaveCount(0);
+
+  // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
+  // the way a user clicks into what they're reading. (Tapping the file in the
+  // Explorer sheet leaves focus on the tree row, outside the leaf.)
+  await new FileViewerPage(page).clickIntoPreview("Test Document");
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar

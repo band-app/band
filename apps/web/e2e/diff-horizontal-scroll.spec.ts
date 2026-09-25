@@ -1,9 +1,8 @@
 /**
- * End-to-end coverage for horizontal scrolling in the Changes view.
+ * End-to-end coverage for horizontal scrolling in a per-file diff leaf.
  *
  * Long lines (minified JS, generated SQL, base64 payloads, etc.) used
- * to be silently clipped by `overflow-clip` on `LazyFileRow`'s root
- * because the naturalHeight CodeMirror config set
+ * to be silently clipped because the naturalHeight CodeMirror config set
  * `.cm-scroller { overflow: visible }` on both axes. The fix in
  * `baseViewerExtensions` switches the scroller to
  * `overflowX: auto, height: auto` (overflowY is left to default to
@@ -13,11 +12,15 @@
  * still flows with the auto-height parent chain (no regression of
  * PR #501).
  *
- * Both viewModes are exercised:
- *  - "unified" (the default) — one `.cm-scroller` per file.
- *  - "split"  — MergeView renders two `.cm-scroller` instances per
- *    file; the fix has to apply equally to both, since both go through
- *    `baseViewerExtensions(isDark, { naturalHeight: true })`.
+ * The diff is opened the way a user does in the unified layout (#643):
+ * click the changed file in the right sidepanel's Changes tree, which
+ * opens its `diff` leaf in the center dockview. That leaf renders
+ * `DiffFileContent`, which builds both view modes with
+ * `baseViewerExtensions(isDark, { naturalHeight: true })`, so the fix and
+ * the natural-height guard apply unchanged:
+ *  - "unified" — one `.cm-scroller`.
+ *  - "split"  — MergeView renders two `.cm-scroller` instances, one per
+ *    side; the fix has to apply equally to both.
  *
  * Drives a real Band server against an on-disk worktree so the diff
  * payload reaches CodeMirror through the same git pipeline production
@@ -40,15 +43,11 @@ import {
 } from "./helpers/server";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
-// Wide viewport so `useIsDesktop()` reports true and the shared dockview
-// renders. The default dockview layout splits horizontally between the
-// project sidebar, the chat panel and the right group (where Changes
-// lives), with a file-tree sub-panel inside the Changes group at desktop
-// widths. At 1920 px the Changes scroll container lands around 620 px —
-// just under the 640-px `SPLIT_VIEW_MIN_WIDTH` floor in DiffView, where
-// it's silently downgraded to unified. 2400 px clears the threshold
-// comfortably (Changes panel ≈ 800–900 px), so the "split" parameter
-// case actually renders a MergeView.
+// Wide viewport so `useIsDesktop()` reports true and the center dockview
+// renders the diff leaf beside the project sidebar and right sidepanel.
+// Kept wide so each side of the split MergeView is still far narrower
+// than the ~8000-px long line, while leaving comfortable room for a real
+// side-by-side render.
 test.use({ viewport: { width: 2400, height: 800 } });
 
 const TOKEN = "e2e-diff-hscroll-token";
@@ -58,11 +57,10 @@ const FILE_PATH = "long-line.txt";
 
 // A line wide enough that it's guaranteed to exceed the editor viewport
 // at our 2400-px viewport, even after accounting for the project
-// sidebar, chat panel, file tree, gutters, and padding. Repeating
+// sidebar, right sidepanel, gutters, and padding. Repeating
 // `the_quick_brown_fox_jumps_over_the_lazy_dog_` (44 chars) 30× gives a
-// ~1300-char line, roughly 8000 px in a 13-px monospaced font — well
-// past the ~800–900 px the editor pane gets inside the dockview at
-// the 2400 viewport.
+// ~1300-char line, roughly 8000 px in a 13-px monospaced font — several
+// times wider than the diff leaf at the 2400 viewport.
 const LONG_LINE = "the_quick_brown_fox_jumps_over_the_lazy_dog_".repeat(30);
 
 // Initial committed content — short enough that there's no horizontal
@@ -83,7 +81,7 @@ test.beforeAll(async () => {
 
   // Seed a real git repo with the file committed at HEAD, then leave a
   // modified version on disk so `git diff` produces an uncommitted hunk
-  // containing the long line. The Changes view fetches that hunk via
+  // containing the long line. The diff leaf fetches that hunk via
   // `workspace.getFileDiff` exactly the way production does — no mock
   // layer.
   git(repoPath, ["init", "-b", BRANCH]);
@@ -192,35 +190,21 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
   expect(finalScrollLeft).toBeGreaterThan(0);
 }
 
-test("Changes view scrolls horizontally (unified mode)", async ({ page }) => {
-  const changes = await ChangesPanelPage.openWithFileExpanded({
-    page,
-    baseUrl: server.url,
-    token: TOKEN,
-    workspaceId,
-    filename: FILE_PATH,
-    fileStatus: "M",
-    viewMode: "unified",
-  });
-  // Unified mode renders one `.cm-scroller` per visible expanded file.
-  await expect(changes.cmScrollers).toHaveCount(1, { timeout: 15_000 });
+test("Diff leaf scrolls horizontally (unified mode)", async ({ page }) => {
+  const changes = new ChangesPanelPage(page, server.url, TOKEN);
+  await changes.goto(workspaceId);
+  // `openDiff` waits for exactly one `.cm-scroller` in unified mode.
+  await changes.openDiff(FILE_PATH, "unified");
   await assertScrollerHorizontallyScrolls(changes);
 });
 
-test("Changes view scrolls horizontally (split mode)", async ({ page }) => {
-  const changes = await ChangesPanelPage.openWithFileExpanded({
-    page,
-    baseUrl: server.url,
-    token: TOKEN,
-    workspaceId,
-    filename: FILE_PATH,
-    fileStatus: "M",
-    viewMode: "split",
-  });
-  // Split mode (MergeView) renders TWO scrollers per file — one for
-  // the "before" side and one for the "after" side. The fix has to
-  // apply to both since both editors go through
+test("Diff leaf scrolls horizontally (split mode)", async ({ page }) => {
+  const changes = new ChangesPanelPage(page, server.url, TOKEN);
+  await changes.goto(workspaceId);
+  // Split mode (MergeView) renders TWO scrollers — one for the "before"
+  // side and one for the "after" side. `openDiff` waits for both. The fix
+  // has to apply to both since both editors go through
   // `baseViewerExtensions(..., { naturalHeight: true })`.
-  await expect(changes.cmScrollers).toHaveCount(2, { timeout: 15_000 });
+  await changes.openDiff(FILE_PATH, "split");
   await assertScrollerHorizontallyScrolls(changes);
 });

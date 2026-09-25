@@ -122,6 +122,11 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
+// TODO(#643 Phase 5): file explorer moved to right sidepanel — the bare
+// per-path `file` leaf that replaced the desktop CodeBrowserView has NO editor
+// back/forward history wired in, so this cross-workspace Go-Back scoping
+// scenario has no affordance to drive. Re-enable when editor history is wired
+// into the new file leaf.
 test.describe("Editor-history workspace scoping (cross-workspace history leak)", () => {
   test("a Go Back addressed to workspace A does NOT step active workspace B's history", async ({
     page,
@@ -143,13 +148,17 @@ test.describe("Editor-history workspace scoping (cross-workspace history leak)",
     await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
     await workspacePage.switchWorkspace(WORKSPACE_B);
     await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    await workspacePage.waitForReady();
     await expect
       .poll(async () => workspacePage.cachedPanelEntries(WORKSPACE_A).count(), { timeout: 5000 })
       .toBeGreaterThan(0);
 
-    // Activate B's Files tab so B's CodeBrowserView mounts (its editor-history
-    // + lsp-navigate listeners register and its FileViewer renders).
-    await workspacePage.activateTab("files");
+    // NOTE(#643 Phase 5): this used to activate B's Files tab so B's
+    // CodeBrowserView mounted (registering its editor-history + lsp-navigate
+    // listeners). That desktop view — and its editor history — were removed in
+    // Phase 2, which is why this whole describe is skipped. The sidepanel reveal
+    // is the closest surviving surface; the body is never reached at runtime.
+    await workspacePage.revealRightPanel();
 
     // Build B's back-navigable history by driving two cross-file navigations
     // into B — the same `band:lsp-navigate` path go-to-definition uses, which

@@ -13,18 +13,24 @@ import {
   trpcData,
 } from "./helpers/server";
 
-// Integration tests for `browsers.*` and `browserLayout.*` tRPC mutations
-// migrated in Phase 5 of issue #316.
+// Integration tests for `browsers.*` tRPC mutations migrated in Phase 5 of
+// issue #316.
 //
 // Prior to this file, `apps/web/tests/cold-start.test.ts` only exercised
 // `browsers.list`. The mutation surface — `browsers.create`, `browsers.update`,
-// `browsers.navigate`, `browsers.remove`, and `browserLayout.get/save` —
-// had no integration coverage, even though the Phase 5 refactor lifted
-// layout cleanup into `BrowserService.remove()` (so the old "router does
-// it as a second step" path is gone). This file closes that gap by
-// driving the procedures end-to-end through the production server bundle
-// and asserting on both the tRPC response shape AND the on-disk
-// `panel_states` row state (i.e. that the layout is actually mutated).
+// `browsers.navigate`, and `browsers.remove` — had no integration coverage,
+// even though the Phase 5 refactor lifted layout cleanup into
+// `BrowserService.remove()` (so the old "router does it as a second step"
+// path is gone). This file closes that gap by driving the procedures
+// end-to-end through the production server bundle and asserting on both the
+// tRPC response shape AND the on-disk `panel_states` row state (i.e. that the
+// layout is actually mutated).
+//
+// The former `browserLayout.get/save` layout-tree procedures were retired in
+// issue #643 Phase 4 (clients persist center layout in localStorage), so their
+// round-trip coverage was dropped. `browsers.create` / `browsers.remove` still
+// register/unregister panels in the server-side saved layout, which the CRUD
+// suite below continues to assert against the `browser_layout_*` row directly.
 
 const DEFAULT_TOKEN = "browsers-test-token";
 
@@ -303,9 +309,9 @@ describe("browsers — CRUD round-trip", () => {
     // The saved layout no longer references the removed panel. This is
     // the Phase 5 contract: `browserService.remove()` calls
     // `removeFromLayout` so the router doesn't have to remember a
-    // separate `browserLayout.save` step. Without this assertion a
-    // regression that re-splits the cleanup (the same shape the pre-
-    // refactor router had) would go unnoticed.
+    // separate layout-save step. Without this assertion a regression
+    // that re-splits the cleanup (the same shape the pre-refactor
+    // router had) would go unnoticed.
     const afterLayoutRow = readBrowserLayoutRow(tmpHome, workspaceId);
     expect(afterLayoutRow).toBeDefined();
     const afterLayout = JSON.parse(afterLayoutRow!.state) as {
@@ -349,92 +355,5 @@ describe("browsers — CRUD round-trip", () => {
     expect(found?.name).toBe("Restart survivor");
     expect(found?.url).toBe("https://survives.test");
     expect(found?.status).toBe("idle");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// browserLayout.get / browserLayout.save — explicit layout-tree CRUD
-// ---------------------------------------------------------------------------
-
-describe("browserLayout — get/save round-trip", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  const workspaceId = "layoutproj-main";
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome("band-browser-layout-");
-    const repoPath = createGitRepo(tmpHome, "layoutproj");
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: "layoutproj",
-          path: repoPath,
-          defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoPath }],
-        },
-      ],
-    });
-    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("browserLayout.get returns { tree: null } when no layout has been saved", async () => {
-    const res = await trpcQuery(server.url, "browserLayout.get", { workspaceId });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ tree: unknown }>(res);
-    expect(data.tree).toBeNull();
-  });
-
-  it("browserLayout.save persists an arbitrary tree and browserLayout.get returns it", async () => {
-    // The router accepts `z.unknown()` — the dashboard hands it dockview's
-    // `toJSON()` output verbatim. Save a minimal shape that mirrors what
-    // `DockviewLayoutManager.addPanel` emits when no layout exists yet,
-    // so the assertion is grounded in the real persisted shape.
-    const tree = {
-      grid: {
-        root: {
-          type: "branch",
-          data: [
-            {
-              type: "leaf",
-              data: { id: "group_a", views: ["browser_a"], activeView: "browser_a" },
-              size: 500,
-            },
-          ],
-          size: 500,
-        },
-        height: 500,
-        width: 500,
-        orientation: "HORIZONTAL",
-      },
-      panels: {
-        browser_a: {
-          id: "browser_a",
-          contentComponent: "browserTab",
-          tabComponent: "browserTab",
-          title: "Tab",
-          params: { workspaceId, browserId: "browser_a" },
-        },
-      },
-      activeGroup: "group_a",
-    };
-
-    const saveRes = await trpcMutate(server.url, "browserLayout.save", {
-      workspaceId,
-      tree,
-    });
-    expect(saveRes.status).toBe(200);
-    const saveData = await trpcData<{ ok: boolean }>(saveRes);
-    expect(saveData.ok).toBe(true);
-
-    const getRes = await trpcQuery(server.url, "browserLayout.get", { workspaceId });
-    expect(getRes.status).toBe(200);
-    const getData = await trpcData<{ tree: typeof tree }>(getRes);
-    expect(getData.tree).toEqual(tree);
   });
 });
