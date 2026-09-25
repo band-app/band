@@ -243,7 +243,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
 
     // Sanity check the fixture: every file we plan to query must actually
     // show up in the diff, otherwise the test wouldn't be reproducing the
-    // DiffView scenario at all.
+    // former DiffView scenario at all.
     expect(Object.keys(diffRes.fileStatuses).length).toBeGreaterThanOrEqual(FILE_COUNT);
   });
 

@@ -15,7 +15,6 @@ import type {
   ProjectInfo,
   Settings,
   WorkspaceDiff,
-  WorkspaceDiffSummary,
   WorkspaceStatus,
 } from "../types";
 
@@ -381,18 +380,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
     })) as WorkspaceDiff;
   }
 
-  async getWorkspaceDiffSummary(
-    workspaceId: string,
-    diffMode?: DiffMode,
-    compareBranch?: string,
-  ): Promise<WorkspaceDiffSummary> {
-    return (await this.trpc.workspace.getDiffSummary.query({
-      workspaceId,
-      diffMode,
-      compareBranch,
-    })) as WorkspaceDiffSummary;
-  }
-
   async listWorkspaceBranches(
     workspaceId: string,
   ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }> {
@@ -519,28 +506,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
       diffMode,
       compareBranch,
     });
-  }
-
-  async gitPullWorkspace(workspaceId: string): Promise<void> {
-    await this.trpc.workspace.gitPull.mutate({ workspaceId });
-  }
-
-  async gitPushWorkspace(workspaceId: string): Promise<void> {
-    await this.trpc.workspace.gitPush.mutate({ workspaceId });
-  }
-
-  async gitCommitWorkspace(workspaceId: string, message: string, body?: string): Promise<void> {
-    await this.trpc.workspace.gitCommit.mutate({ workspaceId, message, body });
-  }
-
-  async generateCommitMessage(
-    workspaceId: string,
-  ): Promise<{ message: string; body: string; agentLabel: string }> {
-    return (await this.trpc.workspace.generateCommitMessage.mutate({ workspaceId })) as {
-      message: string;
-      body: string;
-      agentLabel: string;
-    };
   }
 
   getWorkspaceFileUrl(workspaceId: string, path: string): string {
