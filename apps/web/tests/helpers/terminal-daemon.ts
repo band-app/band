@@ -8,33 +8,46 @@
 // need it gone before the delete, not after.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const STOP_TIMEOUT_MS = 5_000;
 
-/** Pid of the daemon serving `home`, from its pid record, or `null` if none runs. */
-export function terminalDaemonPid(home: string): number | null {
-  let pid: number;
+/**
+ * Pids of the daemons serving `home`, from their pid records. Every protocol
+ * version writes its own `terminal-daemon-v<N>.pid`, so match them all rather
+ * than hardcode one.
+ */
+export function terminalDaemonPids(home: string): number[] {
+  const runDir = join(home, ".band", "run");
+  let names: string[];
   try {
-    const record = JSON.parse(
-      readFileSync(join(home, ".band", "run", "terminal-daemon-v1.pid"), "utf8"),
-    ) as { pid: number };
-    pid = record.pid;
+    names = readdirSync(runDir).filter((name) => /^terminal-daemon-v\d+\.pid$/.test(name));
   } catch {
-    return null;
+    return [];
   }
-  return isTerminalDaemon(pid) ? pid : null;
+  const pids: number[] = [];
+  for (const name of names) {
+    try {
+      const { pid } = JSON.parse(readFileSync(join(runDir, name), "utf8")) as { pid: number };
+      if (isTerminalDaemon(pid)) pids.push(pid);
+    } catch {
+      // Half-written or unreadable record: nothing to stop.
+    }
+  }
+  return pids;
 }
 
 /**
- * SIGTERM the daemon serving `home` and wait for it to exit. The daemon kills
- * its shells and waits for them before exiting, so on return nothing it ran
- * is still writing into `home`. No-op when no daemon runs.
+ * SIGTERM every daemon serving `home` and wait for each to exit. A daemon
+ * kills its shells and waits for them before exiting, so on return nothing
+ * it ran is still writing into `home`. No-op when none runs.
  */
 export async function stopTerminalDaemon(home: string): Promise<void> {
-  const pid = terminalDaemonPid(home);
-  if (pid === null) return;
+  await Promise.all(terminalDaemonPids(home).map(stopPid));
+}
+
+async function stopPid(pid: number): Promise<void> {
   try {
     process.kill(pid, "SIGTERM");
   } catch {

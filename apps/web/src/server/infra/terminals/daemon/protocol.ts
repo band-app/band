@@ -123,7 +123,10 @@ export interface DaemonRequests {
    * Subscribe the caller's stream connection to the terminal and return a
    * snapshot. Stream chunks with `seq <= snapshot.seq` are already in it.
    */
-  attach: [{ terminalId: string; cols?: number; rows?: number }, TerminalSnapshot | null];
+  attach: [
+    { terminalId: string; cols?: number; rows?: number },
+    (TerminalSnapshot & { workspaceId: string }) | null,
+  ];
   ping: [Record<string, never>, { pid: number; sessions: number }];
 }
 
@@ -167,10 +170,23 @@ export function readFrames(
   onFrame: (frame: unknown) => void,
   maxLineBytes = 64 * 1024 * 1024,
 ): void {
-  let buffer = "";
+  // Pending chunks of an unfinished line. Joined only once a newline arrives,
+  // and only the newest chunk is scanned for one, so a multi-MB frame (an
+  // attach snapshot) costs O(size) rather than O(size^2) to reassemble.
+  let chunks: string[] = [];
+  let pendingBytes = 0;
   socket.setEncoding("utf8");
   socket.on("data", (chunk: string) => {
-    buffer += chunk;
+    if (!chunk.includes("\n")) {
+      chunks.push(chunk);
+      pendingBytes += chunk.length;
+      if (pendingBytes > maxLineBytes) socket.destroy(new Error("Frame too large"));
+      return;
+    }
+    chunks.push(chunk);
+    let buffer = chunks.join("");
+    chunks = [];
+    pendingBytes = 0;
     let newline = buffer.indexOf("\n");
     while (newline !== -1) {
       const line = buffer.slice(0, newline);
@@ -188,8 +204,10 @@ export function readFrames(
       }
       newline = buffer.indexOf("\n");
     }
-    if (buffer.length > maxLineBytes) {
-      socket.destroy(new Error("Frame too large"));
+    if (buffer.length > 0) {
+      chunks.push(buffer);
+      pendingBytes = buffer.length;
+      if (pendingBytes > maxLineBytes) socket.destroy(new Error("Frame too large"));
     }
   });
 }

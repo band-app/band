@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
+import { checkEndpointOwner } from "./endpoint";
 import {
   type ControlNotify,
   type ControlReply,
@@ -254,7 +255,18 @@ class FrameSink {
   }
 }
 
+/**
+ * Connect to the daemon socket at `path`, but only if it is ours (see
+ * `checkEndpointOwner`): the connection is about to carry the token.
+ */
 function openSocket(path: string): Promise<Socket> {
+  try {
+    if (checkEndpointOwner(path) === "missing") {
+      return Promise.reject(new DaemonNotRunningError());
+    }
+  } catch (err) {
+    return Promise.reject(err);
+  }
   return new Promise((resolve, reject) => {
     const socket = connect({ path });
     const timer = setTimeout(() => {

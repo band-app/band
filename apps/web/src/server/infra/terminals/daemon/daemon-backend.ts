@@ -128,7 +128,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
   }
 
   async write(terminalId: string, data: string): Promise<boolean> {
-    const client = await this.connection(false);
+    // With a live connection, send before the first `await` so keystrokes
+    // stay ordered with `resize` / `nudgeResize`, which are sent synchronously.
+    const client =
+      this.client && !this.client.isClosed ? this.client : await this.connection(false);
     if (!client) return false;
     return client.request("write", { terminalId, data });
   }
@@ -167,6 +170,8 @@ export class DaemonTerminalBackend implements TerminalBackend {
       gate.detach();
       return null;
     }
+    // Remember it so a dropped daemon connection reports this viewer's exit.
+    this.known.set(terminalId, snapshot.workspaceId);
     gate.setSnapshot(snapshot.data, snapshot.seq);
     return gate;
   }
@@ -195,11 +200,14 @@ export class DaemonTerminalBackend implements TerminalBackend {
   private async connection(launch: boolean): Promise<DaemonClient | null> {
     if (this.closed) return null;
     if (this.client && !this.client.isClosed) return this.client;
-    if (this.connecting) {
+    // Loop, not `if`: two launching callers can both be parked on a
+    // non-launching attempt that resolved null, and only the first may start
+    // the next attempt; the second must join it rather than race a launch.
+    while (this.connecting) {
       const shared = await this.connecting;
       if (shared || !launch) return shared;
+      if (this.client && !this.client.isClosed) return this.client;
     }
-    if (this.client && !this.client.isClosed) return this.client;
     const attempt = this.openConnection(launch);
     this.connecting = attempt;
     try {

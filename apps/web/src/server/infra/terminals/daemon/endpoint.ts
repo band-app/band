@@ -203,6 +203,42 @@ export function ensurePrivateDir(dir: string): void {
   if ((stats.mode & 0o077) !== 0) chmodSync(dir, 0o700);
 }
 
+/**
+ * Verify, before a client trusts it with the token, that the endpoint at
+ * `socketPath` belongs to us: its directory is a real directory we own that
+ * no one else can enter, and the socket itself is ours. Returns `missing`
+ * when either is absent (nothing is running there). Throws on anything else:
+ * under `/tmp` another local user could have planted the directory or socket
+ * to collect the token, the server's env and every keystroke.
+ */
+export function checkEndpointOwner(socketPath: string): "ok" | "missing" {
+  const uid = process.getuid?.();
+  const dir = dirname(socketPath);
+  let dirStats: ReturnType<typeof lstatSync>;
+  try {
+    dirStats = lstatSync(dir);
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return "missing";
+    throw err;
+  }
+  if (!dirStats.isDirectory()) throw new Error(`${dir} is not a directory`);
+  if (uid !== undefined && dirStats.uid !== uid) {
+    throw new Error(`${dir} is owned by another user`);
+  }
+  if ((dirStats.mode & 0o077) !== 0) throw new Error(`${dir} is accessible to other users`);
+  let socketStats: ReturnType<typeof lstatSync>;
+  try {
+    socketStats = lstatSync(socketPath);
+  } catch (err) {
+    if (errorCode(err) === "ENOENT") return "missing";
+    throw err;
+  }
+  if (uid !== undefined && socketStats.uid !== uid) {
+    throw new Error(`${socketPath} is owned by another user`);
+  }
+  return "ok";
+}
+
 function entryIdentity(
   path: string,
   stat: typeof statSync | typeof lstatSync,

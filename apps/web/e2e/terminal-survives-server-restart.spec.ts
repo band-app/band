@@ -102,13 +102,10 @@ test("a terminal keeps its shell and its screen across a server restart", async 
     .toMatch(/BEFORE_RESTART/);
 
   // Same shell, still taking input: only it has SHELL_VALUE set.
-  await expect
-    .poll(
-      async () => {
-        await workspacePage.runInTerminal(`echo $SHELL_VALUE>${afterFile}`);
-        return readFileOrNull(afterFile);
-      },
-      { timeout: 15_000 },
-    )
-    .toBe(SHELL_VALUE);
+  await workspacePage.runInTerminalUntilRendered(
+    WORKSPACE,
+    `echo $SHELL_VALUE>${afterFile}; echo AFTER_"RESTART"`,
+    /AFTER_RESTART/,
+  );
+  await expect.poll(() => readFileOrNull(afterFile)).toBe(SHELL_VALUE);
 });

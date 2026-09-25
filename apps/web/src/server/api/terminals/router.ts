@@ -120,7 +120,14 @@ const terminalRouter = t.router({
       // snapshot (see `TerminalBackend.attach`), so every chunk after it
       // lands in the queue — including ones arriving while the snapshot
       // `yield` below is suspended waiting on the consumer.
-      const attachment = await terminalService.attach(terminalId);
+      let attachment: Awaited<ReturnType<typeof terminalService.attach>>;
+      try {
+        attachment = await terminalService.attach(terminalId);
+      } catch (err) {
+        unsubscribeExit();
+        opts.signal?.removeEventListener("abort", onAbort);
+        throw err;
+      }
       if (!attachment) {
         unsubscribeExit();
         opts.signal?.removeEventListener("abort", onAbort);

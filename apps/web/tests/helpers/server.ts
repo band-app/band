@@ -217,6 +217,12 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
           home: tmpHome,
           close: async (closeOpts) => {
             await new Promise<void>((r) => {
+              // Already gone (e.g. a second close after a failed restart):
+              // `exit` won't fire again, so waiting for it would hang.
+              if (child.exitCode !== null || child.signalCode !== null) {
+                r();
+                return;
+              }
               const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
               child.on("exit", () => {
                 clearTimeout(fallback);

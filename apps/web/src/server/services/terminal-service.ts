@@ -21,7 +21,7 @@ import { workspaceService } from "./workspace-service";
 
 // Re-export the terminal types so the API tier (`terminals/router.ts`,
 // `terminals/ws.ts`) can reference them without reaching into infra.
-// Per `docs/web-architecture.md`, routers must go through services.
+// Routers must not import from infra, so they get these types here.
 export type { SpawnOptions, TerminalAttachment, TerminalExitEvent, TerminalListEntry };
 
 const log = createLogger("terminal-service");

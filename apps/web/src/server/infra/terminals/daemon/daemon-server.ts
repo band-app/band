@@ -360,7 +360,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     } else {
       client.attached.set(terminalId, attached.unsubscribe);
     }
-    return attached.snapshot;
+    return { ...attached.snapshot, workspaceId: pool.info(terminalId)?.workspaceId ?? "" };
   }
 
   function tokenMatches(candidate: string): boolean {

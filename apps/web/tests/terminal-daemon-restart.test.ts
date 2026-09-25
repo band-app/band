@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { toWorkspaceId } from "@/dashboard";
@@ -34,10 +36,24 @@ interface TerminalEntry {
   pid: number;
 }
 
-async function listTerminals(server: ServerHandle): Promise<TerminalEntry[]> {
-  const res = await trpcQuery(server.url, "terminal.list", { workspaceId: WORKSPACE_ID }, TOKEN);
+async function listTerminals(
+  server: ServerHandle,
+  workspaceId = WORKSPACE_ID,
+): Promise<TerminalEntry[]> {
+  const res = await trpcQuery(server.url, "terminal.list", { workspaceId }, TOKEN);
   expect(res.status).toBe(200);
   return (await trpcData<{ terminals: TerminalEntry[] }>(res)).terminals;
+}
+
+async function createTerminal(server: ServerHandle, workspaceId: string): Promise<number> {
+  const res = await trpcMutate(
+    server.url,
+    "terminal.create",
+    { workspaceId, id: randomUUID() },
+    TOKEN,
+  );
+  expect(res.status).toBe(200);
+  return (await trpcData<{ pid: number }>(res)).pid;
 }
 
 /**
@@ -163,17 +179,119 @@ describe("terminal daemon — shells survive a server restart", () => {
     await waitFor(async () => (isAlive(created.pid) ? undefined : true), { label: "shell exit" });
   });
 
-  it("rejects a /terminal WebSocket without the band_token cookie", async () => {
-    const url = new URL(server.url);
-    const ws = new WebSocket(
-      `ws://${url.host}/terminal?workspaceId=${encodeURIComponent(WORKSPACE_ID)}&terminalId=${randomUUID()}`,
-    );
-    const opened = await new Promise<boolean>((resolve) => {
-      ws.once("open", () => resolve(true));
-      ws.once("error", () => resolve(false));
-      ws.once("unexpected-response", () => resolve(false));
+  it("rejects terminal.list on the restarted server without the band_token cookie", async () => {
+    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const res = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// Shells outlive the server now, so deleting a workspace has to end its
+// shells explicitly: at once when a server is running, or at the next boot
+// when the workspace went away while none was.
+describe("terminal daemon — a deleted workspace's shells end", () => {
+  const PROJ = "gonerproj";
+  const MAIN_ID = toWorkspaceId(PROJ, "main");
+  let tmpHome: string;
+  let repo: string;
+  let port: number;
+  let server: ServerHandle;
+
+  const git = (cwd: string, args: string[]) =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Test",
+        GIT_AUTHOR_EMAIL: "test@test.com",
+        GIT_COMMITTER_NAME: "Test",
+        GIT_COMMITTER_EMAIL: "test@test.com",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+      },
     });
-    ws.terminate();
-    expect(opened).toBe(false);
+
+  /** A second worktree on its own branch: a workspace that can be deleted. */
+  function addWorktree(name: string): string {
+    const path = join(tmpHome, `${PROJ}-${name}`);
+    git(repo, ["worktree", "add", "-b", name, path]);
+    return path;
+  }
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-td-goner-");
+    repo = join(tmpHome, PROJ);
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-q", "-b", "main"]);
+    writeFileSync(join(repo, "README.md"), "x\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    const liveDelete = addWorktree("live-delete");
+    const offlineDelete = addWorktree("offline-delete");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: PROJ,
+          path: repo,
+          defaultBranch: "main",
+          worktrees: [
+            { branch: "main", path: repo },
+            { branch: "live-delete", path: liveDelete },
+            { branch: "offline-delete", path: offlineDelete },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: TOKEN });
+    port = await getRandomPort();
+    server = await startServer({ tmpHome, port });
+  });
+
+  afterAll(async () => {
+    await server?.close();
+    await stopTerminalDaemon(tmpHome);
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it("workspaces.remove on a running server ends the workspace's shells", async () => {
+    const workspaceId = toWorkspaceId(PROJ, "live-delete");
+    const pid = await createTerminal(server, workspaceId);
+    expect(isAlive(pid)).toBe(true);
+
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.remove",
+      { project: PROJ, name: "live-delete" },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+
+    await waitFor(async () => (isAlive(pid) ? undefined : true), { label: "shell exit" });
+    expect(await listTerminals(server, workspaceId)).toEqual([]);
+  });
+
+  it("the next boot ends shells of a workspace deleted while no server ran", async () => {
+    const workspaceId = toWorkspaceId(PROJ, "offline-delete");
+    const keptPid = await createTerminal(server, MAIN_ID);
+    const gonePid = await createTerminal(server, workspaceId);
+
+    // Delete the workspace behind the server's back: stop the server (the
+    // daemon and both shells keep running), remove the worktree and its row.
+    await server.close({ keepTerminalDaemon: true });
+    git(repo, ["worktree", "remove", "--force", join(tmpHome, `${PROJ}-offline-delete`)]);
+    const db = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+    db.prepare("DELETE FROM worktrees WHERE project_name = ? AND name = ?").run(
+      PROJ,
+      "offline-delete",
+    );
+    db.close();
+    server = await startServer({ tmpHome, port });
+
+    await waitFor(async () => (isAlive(gonePid) ? undefined : true), { label: "orphan exit" });
+    // Only the deleted workspace's shell goes; the live workspace keeps its own.
+    expect(isAlive(keptPid)).toBe(true);
+    expect(await listTerminals(server, MAIN_ID)).toEqual([
+      expect.objectContaining({ workspaceId: MAIN_ID, pid: keptPid }),
+    ]);
   });
 });
