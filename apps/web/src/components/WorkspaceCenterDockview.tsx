@@ -608,7 +608,22 @@ function ChatLeafContent({
 // ---------------------------------------------------------------------------
 
 function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLeafParams>) {
-  const { visible } = usePanelVisibility();
+  // On screen = workspace visible AND this is the selected tab in its group.
+  // Terminal leaves use `renderer: "always"`, so an unselected tab stays
+  // mounted; without this fold every terminal tab in the workspace reported
+  // visible, stayed attached (starving the parked-terminal LRU), and all of
+  // them grabbed ⌃` focus and received "Add to Terminal" inserts.
+  //
+  // `isVisible` (selected in its group), NOT `isActive` (selected AND its group
+  // focused): a terminal split beside a focused chat is still on screen and
+  // must stay attached.
+  const { visible: parentVisible } = usePanelVisibility();
+  const [tabVisible, setTabVisible] = useState(api.isVisible);
+  useEffect(() => {
+    const d = api.onDidVisibilityChange((e) => setTabVisible(e.isVisible));
+    return () => d.dispose();
+  }, [api]);
+  const visible = parentVisible && tabVisible;
 
   // The OUTER tab title tracks the last-focused pane inside the nested split.
   const onTitleChange = useCallback((title: string) => api.setTitle(title), [api]);
