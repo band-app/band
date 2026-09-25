@@ -271,8 +271,11 @@ export function getWorkspaceLeafActions(workspaceId: string | null): LeafActions
 const leafHeaderActionsByPanelId = new Map<string, () => React.ReactNode>();
 const HEADER_ACTIONS_EVENT = "band:leaf-header-actions-changed";
 
-function notifyHeaderActionsChanged(): void {
-  window.dispatchEvent(new CustomEvent(HEADER_ACTIONS_EVENT));
+// The event carries the publishing panel's id so only the group header that
+// holds that panel re-renders. Every visited workspace stays mounted, so an
+// unscoped broadcast would re-render every hidden workspace's headers too.
+function notifyHeaderActionsChanged(panelId: string): void {
+  window.dispatchEvent(new CustomEvent<string>(HEADER_ACTIONS_EVENT, { detail: panelId }));
 }
 
 /** Publish this leaf's header-action buttons while mounted (and while `render`
@@ -295,10 +298,10 @@ function usePublishHeaderActions(
     } else {
       leafHeaderActionsByPanelId.delete(panelId);
     }
-    notifyHeaderActionsChanged();
+    notifyHeaderActionsChanged(panelId);
     return () => {
       leafHeaderActionsByPanelId.delete(panelId);
-      notifyHeaderActionsChanged();
+      notifyHeaderActionsChanged(panelId);
     };
   }, [panelId, ...deps]);
 }
@@ -2103,12 +2106,16 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const [, bumpActions] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     const d = props.containerApi.onDidActivePanelChange(() => bumpActions());
-    window.addEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+    const onActionsChanged = (e: Event) => {
+      const panelId = (e as CustomEvent<string>).detail;
+      if (props.group.panels.some((p) => p.id === panelId)) bumpActions();
+    };
+    window.addEventListener(HEADER_ACTIONS_EVENT, onActionsChanged);
     return () => {
       d.dispose();
-      window.removeEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+      window.removeEventListener(HEADER_ACTIONS_EVENT, onActionsChanged);
     };
-  }, [props.containerApi]);
+  }, [props.containerApi, props.group]);
 
   // Edge groups don't maximize — the add menu (left slot) is enough there.
   if (!isGridGroup) return null;
