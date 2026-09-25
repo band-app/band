@@ -477,7 +477,8 @@ function parseHello(frame: unknown): HelloMessage | null {
 
 /** Write `path` with mode 0600, atomically, so a reader never sees half a token. */
 function writePrivateFile(path: string, content: string): void {
-  const tmp = `${path}.${process.pid}.tmp`;
+  // A random suffix, not the pid: a recycled pid could share a tmp name.
+  const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
   writeFileSync(tmp, content, { mode: 0o600 });
   renameSync(tmp, path);
 }

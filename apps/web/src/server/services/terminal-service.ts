@@ -95,7 +95,12 @@ const WorkspaceTerminalConfigSchema = z.object({
 export class TerminalService {
   private backend!: TerminalBackend;
   private unsubscribeExit: (() => void) | null = null;
-  private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
+  /** terminalId -> exit listeners, so an exit only reaches its own viewers. */
+  private readonly exitListeners = new Map<string, Set<(event: TerminalExitEvent) => void>>();
+  /** terminalId -> title listeners, fed by one shared poll (see {@link onTitle}). */
+  private readonly titleListeners = new Map<string, Set<(title: string) => void>>();
+  private titleTimer: NodeJS.Timeout | null = null;
+  private titlePolling = false;
 
   constructor(backend: TerminalBackend = new InProcessTerminalBackend()) {
     this.setBackend(backend);
@@ -108,6 +113,13 @@ export class TerminalService {
    */
   setBackend(backend: TerminalBackend): void {
     this.unsubscribeExit?.();
+    // Release the one being replaced (a no-op for the empty boot default; a
+    // disconnect for a daemon backend that failed to spawn).
+    if (this.backend) {
+      void this.backend.close().catch((err) => {
+        log.warn("failed to close the replaced terminal backend: %s", err);
+      });
+    }
     this.backend = backend;
     this.unsubscribeExit = backend.onExit((event) => this.handleExit(event));
   }
@@ -170,6 +182,17 @@ export class TerminalService {
       entry = await this.backend.spawn(request);
     }
 
+    // The workspace can be removed while the spawn is in flight (e.g.
+    // `band workspaces create --prompt` spawns fire-and-forget and a quick
+    // `workspaces remove` follows). Its `killWorkspace` ran before this shell
+    // existed, so end the shell here and don't resurrect the layout row that
+    // the removal already deleted. Shells now outlive the server, so a stray
+    // one would otherwise run until the next boot's reconcile.
+    if (!workspaceService.resolve(workspaceId)) {
+      await this.backend.kill(terminalId);
+      throw new Error(`Workspace removed while its terminal was starting: ${workspaceId}`);
+    }
+
     // Mirror what `createChat` and `createBrowser` do: register the new
     // terminal in the saved dockview layout so it survives a server
     // restart and renders the moment the workspace is opened. Without
@@ -218,7 +241,7 @@ export class TerminalService {
     if (event.cleanupOnExit && !event.killed) {
       this.emitRemoved(event.workspaceId, event.terminalId);
     }
-    for (const listener of this.exitListeners) {
+    for (const listener of this.exitListeners.get(event.terminalId) ?? []) {
       try {
         listener(event);
       } catch (err) {
@@ -304,15 +327,53 @@ export class TerminalService {
   }
 
   /**
-   * Subscribe to every terminal's exit. Returns an unsubscribe function.
-   * Held here rather than on the backend so it keeps working across
+   * Subscribe to one terminal's exit. Returns an unsubscribe function. Held
+   * here rather than on the backend so it keeps working across
    * {@link setBackend}.
    */
-  onExit(listener: (event: TerminalExitEvent) => void): () => void {
-    this.exitListeners.add(listener);
+  onExit(terminalId: string, listener: (event: TerminalExitEvent) => void): () => void {
+    return addKeyed(this.exitListeners, terminalId, listener);
+  }
+
+  /**
+   * Receive a terminal's foreground process name (its tab title) every
+   * {@link TITLE_POLL_MS}, the way iTerm tracks the running command without
+   * OSC sequences. One `listAll` per tick serves every open terminal, rather
+   * than one daemon round trip per viewer. The poll runs only while someone
+   * is listening. Returns an unsubscribe function.
+   */
+  onTitle(terminalId: string, listener: (title: string) => void): () => void {
+    const unsubscribe = addKeyed(this.titleListeners, terminalId, listener);
+    this.titleTimer ??= setInterval(() => this.pollTitles(), TITLE_POLL_MS);
     return () => {
-      this.exitListeners.delete(listener);
+      unsubscribe();
+      if (this.titleListeners.size === 0 && this.titleTimer) {
+        clearInterval(this.titleTimer);
+        this.titleTimer = null;
+      }
     };
+  }
+
+  private pollTitles(): void {
+    // Skip a tick rather than stack polls behind a slow backend.
+    if (this.titlePolling) return;
+    this.titlePolling = true;
+    this.backend
+      .listAll()
+      .then((entries) => {
+        for (const entry of entries) {
+          if (!entry.title) continue;
+          for (const listener of this.titleListeners.get(entry.terminalId) ?? []) {
+            listener(entry.title);
+          }
+        }
+      })
+      .catch(() => {
+        // A failed poll just skips this tick's title updates.
+      })
+      .finally(() => {
+        this.titlePolling = false;
+      });
   }
 
   // -------------------------------------------------------------------------
@@ -382,6 +443,26 @@ export class TerminalService {
 
     return result.data;
   }
+}
+
+/**
+ * Tab-title poll cadence. A 1 s poll picked up `cd`/`vim` transitions ~2 s
+ * sooner but kept the event loop awake at 1 Hz; 3 s still reads as immediate.
+ */
+const TITLE_POLL_MS = 3_000;
+
+/** Add `listener` under `key`; the returned function removes it (and an emptied key). */
+function addKeyed<T>(map: Map<string, Set<T>>, key: string, listener: T): () => void {
+  let set = map.get(key);
+  if (!set) {
+    set = new Set();
+    map.set(key, set);
+  }
+  set.add(listener);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0 && map.get(key) === set) map.delete(key);
+  };
 }
 
 /**

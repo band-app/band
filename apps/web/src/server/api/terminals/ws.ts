@@ -247,41 +247,21 @@ function attachSession(
   let closed = false;
   let replayStarted = false;
 
-  // Poll the PTY foreground process name and send title updates (text/JSON frames).
-  // This mimics how iTerm detects the running command without relying on OSC sequences.
-  // 3 s is a deliberate trade-off: a 1 s poll picked up `cd`/`vim` transitions
-  // ~2 s sooner but kept the event loop awake at 1 Hz for every open terminal,
-  // which compounds when several PTYs are open. 3 s is fast enough that title
-  // updates still feel near-instant to a user reading the change.
+  // Send the PTY's foreground process name as title updates (text/JSON
+  // frames), only when it changes. The service polls once for every open
+  // terminal (see `TerminalService.onTitle`).
   let lastProcess = "";
-  let titlePending = false;
-  const processInterval = setInterval(() => {
-    // Skip a tick rather than stack lookups behind a slow backend.
-    if (titlePending) return;
-    titlePending = true;
-    terminalService
-      .info(terminalId)
-      .then((entry) => {
-        const currentProcess = entry?.title;
-        if (currentProcess && currentProcess !== lastProcess) {
-          lastProcess = currentProcess;
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: "title", title: currentProcess }));
-          }
-        }
-      })
-      .catch(() => {
-        // A failed lookup just skips this tick's title update.
-      })
-      .finally(() => {
-        titlePending = false;
-      });
-  }, 3000);
+  const unsubscribeTitle = terminalService.onTitle(terminalId, (currentProcess) => {
+    if (currentProcess === lastProcess) return;
+    lastProcess = currentProcess;
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: "title", title: currentProcess }));
+    }
+  });
 
   // PTY exit -> close WebSocket
-  const unsubscribeExit = terminalService.onExit((event) => {
-    if (event.terminalId !== terminalId) return;
-    clearInterval(processInterval);
+  const unsubscribeExit = terminalService.onExit(terminalId, (event) => {
+    unsubscribeTitle();
     log.debug("PTY exited with code %d for terminal %s", event.exitCode, terminalId);
     if (ws.readyState === ws.OPEN) {
       ws.close(1000, "Terminal exited");
@@ -356,7 +336,7 @@ function attachSession(
     // synchronous `ws.send` throw on the snapshot (this file documents `ws`
     // throwing) cannot skip the forwarder and wedge an OPEN socket.
     try {
-      if (attached.snapshot && ws.readyState === ws.OPEN) {
+      if (attached.snapshot.length > 0 && ws.readyState === ws.OPEN) {
         ws.send(Buffer.from(stripTerminalQueries(attached.snapshot)));
       }
     } finally {
@@ -380,7 +360,7 @@ function attachSession(
     // client's follow-up resize carries unchanged dims, so it produces no
     // SIGWINCH. Nudge the PTY so the app redraws. Skipped on a fresh spawn
     // (nothing drawn yet) and when there was no state to replay.
-    if (!isNew && attached.snapshot) {
+    if (!isNew && attached.snapshot.length > 0) {
       terminalService.nudgeResize(terminalId);
     }
   };
@@ -414,7 +394,7 @@ function attachSession(
   // WebSocket close -> detach listeners but keep PTY alive
   ws.on("close", () => {
     closed = true;
-    clearInterval(processInterval);
+    unsubscribeTitle();
     clearInterval(pingInterval);
     attachment?.detach();
     unsubscribeExit();

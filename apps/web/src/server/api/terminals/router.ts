@@ -108,8 +108,7 @@ const terminalRouter = t.router({
       // still ends the stream.
       let exited = false;
       let resolve: (() => void) | null = null;
-      const unsubscribeExit = terminalService.onExit((event) => {
-        if (event.terminalId !== terminalId) return;
+      const unsubscribeExit = terminalService.onExit(terminalId, () => {
         exited = true;
         resolve?.();
       });
@@ -150,7 +149,7 @@ const terminalRouter = t.router({
         // guard is cheap and keeps this path aligned with the WS replay.
         // With `replay: false` the snapshot is simply not sent; live output
         // still starts from the same cut.
-        if (replay && attachment.snapshot) {
+        if (replay && attachment.snapshot.length > 0) {
           yield { type: "output" as const, data: stripTerminalQueries(attachment.snapshot) };
         }
 

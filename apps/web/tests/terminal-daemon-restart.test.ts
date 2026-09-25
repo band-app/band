@@ -353,6 +353,7 @@ describe("terminal daemon — when it exits on its own", () => {
   it("a daemon that loses its socket keeps serving its shells, then exits", async () => {
     const pid = await createTerminal(server, WORKSPACE_ID);
     const [daemon] = terminalDaemons(tmpHome);
+    expect(daemon).toBeDefined();
     const [{ terminalId }] = await listTerminals(server);
 
     // Take the socket's name away, as a replacement daemon publishing over it

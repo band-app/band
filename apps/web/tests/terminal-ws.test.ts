@@ -94,7 +94,20 @@ async function startServer(
         ...extraEnv,
       },
       stdio: ["pipe", "pipe", "pipe"],
+      // Own process group, so teardown signals the whole tree (git, LSP
+      // servers) like `tests/helpers/server.ts` does.
+      detached: true,
     });
+
+    // `-pid` targets the group; ESRCH just means it is already gone.
+    const killGroup = (signal: NodeJS.Signals) => {
+      try {
+        if (typeof child.pid === "number") process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        // group already torn down
+      }
+    };
 
     let stderr = "";
     let settled = false;
@@ -118,12 +131,12 @@ async function startServer(
                 r();
                 return;
               }
-              const fallback = setTimeout(() => child.kill("SIGKILL"), 5_000);
+              const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
               child.on("exit", () => {
                 clearTimeout(fallback);
                 r();
               });
-              child.kill("SIGTERM");
+              killGroup("SIGTERM");
             });
             await stopTerminalDaemon(home);
           },
@@ -148,7 +161,7 @@ async function startServer(
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill("SIGTERM");
+        killGroup("SIGTERM");
         reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
       }
     }, 15_000);
