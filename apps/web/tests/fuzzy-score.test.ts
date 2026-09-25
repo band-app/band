@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "../src/server/services/_utils/fuzzy-score";
+import { fuzzyScore, scoreFiles } from "../src/server/services/_utils/fuzzy-score";
 
 // ---------------------------------------------------------------------------
 // Helper: given a query and a list of file paths, return them sorted by score
@@ -215,5 +215,17 @@ describe("fuzzyScore – substring beats scattered subsequence (issue #530)", ()
     ];
     const result = ranked("composite", FILES);
     expect(result[0]).toBe("src/flow/flow-source-composite.ts");
+  });
+});
+
+describe("scoreFiles – ordering", () => {
+  it("orders equal-score results by path, whatever order the corpus arrives in", () => {
+    // Same-length names that score identically for "report". The corpus order
+    // comes from ripgrep, which is not stable between runs on Linux; results
+    // must not depend on it.
+    const files = ["reports-07.ts", "reports-02.ts", "reports-15.ts", "reports-00.ts"];
+    const expected = ["reports-00.ts", "reports-02.ts", "reports-07.ts", "reports-15.ts"];
+    expect(scoreFiles("report", files).map((r) => r.file)).toEqual(expected);
+    expect(scoreFiles("report", [...files].reverse()).map((r) => r.file)).toEqual(expected);
   });
 });

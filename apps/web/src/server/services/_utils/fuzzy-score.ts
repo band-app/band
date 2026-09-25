@@ -143,7 +143,11 @@ export function scoreFiles(query: string, files: string[]): ScoredFile[] {
   }
   // Re-sort: fzf returns results sorted by its own raw score, but the
   // filename bonus + length tiebreaker above can change relative order.
-  scored.sort((a, b) => b.score - a.score);
+  // Equal scores fall back to path order. Without that, ties keep the corpus
+  // order, which comes from ripgrep and differs between runs on Linux, so each
+  // keystroke's refetch could reshuffle identical results under the user's
+  // cursor (a Quick Open selection would jump mid-navigation).
+  scored.sort((a, b) => b.score - a.score || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   return scored;
 }
 
