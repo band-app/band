@@ -1596,6 +1596,21 @@ export class WorkspacePage {
   // the surface whether it's attached (live) or parked.
   // ──────────────────────────────────────────────────────────────────────
 
+  /** Take over the page's timers and `Date` (Playwright's fake clock) so a test
+   *  can cross the terminal parking policy's 30 s / 5 min thresholds without
+   *  waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
+   *  `goto`. */
+  async installClock(): Promise<void> {
+    await this.page.clock.install();
+  }
+
+  /** Jump the fake clock forward, firing each due timer at most once. */
+  async advanceClock(ms: number): Promise<void> {
+    await test.step(`Advance the clock by ${ms} ms`, async () => {
+      await this.page.clock.fastForward(ms);
+    });
+  }
+
   /** Start counting terminal WebSocket opens for a SPECIFIC workspace (matched
    *  on the `workspaceId=` query param). Returns a getter for the running count.
    *  Call BEFORE `goto`. Lets a test prove a given workspace's terminal did NOT
@@ -1799,6 +1814,29 @@ export class WorkspacePage {
   async terminalWrapperCount(workspaceId: string): Promise<number> {
     return await this.page.evaluate(
       (id) => document.querySelectorAll(`[data-workspace-id="${id}"]`).length,
+      workspaceId,
+    );
+  }
+
+  /** Mark a workspace's terminal wrappers so a later read can tell whether the
+   *  SAME live xterm survived (mark still present) or the terminal was disposed
+   *  and re-created (fresh wrapper, no mark). Returns how many were marked. */
+  async markTerminalWrappers(workspaceId: string): Promise<number> {
+    return await this.page.evaluate((id) => {
+      const wrappers = Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-workspace-id="${id}"]`),
+      );
+      for (const w of wrappers) w.dataset.bandProbe = "marked";
+      return wrappers.length;
+    }, workspaceId);
+  }
+
+  /** Count a workspace's terminal wrappers that still carry the mark set by
+   *  `markTerminalWrappers`. */
+  async markedTerminalWrapperCount(workspaceId: string): Promise<number> {
+    return await this.page.evaluate(
+      (id) =>
+        document.querySelectorAll(`[data-workspace-id="${id}"][data-band-probe="marked"]`).length,
       workspaceId,
     );
   }

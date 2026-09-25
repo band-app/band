@@ -6,6 +6,15 @@ import { listen as desktopListen } from "./desktop-ipc";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
+import {
+  selectIdsBeyondHotRetain,
+  TERMINAL_TAB_COLD_PARK_DELAY_MS,
+  TERMINAL_TAB_HOT_RETAIN_LIMIT,
+  TERMINAL_TAB_HOT_RETAIN_MS,
+  TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS,
+  TERMINAL_WORKSPACE_HOT_RETAIN_LIMIT,
+  TERMINAL_WORKSPACE_HOT_RETAIN_MS,
+} from "./terminal-park-policy";
 import { getParkingContainer } from "./terminal-parking";
 import {
   type ArrowDirection,
@@ -150,24 +159,19 @@ const REPLAY_GUARD_TIMEOUT_MS = 3_000;
  *  before giving up (the panel may be 0×0 for a frame right after mount). */
 const MAX_LAYOUT_FRAMES = 5;
 
-/**
- * Max live xterm instances kept in the cache. The cache is bounded by its OWN
- * LRU (least-recently-attached), NOT by the panel host's `maxCachedWorkspaces`.
- *
- * Tying terminal lifetime to the panel LRU was wrong: with
- * `maxCachedWorkspaces = 1`, every workspace switch evicted the previous
- * workspace and tore its terminal down, so returning always forced a reconnect
- * (and, in some environments, a fresh shell) — defeating the whole point of the
- * parking model (band-app/band#617). Now a switched-away terminal is only PARKED
- * (its wrapper moved off-screen, socket + buffer intact) and is reused on
- * return. Terminals are disposed only when: the pane is closed, the workspace is
- * deleted (`reconcileTerminalWorkspaces`), or this LRU cap is exceeded.
- *
- * The cap also bounds live WebGL contexts (browsers hard-cap ~16); each cached
- * terminal keeps a context alive while parked (reused on re-attach — the addon
- * is rebuilt only on genuine GPU loss, not on a plain switch-back).
- */
-const MAX_CACHED_TERMINALS = 8;
+// A switched-away terminal is only PARKED (its wrapper moved off-screen, socket
+// + buffer intact) and is reused on return (band-app/band#617). Terminals are
+// disposed only when: the pane is closed, the workspace is deleted
+// (`reconcileTerminalWorkspaces`), or the renderer policy in
+// `terminal-park-policy.ts` cold-parks a terminal that has been hidden long
+// enough (see `runParkingPass`). A cold-parked terminal's PTY survives on the
+// server; revealing it creates a fresh entry that reconnects and replays.
+//
+// WebGL contexts: Chromium caps live contexts per page (about 16) and drops the
+// oldest when a new one is created. Each warm terminal keeps its context while
+// parked. The policy bounds the warm set, and a dropped context is not fatal:
+// `onContextLoss` disposes the addon and marks the surface suspect, and the next
+// `attach` rebuilds it. There is deliberately no user setting for this.
 
 export interface PaneMetadata {
   name?: string;
@@ -222,15 +226,18 @@ export interface TerminalCacheEntry {
   attach(liveContainer: HTMLElement, opts?: { autoFocus?: boolean }): void;
   detach(): void;
 
-  // --- LRU bookkeeping (used by the module-level cache cap) ---
-  /** Epoch ms of the last attach/touch; the LRU evicts the smallest first. */
-  getLastActive(): number;
-  /** Mark recently used without attaching (a cache hit in `getOrCreate`). */
-  touch(): void;
-  /** True while attached to a live (visible) container — never LRU-evicted. */
+  // --- parking policy bookkeeping (see `runParkingPass`) ---
+  /** Epoch ms since this terminal was last detached (or created parked); null
+   *  while attached. */
+  getHiddenSince(): number | null;
+  /** Monotonic attach counter; breaks hidden-time ties between terminals
+   *  hidden in the same pass (a workspace switch hides them all at once). */
+  getActivatedSeq(): number;
+  /** True while attached to a live (visible) container — never disposed by
+   *  the parking policy. */
   isAttached(): boolean;
   /** True once disposed. A mounted-but-hidden panel holding this entry can
-   *  detect an LRU eviction and re-resolve a fresh entry on becoming visible. */
+   *  detect a cold park and re-resolve a fresh entry on becoming visible. */
   isDestroyed(): boolean;
 
   // --- reactive state for the React view ---
@@ -333,8 +340,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   let liveContainer: HTMLElement | null = null;
   let attached = false;
   let autoFocusPending = autoFocus ?? paneMetadata?.focus ?? false;
-  // LRU recency for the module-level cache cap. Bumped on create/attach/touch.
-  let lastActive = Date.now();
+  // Parking policy clocks. A new entry starts parked, so it is hidden from now.
+  let hiddenSince: number | null = Date.now();
+  let activatedSeq = 0;
 
   // WebGL "surface may be corrupted" flag. The GPU can corrupt the glyph
   // atlas and the renderer's buffers (display sleep / screen unlock, texture
@@ -1149,8 +1157,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // removed wrapper and resurrect a killed terminal.
       if (destroyed) return;
       liveContainer = container;
+      if (!attached) activatedSeq = nextActivationSeq();
       attached = true;
-      lastActive = Date.now();
+      hiddenSince = null;
       if (attachOpts?.autoFocus) autoFocusPending = true;
       // Move the persistent wrapper into the live box (no-op if already there).
       if (wrapper.parentElement !== container) container.appendChild(wrapper);
@@ -1159,6 +1168,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     detach() {
       if (destroyed) return;
+      if (attached) hiddenSince = Date.now();
       attached = false;
       liveContainer = null;
       // Parking moves the wrapper into an off-screen but PAINTED container (see
@@ -1175,17 +1185,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // Park the wrapper (no dispose, no re-fit — retains last cols/rows).
       const parking = getParkingContainer();
       if (wrapper.parentElement !== parking) parking.appendChild(wrapper);
-      // Re-check the cache cap now that this terminal is evictable again — the
-      // cap must hold even when it was exceeded by many simultaneously-attached
-      // terminals that then parked (create-time eviction alone wouldn't trim
-      // them until the next create). Keeps this just-parked one (most recent).
-      evictLeastRecentlyUsed(terminalId);
+      // This terminal just became a parking candidate; re-plan the timers.
+      scheduleParkingPass();
     },
 
-    getLastActive: () => lastActive,
-    touch() {
-      lastActive = Date.now();
-    },
+    getHiddenSince: () => hiddenSince,
+    getActivatedSeq: () => activatedSeq,
     isAttached: () => attached,
     isDestroyed: () => destroyed,
 
@@ -1301,36 +1306,172 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 export function getOrCreateTerminal(terminalId: string, opts: CreateOptions): TerminalCacheEntry {
   const cache = getCache();
   const existing = cache.get(terminalId);
-  if (existing) {
-    existing.touch();
-    return existing;
-  }
+  if (existing) return existing;
   const entry = createEntry(terminalId, opts);
   cache.set(terminalId, entry);
-  evictLeastRecentlyUsed(terminalId);
+  scheduleParkingPass();
   return entry;
 }
 
-/** Enforce the cache cap: dispose the least-recently-attached DETACHED entries
- *  (never an attached/visible one) until within `MAX_CACHED_TERMINALS`, keeping
- *  the just-created `keepId`. */
-function evictLeastRecentlyUsed(keepId: string): void {
+// ---------------------------------------------------------------------------
+// Renderer parking policy (orca's hidden-view parking, see
+// `terminal-park-policy.ts`). Two levels, evaluated in one pass:
+//
+//  1. Per workspace: a workspace hidden for 30 s becomes a candidate; the 4
+//     most recently hidden stay warm for 5 minutes, the most recently hidden
+//     one indefinitely. Every terminal of a cold-parked workspace is disposed.
+//  2. Per terminal, inside each remaining workspace: a terminal detached for
+//     30 s becomes a candidate; the 6 most recently hidden stay warm for 5
+//     minutes, the most recently hidden one indefinitely.
+//
+// An attached (visible) terminal is never disposed, and neither is any
+// terminal of a workspace that has one attached. The pass re-runs on every
+// attach/detach/create and on workspace activation, and otherwise sleeps until
+// the next deadline.
+// ---------------------------------------------------------------------------
+
+const PARK_STATE_KEY = "__bandTerminalParkState__";
+
+interface ParkState {
+  activeWorkspaceId: string | null;
+  /** Epoch ms each non-active workspace was hidden. */
+  workspaceHiddenSince: Map<string, number>;
+  activationSeq: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  passQueued: boolean;
+}
+
+function getParkState(): ParkState {
+  const store = globalThis as unknown as { [PARK_STATE_KEY]?: ParkState };
+  store[PARK_STATE_KEY] ??= {
+    activeWorkspaceId: null,
+    workspaceHiddenSince: new Map(),
+    activationSeq: 0,
+    timer: null,
+    passQueued: false,
+  };
+  return store[PARK_STATE_KEY];
+}
+
+function nextActivationSeq(): number {
+  const state = getParkState();
+  state.activationSeq += 1;
+  return state.activationSeq;
+}
+
+/** Record which workspace is on screen. Called by `MultiWorkspacePanelHost`
+ *  whenever the URL-derived active workspace changes. */
+export function setActiveTerminalWorkspace(workspaceId: string | null): void {
+  const state = getParkState();
+  const prev = state.activeWorkspaceId;
+  if (prev === workspaceId) return;
+  if (prev !== null) state.workspaceHiddenSince.set(prev, Date.now());
+  if (workspaceId !== null) state.workspaceHiddenSince.delete(workspaceId);
+  state.activeWorkspaceId = workspaceId;
+  scheduleParkingPass();
+}
+
+/** Run the pass in a microtask. A workspace switch detaches several terminals
+ *  in one React commit; batching them keeps it to one pass. The pass must not
+ *  run synchronously inside `detach` anyway: it can dispose entries, and
+ *  `detach` is called from React effect cleanups. */
+function scheduleParkingPass(): void {
+  const state = getParkState();
+  if (state.passQueued) return;
+  state.passQueued = true;
+  queueMicrotask(() => {
+    state.passQueued = false;
+    runParkingPass();
+  });
+}
+
+function runParkingPass(): void {
+  const state = getParkState();
+  if (state.timer !== null) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
   const cache = getCache();
-  if (cache.size <= MAX_CACHED_TERMINALS) return;
-  const candidates = [...cache.values()]
-    .filter((e) => e.terminalId !== keepId && !e.isAttached())
-    .sort((a, b) => a.getLastActive() - b.getLastActive());
-  let over = cache.size - MAX_CACHED_TERMINALS;
-  for (const entry of candidates) {
-    if (over <= 0) break;
-    cache.delete(entry.terminalId);
-    entry._destroy();
-    over -= 1;
+  const nowMs = Date.now();
+
+  const byWorkspace = new Map<string, TerminalCacheEntry[]>();
+  for (const entry of cache.values()) {
+    const list = byWorkspace.get(entry.workspaceId);
+    if (list) list.push(entry);
+    else byWorkspace.set(entry.workspaceId, [entry]);
+  }
+  for (const id of [...state.workspaceHiddenSince.keys()]) {
+    if (!byWorkspace.has(id)) state.workspaceHiddenSince.delete(id);
+  }
+
+  let nextDeadline = Number.POSITIVE_INFINITY;
+  const noteDeadlines = (hiddenSinceMs: number, coldParkDelayMs: number, hotRetainMs: number) => {
+    for (const deadline of [hiddenSinceMs + coldParkDelayMs, hiddenSinceMs + hotRetainMs]) {
+      if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
+    }
+  };
+
+  const workspaceCandidates: { id: string; hiddenSinceMs: number }[] = [];
+  for (const [workspaceId, entries] of byWorkspace) {
+    if (workspaceId === state.activeWorkspaceId || entries.some((e) => e.isAttached())) {
+      state.workspaceHiddenSince.delete(workspaceId);
+      continue;
+    }
+    let hiddenSinceMs = state.workspaceHiddenSince.get(workspaceId);
+    if (hiddenSinceMs === undefined) {
+      hiddenSinceMs = nowMs;
+      state.workspaceHiddenSince.set(workspaceId, hiddenSinceMs);
+    }
+    noteDeadlines(
+      hiddenSinceMs,
+      TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS,
+      TERMINAL_WORKSPACE_HOT_RETAIN_MS,
+    );
+    if (nowMs - hiddenSinceMs >= TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS) {
+      workspaceCandidates.push({ id: workspaceId, hiddenSinceMs });
+    }
+  }
+  const parkedWorkspaces = selectIdsBeyondHotRetain(workspaceCandidates, {
+    nowMs,
+    hotRetainMs: TERMINAL_WORKSPACE_HOT_RETAIN_MS,
+    hotRetainLimit: TERMINAL_WORKSPACE_HOT_RETAIN_LIMIT,
+  });
+
+  for (const [workspaceId, entries] of byWorkspace) {
+    if (parkedWorkspaces.has(workspaceId)) {
+      for (const entry of entries) disposeTerminal(entry.terminalId);
+      state.workspaceHiddenSince.delete(workspaceId);
+      continue;
+    }
+    const tabCandidates: { id: string; hiddenSinceMs: number; lastActivatedSeq: number }[] = [];
+    for (const entry of entries) {
+      const hiddenSinceMs = entry.getHiddenSince();
+      if (hiddenSinceMs === null || entry.isAttached()) continue;
+      noteDeadlines(hiddenSinceMs, TERMINAL_TAB_COLD_PARK_DELAY_MS, TERMINAL_TAB_HOT_RETAIN_MS);
+      if (nowMs - hiddenSinceMs >= TERMINAL_TAB_COLD_PARK_DELAY_MS) {
+        tabCandidates.push({
+          id: entry.terminalId,
+          hiddenSinceMs,
+          lastActivatedSeq: entry.getActivatedSeq(),
+        });
+      }
+    }
+    const parkedTabs = selectIdsBeyondHotRetain(tabCandidates, {
+      nowMs,
+      hotRetainMs: TERMINAL_TAB_HOT_RETAIN_MS,
+      hotRetainLimit: TERMINAL_TAB_HOT_RETAIN_LIMIT,
+    });
+    for (const terminalId of parkedTabs) disposeTerminal(terminalId);
+  }
+
+  if (nextDeadline !== Number.POSITIVE_INFINITY) {
+    state.timer = setTimeout(runParkingPass, nextDeadline - nowMs);
   }
 }
 
 /** Intentional close: dispose the xterm + socket + wrapper and drop the entry.
- *  Call on pane close / workspace eviction — NOT on a plain React unmount. */
+ *  Call on pane close / workspace deletion / cold park — NOT on a plain React
+ *  unmount. */
 export function disposeTerminal(terminalId: string): void {
   const cache = getCache();
   const entry = cache.get(terminalId);
@@ -1341,12 +1482,9 @@ export function disposeTerminal(terminalId: string): void {
 
 /** Dispose cached terminals whose workspace is no longer valid (deleted /
  *  worktree removed). Driven by the projects query in `MultiWorkspacePanelHost`,
- *  mirroring the panel-cache reconcile. Never disposes the active workspace's
+ *  mirroring the mounted-set reconcile. Never disposes the active workspace's
  *  terminals (its id can transiently drop out of `validWorkspaceIds` while a
- *  delete of the active workspace propagates to the URL). A panel-LRU eviction
- *  is NOT a valid-set change, so this leaves switched-away terminals parked and
- *  reusable — that is the fix for band-app/band#617's "terminal re-created on
- *  switch" with `maxCachedWorkspaces = 1`. */
+ *  delete of the active workspace propagates to the URL). */
 export function reconcileTerminalWorkspaces(
   validWorkspaceIds: Set<string>,
   activeWorkspaceId: string | null,
