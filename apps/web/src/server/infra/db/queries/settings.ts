@@ -93,12 +93,6 @@ export interface Settings {
   tokenSecret?: string;
   autoStartTunnel?: boolean;
   /**
-   * Maximum number of workspace dockview instances kept alive in memory at
-   * once. Higher values speed up switching back to recent workspaces at the
-   * cost of memory and background work. Defaults to 3 in the client.
-   */
-  maxCachedWorkspaces?: number;
-  /**
    * Experimental: forward Claude Code's partial-message stream events
    * (SDK's `includePartialMessages`) so the chat bubble types in
    * token-by-token instead of in per-block bursts. Off by default.

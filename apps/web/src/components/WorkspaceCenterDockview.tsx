@@ -91,6 +91,7 @@ import {
 } from "@/dashboard";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
+import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -270,8 +271,11 @@ export function getWorkspaceLeafActions(workspaceId: string | null): LeafActions
 const leafHeaderActionsByPanelId = new Map<string, () => React.ReactNode>();
 const HEADER_ACTIONS_EVENT = "band:leaf-header-actions-changed";
 
-function notifyHeaderActionsChanged(): void {
-  window.dispatchEvent(new CustomEvent(HEADER_ACTIONS_EVENT));
+// The event carries the publishing panel's id so only the group header that
+// holds that panel re-renders. Every visited workspace stays mounted, so an
+// unscoped broadcast would re-render every hidden workspace's headers too.
+function notifyHeaderActionsChanged(panelId: string): void {
+  window.dispatchEvent(new CustomEvent<string>(HEADER_ACTIONS_EVENT, { detail: panelId }));
 }
 
 /** Publish this leaf's header-action buttons while mounted (and while `render`
@@ -294,10 +298,10 @@ function usePublishHeaderActions(
     } else {
       leafHeaderActionsByPanelId.delete(panelId);
     }
-    notifyHeaderActionsChanged();
+    notifyHeaderActionsChanged(panelId);
     return () => {
       leafHeaderActionsByPanelId.delete(panelId);
-      notifyHeaderActionsChanged();
+      notifyHeaderActionsChanged(panelId);
     };
   }, [panelId, ...deps]);
 }
@@ -970,15 +974,18 @@ function useFileLeafLsp(
   const { settings } = useSettingsQuery();
   const workspacePath = useWorkspacePath(workspaceId);
   const [lspExtension, setLspExtension] = useState<Extension | null>(null);
+  // A cold-parked hidden workspace releases its language server (a tsserver
+  // can hold hundreds of MB) and re-acquires it when shown again.
+  const coldParked = useWorkspaceColdParked(workspaceId);
 
   // External / untitled files skip LSP entirely (no useful project context /
   // no file URI). Only TS/JS-family files have a mapped server language.
   const lspServerLang = useMemo(() => {
-    if (!settings.enableLSP) return null;
+    if (!settings.enableLSP || coldParked) return null;
     if (external || isUntitledPath(filePath)) return null;
     const cmLang = fileCmLang(filePath);
     return cmLang ? toLspServerLang(cmLang) : null;
-  }, [filePath, external, settings.enableLSP]);
+  }, [filePath, external, settings.enableLSP, coldParked]);
 
   const lspWsUrl = useMemo(
     () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
@@ -1080,6 +1087,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
   const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
   const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+  const coldParked = useWorkspaceColdParked(workspaceIdRaw);
 
   const workspacePath = useWorkspacePath(workspaceIdRaw);
 
@@ -1295,6 +1303,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // untitled buffers have no file URI, so `useFileLeafLsp` returns null
         // for both — pass it straight through.
         lspExtension={lspExtension}
+        // A cold-parked hidden workspace releases its server-side file watcher.
+        watchFileChanges={!coldParked}
         // Untitled buffers save through the OS "Save As" dialog; file-backed
         // tabs save in place (FileViewer handles that itself), so only wire
         // `onSaveAs` when this is an untitled buffer and the shell can save.
@@ -2095,12 +2105,16 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
   const [, bumpActions] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     const d = props.containerApi.onDidActivePanelChange(() => bumpActions());
-    window.addEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+    const onActionsChanged = (e: Event) => {
+      const panelId = (e as CustomEvent<string>).detail;
+      if (props.group.panels.some((p) => p.id === panelId)) bumpActions();
+    };
+    window.addEventListener(HEADER_ACTIONS_EVENT, onActionsChanged);
     return () => {
       d.dispose();
-      window.removeEventListener(HEADER_ACTIONS_EVENT, bumpActions);
+      window.removeEventListener(HEADER_ACTIONS_EVENT, onActionsChanged);
     };
-  }, [props.containerApi]);
+  }, [props.containerApi, props.group]);
 
   // Edge groups don't maximize — the add menu (left slot) is enough there.
   if (!isGridGroup) return null;
@@ -2305,7 +2319,10 @@ interface WorkspaceCenterDockviewProps {
   mobile?: boolean;
 }
 
-export function WorkspaceCenterDockview({
+// Memoized: every visited workspace stays mounted, so without it each render of
+// `SharedDockviewLayout` (route changes, dialog toggles, current-file changes)
+// would re-render every hidden workspace's dockview. The props are primitives.
+export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   workspaceId,
   visible,
   wsActive,
@@ -2777,11 +2794,12 @@ export function WorkspaceCenterDockview({
           // pre-seeded from persisted split blobs in onReady, so this is
           // populated before the nested leaves mount.
           // A leaf also survives if its terminal is still alive in the CLIENT
-          // cache (PARKED across a workspace switch). On return to an LRU-evicted
-          // workspace the server's `terminal.list` can momentarily omit the
-          // parked terminal; without this cache check reconcile would prune the
-          // restored leaf and the empty-fallback below would fabricate a phantom
-          // duplicate terminal (regression of the band-app/band#617 fix).
+          // cache (PARKED across a workspace switch). When the workspace's
+          // dockview remounts in-app, the server's `terminal.list` can
+          // momentarily omit the parked terminal; without this cache check
+          // reconcile would prune the restored leaf and the empty-fallback
+          // below would fabricate a phantom duplicate terminal (regression of
+          // the band-app/band#617 fix).
           const selfLive = data.terminalIds.has(panel.id) || hasTerminal(panel.id);
           const ownsLive =
             leafOwnsAnyLive(panel.id, data.terminalIds) ||
@@ -3325,4 +3343,4 @@ export function WorkspaceCenterDockview({
       </Dialog>
     </div>
   );
-}
+});

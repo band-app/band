@@ -121,9 +121,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [claudeCodePartialMessages, setClaudeCodePartialMessages] = useState(
     settings.claudeCodePartialMessages ?? false,
   );
-  const [maxCachedWorkspaces, setMaxCachedWorkspaces] = useState(
-    settings.maxCachedWorkspaces?.toString() ?? "",
-  );
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   // Default true — see Settings.useWebGLTerminalRenderer JSDoc.
   const [useWebGLTerminalRenderer, setUseWebGLTerminalRenderer] = useState(
@@ -334,7 +331,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
     if (claudeCodePartialMessages !== (settings.claudeCodePartialMessages ?? false)) return true;
-    if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
     if (webBrowserCdpEnabled !== (settings.webBrowserCdpEnabled ?? false)) return true;
@@ -353,7 +349,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     enableLSP,
     enableFilePreviewTabs,
     claudeCodePartialMessages,
-    maxCachedWorkspaces,
     selectedTheme,
     useWebGLTerminalRenderer,
     webBrowserCdpEnabled,
@@ -374,7 +369,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setEnableLSP(settings.enableLSP ?? false);
     setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
     setClaudeCodePartialMessages(settings.claudeCodePartialMessages ?? false);
-    setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
     setWebBrowserCdpEnabled(settings.webBrowserCdpEnabled ?? false);
@@ -391,7 +385,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.enableLSP,
     settings.enableFilePreviewTabs,
     settings.claudeCodePartialMessages,
-    settings.maxCachedWorkspaces,
     settings.theme,
     settings.useWebGLTerminalRenderer,
     settings.webBrowserCdpEnabled,
@@ -415,12 +408,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       const n = parseInt(webServerPort.trim(), 10);
       if (Number.isNaN(n) || n <= 0 || n >= 65536) return;
       parsedPort = n;
-    }
-    let parsedMaxCachedWorkspaces: number | undefined;
-    if (maxCachedWorkspaces.trim()) {
-      const n = parseInt(maxCachedWorkspaces.trim(), 10);
-      if (Number.isNaN(n) || n < 1 || n > 20) return;
-      parsedMaxCachedWorkspaces = n;
     }
     let parsedUsageRetentionDays: number | undefined;
     if (usageRetentionDays.trim()) {
@@ -447,7 +434,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       enableLSP,
       enableFilePreviewTabs,
       claudeCodePartialMessages,
-      maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
       useWebGLTerminalRenderer,
       webBrowserCdpEnabled,
@@ -549,25 +535,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="enable-file-preview-tabs"
                   checked={enableFilePreviewTabs}
                   onCheckedChange={setEnableFilePreviewTabs}
-                />
-              </SettingsRow>
-              <SettingsRow
-                variant="responsive"
-                htmlFor="max-cached-workspaces"
-                label="Cached workspaces"
-                description="How many recently visited workspaces to keep alive in memory for instant switching. Higher values use more memory. Leave empty for the default (3)."
-              >
-                <Input
-                  id="max-cached-workspaces"
-                  type="number"
-                  placeholder="3 (default)"
-                  value={maxCachedWorkspaces}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                    setMaxCachedWorkspaces(e.target.value)
-                  }
-                  min={1}
-                  max={20}
-                  className="h-8 w-full text-sm sm:w-32"
                 />
               </SettingsRow>
             </SettingsSection>

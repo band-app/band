@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
+import { registerBrowserGuest } from "../lib/browser-guest-retention";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
@@ -769,8 +770,13 @@ export function BrowserPaneComponent({
   }, [browserId, initialUrl, invoke]);
 
   // ------- create or show webview once placeholder has real dimensions -------
+  // Only while the workspace is shown: the view may have been destroyed while
+  // hidden (the hidden-workspace guest budget, or the desktop's own view cap),
+  // and it is rebuilt from `currentUrlRef` when the workspace is next shown,
+  // not in the background.
+  const wsActive = params.wsActive !== false;
   useEffect(() => {
-    if (!isDesktop || created || creatingRef.current) return;
+    if (!isDesktop || created || creatingRef.current || !wsActive) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -817,7 +823,47 @@ export function BrowserPaneComponent({
       clearTimeout(timer);
       observer.disconnect();
     };
-  }, [created, getBounds, invoke, browserId]);
+  }, [created, wsActive, getBounds, invoke, browserId]);
+
+  // ------- hidden-workspace guest budget -------
+  // While the native view exists, offer it to the budget in
+  // `browser-guest-retention.ts`. Evicting destroys the view; the create
+  // effect above rebuilds it at the last URL when the workspace is shown.
+  useEffect(() => {
+    if (!isDesktop || !created || !workspaceId) return;
+    const unregister = registerBrowserGuest(workspaceId, browserId, () => {
+      // Leave the budget now rather than on the next commit, so an evicted
+      // workspace stops counting as holding a live guest straight away.
+      unregister();
+      if (!createdRef.current) return;
+      createdRef.current = false;
+      setCreated(false);
+      desktopInvoke("browser_destroy", { browserId }).catch(() => {});
+    });
+    return unregister;
+  }, [created, workspaceId, browserId]);
+
+  // The desktop destroys views on its own too: `BrowserViewManager` caps live
+  // views and closes the oldest. A pane that stays mounted in a hidden
+  // workspace must notice, or it would show a blank rect on return.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    (async () => {
+      const u = await desktopListen<{ browser_id: string }>("browser-view-destroyed", (event) => {
+        if (event.payload.browser_id !== browserIdRef.current) return;
+        createdRef.current = false;
+        setCreated(false);
+      });
+      if (disposed) u();
+      else unlisten = u;
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // ------- listen for URL / title changes from the Rust side -------
   // Persist URL to server (debounced) so it survives workspace switches.
@@ -912,8 +958,8 @@ export function BrowserPaneComponent({
       unlistenTitle?.();
       // Flush a pending URL persist before tearing down. Just clearing
       // the timer would lose the latest URL — e.g. when the user
-      // navigates and then the workspace gets LRU-evicted before the
-      // debounce window elapses. Fire the mutation with whatever URL
+      // navigates and then closes the pane before the debounce window
+      // elapses. Fire the mutation with whatever URL
       // we have on hand; it's `void`-returning so it can safely race
       // the unmount.
       if (urlPersistTimer.current) {
@@ -999,7 +1045,6 @@ export function BrowserPaneComponent({
   // ------- workspace-level visibility -------
   useEffect(() => {
     if (!isDesktop || !created) return;
-    const wsActive = params.wsActive !== false;
     const logFail = (cmd: string) => (err: unknown) =>
       console.error(`[BrowserPane] ${cmd} failed`, err);
 
@@ -1016,7 +1061,7 @@ export function BrowserPaneComponent({
       }
       invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     }
-  }, [params.wsActive, api, created, getBounds, invoke, browserId]);
+  }, [wsActive, api, created, getBounds, invoke, browserId]);
 
   // ------- keep webview bounds in sync on resize -------
   useEffect(() => {

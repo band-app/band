@@ -112,9 +112,7 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin the LRU high enough that a plain A↔B switch keeps A cached (parked),
-  // not evicted — parking is what this spec exercises.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 

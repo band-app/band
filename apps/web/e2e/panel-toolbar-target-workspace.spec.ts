@@ -5,8 +5,8 @@
  *
  * The bug
  * -------
- * `MultiWorkspacePanelHost` keeps up to `DEFAULT_MAX_CACHED_WORKSPACES`
- * (3) workspaces mounted at once; inactive ones are only
+ * `MultiWorkspacePanelHost` keeps every visited workspace mounted at
+ * once; inactive ones are only
  * `visibility: hidden`, so several `DockviewChatContainer` instances are
  * live simultaneously and all keep re-rendering. The add/split handlers
  * used to live in a MODULE-LEVEL singleton ref that every instance

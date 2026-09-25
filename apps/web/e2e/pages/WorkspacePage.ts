@@ -113,16 +113,31 @@ export class WorkspacePage {
     });
   }
 
-  /** Locate the per-panel-host cached entry div for the given workspaceId
-   *  (issue #508). `MultiWorkspacePanelHost` renders one of these per
-   *  workspace it currently caches; the test asserts on their presence /
-   *  absence to verify the LRU map's contents through a public DOM
-   *  surface, without exporting internals. There are multiple panel
-   *  hosts (chat / changes / files / terminal / browser), so each cached
-   *  workspaceId can produce up to five matching elements — the test
-   *  cares about "any" vs "none", not exact count. */
+  /** Locate the mounted entry div for the given workspaceId (issue #508).
+   *  The single `MultiWorkspacePanelHost` renders exactly one of these per
+   *  mounted workspace; tests assert on their presence / absence to verify
+   *  the mounted set's contents through a public DOM surface, without
+   *  exporting internals. `markMountedWorkspace` and friends call
+   *  `.evaluate()` on it, which relies on that one-entry-per-workspace
+   *  shape. */
   cachedPanelEntries(workspaceId: string): Locator {
     return this.page.getByTestId(`workspace-panel-host__cached-entry--${workspaceId}`);
+  }
+
+  /** Mark a workspace's mounted entry element. A remount replaces the element,
+   *  so the mark surviving a round trip proves the workspace stayed mounted. */
+  async markMountedWorkspace(workspaceId: string): Promise<void> {
+    await this.cachedPanelEntries(workspaceId).evaluate((el) => {
+      (el as HTMLElement).dataset.bandProbe = "marked";
+    });
+  }
+
+  /** Whether the workspace's mounted entry still carries the mark set by
+   *  `markMountedWorkspace`. */
+  async isMountedWorkspaceMarked(workspaceId: string): Promise<boolean> {
+    return await this.cachedPanelEntries(workspaceId).evaluate(
+      (el) => (el as HTMLElement).dataset.bandProbe === "marked",
+    );
   }
 
   /** Locator for the chat tab panel's visibility marker inside a specific
@@ -342,10 +357,9 @@ export class WorkspacePage {
   /** Click a workspace card to switch to that workspace via the dashboard
    *  sidebar's client-side navigation. Unlike `goto()`, which does a full
    *  browser navigation that resets React state (including the
-   *  `MultiWorkspacePanelHost` LRU cache), this uses TanStack Router's
+   *  `MultiWorkspacePanelHost` mounted set), this uses TanStack Router's
    *  in-app navigation — the previously-active workspace's panels stay
-   *  mounted, which is what makes them cache candidates in the first
-   *  place. */
+   *  mounted, which is what keeps a return switch instant. */
   async switchWorkspace(workspaceId: string): Promise<void> {
     await test.step(`Switch workspace to ${workspaceId} via sidebar click`, async () => {
       await this.workspaceCard(workspaceId).click();
@@ -1597,6 +1611,65 @@ export class WorkspacePage {
   // the surface whether it's attached (live) or parked.
   // ──────────────────────────────────────────────────────────────────────
 
+  /** Track the `workspace.fileChanges` subscriptions a workspace holds open,
+   *  by reading the tRPC WebSocket frames the page sends (`subscription` opens
+   *  one, `subscription.stop` closes it; frames may be batched arrays). Each
+   *  open subscription pins the server's file watcher for that workspace.
+   *  Returns a getter for the current open count. Call BEFORE `goto`. */
+  trackFileChangeSubscriptions(workspaceId: string): () => number {
+    const open = new Set<number>();
+    this.page.on("websocket", (ws) => {
+      if (!ws.url().includes("/trpc")) return;
+      ws.on("framesent", (frame) => {
+        if (typeof frame.payload !== "string") return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(frame.payload);
+        } catch {
+          return;
+        }
+        const messages = (Array.isArray(parsed) ? parsed : [parsed]) as {
+          id?: number;
+          method?: string;
+          params?: { path?: string; input?: unknown };
+        }[];
+        for (const m of messages) {
+          if (typeof m.id !== "number") continue;
+          if (
+            m.method === "subscription" &&
+            m.params?.path === "workspace.fileChanges" &&
+            JSON.stringify(m.params.input ?? null).includes(workspaceId)
+          ) {
+            open.add(m.id);
+          } else if (m.method === "subscription.stop") {
+            open.delete(m.id);
+          }
+        }
+      });
+    });
+    return () => open.size;
+  }
+
+  /** Take over the page's timers and `Date` (Playwright's fake clock) so a test
+   *  can cross the parking thresholds (30 s / 5 min, for terminals and for
+   *  workspace cold park) without waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
+   *  `goto`. */
+  async installClock(): Promise<void> {
+    await this.page.clock.install();
+  }
+
+  /** Read the page's (fake) `Date.now()`. */
+  async clockNow(): Promise<number> {
+    return await this.page.evaluate(() => Date.now());
+  }
+
+  /** Jump the fake clock forward, firing each due timer at most once. */
+  async advanceClock(ms: number): Promise<void> {
+    await test.step(`Advance the clock by ${ms} ms`, async () => {
+      await this.page.clock.fastForward(ms);
+    });
+  }
+
   /** Start counting terminal WebSocket opens for a SPECIFIC workspace (matched
    *  on the `workspaceId=` query param). Returns a getter for the running count.
    *  Call BEFORE `goto`. Lets a test prove a given workspace's terminal did NOT
@@ -1800,6 +1873,48 @@ export class WorkspacePage {
   async terminalWrapperCount(workspaceId: string): Promise<number> {
     return await this.page.evaluate(
       (id) => document.querySelectorAll(`[data-workspace-id="${id}"]`).length,
+      workspaceId,
+    );
+  }
+
+  /** Mark a workspace's terminal wrappers so a later read can tell whether the
+   *  SAME live xterm survived (mark still present) or the terminal was disposed
+   *  and re-created (fresh wrapper, no mark). Returns how many were marked. */
+  async markTerminalWrappers(workspaceId: string): Promise<number> {
+    return await this.page.evaluate((id) => {
+      const wrappers = Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-workspace-id="${id}"]`),
+      );
+      for (const w of wrappers) w.dataset.bandProbe = "marked";
+      return wrappers.length;
+    }, workspaceId);
+  }
+
+  /** Mark one terminal's wrapper, by terminal id (see `markTerminalWrappers`). */
+  async markTerminalWrapper(terminalId: string): Promise<void> {
+    await this.page.evaluate((id) => {
+      const wrapper = document.querySelector<HTMLElement>(`[data-terminal-id="${id}"]`);
+      if (wrapper) wrapper.dataset.bandProbe = "marked";
+    }, terminalId);
+  }
+
+  /** Whether a terminal's wrapper exists, and whether it still carries the mark
+   *  set by `markTerminalWrapper`. A disposed terminal has no wrapper; a
+   *  disposed-then-recreated one has an unmarked wrapper. */
+  async terminalWrapperState(terminalId: string): Promise<"marked" | "unmarked" | "absent"> {
+    return await this.page.evaluate((id) => {
+      const wrapper = document.querySelector<HTMLElement>(`[data-terminal-id="${id}"]`);
+      if (!wrapper) return "absent";
+      return wrapper.dataset.bandProbe === "marked" ? "marked" : "unmarked";
+    }, terminalId);
+  }
+
+  /** Count a workspace's terminal wrappers that still carry the mark set by
+   *  `markTerminalWrappers`. */
+  async markedTerminalWrapperCount(workspaceId: string): Promise<number> {
+    return await this.page.evaluate(
+      (id) =>
+        document.querySelectorAll(`[data-workspace-id="${id}"][data-band-probe="marked"]`).length,
       workspaceId,
     );
   }

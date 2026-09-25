@@ -607,7 +607,7 @@ export function TerminalSplitLeaf({
       splitDisposerRef.current = null;
       activeTitleDisposerRef.current?.dispose();
       // Flush a pending debounced save rather than dropping it — otherwise the
-      // last pane-resize geometry is lost on a workspace switch / LRU eviction.
+      // last pane-resize geometry is lost on a workspace switch / unmount.
       // (`flushPersist` clears the timer itself.) Mirrors the outer dockview.
       if (persistTimerRef.current) flushPersistRef.current();
     };

@@ -40,8 +40,8 @@ interface TerminalPanelProps {
  *   - mirrors the entry's reactive UI state via `useSyncExternalStore` and
  *     renders the find bar + iOS keyboard toolbar wired to the entry's handlers.
  *
- * Dispose is driven externally (pane close / workspace eviction), NOT by this
- * component's unmount — unmount only parks.
+ * Dispose is driven externally (pane close / workspace deletion / the parking
+ * policy's cold park), NOT by this component's unmount — unmount only parks.
  */
 export function TerminalPanel({
   workspaceId,
@@ -64,15 +64,16 @@ export function TerminalPanel({
   // terminalId change (never happens for a given dockview panel) re-resolves.
   const entryRef = useRef<TerminalCacheEntry | null>(null);
   // Re-resolve when the terminalId changes (never for a given panel) OR when the
-  // held entry was disposed out from under us — the cache's LRU can evict a
-  // parked entry while this panel is mounted-but-hidden (a cached, inactive
+  // held entry was disposed out from under us — the parking policy cold-parks a
+  // hidden terminal while this panel stays mounted (a hidden tab, or a hidden
   // workspace). On becoming visible again we must pick up a fresh entry, which
   // reconnects + replays, rather than attach a destroyed one (a no-op that would
-  // leave a dead/blank terminal).
+  // leave a dead/blank terminal). Only on becoming visible: re-creating it on an
+  // unrelated re-render while still hidden would undo the cold park.
   if (
     !entryRef.current ||
     entryRef.current.terminalId !== terminalId ||
-    entryRef.current.isDestroyed()
+    (entryRef.current.isDestroyed() && visible)
   ) {
     entryRef.current = getOrCreateTerminal(terminalId, {
       workspaceId,

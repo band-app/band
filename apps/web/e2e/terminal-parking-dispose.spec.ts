@@ -1,16 +1,16 @@
 /**
  * band-app/band#617 — parking model: lifecycle (dispose vs park).
  *
- * The terminal cache is bounded by its OWN LRU (not the panel host's
- * `maxCachedWorkspaces`). The scenarios here pin down when a cached terminal is
- * DISPOSED vs merely PARKED:
+ * The scenarios here pin down when a cached terminal is DISPOSED vs merely
+ * PARKED (the time-based renderer policy has its own spec,
+ * `terminal-park-policy.spec.ts`):
  *
  *  1. Closing a terminal tab disposes that terminal's cached xterm (its wrapper
  *     is removed from the DOM entirely), alongside the server-side kill.
  *
- *  2. Switching away with `maxCachedWorkspaces = 1` PARKS the terminal (not
- *     disposed) and returning REUSES it — same terminalId, no new socket, output
- *     intact. This is the reported "terminal re-created on switch" bug.
+ *  2. Switching away PARKS the terminal (not disposed) and returning REUSES it
+ *     — same terminalId, no new socket, output intact. This is the reported
+ *     "terminal re-created on switch" bug.
  *
  *  3. Deleting a workspace disposes its terminals (the only workspace-level
  *     dispose trigger now) via the projects reconcile, while the active
@@ -123,14 +123,11 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin the LRU to 1 so a single A→B switch EVICTS A from the panel cache,
-  // exercising the "evicted terminal is parked, not disposed" path.
   // `useWebGLTerminalRenderer: false` forces xterm's DOM renderer so the printed
   // output lands in `.xterm-rows` where `readTerminalRenderedText` can read it —
   // CI's Chromium has WebGL, which otherwise renders to a canvas (empty rows).
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    maxCachedWorkspaces: 1,
     useWebGLTerminalRenderer: false,
   });
   server = await startServer({ tmpHome });
@@ -183,13 +180,12 @@ test.describe("Terminal parking: dispose triggers", () => {
       .toBe(1);
   });
 
-  test("switching away with maxCachedWorkspaces=1 parks the terminal and returning reuses it (no re-create)", async ({
+  test("switching away parks the terminal and returning reuses it (no re-create)", async ({
     page,
   }) => {
-    // This is the exact reported bug: with maxCachedWorkspaces=1, sidebar-
-    // switching A → B → A used to tear A's terminal down and bring it back as a
-    // fresh/empty shell. The terminal cache now has its OWN LRU bound and is NOT
-    // disposed on panel-LRU eviction, so A's terminal is parked and REUSED.
+    // This is the reported bug: sidebar-switching A → B → A used to tear A's
+    // terminal down and bring it back as a fresh/empty shell. A's terminal is
+    // now parked on switch-away and REUSED on return.
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     // A-scoped socket counter: a reuse opens NO new socket; a re-create would.
     const socketCount = workspacePage.trackTerminalSocketOpensFor(WORKSPACE_A);
@@ -206,17 +202,17 @@ test.describe("Terminal parking: dispose triggers", () => {
     expect(idBefore.length).toBe(1);
 
     // Produce output we can look for after the round-trip.
-    await workspacePage.runInTerminal("echo EVICT_MARKER_A");
+    await workspacePage.runInTerminal("echo PARK_MARKER_A");
     await expect
       .poll(
         async () =>
-          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("EVICT_MARKER_A"),
+          (await workspacePage.readTerminalRenderedText(WORKSPACE_A)).includes("PARK_MARKER_A"),
         { timeout: 20_000 },
       )
       .toBe(true);
 
-    // Switch to B. A is evicted from the panel LRU (its React subtree unmounts),
-    // but its terminal must stay alive — PARKED off-screen, not disposed.
+    // Switch to B. A's workspace stays mounted but hidden, and its terminal
+    // must stay alive — PARKED off-screen, not disposed.
     await workspacePage.switchWorkspace(WORKSPACE_B);
     await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
       timeout: 20_000,
@@ -238,7 +234,7 @@ test.describe("Terminal parking: dispose triggers", () => {
       .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
       .toBe(false);
     expect(await workspacePage.terminalIds(WORKSPACE_A)).toEqual(idBefore);
-    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_A)).toContain("EVICT_MARKER_A");
+    expect(await workspacePage.readTerminalRenderedText(WORKSPACE_A)).toContain("PARK_MARKER_A");
     // No reconnect happened — the live socket was reused across the switch.
     expect(socketCount()).toBe(1);
   });

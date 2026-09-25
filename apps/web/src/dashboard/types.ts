@@ -217,13 +217,6 @@ export interface Settings {
   enableFilePreviewTabs?: boolean;
   theme?: Theme;
   /**
-   * Maximum number of workspace dockview instances kept alive in memory at
-   * once for instant switching. Higher values use more memory but make
-   * switching back to recent workspaces faster.
-   * @default 3
-   */
-  maxCachedWorkspaces?: number;
-  /**
    * Use the GPU-accelerated WebGL renderer for terminal panels. Enables
    * `customGlyphs` (continuous box-drawing / powerline / block art) and
    * lets the panel use iTerm-style row spacing (`lineHeight: 1.2`). When
