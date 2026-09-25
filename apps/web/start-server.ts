@@ -1132,6 +1132,12 @@ async function main() {
         console.error("First-time setup failed:", err);
       }
 
+      // Terminals outlive this server in the terminal daemon; drop the ones
+      // whose workspace was deleted while no server was running.
+      await terminalService.reconcile().catch((err) => {
+        console.error("Failed to reconcile terminals:", err);
+      });
+
       // Start cronjob scheduler AFTER setup so any setting tweaks
       // `runFirstTimeSetup` applied (default-disable etc.) are visible
       // to the first scheduled load.
@@ -1157,6 +1163,8 @@ async function main() {
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
     stopUsageScanner();
+    // Disconnect only: terminals live in the terminal daemon and must survive
+    // this restart. (In-process terminals, the fallback, die here.)
     await terminalService.close().catch((err) => {
       console.error("Failed to close terminal backend:", err);
     });

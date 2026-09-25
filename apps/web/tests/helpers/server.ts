@@ -28,13 +28,19 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./server-runtime";
+import { stopTerminalDaemon } from "./terminal-daemon";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
 
 export interface ServerHandle {
   url: string;
   home: string;
-  close: () => Promise<void>;
+  /**
+   * Stop the server, then the terminal daemon it may have launched for
+   * `home` (see `stopTerminalDaemon`). Pass `keepTerminalDaemon` to model a
+   * server restart, where the daemon and its shells must survive.
+   */
+  close: (opts?: { keepTerminalDaemon?: boolean }) => Promise<void>;
 }
 
 /**
@@ -139,6 +145,8 @@ export async function trpcData<T>(res: Response): Promise<T> {
 export interface StartServerOptions {
   tmpHome: string;
   env?: Record<string, string>;
+  /** Pin the port, e.g. to restart a server on the same address. Random by default. */
+  port?: number;
 }
 
 /**
@@ -162,7 +170,7 @@ export interface StartServerOptions {
  */
 export async function startServer(opts: StartServerOptions): Promise<ServerHandle> {
   const { tmpHome, env: extraEnv } = opts;
-  const port = await getRandomPort();
+  const port = opts.port ?? (await getRandomPort());
 
   return new Promise((resolve, reject) => {
     const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
@@ -207,15 +215,17 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
         resolve({
           url: `http://127.0.0.1:${port}`,
           home: tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
+          close: async (closeOpts) => {
+            await new Promise<void>((r) => {
               const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
               child.on("exit", () => {
                 clearTimeout(fallback);
                 r();
               });
               killGroup("SIGTERM");
-            }),
+            });
+            if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(tmpHome);
+          },
         });
       }
     });

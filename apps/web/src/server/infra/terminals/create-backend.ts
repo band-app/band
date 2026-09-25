@@ -8,7 +8,10 @@ import type { TerminalBackend } from "./terminal-backend";
 const log = createLogger("terminal-backend");
 
 /**
- * Pick where this server's terminals live.
+ * Pick where this server's terminals live: the terminal daemon by default,
+ * so shells survive a server restart. In-process on Windows (no ConPTY
+ * support in the daemon yet) and when `BAND_TERMINAL_DAEMON=0`, the
+ * operator's escape hatch.
  *
  * `serverRoot` is the directory holding the server entry: `dist/` for the
  * bundle, where the daemon is `terminal-daemon.mjs`, or `apps/web/` in dev,
@@ -16,7 +19,7 @@ const log = createLogger("terminal-backend");
  */
 export function createTerminalBackend(serverRoot: string, bandHome: string): TerminalBackend {
   if (process.platform === "win32") return new InProcessTerminalBackend();
-  if (process.env.BAND_TERMINAL_DAEMON !== "1") return new InProcessTerminalBackend();
+  if (process.env.BAND_TERMINAL_DAEMON === "0") return new InProcessTerminalBackend();
 
   const entry = [
     join(serverRoot, "terminal-daemon.mjs"),

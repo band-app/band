@@ -236,6 +236,25 @@ export class TerminalService {
     return this.backend.killWorkspace(workspaceId);
   }
 
+  /**
+   * Kill sessions whose workspace no longer exists — it was deleted while
+   * no server was running, so the `killWorkspace` in the delete path never
+   * reached them. Runs once at boot. Only workspaces missing from the shared
+   * `~/.band` state count, so a second server on the same home (dev beside
+   * desktop) never kills the other's terminals.
+   */
+  async reconcile(): Promise<void> {
+    const entries = await this.backend.listAll();
+    for (const entry of entries) {
+      if (workspaceService.resolve(entry.workspaceId)) continue;
+      log.info(
+        { terminalId: entry.terminalId, workspaceId: entry.workspaceId },
+        "killing terminal of a deleted workspace",
+      );
+      await this.backend.kill(entry.terminalId);
+    }
+  }
+
   /** Release the backend at server shutdown — see `TerminalBackend.close`. */
   close(): Promise<void> {
     return this.backend.close();

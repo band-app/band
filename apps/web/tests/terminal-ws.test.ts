@@ -30,6 +30,7 @@ import { WebSocket } from "ws";
 import type { AppRouter } from "../src/server/api/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "terminal-ws-test-token";
@@ -110,11 +111,13 @@ async function startServer(
           url: `http://127.0.0.1:${port}`,
           port,
           home,
-          close: () =>
-            new Promise<void>((r) => {
+          close: async () => {
+            await new Promise<void>((r) => {
               child.on("exit", () => r());
               child.kill("SIGTERM");
-            }),
+            });
+            await stopTerminalDaemon(home);
+          },
         });
       }
     });
