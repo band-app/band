@@ -118,7 +118,11 @@ async function startServer(
                 r();
                 return;
               }
-              child.on("exit", () => r());
+              const fallback = setTimeout(() => child.kill("SIGKILL"), 5_000);
+              child.on("exit", () => {
+                clearTimeout(fallback);
+                r();
+              });
               child.kill("SIGTERM");
             });
             await stopTerminalDaemon(home);

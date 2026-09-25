@@ -12,9 +12,8 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 
 /**
- * Who may touch the daemon's socket path, and how. Ported from orca's
- * `src/main/daemon/daemon-endpoint-ownership.ts`; its `AGENTS.md` records the
- * bugs behind each rule:
+ * Who may touch the daemon's socket path, and how. Adopted from orca's
+ * terminal daemon, where each rule below was learned from a bug:
  *
  *   - Only a daemon publishing itself may change the directory entry, and only
  *     to replace an entry it has just proven dead.
@@ -235,6 +234,9 @@ export function checkEndpointOwner(socketPath: string): "ok" | "missing" {
   }
   if (uid !== undefined && socketStats.uid !== uid) {
     throw new Error(`${socketPath} is owned by another user`);
+  }
+  if ((socketStats.mode & 0o077) !== 0) {
+    throw new Error(`${socketPath} is accessible to other users`);
   }
   return "ok";
 }

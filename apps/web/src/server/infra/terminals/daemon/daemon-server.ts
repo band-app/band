@@ -357,6 +357,9 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   ): Promise<DaemonRequests["attach"][1]> {
     const { terminalId, cols, rows } = request;
     const dims = cols !== undefined && rows !== undefined ? { cols, rows } : undefined;
+    // Read before the await: the shell can exit while the snapshot drains.
+    const workspaceId = pool.info(terminalId)?.workspaceId;
+    if (workspaceId === undefined) return null;
     const attached = await pool.attach(terminalId, dims, (d, seq) =>
       send(client, "stream", { t: "data", id: terminalId, seq, d } satisfies StreamEvent),
     );
@@ -368,7 +371,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     } else {
       client.attached.set(terminalId, attached.unsubscribe);
     }
-    return { ...attached.snapshot, workspaceId: pool.info(terminalId)?.workspaceId ?? "" };
+    return { ...attached.snapshot, workspaceId };
   }
 
   function tokenMatches(candidate: string): boolean {

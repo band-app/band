@@ -281,7 +281,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
     const lost = [...this.known];
     this.known.clear();
     this.lastSeq.clear();
+    const gates = [...this.gates.values()].flatMap((viewers) => [...viewers]);
     this.gates.clear();
+    // Release their buffers now. Their detach notify goes nowhere: `client` is null.
+    for (const gate of gates) gate.detach();
     for (const [terminalId, workspaceId] of lost) {
       this.emitExit({ terminalId, workspaceId, exitCode: -1, killed: false, cleanupOnExit: false });
     }

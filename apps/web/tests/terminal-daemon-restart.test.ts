@@ -177,12 +177,11 @@ describe("terminal daemon — shells survive a server restart", () => {
     expect(killRes.status).toBe(200);
     expect(await listTerminals(server)).toEqual([]);
     await waitFor(async () => (isAlive(created.pid) ? undefined : true), { label: "shell exit" });
-  });
 
-  it("rejects terminal.list on the restarted server without the band_token cookie", async () => {
+    // The restarted server still refuses a request without the token.
     const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
-    const res = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
-    expect(res.status).toBe(401);
+    const unauthenticated = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
+    expect(unauthenticated.status).toBe(401);
   });
 });
 

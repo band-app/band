@@ -83,7 +83,10 @@ function isTerminalDaemon(pid: number): boolean {
     const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
       encoding: "utf8",
     });
-    return command.includes("terminal-daemon");
+    // `-o command=` suppresses the header on macOS and procps-ng; trim guards
+    // against a variant that pads an empty result.
+    const trimmed = command.trim();
+    return trimmed.length > 0 && trimmed.includes("terminal-daemon");
   } catch {
     return false;
   }

@@ -257,7 +257,9 @@ class FrameSink {
 
 /**
  * Connect to the daemon socket at `path`, but only if it is ours (see
- * `checkEndpointOwner`): the connection is about to carry the token.
+ * `checkEndpointOwner`): the connection is about to carry the token. The
+ * check and the connect are two syscalls, but only we can write to the 0700
+ * directory, so no one else can swap the socket in between.
  */
 function openSocket(path: string): Promise<Socket> {
   try {

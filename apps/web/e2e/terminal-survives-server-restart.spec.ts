@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { stopTerminalDaemon } from "../tests/helpers/terminal-daemon";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -65,6 +66,9 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
+  // If `restart()` threw midway, `server` is the old handle and a new server's
+  // daemon may still run; stop whatever serves this home before deleting it.
+  await stopTerminalDaemon(tmpHome);
   cleanupTmpHome(tmpHome);
   rmSync(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
