@@ -41,10 +41,8 @@ const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
  *
  * Note this is a tree, not a commit — `git diff` accepts either, but
  * callers that strictly expect a commit-ish (e.g. `git merge-base
- * <sha> HEAD`) will reject it. The DiffView guards against ever
- * passing this through for a plain project via its `isPlain` check;
- * other potential consumers should treat this as "empty diff,
- * intentionally" rather than a usable commit reference.
+ * <sha> HEAD`) will reject it. Consumers should treat this as "empty
+ * diff, intentionally" rather than a usable commit reference.
  */
 export const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 

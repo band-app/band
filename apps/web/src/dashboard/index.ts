@@ -11,16 +11,13 @@ export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
-export { CommitDialog } from "./components/CommitDialog";
 export { DashboardShell } from "./components/DashboardShell";
 export {
   DiffFileContent,
-  type DiffStats,
-  DiffView,
   getStoredViewMode,
   storeViewMode,
   type ViewMode,
-} from "./components/DiffView";
+} from "./components/DiffFileContent";
 export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
@@ -61,7 +58,6 @@ export {
   LABEL_LAST_WORKSPACE_KEY,
   useLabelLastWorkspace,
 } from "./hooks/use-label-last-workspace";
-export { useProjectKindForWorkspace, useProjectKindMap } from "./hooks/use-project-kind";
 export {
   useAddProject,
   useCreateWorkspace,

@@ -531,7 +531,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
   });
 
   it("workspace.getDiffSummary returns an empty summary for plain projects", async () => {
-    // The DiffView fetches this on mount. For plain projects we don't want
+    // The Changes sidepanel fetches this on mount. For plain projects we don't want
     // to surface a git error — return an empty result so the UI renders its
     // "folder is not a git repo" message instead.
     const res = await trpcQuery(server.url, "workspace.getDiffSummary", {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import type { DiffMode } from "../types";
 
-// Both keys are workspace-scoped so the DiffView and the Changes-tab badge
-// always read the same target — see issue #396 ("Changes tab — out of sync").
+// Both keys are workspace-scoped so the Changes sidepanel, the diff leaves and
+// the Changes-tab badge always read the same target — see issue #396 ("Changes tab — out of sync").
 // `diffMode` used to be a global preference (one key for all workspaces) but
 // that caused the badge for workspace B to inherit workspace A's mode the
 // first time a user opened B in a new session; per-workspace keys keep the
@@ -17,7 +17,8 @@ const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
  * Custom DOM event fired whenever any subscriber mutates the diff target via
  * `setDiffMode` / `setCompareBranch`. The browser's `storage` event only
  * fires across windows, so we add this same-window broadcast so the Changes
- * badge re-fetches when the user changes the dropdown inside the DiffView.
+ * badge and open diff leaves re-fetch when the user changes the sidepanel's
+ * diff-target dropdown.
  */
 const CHANGE_EVENT = "band:diff-target-changed";
 
@@ -42,7 +43,7 @@ function readStoredDiffMode(workspaceId: string): DiffMode {
   return "uncommitted";
 }
 
-export function readStoredCompareBranch(workspaceId: string): string | null {
+function readStoredCompareBranch(workspaceId: string): string | null {
   try {
     return localStorage.getItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
   } catch {
@@ -83,7 +84,8 @@ export interface UseDiffTargetReturn {
  * compare branch) for a given workspace. State is mirrored to localStorage
  * so it survives reloads, and any subscriber in the same window receives a
  * synthetic event when another subscriber mutates the state — this is what
- * keeps the Changes-tab badge in sync with the DiffView's branch dropdown.
+ * keeps the Changes-tab badge and diff leaves in sync with the sidepanel's
+ * diff-target dropdown.
  */
 export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   const [diffMode, setDiffModeState] = useState<DiffMode>(() => readStoredDiffMode(workspaceId));
@@ -116,7 +118,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   // NOTE: there is a brief pre-paint window between the first render and
   // when this effect registers the listener, during which an event dispatched
   // by another subscriber would be missed. In practice this is a non-issue
-  // because the DiffView and the badge hooks mount together in the same tick
+  // because the sidepanel and the badge hooks mount together in the same tick
   // and user interaction happens much later — but worth revisiting if Band
   // ever renders them in separate React roots or defers one with
   // `startTransition`.

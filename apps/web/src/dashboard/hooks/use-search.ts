@@ -19,17 +19,12 @@ const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
 interface UseSearchOptions {
   /** Return the current set of editor views to search in. */
   getViews: () => EditorView[];
-  /**
-   * Optional custom match collector (e.g. for cross-file ordering in DiffView).
-   * When omitted the default `collectSearchMatches` is used.
-   */
-  collectMatches?: (query: string, opts: SearchOptions) => SearchMatch[];
   /** Called when the find-in-file open callback changes (for Cmd+F integration). */
   onFindInFile?: ((fn: (() => void) | null) => void) | null;
   /**
    * Whether this hook registers its own unscoped, window-level Cmd/Ctrl+F
    * handler that opens the bar on ANY find keypress. Defaults to `true` for
-   * standalone consumers (e.g. mobile `CodeBrowserView`, `DiffView`) that have
+   * standalone consumers (e.g. mobile `CodeBrowserView`) that have
    * no outer focus-scoping layer.
    *
    * Set to `false` when a parent already owns a focus-scoped find keybind
@@ -74,7 +69,6 @@ export interface UseSearchReturn {
 
 export function useSearch({
   getViews,
-  collectMatches,
   onFindInFile,
   registerGlobalFindKey = true,
 }: UseSearchOptions): UseSearchReturn {
@@ -98,14 +92,11 @@ export function useSearch({
     searchOptionsRef.current = searchOptions;
   }, [searchOptions]);
 
-  // Stable ref for getViews / collectMatches so callbacks don't re-create.
+  // Stable ref for getViews so callbacks don't re-create.
   const getViewsRef = useRef(getViews);
   getViewsRef.current = getViews;
-  const collectMatchesRef = useRef(collectMatches);
-  collectMatchesRef.current = collectMatches;
 
   const getMatches = useCallback((query: string, opts: SearchOptions): SearchMatch[] => {
-    if (collectMatchesRef.current) return collectMatchesRef.current(query, opts);
     return collectSearchMatches(getViewsRef.current(), query, opts);
   }, []);
 

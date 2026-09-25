@@ -3,11 +3,11 @@
 //
 // Root cause: two separate `httpBatchLink`s — one in
 // `apps/web/src/lib/trpc-client.ts`, one in
-// `apps/web/src/dashboard/adapters/web.ts` (the client DiffView actually
-// routes through) — were configured without `maxURLLength`, so
-// the default cap is `Infinity`. DiffView fires one
+// `apps/web/src/dashboard/adapters/web.ts` (the client the former DiffView
+// routed through) — were configured without `maxURLLength`, so
+// the default cap is `Infinity`. DiffView fired one
 // `workspace.getFileDiff` query per expanded file on mount, on every SSE
-// `branch-status` tick, and all at once when the user clicks "expand all".
+// `branch-status` tick, and all at once when the user clicked "expand all".
 // All of those queries collapse into a single GET whose URL encodes every
 // batched op's `workspaceId` + `filePath` + `mergeBase` (40-char SHA).
 // Past Node's default 16 KiB header limit the server returns 431 with an
@@ -232,7 +232,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
     // convention change doesn't silently fail this test with a misleading
     // "workspace not found" error instead of the batch-URL assertion.
     workspaceId = toWorkspaceId(project, branch);
-    // `getDiffSummary` is the procedure DiffView itself uses to discover
+    // `getDiffSummary` is the procedure the former DiffView used to discover
     // the merge-base + per-file statuses before fanning out a
     // `getFileDiff` query per expanded file, so use it here too.
     const diffRes = await client.workspace.getDiffSummary.query({
@@ -253,7 +253,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
   });
 
   it(`resolves ${FILE_COUNT} parallel getFileDiff queries through the batch link`, async () => {
-    // Reproduces DiffView's behavior on a branch with many expanded files:
+    // Reproduces the former DiffView's behavior on a branch with many expanded files:
     // every file panel fires `getFileDiff` simultaneously, and they all
     // collapse into batched GETs through `httpBatchLink`.
     const client = createBatchClient(server.url);

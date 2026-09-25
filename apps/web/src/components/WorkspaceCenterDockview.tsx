@@ -819,7 +819,7 @@ function removeFileTabState(ws: string, path: string): void {
 // ---------------------------------------------------------------------------
 //
 // `FileViewer` has no built-in find, so we replicate the small slice of
-// CodeBrowserView / DiffView's wiring here: a `useSearch` over the leaf's
+// CodeBrowserView's wiring here: a `useSearch` over the leaf's
 // CodeMirror editor view(s) plus a `SearchBar`. `useSearch` already ships a
 // window-level Cmd/Ctrl+F handler and reports its "open find" fn through
 // `onFindInFile`, so all we add on top is:
@@ -1354,8 +1354,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
 }
 
 // Full-file context: `getFileDiff`'s max contextLines renders the whole file
-// with the changes in place (not just the changed hunks) — matches DiffView's
-// "Show full file" step.
+// with the changes in place (not just the changed hunks).
 const FULL_FILE_CONTEXT = 99999;
 
 function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
