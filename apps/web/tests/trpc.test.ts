@@ -454,6 +454,11 @@ describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
+  it("settings.get still requires auth", async () => {
+    const res = await fetch(`${server.url}/trpc/settings.get`);
+    expect(res.status).toBe(401);
+  });
+
   it("settings.get loads a settings file that still stores the key", async () => {
     const res = await trpcQuery(server.url, "settings.get");
     expect(res.status).toBe(200);
