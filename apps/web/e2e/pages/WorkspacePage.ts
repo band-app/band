@@ -125,6 +125,22 @@ export class WorkspacePage {
     return this.page.getByTestId(`workspace-panel-host__cached-entry--${workspaceId}`);
   }
 
+  /** Mark a workspace's mounted entry element. A remount replaces the element,
+   *  so the mark surviving a round trip proves the workspace stayed mounted. */
+  async markMountedWorkspace(workspaceId: string): Promise<void> {
+    await this.cachedPanelEntries(workspaceId).evaluate((el) => {
+      (el as HTMLElement).dataset.bandProbe = "marked";
+    });
+  }
+
+  /** Whether the workspace's mounted entry still carries the mark set by
+   *  `markMountedWorkspace`. */
+  async isMountedWorkspaceMarked(workspaceId: string): Promise<boolean> {
+    return await this.cachedPanelEntries(workspaceId).evaluate(
+      (el) => (el as HTMLElement).dataset.bandProbe === "marked",
+    );
+  }
+
   /** Locator for the chat tab panel's visibility marker inside a specific
    *  workspace's cached panel host (issue #469). The marker testid is set
    *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
