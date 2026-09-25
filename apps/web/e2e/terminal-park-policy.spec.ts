@@ -19,11 +19,11 @@
  * lands in `.xterm-rows` where `readTerminalRenderedText` can read it.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -49,35 +49,18 @@ test.use({ viewport: { width: 1280, height: 800 } });
 let server!: ServerHandle;
 let tmpHome!: string;
 
-function makeGitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@example.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@example.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-}
-
-function git(cwd: string, args: string[], home: string): void {
-  execFileSync("git", args, { cwd, env: makeGitEnv(home) });
-}
-
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, PROJECT);
   mkdirSync(repoPath, { recursive: true });
-  git(repoPath, ["init", "-q", "-b", "main"], tmpHome);
+  gitInHome(repoPath, ["init", "-q", "-b", "main"], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# park policy\n");
-  git(repoPath, ["add", "."], tmpHome);
-  git(repoPath, ["commit", "-q", "-m", "init"], tmpHome);
+  gitInHome(repoPath, ["add", "."], tmpHome);
+  gitInHome(repoPath, ["commit", "-q", "-m", "init"], tmpHome);
   const worktrees = [{ branch: "main", path: repoPath }];
   for (const branch of BRANCHES) {
     const path = join(tmpHome, `${PROJECT}-${branch}`);
-    git(repoPath, ["worktree", "add", "-q", "-b", branch, path], tmpHome);
+    gitInHome(repoPath, ["worktree", "add", "-q", "-b", branch, path], tmpHome);
     worktrees.push({ branch, path });
   }
   seedState(tmpHome, {
@@ -125,15 +108,21 @@ test.describe("Terminal parking policy", () => {
     await workspacePage.installClock();
 
     await openFirst(workspacePage, oldest);
+    // The fake clock keeps flowing in real time while the switches run, so
+    // measure the thresholds from just before the oldest is hidden (the hide
+    // lands a click later, so `elapsed` never undercounts).
+    const oldestHiddenAt = await workspacePage.clockNow();
     for (const id of recent) await switchTo(workspacePage, id);
     await switchTo(workspacePage, active);
+    const elapsed = (await workspacePage.clockNow()) - oldestHiddenAt;
+    expect(elapsed).toBeLessThan(29 * SECOND);
 
     // Under the 30 s delay nothing is disposed, even over budget.
-    await workspacePage.advanceClock(20 * SECOND);
+    await workspacePage.advanceClock(29 * SECOND - elapsed);
     expect(await workspacePage.markedTerminalWrapperCount(oldest)).toBe(1);
 
     // Past it, the oldest falls outside the 4 most recently hidden.
-    await workspacePage.advanceClock(11 * SECOND);
+    await workspacePage.advanceClock(2 * SECOND);
     await expect
       .poll(() => workspacePage.terminalWrapperCount(oldest), { timeout: 10_000 })
       .toBe(0);

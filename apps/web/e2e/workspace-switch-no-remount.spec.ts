@@ -12,11 +12,11 @@
  * read it.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -37,35 +37,18 @@ test.use({ viewport: { width: 1280, height: 800 } });
 let server!: ServerHandle;
 let tmpHome!: string;
 
-function makeGitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@example.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@example.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-}
-
-function git(cwd: string, args: string[], home: string): void {
-  execFileSync("git", args, { cwd, env: makeGitEnv(home) });
-}
-
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, PROJECT);
   mkdirSync(repoPath, { recursive: true });
-  git(repoPath, ["init", "-q", "-b", "main"], tmpHome);
+  gitInHome(repoPath, ["init", "-q", "-b", "main"], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# no remount\n");
-  git(repoPath, ["add", "."], tmpHome);
-  git(repoPath, ["commit", "-q", "-m", "init"], tmpHome);
+  gitInHome(repoPath, ["add", "."], tmpHome);
+  gitInHome(repoPath, ["commit", "-q", "-m", "init"], tmpHome);
   const worktrees = [{ branch: "main", path: repoPath }];
   for (const branch of BRANCHES) {
     const path = join(tmpHome, `${PROJECT}-${branch}`);
-    git(repoPath, ["worktree", "add", "-q", "-b", branch, path], tmpHome);
+    gitInHome(repoPath, ["worktree", "add", "-q", "-b", branch, path], tmpHome);
     worktrees.push({ branch, path });
   }
   seedState(tmpHome, {
@@ -110,6 +93,9 @@ test("returning to the first of six visited workspaces does not remount it", asy
   await expect(workspacePage.terminalTabVisibilityMarker(first, true)).toBeVisible();
 
   expect(await workspacePage.isMountedWorkspaceMarked(first)).toBe(true);
+  // Only the shown workspace takes focus; the one just left is inert.
+  expect(await workspacePage.isMountedWorkspaceInert(first)).toBe(false);
+  expect(await workspacePage.isMountedWorkspaceInert(others[others.length - 1])).toBe(true);
   expect(await workspacePage.markedTerminalWrapperCount(first)).toBe(1);
   expect(await workspacePage.readTerminalRenderedText(first)).toContain("NO_REMOUNT_42");
   expect(socketOpens()).toBe(1);

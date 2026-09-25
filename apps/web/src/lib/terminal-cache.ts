@@ -11,9 +11,6 @@ import {
   TERMINAL_TAB_COLD_PARK_DELAY_MS,
   TERMINAL_TAB_HOT_RETAIN_LIMIT,
   TERMINAL_TAB_HOT_RETAIN_MS,
-  TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS,
-  TERMINAL_WORKSPACE_HOT_RETAIN_LIMIT,
-  TERMINAL_WORKSPACE_HOT_RETAIN_MS,
 } from "./terminal-park-policy";
 import { getParkingContainer } from "./terminal-parking";
 import {
@@ -25,6 +22,7 @@ import {
   pointToCell,
   wordSelectionAt,
 } from "./terminal-selection";
+import { isWorkspaceColdParked, subscribeWorkspaceColdPark } from "./workspace-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 
 // ---------------------------------------------------------------------------
@@ -169,9 +167,13 @@ const MAX_LAYOUT_FRAMES = 5;
 //
 // WebGL contexts: Chromium caps live contexts per page (about 16) and drops the
 // oldest when a new one is created. Each warm terminal keeps its context while
-// parked. The policy bounds the warm set, and a dropped context is not fatal:
-// `onContextLoss` disposes the addon and marks the surface suspect, and the next
-// `attach` rebuilds it. There is deliberately no user setting for this.
+// parked, and the policy's warm set is larger than that cap: up to 6 hidden
+// terminals in each of 4 warm hidden workspaces plus the active workspace's,
+// and more during the 30 s grace window. So with WebGL on, a large working set
+// does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
+// parked terminal is only marked suspect and rebuilds on its next `attach`, and
+// only an attached one rebuilds at once, so a loss costs one glyph re-raster on
+// reveal. There is deliberately no user setting for this.
 
 export interface PaneMetadata {
   name?: string;
@@ -1160,6 +1162,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (!attached) activatedSeq = nextActivationSeq();
       attached = true;
       hiddenSince = null;
+      scheduleParkingPass();
       if (attachOpts?.autoFocus) autoFocusPending = true;
       // Move the persistent wrapper into the live box (no-op if already there).
       if (wrapper.parentElement !== container) container.appendChild(wrapper);
@@ -1317,25 +1320,22 @@ export function getOrCreateTerminal(terminalId: string, opts: CreateOptions): Te
 // Renderer parking policy (orca's hidden-view parking, see
 // `terminal-park-policy.ts`). Two levels, evaluated in one pass:
 //
-//  1. Per workspace: a workspace hidden for 30 s becomes a candidate; the 4
-//     most recently hidden stay warm for 5 minutes, the most recently hidden
-//     one indefinitely. Every terminal of a cold-parked workspace is disposed.
+//  1. Per workspace: every terminal of a cold-parked workspace is disposed.
+//     The workspace-level decision (30 s delay, 4 most recently hidden warm for
+//     5 minutes, the most recently left warm indefinitely) is shared with the
+//     other heavy panes and lives in `workspace-cold-park.ts`.
 //  2. Per terminal, inside each remaining workspace: a terminal detached for
 //     30 s becomes a candidate; the 6 most recently hidden stay warm for 5
 //     minutes, the most recently hidden one indefinitely.
 //
-// An attached (visible) terminal is never disposed, and neither is any
-// terminal of a workspace that has one attached. The pass re-runs on every
-// attach/detach/create and on workspace activation, and otherwise sleeps until
-// the next deadline.
+// An attached (visible) terminal is never disposed. The pass re-runs on every
+// attach/detach/create and whenever the cold workspace set changes, and
+// otherwise sleeps until the next per-terminal deadline.
 // ---------------------------------------------------------------------------
 
 const PARK_STATE_KEY = "__bandTerminalParkState__";
 
 interface ParkState {
-  activeWorkspaceId: string | null;
-  /** Epoch ms each non-active workspace was hidden. */
-  workspaceHiddenSince: Map<string, number>;
   activationSeq: number;
   timer: ReturnType<typeof setTimeout> | null;
   passQueued: boolean;
@@ -1343,13 +1343,10 @@ interface ParkState {
 
 function getParkState(): ParkState {
   const store = globalThis as unknown as { [PARK_STATE_KEY]?: ParkState };
-  store[PARK_STATE_KEY] ??= {
-    activeWorkspaceId: null,
-    workspaceHiddenSince: new Map(),
-    activationSeq: 0,
-    timer: null,
-    passQueued: false,
-  };
+  if (!store[PARK_STATE_KEY]) {
+    store[PARK_STATE_KEY] = { activationSeq: 0, timer: null, passQueued: false };
+    subscribeWorkspaceColdPark(scheduleParkingPass);
+  }
   return store[PARK_STATE_KEY];
 }
 
@@ -1357,18 +1354,6 @@ function nextActivationSeq(): number {
   const state = getParkState();
   state.activationSeq += 1;
   return state.activationSeq;
-}
-
-/** Record which workspace is on screen. Called by `MultiWorkspacePanelHost`
- *  whenever the URL-derived active workspace changes. */
-export function setActiveTerminalWorkspace(workspaceId: string | null): void {
-  const state = getParkState();
-  const prev = state.activeWorkspaceId;
-  if (prev === workspaceId) return;
-  if (prev !== null) state.workspaceHiddenSince.set(prev, Date.now());
-  if (workspaceId !== null) state.workspaceHiddenSince.delete(workspaceId);
-  state.activeWorkspaceId = workspaceId;
-  scheduleParkingPass();
 }
 
 /** Run the pass in a microtask. A workspace switch detaches several terminals
@@ -1391,63 +1376,33 @@ function runParkingPass(): void {
     clearTimeout(state.timer);
     state.timer = null;
   }
-  const cache = getCache();
   const nowMs = Date.now();
 
   const byWorkspace = new Map<string, TerminalCacheEntry[]>();
-  for (const entry of cache.values()) {
+  for (const entry of getCache().values()) {
     const list = byWorkspace.get(entry.workspaceId);
     if (list) list.push(entry);
     else byWorkspace.set(entry.workspaceId, [entry]);
   }
-  for (const id of [...state.workspaceHiddenSince.keys()]) {
-    if (!byWorkspace.has(id)) state.workspaceHiddenSince.delete(id);
-  }
 
   let nextDeadline = Number.POSITIVE_INFINITY;
-  const noteDeadlines = (hiddenSinceMs: number, coldParkDelayMs: number, hotRetainMs: number) => {
-    for (const deadline of [hiddenSinceMs + coldParkDelayMs, hiddenSinceMs + hotRetainMs]) {
-      if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
-    }
-  };
-
-  const workspaceCandidates: { id: string; hiddenSinceMs: number }[] = [];
   for (const [workspaceId, entries] of byWorkspace) {
-    if (workspaceId === state.activeWorkspaceId || entries.some((e) => e.isAttached())) {
-      state.workspaceHiddenSince.delete(workspaceId);
-      continue;
-    }
-    let hiddenSinceMs = state.workspaceHiddenSince.get(workspaceId);
-    if (hiddenSinceMs === undefined) {
-      hiddenSinceMs = nowMs;
-      state.workspaceHiddenSince.set(workspaceId, hiddenSinceMs);
-    }
-    noteDeadlines(
-      hiddenSinceMs,
-      TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS,
-      TERMINAL_WORKSPACE_HOT_RETAIN_MS,
-    );
-    if (nowMs - hiddenSinceMs >= TERMINAL_WORKSPACE_COLD_PARK_DELAY_MS) {
-      workspaceCandidates.push({ id: workspaceId, hiddenSinceMs });
-    }
-  }
-  const parkedWorkspaces = selectIdsBeyondHotRetain(workspaceCandidates, {
-    nowMs,
-    hotRetainMs: TERMINAL_WORKSPACE_HOT_RETAIN_MS,
-    hotRetainLimit: TERMINAL_WORKSPACE_HOT_RETAIN_LIMIT,
-  });
-
-  for (const [workspaceId, entries] of byWorkspace) {
-    if (parkedWorkspaces.has(workspaceId)) {
-      for (const entry of entries) disposeTerminal(entry.terminalId);
-      state.workspaceHiddenSince.delete(workspaceId);
+    if (isWorkspaceColdParked(workspaceId)) {
+      for (const entry of entries) {
+        if (!entry.isAttached()) disposeTerminal(entry.terminalId);
+      }
       continue;
     }
     const tabCandidates: { id: string; hiddenSinceMs: number; lastActivatedSeq: number }[] = [];
     for (const entry of entries) {
       const hiddenSinceMs = entry.getHiddenSince();
       if (hiddenSinceMs === null || entry.isAttached()) continue;
-      noteDeadlines(hiddenSinceMs, TERMINAL_TAB_COLD_PARK_DELAY_MS, TERMINAL_TAB_HOT_RETAIN_MS);
+      for (const deadline of [
+        hiddenSinceMs + TERMINAL_TAB_COLD_PARK_DELAY_MS,
+        hiddenSinceMs + TERMINAL_TAB_HOT_RETAIN_MS,
+      ]) {
+        if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
+      }
       if (nowMs - hiddenSinceMs >= TERMINAL_TAB_COLD_PARK_DELAY_MS) {
         tabCandidates.push({
           id: entry.terminalId,

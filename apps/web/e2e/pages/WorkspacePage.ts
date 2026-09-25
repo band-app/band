@@ -113,14 +113,13 @@ export class WorkspacePage {
     });
   }
 
-  /** Locate the per-panel-host cached entry div for the given workspaceId
-   *  (issue #508). `MultiWorkspacePanelHost` renders one of these per
-   *  workspace it currently caches; the test asserts on their presence /
-   *  absence to verify the mounted set's contents through a public DOM
-   *  surface, without exporting internals. There are multiple panel
-   *  hosts (chat / changes / files / terminal / browser), so each cached
-   *  workspaceId can produce up to five matching elements — the test
-   *  cares about "any" vs "none", not exact count. */
+  /** Locate the mounted entry div for the given workspaceId (issue #508).
+   *  The single `MultiWorkspacePanelHost` renders exactly one of these per
+   *  mounted workspace; tests assert on their presence / absence to verify
+   *  the mounted set's contents through a public DOM surface, without
+   *  exporting internals. `markMountedWorkspace` and friends call
+   *  `.evaluate()` on it, which relies on that one-entry-per-workspace
+   *  shape. */
   cachedPanelEntries(workspaceId: string): Locator {
     return this.page.getByTestId(`workspace-panel-host__cached-entry--${workspaceId}`);
   }
@@ -131,6 +130,12 @@ export class WorkspacePage {
     await this.cachedPanelEntries(workspaceId).evaluate((el) => {
       (el as HTMLElement).dataset.bandProbe = "marked";
     });
+  }
+
+  /** Whether the workspace's mounted entry is `inert` (hidden workspaces are,
+   *  so they cannot take focus or clicks). */
+  async isMountedWorkspaceInert(workspaceId: string): Promise<boolean> {
+    return await this.cachedPanelEntries(workspaceId).evaluate((el) => el.hasAttribute("inert"));
   }
 
   /** Whether the workspace's mounted entry still carries the mark set by
@@ -1612,12 +1617,56 @@ export class WorkspacePage {
   // the surface whether it's attached (live) or parked.
   // ──────────────────────────────────────────────────────────────────────
 
+  /** Track the `workspace.fileChanges` subscriptions a workspace holds open,
+   *  by reading the tRPC WebSocket frames the page sends (`subscription` opens
+   *  one, `subscription.stop` closes it; frames may be batched arrays). Each
+   *  open subscription pins the server's file watcher for that workspace.
+   *  Returns a getter for the current open count. Call BEFORE `goto`. */
+  trackFileChangeSubscriptions(workspaceId: string): () => number {
+    const open = new Set<number>();
+    this.page.on("websocket", (ws) => {
+      if (!ws.url().includes("/trpc")) return;
+      ws.on("framesent", (frame) => {
+        if (typeof frame.payload !== "string") return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(frame.payload);
+        } catch {
+          return;
+        }
+        const messages = (Array.isArray(parsed) ? parsed : [parsed]) as {
+          id?: number;
+          method?: string;
+          params?: { path?: string; input?: unknown };
+        }[];
+        for (const m of messages) {
+          if (typeof m.id !== "number") continue;
+          if (
+            m.method === "subscription" &&
+            m.params?.path === "workspace.fileChanges" &&
+            JSON.stringify(m.params.input ?? null).includes(workspaceId)
+          ) {
+            open.add(m.id);
+          } else if (m.method === "subscription.stop") {
+            open.delete(m.id);
+          }
+        }
+      });
+    });
+    return () => open.size;
+  }
+
   /** Take over the page's timers and `Date` (Playwright's fake clock) so a test
    *  can cross the terminal parking policy's 30 s / 5 min thresholds without
    *  waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
    *  `goto`. */
   async installClock(): Promise<void> {
     await this.page.clock.install();
+  }
+
+  /** Read the page's (fake) `Date.now()`. */
+  async clockNow(): Promise<number> {
+    return await this.page.evaluate(() => Date.now());
   }
 
   /** Jump the fake clock forward, firing each due timer at most once. */

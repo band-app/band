@@ -1,9 +1,9 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toWorkspaceId, useProjects } from "@/dashboard";
-import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { reconcileTerminalWorkspaces, setActiveTerminalWorkspace } from "../lib/terminal-cache";
+import { reconcileTerminalWorkspaces } from "../lib/terminal-cache";
+import { forgetMissingWorkspaces } from "../lib/workspace-cold-park";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
 // ---------------------------------------------------------------------------
@@ -12,9 +12,10 @@ import { clearPerWorkspaceState } from "./per-workspace-state-store";
 // orca's `mountedWorktreeIdsRef` (use-terminal-workspace-foundation.ts): a
 // workspace joins the set on first activation and leaves it only when it stops
 // existing (deleted, worktree removed). There is no LRU and no cap. Memory is
-// bounded by parking the heavy panes inside hidden workspaces instead: terminal
-// renderers (`terminal-park-policy.ts`) and browser webviews
-// (`browser-guest-retention.ts`).
+// bounded by parking the heavy resources of hidden workspaces instead:
+// terminals, LSP clients and file watchers of a cold workspace
+// (`workspace-cold-park.ts`), and browser webviews beyond a hidden-workspace
+// budget (`browser-guest-retention.ts`).
 // ---------------------------------------------------------------------------
 
 // Hoisted style objects so the mounted-entry divs receive
@@ -84,15 +85,6 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
       return new Set(prev).add(activeWorkspaceId);
     });
   }
-
-  // Tell the memory policies which workspace is on screen: the terminal
-  // parking policy stamps when each workspace was hidden (`runParkingPass` in
-  // `terminal-cache.ts`), and the browser guest budget orders workspaces by
-  // activation (`browser-guest-retention.ts`).
-  useEffect(() => {
-    setActiveTerminalWorkspace(activeWorkspaceId);
-    activateBrowserGuestWorkspace(activeWorkspaceId);
-  }, [activeWorkspaceId]);
 
   // Fade-in cue on workspace switch. Content-correctness is synchronous
   // (activeWorkspaceId is derived during render); this only masks the
@@ -165,6 +157,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     // worktree removed), mirroring the mounted-set reconcile below. The active
     // workspace is never disposed even if mid-delete (see the guard inside).
     reconcileTerminalWorkspaces(validIds, activeWorkspaceId);
+    forgetMissingWorkspaces(validIds);
     setMounted((prev) => {
       // Steady-state fast-path: the projects query refetches every 30 s,
       // so this effect fires repeatedly with nothing to remove. Scan once to
@@ -197,20 +190,19 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     lastMountedRef.current = mounted;
   }, [mounted]);
 
-  // No workspace selected: render the empty state. Mounted workspaces stay in
-  // `mounted` so navigating back to one remains instant; they're just visually
-  // replaced by the empty state. The wrapper still claims the full panel rect
-  // (h-full w-full) so the empty state fills the panel.
-  if (!activeWorkspaceId) return <div className="relative h-full w-full">{emptyState}</div>;
-
   // The outer wrapper is `relative` (not `absolute`) so the inner absolute
   // entries anchor to THIS box — the dockview panel content area we live
   // inside isn't guaranteed to be `position: relative`, so without this
   // wrapper the inner divs would escape to the nearest positioned ancestor
   // (typically the AppShell) and stack on top of each other at the top-left
   // of the layout, on top of the tab strip.
+  //
+  // With no workspace selected (index route) every mounted entry stays in the
+  // tree, hidden, under the empty state, so navigating back to one remains
+  // instant.
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
+      {!activeWorkspaceId && emptyState}
       {Array.from(mounted, (workspaceId) => {
         const isActive = workspaceId === activeWorkspaceId;
         return (

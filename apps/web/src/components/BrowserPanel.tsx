@@ -831,12 +831,16 @@ export function BrowserPaneComponent({
   // effect above rebuilds it at the last URL when the workspace is shown.
   useEffect(() => {
     if (!isDesktop || !created || !workspaceId) return;
-    return registerBrowserGuest(workspaceId, browserId, () => {
+    const unregister = registerBrowserGuest(workspaceId, browserId, () => {
+      // Leave the budget now rather than on the next commit, so an evicted
+      // workspace stops counting as holding a live guest straight away.
+      unregister();
       if (!createdRef.current) return;
       createdRef.current = false;
       setCreated(false);
       desktopInvoke("browser_destroy", { browserId }).catch(() => {});
     });
+    return unregister;
   }, [created, workspaceId, browserId]);
 
   // The desktop destroys views on its own too: `BrowserViewManager` caps live

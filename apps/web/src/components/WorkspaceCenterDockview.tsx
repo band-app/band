@@ -91,6 +91,7 @@ import {
 } from "@/dashboard";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
+import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
 import {
   attachEdgeGroupDragVisibility,
@@ -970,15 +971,18 @@ function useFileLeafLsp(
   const { settings } = useSettingsQuery();
   const workspacePath = useWorkspacePath(workspaceId);
   const [lspExtension, setLspExtension] = useState<Extension | null>(null);
+  // A cold-parked hidden workspace releases its language server (a tsserver
+  // can hold hundreds of MB) and re-acquires it when shown again.
+  const coldParked = useWorkspaceColdParked(workspaceId);
 
   // External / untitled files skip LSP entirely (no useful project context /
   // no file URI). Only TS/JS-family files have a mapped server language.
   const lspServerLang = useMemo(() => {
-    if (!settings.enableLSP) return null;
+    if (!settings.enableLSP || coldParked) return null;
     if (external || isUntitledPath(filePath)) return null;
     const cmLang = fileCmLang(filePath);
     return cmLang ? toLspServerLang(cmLang) : null;
-  }, [filePath, external, settings.enableLSP]);
+  }, [filePath, external, settings.enableLSP, coldParked]);
 
   const lspWsUrl = useMemo(
     () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
@@ -1080,6 +1084,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
   const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
   const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+  const coldParked = useWorkspaceColdParked(workspaceIdRaw);
 
   const workspacePath = useWorkspacePath(workspaceIdRaw);
 
@@ -1295,6 +1300,8 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // untitled buffers have no file URI, so `useFileLeafLsp` returns null
         // for both — pass it straight through.
         lspExtension={lspExtension}
+        // A cold-parked hidden workspace releases its server-side file watcher.
+        watchFileChanges={!coldParked}
         // Untitled buffers save through the OS "Save As" dialog; file-backed
         // tabs save in place (FileViewer handles that itself), so only wire
         // `onSaveAs` when this is an untitled buffer and the shell can save.
@@ -2306,7 +2313,10 @@ interface WorkspaceCenterDockviewProps {
   mobile?: boolean;
 }
 
-export function WorkspaceCenterDockview({
+// Memoized: every visited workspace stays mounted, so without it each render of
+// `SharedDockviewLayout` (route changes, dialog toggles, current-file changes)
+// would re-render every hidden workspace's dockview. The props are primitives.
+export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   workspaceId,
   visible,
   wsActive,
@@ -3326,4 +3336,4 @@ export function WorkspaceCenterDockview({
       </Dialog>
     </div>
   );
-}
+});

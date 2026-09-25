@@ -27,6 +27,7 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
+import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
 import { getElectronBridge } from "../lib/desktop-ipc";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
@@ -45,6 +46,7 @@ import {
   saveSidebarCollapsed,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
+import { setActiveWorkspace } from "../lib/workspace-cold-park";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -315,6 +317,15 @@ function AppShell() {
 
   // Derive active workspace from pathname for title bar display
   const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+
+  // Tell the memory policies which workspace is on screen, on both layouts:
+  // `workspace-cold-park.ts` stamps when each workspace was hidden (terminals,
+  // LSP clients and file watchers of a cold workspace release), and the
+  // browser guest budget orders workspaces by activation.
+  useEffect(() => {
+    setActiveWorkspace(activeWorkspaceId);
+    activateBrowserGuestWorkspace(activeWorkspaceId);
+  }, [activeWorkspaceId]);
 
   // Get the workspace path from the statuses store (for Finder / copy path)
   const workspacePath = useDashboardStore((s) =>

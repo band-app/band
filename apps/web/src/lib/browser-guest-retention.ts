@@ -87,6 +87,9 @@ export function registerBrowserGuest(
     guestsByWorkspace.set(workspaceId, guests);
   }
   guests.set(browserId, evict);
+  // A view can finish creating after its workspace was left (and pruned from
+  // `recency` for holding no guest yet). Put it back so it counts.
+  if (!recency.includes(workspaceId)) recency.unshift(workspaceId);
   return () => {
     const current = guestsByWorkspace.get(workspaceId);
     if (current?.get(browserId) !== evict) return;
@@ -96,10 +99,17 @@ export function registerBrowserGuest(
 }
 
 /** Record a workspace activation and evict guests beyond the hidden budget.
- *  Called by `MultiWorkspacePanelHost` whenever the active workspace changes. */
+ *  Called from the root route whenever the active workspace changes. */
 export function activateBrowserGuestWorkspace(activeWorkspaceId: string | null): void {
   if (activeWorkspaceId !== null) touchBrowserGuestWorkspaceRecency(recency, activeWorkspaceId);
   const holdsLiveGuests = (id: string) => (guestsByWorkspace.get(id)?.size ?? 0) > 0;
+  // Drop hidden workspaces with no live guest so the list doesn't grow with
+  // every workspace ever visited (deleted ones included). Guests are only
+  // created while their workspace is active, which re-adds it at the front.
+  for (let i = recency.length - 1; i >= 0; i--) {
+    const id = recency[i];
+    if (id !== activeWorkspaceId && !holdsLiveGuests(id)) recency.splice(i, 1);
+  }
   const evicted = selectBrowserGuestEvictionWorkspaceIds({
     orderedWorkspaceIds: recency,
     activeWorkspaceId,

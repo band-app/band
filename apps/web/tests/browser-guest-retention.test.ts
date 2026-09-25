@@ -8,8 +8,7 @@ import {
 // (`registerBrowserGuest` + `activateBrowserGuestWorkspace`) — no mocks. The
 // only consumer, `BrowserPaneComponent`, runs its native-view lifecycle only on
 // the desktop build, and the e2e harness boots the web build, so a real-server
-// Playwright test cannot reach it. That carve-out is recorded in CLAUDE.md →
-// "## Testing Strategy → ### Exceptions".
+// Playwright test cannot reach it.
 //
 // The registry is module state shared by every test in this file, so each test
 // uses its own workspace ids and unregisters its guests afterwards.
@@ -29,23 +28,20 @@ function registerGuest(workspaceId: string, browserId: string, evicted: string[]
   unregisters.push(unregister);
 }
 
-/** Register one guest per workspace; returns the ids whose guest was evicted. */
-function registerGuests(workspaceIds: string[]): string[] {
-  const evicted: string[] = [];
-  for (const id of workspaceIds) registerGuest(id, id, evicted);
+/** Visit workspaces in order, opening one browser in each, the way
+ *  `BrowserPaneComponent` registers its view while its workspace is active.
+ *  Returns the ids whose guest was evicted. */
+function visitWithBrowser(workspaceIds: string[], evicted: string[] = []): string[] {
+  for (const id of workspaceIds) {
+    activateBrowserGuestWorkspace(id);
+    registerGuest(id, id, evicted);
+  }
   return evicted;
-}
-
-/** Visit workspaces in order, the way `MultiWorkspacePanelHost` reports them. */
-function visit(workspaceIds: string[]): void {
-  for (const id of workspaceIds) activateBrowserGuestWorkspace(id);
 }
 
 describe("browser guest retention", () => {
   it("keeps live guests for the 4 most recently active hidden workspaces", () => {
-    const ids = ["a1", "a2", "a3", "a4", "a5", "a6"];
-    visit(ids.slice(0, 5));
-    const evicted = registerGuests(ids.slice(0, 5));
+    const evicted = visitWithBrowser(["a1", "a2", "a3", "a4", "a5"]);
 
     // a6 becomes active: a1 is the fifth most recent hidden workspace.
     activateBrowserGuestWorkspace("a6");
@@ -53,34 +49,46 @@ describe("browser guest retention", () => {
     expect(evicted).toEqual(["a1"]);
   });
 
-  it("never evicts the active workspace, even far over budget", () => {
-    const ids = ["b1", "b2", "b3", "b4", "b5", "b6"];
-    visit(ids);
-    const evicted = registerGuests(ids);
+  it("does not count the active workspace against the budget", () => {
+    const evicted = visitWithBrowser(["b1", "b2", "b3", "b4", "b5"]);
 
-    // b1 is the least recently active but is now on screen.
+    // Back on b1, the least recently active: five workspaces hold guests, but
+    // only the four hidden ones count, so nothing is over budget.
     activateBrowserGuestWorkspace("b1");
 
-    expect(evicted).toEqual(["b2"]);
+    expect(evicted).toEqual([]);
   });
 
   it("does not count hidden workspaces that hold no live guest", () => {
-    const ids = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"];
-    visit(ids.slice(0, 6));
-    // c3 was visited but never opened a browser.
-    const evicted = registerGuests(["c1", "c2", "c4", "c5", "c6"]);
+    const evicted = visitWithBrowser(["c1", "c2"]);
+    // c3 is visited but never opens a browser.
+    activateBrowserGuestWorkspace("c3");
+    visitWithBrowser(["c4", "c5", "c6"], evicted);
 
     activateBrowserGuestWorkspace("c7");
 
     expect(evicted).toEqual(["c1"]);
   });
 
-  it("evicts every guest of an over-budget workspace", () => {
-    visit(["d1", "d2", "d3", "d4", "d5"]);
+  it("counts a guest whose view finished creating after its workspace was left", () => {
     const evicted: string[] = [];
+    activateBrowserGuestWorkspace("f1");
+    // The user moves on before f1's view is created.
+    activateBrowserGuestWorkspace("f2");
+    registerGuest("f1", "f1", evicted);
+    visitWithBrowser(["f2", "f3", "f4", "f5"], evicted);
+
+    activateBrowserGuestWorkspace("f6");
+
+    expect(evicted).toEqual(["f1"]);
+  });
+
+  it("evicts every guest of an over-budget workspace", () => {
+    const evicted: string[] = [];
+    activateBrowserGuestWorkspace("d1");
     registerGuest("d1", "d1-tab-a", evicted);
     registerGuest("d1", "d1-tab-b", evicted);
-    registerGuests(["d2", "d3", "d4", "d5"]);
+    visitWithBrowser(["d2", "d3", "d4", "d5"]);
 
     activateBrowserGuestWorkspace("d6");
 
@@ -88,10 +96,10 @@ describe("browser guest retention", () => {
   });
 
   it("stops counting a workspace once its last guest unregisters", () => {
-    visit(["e1", "e2", "e3", "e4", "e5"]);
-    const evicted = registerGuests(["e1", "e2", "e3", "e4"]);
-    // e5 closes its only browser pane before the next switch, so e1 is back
-    // within the budget of 4.
+    const evicted = visitWithBrowser(["e1", "e2", "e3", "e4"]);
+    // e5 opens a browser and closes it again before the next switch, so e1 is
+    // still within the budget of 4.
+    activateBrowserGuestWorkspace("e5");
     registerBrowserGuest("e5", "e5", () => evicted.push("e5"))();
 
     activateBrowserGuestWorkspace("e6");
