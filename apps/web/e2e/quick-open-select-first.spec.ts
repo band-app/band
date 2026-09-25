@@ -126,8 +126,24 @@ test.describe("Quick Open selection reset on query change", () => {
 
     // Query 1: "report" — matches all 27 seeded files
     // (20 reports-NN.ts + 6 report-decoy-NN.md + 1 TARGET). TARGET ranks last.
-    await workspacePage.typeQuickOpen("report");
-    await expect.poll(() => workspacePage.quickOpenItems.count()).toBe(27);
+    //
+    // Set the query in one step and wait for the EXACT ranked list, not just a
+    // count of 27. Typed character by character, the "repor" prefix already
+    // matches the same 27 files, and the empty-query listing has 27 rows too,
+    // so a count poll could pass on an earlier result set. The debounced
+    // "report" results then land mid-walk and (by design, #635) snap the
+    // selection back to the first row, leaving the walk short of TARGET. That
+    // raced on the slower Linux CI runner. Equal scores rank by path, so this
+    // order is deterministic.
+    const reportRanked = [
+      ...Array.from({ length: 20 }, (_, i) => `reports-${String(i).padStart(2, "0")}.ts`),
+      ...Array.from({ length: 6 }, (_, i) => `report-decoy-${String(i).padStart(2, "0")}.md`),
+      TARGET,
+    ];
+    await workspacePage.fillQuickOpen("report");
+    await expect
+      .poll(() => workspacePage.quickOpenItemValues(), { timeout: 15_000 })
+      .toEqual(reportRanked);
 
     // Drive the selection down to the LAST row (TARGET) with ArrowDown — the
     // stale-selection precondition: a non-first item selected, list scrolled
