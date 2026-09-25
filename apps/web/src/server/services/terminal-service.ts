@@ -2,13 +2,14 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import type { WorkspaceTerminalConfig } from "@/dashboard";
 import { loadProjectConfig } from "../infra/setup/project-config";
-import {
-  type SpawnOptions,
-  type TerminalListEntry,
-  type TerminalPool,
-  type TerminalSession,
-  terminalPool,
-} from "../infra/terminals/terminal-pool";
+import { InProcessTerminalBackend } from "../infra/terminals/in-process-backend";
+import type {
+  SpawnOptions,
+  TerminalAttachment,
+  TerminalBackend,
+  TerminalExitEvent,
+  TerminalListEntry,
+} from "../infra/terminals/terminal-backend";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
@@ -17,10 +18,10 @@ import {
 import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
 
-// Re-export the PTY types so the API tier (`terminals/router.ts`,
+// Re-export the terminal types so the API tier (`terminals/router.ts`,
 // `terminals/ws.ts`) can reference them without reaching into infra.
 // Per `docs/web-architecture.md`, routers must go through services.
-export type { SpawnOptions, TerminalListEntry, TerminalSession };
+export type { SpawnOptions, TerminalAttachment, TerminalExitEvent, TerminalListEntry };
 
 const log = createLogger("terminal-service");
 
@@ -73,26 +74,42 @@ const WorkspaceTerminalConfigSchema = z.object({
 /**
  * Business logic for the terminal domain.
  *
- * Services tier — coordinates the {@link TerminalPool} (PTY lifecycle), the
- * dockview layout store (so a freshly spawned terminal survives a reload),
- * and the workspace status event bus. The pool stays oblivious to the
- * workspace registry; the service is the one that resolves a workspaceId
- * to a worktree path and decides which side effects fire on spawn / kill.
+ * Services tier — coordinates the {@link TerminalBackend} (PTY lifecycle,
+ * in this process or in the terminal daemon), the dockview layout store (so
+ * a freshly spawned terminal survives a reload), and the workspace status
+ * event bus. The backend stays oblivious to the workspace registry; the
+ * service is the one that resolves a workspaceId to a worktree path and
+ * decides which side effects fire on spawn / kill.
  *
  * Callers:
  *   - The tRPC `terminals` router (`server/api/terminals/router.ts`) for
- *     synchronous CRUD-shaped procedures.
+ *     CRUD-shaped procedures.
  *   - The terminal WebSocket handler (`server/api/terminals/ws.ts`) for
  *     spawning + attaching a live PTY.
- *   - The legacy `trpc/router.ts` workspaces flow, for `getTerminalConfig`
- *     and the workspace-deletion cleanup (`killWorkspace` + `deleteLayout`).
- *   - `start-server.ts` shutdown path, for `killAll`.
- *
- * Stateless aside from the `pool` dependency, which is itself a process-wide
- * singleton — see the `terminalService` export at the bottom.
+ *   - The workspace router, for `getTerminalConfig`, and the workspace
+ *     deletion cleanup (`killWorkspace` + `deleteLayout`).
+ *   - `start-server.ts`, which picks the backend at boot and calls
+ *     {@link close} on shutdown.
  */
 export class TerminalService {
-  constructor(private readonly pool: TerminalPool = terminalPool) {}
+  private backend!: TerminalBackend;
+  private unsubscribeExit: (() => void) | null = null;
+  private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
+
+  constructor(backend: TerminalBackend = new InProcessTerminalBackend()) {
+    this.setBackend(backend);
+  }
+
+  /**
+   * Switch where PTYs live. Called once at boot by `start-server.ts`, and
+   * again if the daemon backend cannot start and the service falls back to
+   * an in-process one. Sessions on the previous backend are not carried over.
+   */
+  setBackend(backend: TerminalBackend): void {
+    this.unsubscribeExit?.();
+    this.backend = backend;
+    this.unsubscribeExit = backend.onExit((event) => this.handleExit(event));
+  }
 
   // -------------------------------------------------------------------------
   // PTY lifecycle
@@ -102,8 +119,8 @@ export class TerminalService {
    * Spawn a new PTY for the given workspace + terminalId.
    *
    * Resolves `workspaceId` to a worktree path before delegating to the
-   * pool, and registers the new terminal in the saved dockview layout so it
-   * survives a server restart (mirrors `chatService.create` /
+   * backend, and registers the new terminal in the saved dockview layout so
+   * it survives a server restart (mirrors `chatService.create` /
    * `browserService.create`). Does NOT emit a `terminal-created` event —
    * the API entry points decide whether to broadcast (the WebSocket handler
    * stays silent; the tRPC `create` mutation emits explicitly).
@@ -117,23 +134,22 @@ export class TerminalService {
     // teardown as an explicit `kill` — the tab is dropped from the saved layout
     // and a `terminal-killed` event is emitted. Off by default so a user's
     // interactive terminal keeps its "Terminal exited" pane on screen (existing
-    // behavior); only opt-in callers get the auto-prune. The exit hook closes
-    // over THIS call's `workspaceId`/`terminalId`, so callers must pass the same
-    // `workspaceId` the terminal is registered under in the layout (they match
-    // here — `addTerminalToLayout` below uses the same value).
+    // behavior); only opt-in callers get the auto-prune. The backend stores the
+    // flag on the session and reports it back on the exit event (see
+    // `handleExit`), so it holds even when the shell outlives this server.
     opts?: { cleanupOnExit?: boolean },
-  ): Promise<TerminalSession> {
+  ): Promise<TerminalListEntry> {
     const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);
     }
-    const session = await this.pool.spawn(
+    const entry = await this.backend.spawn({
       workspaceId,
       terminalId,
-      workspace.worktree.path,
+      workspaceRoot: workspace.worktree.path,
       options,
-      opts?.cleanupOnExit ? () => this.emitRemoved(workspaceId, terminalId) : undefined,
-    );
+      cleanupOnExit: opts?.cleanupOnExit,
+    });
 
     // Mirror what `createChat` and `createBrowser` do: register the new
     // terminal in the saved dockview layout so it survives a server
@@ -147,7 +163,7 @@ export class TerminalService {
       env: options?.env,
     });
 
-    return session;
+    return entry;
   }
 
   /**
@@ -155,20 +171,18 @@ export class TerminalService {
    * emits `terminal-killed` so the dashboard's status stream prunes the
    * panel. Safe to call with an unknown terminalId — no-op.
    */
-  kill(terminalId: string): void {
-    const session = this.pool.get(terminalId);
-    const workspaceId = session?.workspaceId;
-    this.pool.kill(terminalId);
-    if (workspaceId) {
-      this.emitRemoved(workspaceId, terminalId);
+  async kill(terminalId: string): Promise<void> {
+    const killed = await this.backend.kill(terminalId);
+    if (killed) {
+      this.emitRemoved(killed.workspaceId, terminalId);
     }
   }
 
   /**
    * Drop a terminal from the saved dockview layout and broadcast
    * `terminal-killed` so an open dashboard prunes the panel. Shared by the
-   * explicit {@link kill} path and the `cleanupOnExit` natural-exit hook wired
-   * up in {@link spawn}. Idempotent: `removeTerminalFromLayout` is a no-op when
+   * explicit {@link kill} path and the `cleanupOnExit` natural-exit path in
+   * {@link handleExit}. Idempotent: `removeTerminalFromLayout` is a no-op when
    * the panel is already gone, and a duplicate `terminal-killed` is harmless.
    */
   private emitRemoved(workspaceId: string, terminalId: string): void {
@@ -177,62 +191,88 @@ export class TerminalService {
   }
 
   /**
+   * A shell that exits on its own after being spawned with `cleanupOnExit`
+   * gets the same teardown as an explicit kill. An explicit kill already ran
+   * it in {@link kill}, so `killed` exits are skipped to avoid a double emit.
+   */
+  private handleExit(event: TerminalExitEvent): void {
+    if (event.cleanupOnExit && !event.killed) {
+      this.emitRemoved(event.workspaceId, event.terminalId);
+    }
+    for (const listener of this.exitListeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        log.warn("terminal exit listener threw for %s: %s", event.terminalId, err);
+      }
+    }
+  }
+
+  /**
    * Kill every PTY associated with a workspace. Used by the workspace
    * deletion path — the caller is responsible for tearing down the layout
    * tree via {@link deleteLayout} as well.
    */
-  killWorkspace(workspaceId: string): void {
-    this.pool.killWorkspace(workspaceId);
+  killWorkspace(workspaceId: string): Promise<void> {
+    return this.backend.killWorkspace(workspaceId);
   }
 
-  /**
-   * Kill every tracked PTY across all workspaces. Used by the server
-   * shutdown path in `start-server.ts`.
-   */
-  killAll(): void {
-    this.pool.killAll();
+  /** Release the backend at server shutdown — see `TerminalBackend.close`. */
+  close(): Promise<void> {
+    return this.backend.close();
   }
 
   // -------------------------------------------------------------------------
   // Per-terminal accessors
   // -------------------------------------------------------------------------
 
-  list(workspaceId: string): TerminalListEntry[] {
-    return this.pool.list(workspaceId);
+  list(workspaceId: string): Promise<TerminalListEntry[]> {
+    return this.backend.list(workspaceId);
   }
 
-  getSession(terminalId: string): TerminalSession | undefined {
-    return this.pool.get(terminalId);
+  /** pid, foreground process name (`title`) and workspace, or `null` if not live. */
+  info(terminalId: string): Promise<TerminalListEntry | null> {
+    return this.backend.info(terminalId);
   }
 
-  getScrollback(terminalId: string, lines?: number): string | null {
-    return this.pool.getScrollback(terminalId, lines);
+  getScrollback(terminalId: string, lines?: number): Promise<string | null> {
+    return this.backend.getScrollback(terminalId, lines);
   }
 
   /**
-   * Serialized reconstruction of the terminal's current state — the
-   * replay-on-reconnect payload (see `TerminalPool.serialize` for why raw
-   * scrollback bytes are not sound to replay).
+   * Snapshot plus live output from the point the snapshot was taken — the
+   * replay-on-reconnect path. See `TerminalBackend.attach`.
    */
-  serialize(terminalId: string): Promise<string | null> {
-    return this.pool.serialize(terminalId);
+  attach(
+    terminalId: string,
+    dims?: { cols: number; rows: number },
+  ): Promise<TerminalAttachment | null> {
+    return this.backend.attach(terminalId, dims);
   }
 
-  write(terminalId: string, data: string): boolean {
-    return this.pool.write(terminalId, data);
+  write(terminalId: string, data: string): Promise<boolean> {
+    return this.backend.write(terminalId, data);
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
-    this.pool.resize(terminalId, cols, rows);
+    this.backend.resize(terminalId, cols, rows);
   }
 
   /** Force a live TUI to repaint after re-attach — see `TerminalPool.nudgeResize`. */
   nudgeResize(terminalId: string): void {
-    this.pool.nudgeResize(terminalId);
+    this.backend.nudgeResize(terminalId);
   }
 
-  subscribeOutput(terminalId: string, callback: (data: string) => void): () => void {
-    return this.pool.subscribeOutput(terminalId, callback);
+  /**
+   * Subscribe to every terminal's exit. Returns an unsubscribe function.
+   * Held here rather than on the backend so it keeps working across
+   * {@link setBackend}.
+   */
+  onExit(listener: (event: TerminalExitEvent) => void): () => void {
+    this.exitListeners.add(listener);
+    return () => {
+      this.exitListeners.delete(listener);
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -306,9 +346,8 @@ export class TerminalService {
 
 /**
  * Process-wide singleton consumed by the API tier (terminals router +
- * terminal WS handler), the legacy `trpc/router.ts` cleanup paths, and the
- * server-shutdown hook in `start-server.ts`. Sharing one instance keeps the
- * PTY pool, the dockview layout writes, and the event bus emissions in
- * lock-step across every entry point.
+ * terminal WS handler), the workspace cleanup paths, and `start-server.ts`.
+ * Sharing one instance keeps the backend, the dockview layout writes, and the
+ * event bus emissions in lock-step across every entry point.
  */
 export const terminalService = new TerminalService();

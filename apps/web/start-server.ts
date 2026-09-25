@@ -1151,7 +1151,9 @@ async function main() {
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
     stopUsageScanner();
-    terminalService.killAll();
+    await terminalService.close().catch((err) => {
+      console.error("Failed to close terminal backend:", err);
+    });
     killAllServers();
 
     // Wait for any still-in-flight Phase B work to settle so we don't
