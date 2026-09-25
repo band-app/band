@@ -5,7 +5,7 @@
 // as a scripted ACP agent subprocess over the real protocol. The stub's
 // scenario, state and request log live in the test's tmp `$HOME`.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatEvent } from "../../src/shared/chat-events";
 import { seedSettings, seedState } from "./seed-state";
@@ -62,8 +62,13 @@ export function writeStubScenario(home: string, turns: StubTurn[]): string {
   return path;
 }
 
-/** Boots the server with every agent pointed at the stub. */
+/**
+ * Boots the server with every agent pointed at the stub. When the helper
+ * creates the home, `close()` also removes it. A test that passes its own
+ * `home` (to restart a server on it) removes it itself.
+ */
 export async function startAcpServer(opts: AcpServerOptions = {}): Promise<ServerHandle> {
+  const ownsHome = !opts.home;
   const home = opts.home ?? seedAcpHome();
   const env: Record<string, string> = {
     BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,
@@ -73,7 +78,15 @@ export async function startAcpServer(opts: AcpServerOptions = {}): Promise<Serve
   };
   if (opts.turns) env.BAND_TEST_ACP_SCENARIO = writeStubScenario(home, opts.turns);
   if (opts.caps) env.BAND_TEST_ACP_CAPS = JSON.stringify(opts.caps);
-  return startServer({ tmpHome: home, env });
+  const server = await startServer({ tmpHome: home, env });
+  if (!ownsHome) return server;
+  return {
+    ...server,
+    close: async () => {
+      await server.close();
+      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    },
+  };
 }
 
 export interface StubRequest {
@@ -224,3 +237,54 @@ export function agentText(events: ChatEvent[]): string {
 }
 
 export const turnEnded = (e: ChatEvent) => e.type === "turn-ended";
+
+/**
+ * Opens the chat event stream and waits until its `subscription-opened`
+ * frame has arrived, so anything sent afterwards is seen live. `events`
+ * resolves like {@link collectEvents}. (Wrapped in an object because an
+ * async function can't return a bare promise without awaiting it.)
+ */
+export async function openStream(
+  url: string,
+  chatId: string,
+  opts: CollectOptions,
+): Promise<{ events: Promise<ChatEvent[]> }> {
+  let opened!: () => void;
+  const isOpen = new Promise<void>((resolve) => {
+    opened = resolve;
+  });
+  const events = collectEvents(url, chatId, {
+    ...opts,
+    onEvent: (e) => {
+      if (e.type === "subscription-opened") opened();
+      opts.onEvent?.(e);
+    },
+  });
+  // A stream that fails before opening rejects here instead of hanging.
+  await Promise.race([isOpen, events]);
+  return { events };
+}
+
+/** The highest event id in a list (0 when there are no logged events). */
+export const maxId = (events: ChatEvent[]) => Math.max(0, ...events.map((e) => e.eventId));
+
+/**
+ * Sends `text` and collects the stream until that turn ends. Pass the last
+ * event id already seen as `lastEventId` when the chat has earlier turns.
+ * A turn that fails before the chat has a session ends with a transient
+ * (negative-id) `turn-ended`, which also counts.
+ */
+export async function runTurn(
+  url: string,
+  chatId: string,
+  text: string,
+  lastEventId?: number,
+  extra: Parameters<typeof sendMessage>[3] = {},
+): Promise<ChatEvent[]> {
+  const stream = await openStream(url, chatId, {
+    lastEventId,
+    until: (e) => turnEnded(e) && (e.eventId > (lastEventId ?? 0) || e.eventId < 0),
+  });
+  await sendMessage(url, chatId, text, extra);
+  return stream.events;
+}

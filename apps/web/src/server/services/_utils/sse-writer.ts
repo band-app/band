@@ -79,9 +79,10 @@ export function openSseStream(res: ServerResponse): SseWriter {
       // Native SSE id field — EventSource lifts this into Last-Event-ID
       // on reconnect. We send it as the eventId on the JSON payload too
       // so non-EventSource readers (curl, tests) can recover it without
-      // parsing SSE framing.
+      // parsing SSE framing. Synthetic events (id <= 0) get no `id:` line,
+      // so the browser's reconnect cursor stays on the last logged event.
       try {
-        res.write(`id: ${event.eventId}\n`);
+        if (event.eventId > 0) res.write(`id: ${event.eventId}\n`);
         res.write(`event: ${event.type}\n`);
         res.write(`data: ${JSON.stringify(event)}\n\n`);
       } catch {

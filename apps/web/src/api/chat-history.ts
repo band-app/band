@@ -65,6 +65,6 @@ export async function handleChatHistory(
   sendJson(res, 200, {
     events: page.events,
     hasOlder: page.hasOlder,
-    oldestEventId: page.events[0]?.eventId ?? 0,
+    oldestEventId: page.oldestEventId,
   });
 }

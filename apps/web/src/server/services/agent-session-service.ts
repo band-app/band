@@ -84,6 +84,8 @@ interface PendingRequest {
   workspaceId: string;
   cancel(): void;
   permission?(optionId: string | null): void;
+  /** Option ids the agent offered; an answer must be one of them. */
+  optionIds?: string[];
   elicitation?(response: acp.CreateElicitationResponse): void;
 }
 
@@ -108,6 +110,8 @@ interface Runtime {
   buffered: acp.SessionNotification[];
   lastUpdateKind: string | null;
   inTurn: boolean;
+  /** Bumped per prompt turn, so a late cancel timer can't hit a newer turn. */
+  turnSeq: number;
   live: LiveState;
   pending: Map<string, PendingRequest>;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -169,16 +173,32 @@ function launchDefinition(def: CodingAgentDefinition): AcpAgentDefinition {
   return { type: def.type, label: def.label, command: def.command };
 }
 
-function selectValues(option: acp.SessionConfigOption): string[] {
-  if (option.type !== "select") return [];
-  return option.options.flatMap((o) => ("group" in o ? o.options.map((x) => x.value) : [o.value]));
+/** A choice of a select-type session config option, groups flattened. */
+export interface ConfigChoice {
+  id: string;
+  name: string;
+  description?: string;
 }
 
-function findOption(
+/** The select option for a category (`model`, `mode`), by ACP category or
+ *  by the id agents conventionally give it. */
+export function findOption(
   options: acp.SessionConfigOption[],
   category: "model" | "mode",
 ): acp.SessionConfigOption | undefined {
   return options.find((o) => o.type === "select" && (o.category === category || o.id === category));
+}
+
+/** A select option's choices, flat or grouped, as one list. */
+export function optionChoices(option: acp.SessionConfigOption): ConfigChoice[] {
+  if (option.type !== "select") return [];
+  return option.options
+    .flatMap((o) => ("group" in o ? o.options : [o]))
+    .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
+}
+
+function selectValues(option: acp.SessionConfigOption): string[] {
+  return optionChoices(option).map((c) => c.id);
 }
 
 function emit(chatId: string, event: ChatEvent): void {
@@ -215,6 +235,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       buffered: [],
       lastUpdateKind: null,
       inTurn: false,
+      turnSeq: 0,
       live: emptyLive(),
       pending: new Map(),
       idleTimer: null,
@@ -376,6 +397,7 @@ function requestPermission(
       rt,
       signal,
       (done) => ({
+        optionIds: request.options.map((o) => o.optionId),
         permission: (optionId) => {
           done(optionId ?? "cancelled");
           resolve(optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" });
@@ -481,6 +503,7 @@ function logAttached(
     type: "session-attached",
     sessionId: attached.sessionId,
     how,
+    revision: rt.revision,
     agentName: proc.agentName,
     configOptions: attached.configOptions,
     modes: attached.modes,
@@ -765,6 +788,7 @@ export class AgentSessionService {
     }
     if (rt.idleTimer) clearTimeout(rt.idleTimer);
     rt.inTurn = true;
+    rt.turnSeq++;
     try {
       return await proc.prompt(rt.sessionId, blocks);
     } finally {
@@ -785,9 +809,9 @@ export class AgentSessionService {
     const proc = rt.process;
     if (!proc || !rt.sessionId) return;
     await proc.cancel(rt.sessionId);
-    const generation = rt.generation;
+    const turn = rt.turnSeq;
     setTimeout(() => {
-      if (rt.inTurn && rt.generation === generation) {
+      if (rt.inTurn && rt.turnSeq === turn && rt.process === proc) {
         log.warn({ chatId }, "agent ignored session/cancel; killing it");
         proc.close();
       }
@@ -813,6 +837,7 @@ export class AgentSessionService {
   answerPermission(chatId: string, requestId: string, optionId: string | null): boolean {
     const pending = runtimes.get(chatId)?.pending.get(requestId);
     if (!pending?.permission) return false;
+    if (optionId !== null && !pending.optionIds?.includes(optionId)) return false;
     pending.permission(optionId);
     return true;
   }
@@ -909,14 +934,12 @@ export class AgentSessionService {
     const def = definitionFor(chat);
     const rt = runtimes.get(chatId);
     const sessionId = chat.activeSessionId;
-    const canListSessions = true;
 
     if (rt?.process?.alive && rt.sessionId && rt.sessionId === sessionId) {
       return {
         source: "live",
         ...rt.live,
         costUsd: this.reportedCost(chatId) ?? sessionCost(sessionId),
-        canListSessions,
       };
     }
 
@@ -964,7 +987,6 @@ export class AgentSessionService {
           info?.type === "update" && info.update.sessionUpdate === "session_info_update"
             ? (info.update.title ?? null)
             : null,
-        canListSessions,
       };
     }
 
@@ -1000,7 +1022,6 @@ export class AgentSessionService {
       usage: null,
       costUsd: null,
       title: null,
-      canListSessions,
     };
   }
 
@@ -1068,15 +1089,17 @@ export class AgentSessionService {
   }
 
   /** The last `turns` turns before `beforeId` (or the end), text chunks
-   *  merged, and whether older turns exist. */
+   *  merged, whether older turns exist, and the id to page back from. */
   replayTurns(
     sessionId: string,
     revision: number,
     turns: number,
     beforeId?: number,
-  ): { events: ChatEvent[]; hasOlder: boolean } {
+  ): { events: ChatEvent[]; hasOlder: boolean; oldestEventId: number } {
     const { rows, hasOlder } = events.readTurns(sessionId, revision, turns, beforeId);
-    return { events: rowsToEvents(rows), hasOlder };
+    // The page cursor is the first raw row: a merged text run carries its
+    // last row's id, and paging from that would repeat the run's head.
+    return { events: rowsToEvents(rows), hasOlder, oldestEventId: rows[0]?.id ?? 0 };
   }
 
   /** Stops the chat's agent. Used when the chat is removed or switches agent. */
@@ -1131,6 +1154,23 @@ export class AgentSessionService {
     }
   }
 
+  /**
+   * The modes an agent offers, from the catalog: its `mode` config option,
+   * else its legacy session modes. Empty until a probe or a session has
+   * reported them.
+   */
+  listModes(agentId?: string): ConfigChoice[] {
+    const entry = catalog.get(resolveAgentDefinition(settings.load(), agentId).id);
+    if (!entry) return [];
+    const option = findOption(entry.configOptions, "mode");
+    if (option) return optionChoices(option);
+    return (entry.modes?.availableModes ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description ?? undefined,
+    }));
+  }
+
   /** What the catalog knows about an agent, if anything. */
   catalogEntry(agentDefId: string): CatalogEntry | undefined {
     return catalog.get(agentDefId);
@@ -1140,8 +1180,11 @@ export class AgentSessionService {
    * Runs one prompt in a throwaway session and returns the text of the
    * agent's last message (the prose after its final tool call). Used for
    * one-shot jobs such as writing a commit message, where nobody is there
-   * to answer a permission prompt: tool calls are allowed once, as the
-   * pre-ACP adapters did for every tool.
+   * to answer a permission prompt. The prompt reads untrusted repo content,
+   * so only read-only calls (`read`, `search`) are approved, once; anything
+   * else the agent's rules would ask about is refused. Read-only git
+   * commands don't reach this: Claude Code allows them without asking and
+   * Codex runs them in its workspace sandbox.
    */
   async oneShot(def: CodingAgentDefinition, cwd: string, prompt: string): Promise<string> {
     const launch = await resolveAcpLaunch(launchDefinition(def));
@@ -1160,9 +1203,11 @@ export class AgentSessionService {
         }
       },
       onPermission: async (req) => {
+        const kind = req.toolCall.kind;
         const allow =
-          req.options.find((o) => o.kind === "allow_once") ??
-          req.options.find((o) => o.kind === "allow_always");
+          kind === "read" || kind === "search"
+            ? req.options.find((o) => o.kind === "allow_once")
+            : undefined;
         return allow ? { outcome: "selected", optionId: allow.optionId } : { outcome: "cancelled" };
       },
       onElicitation: async () => ({ action: "decline" }),

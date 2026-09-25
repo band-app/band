@@ -57,7 +57,6 @@ const SESSION: SessionState = {
   usage: null,
   costUsd: null,
   title: null,
-  canListSessions: true,
 };
 
 function assistant(
@@ -426,6 +425,7 @@ describe("transcriptReducer — subscription and cursor", () => {
           type: "session-attached",
           sessionId: "s1",
           how: "new",
+          revision: 1,
           configOptions: [
             {
               id: "model",
@@ -447,6 +447,8 @@ describe("transcriptReducer — subscription and cursor", () => {
       ]),
     );
     expect(attached.sessionId).toBe("s1");
+    // The client adopts the log revision, so its next reconnect gap-fills.
+    expect(attached.revision).toBe(1);
     expect(attached.session).toMatchObject({
       source: "live",
       commands: [{ name: "review", description: "Review" }],

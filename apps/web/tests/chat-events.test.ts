@@ -27,6 +27,9 @@ import type { ChatEvent } from "../src/shared/chat-events";
 import {
   agentText,
   collectEvents,
+  maxId,
+  openStream,
+  runTurn,
   sendMessage,
   startAcpServer,
   stubRequests,
@@ -76,19 +79,7 @@ afterAll(async () => {
 let seq = 0;
 const newChatId = (tag = "chat") => `events-${tag}-${Date.now()}-${seq++}`;
 
-const maxId = (events: ChatEvent[]) => Math.max(0, ...events.map((e) => e.eventId));
 const logged = (events: ChatEvent[]) => events.filter((e) => e.eventId > 0);
-
-/** Sends `text` and collects the stream until that turn ends. */
-async function runTurn(chatId: string, text: string, lastEventId?: number) {
-  const done = collectEvents(server.url, chatId, {
-    lastEventId,
-    until: (e) => turnEnded(e) && e.eventId > (lastEventId ?? 0),
-  });
-  await new Promise((r) => setTimeout(r, 50));
-  await sendMessage(server.url, chatId, text);
-  return done;
-}
 
 interface Frame {
   id: string;
@@ -102,7 +93,12 @@ interface Frame {
  */
 async function readFrames(
   chatId: string,
-  opts: { headers?: Record<string, string>; query?: string; timeoutMs: number },
+  opts: {
+    headers?: Record<string, string>;
+    query?: string;
+    timeoutMs: number;
+    onFrame?: (frame: Frame) => void;
+  },
 ): Promise<{ frames: Frame[]; ended: boolean }> {
   const ac = new AbortController();
   const res = await fetch(
@@ -136,12 +132,15 @@ async function readFrames(
             .find((l) => l.startsWith(`${name}: `))
             ?.slice(name.length + 2);
         const data = field("data");
-        if (data)
-          frames.push({
+        if (data) {
+          const frame = {
             id: field("id") ?? "",
             event: field("event") ?? "",
             data: JSON.parse(data),
-          });
+          };
+          frames.push(frame);
+          opts.onFrame?.(frame);
+        }
       }
     }
   } catch (err) {
@@ -151,6 +150,29 @@ async function readFrames(
     ac.abort();
   }
   return { frames, ended };
+}
+
+/**
+ * Starts {@link readFrames} and waits until a frame of type `readyOn` has
+ * arrived, so a message sent afterwards is seen live.
+ */
+async function openFrames(
+  chatId: string,
+  opts: Parameters<typeof readFrames>[1],
+  readyOn = "subscription-opened",
+): Promise<{ result: ReturnType<typeof readFrames> }> {
+  let ready!: () => void;
+  const isReady = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  const result = readFrames(chatId, {
+    ...opts,
+    onFrame: (f) => {
+      if (f.data.type === readyOn) ready();
+    },
+  });
+  await Promise.race([isReady, result]);
+  return { result };
 }
 
 // ---------------------------------------------------------------------------
@@ -182,21 +204,23 @@ describe("subscribe", () => {
 
   it("frames each event with its id and type on the SSE lines", async () => {
     const chatId = newChatId("frames");
-    await runTurn(chatId, "hello frames");
+    await runTurn(server.url, chatId, "hello frames");
     const { frames } = await readFrames(chatId, { timeoutMs: 1_000 });
     expect(frames.length).toBeGreaterThan(5);
     for (const f of frames) {
-      expect(f.id).toBe(String(f.data.eventId));
+      // Logged events carry their id; synthetic ones (negative ids) have no
+      // `id:` line, so they never move the browser's Last-Event-ID.
+      expect(f.id).toBe(f.data.eventId > 0 ? String(f.data.eventId) : "");
       expect(f.event).toBe(f.data.type);
     }
+    expect(frames.some((f) => f.id === "")).toBe(true);
   });
 });
 
 describe("a turn", () => {
   it("submit then observe: the logged sequence of a first turn", async () => {
     const chatId = newChatId("sequence");
-    const done = collectEvents(server.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 50));
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
     const submit = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders },
@@ -238,8 +262,8 @@ describe("a turn", () => {
 
   it("the prompt event carries what the user typed; the agent also gets the file-sharing hint on the first turn only", async () => {
     const chatId = newChatId("hint");
-    const first = await runTurn(chatId, "first message");
-    const second = await runTurn(chatId, "second message", maxId(first));
+    const first = await runTurn(server.url, chatId, "first message");
+    const second = await runTurn(server.url, chatId, "second message", maxId(first));
     expect(first.find((e) => e.type === "prompt")).toMatchObject({ text: "first message" });
     expect(second.find((e) => e.type === "prompt")).toMatchObject({ text: "second message" });
 
@@ -256,8 +280,8 @@ describe("a turn", () => {
 
   it("sequential submits continue the same agent session", async () => {
     const chatId = newChatId("resume");
-    const first = await runTurn(chatId, "turn one");
-    const second = await runTurn(chatId, "turn two", maxId(first));
+    const first = await runTurn(server.url, chatId, "turn one");
+    const second = await runTurn(server.url, chatId, "turn two", maxId(first));
 
     const attached = first.find((e) => e.type === "session-attached");
     const sessionId = attached?.type === "session-attached" ? attached.sessionId : "";
@@ -272,18 +296,20 @@ describe("a turn", () => {
 
   it("the stream closes after turn-ended when the chat goes idle", async () => {
     const chatId = newChatId("close");
-    const reading = readFrames(chatId, { timeoutMs: 10_000 });
-    await new Promise((r) => setTimeout(r, 50));
+    const { result: reading } = await openFrames(chatId, { timeoutMs: 10_000 });
     await sendMessage(server.url, chatId, "hello close");
     const { frames, ended } = await reading;
     expect(ended).toBe(true);
     expect(frames.at(-1)?.data).toMatchObject({ type: "turn-ended", stopReason: "end_turn" });
 
-    // A stream opened on the idle chat stays open through the replay and
-    // until the next turn ends.
+    // A stream opened on the idle chat stays open past its snapshot events
+    // and until the next turn ends.
     const cursor = Math.max(...frames.map((f) => f.data.eventId));
-    const next = readFrames(chatId, { query: `?lastEventId=${cursor}`, timeoutMs: 10_000 });
-    await new Promise((r) => setTimeout(r, 300));
+    const { result: next } = await openFrames(
+      chatId,
+      { query: `?lastEventId=${cursor}`, timeoutMs: 10_000 },
+      "session-state",
+    );
     await sendMessage(server.url, chatId, "hello again");
     const again = await next;
     expect(again.ended).toBe(true);
@@ -297,7 +323,7 @@ describe("a turn", () => {
 describe("reconnect", () => {
   it("Last-Event-ID gap-fill sends only what came after the cursor", async () => {
     const chatId = newChatId("gapfill");
-    const full = await runTurn(chatId, "chunky reply");
+    const full = await runTurn(server.url, chatId, "chunky reply");
     const fullLogged = logged(full);
     // Resume from the middle of the reply's chunks.
     const chunks = fullLogged.filter(
@@ -323,7 +349,7 @@ describe("reconnect", () => {
 
   it("a cold subscribe then a reconnect at its last id re-sends nothing", async () => {
     const chatId = newChatId("nodup");
-    await runTurn(chatId, "hello nodup");
+    await runTurn(server.url, chatId, "hello nodup");
     const cold = await collectEvents(server.url, chatId, {
       until: (e) => e.type === "history-meta",
     });
@@ -347,32 +373,34 @@ describe("reconnect", () => {
 
   it("two concurrent subscribers receive the same logged events", async () => {
     const chatId = newChatId("concurrent");
-    const a = collectEvents(server.url, chatId, { until: turnEnded });
-    const b = collectEvents(server.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 100));
+    const a = await openStream(server.url, chatId, { until: turnEnded });
+    const b = await openStream(server.url, chatId, { until: turnEnded });
     await sendMessage(server.url, chatId, "chunky for two");
-    const [eventsA, eventsB] = await Promise.all([a, b]);
+    const [eventsA, eventsB] = await Promise.all([a.events, b.events]);
     expect(logged(eventsA).length).toBeGreaterThan(4);
     expect(logged(eventsA)).toEqual(logged(eventsB));
   });
 
   it("a permission request is logged once, live and on replay", async () => {
     const chatId = newChatId("permission");
-    const done = collectEvents(server.url, chatId, {
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "permission") {
-          void trpc(server.url, "chat.answer", {
-            chatId,
-            requestId: e.requestId,
-            optionId: "allow",
-          });
+          answers.push(
+            trpc(server.url, "chat.answer", {
+              chatId,
+              requestId: e.requestId,
+              optionId: "allow",
+            }),
+          );
         }
       },
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "ask first");
     const live = await done;
+    await Promise.all(answers);
     expect(live.filter((e) => e.type === "permission")).toHaveLength(1);
     expect(agentText(live)).toBe("Edited.");
 
@@ -388,10 +416,9 @@ describe("reconnect", () => {
 describe("queue", () => {
   it("a message sent during a turn is queued, then runs as its own clean turn", async () => {
     const chatId = newChatId("queue");
-    const done = collectEvents(server.url, chatId, {
+    const { events: done } = await openStream(server.url, chatId, {
       until: (_e, all) => all.filter(turnEnded).length === 2,
     });
-    await new Promise((r) => setTimeout(r, 50));
     expect(await sendMessage(server.url, chatId, "slow first")).toEqual({
       ok: true,
       queued: false,
@@ -432,10 +459,9 @@ describe("queue", () => {
     const uploadDir = join(server.home, ".band", "uploads");
     const before = new Set(existsSync(uploadDir) ? readdirSync(uploadDir) : []);
 
-    const done = collectEvents(server.url, chatId, {
+    const { events: done } = await openStream(server.url, chatId, {
       until: (_e, all) => all.filter(turnEnded).length === 2,
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "slow start");
     expect(
       await sendMessage(server.url, chatId, "look at this pixel", {
@@ -482,8 +508,7 @@ describe("queue", () => {
 describe("attachments", () => {
   it("saves an uploaded file to disk and shows it on the prompt by its /api/uploads URL", async () => {
     const chatId = newChatId("upload");
-    const done = collectEvents(server.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 50));
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
     await sendMessage(server.url, chatId, "read my notes", {
       files: [
         {
@@ -509,18 +534,19 @@ describe("attachments", () => {
 describe("cancel", () => {
   it("tasks.abort ends the running turn as cancelled and fails the task", async () => {
     const chatId = newChatId("abort");
-    const done = collectEvents(server.url, chatId, {
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
       until: turnEnded,
       onEvent: (e) => {
         // Abort once the agent is inside the turn.
         if (e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
-          void trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+          answers.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
         }
       },
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "wait for me");
     const events = await done;
+    await Promise.all(answers);
 
     expect(agentText(events)).toBe("Working.");
     const ended = events.at(-1);
@@ -538,8 +564,10 @@ describe("cancel", () => {
   // cancel and applies it once the session is attached.
   it("tasks.abort sent while the agent is still starting cancels the turn", async () => {
     const chatId = newChatId("abort-early");
-    const done = collectEvents(server.url, chatId, { until: turnEnded, timeoutMs: 8_000 });
-    await new Promise((r) => setTimeout(r, 50));
+    const { events: done } = await openStream(server.url, chatId, {
+      until: turnEnded,
+      timeoutMs: 8_000,
+    });
     await sendMessage(server.url, chatId, "wait for me early");
     // Straight after the submit returns: the agent process is not up yet.
     await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
@@ -551,7 +579,7 @@ describe("cancel", () => {
 describe("session switching", () => {
   it("a cold subscribe follows chat.activeSessionId, not the last task's session", async () => {
     const chatId = newChatId("switch");
-    const turn = await runTurn(chatId, "first task");
+    const turn = await runTurn(server.url, chatId, "first task");
     const attached = turn.find((e) => e.type === "session-attached");
     const oldSession = attached?.type === "session-attached" ? attached.sessionId : "";
 
@@ -577,7 +605,7 @@ describe("session switching", () => {
 
   it("clearing activeSessionId (New session) yields an empty subscription", async () => {
     const chatId = newChatId("newsession");
-    await runTurn(chatId, "first task");
+    await runTurn(server.url, chatId, "first task");
     await trpc(server.url, "chats.setActiveSession", { workspaceId: WORKSPACE_ID, chatId });
 
     const events = await collectEvents(server.url, chatId, {
@@ -588,7 +616,7 @@ describe("session switching", () => {
     expect(logged(events)).toEqual([]);
 
     // The next message starts a fresh session.
-    const next = await runTurn(chatId, "new beginning");
+    const next = await runTurn(server.url, chatId, "new beginning");
     expect(next.find((e) => e.type === "session-attached")).toMatchObject({ how: "new" });
   });
 });

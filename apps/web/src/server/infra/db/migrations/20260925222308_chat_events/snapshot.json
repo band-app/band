@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "7e419097-80aa-41b2-95ce-49ede686ff3f",
+  "id": "b352ba5c-a9e8-4f1f-a2ed-c6ee20307ba4",
   "prevIds": [
     "f0053d67-cc4a-4ed1-baff-9dbf73ccd0a1"
   ],
@@ -1250,6 +1250,58 @@
       "where": null,
       "origin": "manual",
       "name": "chat_events_session_idx",
+      "entityType": "indexes",
+      "table": "chat_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "revision",
+          "isExpression": false
+        },
+        {
+          "value": "kind",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "chat_events_kind_idx",
+      "entityType": "indexes",
+      "table": "chat_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "revision",
+          "isExpression": false
+        },
+        {
+          "value": "update_kind",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "chat_events_update_kind_idx",
       "entityType": "indexes",
       "table": "chat_events"
     },

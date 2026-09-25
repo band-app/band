@@ -1,6 +1,6 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronDownIcon } from "lucide-react";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { ToolEntry } from "../chat/transcript";
 import { diffLines } from "./diff-lines";
 import { MessageResponse } from "./message";
@@ -88,7 +88,7 @@ function Diff({
  * One ACP tool call: title and status, and on expand what the agent
  * reported: file diffs, text output, the raw input and output.
  */
-export function ToolCall({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
+export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
   const status = statusOf(entry);
   const diffs = entry.content.filter((c) => c.type === "diff");
   const texts = entry.content.flatMap((c) =>
@@ -149,4 +149,4 @@ export function ToolCall({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
       </CollapsibleContent>
     </Collapsible>
   );
-}
+});

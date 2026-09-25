@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { agentSessionService } from "../../services/agent-session-service";
-import { settingsService } from "../../services/settings-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -14,28 +13,13 @@ import { publicProcedure, t } from "../trpc";
  * chat pane reads its live modes from its event stream instead.
  */
 export const modesRouter = t.router({
-  list: publicProcedure.input(z.object({ agentId: z.string().optional() })).query(({ input }) => {
-    const def = settingsService.getAgentDefinition(input.agentId);
-    const entry = agentSessionService.catalogEntry(def.id);
-    if (!entry) return { modes: [] };
-    const option = entry.configOptions.find(
-      (o) => o.type === "select" && (o.category === "mode" || o.id === "mode"),
-    );
-    if (option?.type === "select") {
-      return {
-        modes: option.options
-          .flatMap((o) => ("group" in o ? o.options : [o]))
-          .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined })),
-      };
-    }
-    return {
-      modes: (entry.modes?.availableModes ?? []).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description ?? undefined,
-      })),
-    };
-  }),
+  list: publicProcedure.input(z.object({ agentId: z.string().optional() })).query(({ input }) => ({
+    modes: agentSessionService.listModes(input.agentId).map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+    })),
+  })),
 });
 
 export type ModesRouter = typeof modesRouter;

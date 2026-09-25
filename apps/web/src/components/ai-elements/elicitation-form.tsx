@@ -1,6 +1,6 @@
 import { Button, cn, Input } from "@band-app/ui";
 import { CheckIcon, Loader2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Entry } from "../chat/transcript";
 
 type ElicitationEntry = Extract<Entry, { kind: "elicitation" }>;
@@ -59,6 +59,18 @@ function fieldsOf(entry: ElicitationEntry): Field[] {
   });
 }
 
+/** The answer content: number fields parsed, unparseable ones dropped. */
+function toContent(fields: Field[], values: Record<string, Value>): Record<string, Value> {
+  const content: Record<string, Value> = { ...values };
+  for (const field of fields) {
+    if (field.kind !== "number" || typeof content[field.key] !== "string") continue;
+    const n = Number(content[field.key]);
+    if (Number.isFinite(n)) content[field.key] = n;
+    else delete content[field.key];
+  }
+  return content;
+}
+
 /**
  * An ACP form elicitation: the agent needs structured input from the user,
  * such as Claude Code's AskUserQuestion (one select field per question, plus
@@ -72,7 +84,7 @@ export function ElicitationForm({
   entry: ElicitationEntry;
   onAnswer: (action: "accept" | "decline", content?: Record<string, Value>) => Promise<void>;
 }) {
-  const fields = fieldsOf(entry);
+  const fields = useMemo(() => fieldsOf(entry), [entry]);
   const [values, setValues] = useState<Record<string, Value>>({});
   const [sending, setSending] = useState(false);
   const answered = entry.answer !== undefined;
@@ -94,12 +106,12 @@ export function ElicitationForm({
     async (action: "accept" | "decline") => {
       setSending(true);
       try {
-        await onAnswer(action, action === "accept" ? values : undefined);
+        await onAnswer(action, action === "accept" ? toContent(fields, values) : undefined);
       } finally {
         setSending(false);
       }
     },
-    [onAnswer, values],
+    [onAnswer, values, fields],
   );
 
   return (
@@ -172,13 +184,12 @@ export function ElicitationForm({
             />
           )}
           {field.kind === "number" && (
+            // Kept as typed ("-", "1.") and converted on submit.
             <Input
               type="number"
               disabled={disabled}
-              value={typeof values[field.key] === "number" ? String(values[field.key]) : ""}
-              onChange={(e) =>
-                set(field.key, e.target.value === "" ? undefined : Number(e.target.value))
-              }
+              value={typeof values[field.key] === "string" ? (values[field.key] as string) : ""}
+              onChange={(e) => set(field.key, e.target.value)}
             />
           )}
           {field.kind === "boolean" && (

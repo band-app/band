@@ -9,7 +9,7 @@ import { WorkspaceNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import { shiftQueuedMessage } from "./_utils/queued-message-store";
-import { agentSessionService } from "./agent-session-service";
+import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
@@ -313,7 +313,7 @@ async function runTask(task: InternalTask): Promise<void> {
   const chat = chatService.get(chatId);
   if (task.codingAgentId && chat && task.codingAgentId !== chat.agent) {
     agentSessionService.stop(chatId);
-    chatService.update(chatId, { agent: task.codingAgentId });
+    chatService.update(chatId, { agent: task.codingAgentId, model: null, mode: null });
     chatService.updateActiveSession(chatId, undefined);
   }
   if (task.sessionId && chatService.get(chatId)?.activeSessionId !== task.sessionId) {
@@ -436,9 +436,7 @@ async function runTask(task: InternalTask): Promise<void> {
 async function applyTurnChoice(chatId: string, category: "model" | "mode", value: string) {
   try {
     const state = agentSessionService.getSessionState(chatId);
-    const option = state.configOptions.find(
-      (o) => o.type === "select" && (o.category === category || o.id === category),
-    );
+    const option = findOption(state.configOptions, category);
     const configId = option?.id ?? (category === "model" ? "__legacy_model" : "__legacy_mode");
     await agentSessionService.setConfigOption(chatId, configId, value);
   } catch (err) {
@@ -531,7 +529,7 @@ export function getTask(chatId: string): TaskInfo | null {
 
 /**
  * Service-tier façade over `TaskQueries` so the API tier never reaches into
- * infra directly (per `docs/web-architecture.md`).
+ * infra directly (because routers may not import infra directly).
  */
 export class TaskService {
   constructor(private readonly queries: TaskQueries = taskQueries) {}

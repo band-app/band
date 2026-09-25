@@ -19,6 +19,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { TaskConflictError, taskService } from "../../services/task-service";
@@ -185,7 +186,7 @@ export const chatsRouter = t.router({
         // Cap the length: this id is persisted as `activeSessionId` and later
         // flows into the resume command line (`continueInTerminal` →
         // `formatShellCommand` → PTY). Real provider ids are well under this.
-        sessionId: z.string().max(512).optional(),
+        sessionId: sessionIdSchema.optional(),
         summary: z.string().max(1000).optional(),
       }),
     )
@@ -221,7 +222,7 @@ export const chatsRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string(),
         message: z.string(),
-        sessionId: z.string().max(512).optional(),
+        sessionId: sessionIdSchema.optional(),
       }),
     )
     .mutation(({ input }) => {

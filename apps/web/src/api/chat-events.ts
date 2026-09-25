@@ -128,7 +128,7 @@ export async function handleChatEvents(
       writer.write({
         type: "history-meta",
         hasOlder: page.hasOlder,
-        oldestEventId: page.events[0]?.eventId ?? 0,
+        oldestEventId: page.oldestEventId,
         eventId: syntheticId--,
       });
     };

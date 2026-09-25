@@ -117,6 +117,10 @@ export const chatEvents = sqliteTable(
   },
   (t) => [
     index("chat_events_session_idx").on(t.sessionId, t.revision, t.id),
+    // `latest()` lookups by event kind / update kind (session state on
+    // every cold subscribe).
+    index("chat_events_kind_idx").on(t.sessionId, t.revision, t.kind, t.id),
+    index("chat_events_update_kind_idx").on(t.sessionId, t.revision, t.updateKind, t.id),
     index("chat_events_chat_idx").on(t.chatId),
   ],
 );

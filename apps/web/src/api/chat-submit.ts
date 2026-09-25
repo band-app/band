@@ -13,6 +13,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { pushQueuedMessage } from "../server/services/_utils/queued-message-store";
+import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
@@ -64,6 +65,10 @@ export async function handleChatSubmit(
   const { workspaceId, text, sessionId, mode, model, codingAgentId, files } = body;
   if (!workspaceId || !text?.trim()) {
     sendJson(res, 400, { error: "workspaceId and text are required" });
+    return;
+  }
+  if (sessionId !== undefined && !SESSION_ID_PATTERN.test(sessionId)) {
+    sendJson(res, 400, { error: "invalid sessionId" });
     return;
   }
 

@@ -32,7 +32,12 @@ import type {
   Settings,
 } from "../infra/db/queries/settings";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
-import { agentSessionService, type CatalogEntry } from "./agent-session-service";
+import {
+  agentSessionService,
+  type CatalogEntry,
+  findOption,
+  optionChoices,
+} from "./agent-session-service";
 
 const log = createLogger("model-refresh");
 
@@ -333,14 +338,8 @@ export class ModelRefreshService {
  * option, or its legacy model list (Gemini CLI).
  */
 function modelsFromCatalog(entry: CatalogEntry): CachedAgentModel[] {
-  const option = entry.configOptions.find(
-    (o) => o.type === "select" && (o.category === "model" || o.id === "model"),
-  );
-  if (option?.type === "select") {
-    return option.options
-      .flatMap((o) => ("group" in o ? o.options : [o]))
-      .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
-  }
+  const option = findOption(entry.configOptions, "model");
+  if (option) return optionChoices(option);
   return (entry.models?.availableModels ?? []).map((m) => ({
     id: m.modelId,
     name: m.name,

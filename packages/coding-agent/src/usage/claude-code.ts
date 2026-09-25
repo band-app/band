@@ -117,6 +117,23 @@ async function readSessionCwd(file: string): Promise<string | undefined | null> 
   }
 }
 
+/** How many session files `listSessions` reads at once. A project dir can
+ *  hold thousands; reading them all at once would hold one fd and one head
+ *  buffer per file. */
+const READ_CONCURRENCY = 16;
+
+async function forEachLimited<T>(
+  items: T[],
+  limit: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await work(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 /**
  * List the sessions Claude Code recorded for `dir`.
  *
@@ -137,29 +154,27 @@ async function listSessions(dir: string): Promise<UsageSessionItem[]> {
     } catch {
       continue;
     }
-    await Promise.all(
-      names.map(async (name) => {
-        if (!name.endsWith(".jsonl")) return;
-        const sessionId = name.slice(0, -".jsonl".length);
-        if (!SESSION_ID_RE.test(sessionId)) return;
-        const file = join(projectDir, name);
-        const cwd = await readSessionCwd(file);
-        if (cwd === null) return;
-        // Files without a recorded cwd are attributed to the project dir
-        // they live in, as the SDK does.
-        if (cwd !== undefined && cwd !== dir && cwd !== canonical) return;
-        let lastModified: number;
-        try {
-          lastModified = (await stat(file)).mtimeMs;
-        } catch {
-          return;
-        }
-        const existing = bySession.get(sessionId);
-        if (!existing || lastModified > existing.lastModified) {
-          bySession.set(sessionId, { sessionId, lastModified });
-        }
-      }),
-    );
+    await forEachLimited(names, READ_CONCURRENCY, async (name) => {
+      if (!name.endsWith(".jsonl")) return;
+      const sessionId = name.slice(0, -".jsonl".length);
+      if (!SESSION_ID_RE.test(sessionId)) return;
+      const file = join(projectDir, name);
+      const cwd = await readSessionCwd(file);
+      if (cwd === null) return;
+      // Files without a recorded cwd are attributed to the project dir
+      // they live in, as the SDK does.
+      if (cwd !== undefined && cwd !== dir && cwd !== canonical) return;
+      let lastModified: number;
+      try {
+        lastModified = (await stat(file)).mtimeMs;
+      } catch {
+        return;
+      }
+      const existing = bySession.get(sessionId);
+      if (!existing || lastModified > existing.lastModified) {
+        bySession.set(sessionId, { sessionId, lastModified });
+      }
+    });
   }
 
   return [...bySession.values()].sort((a, b) => b.lastModified - a.lastModified);

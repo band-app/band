@@ -15,15 +15,15 @@
  * Real server bundle, stub ACP agent (`startAcpServer`), tRPC over HTTP.
  */
 
+import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  collectEvents,
+  maxId,
+  runTurn,
   type StubTurn,
   seedAcpHome,
-  sendMessage,
   startAcpServer,
   trpc,
-  turnEnded,
   WORKSPACE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
@@ -36,9 +36,13 @@ interface ChatRow {
 }
 
 let servers: ServerHandle[] = [];
+/** Homes a test created itself (to restart a server on); removed after it. */
+let homes: string[] = [];
 afterEach(async () => {
   await Promise.all(servers.map((s) => s.close()));
   servers = [];
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
 });
 
 async function boot(opts: { home?: string; turns?: StubTurn[] } = {}): Promise<ServerHandle> {
@@ -53,19 +57,6 @@ const newChatId = () => `summary-chat-${Date.now()}-${seq++}`;
 async function getChat(url: string, chatId: string): Promise<ChatRow | null> {
   return (await trpc<{ chat: ChatRow | null }>(url, "chats.get", { chatId }, "query")).chat;
 }
-
-/** Sends `text` and waits for its turn to end. Returns the turn's events. */
-async function runTurn(url: string, chatId: string, text: string, lastEventId?: number) {
-  const done = collectEvents(url, chatId, {
-    lastEventId,
-    until: (e) => turnEnded(e) && e.eventId > (lastEventId ?? 0),
-  });
-  await new Promise((r) => setTimeout(r, 50));
-  await sendMessage(url, chatId, text);
-  return done;
-}
-
-const maxId = (events: { eventId: number }[]) => Math.max(0, ...events.map((e) => e.eventId));
 
 describe("chats.get — persisted activeSessionSummary", () => {
   it("is the session's first prompt, and later turns don't change it", async () => {
@@ -114,6 +105,7 @@ describe("chats.get — persisted activeSessionSummary", () => {
 
   it("survives a server restart (read from SQLite)", async () => {
     const home = seedAcpHome();
+    homes.push(home);
     const first = await boot({ home });
     const chatId = newChatId();
     await runTurn(first.url, chatId, "remember this title");

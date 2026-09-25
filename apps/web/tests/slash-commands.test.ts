@@ -21,16 +21,16 @@
  * its own commands, skills included.)
  */
 
+import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatEvent, SessionState } from "../src/shared/chat-events";
 import {
   collectEvents,
+  runTurn,
   seedAcpHome,
-  sendMessage,
   startAcpServer,
   TEST_TOKEN,
   trpc,
-  turnEnded,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
@@ -40,9 +40,13 @@ const STUB_COMMANDS = [
 ];
 
 let servers: ServerHandle[] = [];
+/** Homes a test created itself (to restart a server on); removed after it. */
+let homes: string[] = [];
 afterEach(async () => {
   await Promise.all(servers.map((s) => s.close()));
   servers = [];
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
 });
 
 async function boot(home?: string): Promise<ServerHandle> {
@@ -86,10 +90,7 @@ describe("slash commands in the chat's session-state", () => {
   it("a chat whose agent runs offers the live session's commands", async () => {
     const server = await boot();
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 50));
-    await sendMessage(server.url, chatId, "hello");
-    const events = await done;
+    const events = await runTurn(server.url, chatId, "hello");
 
     // The agent announced its commands on the session, and Band logged it.
     const announced = events.find(
@@ -106,12 +107,10 @@ describe("slash commands in the chat's session-state", () => {
 
   it("after a restart, the chat's commands come back from Band's log", async () => {
     const home = seedAcpHome();
+    homes.push(home);
     const first = await boot(home);
     const chatId = newChatId();
-    const done = collectEvents(first.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 50));
-    await sendMessage(first.url, chatId, "hello");
-    await done;
+    await runTurn(first.url, chatId, "hello");
     await first.close();
     servers = servers.filter((s) => s !== first);
 

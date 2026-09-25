@@ -23,6 +23,11 @@ export function getDb() {
 
   _sqlite = new DatabaseSync(dbPath);
   _sqlite.exec("PRAGMA journal_mode = WAL");
+  // With WAL, NORMAL syncs at checkpoints instead of on every commit. The
+  // chat event log appends one row per streamed agent chunk; FULL would
+  // fsync each of them on the event loop. NORMAL can lose the last commits
+  // on power loss but never corrupts the database.
+  _sqlite.exec("PRAGMA synchronous = NORMAL");
   _sqlite.exec("PRAGMA foreign_keys = ON");
   // Wait up to 5 s on a writer collision instead of throwing
   // `SQLITE_BUSY` immediately. WAL allows concurrent readers, but only

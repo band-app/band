@@ -129,7 +129,9 @@ export async function resolveAcpLaunch(def: AcpAgentDefinition): Promise<AcpLaun
         : "Gemini CLI is not installed, or not on your PATH";
     }
     case "cursor-cli": {
-      const bin = binary(def, ["agent", "cursor-agent"], path);
+      // `cursor-agent` first: `agent` is a generic name another tool on the
+      // PATH could own.
+      const bin = binary(def, ["cursor-agent", "agent"], path);
       return bin
         ? { command: bin, args: ["acp"], env }
         : "Cursor CLI is not installed, or not on your PATH";

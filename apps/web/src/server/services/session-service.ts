@@ -25,7 +25,8 @@ export interface SessionSummary {
 
 export interface ListSessionsResponse {
   sessions: SessionSummary[];
-  /** False when neither the agent nor Band's log can list sessions. */
+  /** Always true since #648: agents without `session/list` fall back to
+   *  Band's own log. Kept so existing clients' checks keep working. */
   supported: boolean;
 }
 

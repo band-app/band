@@ -8,11 +8,15 @@
  * stream and the stub's own request log (what Band sent over ACP).
  */
 
+import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ChatEvent } from "../src/shared/chat-events";
 import {
   agentText,
   collectEvents,
+  maxId,
+  openStream,
+  runTurn,
+  seedAcpHome,
   sendMessage,
   startAcpServer,
   stubRequests,
@@ -36,21 +40,6 @@ async function boot(opts: Parameters<typeof startAcpServer>[0] = {}) {
 let seq = 0;
 const newChatId = () => `acp-chat-${Date.now()}-${seq++}`;
 
-/** Sends `text` and collects the stream until the turn ends. */
-async function runTurn(url: string, chatId: string, text: string, lastEventId?: number) {
-  const events = collectEvents(url, chatId, {
-    lastEventId,
-    // A turn that fails before the chat has a session ends with a
-    // transient (negative-id) event.
-    until: (e) => turnEnded(e) && (e.eventId > (lastEventId ?? 0) || e.eventId < 0),
-  });
-  await new Promise((r) => setTimeout(r, 50));
-  await sendMessage(url, chatId, text);
-  return events;
-}
-
-const maxId = (events: ChatEvent[]) => Math.max(0, ...events.map((e) => e.eventId));
-
 describe("chat over ACP", () => {
   it("streams the agent's reply as ACP session/updates and logs the prompt", async () => {
     const server = await boot();
@@ -68,10 +57,12 @@ describe("chat over ACP", () => {
 
     // What Band told the agent: no fs, no terminal (#649), form elicitation.
     const [init] = stubRequests(server.home, "initialize");
-    expect(init.params.clientCapabilities).toMatchObject({
+    expect(init.params.clientCapabilities).toEqual({
       fs: { readTextFile: false, writeTextFile: false },
       terminal: false,
       elicitation: { form: {} },
+      session: { notices: {} },
+      auth: { terminal: false },
     });
     // The agent runs in the workspace, with chat dispatch for nested `band`
     // calls. (Other `session/new`s come from the boot-time model probe,
@@ -81,8 +72,16 @@ describe("chat over ACP", () => {
     );
     expect(newSession?.env.BAND_DISPATCH).toBe("chat");
     const [sent] = stubRequests(server.home, "session/prompt");
-    const blocks = sent.params.prompt as { type: string; text?: string }[];
-    expect(blocks[0]).toEqual({ type: "text", text: "hello there" });
+    // The first turn also tells the agent where to put files for the user.
+    expect(sent.params.prompt).toEqual([
+      { type: "text", text: "hello there" },
+      {
+        type: "text",
+        text: expect.stringMatching(
+          /^\[File sharing: to send a file to the user, write or copy it to .*\/shared\/testproject-main\/ /,
+        ),
+      },
+    ]);
   });
 
   it("replays a finished chat with text chunks merged, and gap-fills after a cursor", async () => {
@@ -107,12 +106,28 @@ describe("chat over ACP", () => {
     expect(agentText(merged)).toBe("one two three four five six");
     expect(replay.find((e) => e.type === "history-meta")).toMatchObject({ hasOlder: false });
 
-    // Reconnect with a cursor: only what came after it.
     const opened = replay.find((e) => e.type === "subscription-opened");
-    const cursor = maxId(first);
-    const second = await runTurn(server.url, chatId, "again", cursor);
+    expect(opened).toMatchObject({ reset: false });
+
+    // Reconnect from the middle of the logged chunks: only what came after
+    // the cursor, the rest of the reply merged into one chunk.
+    const cursor = chunks[2].eventId;
+    const gapFill = await collectEvents(server.url, chatId, {
+      lastEventId: cursor,
+      until: (e) => turnEnded(e) && e.eventId > cursor,
+    });
+    expect(gapFill[0]).toMatchObject({ type: "subscription-opened", reset: false });
+    const filled = gapFill.filter((e) => e.eventId > 0);
+    expect(filled.every((e) => e.eventId > cursor)).toBe(true);
+    expect(filled.map((e) => e.type)).toEqual(["update", "turn-ended"]);
+    expect(agentText(filled)).toBe(agentText(chunks.slice(3)));
+
+    // Reconnect at the end and run another turn: only the new turn arrives.
+    const end = maxId(first);
+    const second = await runTurn(server.url, chatId, "again", end);
+    expect(second[0]).toMatchObject({ type: "subscription-opened", reset: false });
     const logged = second.filter((e) => e.eventId > 0);
-    expect(logged.every((e) => e.eventId > cursor)).toBe(true);
+    expect(logged.every((e) => e.eventId > end)).toBe(true);
     // Live chunks arrive as the agent sent them; only replays merge.
     expect([...new Set(logged.map((e) => e.type))]).toEqual([
       "prompt",
@@ -120,7 +135,6 @@ describe("chat over ACP", () => {
       "update",
       "turn-ended",
     ]);
-    expect(opened).toMatchObject({ reset: false });
   });
 
   it("answers a permission request with the picked option", async () => {
@@ -143,21 +157,24 @@ describe("chat over ACP", () => {
       ],
     });
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, {
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "permission") {
-          void trpc(server.url, "chat.answer", {
-            chatId,
-            requestId: e.requestId,
-            optionId: "allow",
-          });
+          answers.push(
+            trpc(server.url, "chat.answer", {
+              chatId,
+              requestId: e.requestId,
+              optionId: "allow",
+            }),
+          );
         }
       },
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "edit it");
     const events = await done;
+    await Promise.all(answers);
 
     const permission = events.find((e) => e.type === "permission");
     expect(permission).toMatchObject({
@@ -194,22 +211,25 @@ describe("chat over ACP", () => {
       ],
     });
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, {
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "elicitation") {
-          void trpc(server.url, "chat.answerElicitation", {
-            chatId,
-            requestId: e.requestId,
-            action: "accept",
-            content: { question_0: "SQLite" },
-          });
+          answers.push(
+            trpc(server.url, "chat.answerElicitation", {
+              chatId,
+              requestId: e.requestId,
+              action: "accept",
+              content: { question_0: "SQLite" },
+            }),
+          );
         }
       },
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "pick one");
     const events = await done;
+    await Promise.all(answers);
     expect(events.find((e) => e.type === "elicitation")).toMatchObject({
       request: { mode: "form", message: "Which database?" },
     });
@@ -234,17 +254,20 @@ describe("chat over ACP", () => {
       ],
     });
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, {
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
       until: turnEnded,
       onEvent: (e) => {
         if (e.type === "permission") {
-          void trpc(server.url, "tasks.abort", { workspaceId: "testproject-main", chatId });
+          answers.push(
+            trpc(server.url, "tasks.abort", { workspaceId: "testproject-main", chatId }),
+          );
         }
       },
     });
-    await new Promise((r) => setTimeout(r, 50));
     await sendMessage(server.url, chatId, "run the tests");
     const events = await done;
+    await Promise.all(answers);
 
     expect(events.find((e) => e.type === "request-resolved")).toMatchObject({
       answer: "cancelled",
@@ -261,10 +284,9 @@ describe("chat over ACP", () => {
       ],
     });
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, {
+    const { events: done } = await openStream(server.url, chatId, {
       until: (_e, all) => all.filter(turnEnded).length === 2,
     });
-    await new Promise((r) => setTimeout(r, 50));
     expect(await sendMessage(server.url, chatId, "slow one")).toMatchObject({ queued: false });
     expect(await sendMessage(server.url, chatId, "second one")).toMatchObject({ queued: true });
     const events = await done;
@@ -283,8 +305,7 @@ describe("chat over ACP", () => {
   it("sends attached files as ACP resource links and shows them on the prompt", async () => {
     const server = await boot({ caps: { image: false } });
     const chatId = newChatId();
-    const done = collectEvents(server.url, chatId, { until: turnEnded });
-    await new Promise((r) => setTimeout(r, 50));
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
     await sendMessage(server.url, chatId, "look at this", {
       files: [
         {
@@ -299,11 +320,17 @@ describe("chat over ACP", () => {
     const prompt = events.find((e) => e.type === "prompt");
     expect(prompt).toMatchObject({ files: [{ mediaType: "text/plain", filename: "note.txt" }] });
     const [sent] = stubRequests(server.home, "session/prompt");
-    const link = (sent.params.prompt as { type: string; uri?: string; name?: string }[]).find(
-      (b) => b.type === "resource_link",
-    );
-    expect(link?.name).toBe("note.txt");
-    expect(link?.uri).toMatch(/^file:\/\/.*note/);
+    // The agent can't take images here, so the file goes as a link.
+    expect(sent.params.prompt).toEqual([
+      { type: "text", text: "look at this" },
+      {
+        type: "resource_link",
+        uri: expect.stringMatching(/^file:\/\/.*\/uploads\/.*note\.txt$/),
+        name: "note.txt",
+        mimeType: "text/plain",
+      },
+      { type: "text", text: expect.stringMatching(/^\[File sharing: /) },
+    ]);
   });
 
   it("changes a session config option on the live session and remembers it", async () => {
@@ -355,26 +382,34 @@ describe("chat over ACP", () => {
 
 describe("chat over ACP: sessions", () => {
   it("resumes the session after a server restart and keeps the log", async () => {
-    const first = await boot();
-    const home = first.home;
+    const home = seedAcpHome();
+    const first = await boot({ home });
     const chatId = newChatId();
     const turn1 = await runTurn(first.url, chatId, "before restart");
-    const opened = turn1.find((e) => e.type === "subscription-opened");
+    // The client holds the revision of the last `subscription-opened` or
+    // `session-attached` it saw, as the transcript reducer does. A turn that
+    // starts a new session moves the log to revision 1 via `session-attached`.
+    const carrier = turn1
+      .filter((e) => e.type === "subscription-opened" || e.type === "session-attached")
+      .at(-1);
     await first.close();
     servers = servers.filter((s) => s !== first);
 
     const second = await boot({ home });
     // Reconnecting with the old cursor and revision finds nothing missing.
-    const revision = opened?.type === "subscription-opened" ? opened.revision : undefined;
+    const revision =
+      carrier?.type === "subscription-opened" || carrier?.type === "session-attached"
+        ? carrier.revision
+        : -1;
+    expect(revision).toBe(1);
     const reconnect = await collectEvents(second.url, chatId, {
       lastEventId: maxId(turn1),
-      revision: 1,
+      revision,
       until: (e) => e.type === "session-state",
     });
-    expect(revision).toBe(0);
     expect(reconnect.find((e) => e.type === "subscription-opened")).toMatchObject({
       reset: false,
-      revision: 1,
+      revision,
     });
     // A cold subscribe replays the log Band kept.
     const cold = await collectEvents(second.url, chatId, {
@@ -390,6 +425,9 @@ describe("chat over ACP: sessions", () => {
     expect(resume.params.sessionId).toBe(
       attached?.type === "session-attached" ? attached.sessionId : "",
     );
+    await second.close();
+    servers = servers.filter((s) => s !== second);
+    rmSync(home, { recursive: true, force: true });
   });
 
   it("loads a session Band never recorded, writing the replay as a new revision", async () => {

@@ -10,7 +10,7 @@
  * Real server bundle, real ACP subprocess, tRPC over HTTP. No mocks.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -68,6 +68,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.close();
+  rmSync(home, { recursive: true, force: true });
 });
 
 describe("workspace-switch perf — sessions.list", () => {
@@ -88,8 +89,12 @@ describe("workspace-switch perf — sessions.list", () => {
     });
     // Generous bound: this includes starting the agent process.
     expect(elapsedMs).toBeLessThan(5000);
-    // One `session/list` answered it; no session was loaded to read titles.
-    expect(stubRequests(home, "session/list").length).toBeGreaterThan(0);
+    // Exactly one `session/list`, scoped to the workspace, answered it (the
+    // boot-time model probe never lists), and no session was loaded to
+    // read titles.
+    expect(stubRequests(home, "session/list").map((r) => r.params.cwd)).toEqual([
+      join(home, "repo"),
+    ]);
     expect(stubRequests(home, "session/load")).toHaveLength(0);
   });
 

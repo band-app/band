@@ -121,6 +121,16 @@ describe("sse-writer", () => {
     expect(ids).toEqual(["id: 1", "id: 2", "id: 3"]);
   });
 
+  it("writes no id line for synthetic events, so they never move the client's cursor", () => {
+    const { res, recorded } = makeStubResponse();
+    const w = openSseStream(res);
+
+    const evt: ChatEvent = { eventId: -1, type: "queue-updated", messages: [] };
+    w.write(evt);
+
+    expect(recorded.chunks).toEqual(["event: queue-updated\n", `data: ${JSON.stringify(evt)}\n\n`]);
+  });
+
   it("writes comments as ': ...' lines (used for heartbeats)", () => {
     const { res, recorded } = makeStubResponse();
     const w = openSseStream(res);

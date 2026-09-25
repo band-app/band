@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../../errors";
+import { sessionIdSchema } from "../../services/_utils/session-id";
 import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
@@ -53,7 +54,7 @@ export const tasksRouter = t.router({
           project: z.string().optional(),
           workspaceId: z.string().optional(),
           status: z.enum(["running", "completed", "failed"]).optional(),
-          sessionId: z.string().optional(),
+          sessionId: sessionIdSchema.optional(),
           chatId: z.string().optional(),
         })
         .optional(),
@@ -81,7 +82,7 @@ export const tasksRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string().optional(),
         prompt: z.string(),
-        sessionId: z.string().optional(),
+        sessionId: sessionIdSchema.optional(),
         mode: z.string().optional(),
         model: z.string().optional(),
         codingAgentId: z.string().optional(),

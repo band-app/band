@@ -18,7 +18,7 @@
  * never move the cursor.
  *
  * Lives under `apps/web/src/shared/` because both the server tier and the
- * browser components import it (see `docs/web-architecture.md`).
+ * browser components import it.
  */
 
 import type {
@@ -118,9 +118,6 @@ export interface SessionState {
    *  one, else Band's estimate from the last turn's tokens. */
   costUsd: number | null;
   title: string | null;
-  /** True when the agent can list past sessions (`session/list`) or Band's
-   *  own log can stand in for it. Drives the history dropdown. */
-  canListSessions: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +188,9 @@ export interface SessionAttachedEvent {
   type: "session-attached";
   sessionId: string;
   how: "new" | "load" | "resume";
+  /** The log revision this session writes from now on. A client adopts it,
+   *  so its next reconnect gap-fills rather than resets. */
+  revision: number;
   agentName?: string;
   configOptions: SessionConfigOption[];
   modes: SessionModeState | null;

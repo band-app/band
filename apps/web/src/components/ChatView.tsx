@@ -801,15 +801,13 @@ export function ChatView({
             <PromptInputActions>
               <div className="flex items-center gap-0.5">
                 <PromptInputAttach />
-                {(session?.canListSessions ?? true) && (
-                  <SessionHistoryMenu
-                    workspaceId={workspaceId}
-                    chatId={chatId}
-                    activeSessionId={currentSessionId}
-                    onSelectSession={handleSelectSession}
-                    onNewSession={handleNewSession}
-                  />
-                )}
+                <SessionHistoryMenu
+                  workspaceId={workspaceId}
+                  chatId={chatId}
+                  activeSessionId={currentSessionId}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                />
                 {contextMeterEnabled && (
                   <ContextMeter usage={session?.usage ?? null} costUsd={session?.costUsd ?? null} />
                 )}
@@ -998,6 +996,7 @@ function AgentModelMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          data-testid="chat-pane__model-menu"
           disabled={disabled}
           className={cn(
             "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",

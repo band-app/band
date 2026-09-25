@@ -49,6 +49,15 @@ export class ChatPanePage {
   /** Inline notices in the transcript (a stopped turn, an agent error).
    *  Each carries `data-level` (`info` / `warning` / `error`). */
   readonly notices: Locator;
+  /** Permission cards (ACP `session/request_permission`), one per request.
+   *  Each carries `data-answered="true"` once the user picked an option. */
+  readonly permissionCards: Locator;
+  /** Elicitation forms (ACP form `elicitation/create`, e.g. Claude Code's
+   *  AskUserQuestion). Same `data-answered` attribute as the cards. */
+  readonly elicitationForms: Locator;
+  /** The model picker's trigger, built from the session's `model` config
+   *  option. */
+  readonly modelMenuButton: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
@@ -98,6 +107,9 @@ export class ChatPanePage {
     this.emptyConversation = page.getByTestId("chat-pane__empty-state");
     this.taskListWidget = page.getByTestId("task-list-widget__container");
     this.notices = page.getByTestId("chat-pane__notice");
+    this.permissionCards = page.getByTestId("chat-pane__permission");
+    this.elicitationForms = page.getByTestId("chat-pane__elicitation");
+    this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -350,6 +362,46 @@ export class ChatPanePage {
   async selectPastSession(summary: string): Promise<void> {
     await test.step(`Select past session "${summary}"`, async () => {
       await this.sessionHistoryItem(summary).click();
+    });
+  }
+
+  /** Answer the Nth permission card by clicking the option the agent
+   *  offered. Option names come from the agent (test data), so the button's
+   *  role name is the stable locator. */
+  async answerPermission(index: number, optionName: string): Promise<void> {
+    await test.step(`Answer permission #${index} with "${optionName}"`, async () => {
+      await this.permissionCards
+        .nth(index)
+        .getByRole("button", { name: optionName, exact: true })
+        .click();
+    });
+  }
+
+  /** Pick a choice in the Nth elicitation form by its title (agent-supplied
+   *  test data). */
+  async pickElicitationChoice(index: number, choiceTitle: string): Promise<void> {
+    await test.step(`Pick "${choiceTitle}" in elicitation #${index}`, async () => {
+      await this.elicitationForms
+        .nth(index)
+        .getByRole("button", { name: choiceTitle, exact: true })
+        .click();
+    });
+  }
+
+  /** Submit the Nth elicitation form. "Submit" is a constant label in
+   *  `elicitation-form.tsx`, so role + name is the locator. */
+  async submitElicitation(index: number): Promise<void> {
+    await test.step(`Submit elicitation #${index}`, async () => {
+      await this.elicitationForms.nth(index).getByRole("button", { name: "Submit" }).click();
+    });
+  }
+
+  /** Open the model picker and choose a model by its display name (from
+   *  the agent's `model` config option, i.e. test data). */
+  async selectModel(modelName: string): Promise<void> {
+    await test.step(`Select model "${modelName}"`, async () => {
+      await this.modelMenuButton.click();
+      await this.page.getByRole("menuitem", { name: modelName }).click();
     });
   }
 

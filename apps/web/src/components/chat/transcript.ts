@@ -583,6 +583,7 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
       return {
         ...state,
         sessionId: event.sessionId,
+        revision: event.revision,
         session: {
           ...(state.session ?? {
             source: "live",
@@ -590,7 +591,6 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
             usage: null,
             costUsd: null,
             title: null,
-            canListSessions: true,
           }),
           source: "live",
           configOptions: event.configOptions,
