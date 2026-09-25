@@ -67,6 +67,10 @@ test("returning to the first of six visited workspaces does not remount it", asy
   const [first, ...others] = WS;
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   const socketOpens = workspacePage.trackTerminalSocketOpensFor(first);
+  // The fake clock only measures here: `first` becomes the oldest of five
+  // hidden workspaces, and past 30 s hidden the cold-park policy would
+  // legitimately dispose its terminal, which is not what this test checks.
+  await workspacePage.installClock();
 
   await workspacePage.goto(first);
   await workspacePage.waitForReady();
@@ -84,6 +88,7 @@ test("returning to the first of six visited workspaces does not remount it", asy
   await workspacePage.markMountedWorkspace(first);
   expect(await workspacePage.markTerminalWrappers(first)).toBe(1);
 
+  const firstHiddenAt = await workspacePage.clockNow();
   for (const id of others) {
     await workspacePage.switchWorkspace(id);
     await expect(workspacePage.cachedPanelEntries(id)).toBeVisible();
@@ -91,6 +96,7 @@ test("returning to the first of six visited workspaces does not remount it", asy
 
   await workspacePage.switchWorkspace(first);
   await expect(workspacePage.terminalTabVisibilityMarker(first, true)).toBeVisible();
+  expect((await workspacePage.clockNow()) - firstHiddenAt).toBeLessThan(29_000);
 
   expect(await workspacePage.isMountedWorkspaceMarked(first)).toBe(true);
   // Only the shown workspace takes focus; the one just left is inert.

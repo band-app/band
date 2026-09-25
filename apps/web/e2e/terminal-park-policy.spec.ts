@@ -38,7 +38,7 @@ const TOKEN = "e2e-terminal-park-policy-token";
 const PROJECT = "park-policy-repo";
 
 // Server-side PTYs outlive a test's page, so each test uses its own worktrees.
-const BRANCHES = Array.from({ length: 11 }, (_, i) => `park-${i}`);
+const BRANCHES = Array.from({ length: 12 }, (_, i) => `park-${i}`);
 const WS = BRANCHES.map((branch) => toWorkspaceId(PROJECT, branch));
 
 const SECOND = 1_000;
@@ -137,15 +137,16 @@ test.describe("Terminal parking policy", () => {
     await workspacePage.advanceClock(29 * SECOND - elapsed);
     expect(await workspacePage.markedTerminalWrapperCount(oldest)).toBe(1);
 
-    // Past it, the oldest falls outside the 4 most recently hidden; the other
-    // four stay warm.
-    await workspacePage.advanceClock(2 * SECOND);
-    for (const id of recent) {
-      expect(await workspacePage.markedTerminalWrapperCount(id)).toBe(1);
-    }
+    // Move until even the last one hidden has been hidden 31 s (all five are
+    // candidates, all under 5 minutes). Only the budget can dispose now: the
+    // oldest falls outside the 4 most recently hidden, and those 4 stay warm.
+    await workspacePage.advanceClock(elapsed + 2 * SECOND);
     await expect
       .poll(() => workspacePage.terminalWrapperCount(oldest), { timeout: 10_000 })
       .toBe(0);
+    for (const id of recent) {
+      expect(await workspacePage.markedTerminalWrapperCount(id)).toBe(1);
+    }
   });
 
   test("past the 5 minute window a hidden workspace's terminal is disposed, and reveal replays its output", async ({
@@ -206,5 +207,48 @@ test.describe("Terminal parking policy", () => {
 
     expect(await workspacePage.markedTerminalWrapperCount(a)).toBe(1);
     expect(await workspacePage.isTerminalParked(a)).toBe(true);
+  });
+  test("inside a workspace, a terminal tab hidden past 5 minutes is disposed unless it was hidden last", async ({
+    page,
+  }) => {
+    const ws = WS[11];
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.installClock();
+    const socketOpens = workspacePage.trackTerminalSocketOpensFor(ws);
+
+    // Three terminal tabs; the first gets output we look for after a replay.
+    await openFirst(workspacePage, ws);
+    const [first] = await workspacePage.terminalIds(ws);
+    await workspacePage.runInTerminalUntilRendered(ws, "echo TAB_PARK_$((6*7))", /TAB_PARK_42/);
+    await workspacePage.clickTerminalAddTab(ws);
+    await expect.poll(() => workspacePage.terminalWrapperCount(ws), { timeout: 20_000 }).toBe(2);
+    const second = (await workspacePage.terminalIds(ws)).find((id) => id !== first);
+    await workspacePage.clickTerminalAddTab(ws);
+    await expect.poll(() => workspacePage.terminalWrapperCount(ws), { timeout: 20_000 }).toBe(3);
+    const third = (await workspacePage.terminalIds(ws)).find((id) => id !== first && id !== second);
+    if (!second || !third) throw new Error("expected three terminal ids");
+    for (const id of [first, second, third]) await workspacePage.markTerminalWrapper(id);
+    const opensBefore = socketOpens();
+
+    // The first and second tabs are hidden; the second was hidden last, so it
+    // is exempt. The third is on screen.
+    await workspacePage.advanceClock(5 * MINUTE + SECOND);
+
+    await expect
+      .poll(() => workspacePage.terminalWrapperState(first), { timeout: 10_000 })
+      .toBe("absent");
+    expect(await workspacePage.terminalWrapperState(second)).toBe("marked");
+    expect(await workspacePage.terminalWrapperState(third)).toBe("marked");
+
+    // Revealing the first tab reattaches a fresh terminal that replays output.
+    await workspacePage.activateTerminalTab(0);
+    await expect
+      .poll(
+        async () => (await workspacePage.readTerminalRenderedText(ws)).includes("TAB_PARK_42"),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    expect(await workspacePage.terminalWrapperState(first)).toBe("unmarked");
+    expect(socketOpens()).toBe(opensBefore + 1);
   });
 });

@@ -253,7 +253,7 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
   // even though only the desktop menu invokes it today.
   //
   // Multiple `DashboardShell` instances can be alive concurrently —
-  // DockviewInstanceManager keeps one per cached workspace. They all
+  // `MultiWorkspacePanelHost` keeps every visited workspace mounted. They all
   // race to own the same window global: each mount overwrites the
   // previous registration. The cleanup must only delete the key if
   // we still own it; otherwise a stale unmount (workspace deletion or

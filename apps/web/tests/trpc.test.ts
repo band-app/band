@@ -464,6 +464,8 @@ describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
     expect(res.status).toBe(200);
     const data = await trpcData<Record<string, unknown>>(res);
     expect(data.enableLSP).toBe(true);
+    // Ignored, not stripped: the passthrough schema keeps the stored value.
+    expect(data.maxCachedWorkspaces).toBe(1);
   });
 
   it("settings.update accepts an update that still sends the key", async () => {
@@ -476,6 +478,7 @@ describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
     const getRes = await trpcQuery(server.url, "settings.get");
     const data = await trpcData<Record<string, unknown>>(getRes);
     expect(data.enableLSP).toBe(false);
+    expect(data.maxCachedWorkspaces).toBe(2);
   });
 });
 

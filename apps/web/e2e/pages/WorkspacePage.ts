@@ -1651,8 +1651,8 @@ export class WorkspacePage {
   }
 
   /** Take over the page's timers and `Date` (Playwright's fake clock) so a test
-   *  can cross the terminal parking policy's 30 s / 5 min thresholds without
-   *  waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
+   *  can cross the parking thresholds (30 s / 5 min, for terminals and for
+   *  workspace cold park) without waiting. Time keeps flowing normally until `advanceClock`. Call BEFORE
    *  `goto`. */
   async installClock(): Promise<void> {
     await this.page.clock.install();
@@ -1888,6 +1888,25 @@ export class WorkspacePage {
       for (const w of wrappers) w.dataset.bandProbe = "marked";
       return wrappers.length;
     }, workspaceId);
+  }
+
+  /** Mark one terminal's wrapper, by terminal id (see `markTerminalWrappers`). */
+  async markTerminalWrapper(terminalId: string): Promise<void> {
+    await this.page.evaluate((id) => {
+      const wrapper = document.querySelector<HTMLElement>(`[data-terminal-id="${id}"]`);
+      if (wrapper) wrapper.dataset.bandProbe = "marked";
+    }, terminalId);
+  }
+
+  /** Whether a terminal's wrapper exists, and whether it still carries the mark
+   *  set by `markTerminalWrapper`. A disposed terminal has no wrapper; a
+   *  disposed-then-recreated one has an unmarked wrapper. */
+  async terminalWrapperState(terminalId: string): Promise<"marked" | "unmarked" | "absent"> {
+    return await this.page.evaluate((id) => {
+      const wrapper = document.querySelector<HTMLElement>(`[data-terminal-id="${id}"]`);
+      if (!wrapper) return "absent";
+      return wrapper.dataset.bandProbe === "marked" ? "marked" : "unmarked";
+    }, terminalId);
   }
 
   /** Count a workspace's terminal wrappers that still carry the mark set by

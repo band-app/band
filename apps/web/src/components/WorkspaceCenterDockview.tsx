@@ -2797,9 +2797,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           // A leaf also survives if its terminal is still alive in the CLIENT
           // cache (PARKED across a workspace switch). When the workspace's
           // dockview remounts in-app, the server's `terminal.list` can
-          // momentarily omit the parked terminal; without this cache check reconcile would prune the
-          // restored leaf and the empty-fallback below would fabricate a phantom
-          // duplicate terminal (regression of the band-app/band#617 fix).
+          // momentarily omit the parked terminal; without this cache check
+          // reconcile would prune the restored leaf and the empty-fallback
+          // below would fabricate a phantom duplicate terminal (regression of
+          // the band-app/band#617 fix).
           const selfLive = data.terminalIds.has(panel.id) || hasTerminal(panel.id);
           const ownsLive =
             leafOwnsAnyLive(panel.id, data.terminalIds) ||

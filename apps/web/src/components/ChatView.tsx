@@ -957,8 +957,9 @@ export function ChatView({
     // Scope every `band-file:` link clicked inside this chat to *this*
     // workspace — `dispatchOpenFile` reads the id from context, so a
     // dockview that has both workspace A and workspace B alive at once
-    // (every visited workspace stays mounted) routes each click to the chat's owning workspace rather
-    // than racing every mounted layout against the active tab. Without
+    // (every visited workspace stays mounted) routes each click to the
+    // chat's owning workspace rather than racing every mounted layout
+    // against the active tab. Without
     // this, a click in workspace A's chat would open the file in
     // whichever workspace happens to be active when the listener fires
     // (issue #539).

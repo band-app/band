@@ -22,6 +22,7 @@ import {
   pointToCell,
   wordSelectionAt,
 } from "./terminal-selection";
+import { ownerOfTerminal } from "./terminal-split-registry";
 import { isWorkspaceColdParked, subscribeWorkspaceColdPark } from "./workspace-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 
@@ -1324,9 +1325,10 @@ export function getOrCreateTerminal(terminalId: string, opts: CreateOptions): Te
 //     The workspace-level decision (30 s delay, 4 most recently hidden warm for
 //     5 minutes, the most recently left warm indefinitely) is shared with the
 //     other heavy panes and lives in `workspace-cold-park.ts`.
-//  2. Per terminal, inside each remaining workspace: a terminal detached for
-//     30 s becomes a candidate; the 6 most recently hidden stay warm for 5
-//     minutes, the most recently hidden one indefinitely.
+//  2. Per terminal tab, inside each workspace: a tab whose panes have all been
+//     detached for 30 s becomes a candidate; the 6 most recently hidden tabs
+//     stay warm for 5 minutes, the most recently hidden one indefinitely. A
+//     split tab's panes are parked or kept together.
 //
 // An attached (visible) terminal is never disposed. The pass re-runs on every
 // attach/detach/create and whenever the cold workspace set changes, and
@@ -1387,16 +1389,47 @@ function runParkingPass(): void {
 
   let nextDeadline = Number.POSITIVE_INFINITY;
   for (const [workspaceId, entries] of byWorkspace) {
+    let remaining = entries;
     if (isWorkspaceColdParked(workspaceId)) {
+      // Dispose every detached terminal of a cold workspace, except entries
+      // that were never attached: revealing a cold workspace creates fresh
+      // entries a moment before their attach effect runs, and this pass can
+      // land in between while the workspace is still marked cold. Those fall
+      // through to the per-tab policy below instead.
+      remaining = [];
       for (const entry of entries) {
-        if (!entry.isAttached()) disposeTerminal(entry.terminalId);
+        if (entry.isAttached() || entry.getActivatedSeq() === 0) remaining.push(entry);
+        else disposeTerminal(entry.terminalId);
       }
-      continue;
+    }
+
+    // Per-tab policy. Orca ranks terminal TABS; in Band each split pane is its
+    // own entry, so group panes by their outer tab (`ownerOfTerminal`) and
+    // park or keep a tab's panes together. A tab is hidden once all its panes
+    // are detached, since the latest detach; its activation is its latest
+    // pane's.
+    const tabs = new Map<string, TerminalCacheEntry[]>();
+    for (const entry of remaining) {
+      const tabId = ownerOfTerminal(entry.terminalId) ?? entry.terminalId;
+      const panes = tabs.get(tabId);
+      if (panes) panes.push(entry);
+      else tabs.set(tabId, [entry]);
     }
     const tabCandidates: { id: string; hiddenSinceMs: number; lastActivatedSeq: number }[] = [];
-    for (const entry of entries) {
-      const hiddenSinceMs = entry.getHiddenSince();
-      if (hiddenSinceMs === null || entry.isAttached()) continue;
+    for (const [tabId, panes] of tabs) {
+      let hiddenSinceMs = Number.NEGATIVE_INFINITY;
+      let lastActivatedSeq = 0;
+      let attached = false;
+      for (const pane of panes) {
+        const paneHiddenSince = pane.getHiddenSince();
+        if (paneHiddenSince === null || pane.isAttached()) {
+          attached = true;
+          break;
+        }
+        hiddenSinceMs = Math.max(hiddenSinceMs, paneHiddenSince);
+        lastActivatedSeq = Math.max(lastActivatedSeq, pane.getActivatedSeq());
+      }
+      if (attached) continue;
       for (const deadline of [
         hiddenSinceMs + TERMINAL_TAB_COLD_PARK_DELAY_MS,
         hiddenSinceMs + TERMINAL_TAB_HOT_RETAIN_MS,
@@ -1404,11 +1437,7 @@ function runParkingPass(): void {
         if (deadline > nowMs && deadline < nextDeadline) nextDeadline = deadline;
       }
       if (nowMs - hiddenSinceMs >= TERMINAL_TAB_COLD_PARK_DELAY_MS) {
-        tabCandidates.push({
-          id: entry.terminalId,
-          hiddenSinceMs,
-          lastActivatedSeq: entry.getActivatedSeq(),
-        });
+        tabCandidates.push({ id: tabId, hiddenSinceMs, lastActivatedSeq });
       }
     }
     const parkedTabs = selectIdsBeyondHotRetain(tabCandidates, {
@@ -1416,7 +1445,9 @@ function runParkingPass(): void {
       hotRetainMs: TERMINAL_TAB_HOT_RETAIN_MS,
       hotRetainLimit: TERMINAL_TAB_HOT_RETAIN_LIMIT,
     });
-    for (const terminalId of parkedTabs) disposeTerminal(terminalId);
+    for (const tabId of parkedTabs) {
+      for (const pane of tabs.get(tabId) ?? []) disposeTerminal(pane.terminalId);
+    }
   }
 
   if (nextDeadline !== Number.POSITIVE_INFINITY) {
