@@ -1238,7 +1238,13 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full flex-col overflow-hidden"
+      // Focusable (but not in the tab order) so clicking anywhere in the leaf,
+      // including a rendered markdown preview that has no focusable content,
+      // moves focus inside it. `useLeafFind` only opens on Cmd/Ctrl+F when
+      // focus is within this container; without this a preview could never
+      // open its find bar.
+      tabIndex={-1}
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
       <FileViewer

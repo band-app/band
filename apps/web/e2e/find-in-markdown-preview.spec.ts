@@ -136,6 +136,11 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   const findInput = page.getByPlaceholder(/Find in (preview|file)\.\.\./);
   await expect(findInput).toHaveCount(0);
 
+  // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
+  // the way a user clicks into what they're reading. (Tapping the file in the
+  // Explorer sheet leaves focus on the tree row, outside the leaf.)
+  await page.getByRole("heading", { level: 1, name: "Test Document" }).click();
+
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
   // SearchBar. CodeBrowserView routes the input through to
