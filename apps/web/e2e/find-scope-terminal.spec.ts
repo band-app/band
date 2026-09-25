@@ -122,6 +122,13 @@ test("Cmd+F opens the find bar for the focused surface, not another leaf", async
   }
   expect(leakedToFile).toBe(false);
 
+  // Close the terminal's bar (Escape, the focused bar's own dismiss) so the
+  // final `toHaveCount(0)` below proves the FILE's Cmd+F didn't open it.
+  // Terminal leaves use `renderer: "always"`, so a bar left open here would stay
+  // in the DOM (hidden) after switching tabs and make that assertion meaningless.
+  await workspacePage.pressEscape();
+  await expect(workspacePage.findInTerminalBar).toHaveCount(0);
+
   // Symmetric positive control: activate + focus the file editor → Cmd+F opens
   // its find bar (not the terminal's), proving the scoping holds both ways and
   // the negative above is a real guard rather than a dead keybind.
