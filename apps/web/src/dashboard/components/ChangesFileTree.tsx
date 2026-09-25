@@ -25,8 +25,8 @@ import { FileStatusBadge } from "./FileStatusBadge";
 interface ChangesFileTreeProps {
   fileStatuses: Record<string, FileStatus>;
   onSelectFile: (filePath: string) => void;
-  /** Double-click a file — pins the diff (vs the single-click preview). Optional
-   *  so the mobile DiffView, which passes only `onSelectFile`, is unaffected. */
+  /** Double-click a file — pins the diff (vs the single-click preview). When
+   *  omitted, a double-click does nothing beyond the single-click select. */
   onSelectFilePinned?: (filePath: string) => void;
   activeFile?: string | null;
   /**

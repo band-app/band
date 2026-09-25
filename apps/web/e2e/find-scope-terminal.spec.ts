@@ -14,7 +14,7 @@
  * handler.
  *
  * Fix: `useSearch` gained `registerGlobalFindKey` (default `true` for
- * standalone consumers like mobile `CodeBrowserView` / `DiffView`), and
+ * standalone consumers like mobile `CodeBrowserView`), and
  * `useLeafFind` passes `false` — its focus-in-container capture handler is the
  * single opener. So a Cmd+F from the terminal opens no editor/preview bar.
  *

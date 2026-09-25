@@ -29,8 +29,8 @@ import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
 const UNCOMMITTED_VALUE = "__uncommitted__";
 
 // Integration/staging branches floated to the top of the diff-target picker,
-// mirroring DiffView's `STAGING_BRANCH_PRIORITY`. Matched case-insensitively;
-// array order is the pin priority.
+// right after Uncommitted: they're the branches a user most often diffs
+// against. Matched case-insensitively; array order is the pin priority.
 const STAGING_BRANCH_PRIORITY = [
   "develop",
   "dev",

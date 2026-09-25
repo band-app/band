@@ -26,7 +26,7 @@ import { publicProcedure, t } from "../trpc";
  * The plural `workspaces.*` namespace handles workspace lifecycle
  * (create, remove, runScript, gitPull/Push by `(project, branch)`); see
  * `api/workspaces/router.ts`. Every existing client (FileBrowser,
- * ChangesView, CommitDialog, search popups, agent picker) speaks
+ * Changes sidepanel, diff leaves, search popups, agent picker) speaks
  * `trpc.workspace.*`.
  */
 
