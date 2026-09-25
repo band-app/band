@@ -65,7 +65,9 @@ export function setActiveWorkspace(workspaceId: string | null): void {
 export function forgetMissingWorkspaces(validWorkspaceIds: ReadonlySet<string>): void {
   const state = getState();
   let changed = false;
-  for (const id of [...state.hiddenSince.keys()]) {
+  // Deleting the current key while iterating a Map is safe. `cold` is
+  // recomputed from `hiddenSince` by the pass below.
+  for (const id of state.hiddenSince.keys()) {
     if (!validWorkspaceIds.has(id)) {
       state.hiddenSince.delete(id);
       changed = true;

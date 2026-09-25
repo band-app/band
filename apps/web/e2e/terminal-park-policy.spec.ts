@@ -75,13 +75,24 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
-/** Show a workspace's terminal and wait until its xterm is live and marked. */
-async function showTerminal(workspacePage: WorkspacePage, workspaceId: string): Promise<void> {
+/** Show a workspace's terminal and mark its wrapper. By default waits for the
+ *  shell prompt; `waitForPrompt: false` only waits for the wrapper, which is
+ *  all the mark needs and keeps a chain of switches fast on a loaded runner. */
+async function showTerminal(
+  workspacePage: WorkspacePage,
+  workspaceId: string,
+  { waitForPrompt = true }: { waitForPrompt?: boolean } = {},
+): Promise<void> {
   await workspacePage.openTerminalTab();
   await expect(workspacePage.terminalTabVisibilityMarker(workspaceId, true)).toBeVisible({
     timeout: 20_000,
   });
-  await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
+  if (waitForPrompt) await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
+  else {
+    await expect
+      .poll(() => workspacePage.terminalWrapperCount(workspaceId), { timeout: 20_000 })
+      .toBe(1);
+  }
   expect(await workspacePage.markTerminalWrappers(workspaceId)).toBe(1);
 }
 
@@ -91,9 +102,13 @@ async function openFirst(workspacePage: WorkspacePage, workspaceId: string): Pro
   await showTerminal(workspacePage, workspaceId);
 }
 
-async function switchTo(workspacePage: WorkspacePage, workspaceId: string): Promise<void> {
+async function switchTo(
+  workspacePage: WorkspacePage,
+  workspaceId: string,
+  opts?: { waitForPrompt?: boolean },
+): Promise<void> {
   await workspacePage.switchWorkspace(workspaceId);
-  await showTerminal(workspacePage, workspaceId);
+  await showTerminal(workspacePage, workspaceId, opts);
 }
 
 test.describe("Terminal parking policy", () => {
@@ -110,10 +125,11 @@ test.describe("Terminal parking policy", () => {
     await openFirst(workspacePage, oldest);
     // The fake clock keeps flowing in real time while the switches run, so
     // measure the thresholds from just before the oldest is hidden (the hide
-    // lands a click later, so `elapsed` never undercounts).
+    // lands a click later, so `elapsed` never undercounts). The switches skip
+    // the shell-prompt wait so they fit well inside the 30 s window.
     const oldestHiddenAt = await workspacePage.clockNow();
-    for (const id of recent) await switchTo(workspacePage, id);
-    await switchTo(workspacePage, active);
+    for (const id of recent) await switchTo(workspacePage, id, { waitForPrompt: false });
+    await switchTo(workspacePage, active, { waitForPrompt: false });
     const elapsed = (await workspacePage.clockNow()) - oldestHiddenAt;
     expect(elapsed).toBeLessThan(29 * SECOND);
 
@@ -121,14 +137,15 @@ test.describe("Terminal parking policy", () => {
     await workspacePage.advanceClock(29 * SECOND - elapsed);
     expect(await workspacePage.markedTerminalWrapperCount(oldest)).toBe(1);
 
-    // Past it, the oldest falls outside the 4 most recently hidden.
+    // Past it, the oldest falls outside the 4 most recently hidden; the other
+    // four stay warm.
     await workspacePage.advanceClock(2 * SECOND);
-    await expect
-      .poll(() => workspacePage.terminalWrapperCount(oldest), { timeout: 10_000 })
-      .toBe(0);
     for (const id of recent) {
       expect(await workspacePage.markedTerminalWrapperCount(id)).toBe(1);
     }
+    await expect
+      .poll(() => workspacePage.terminalWrapperCount(oldest), { timeout: 10_000 })
+      .toBe(0);
   });
 
   test("past the 5 minute window a hidden workspace's terminal is disposed, and reveal replays its output", async ({

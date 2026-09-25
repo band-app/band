@@ -76,8 +76,9 @@ export function selectIdsBeyondHotRetain(
     }
   }
   retainedCandidates.sort(compareColdParkRecencyDesc);
-  // The last-active id already holds one slot in the warm working set, so the
-  // cap counts it out: the remaining candidates fill hotRetainLimit - 1.
+  // When there is a last-active id it already holds one slot in the warm
+  // working set, so the remaining candidates fill hotRetainLimit - 1;
+  // otherwise the full cap applies.
   const remainingLimit = lastActiveId === null ? args.hotRetainLimit : args.hotRetainLimit - 1;
   for (const candidate of retainedCandidates.slice(Math.max(0, remainingLimit))) {
     coldParkedIds.add(candidate.id);
