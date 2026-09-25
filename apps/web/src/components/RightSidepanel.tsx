@@ -168,7 +168,8 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
   // keyed on diffMode/compareBranch, so switching the target refetches it.
   const branchesQuery = useQuery({
     queryKey: ["rightSidepanelBranches", workspaceId],
-    queryFn: () => adapter.listWorkspaceBranches?.(workspaceId) ?? { branches: [] as string[] },
+    queryFn: async (): Promise<{ branches: string[]; defaultBranch?: string }> =>
+      (await adapter.listWorkspaceBranches?.(workspaceId)) ?? { branches: [] },
     enabled: visible && !!adapter.listWorkspaceBranches,
   });
 
@@ -195,17 +196,22 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
   >;
   const changeCount = Object.keys(fileStatuses).length;
 
-  // Order branches like DiffView's target picker: staging-style branches first
-  // (priority order), then the rest alphabetically.
+  // Pinned above the separator: staging-style branches (priority order), then
+  // the project's default branch. Everything else follows alphabetically.
+  // Pinning the most common compare targets keeps them one click below
+  // Uncommitted (#599). `listBranches` drops the default branch when it IS the
+  // HEAD branch (no comparing against yourself), hence the `includes` guard.
   const { topSectionBranches, otherBranches } = useMemo(() => {
     const branchList = branchesQuery.data?.branches ?? [];
-    const staging = STAGING_BRANCH_PRIORITY.map((name) =>
+    const defaultBranch = branchesQuery.data?.defaultBranch;
+    const pinned = STAGING_BRANCH_PRIORITY.map((name) =>
       branchList.find((b) => b.toLowerCase() === name),
     ).filter((b): b is string => b != null);
-    const others = branchList
-      .filter((b) => !staging.includes(b))
-      .sort((a, b) => a.localeCompare(b));
-    return { topSectionBranches: staging, otherBranches: others };
+    if (defaultBranch && branchList.includes(defaultBranch) && !pinned.includes(defaultBranch)) {
+      pinned.push(defaultBranch);
+    }
+    const others = branchList.filter((b) => !pinned.includes(b)).sort((a, b) => a.localeCompare(b));
+    return { topSectionBranches: pinned, otherBranches: others };
   }, [branchesQuery.data]);
 
   const diffSelectValue =

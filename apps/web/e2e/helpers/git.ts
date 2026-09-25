@@ -2,9 +2,9 @@
  * Shared git helpers for e2e tests that need a real on-disk repository
  * as a fixture. Extracted from `find-in-markdown-preview.spec.ts`,
  * which had carried its own inline copy of the identity env + the
- * `git()` shell-out wrapper. `diff-horizontal-scroll.spec.ts` and
- * `diff-mount-once.spec.ts` use this helper from the start so the
- * pattern doesn't keep duplicating itself across the test suite.
+ * `git()` shell-out wrapper. `diff-horizontal-scroll.spec.ts` used this
+ * helper from the start so the pattern doesn't keep duplicating itself
+ * across the test suite.
  */
 
 import { execFileSync } from "node:child_process";

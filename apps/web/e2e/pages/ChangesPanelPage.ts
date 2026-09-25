@@ -1,249 +1,107 @@
 /**
- * Page object for the Changes panel inside a workspace's shared dockview.
+ * Page object for the Changes UI of the unified workspace layout (#643):
  *
- * Centralises the locators and the "navigate + seed expand-all + reload"
- * dance so individual spec files don't reach into `localStorage` /
- * `page.goto` directly. Test bodies drive UI exclusively through methods
- * on a page object — the test body stays focused on assertions instead
- * of setup plumbing.
+ *   - The Changes tab of the right sidepanel (`RightSidepanel.tsx`), which
+ *     holds the diff-target picker (`right-sidepanel__diff-target-select`)
+ *     and the changed-file tree (`changes-tree__row--<path>` rows).
+ *   - The per-file `diff` leaf a changed-file click opens in the center
+ *     dockview (`center-diff-leaf__visible-*`), with its unified / split
+ *     toggle (`center-diff-leaf__view--unified|split`).
  *
- * What lives here:
- *  - The diff scroller (matched via `getByTestId("diff-view__scroller")`).
- *  - The per-file header buttons (matched via `getByRole("button",
- *    { name: /<filename>\s+<status>/ })` — the file row exposes its
- *    filename + status as the button's accessible name).
- *  - The CodeMirror editor / scroller elements rendered inside each
- *    expanded file. These are 3rd-party CodeMirror class selectors
- *    (`.cm-editor`, `.cm-scroller`) — we don't own those names, but we
- *    encapsulate them here so the spec body never repeats the literal
- *    selector and a future CodeMirror upgrade flows through one file.
- *  - Setup helpers for the expand-all and split-mode localStorage flags
- *    (`band:diff-expand-all`, `band:diff-view-mode`), and the seed-and-
- *    reload step that activates them.
+ * This replaces the page object for the retired monolithic `DiffView`, which
+ * stacked every changed file in one lazily-mounted scroller. Nothing renders
+ * that component any more, so its `diff-view__*` testids are gone from the
+ * page.
+ *
+ * Revealing the sidepanel and selecting its tab is delegated to
+ * `WorkspacePage` rather than re-deriving those testids here.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-
-/** localStorage keys read on first paint by DiffView. */
-const EXPAND_ALL_KEY = "band:diff-expand-all";
-const VIEW_MODE_KEY = "band:diff-view-mode";
+import { WorkspacePage } from "./WorkspacePage";
 
 export type DiffViewMode = "unified" | "split";
 
+/** Testid of the "Uncommitted" entry in the diff-target dropdown. Exposed so
+ *  specs assert its position by id rather than by the localisable label. */
+export const UNCOMMITTED_OPTION_TESTID = "right-sidepanel__diff-target-option-uncommitted";
+
 export class ChangesPanelPage {
-  /** Scroll container around the file rows — used to programmatically
-   *  scroll the panel in the mount-once test. `data-testid` is set in
-   *  DiffView.tsx so the locator stays anchored if the layout markup
-   *  shifts around it. */
-  readonly scroller: Locator;
-  /** Every `.cm-editor` rendered inside the panel. In unified mode
-   *  there's one per visible expanded file; in split mode each visible
-   *  expanded file contributes two (one per side of the MergeView).
-   *
-   *  FRAGILITY: this is a CSS-class locator against a class owned by
-   *  CodeMirror (`@codemirror/view`'s baseTheme), which the doctrine
-   *  prefers we avoid for elements we own. CodeMirror doesn't expose a
-   *  testid hook on its own DOM, so this is the least-bad anchor —
-   *  but a major-version upgrade that renames `.cm-editor` (or splits
-   *  it into multiple class names) silently breaks every test that
-   *  uses this locator. The mitigation is to centralise the literal
-   *  here so a CM upgrade flows through one file. */
-  readonly cmEditors: Locator;
-  /** Every `.cm-scroller` rendered inside the panel. Same per-file
-   *  cardinality as `cmEditors`, same FRAGILITY caveat against
-   *  CodeMirror class-name renames in major upgrades. */
-  readonly cmScrollers: Locator;
-  /** The diff-target `<Select>` trigger (mode + compare-branch picker).
-   *  `data-testid="diff-view__target-select"` is set on the shadcn
-   *  `SelectTrigger` in DiffView.tsx — the system-controlled anchor the
-   *  doctrine prefers. Its rendered text is the currently-selected
-   *  target (e.g. "Uncommitted" or a branch name). */
+  /** The diff-target `<Select>` trigger in the Changes tab. Its rendered text
+   *  is the selected target (e.g. "Uncommitted" or a branch name). */
   readonly diffTargetTrigger: Locator;
-  /** First option in the open diff-target dropdown. Used to assert (via its
-   *  stable testid, not the localisable "Uncommitted" copy) that the
-   *  Uncommitted entry sits at the top of the list. */
+  /** First option in the open diff-target dropdown. */
   readonly firstDiffTargetOption: Locator;
-  /** The toolbar's `<head-branch> →` indicator span. `data-testid` is set on
-   *  the span in DiffView.tsx. Its text is the workspace's HEAD branch (runtime
-   *  data the test seeded). The picker keeps this populated across diff-target
-   *  refetches — the flicker-guard test asserts it never detaches/blanks. */
-  readonly headBranchLabel: Locator;
-  /** Workspace opened via `openWorkspace`, remembered so `diffMode()` can build
-   *  the per-workspace `band:diff-mode:<id>` localStorage key that
-   *  `useDiffTarget` mirrors the selected mode into. */
+  /** The body of the visible `diff` leaf. Scopes the CodeMirror locators below
+   *  so they can't pick up an editor from some other leaf. */
+  readonly diffLeaf: Locator;
+  /** Every `.cm-scroller` inside the visible diff leaf. Unified mode renders
+   *  one; split mode (MergeView) renders two, one per side.
+   *
+   *  FRAGILITY: `.cm-scroller` is a class owned by CodeMirror, which exposes
+   *  no testid hook on its own DOM. Centralised here so a CodeMirror upgrade
+   *  that renames it flows through one file. */
+  readonly cmScrollers: Locator;
+
+  private readonly workspace: WorkspacePage;
+  /** Workspace opened via `goto`, remembered so `diffMode()` can build the
+   *  per-workspace `band:diff-mode:<id>` localStorage key. */
   private currentWorkspaceId: string | null = null;
 
   constructor(
     private readonly page: Page,
-    private readonly baseUrl: string,
-    private readonly token: string,
+    baseUrl: string,
+    token: string,
   ) {
-    this.scroller = page.getByTestId("diff-view__scroller");
-    this.cmEditors = page.locator(".cm-editor");
-    this.cmScrollers = page.locator(".cm-scroller");
-    this.diffTargetTrigger = page.getByTestId("diff-view__target-select");
+    this.workspace = new WorkspacePage(page, baseUrl, token);
+    this.diffTargetTrigger = page.getByTestId("right-sidepanel__diff-target-select");
     this.firstDiffTargetOption = page.getByRole("option").first();
-    this.headBranchLabel = page.getByTestId("diff-view__head-branch");
+    this.diffLeaf = page.getByTestId("center-diff-leaf__visible-true");
+    this.cmScrollers = this.diffLeaf.locator(".cm-scroller");
   }
 
-  /** Factory method that bundles the common "open the Changes panel
-   *  with expand-all on, then optionally switch to split mode" setup
-   *  used by both `diff-horizontal-scroll.spec.ts` and any future spec
-   *  that needs a populated diff view. Owning this on the page object
-   *  (rather than as a module-level helper in the spec file) keeps the
-   *  navigation + locator-await logic inside the page-object layer.
-   *
-   *  Returns the constructed `ChangesPanelPage` so the caller can
-   *  continue driving the panel via instance methods. */
-  static async openWithFileExpanded(opts: {
-    page: Page;
-    baseUrl: string;
-    token: string;
-    workspaceId: string;
-    filename: string;
-    /** Git status badge expected on the file row (e.g. `"M"`). */
-    fileStatus: string;
-    viewMode: DiffViewMode;
-  }): Promise<ChangesPanelPage> {
-    const changes = new ChangesPanelPage(opts.page, opts.baseUrl, opts.token);
-    await changes.openWorkspace(opts.workspaceId, { expandAll: true });
-    // The file row appears in two places (the file tree sidebar AND
-    // the diff row header button) — wait on the diff row explicitly
-    // since that's the surface the editor hangs off.
-    await expect(changes.fileRowButton(opts.filename, opts.fileStatus)).toBeVisible({
-      timeout: 15_000,
-    });
-    if (opts.viewMode === "split") {
-      await changes.setViewMode("split");
-    }
-    return changes;
-  }
-
-  /** Locate the diff-row header button for a specific filename + git
-   *  status (e.g. `M` for modified). The row's `<button>` carries a
-   *  `data-testid="diff-view__file-row-toggle"` set in
-   *  `LazyFileRow`'s JSX — that's the system-controlled anchor the
-   *  doctrine prefers. We then filter by the accessible name (which
-   *  is the disclosure arrow + filename + status, e.g.
-   *  `▶ src/foo.ts M`) so callers can target a specific row when
-   *  multiple file rows are visible. Filtering instead of matching the
-   *  full name keeps the locator tolerant of changes to the
-   *  disclosure indicator (SVG icon swap, label tweaks, etc.) — only
-   *  the filename + status badge have to remain in the accessible
-   *  name for the locator to keep working. */
-  fileRowButton(filename: string, status: string): Locator {
-    // Escape `.` and other regex meta-characters in the filename so a
-    // path like `src/foo.ts` doesn't accidentally match
-    // `src/foo<anychar>ts`.
-    const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return this.page.getByTestId("diff-view__file-row-toggle").filter({
-      hasText: new RegExp(`${escapedFilename}\\s+${status}`),
-    });
-  }
-
-  /** Navigate to the workspace's Changes panel with one or more
-   *  client-side defaults pre-seeded in `localStorage`. Uses
-   *  `addInitScript` so the seed runs before any page script — DiffView
-   *  reads `band:diff-view-mode` / `band:diff-expand-all` in
-   *  `useState(getStoredViewMode)` / `useState(getStoredExpandAll)`
-   *  during its FIRST render, so the seed has to land before that
-   *  point or the lazy initializer captures the default (`unified` /
-   *  `false`) and never re-reads.
-   *
-   *  The init script is keyed via the (filename, status) shape that
-   *  comes from `JSON.stringify` so re-calling `openWorkspace` with
-   *  different options on the same `Page` is idempotent — each call
-   *  re-registers a new init script that runs on subsequent
-   *  navigations (Playwright doesn't deregister old init scripts, so
-   *  this would compose: last value wins because writes overwrite).
-   */
-  async openWorkspace(
-    workspaceId: string,
-    options: { expandAll?: boolean; viewMode?: DiffViewMode } = {},
-  ): Promise<void> {
+  /** Navigate to the workspace, reveal the right sidepanel, and select its
+   *  Changes tab. The sidepanel defaults to Explorer, and only the active
+   *  tab's body is mounted, so the picker and tree exist only after this. */
+  async goto(workspaceId: string): Promise<void> {
     this.currentWorkspaceId = workspaceId;
-    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
-    await test.step(`Open Changes panel for ${workspaceId}`, async () => {
-      const { expandAll, viewMode } = options;
-      if (expandAll != null || viewMode != null) {
-        await this.page.addInitScript(
-          ({ expandAll, viewMode, expandAllKey, viewModeKey }) => {
-            if (expandAll != null) {
-              localStorage.setItem(expandAllKey, expandAll ? "true" : "false");
-            }
-            if (viewMode != null) localStorage.setItem(viewModeKey, viewMode);
-          },
-          {
-            expandAll,
-            viewMode,
-            expandAllKey: EXPAND_ALL_KEY,
-            viewModeKey: VIEW_MODE_KEY,
-          },
-        );
-      }
-      await this.page.goto(url);
-    });
+    await this.workspace.goto(workspaceId);
+    await this.workspace.waitForReady();
+    await this.workspace.revealRightPanel();
+    await this.workspace.selectRightPanelTab("changes");
+    await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
   }
 
-  /** Scroll the diff panel to a specific pixel offset. Used in the
-   *  mount-once test to push a row well outside the IntersectionObserver
-   *  rootMargin zone. */
-  async scrollTo(offsetPx: number): Promise<void> {
-    await this.scroller.evaluate((el, top) => {
-      (el as HTMLDivElement).scrollTop = top;
-    }, offsetPx);
+  /** A changed-file row in the Changes tree, keyed by workspace-relative path. */
+  changesTreeRow(path: string): Locator {
+    return this.page.getByTestId(`changes-tree__row--${path}`);
   }
 
-  /** Current `scrollTop` of the diff panel. Useful for polling on
-   *  scroll commit without relying on `waitForTimeout`. */
-  async scrollTop(): Promise<number> {
-    return await this.scroller.evaluate((el) => (el as HTMLDivElement).scrollTop);
-  }
-
-  /** Count of currently-mounted `.cm-editor` elements across all
-   *  visible file rows. Used as a direct proxy for mount-once: the
-   *  count stays stable across scroll-away with mount-once, but drops
-   *  under the pre-mount-once behaviour. */
-  async mountedEditorCount(): Promise<number> {
-    return await this.cmEditors.count();
-  }
-
-  /** Double-click the diff line whose rendered text contains `text` to select
-   *  a WORD on that line in the first rendered CodeMirror editor. A non-empty
-   *  selection fires CodeMirror's `selectionSet`, which is what surfaces the
-   *  floating "Add to Chat / Add to Terminal / Copy reference" selection
-   *  tooltip (`selectionToChatExtension`).
-   *
-   *  Word-select (double-click) rather than line-select (triple-click) keeps
-   *  the selection within a single line: CodeMirror's line gesture extends the
-   *  selection to the start of the NEXT line (the trailing newline), which
-   *  makes `doc.lineAt(to)` resolve one line further and yields a `1-2` range
-   *  for a visually single-line selection. Pass a single-word line so the
-   *  double-click deterministically selects that word regardless of where in
-   *  the line the click lands.
-   *
-   *  `.cm-line` is a CodeMirror-owned class (same FRAGILITY caveat as
-   *  `cmEditors` / `cmScrollers` above) — centralised here so a CM upgrade
-   *  flows through one file. Scoped to `cmEditors.first()` so it targets the
-   *  single unified-mode editor for the expanded file. */
-  async selectWordInDiff(text: string): Promise<void> {
-    await test.step(`Select a word in diff line containing "${text}"`, async () => {
-      const line = this.cmEditors.first().locator(".cm-line", { hasText: text }).first();
-      await line.waitFor({ state: "visible", timeout: 15_000 });
-      await line.dblclick();
+  /** Open `path`'s per-file diff leaf from the Changes tree and put it in
+   *  `viewMode`. Clicks the view toggle for both modes rather than relying on
+   *  the stored default, so the mode under test is set explicitly. Waits for
+   *  CodeMirror to mount the expected number of scrollers (1 unified, 2 split)
+   *  so callers can measure immediately. */
+  async openDiff(path: string, viewMode: DiffViewMode): Promise<void> {
+    await test.step(`Open ${viewMode} diff for ${path}`, async () => {
+      await this.changesTreeRow(path).click();
+      await expect(this.diffLeaf).toBeVisible({ timeout: 15_000 });
+      await this.page.getByTestId(`center-diff-leaf__view--${viewMode}`).click();
+      await expect(this.cmScrollers).toHaveCount(viewMode === "split" ? 2 : 1, {
+        timeout: 15_000,
+      });
     });
   }
 
   /** The selected diff mode as a stable enum (`"uncommitted"` | `"branch"`),
    *  read from the per-workspace `band:diff-mode:<id>` localStorage key that
    *  `useDiffTarget` mirrors the mode into. Reading persisted client state
-   *  keeps this black-box (no production test-hook attribute) and dodges the
-   *  localisable trigger label. Falls back to `"uncommitted"` when the key is
-   *  absent — mirrors the app's own default for a fresh workspace with no
-   *  stored pick, where nothing has been written yet. */
+   *  keeps this black-box and avoids the localisable trigger label. Falls back
+   *  to `"uncommitted"` when the key is absent, which is the app's own default
+   *  for a fresh workspace where nothing has been written yet. */
   async diffMode(): Promise<string> {
     if (!this.currentWorkspaceId) {
-      throw new Error("diffMode() called before openWorkspace()");
+      throw new Error("diffMode() called before goto()");
     }
     return await this.page.evaluate((workspaceId) => {
       const v = localStorage.getItem(`band:diff-mode:${workspaceId}`);
@@ -251,11 +109,10 @@ export class ChangesPanelPage {
     }, this.currentWorkspaceId);
   }
 
-  /** Open the diff-target dropdown. Radix renders the open listbox into a
-   *  portal; the branch list arrives asynchronously (via `listBranches`)
-   *  and Radix re-renders the still-open listbox as options appear, so
-   *  callers open ONCE here and then poll `visibleDiffTargetOptions()` —
-   *  re-clicking the trigger in a poll loop would toggle it shut. */
+  /** Open the diff-target dropdown. Radix renders the listbox into a portal
+   *  and re-renders it as the branch list arrives, so callers open ONCE here
+   *  and then poll `visibleDiffTargetOptions()`. Re-clicking the trigger in a
+   *  poll loop would toggle it shut. */
   async openDiffTargetDropdown(): Promise<void> {
     await test.step("Open diff-target dropdown", async () => {
       await this.diffTargetTrigger.click();
@@ -263,120 +120,17 @@ export class ChangesPanelPage {
     });
   }
 
-  /** Every currently-rendered option label in the open diff-target
-   *  dropdown, in DOM order. Each `<SelectItem>` carries `role="option"`,
-   *  so `getByRole("option")` returns them top-to-bottom (the
-   *  `<SelectSeparator>` is a `role="separator"` and is excluded).
-   *  Callers assert on the ordering — Uncommitted first, then pinned
-   *  staging branches, then the default branch, then the alphabetical
-   *  remainder. Does not click, so it's safe to call inside `expect.poll`
-   *  while the branch list settles. */
+  /** Every option label in the open diff-target dropdown, in DOM order. Each
+   *  `<SelectItem>` has `role="option"`; the `<SelectSeparator>` is
+   *  `role="separator"` and is excluded. Doesn't click, so it's safe inside
+   *  `expect.poll` while the branch list settles. */
   async visibleDiffTargetOptions(): Promise<string[]> {
     return (await this.page.getByRole("option").allTextContents()).map((t) => t.trim());
   }
 
-  /** Open the diff-target dropdown and pick the option whose label is
-   *  `branchName`. The option label is a branch name (runtime data the test
-   *  seeded), so `getByRole("option", { name, exact })` is the doctrine-
-   *  allowed path — `exact` avoids `develop` matching `development`. Selecting
-   *  a branch flips the picker to `branch` mode and triggers a diff-target
-   *  refetch (the summary is nulled then reloaded). */
-  async selectDiffTarget(branchName: string): Promise<void> {
-    await test.step(`Select diff target "${branchName}"`, async () => {
-      await this.openDiffTargetDropdown();
-      await this.page.getByRole("option", { name: branchName, exact: true }).click();
-    });
-  }
-
-  /** Plant a MutationObserver that flags if the head-branch label ever
-   *  detaches from the DOM or blanks to empty text while it's connected.
-   *  Mirrors the flicker guard in `workspace-switch-changes.spec.ts`: an
-   *  auto-retrying assertion would step over a one-frame blank, but the
-   *  observer records every mutation in the window, so a single transient
-   *  blank during the diff-target refetch is enough to fail. Pair with
-   *  `stopHeadBranchFlickerGuard()` after the switch settles. */
-  async startHeadBranchFlickerGuard(): Promise<void> {
-    await this.page.evaluate((testId) => {
-      const selector = `[data-testid="${testId}"]`;
-      const isBlank = () => {
-        const el = document.querySelector(selector);
-        return !el || (el.textContent ?? "").trim() === "";
-      };
-      interface FlickerRecorder {
-        blanked: boolean;
-        observer: MutationObserver;
-      }
-      const recorder: FlickerRecorder = {
-        blanked: isBlank(),
-        observer: new MutationObserver(() => {
-          if (isBlank()) recorder.blanked = true;
-        }),
-      };
-      recorder.observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-      (
-        window as unknown as { __headBranchFlickerRecorder: FlickerRecorder }
-      ).__headBranchFlickerRecorder = recorder;
-    }, "diff-view__head-branch");
-  }
-
-  /** Disconnect the flicker guard and report whether the head-branch label
-   *  ever detached/blanked while it was connected. */
-  async stopHeadBranchFlickerGuard(): Promise<boolean> {
-    return await this.page.evaluate(() => {
-      const w = window as unknown as {
-        __headBranchFlickerRecorder: { blanked: boolean; observer: MutationObserver };
-      };
-      w.__headBranchFlickerRecorder.observer.disconnect();
-      return w.__headBranchFlickerRecorder.blanked;
-    });
-  }
-
-  /** Click the "Split view" / "Unified view" toggle. The buttons are
-   *  rendered with aria-name "Split view" / "Unified view" by
-   *  `DiffViewModeToggle`, so the role-name locator is the doctrine-
-   *  preferred path. Using the visible toggle (rather than seeding
-   *  localStorage) is more reliable across the app's auto-downgrade
-   *  rules (e.g. `effectiveViewMode` collapses split → unified when the
-   *  scroll container is narrower than `SPLIT_VIEW_MIN_WIDTH`) — the
-   *  toggle exposes the same control surface the user has. */
-  async setViewMode(mode: DiffViewMode): Promise<void> {
-    const label = mode === "split" ? "Split view" : "Unified view";
-    await test.step(`Set diff view mode to ${mode}`, async () => {
-      await this.page.getByRole("button", { name: label, exact: true }).click();
-    });
-  }
-
-  /** Mark the first rendered `.cm-editor` element with a JS property so
-   *  later assertions can verify DOM identity preservation across
-   *  scroll-away/back. If the editor is destroyed and re-mounted, the
-   *  marker is lost on the new element. */
-  async tagFirstEditor(marker: string): Promise<void> {
-    await this.cmEditors.first().evaluate((el, value) => {
-      (el as HTMLElement & { __bandMountOnceMarker?: string }).__bandMountOnceMarker = value;
-    }, marker);
-  }
-
-  /** Read the marker set by `tagFirstEditor` from the first rendered
-   *  `.cm-editor`. Returns `undefined` if the element no longer carries
-   *  it (i.e. it's a fresh re-mount). */
-  async firstEditorMarker(): Promise<string | undefined> {
-    return await this.cmEditors
-      .first()
-      .evaluate(
-        (el) => (el as HTMLElement & { __bandMountOnceMarker?: string }).__bandMountOnceMarker,
-      );
-  }
-
-  /** Write to the `scrollLeft` of the Nth `.cm-scroller` and read the
-   *  committed value back. The round-trip is what the horizontal-
-   *  scroll test uses to prove the scroller actually accepts
-   *  horizontal-scroll input — the pre-fix `overflow: visible` path
-   *  silently clamps the write to 0, so a non-zero read here is the
-   *  most direct behavioural assertion of the fix. */
+  /** Write `target` to the Nth diff scroller's `scrollLeft` and read back what
+   *  the browser committed. A scroller that can't scroll horizontally clamps
+   *  the write to 0, so a non-zero read is the direct behavioural check. */
   async roundTripScrollLeftAt(index: number, target: number): Promise<number> {
     return await this.cmScrollers.nth(index).evaluate((el, value) => {
       el.scrollLeft = value;
@@ -384,18 +138,9 @@ export class ChangesPanelPage {
     }, target);
   }
 
-  /** Per-scroller metrics for ALL rendered `.cm-scroller` elements.
-   *  Used by the split-mode assertion path — MergeView renders one
-   *  scroller per side, and both should report horizontal-scroll
-   *  capability for the fix to be considered complete.
-   *
-   *  Implemented via `locator.evaluateAll` (single round-trip across
-   *  the page boundary) rather than `elementHandles` (one round-trip
-   *  per element + holds JS handles across the serialisation
-   *  boundary). `scrollHeight` is included so the test can assert
-   *  it equals `clientHeight` — the natural-height regression guard
-   *  for PR #501.
-   */
+  /** Metrics for every diff scroller in the visible leaf, in one round trip.
+   *  `scrollHeight` is included so specs can assert it matches
+   *  `clientHeight`, the natural-height guard from PR #501. */
   async allScrollerMetrics(): Promise<
     Array<{
       scrollWidth: number;
