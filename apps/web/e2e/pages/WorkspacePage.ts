@@ -750,6 +750,16 @@ export class WorkspacePage {
     });
   }
 
+  /** Leave the app for a blank page. Unloading fires `pagehide`, which is
+   *  when an open file leaf captures its editor position into the per-tab
+   *  store, so a spec can change a file on disk while no editor is live to
+   *  pick the change up, then `goto` back and observe what the leaf restores. */
+  async navigateAway(): Promise<void> {
+    await test.step("Navigate away from the app (about:blank)", async () => {
+      await this.page.goto("about:blank");
+    });
+  }
+
   /** The scroll offset of the visible file leaf's CodeMirror scroller. 0 means
    *  the editor is at the top; a restored scroll position reads > 0. */
   async editorScrollTop(): Promise<number> {

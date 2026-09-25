@@ -102,6 +102,7 @@ export {
   scrollToLine,
   scrollToSearchMatch,
   serializeEditorState,
+  serializeViewPosition,
 } from "./lib/codemirror-setup";
 export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
 export { buildCommands, formatShortcut, isMacPlatform } from "./lib/command-registry";

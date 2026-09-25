@@ -76,7 +76,7 @@ import {
   releaseLspClient,
   SearchBar,
   type SearchOptions,
-  serializeEditorState,
+  serializeViewPosition,
   storeViewMode,
   type TerminalInsertDetail,
   toFileUri,
@@ -727,10 +727,30 @@ function readTabStates(ws: string): Record<string, TabFileState> {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
-    return parsed as Record<string, TabFileState>;
+    return dropLegacyEditorState(ws, parsed as Record<string, LegacyTabFileState>);
   } catch {
     return {};
   }
+}
+
+// Earlier builds persisted the full CodeMirror `EditorState` (entire document +
+// undo history) under `editorState`. Strip it on first read and write the
+// slimmer blob back once, so existing users stop re-parsing megabytes per
+// render and a stale document snapshot can never be restored.
+type LegacyTabFileState = TabFileState & { editorState?: unknown };
+function dropLegacyEditorState(
+  ws: string,
+  states: Record<string, LegacyTabFileState>,
+): Record<string, TabFileState> {
+  let changed = false;
+  for (const state of Object.values(states)) {
+    if (state && typeof state === "object" && "editorState" in state) {
+      delete state.editorState;
+      changed = true;
+    }
+  }
+  if (changed) writeTabStates(ws, states);
+  return states;
 }
 
 function writeTabStates(ws: string, states: Record<string, TabFileState>): void {
@@ -1060,16 +1080,18 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [setViews],
   );
 
-  // Capture the editor's cursor/selection/undo-history + scroll offset into the
-  // per-tab store so reopening the file (or reloading) lands the user back where
-  // they were. `FileViewer` restores it via `savedEditorState`/`savedScrollTop`
-  // below. Mirrors CodeBrowserView's serialize-on-unmount (pre-#643).
+  // Capture the editor's cursor selection + scroll offset into the per-tab
+  // store so reopening the file (or reloading) lands the user back where they
+  // were. `FileViewer` restores it via `savedSelection`/`savedScrollTop` below.
+  // Only positions are stored, never the document or undo history: the text
+  // always comes from disk (or the saved unsaved-edits), so a reload can't
+  // replay a stale copy of the file over newer content.
   const persistEditorState = useCallback(() => {
     const view = editorViewRef.current;
     if (!view) return;
     try {
-      const { editorState, scrollTop } = serializeEditorState(view);
-      updateFileTabState(workspaceIdRaw, filePathRaw, { editorState, scrollTop });
+      const { selection, scrollTop } = serializeViewPosition(view);
+      updateFileTabState(workspaceIdRaw, filePathRaw, { selection, scrollTop });
     } catch {
       // editor not ready — nothing to capture
     }
@@ -1253,12 +1275,13 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         renderMarkdown={renderMarkdown}
         onEditorView={handleEditorView}
         toolbar={searchBar}
-        // Cursor/selection/undo-history + scroll restore: seeded from the per-tab
-        // store; `CodeMirrorEditor` applies them on view creation. Captured back
-        // by `persistEditorState` on hide/unmount/reload. Read fresh each render
-        // — harmless, since `CodeMirrorEditor` consumes the value via a ref only
-        // at view-creation time (it doesn't recreate on prop change).
-        savedEditorState={persisted?.editorState}
+        // Cursor selection + scroll restore: seeded from the per-tab store;
+        // `CodeMirrorEditor` applies them on view creation, on top of the
+        // document from disk. Captured back by `persistEditorState` on
+        // unmount/reload. Read fresh each render, which is cheap now the blob
+        // holds positions rather than documents; `CodeMirrorEditor` only
+        // consumes it via a ref at view-creation time.
+        savedSelection={persisted?.selection}
         savedScrollTop={persisted?.scrollTop}
         // Editor-state persistence (localStorage, `band-tab-state:<ws>`). Seed
         // from the fresh module-level store and write back on every change so a

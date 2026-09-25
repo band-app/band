@@ -76,8 +76,8 @@ interface FileViewerProps {
   lspExtension?: Extension | null;
   /** Initial edited content to restore (from tab state). null = no cached edits. */
   initialEditedContent?: string | null;
-  /** Serialized CodeMirror editor state to restore on creation */
-  savedEditorState?: unknown;
+  /** Saved cursor selection (from `serializeViewPosition`) to re-apply on creation */
+  savedSelection?: unknown;
   /** Scroll position to restore after editor creation */
   savedScrollTop?: number;
   /** Called when edited content changes (for persistence to tab state) */
@@ -259,7 +259,7 @@ export function FileViewer({
   onViewModeChange,
   lspExtension,
   initialEditedContent,
-  savedEditorState,
+  savedSelection,
   savedScrollTop,
   onEditedContentChange,
   external,
@@ -1094,7 +1094,7 @@ export function FileViewer({
               onSave={handleSave}
               onCursorLineChange={onCursorLineChange}
               lspExtension={lspExtension}
-              savedEditorState={savedEditorState}
+              savedSelection={savedSelection}
               savedScrollTop={savedScrollTop}
             />
           ) : (

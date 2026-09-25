@@ -10,6 +10,7 @@ import {
   loadLanguage,
   scrollToLine,
   searchHighlightOnly,
+  selectionFromJSON,
   serializeEditorState,
   setHighlightLines,
 } from "../lib/codemirror-setup";
@@ -45,8 +46,12 @@ interface CodeMirrorEditorProps {
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
   /** Optional LSP extension to wire into the editor */
   lspExtension?: Extension | null;
-  /** Serialized editor state (from EditorState.toJSON with historyField) to restore on creation */
-  savedEditorState?: unknown;
+  /**
+   * Saved selection (from `serializeViewPosition`) to re-apply on creation. The
+   * document itself always comes from `content` / `originalContent`; only the
+   * cursor positions are restored, clamped to the current document length.
+   */
+  savedSelection?: unknown;
   /** Scroll position to restore after editor creation */
   savedScrollTop?: number;
 }
@@ -65,7 +70,7 @@ export function CodeMirrorEditor({
   onSave,
   onCursorLineChange,
   lspExtension,
-  savedEditorState,
+  savedSelection,
   savedScrollTop,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,8 +103,8 @@ export function CodeMirrorEditor({
   const originalContentRef = useRef(originalContent);
   originalContentRef.current = originalContent;
 
-  const savedEditorStateRef = useRef(savedEditorState);
-  savedEditorStateRef.current = savedEditorState;
+  const savedSelectionRef = useRef(savedSelection);
+  savedSelectionRef.current = savedSelection;
   const savedScrollTopRef = useRef(savedScrollTop);
   savedScrollTopRef.current = savedScrollTop;
 
@@ -155,9 +160,9 @@ export function CodeMirrorEditor({
 
       // Determine how to create the editor state:
       // 1. Recreation (theme/language change) — restore full state with new extensions
-      // 2. Tab switch — restore from parent-provided saved state
-      // 3. First creation with cached edits — apply as undoable transaction
-      // 4. Normal first creation — use content prop directly
+      // 2. First creation with cached edits — apply as undoable transaction
+      // 3. Normal first creation — use content prop directly
+      // Paths 2 and 3 then re-apply a parent-provided saved selection + scroll.
       const savedRecreation = recreationStateRef.current;
       recreationStateRef.current = null;
 
@@ -172,15 +177,6 @@ export function CodeMirrorEditor({
         );
         viewRef.current = new EditorView({ state, parent: container });
         restoreScroll = savedRecreation.scrollTop;
-      } else if (savedEditorStateRef.current) {
-        // Tab switch — restore from parent-provided serialized state
-        const state = EditorState.fromJSON(
-          savedEditorStateRef.current,
-          { extensions },
-          { history: historyField },
-        );
-        viewRef.current = new EditorView({ state, parent: container });
-        restoreScroll = savedScrollTopRef.current ?? undefined;
       } else {
         // First creation — use content props
         let initDoc: string;
@@ -207,13 +203,24 @@ export function CodeMirrorEditor({
           });
         }
 
-        // Scroll to line only on first creation (not restoration)
-        if (lineRef.current) {
+        // Reopen/reload: put the cursor back where the user left it. Built on
+        // top of the document from props (never a saved copy of the text), so
+        // a file changed on disk since then can't be overwritten by a stale
+        // snapshot on the next save. Clamped in case the file got shorter.
+        const selection =
+          savedSelectionRef.current != null
+            ? selectionFromJSON(savedSelectionRef.current, viewRef.current.state.doc.length)
+            : null;
+        if (selection) {
+          viewRef.current.dispatch({ selection });
+          restoreScroll = savedScrollTopRef.current ?? undefined;
+        } else if (lineRef.current) {
+          // Scroll to line only on a fresh open (not when restoring a position)
           scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
         }
       }
 
-      // Restore scroll position and focus (for recreation and tab switch)
+      // Restore scroll position and focus (for recreation and reopen)
       if (restoreScroll != null) {
         const scroll = restoreScroll;
         requestAnimationFrame(() => {
