@@ -2386,6 +2386,21 @@ export function WorkspaceCenterDockview({
     writeLayout();
   }, [writeLayout]);
 
+  // A reload doesn't unmount React, so the unmount flush below never runs for
+  // it. Without this, a debounced save still pending at reload time (tab
+  // switches and resizes are debounced, and terminal title updates keep
+  // resetting the timer) is dropped, and the page restores a stale layout,
+  // e.g. with the wrong tab active.
+  const flushPersistRef = useRef(flushPersist);
+  flushPersistRef.current = flushPersist;
+  useEffect(() => {
+    const onPageHide = () => {
+      if (saveTimerRef.current) flushPersistRef.current();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
   const reportFocus = useCallback(() => {
     if (isRestoringRef.current || wsActiveRef.current === false) return;
     const panel = apiRef.current?.activePanel;

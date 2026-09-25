@@ -179,7 +179,9 @@ test.describe("Terminal parking: full-page navigation", () => {
     // is restored from the server and the active terminal reconnects + replays.
     await workspacePage.reload();
     await workspacePage.waitForReady();
-    await workspacePage.openTerminalTab();
+    // No `openTerminalTab()` here: each terminal is its own tab now, and that
+    // helper clicks the FIRST one, which would switch away from the restored
+    // active tab (the 2nd terminal, holding the marker) that this test is about.
     await workspacePage.waitForTerminalReady(20_000);
 
     // Both terminals restored, and the active one still shows its output.
