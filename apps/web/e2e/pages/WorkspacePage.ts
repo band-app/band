@@ -1030,6 +1030,22 @@ export class WorkspacePage {
     });
   }
 
+  /** `openChat`, then return the new chat's id. The chat tab's testid is
+   *  `center-chat-tab--<chatId>`, so the id is read from the DOM rather than
+   *  sniffed from network traffic (a freshly created chat need not fetch
+   *  itself). For specs that address the chat server-side, e.g. `queue.push`. */
+  async openChatAndGetId(workspaceId: string): Promise<string> {
+    await this.openChat(workspaceId);
+    const testId = await this.cachedPanelEntries(workspaceId)
+      .getByTestId(/^center-chat-tab--/)
+      .filter({ visible: true })
+      .first()
+      .getAttribute("data-testid");
+    const chatId = testId?.slice("center-chat-tab--".length);
+    if (!chatId) throw new Error(`no chat tab id in workspace ${workspaceId}`);
+    return chatId;
+  }
+
   /** Add a new terminal leaf via the "+" menu in the given workspace's dockview. */
   async clickTerminalAddTab(workspaceId: string): Promise<void> {
     await test.step(`Add a terminal via "+" menu in workspace ${workspaceId}`, async () => {
@@ -2166,12 +2182,21 @@ export class WorkspacePage {
         title: p.split("/").pop() ?? p,
       };
     }
+    // The grid root must be a `branch`, the shape dockview's own `toJSON()`
+    // always emits (and what the app persists); a bare `leaf` root is rejected
+    // on restore, so the app silently falls back to its default layout.
     const layout = {
       grid: {
         root: {
-          type: "leaf",
-          data: { views, activeView: `file:${activePath}`, id: "1" },
-          size: 1000,
+          type: "branch",
+          data: [
+            {
+              type: "leaf",
+              data: { views, activeView: `file:${activePath}`, id: "1" },
+              size: 1000,
+            },
+          ],
+          size: 800,
         },
         width: 1000,
         height: 800,

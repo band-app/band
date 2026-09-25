@@ -22,6 +22,8 @@
  * restored when the user later exits maximize).
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import {
@@ -52,19 +54,27 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
+  // Real directories, not `/tmp/fake/...`: the default center layout is a
+  // single terminal, and a shell can't start in a directory that doesn't
+  // exist. Its PTY dies, the leaf is removed, and the center drops to its
+  // empty state, leaving nothing to maximize.
+  const pathA = join(tmpHome, PROJECT_A);
+  const pathB = join(tmpHome, PROJECT_B);
+  mkdirSync(pathA, { recursive: true });
+  mkdirSync(pathB, { recursive: true });
   seedState(tmpHome, {
     projects: [
       {
         name: PROJECT_A,
-        path: `/tmp/fake/${PROJECT_A}`,
+        path: pathA,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_A}` }],
+        worktrees: [{ branch: "main", path: pathA }],
       },
       {
         name: PROJECT_B,
-        path: `/tmp/fake/${PROJECT_B}`,
+        path: pathB,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_B}` }],
+        worktrees: [{ branch: "main", path: pathB }],
       },
     ],
   });
@@ -199,8 +209,12 @@ test.describe("Workspace maximize state (issue #490)", () => {
     // Switch to B and maximize the SECOND group (different from A's).
     await workspacePage.goto(WORKSPACE_B);
     await workspacePage.waitForReady();
-    // The default layout has two grid groups; index 0 was maximized in
-    // A, so picking index 1 here gives B a different maximizedGroup.
+    // The default layout is a single terminal group, so give B a second group
+    // (a chat split right with ⌘D lands in a sibling group). Index 0 was
+    // maximized in A, so maximizing index 1 here gives B a different group.
+    await workspacePage.openChat(WORKSPACE_B);
+    await workspacePage.clickChatSplitRight(WORKSPACE_B);
+    await expect(workspacePage.maximizeButtons).toHaveCount(2);
     await workspacePage.maximizePanel(1);
     const bMaxGroup = await workspacePage.readMaximizedGroup(WORKSPACE_B);
     expect(bMaxGroup).toBeDefined();
