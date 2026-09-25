@@ -1,280 +1,199 @@
 /**
  * Integration tests for the older-page endpoint backing chat scroll-back
- * pagination (issue #572):
+ * pagination (issues #572, #648):
  *
- *   GET /api/chats/:chatId/history?before=<offset>&limit=<N>
+ *   GET /api/chats/:chatId/history?before=<eventId>&revision=<n>
  *
- * Black-box: the real production server boots in a child process; a long
- * session JSONL is seeded on disk in the Claude Code SDK layout and read back
- * through the real adapter. No mocks.
+ * Black-box: the real production server boots in a child process with the
+ * stub ACP agent (`startAcpServer`). A long session is built by sending
+ * TURNS messages through the real submit path (queued behind each other),
+ * so Band's chat event log holds TURNS turns. No mocks.
  *
  * What this guards:
- *   • Happy path — a page of older messages translated to ChatEvents, with the
- *     correct `{ hasOlder, oldestOffset }` cursor, folding to the expected
- *     messages (and excluding messages outside the page window).
- *   • Reaching the start — the page that begins at offset 0 reports
- *     `hasOlder: false`.
- *   • The `before <= 0` guard returns an empty page, not an error.
- *   • A chat with no resolved session returns an empty page.
+ *   • The cold subscribe replays only the last HISTORY_PAGE_SIZE turns and
+ *     reports `{ hasOlder, oldestEventId }` in `history-meta`.
+ *   • Paging back — each page is the HISTORY_PAGE_SIZE turns before the
+ *     cursor, only events older than it, and the page that reaches the
+ *     start reports `hasOlder: false`. All pages together are the whole
+ *     conversation, in order, once.
+ *   • The `before <= 0` guard and a stale `revision` return an empty page.
+ *   • A chat with no session, or an unknown chat, returns an empty page.
  *   • Auth — the route is behind the token gate (401 without a cookie).
  *   • Security — the session is resolved SERVER-SIDE from the chat row, so a
- *     client-supplied `sessionId` cannot redirect the filesystem read.
+ *     client-supplied `sessionId` cannot read another chat's log.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ChatEvent } from "../src/shared/chat-events";
-import { seedSettings, seedState } from "./helpers/seed-state";
-import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
+import { type ChatEvent, HISTORY_PAGE_SIZE } from "../src/shared/chat-events";
+import {
+  collectEvents,
+  sendMessage,
+  startAcpServer,
+  TEST_TOKEN,
+  trpc,
+  WORKSPACE_ID,
+} from "./helpers/acp-chat";
+import type { ServerHandle } from "./helpers/server";
+import { listTasksForWorkspace } from "./helpers/tasks";
+import { waitFor } from "./helpers/wait-for";
 
-const TOKEN = "chat-history-test-token";
-const PROJECT = "histproj";
-const WORKSPACE = `${PROJECT}-main`;
 const CHAT_ID = "hist-chat-id";
-const SESSION_ID = "33333333-4444-5555-6666-777777777777";
-// 60 turns = 120 user/assistant messages. The cold window is 50, so older
-// pages exist and the offsets are large enough to page through.
-const TURNS = 60;
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
-// The endpoint caps `limit` at 200 messages; each message folds to ≥1 event, so
-// a bounded page never exceeds a few hundred events for these text-only turns.
-const MAX_PAGE_LIMIT_EVENTS = 300;
+// 45 turns = two full pages of 20 plus a partial one of 5.
+const TURNS = 45;
+const prompts = Array.from({ length: TURNS }, (_, i) => `turn ${i + 1}`);
 
 let server: ServerHandle;
-let tmpHome: string;
+let cold: ChatEvent[];
 
 beforeAll(async () => {
-  tmpHome = createTmpHome("band-chat-history-test-");
-  const repoDir = join(tmpHome, "repo");
-  mkdirSync(repoDir, { recursive: true });
-
-  seedState(tmpHome, {
-    projects: [
-      {
-        name: PROJECT,
-        path: repoDir,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: repoDir }],
-      },
-    ],
-  });
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    defaultCodingAgent: "claude-code",
-    codingAgents: [
-      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-    ],
-  });
-
-  // Seed the session JSONL in the Claude Code SDK layout:
-  // `<HOME>/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`.
-  const encoded = repoDir.replace(/[^a-zA-Z0-9]/g, "-");
-  const projectDir = join(tmpHome, ".claude", "projects", encoded);
-  mkdirSync(projectDir, { recursive: true });
-  writeFileSync(join(projectDir, `${SESSION_ID}.jsonl`), buildLongSessionJsonl(SESSION_ID, TURNS));
-
-  server = await startServer({ tmpHome, env: { FAKE_AGENT_SCENARIO: "" } });
-
-  // Create the chat and bind it to the seeded session — the endpoint resolves
-  // the session from the chat row, never from a client param.
-  let res = await trpcMutate(
-    server.url,
-    "chats.create",
-    { workspaceId: WORKSPACE, id: CHAT_ID, agent: "claude-code" },
-    TOKEN,
+  server = await startAcpServer({ turns: [{ steps: [{ say: "ok {{prompt}}" }] }] });
+  // The first message starts a turn; the rest queue behind it and run one
+  // after another.
+  for (const text of prompts) await sendMessage(server.url, CHAT_ID, text);
+  await waitFor(
+    async () => {
+      const tasks = await listTasksForWorkspace(server.url, WORKSPACE_ID, TEST_TOKEN);
+      return tasks.filter((t) => t.status === "completed").length === TURNS;
+    },
+    { timeoutMs: 60_000, intervalMs: 200, label: `${TURNS} turns completed` },
   );
-  expect(res.status).toBe(200);
-  res = await trpcMutate(
-    server.url,
-    "chats.setActiveSession",
-    { workspaceId: WORKSPACE, chatId: CHAT_ID, sessionId: SESSION_ID },
-    TOKEN,
-  );
-  expect(res.status).toBe(200);
-}, 30_000);
+  cold = await collectEvents(server.url, CHAT_ID, { until: (e) => e.type === "history-meta" });
+}, 90_000);
 
 afterAll(async () => {
   if (server) await server.close();
-  // Retry on ENOTEMPTY — background server subprocesses may still be writing to
-  // the tree as cleanup walks it (mirrors e2e/helpers/server.ts::cleanupTmpHome).
-  rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 interface HistoryResponse {
   events: ChatEvent[];
   hasOlder: boolean;
-  oldestOffset: number;
+  oldestEventId: number;
 }
 
 function getHistory(
   chatId: string,
-  params: { before?: number; limit?: number },
-  token: string | null = TOKEN,
+  params: Record<string, string | number>,
+  token: string | null = TEST_TOKEN,
 ): Promise<Response> {
-  const qs = new URLSearchParams();
-  if (params.before != null) qs.set("before", String(params.before));
-  if (params.limit != null) qs.set("limit", String(params.limit));
+  const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]));
   const headers: Record<string, string> = {};
   if (token) headers.Cookie = `band_token=${token}`;
   return fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/history?${qs}`, { headers });
 }
 
-/** Collect the `user-message` texts from a translated history page. */
-function userTextsOf(body: HistoryResponse): string[] {
-  return body.events
-    .filter((e): e is Extract<ChatEvent, { type: "user-message" }> => e.type === "user-message")
-    .map((e) => e.text);
+async function page(params: Record<string, string | number>): Promise<HistoryResponse> {
+  const res = await getHistory(CHAT_ID, params);
+  expect(res.status).toBe(200);
+  return (await res.json()) as HistoryResponse;
 }
 
-describe("GET /api/chats/:chatId/history", () => {
-  it("returns a page of older messages with the right cursor, folding to the expected window", async () => {
-    // before=70 (the cold window's oldestOffset for a 120-message session) →
-    // offset = max(0, 70 - 50) = 20, page = messages [20, 70) = turns 10..34.
-    const res = await getHistory(CHAT_ID, { before: 70, limit: 50 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
+/** The prompt texts in a list of events. */
+function promptsOf(events: ChatEvent[]): string[] {
+  return events.flatMap((e) => (e.type === "prompt" ? [e.text] : []));
+}
 
-    expect(body.oldestOffset).toBe(20);
-    expect(body.hasOlder).toBe(true); // offset 20 > 0 — more history before this page
+function historyMeta(events: ChatEvent[]) {
+  const meta = events.find((e) => e.type === "history-meta");
+  if (meta?.type !== "history-meta") throw new Error("no history-meta event");
+  return meta;
+}
 
-    const texts = userTextsOf(body);
-    // The page covers turns 10..34 inclusive (25 user messages).
-    expect(texts).toContain(userText(10));
-    expect(texts).toContain(userText(34));
-    // ...and nothing outside it.
-    expect(texts).not.toContain(userText(9));
-    expect(texts).not.toContain(userText(35));
-    expect(texts).not.toContain(userText(0));
-  });
+function revisionOf(events: ChatEvent[]): number {
+  const opened = events.find((e) => e.type === "subscription-opened");
+  if (opened?.type !== "subscription-opened") throw new Error("no subscription-opened event");
+  return opened.revision;
+}
 
-  it("reports hasOlder:false for the page that reaches the start of history", async () => {
-    // before=20 → offset = max(0, 20 - 50) = 0, page = messages [0, 20) = turns 0..9.
-    const res = await getHistory(CHAT_ID, { before: 20, limit: 50 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
-
-    expect(body.oldestOffset).toBe(0);
-    expect(body.hasOlder).toBe(false);
-    const texts = userTextsOf(body);
-    expect(texts).toContain(userText(0));
-    expect(texts).toContain(userText(9));
-    expect(texts).not.toContain(userText(10));
-  });
-
-  it("returns an empty page (not an error) when before <= 0", async () => {
-    const res = await getHistory(CHAT_ID, { before: 0, limit: 50 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
-    expect(body).toEqual({ events: [], hasOlder: false, oldestOffset: 0 });
-  });
-
-  it("returns an empty page for a chat with no resolved session", async () => {
-    const sessionlessChat = "hist-chat-no-session";
-    const created = await trpcMutate(
-      server.url,
-      "chats.create",
-      { workspaceId: WORKSPACE, id: sessionlessChat, agent: "claude-code" },
-      TOKEN,
-    );
-    expect(created.status).toBe(200);
-
-    const res = await getHistory(sessionlessChat, { before: 50, limit: 50 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
-    expect(body).toEqual({ events: [], hasOlder: false, oldestOffset: 0 });
-  });
-
-  it("requires authentication", async () => {
-    const res = await getHistory(CHAT_ID, { before: 70, limit: 50 }, null);
-    expect(res.status).toBe(401);
-  });
-
-  it("returns an empty page (not a 5xx) for an unknown chatId", async () => {
-    // An unknown chat resolves no session → empty page, same as the
-    // no-session branch. Pins the error-path contract so it can't regress to a
-    // 500 (or an unhandled throw).
-    const res = await getHistory("hist-chat-does-not-exist", { before: 70, limit: 50 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
-    expect(body).toEqual({ events: [], hasOlder: false, oldestOffset: 0 });
-  });
-
-  it("handles an oversized limit safely (clamped server-side, no error, bounded page)", async () => {
-    // A hostile `limit=10_000_000` is clamped to MAX_PAGE_LIMIT server-side, so
-    // the endpoint responds 200 with a bounded page instead of trying to read,
-    // translate, and stringify the whole transcript. (This 120-message session
-    // is shorter than the cap, so the page is the full [0, 70) range; the guard
-    // here is that the oversized request is handled without a 5xx or a hang.)
-    const res = await getHistory(CHAT_ID, { before: 70, limit: 10_000_000 });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as HistoryResponse;
-    expect(body.oldestOffset).toBe(0);
-    // The page covers [0, 70) and starts at the very beginning, so there is
-    // nothing older — a regression that flipped this true would slip past the
-    // length check alone.
-    expect(body.hasOlder).toBe(false);
-    expect(body.events.length).toBeLessThanOrEqual(MAX_PAGE_LIMIT_EVENTS);
-    expect(userTextsOf(body)).toContain(userText(0));
+describe("cold subscribe window", () => {
+  it("replays only the last page of turns and reports older ones", () => {
+    expect(promptsOf(cold)).toEqual(prompts.slice(TURNS - HISTORY_PAGE_SIZE));
+    const logged = cold.filter((e) => e.eventId > 0);
+    expect(historyMeta(cold)).toMatchObject({
+      hasOlder: true,
+      oldestEventId: logged[0].eventId,
+    });
+    // The window starts at a turn's prompt.
+    expect(logged[0]).toMatchObject({
+      type: "prompt",
+      text: `turn ${TURNS - HISTORY_PAGE_SIZE + 1}`,
+    });
   });
 });
 
-// ---------------------------------------------------------------------------
-// Helpers — mirror the JSONL shape the Claude Code SDK persists.
-// ---------------------------------------------------------------------------
-
-function buildLongSessionJsonl(sessionId: string, turns: number): string {
-  const lines: string[] = [];
-  let parentUuid: string | null = null;
-  for (let i = 0; i < turns; i++) {
-    const userUuid = uuid(i * 2 + 1);
-    const assistantUuid = uuid(i * 2 + 2);
-    lines.push(
-      JSON.stringify({
-        type: "user",
-        uuid: userUuid,
-        parentUuid,
-        sessionId,
-        isSidechain: false,
-        userType: "external",
-        message: { role: "user", content: [{ type: "text", text: userText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2)).toISOString(),
-      }),
+describe("GET /api/chats/:chatId/history", () => {
+  it("pages back turn by turn until the start of the conversation", async () => {
+    const revision = revisionOf(cold);
+    const first = await page({ before: historyMeta(cold).oldestEventId, revision });
+    expect(promptsOf(first.events)).toEqual(
+      prompts.slice(TURNS - 2 * HISTORY_PAGE_SIZE, TURNS - HISTORY_PAGE_SIZE),
     );
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        uuid: assistantUuid,
-        parentUuid: userUuid,
-        sessionId,
-        isSidechain: false,
-        message: { role: "assistant", content: [{ type: "text", text: assistantText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2 + 1)).toISOString(),
-      }),
+    expect(first.hasOlder).toBe(true);
+    expect(first.oldestEventId).toBe(first.events[0].eventId);
+    expect(first.events.every((e) => e.eventId < historyMeta(cold).oldestEventId)).toBe(true);
+
+    const second = await page({ before: first.oldestEventId, revision });
+    // The last page reaches the start, including the session attach that
+    // came before the first prompt.
+    expect(promptsOf(second.events)).toEqual(prompts.slice(0, TURNS - 2 * HISTORY_PAGE_SIZE));
+    expect(second.events[0]).toMatchObject({ type: "session-attached", how: "new" });
+    expect(second.hasOlder).toBe(false);
+    expect(second.events.every((e) => e.eventId < first.oldestEventId)).toBe(true);
+
+    // Every turn exactly once, in order, across the three windows.
+    expect([...promptsOf(second.events), ...promptsOf(first.events), ...promptsOf(cold)]).toEqual(
+      prompts,
     );
-    parentUuid = assistantUuid;
-  }
-  lines.push(
-    JSON.stringify({
-      type: "last-prompt",
-      sessionId,
-      lastPrompt: userText(turns - 1),
-      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, turns * 2)).toISOString(),
-      uuid: uuid(turns * 2 + 1),
-      parentUuid: null,
-    }),
-  );
-  return `${lines.join("\n")}\n`;
-}
+  });
 
-function uuid(n: number): string {
-  return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
-}
+  it("returns an empty page (not an error) when before <= 0", async () => {
+    expect(await page({ before: 0 })).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+    expect(await page({ before: -5 })).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+  });
 
-function userText(turn: number): string {
-  return `hist-prompt-${turn}-marker`;
-}
+  it("returns an empty page for a stale revision", async () => {
+    const body = await page({
+      before: historyMeta(cold).oldestEventId,
+      revision: revisionOf(cold) + 1,
+    });
+    expect(body).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+  });
 
-function assistantText(turn: number): string {
-  return `hist-reply-${turn}-marker`;
-}
+  it("returns an empty page for a chat with no session", async () => {
+    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: "hist-empty-chat" });
+    const res = await getHistory("hist-empty-chat", { before: 1000 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+  });
+
+  it("returns an empty page (not a 5xx) for an unknown chatId", async () => {
+    const res = await getHistory("no-such-chat", { before: 1000 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+  });
+
+  it("ignores a client-supplied sessionId: the session comes from the chat row", async () => {
+    const { chat } = await trpc<{ chat: { activeSessionId?: string } }>(
+      server.url,
+      "chats.get",
+      { chatId: CHAT_ID },
+      "query",
+    );
+    expect(chat.activeSessionId).toBeTruthy();
+    const res = await getHistory("hist-empty-chat", {
+      before: 1_000_000,
+      sessionId: chat.activeSessionId ?? "",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ events: [], hasOlder: false, oldestEventId: 0 });
+  });
+
+  it("rejects an oversized chatId with 400", async () => {
+    const res = await getHistory("x".repeat(201), { before: 1000 });
+    expect(res.status).toBe(400);
+  });
+
+  it("requires authentication", async () => {
+    const res = await getHistory(CHAT_ID, { before: 1000 }, null);
+    expect(res.status).toBe(401);
+  });
+});

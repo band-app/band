@@ -1,125 +1,152 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronDownIcon } from "lucide-react";
-
-import { AskUserQuestion } from "./ask-user-question";
+import { useMemo } from "react";
+import type { ToolEntry } from "../chat/transcript";
+import { diffLines } from "./diff-lines";
 import { MessageResponse } from "./message";
-import { PlanApproval } from "./plan-approval";
 import { ToolInput, ToolOutput } from "./tool";
 
-function extractMarkdown(item: ToolCallItem): string | null {
-  if (item.toolName === "ExitPlanMode") {
-    const input = item.input as Record<string, unknown> | null | undefined;
-    if (input && typeof input.plan === "string" && input.plan.trim()) {
-      return input.plan;
-    }
-  }
-  return null;
+type Status = "error" | "in-progress" | "complete";
+
+function statusOf(entry: ToolEntry): Status {
+  if (entry.status === "failed") return "error";
+  if (entry.status === "pending" || entry.status === "in_progress") return "in-progress";
+  return "complete";
 }
 
-export interface ToolCallItem {
-  toolCallId: string;
-  toolName: string;
-  /** Server-formatted display title (e.g. "Bash(git status)"). */
-  displayTitle?: string;
-  input: unknown;
-  output: unknown;
-  errorText?: string;
-  isError: boolean;
-  isInProgress: boolean;
-  approvalId?: string;
-}
-
-function StatusDot({ isError, isInProgress }: { isError: boolean; isInProgress: boolean }) {
-  // `data-status` is the test seam — Playwright asserts on it to verify
-  // tool-call completion without coupling to Tailwind class strings.
-  // The three values mirror the three branches below.
-  if (isError) {
-    return (
-      <span
-        data-testid="tool-call__status-dot"
-        data-status="error"
-        className="size-2 shrink-0 rounded-full bg-red-500"
-      />
-    );
-  }
-  if (isInProgress) {
-    return (
-      <span
-        data-testid="tool-call__status-dot"
-        data-status="in-progress"
-        className="size-2 shrink-0 animate-pulse rounded-full bg-orange-500"
-      />
-    );
-  }
+function StatusDot({ status }: { status: Status }) {
   return (
     <span
       data-testid="tool-call__status-dot"
-      data-status="complete"
-      className="size-2 shrink-0 rounded-full bg-green-500"
+      data-status={status}
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        status === "error" && "bg-red-500",
+        status === "in-progress" && "animate-pulse bg-orange-500",
+        status === "complete" && "bg-green-500",
+      )}
     />
   );
 }
 
-export function ToolCall({ item }: { item: ToolCallItem }) {
-  if (item.toolName === "AskUserQuestion" && item.approvalId && item.isInProgress) {
-    const input = item.input as
-      | {
-          questions?: Array<{
-            question: string;
-            header?: string;
-            options: Array<{ label: string; description?: string }>;
-            multiSelect?: boolean;
-          }>;
-        }
-      | undefined;
-    const questions = input?.questions ?? [];
-    return (
-      <div className="not-prose mb-4">
-        <AskUserQuestion questions={questions} approvalId={item.approvalId} />
+/** Relative to the workspace when the path is inside it. */
+function shortPath(path: string, cwd: string | undefined): string {
+  return cwd && path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path;
+}
+
+function Diff({
+  path,
+  oldText,
+  newText,
+  cwd,
+}: {
+  path: string;
+  oldText?: string | null;
+  newText: string;
+  cwd?: string;
+}) {
+  const lines = useMemo(() => diffLines(oldText, newText), [oldText, newText]);
+  return (
+    <div
+      data-testid="tool-call__diff"
+      className="overflow-hidden rounded-md border border-border/30"
+    >
+      <div className="border-b border-border/30 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
+        {shortPath(path, cwd)}
+        {!oldText && <span className="ml-2 text-green-600 dark:text-green-400">new file</span>}
       </div>
-    );
-  }
+      <pre className="max-h-80 overflow-auto text-xs leading-5">
+        {lines.map((line, i) =>
+          line.kind === "gap" ? (
+            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+            <div key={i} className="px-2 text-muted-foreground/60">
+              ⋯ {line.skipped} unchanged {line.skipped === 1 ? "line" : "lines"}
+            </div>
+          ) : (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no identity beyond position
+              key={i}
+              className={cn(
+                "whitespace-pre px-2",
+                line.kind === "add" && "bg-green-500/15",
+                line.kind === "del" && "bg-red-500/15",
+              )}
+            >
+              <span className="select-none text-muted-foreground/60">
+                {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
+              </span>
+              {line.text}
+            </div>
+          ),
+        )}
+      </pre>
+    </div>
+  );
+}
 
-  if (item.toolName === "ExitPlanMode" && item.approvalId && item.isInProgress) {
-    const input = item.input as Record<string, unknown> | null | undefined;
-    const plan = typeof input?.plan === "string" ? input.plan : "";
-    return (
-      <div className="not-prose mb-4">
-        <PlanApproval plan={plan} approvalId={item.approvalId} />
-      </div>
-    );
-  }
-
-  const title = item.displayTitle ?? item.toolName;
-
-  const markdown = extractMarkdown(item);
-
-  // Coarse status string mirrors the StatusDot branches — surfaced as a
-  // data attribute on the container so tests can poll a single tool by
-  // toolCallId without inspecting child class strings.
-  const status = item.isError ? "error" : item.isInProgress ? "in-progress" : "complete";
+/**
+ * One ACP tool call: title and status, and on expand what the agent
+ * reported: file diffs, text output, the raw input and output.
+ */
+export function ToolCall({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
+  const status = statusOf(entry);
+  const diffs = entry.content.filter((c) => c.type === "diff");
+  const texts = entry.content.flatMap((c) =>
+    c.type === "content" && c.content.type === "text" ? [c.content.text] : [],
+  );
+  const paths = [...new Set([...diffs.map((d) => d.path), ...entry.locations.map((l) => l.path)])];
+  // Plans and thinking come back as prose; command output is raw text.
+  const prose = entry.toolKind === "switch_mode" || entry.toolKind === "think";
+  const hasBody =
+    diffs.length > 0 ||
+    texts.length > 0 ||
+    entry.rawInput !== undefined ||
+    entry.rawOutput !== undefined;
 
   return (
-    <>
-      <Collapsible
-        data-testid="tool-call__container"
-        data-status={status}
-        className="group not-prose w-full rounded border border-border/30 bg-muted/20"
+    <Collapsible
+      data-testid="tool-call__container"
+      data-status={status}
+      className="group not-prose w-full rounded border border-border/30 bg-muted/20"
+    >
+      <CollapsibleTrigger
+        className="flex w-full items-center justify-between gap-4 px-2 py-1.5"
+        disabled={!hasBody}
       >
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-2 py-1.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
-            <span className="truncate font-medium text-xs text-muted-foreground">{title}</span>
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <StatusDot status={status} />
+          <span className="truncate font-medium text-xs text-muted-foreground">{entry.title}</span>
+          {paths.length > 0 && !entry.title.includes(shortPath(paths[0], cwd)) && (
+            <span className="truncate text-xs text-muted-foreground/70">
+              {paths.map((p) => shortPath(p, cwd)).join(", ")}
+            </span>
+          )}
+        </div>
+        {hasBody && (
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
+        )}
+      </CollapsibleTrigger>
 
-        <CollapsibleContent className="space-y-3 border-t border-border/30 px-3 py-2 text-popover-foreground">
-          <ToolInput input={item.input} />
-          <ToolOutput output={item.output} errorText={item.errorText} />
-        </CollapsibleContent>
-      </Collapsible>
-      {markdown && <MessageResponse>{markdown}</MessageResponse>}
-    </>
+      <CollapsibleContent className="space-y-3 border-t border-border/30 px-3 py-2 text-popover-foreground">
+        {diffs.map((d) => (
+          <Diff key={d.path} path={d.path} oldText={d.oldText} newText={d.newText} cwd={cwd} />
+        ))}
+        {texts.map((text, i) =>
+          prose ? (
+            // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+            <MessageResponse key={i}>{text}</MessageResponse>
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: content blocks have no id
+            <ToolOutput key={i} output={text.slice(0, 20_000)} errorText={undefined} />
+          ),
+        )}
+        {diffs.length === 0 && texts.length === 0 && entry.rawInput !== undefined && (
+          <ToolInput input={entry.rawInput} />
+        )}
+        {diffs.length === 0 && texts.length === 0 && entry.rawOutput !== undefined && (
+          <ToolOutput output={entry.rawOutput} errorText={undefined} />
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

@@ -1,34 +1,30 @@
 /**
- * Session-history dropdown — doctrine-compliant rewrite.
+ * Session-history dropdown against the real server (issue #648).
  *
- * Replaces the previous `createTrpcMock`-based file with real-server
- * coverage. tRPC is not mocked; sessions are real on-disk artifacts
- * produced by the real chat flow.
+ * Past sessions come from the agent over the Agent Client Protocol: the
+ * dropdown lists them with `session/list`, and picking one attaches the chat
+ * to it, which replays it with `session/load` (or reads it back from Band's
+ * own event log when Band recorded it). The ACP stub agent
+ * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub; it keeps
+ * its sessions in the test's tmp home, so they survive the agent process.
  *
  * What's covered here:
  *
- *   1. Empty-state ("No sessions yet") when the workspace has no JSONL
- *      transcripts.
- *   2. After submitting a real message, the resulting session shows up
- *      in the history dropdown with its summary.
- *   3. "New session" clears the chat to the empty state.
- *   4. Selecting a past session from history reloads its messages.
+ *   1. Empty state ("No sessions yet") when the agent has no sessions for
+ *      the workspace.
+ *   2. After a real message, the session shows up in the dropdown under
+ *      its first prompt; "New session" clears the chat to the empty state;
+ *      picking the past session brings its messages back.
  *
- * What's NOT covered here (deleted with the legacy file):
- *
- *   - "Session toggle hidden when not supported" — required a custom
- *     agent config with `sessionListing: false`. Recreating that in
- *     a real server boot needs a fake-agent variant that reports
- *     supportedFeatures differently, which is more work than the
- *     coverage warrants. A `chat-events` integration test could pin
- *     the same behaviour by asserting the chat HTML doesn't include a
- *     history button for unsupported agents — left as future work.
+ * Each test uses its own workspace, because the stub filters `session/list`
+ * by working directory, so the tests don't depend on running order.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -40,12 +36,10 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-session-history-token";
-const PROJECT = "histproj";
-const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const EMPTY_PROJECT = "histempty";
+const FLOW_PROJECT = "histflow";
 
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -53,58 +47,27 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
 
-  const repoDir = join(tmpHome, "repo");
-  mkdirSync(repoDir, { recursive: true });
-
-  seedState(tmpHome, {
-    projects: [
-      {
-        name: PROJECT,
-        path: repoDir,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: repoDir }],
-      },
-    ],
+  const projects = [EMPTY_PROJECT, FLOW_PROJECT].map((name) => {
+    const repoDir = join(tmpHome, name);
+    mkdirSync(repoDir, { recursive: true });
+    return {
+      name,
+      path: repoDir,
+      defaultBranch: "main",
+      worktrees: [{ branch: "main", path: repoDir }],
+    };
   });
+  seedState(tmpHome, { projects });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
-    codingAgents: [
-      {
-        id: "claude-code",
-        type: "claude-code",
-        label: "Claude Code",
-        command: FAKE_AGENT_PATH,
-      },
-    ],
+    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
 
-  // Fast-completing fake-agent scenario — emit a short reply and finish.
-  // We want submissions to land in the JSONL transcript quickly so the
-  // session-history dropdown has something to show.
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "history-test-session" },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "ok" }] },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "history-test-session",
-        duration_ms: 10,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
-
+  // Fast-completing turn so the session exists before the dropdown opens.
   server = await startServer({
     tmpHome,
-    env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    env: acpStubEnv(tmpHome, { turns: [{ steps: [{ say: "noted" }] }] }),
   });
 });
 
@@ -117,19 +80,39 @@ test.describe("Session history dropdown", () => {
   test("empty state — opening the dropdown on a fresh workspace shows 'No sessions yet'", async ({
     page,
   }) => {
-    // Use a workspace path that has no prior JSONL transcripts. Since
-    // the fake-agent writes its session to `<repoDir>/.claude/projects/`
-    // (via the SDK's $HOME-relative path), a fresh tmpHome means no
-    // sessions exist yet.
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
-    await chatPane.goto(WORKSPACE);
+    await chatPane.goto(toWorkspaceId(EMPTY_PROJECT, "main"));
     await chatPane.waitForReady();
 
     await chatPane.openSessionHistory();
 
-    // The "No sessions yet" empty-state message is system-controlled
-    // copy inside the SessionHistoryMenu in `ChatView.tsx`. Until
-    // anyone submits a message, JSONL is empty and this text renders.
-    await expect(page.getByText("No sessions yet")).toBeVisible();
+    // The agent has no sessions for this workspace's directory yet.
+    await expect(chatPane.sessionHistoryEmpty).toBeVisible();
+  });
+
+  test("a sent message's session is listed, and picking it after 'New session' brings it back", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId(FLOW_PROJECT, "main"));
+    await chatPane.waitForReady();
+
+    await chatPane.typeMessage("remember this conversation");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage("noted")).toBeVisible();
+
+    // "New session" detaches the chat: the conversation clears.
+    await chatPane.openSessionHistory();
+    await chatPane.clickNewSession();
+    await expect(chatPane.emptyConversation).toBeVisible();
+    await expect(chatPane.userMessage("remember this conversation")).toHaveCount(0);
+
+    // The finished session is listed under its first prompt. Picking it
+    // re-attaches the chat and its messages come back.
+    await chatPane.openSessionHistory();
+    await expect(chatPane.sessionHistoryItem("remember this conversation")).toBeVisible();
+    await chatPane.selectPastSession("remember this conversation");
+    await expect(chatPane.userMessage("remember this conversation")).toBeVisible();
+    await expect(chatPane.assistantMessage("noted")).toBeVisible();
   });
 });

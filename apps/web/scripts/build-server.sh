@@ -199,24 +199,28 @@ exec node "$basedir/../typescript/bin/tsserver" "$@"
 SHIM
   chmod +x dist/node_modules/.bin/tsserver
 
-  # Resolve the monorepo root (where the pnpm store lives).
-  # The SDK packages below are deps of packages/coding-agent, not apps/web,
-  # so they only exist in the root node_modules/.pnpm store.
-  MONO_ROOT="$(cd ../.. && pwd)"
-
-  # NOTE: We deliberately do NOT bundle the @anthropic-ai/claude-agent-sdk
-  # platform-specific native binary (~206MB on macOS arm64). Bundling it
-  # makes the Electron app balloon to ~300MB. Band users are developers using
-  # AI coding agents, so they already have `claude` installed on PATH —
-  # the SDK resolves it from there at runtime.
-
-  # Copy Codex SDK package.json so createRequire(import.meta.url).resolve("@openai/codex/package.json")
-  # works from dist/. The actual codex CLI binary is expected to be installed on the user's system.
-  CODEX_PKG_DIR="$(find "$MONO_ROOT/node_modules/.pnpm" -path "*/@openai/codex/package.json" -type f 2>/dev/null | head -1)"
-  if [ -n "$CODEX_PKG_DIR" ]; then
-    mkdir -p dist/node_modules/@openai/codex
-    cp "$CODEX_PKG_DIR" dist/node_modules/@openai/codex/
-  fi
+  # -----------------------------------------------------------------------
+  # ACP adapters for Claude Code and Codex (issue #648). Band runs each as a
+  # Node subprocess speaking the Agent Client Protocol over stdio (see
+  # `src/server/infra/agents/acp-launch.ts`, which looks for them at
+  # `dist/agents/<name>.mjs` before falling back to node_modules). Bundled
+  # into one file each so the desktop app needs no node_modules for them.
+  #
+  # The vendors' native CLIs are NOT bundled: the adapters drive the user's
+  # own `claude` / `codex` binary (`CLAUDE_CODE_EXECUTABLE`, `CODEX_PATH`),
+  # the same way the pre-ACP SDK adapters did.
+  # -----------------------------------------------------------------------
+  rm -rf dist/agents
+  mkdir -p dist/agents
+  for adapter in claude-agent-acp codex-acp; do
+    esbuild "node_modules/@agentclientprotocol/${adapter}/dist/index.js" \
+      --bundle \
+      --platform=node \
+      --format=esm \
+      --log-level=warning \
+      --outfile="dist/agents/${adapter}.mjs" \
+      --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
+  done
 fi
 
 # Copy Drizzle migrations

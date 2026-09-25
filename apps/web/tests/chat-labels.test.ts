@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -25,7 +26,6 @@ import {
 //     deleted between fires.
 //   • Two cronjobs in the same workspace produce two distinct chats.
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "chat-labels-test-token";
 
 // ---------------------------------------------------------------------------
@@ -74,12 +74,6 @@ function createGitRepo(parentDir: string, name: string): string {
   return repoPath;
 }
 
-function writeScenario(tmpHome: string, events: object[]): string {
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(scenarioPath, JSON.stringify(events));
-  return scenarioPath;
-}
-
 interface ChatRecord {
   id: string;
   name: string;
@@ -110,9 +104,7 @@ describe("chats — label round-trip", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
     server = await startServer({ tmpHome });
   });
@@ -269,9 +261,7 @@ describe("chats — label validation", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
     server = await startServer({ tmpHome });
   });
@@ -388,9 +378,7 @@ describe("chats — legacy panel_states rows load with empty labels", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
 
     // Inject a panel_states row with `labels` left NULL, simulating a row
@@ -460,15 +448,6 @@ describe("cronjobs — labeled chat dispatch", () => {
     tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
-    // Multi-message scenario: the fake agent emits these for *every* run.
-    // Each cron tick submits a new task; the agent replies with one init
-    // record + one result so the task transitions to "completed" before
-    // the next trigger.
-    const scenarioPath = writeScenario(tmpHome, [
-      { type: "system", subtype: "init", session_id: "trigger-session" },
-      { type: "result", subtype: "success", result: "Done" },
-    ]);
-
     seedState(tmpHome, {
       projects: [
         {
@@ -481,14 +460,11 @@ describe("cronjobs — labeled chat dispatch", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
-    });
+    // Every cron tick submits a turn; the stub agent answers "Done" and
+    // ends it, so the chat is idle again before the next trigger.
+    server = await startAcpServer({ home: tmpHome, turns: [{ steps: [{ say: "Done" }] }] });
 
     const createRes = await trpcMutate(server.url, "cronjobs.create", {
       key: "triggerproj",
@@ -562,6 +538,11 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(matching[0].name).toBe("Daily check");
 
     await waitForChatIdle(triggerData.chatId);
+    // The cronjob's prompt reached the agent as the turn's first block.
+    const prompts = stubRequests(tmpHome, "session/prompt").map(
+      (r) => (r.params.prompt as { text?: string }[])[0]?.text,
+    );
+    expect(prompts).toEqual(["Run automated check"]);
   });
 
   it("subsequent trigger reuses the same chat (no duplicate creation)", async () => {

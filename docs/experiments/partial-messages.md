@@ -1,5 +1,7 @@
 # Experiment: token-by-token streaming from Claude Code into the chat UI
 
+> **Superseded by issue #648.** Chats run over the Agent Client Protocol, where every agent streams message chunks, so the `claudeCodePartialMessages` setting this experiment added is gone.
+
 **Status**: prototype, behind a draft PR. Not for merge.
 **Author**: see PR.
 **Branch**: `partial-messages`.

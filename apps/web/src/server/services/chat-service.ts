@@ -18,7 +18,6 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { getOrCreateAgent, removeAgent } from "../infra/agents/agent-pool";
 import {
   ChatQueries,
   type ChatRow,
@@ -26,6 +25,9 @@ import {
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
+// FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
+// back from this file. Safe because it is only used inside method bodies.
+import { agentSessionService } from "./agent-session-service";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 
@@ -244,20 +246,6 @@ function validateLabels(
  * the CLI adapter — already re-reads on each access, so the new
  * contract is a no-op behavioural change for them.)
  */
-/**
- * Resolve (or lazily create) the per-chatId dedupe map for in-flight
- * active-session refreshes. Stored on a `globalThis`-keyed singleton
- * so multiple bundles of this module (esbuild start-server.mjs + Vite
- * SSR server.js) share one map and don't fork the dedupe set —
- * mirroring agent-pool's pattern.
- */
-const REFRESH_KEY = Symbol.for("band.chat-session-summary.refresh");
-function obtainRefreshMap(): Map<string, Promise<void>> {
-  const g = globalThis as unknown as Record<symbol, unknown>;
-  if (!g[REFRESH_KEY]) g[REFRESH_KEY] = new Map<string, Promise<void>>();
-  return g[REFRESH_KEY] as Map<string, Promise<void>>;
-}
-
 export class ChatService {
   // Primary index: chatId → ChatSession
   private readonly chatSessions = new Map<string, ChatSession>();
@@ -271,15 +259,6 @@ export class ChatService {
    * see persisted chat records.
    */
   private initialized = false;
-
-  /**
-   * Per-chatId dedupe map for in-flight active-session refreshes.
-   * Initialised once via `obtainRefreshMap` (lazy globalThis-keyed
-   * singleton) so multiple bundles of this module share one map. Lives
-   * up here with the other private fields rather than next to its
-   * methods so the class layout matches the rest of the file.
-   */
-  private readonly refreshes: Map<string, Promise<void>> = obtainRefreshMap();
 
   constructor(
     private readonly queries: ChatQueries = new ChatQueries(),
@@ -556,8 +535,9 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
-    // Kill agent process
-    removeAgent(chatId);
+    // Stop the agent process and drop the chat's event log
+    agentSessionService.stop(chatId);
+    agentSessionService.deleteLog(chatId);
 
     // Remove from DB
     this.queries.remove(chatId);
@@ -611,7 +591,8 @@ export class ChatService {
       // needed and a future refactor of the loop can't desync the two
       // indexes.
       for (const chatId of [...ids]) {
-        removeAgent(chatId);
+        agentSessionService.stop(chatId);
+        agentSessionService.deleteLog(chatId);
         this.removeFromIndex(chatId);
       }
 
@@ -764,103 +745,27 @@ export class ChatService {
   }
 
   // -------------------------------------------------------------------------
-  // Active-session summary (absorbed from chat-session-summary.ts in #535)
+  // Active-session summary
   // -------------------------------------------------------------------------
 
   /**
-   * Resolve and persist the active-session summary when the chat row is
-   * missing one. Used by `chats.get` for the migration / fallback case.
-   *
-   * Returns the updated chat (or the unchanged input if nothing was
-   * resolved). Walks through the agent pool because the summary lives on
-   * disk in the agent's session JSONL.
+   * Fills in the cached title of the chat's active session when the row has
+   * none, from the session's first prompt in Band's event log. Agents that
+   * name their sessions update the title live (`session_info_update`).
    */
-  async ensureActiveSessionSummary(
-    chatId: string,
-    worktreePath: string,
-  ): Promise<ChatSession | undefined> {
+  ensureActiveSessionSummary(chatId: string): ChatSession | undefined {
     const chat = this.get(chatId);
-    if (!chat) return undefined;
-
-    // Already cached — nothing to do.
-    if (chat.activeSessionId && chat.activeSessionSummary !== undefined) return chat;
-
-    try {
-      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
-
-      if (chat.activeSessionId) {
-        // Migration / lazy-resolve case: row has activeSessionId but no
-        // cached summary. Resolve once and persist.
-        if (!agent.getSessionInfo) return chat;
-        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
-        if (info) {
-          this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
-        }
-        // Session file doesn't exist anymore — leave the cached values
-        // null. The client will treat this as "no active session" until
-        // the next mutation rebuilds the cache.
-        return this.get(chatId);
-      }
-
-      // No activeSessionId. Leave it null — the legacy
-      // `agent.getLatestSession` fallback broke the "New session" flow
-      // under the event-log model (handleNewSession clears
-      // activeSessionId to null and the subsequent chats.get refetch
-      // would re-promote the prior session before the new task starts).
-      // See issue #478.
-      return chat;
-    } catch (err) {
-      log.warn({ chatId, err }, "ensureActiveSessionSummary failed");
-      return chat;
+    if (!chat?.activeSessionId || chat.activeSessionSummary !== undefined) return chat;
+    const title = agentSessionService.sessionTitle(chat.activeSessionId);
+    if (title) {
+      this.updateSessionSummary(
+        chatId,
+        chat.activeSessionId,
+        title,
+        chat.activeSessionLastModified ?? Date.now(),
+      );
     }
-  }
-
-  /**
-   * Fire-and-forget refresh of the cached summary after a `chats.get`
-   * returns. Concurrent calls for the same chatId share a single in-flight
-   * refresh — a burst of SSE-driven query refetches won't stampede
-   * `agent.getSessionInfo`.
-   */
-  scheduleActiveSessionRefresh(chatId: string, worktreePath: string): void {
-    if (this.refreshes.has(chatId)) return;
-
-    const promise = this.doRefresh(chatId, worktreePath).finally(() => {
-      // Only clear if the entry is still ours — defensive, the Map is
-      // keyed per-chatId and the only writer here is this method, but
-      // kept for symmetry with the agent-pool dedupe pattern.
-      const current = this.refreshes.get(chatId);
-      if (current === promise) this.refreshes.delete(chatId);
-    });
-    this.refreshes.set(chatId, promise);
-  }
-
-  private async doRefresh(chatId: string, worktreePath: string): Promise<void> {
-    try {
-      const chat = this.get(chatId);
-      if (!chat) return;
-
-      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
-
-      if (chat.activeSessionId) {
-        if (!agent.getSessionInfo) return;
-        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
-        if (!info) {
-          // Session file is gone (deleted, moved, etc.). Don't clobber
-          // the cached values — they're still useful for the tab title
-          // until the user picks a new session.
-          return;
-        }
-        this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
-        return;
-      }
-
-      // No activeSessionId. Leave it null — same rationale as
-      // `ensureActiveSessionSummary`. Discovery of prior sessions is now
-      // an explicit user action via the history dropdown
-      // (`sessions.list`). See issue #478.
-    } catch (err) {
-      log.warn({ chatId, err }, "active session refresh failed");
-    }
+    return this.get(chatId);
   }
 }
 

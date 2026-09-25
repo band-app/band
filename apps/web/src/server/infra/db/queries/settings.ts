@@ -98,13 +98,6 @@ export interface Settings {
    * cost of memory and background work. Defaults to 3 in the client.
    */
   maxCachedWorkspaces?: number;
-  /**
-   * Experimental: forward Claude Code's partial-message stream events
-   * (SDK's `includePartialMessages`) so the chat bubble types in
-   * token-by-token instead of in per-block bursts. Off by default.
-   * See `docs/experiments/partial-messages.md`.
-   */
-  claudeCodePartialMessages?: boolean;
   /** Enable Language Server Protocol features (file preview hovers, etc.). */
   enableLSP?: boolean;
   /**
@@ -184,7 +177,7 @@ function settingsFile(): string {
  *   4. A built-in `claude-code` definition so a freshly installed Band
  *      with an empty settings file can still launch.
  *
- * Lives in infra so `agent-pool.ts` (also infra) can resolve definitions
+ * Lives in infra so `acp-launch.ts` (also infra) can resolve definitions
  * from the same package — both sides import this function and
  * `SettingsQueries.load()` directly, with no hop through the services
  * tier. `SettingsService.resolveAgent` retains a thin static wrapper
@@ -213,7 +206,7 @@ export function resolveAgentDefinition(
  *
  * `settings.json` is read on hot paths — every agent hook event routes through
  * `statuses.notify` → `SettingsService.getAgentDefinition` → `load()`, and
- * `agent-pool` calls `load()` on every agent resolution — but the file changes
+ * `agent-session-service` calls `load()` on every agent resolution — but the file changes
  * rarely (only when the user edits settings). Re-reading + re-parsing it
  * synchronously on every call needlessly parks the event loop. Caching by
  * mtime makes the steady state a single `statSync` with no `readFileSync`/

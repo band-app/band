@@ -1,51 +1,38 @@
 /**
- * Refresh the cached model list for each configured coding agent.
+ * Cache of the models each configured coding agent offers, for the model
+ * pickers of chats that have no session yet and for the Settings UI.
  *
- * The model list used to be fetched lazily inside `ClaudeCodeAdapter.runSession()`
- * and cached in-memory per-adapter-instance. That meant:
- *   1. A fresh chat pane saw no SDK-discovered models until the user sent
- *      their first message.
- *   2. The cache was lost on server restart.
- *   3. The Settings UI couldn't show the live list without first triggering
- *      a chat session.
- *
- * This service moves the cache into `~/.band/settings.json` (one entry per
- * `CodingAgentDefinition`) and exposes two refresh paths:
+ * Over ACP an agent only reports its models once a session exists: as the
+ * choices of its `model` session config option (or, for Gemini CLI, the
+ * legacy model list). A refresh probes the agent: starts it, opens a
+ * scratch session, reads the option, stops it (`agentSessionService.probe`,
+ * issue #648). The result is cached in `~/.band/settings.json` (one entry
+ * per `CodingAgentDefinition`) so it survives restarts:
  *
  *   • **Boot-time fire-and-forget** — `runFirstTimeSetup` kicks off a
- *     `refreshAll()` after the rest of the setup pipeline. Failures (network,
- *     missing binary) log a warning and keep the prior cached list.
+ *     `refreshAll()` after the rest of the setup pipeline. Failures (missing
+ *     binary, login required) log a warning and keep the prior cached list.
  *   • **Explicit user request** — the `models.refresh` tRPC mutation
  *     dispatches `refresh(agentId)` from the Settings UI's "Refresh models"
  *     button.
  *
- * Reads always go through the persisted cache (`getCachedOrDefaults`), which
- * falls back to the adapter's hardcoded defaults when no cache has been
- * written yet so a fresh install never shows an empty picker.
- *
- * The service is intentionally sequential — boot-time and user-initiated
- * refreshes share the same `~/.band/settings.json` file, and running two
- * `load → mutate → save` cycles in parallel would race (last writer wins).
- * The implementation `for await`s each agent rather than `Promise.all`-ing
- * them, even though the SDK calls themselves could overlap. The overhead is
- * negligible (one refresh call per agent, capped at ~5 entries).
+ * Refreshes run sequentially: boot-time and user-initiated refreshes share
+ * the same `~/.band/settings.json` file, and two `load → mutate → save`
+ * cycles in parallel would race (last writer wins).
  *
  * Snapshot-passing convention: every public method loads `settings.json` at
  * most once and threads the snapshot to internal helpers — see the
- * `*FromSnapshot` variants. Callers that already hold a snapshot (the
- * `models.list` / `models.listAll` tRPC handlers) should use the
- * snapshot-based helpers directly to avoid duplicate `readFileSync` calls.
+ * `*FromSnapshot` variants.
  */
 
-import type { AgentModel } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { createMetadataAgent } from "../infra/agents/agent-pool";
 import type {
   CachedAgentModel,
   CodingAgentDefinition,
   Settings,
 } from "../infra/db/queries/settings";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
+import { agentSessionService, type CatalogEntry } from "./agent-session-service";
 
 const log = createLogger("model-refresh");
 
@@ -53,8 +40,7 @@ export interface ModelRefreshResult {
   agentId: string;
   models: CachedAgentModel[];
   updatedAt: number;
-  /** When refresh failed, the prior cached list (or the adapter defaults)
-   *  is still returned and `error` is populated with the failure reason. */
+  /** When refresh failed, the prior cached list is still returned and `error` is populated with the failure reason. */
   error?: string;
 }
 
@@ -73,13 +59,11 @@ export class ModelRefreshService {
   constructor(private readonly queries: SettingsQueries = new SettingsQueries()) {}
 
   /**
-   * Read the cached model list for one agent, falling back to the
-   * adapter's hardcoded defaults when no cache is present.
+   * Read the cached model list for one agent, falling back to what this
+   * process learned from the agent when no cache is present.
    *
    * This is the read path the `models.list` / `models.listAll` routers
-   * hit, so it must NOT spawn a real metadata agent or touch the SDK —
-   * the fallback path uses a fresh adapter only to extract the static
-   * default list, which every adapter implements synchronously.
+   * hit, so it never starts an agent.
    */
   async getCachedOrDefaults(agentId: string): Promise<CachedAgentModel[]> {
     const settings = this.queries.load();
@@ -119,8 +103,7 @@ export class ModelRefreshService {
   /**
    * Snapshot-based variant of `getCachedOrDefaults` — callers (and other
    * methods on this service) that already hold a settings snapshot pass
-   * it in to avoid a duplicate `readFileSync`. The cache-hit path is pure;
-   * only the fallback path touches the agent pool.
+   * it in to avoid a duplicate `readFileSync`.
    */
   async getCachedOrDefaultsFromSnapshot(
     settings: Settings,
@@ -130,41 +113,26 @@ export class ModelRefreshService {
     if (def?.cachedModels && def.cachedModels.length > 0) {
       return def.cachedModels;
     }
-    // Fall back to the adapter's static default list by instantiating a
-    // throwaway metadata agent and calling its sync `listModels()`. Note
-    // that `claude-code` and `codex` deliberately return `[]` from
-    // `listModels()` (their canonical source is the live SDK / `codex
-    // debug models`, populated via `refreshModels()`), so the fallback
-    // only yields a non-empty list for adapters with static hardcoded
-    // catalogues (`cursor-cli`, `gemini-cli`). For the SDK-backed
-    // adapters this branch returns `[]` until the first successful
-    // refresh — the correct "we have nothing to show yet" signal.
-    try {
-      const agent = await createMetadataAgent(agentId);
-      if (!agent.listModels) return [];
-      const models = await agent.listModels();
-      return models.map(toCachedModel);
-    } catch (err) {
-      log.warn({ agentId, err }, "failed to load adapter defaults; returning empty list");
-      return [];
-    }
+    // No cache yet: use what this server process learned from the agent
+    // (a probe or a chat session), or nothing.
+    const entry = agentSessionService.catalogEntry(agentId);
+    return entry ? modelsFromCatalog(entry) : [];
   }
 
   /**
    * Refresh the cached model list for one agent and persist the result
-   * in `~/.band/settings.json`. On failure (no network, missing binary,
-   * SDK throws), logs a warning and returns the previously cached list
-   * (or the adapter's defaults) without overwriting the cache.
+   * in `~/.band/settings.json`. On failure (missing binary, login required,
+   * the agent errors), logs a warning and returns the previously cached
+   * list without overwriting the cache.
    *
-   * Unknown `agentId`: `createMetadataAgent` resolves through
-   * `resolveAgentDefinition`, which silently falls back to the default
-   * agent for an unrecognised id. We don't want a stray id to spawn the
-   * default agent's subprocess, so we reject it up front with an
+   * Unknown `agentId`: `resolveAgentDefinition` silently falls back to the
+   * default agent for an unrecognised id. We don't want a stray id to spawn
+   * the default agent's subprocess, so we reject it up front with an
    * explicit error instead.
    */
   async refresh(agentId: string): Promise<ModelRefreshResult> {
     const now = Date.now();
-    let fresh: AgentModel[] | undefined;
+    let fresh: CachedAgentModel[] | undefined;
     let error: string | undefined;
 
     // Load settings exactly once and reuse the snapshot for the
@@ -185,20 +153,13 @@ export class ModelRefreshService {
     }
 
     try {
-      const agent = await createMetadataAgent(agentId);
-      if (!agent.refreshModels) {
-        // Adapter has no refresh implementation — fall back to its static
-        // defaults so the cache still gets seeded with something useful.
-        if (!agent.listModels) {
-          throw new Error("adapter exposes neither refreshModels nor listModels");
-        }
-        fresh = await agent.listModels();
-      } else {
-        fresh = await agent.refreshModels();
-      }
+      // Start the agent in a scratch ACP session and read the model option
+      // it offers (issue #648).
+      const def = resolveAgentDefinition(settings, agentId);
+      fresh = modelsFromCatalog(await agentSessionService.probe(def));
     } catch (err) {
       // Surface only a sanitized classification to the tRPC response —
-      // raw error messages from the SDK can include filesystem paths,
+      // raw error messages from the agent can include filesystem paths,
       // partial commands, or other host state the client doesn't need
       // to see. The full `err` (including the stack) is still logged
       // server-side at warn level for operator debugging.
@@ -207,10 +168,10 @@ export class ModelRefreshService {
     }
 
     if (fresh) {
-      const cachedFresh = fresh.map(toCachedModel);
+      const cachedFresh = fresh;
       const persisted = this.persist(agentId, cachedFresh, now);
       if (!persisted) {
-        // SDK fetch worked, but the agent isn't in settings.codingAgents.
+        // The probe worked, but the agent isn't in settings.codingAgents.
         // Don't pretend the cache was updated — fall through to the
         // failure branch with an explicit error so the UI surface and
         // boot-time logging both see the no-op.
@@ -285,8 +246,8 @@ export class ModelRefreshService {
    * what the Settings UI and the chat model picker call — a single
    * settings.json read returns the full {agentId → models} map plus the
    * `cachedModelsUpdatedAt` timestamp so the UI can render staleness.
-   * When an agent has no cached entry yet, falls back to the adapter's
-   * static defaults via `getCachedOrDefaultsFromSnapshot`.
+   * When an agent has no cached entry yet, falls back to what this process
+   * learned from it via `getCachedOrDefaultsFromSnapshot`.
    */
   async getAllCachedOrDefaults(): Promise<AgentModelsEntry[]> {
     return this.getAllCachedOrDefaultsFromSnapshot(this.queries.load());
@@ -340,7 +301,7 @@ export class ModelRefreshService {
    *
    * Reads the settings document FRESH here — right before the
    * find-and-mutate — rather than reusing the snapshot `refresh()` loaded
-   * before its (up to 10 s) SDK call. `SettingsQueries.save()` replaces
+   * before its (up to a minute) probe. `SettingsQueries.save()` replaces
    * the whole `codingAgents` array (shallow top-level merge), so building
    * `next` from a stale snapshot would clobber any concurrent
    * `SettingsService.update()` (e.g. a user editing a label/command/model
@@ -367,13 +328,24 @@ export class ModelRefreshService {
   }
 }
 
-function toCachedModel(m: AgentModel): CachedAgentModel {
-  return {
-    id: m.id,
+/**
+ * The models an agent offers: the choices of its `model` session config
+ * option, or its legacy model list (Gemini CLI).
+ */
+function modelsFromCatalog(entry: CatalogEntry): CachedAgentModel[] {
+  const option = entry.configOptions.find(
+    (o) => o.type === "select" && (o.category === "model" || o.id === "model"),
+  );
+  if (option?.type === "select") {
+    return option.options
+      .flatMap((o) => ("group" in o ? o.options : [o]))
+      .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
+  }
+  return (entry.models?.availableModels ?? []).map((m) => ({
+    id: m.modelId,
     name: m.name,
-    description: m.description,
-    contextWindow: m.contextWindow,
-  };
+    description: m.description ?? undefined,
+  }));
 }
 
 /**

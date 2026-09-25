@@ -12,7 +12,7 @@
 //
 // Real production server (`dist/start-server.mjs`), real PTY (node-pty), real
 // git repo, real SQLite. No tRPC mocking, no MSW. Each describe block boots its
-// own server with a tmp `$HOME` so an SDK-adapter wedge in one scenario can't
+// own server with a tmp `$HOME` so an agent wedge in one scenario can't
 // cascade into the next.
 //
 // The cron terminal pane is *self-closing* (its command ends with `exit`), so
@@ -27,6 +27,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
+import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -38,8 +39,6 @@ import {
 } from "./helpers/server";
 import { listTasksForWorkspace } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 
 // ---------------------------------------------------------------------------
 // Git + stub helpers
@@ -82,8 +81,8 @@ function writeVendorCliScript(tmpHome: string, name: string, body: string): stri
  * home can't split the redirect target.
  *
  * The same binary is the configured `claude-code` command, so the Claude Code
- * SDK also spawns it (boot model-refresh / adapter construction) with its own
- * `-p --output-format stream-json …` arg set into this same log. Two
+ * ACP adapter (boot model-refresh probe) may also spawn it with its own arg
+ * set into this same log. Two
  * defenses make the argv assertion robust against that:
  *   1. The whole argv is composed into one string and written with a SINGLE
  *      `printf '%s\n'` — one `O_APPEND` write, atomic under PIPE_BUF (our lines
@@ -106,7 +105,7 @@ function writeLoggingVendorCli(tmpHome: string, name: string, logPath: string): 
 /**
  * Stub vendor CLI that sleeps so the PTY stays alive long enough for the
  * overlap / delete tests to observe the running pane and act before the command
- * finishes. Gated on `BAND_DISPATCH=terminal` so the SDK's boot-time
+ * finishes. Gated on `BAND_DISPATCH=terminal` so the ACP adapter's boot-time
  * model-refresh spawn (`BAND_DISPATCH=chat`) exits immediately instead of
  * spawning a stray multi-second sleeper.
  */
@@ -116,25 +115,6 @@ function writeSleepingVendorCli(tmpHome: string, name: string, seconds: number):
     name,
     `[ "$BAND_DISPATCH" = terminal ] || exit 0\nsleep ${seconds}\n`,
   );
-}
-
-/**
- * Minimal fake-agent scenario for the chat-path dispatch: emit `system.init`
- * then a terminal `result` so `taskService.submitTask` records a completed task
- * and tears the agent down cleanly. A bare shell stub would hang the SDK
- * subprocess on Linux CI.
- */
-function writeChatScenario(tmpHome: string, name: string): string {
-  const scenarioPath = join(tmpHome, name);
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "cron-via-chat-session" },
-      { type: "result", subtype: "success", result: "Done" },
-    ]),
-    "utf-8",
-  );
-  return scenarioPath;
 }
 
 interface TerminalListEntry {
@@ -242,7 +222,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
 
     // The stub vendor CLI logged its argv (one atomic line per spawn) to a file
     // so the assertion survives the pane self-closing. Grab the line bearing the
-    // cron prompt — the SDK's own spawns of this same binary write other lines
+    // cron prompt — the ACP adapter's own spawns of this same binary write other lines
     // we ignore.
     const argvLine = await waitFor(
       async () => {
@@ -260,7 +240,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
     // a claude-code agent, so headless dispatch logs exactly `-p` then the prompt
     // (`ARGV:-p|<prompt>|`); interactive dispatch would log only the prompt token
     // (`ARGV:<prompt>|`). Asserting the whole line rules out both a regression to
-    // the interactive form and any accidental match against an SDK spawn's line.
+    // the interactive form and any accidental match against an adapter spawn's line.
     expect(argvLine).toBe("ARGV:-p|run the terminal check|");
 
     // Self-close: the command ended with `exit`, so the pane closes when the
@@ -375,8 +355,8 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
 // ---------------------------------------------------------------------------
 // via=chat (default) — no terminal spawned, a chat task is submitted
 //
-// Uses `fake-agent.mjs` (the SDK-protocol stub) because chat dispatch runs
-// `taskService.submitTask`, which spawns the real SDK and reads JSONL events.
+// Chat dispatch runs `taskService.submitTask`, which starts the agent over
+// ACP; `startAcpServer` points it at the scripted stub ACP agent.
 // ---------------------------------------------------------------------------
 
 describe("cronjobs.trigger default dispatches to chat", () => {
@@ -388,7 +368,6 @@ describe("cronjobs.trigger default dispatches to chat", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-cron-via-chat-");
     const repoPath = createGitRepo(tmpHome, "chatcron");
-    const scenarioPath = writeChatScenario(tmpHome, "chat-scenario.json");
     seedState(tmpHome, {
       projects: [
         {
@@ -401,11 +380,9 @@ describe("cronjobs.trigger default dispatches to chat", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
-    server = await startServer({ tmpHome, env: { FAKE_AGENT_SCENARIO: scenarioPath } });
+    server = await startAcpServer({ home: tmpHome });
 
     // No `via` field — the server defaults to chat (backward-compatible).
     const res = await trpcMutate(
@@ -461,6 +438,14 @@ describe("cronjobs.trigger default dispatches to chat", () => {
       { label: "chat task submitted for default via" },
     );
     expect(tasks.some((t) => t.prompt === "chat dispatch work")).toBe(true);
+    // ...and the prompt reached the agent over ACP.
+    await expect
+      .poll(() =>
+        stubRequests(tmpHome, "session/prompt").map(
+          (r) => (r.params.prompt as { text?: string }[])[0]?.text,
+        ),
+      )
+      .toEqual(["chat dispatch work"]);
 
     // No PTY: chat dispatch never touches the terminal pool.
     const terminals = await listTerminals(server.url, workspaceId, TOKEN);
@@ -472,13 +457,9 @@ describe("cronjobs.trigger default dispatches to chat", () => {
 // via=terminal + unsupported adapter → silent fallback to chat
 //
 // cursor-cli's `cliHeadlessInvocation` returns `unsupported: true`; the service
-// warns and downgrades to chat. As in workspace-create-via, the real Cursor SDK
-// isn't safe to run in the test process, so we assert the response shape only.
-// The chat fallback fires `submitTask`, which spawns the Cursor SDK in the
-// background; with no `cursor` binary in CI that background task fails, but the
-// failure is out-of-band (the response has already returned) and the process is
-// reaped by `server.close()` in afterAll — the only visible effect is benign
-// error-log noise, not a test failure.
+// warns and downgrades to chat. The chat fallback fires `submitTask`, which
+// `startAcpServer` points at the stub ACP agent, so no Cursor install is
+// needed. We assert the response shape only.
 // ---------------------------------------------------------------------------
 
 describe("cronjobs.trigger via=terminal falls back to chat when unsupported", () => {
@@ -505,7 +486,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
       codingAgents: [{ id: "cursor-cli", type: "cursor-cli", label: "Cursor CLI" }],
       defaultCodingAgent: "cursor-cli",
     });
-    server = await startServer({ tmpHome });
+    server = await startAcpServer({ home: tmpHome });
 
     const res = await trpcMutate(
       server.url,

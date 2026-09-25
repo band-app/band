@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startAcpServer } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -12,7 +13,6 @@ import {
   trpcQuery,
 } from "./helpers/server";
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "cronjob-test-token";
 
 // ---------------------------------------------------------------------------
@@ -439,27 +439,9 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
 // Cronjobs trigger
 // ---------------------------------------------------------------------------
 
-function writeScenario(tmpHome: string, events: object[]): string {
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(scenarioPath, JSON.stringify(events));
-  return scenarioPath;
-}
-
 describe("tRPC — cronjobs.trigger", () => {
-  // How long the fake agent sleeps between `init` and `result`. Must stay
-  // strictly greater than `CONFLICT_POLL_TIMEOUT_MS` so the conflict test
-  // has a window in which to observe `status: "running"` and fire the
-  // second trigger before the agent reports completion. Both constants
-  // are scoped to this describe so a later refactor can't separate them
-  // accidentally by moving one and leaving the other.
-  const FAKE_AGENT_SLEEP_MS = 5000;
-
-  // How long the conflict test will poll `tasks.list` waiting for the
-  // first trigger's task to enter `status: "running"`. Strictly less than
-  // `FAKE_AGENT_SLEEP_MS`; otherwise the poll could succeed because the
-  // agent has already completed, turning the subsequent 409 assertion
-  // into a race. The runtime check in `beforeAll` enforces the
-  // invariant.
+  // How long the conflict test polls `tasks.list` for the first trigger's
+  // task to be running.
   const CONFLICT_POLL_TIMEOUT_MS = 4000;
 
   let server: ServerHandle;
@@ -467,37 +449,8 @@ describe("tRPC — cronjobs.trigger", () => {
   let jobId: string;
 
   beforeAll(async () => {
-    if (CONFLICT_POLL_TIMEOUT_MS >= FAKE_AGENT_SLEEP_MS) {
-      throw new Error(
-        `CONFLICT_POLL_TIMEOUT_MS (${CONFLICT_POLL_TIMEOUT_MS}) must be strictly less than FAKE_AGENT_SLEEP_MS (${FAKE_AGENT_SLEEP_MS}) — see comments above`,
-      );
-    }
     tmpHome = createTmpHome("band-cronjob-trigger-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
-
-    // Long-running scenario: the agent emits `init` and then sleeps for
-    // FAKE_AGENT_SLEEP_MS before the terminal `result`. The sleep window is
-    // what makes the "returns CONFLICT when task is already running"
-    // assertion below deterministic — the previous fake-agent scenario
-    // completed in tens of ms, so a slower test runner would race the
-    // result event past the second trigger and turn the conflict check
-    // into a coin flip.
-    //
-    // FAKE_AGENT_SLEEP_MS must stay strictly greater than
-    // CONFLICT_POLL_TIMEOUT_MS (defined at the top of the conflict test)
-    // so the "still running" poll has time to observe `status: "running"`
-    // before the agent reports completion. The current 5000 / 4000 split
-    // leaves a 1-second margin; if you shrink either constant, shrink the
-    // other proportionally and keep the strict inequality.
-    const scenarioPath = writeScenario(tmpHome, [
-      { type: "system", subtype: "init", session_id: "trigger-session" },
-      { _sleep_ms: FAKE_AGENT_SLEEP_MS },
-      {
-        type: "result",
-        subtype: "success",
-        result: "Done",
-      },
-    ]);
 
     seedState(tmpHome, {
       projects: [
@@ -511,13 +464,14 @@ describe("tRPC — cronjobs.trigger", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    // The stub agent's turn blocks until `session/cancel`, so the task the
+    // first trigger starts is still running when the conflict test fires
+    // the second trigger. No wall-clock margin involved.
+    server = await startAcpServer({
+      home: tmpHome,
+      turns: [{ steps: [{ say: "Checking." }, { waitForCancel: true }] }],
     });
 
     // Create a cronjob to trigger
@@ -578,16 +532,10 @@ describe("tRPC — cronjobs.trigger", () => {
   });
 
   it("returns CONFLICT when task is already running", async () => {
-    // The fake-agent scenario above sleeps for `FAKE_AGENT_SLEEP_MS` before
-    // emitting `result`, so by the time this test runs the task started by
-    // the first `triggers a cronjob and creates a task` case is still
-    // in-flight. Belt-and-braces: poll `tasks.list` until we see
-    // `status: "running"` before firing the second trigger, so the
-    // assertion does not depend on wall-clock margin between the two `it`
-    // blocks at all. If the agent ever completes faster than expected the
-    // poll fails loudly instead of the conflict check silently flipping
-    // to 200. The poll timeout intentionally sits below
-    // `FAKE_AGENT_SLEEP_MS` — see the constant definitions above.
+    // The stub agent's turn never ends on its own, so the task started by
+    // the first `triggers a cronjob and creates a task` case is still in
+    // flight. Poll `tasks.list` until it reports `status: "running"` before
+    // firing the second trigger.
 
     // Pre-flight diagnostic: this test relies on the preceding "triggers a
     // cronjob and creates a task" case having already submitted a task.

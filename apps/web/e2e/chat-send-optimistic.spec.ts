@@ -18,12 +18,10 @@
  *   - NO tRPC mocking. The chat-events subscription, the
  *     `POST /api/chats/:chatId/messages` endpoint, and the agent
  *     orchestration all run for real.
- *   - The fake-agent at `apps/web/tests/fake-agent.mjs` is the *only*
- *     mock — it's the boundary stub for the external LLM subprocess
- *     (exactly the case the doctrine recommends an Express-style stub
- *     for, except the boundary here is a child process speaking the
- *     Claude SDK protocol over stdio, not HTTP).
- *   - The fake-agent's scenario is deliberately SLOW: it pauses 30 s
+ *   - The ACP stub agent at `apps/web/tests/fixtures/acp-stub-agent.mjs`
+ *     is the *only* mock. It is the boundary stub for the coding-agent
+ *     subprocess, which speaks the Agent Client Protocol over stdio.
+ *   - The stub's scenario is deliberately SLOW: it pauses 30 s
  *     before producing any output. That gap lets us observe the
  *     optimistic state in the UI — if the optimistic dispatch ever
  *     regresses, the thinking indicator won't appear before the 30 s
@@ -33,10 +31,11 @@
  *     body).
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -54,11 +53,8 @@ const WORKSPACE = toWorkspaceId(PROJECT, "main");
 // Wide viewport so the desktop chat layout renders.
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
-
 let server: ServerHandle;
 let tmpHome: string;
-let scenarioPath: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -81,46 +77,20 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    codingAgents: [
-      {
-        id: "claude-code",
-        type: "claude-code",
-        label: "Claude Code",
-        command: FAKE_AGENT_PATH,
-      },
-    ],
+    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
 
   // 30-second sleep before any agent output. The test asserts within
   // ~5 s, so it observes ONLY the client-side optimistic state — never
-  // the server's late `task-started` / text-delta echo. A regression
+  // the server's late `turn-started` / message-chunk echo. A regression
   // that re-introduces the "wait for server" path would fail to render
   // the indicator within Playwright's default timeout and the test
   // would fail noisily, exactly the signal we want.
-  scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "optimistic-session" },
-      { _sleep_ms: 30_000 },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "never observed" }] },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "optimistic-session",
-        duration_ms: 30_000,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
-
   server = await startServer({
     tmpHome,
-    env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    env: acpStubEnv(tmpHome, {
+      turns: [{ steps: [{ sleep: 30_000 }, { say: "never observed" }] }],
+    }),
   });
 });
 
@@ -146,7 +116,7 @@ test.describe("Chat send — optimistic dispatch (#478)", () => {
     // BOTH of these must appear quickly. With the fix, the optimistic
     // dispatch fires in the same React render as the form submission;
     // the assertions auto-retry up to Playwright's default 5 s. The
-    // fake-agent's 30 s sleep guarantees no server-driven message can
+    // stub agent's 30 s sleep guarantees no server-driven message can
     // satisfy these — only the optimistic dispatch can.
     await expect(chatPane.userMessage("hello world")).toBeVisible();
     await expect(chatPane.thinkingIndicator).toBeVisible();
@@ -157,7 +127,7 @@ test.describe("Chat send — optimistic dispatch (#478)", () => {
   }) => {
     // We use a separate chatId so the prior test's task can't bleed in.
     // The optimistic-dispatch send() path also rolls the optimistic
-    // task-started back to task-error when the POST fails — this test
+    // send back when the POST fails — this test
     // asserts that wire shape on the rendered DOM. To force a failure,
     // we override the workspace to one that doesn't exist; the server's
     // `chat-submit` returns 404.

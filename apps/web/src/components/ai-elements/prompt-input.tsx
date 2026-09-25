@@ -1,5 +1,4 @@
 import { cn } from "@band-app/ui";
-import type { ChatStatus } from "ai";
 import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
 import type {
   ComponentProps,
@@ -555,8 +554,11 @@ export const PromptInputTextarea = ({
   );
 };
 
+/** What the submit button shows: send, or stop while a turn runs. */
+export type PromptInputStatus = "ready" | "submitted" | "streaming" | "error";
+
 export type PromptInputSubmitProps = ComponentProps<"button"> & {
-  status?: ChatStatus;
+  status?: PromptInputStatus;
   onStop?: () => void;
 };
 

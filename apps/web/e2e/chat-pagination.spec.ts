@@ -2,15 +2,16 @@
  * Frontend integration test for chat scroll-back pagination (issue #572).
  *
  * Builds on the virtualization work (#586): the DOM is already windowed to a
- * handful of rows. This spec proves the DATA layer is now windowed too — a cold
- * subscribe replays only the most recent `COLD_REPLAY_LIMIT` (50) messages, and
- * scrolling to the top fetches + prepends the previous page on demand, with no
- * visible scroll jump and without breaking stick-to-bottom.
+ * handful of rows. This spec proves the DATA layer is windowed too — a cold
+ * subscribe replays only the most recent `HISTORY_PAGE_SIZE` (20) turns, and
+ * scrolling to the top fetches + prepends the previous page of turns on
+ * demand, with no visible scroll jump and without breaking stick-to-bottom.
  *
  * Boots the real production server, drives through Playwright + a page object,
- * no tRPC mocking. The chat-events SSE stream + the new
- * `GET /api/chats/:id/history` endpoint replay the seeded JSONL through the real
- * Claude Code adapter (`getSessionMessages` reads the file from disk). The spec
+ * no tRPC mocking. The session is seeded in the ACP stub agent's store; the
+ * server imports it with `session/load` into Band's event log, and the
+ * chat-events SSE stream + `GET /api/chats/:id/history` page through that log
+ * by turns. The spec
  * body never touches `page.goto` / `page.getByTestId` directly — locators live
  * on `ChatPanePage`.
  *
@@ -25,11 +26,12 @@
  *   5. The DOM stays virtualized throughout (no row-count blow-up).
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { fakeAgentPath } from "./helpers/fake-agent";
+import { HISTORY_PAGE_SIZE } from "@/shared/chat-events";
+import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -47,17 +49,14 @@ const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const CHAT_ID = "page-chat-deterministic-id";
 const SESSION_ID = "22222222-3333-4444-5555-666666666666";
 
-// 200 turns = 400 messages. The cold window is 50 messages (25 turns), so
-// reaching the first message requires paging back through several pages —
+// 200 turns = 400 messages. The cold window is HISTORY_PAGE_SIZE (20) turns,
+// so reaching the first message requires paging back through several pages —
 // enough to exercise repeated prepends without ballooning test cost.
 const TURNS = 200;
-// Oldest turn present in the initial 50-message window (50 messages = 25 turns).
-// Mirrors `COLD_REPLAY_LIMIT` in `apps/web/src/api/chat-events.ts`.
-const OLDEST_WINDOW_TURN = TURNS - 25;
+// Oldest turn present in the initial window.
+const OLDEST_WINDOW_TURN = TURNS - HISTORY_PAGE_SIZE;
 
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = fakeAgentPath();
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -81,19 +80,17 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     defaultCodingAgent: "claude-code",
-    codingAgents: [
-      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-    ],
+    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
 
-  // Seed the session JSONL in the Claude Code SDK layout:
-  // `<HOME>/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`.
-  const encodedRepoDir = repoDir.replace(/[^a-zA-Z0-9]/g, "-");
-  const projectDir = join(tmpHome, ".claude", "projects", encodedRepoDir);
-  mkdirSync(projectDir, { recursive: true });
-  writeFileSync(join(projectDir, `${SESSION_ID}.jsonl`), buildLongSessionJsonl(SESSION_ID, TURNS));
+  // Seed the session in the stub agent's own store, as if an earlier agent
+  // process had recorded it. Band has never seen it, so pointing the chat
+  // at it makes the server `session/load` it: the stub replays every turn
+  // as `user_message_chunk` + `agent_message_chunk` updates, which Band
+  // writes to its event log.
+  seedStubSession(tmpHome, { sessionId: SESSION_ID, cwd: repoDir, turns: buildTurns(TURNS) });
 
-  server = await startServer({ tmpHome, env: { FAKE_AGENT_SCENARIO: "" } });
+  server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 
   await trpcMutate(server.url, TOKEN, "chats.create", {
     workspaceId: WORKSPACE,
@@ -127,7 +124,7 @@ test.describe("Chat scroll-back pagination", () => {
       timeout: 30_000,
     });
 
-    // The FIRST seeded message is far outside the 50-message window — it isn't
+    // The FIRST seeded message is far outside the 20-turn window — it isn't
     // loaded into the reducer at all on cold subscribe (the windowing the
     // issue asks for). A non-windowed cold replay would have it in the data.
     await expect(chatPane.userMessage(userText(0))).toHaveCount(0);
@@ -178,7 +175,7 @@ test.describe("Chat scroll-back pagination", () => {
 
     // Scroll to the top: this mounts the anchor row AND trips the sentinel, which
     // fetches + prepends the previous page. The scroll-anchor compensation must
-    // keep the anchor row pinned — its screen position must not move as ~25 older
+    // keep the anchor row pinned — its screen position must not move as ~20 older
     // turns are inserted above it.
     await chatPane.scrollToTop();
 
@@ -203,7 +200,7 @@ test.describe("Chat scroll-back pagination", () => {
     //      before the virtualizer settles; a real jump moves MANY frames.
     // Threshold derivation: a correctly anchored row only jitters by sub-pixel
     // measurement rounding (< a few px). The failure mode it must catch is the
-    // inserted page (~25 turns × ~40px row ≈ 1000px, or up to 11000px at the
+    // inserted page (~20 turns × ~40px row ≈ 1000px, or up to 11000px at the
     // 220px estimate) shoving the row — orders of magnitude larger. 30px (net)
     // and 40px (per-frame) sit comfortably between real jitter and a real jump,
     // and ≤5 deviating frames tolerates the single prepend-commit transient
@@ -299,52 +296,10 @@ test.describe("Chat scroll-back pagination — mobile viewport", () => {
 // Helpers (self-contained, mirroring chat-virtualization.spec.ts)
 // ---------------------------------------------------------------------------
 
-function buildLongSessionJsonl(sessionId: string, turns: number): string {
-  const lines: string[] = [];
-  let parentUuid: string | null = null;
-  for (let i = 0; i < turns; i++) {
-    const userUuid = uuid(i * 2 + 1);
-    const assistantUuid = uuid(i * 2 + 2);
-    lines.push(
-      JSON.stringify({
-        type: "user",
-        uuid: userUuid,
-        parentUuid,
-        sessionId,
-        isSidechain: false,
-        userType: "external",
-        message: { role: "user", content: [{ type: "text", text: userText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2)).toISOString(),
-      }),
-    );
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        uuid: assistantUuid,
-        parentUuid: userUuid,
-        sessionId,
-        isSidechain: false,
-        message: { role: "assistant", content: [{ type: "text", text: assistantText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2 + 1)).toISOString(),
-      }),
-    );
-    parentUuid = assistantUuid;
-  }
-  lines.push(
-    JSON.stringify({
-      type: "last-prompt",
-      sessionId,
-      lastPrompt: userText(turns - 1),
-      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, turns * 2)).toISOString(),
-      uuid: uuid(turns * 2 + 1),
-      parentUuid: null,
-    }),
-  );
-  return `${lines.join("\n")}\n`;
-}
-
-function uuid(n: number): string {
-  return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
+/** `turns` user→assistant pairs, each carrying index-bearing text so the
+ *  test can address a specific message without matching the wrong row. */
+function buildTurns(turns: number): SeededTurn[] {
+  return Array.from({ length: turns }, (_, i) => ({ user: userText(i), agent: assistantText(i) }));
 }
 
 /** Index-bearing, unambiguous text per turn. The trailing `-marker` prevents

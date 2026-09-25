@@ -118,9 +118,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [enableFilePreviewTabs, setEnableFilePreviewTabs] = useState(
     settings.enableFilePreviewTabs ?? true,
   );
-  const [claudeCodePartialMessages, setClaudeCodePartialMessages] = useState(
-    settings.claudeCodePartialMessages ?? false,
-  );
   const [maxCachedWorkspaces, setMaxCachedWorkspaces] = useState(
     settings.maxCachedWorkspaces?.toString() ?? "",
   );
@@ -333,7 +330,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
-    if (claudeCodePartialMessages !== (settings.claudeCodePartialMessages ?? false)) return true;
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
@@ -352,7 +348,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     autoStartTunnel,
     enableLSP,
     enableFilePreviewTabs,
-    claudeCodePartialMessages,
     maxCachedWorkspaces,
     selectedTheme,
     useWebGLTerminalRenderer,
@@ -373,7 +368,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
     setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
-    setClaudeCodePartialMessages(settings.claudeCodePartialMessages ?? false);
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
@@ -390,7 +384,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.autoStartTunnel,
     settings.enableLSP,
     settings.enableFilePreviewTabs,
-    settings.claudeCodePartialMessages,
     settings.maxCachedWorkspaces,
     settings.theme,
     settings.useWebGLTerminalRenderer,
@@ -446,7 +439,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       autoStartTunnel,
       enableLSP,
       enableFilePreviewTabs,
-      claudeCodePartialMessages,
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
       useWebGLTerminalRenderer,
@@ -705,17 +697,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="agents-context-meter"
                   checked={contextMeterEnabled}
                   onCheckedChange={setContextMeterEnabled}
-                />
-              </SettingsRow>
-              <SettingsRow
-                htmlFor="claude-code-partial-messages"
-                label="Stream Claude Code text (experimental)"
-                description="Forward the SDK's partial-message stream events so the chat bubble types in token-by-token instead of arriving in per-block bursts. Claude Code only; subagent text and partial tool args are not yet streamed. Off by default."
-              >
-                <Switch
-                  id="claude-code-partial-messages"
-                  checked={claudeCodePartialMessages}
-                  onCheckedChange={setClaudeCodePartialMessages}
                 />
               </SettingsRow>
               <Accordion type="multiple" className="w-full">

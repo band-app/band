@@ -1,5 +1,4 @@
 import { cn } from "@band-app/ui";
-import type { UIMessage } from "ai";
 import { Download, Expand, FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { memo, useCallback, useState } from "react";
@@ -17,7 +16,7 @@ import { FilePreviewOverlay } from "./file-preview-overlay";
 import { downloadFile, isTextMediaType } from "./file-preview-utils";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
-  from: UIMessage["role"];
+  from: "user" | "assistant";
 };
 
 export const Message = ({ className, from, ...props }: MessageProps) => (

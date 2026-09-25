@@ -1,10 +1,9 @@
 /**
  * Tests for the agent hook → workspace status dispatcher
- * (`packages/coding-agent/src/hook-status.ts`) and the Claude Code adapter's
- * mapper it dispatches to.
+ * (`packages/coding-agent/src/hook-status.ts`) and the Claude Code mapper it
+ * dispatches to.
  *
- * Run with the package's standard `pnpm test` setup (node:test + the loader
- * that redirects optional adapter SDK imports to local mocks).
+ * Run with the package's standard `pnpm test` setup (node:test).
  */
 
 import assert from "node:assert/strict";

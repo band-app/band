@@ -97,8 +97,12 @@ describe("build output", () => {
     expect(found).toBe(false);
   });
 
-  it.skipIf(skipSdkChecks)("contains Codex SDK package", () => {
-    expect(existsSync(join(dist, "node_modules/@openai/codex/package.json"))).toBe(true);
+  it.skipIf(skipSdkChecks)("contains the pre-bundled Claude Code and Codex ACP adapters", () => {
+    // Claude Code and Codex run as ACP agents through their adapters
+    // (issue #648), which `scripts/build-server.sh` bundles next to the
+    // server so the desktop app needs no `node_modules` lookup for them.
+    expect(existsSync(join(dist, "agents/claude-agent-acp.mjs"))).toBe(true);
+    expect(existsSync(join(dist, "agents/codex-acp.mjs"))).toBe(true);
   });
 });
 

@@ -1,8 +1,7 @@
+import type { PlanEntry } from "@agentclientprotocol/sdk";
 import { cn } from "@band-app/ui";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
-
-import type { TaskMap } from "./task-state";
 
 function readCollapsed(workspaceId: string): boolean {
   try {
@@ -12,7 +11,12 @@ function readCollapsed(workspaceId: string): boolean {
   }
 }
 
-export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspaceId: string }) {
+/**
+ * The agent's current plan (ACP `plan` updates; Claude Code's TodoWrite and
+ * task tools arrive this way), pinned above the prompt input while any
+ * entry is unfinished.
+ */
+export function TaskListWidget({ plan, workspaceId }: { plan: PlanEntry[]; workspaceId: string }) {
   const [collapsed, setCollapsed] = useState(() => readCollapsed(workspaceId));
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -30,9 +34,9 @@ export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspa
     });
   }, [workspaceId]);
 
-  if (tasks.size === 0) return null;
+  if (plan.length === 0) return null;
 
-  const taskList = Array.from(tasks.values());
+  const taskList = plan;
   const allDone = taskList.every((t) => t.status === "completed");
   if (allDone) return null;
   const completedCount = taskList.filter((t) => t.status === "completed").length;
@@ -61,8 +65,9 @@ export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspa
       </button>
       {!collapsed && (
         <div className="border-t border-border/50 px-2.5 py-1">
-          {taskList.map((task) => (
-            <div key={task.id} className="flex items-center gap-1.5 py-0.5">
+          {taskList.map((task, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
+            <div key={i} className="flex items-center gap-1.5 py-0.5">
               <TaskStatusIcon status={task.status} />
               <span
                 className={cn(
@@ -70,7 +75,7 @@ export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspa
                   task.status === "completed" && "text-muted-foreground line-through",
                 )}
               >
-                {task.status === "in_progress" && task.activeForm ? task.activeForm : task.subject}
+                {task.content}
               </span>
             </div>
           ))}

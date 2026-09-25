@@ -14,7 +14,6 @@ packages:
 # only understands the old key. Each version reads the one it knows and ignores
 # the other. Drop `onlyBuiltDependencies` once every workflow is on pnpm 11.
 onlyBuiltDependencies:
-  - '@nothumanwork/cursor-agents-sdk'
   - better-sqlite3
   - electron
   - esbuild
@@ -22,7 +21,6 @@ onlyBuiltDependencies:
   - sharp
 
 allowBuilds:
-  '@nothumanwork/cursor-agents-sdk': true
   better-sqlite3: true
   electron: true
   esbuild: true

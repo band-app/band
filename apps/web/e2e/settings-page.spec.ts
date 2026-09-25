@@ -1,6 +1,7 @@
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -13,58 +14,29 @@ import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-settings-test-token";
 
-// Stub Codex catalog the boot refresh + explicit Refresh click both
-// resolve to. Two entries so the test can pin a count and a couple of
-// ids without depending on whatever the host's real `codex debug models`
-// would return.
-const STUB_CODEX_MODELS = [
-  { slug: "stub-codex-1", display_name: "Stub Codex 1", priority: 1 },
-  { slug: "stub-codex-2", display_name: "Stub Codex 2", priority: 2 },
-];
-
-/**
- * Write a stub Codex shell that prints the JSON the adapter expects
- * (`{ "models": [...] }`) when invoked as `<stub> debug models`. The
- * adapter's `refreshModels()` shells out to that exact subcommand
- * (see `packages/coding-agent/src/adapters/codex.ts`), so this stub
- * makes both the boot refresh and the explicit Refresh click
- * deterministic on every CI host without requiring a real codex install.
- */
-function writeStubCodex(tmpHome: string): string {
-  const binPath = join(tmpHome, "stub-codex.sh");
-  const json = JSON.stringify({ models: STUB_CODEX_MODELS });
-  writeFileSync(
-    binPath,
-    `#!/bin/sh\nif [ "$1" = "debug" ] && [ "$2" = "models" ]; then\n  printf '%s\\n' '${json}'\nfi\n`,
-    "utf-8",
-  );
-  chmodSync(binPath, 0o755);
-  return binPath;
-}
-
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, { projects: [] });
-  const stubCodex = writeStubCodex(tmpHome);
   // Seed codingAgents explicitly so the Default-agent dropdown renders
   // deterministically — without this, runFirstTimeSetup() relies on the
   // host having `claude`/`codex`/`opencode` on PATH, which is true on
-  // dev machines but not on CI runners. Point Codex at the stub so the
-  // boot refresh + explicit Refresh resolve to a known model list with
-  // no host dependency.
+  // dev machines but not on CI runners. A model refresh probes the agent
+  // over ACP (a scratch session, then its `model` config option); every
+  // agent here runs as the ACP stub, so the boot refresh and the explicit
+  // Refresh resolve to the stub's two models with no host dependency.
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
     theme: "dark",
     codingAgents: [
       { id: "claude-code", type: "claude-code", label: "Claude Code" },
-      { id: "codex", type: "codex", label: "Codex", command: stubCodex },
+      { id: "codex", type: "codex", label: "Codex" },
     ],
     defaultCodingAgent: "claude-code",
   });
-  server = await startServer({ tmpHome });
+  server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 });
 
 test.afterAll(async () => {
@@ -192,14 +164,12 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // and the `codingAgents`-keyed effect that calls `listModels()` has
   // fired (the auto-retry inside `toHaveAttribute` doubles as a settling
   // window for the SDK-rendered Select). This is the strongest
-  // deterministic signal we have without stubbing the listModels
-  // response itself — the CI environment ships no agent binaries, so
-  // listModels() returns no models and the Default-model dropdown never
-  // mounts. Any *synchronous* Radix throw during the re-render would
-  // already have hit the `pageerror` listener by the time the data-state
-  // attribute flips; the async-throw case (post-listModels render) is
-  // genuinely uncovered here and would require an Express stub fronting
-  // listModels to surface deterministically.
+  // deterministic signal for the toggle itself. Any *synchronous* Radix
+  // throw during the re-render would already have hit the `pageerror`
+  // listener by the time the data-state attribute flips. The boot refresh
+  // cached the ACP stub's models, so the model list can mount with real
+  // entries; the `errors` assertion below covers a throw from that render
+  // too.
   await expect(claudeSwitch).toHaveAttribute("data-state", targetState);
 
   // The dialog must still be visible — if Radix had thrown, the React tree
@@ -216,10 +186,9 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
   // and (b) write `cachedModels` + `cachedModelsUpdatedAt` into
   // ~/.band/settings.json for that agent.
   //
-  // The `beforeAll` above seeded Codex with a stub shell that prints
-  // `{ "models": [...] }` — the same shape the real codex binary
-  // produces — so the round-trip is fully deterministic on every CI
-  // host without a real codex install.
+  // Codex runs as the ACP stub agent, whose `model` config option offers
+  // `stub-small` and `stub-large`, so the round-trip is fully
+  // deterministic on every CI host without a real codex install.
 
   // Record the pre-click `cachedModelsUpdatedAt` value populated by
   // the boot-time refresh; the assertion below requires the explicit
@@ -251,9 +220,9 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
   // reflect the stub catalog exactly.
   await settingsPage.clickRefreshModels("Codex");
   await expect(settingsPage.modelList("codex")).toBeVisible();
-  // The stub returns two entries; assert exact count + ids so a
-  // regression in either the click path or the stub's JSON shape would
-  // fail the test rather than passing on a partial match.
+  // The stub offers two models; assert exact count + ids so a regression
+  // in either the click path or the probe would fail the test rather than
+  // passing on a partial match.
   await expect(settingsPage.modelListItems("codex")).toHaveCount(2);
 
   // Poll the persisted JSON until the stub catalog has landed AND the
@@ -268,7 +237,7 @@ test("clicking Refresh models persists the stub catalog to settings.json", async
     };
     const codex = settings.codingAgents?.find((a) => a.id === "codex");
     if (!codex) throw new Error("codex agent not present in settings.json");
-    if (codex.cachedModels?.map((m) => m.id).join(",") !== "stub-codex-1,stub-codex-2") {
+    if (codex.cachedModels?.map((m) => m.id).join(",") !== "stub-small,stub-large") {
       throw new Error(
         `expected codex.cachedModels to be the stub catalog, got ${JSON.stringify(codex.cachedModels)}`,
       );

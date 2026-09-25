@@ -37,11 +37,23 @@ export class ChatPanePage {
   readonly sessionHistoryButton: Locator;
   /** "New session" item inside the session-history dropdown. */
   readonly newSessionMenuItem: Locator;
+  /** The "No sessions yet" empty state inside the session-history
+   *  dropdown. Targeted by testid, not by its English copy. */
+  readonly sessionHistoryEmpty: Locator;
+  /** The conversation's empty state, shown once the stream is connected
+   *  and the chat has no messages (a fresh chat, or after "New session"). */
+  readonly emptyConversation: Locator;
+  /** The pinned todo list above the prompt, fed by the agent's ACP
+   *  `plan` updates (Claude Code's TodoWrite arrives this way). */
+  readonly taskListWidget: Locator;
+  /** Inline notices in the transcript (a stopped turn, an agent error).
+   *  Each carries `data-level` (`info` / `warning` / `error`). */
+  readonly notices: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
-  /** All tool-call container rows in the conversation (one per
-   *  `tool-input-available` event). Each carries a `data-status`
+  /** All tool-call container rows in the conversation (one per ACP
+   *  `tool_call`). Each carries a `data-status`
    *  attribute mirroring the StatusDot branch
    *  (`in-progress` / `complete` / `error`) — tests assert against
    *  that rather than the underlying Tailwind classes. */
@@ -82,6 +94,10 @@ export class ChatPanePage {
     // doctrine-preferred locator (role + name).
     this.sessionHistoryButton = page.getByRole("button", { name: "Session history" });
     this.newSessionMenuItem = page.getByRole("menuitem", { name: /New session/ });
+    this.sessionHistoryEmpty = page.getByTestId("chat-pane__session-history-empty");
+    this.emptyConversation = page.getByTestId("chat-pane__empty-state");
+    this.taskListWidget = page.getByTestId("task-list-widget__container");
+    this.notices = page.getByTestId("chat-pane__notice");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -324,6 +340,19 @@ export class ChatPanePage {
     });
   }
 
+  /** A past session in the open session-history dropdown, by its summary
+   *  (the session's first prompt, which is test data). */
+  sessionHistoryItem(summary: string): Locator {
+    return this.page.getByRole("menuitem", { name: new RegExp(escapeRegExp(summary)) });
+  }
+
+  /** Pick a past session from the open session-history dropdown. */
+  async selectPastSession(summary: string): Promise<void> {
+    await test.step(`Select past session "${summary}"`, async () => {
+      await this.sessionHistoryItem(summary).click();
+    });
+  }
+
   /** Type a single key in the focused prompt textarea. The prompt
    *  must already be focused — call `focusPrompt()` first. Used by the
    *  mention/slash-dropdown tests where `fill()` would replace the whole
@@ -480,4 +509,8 @@ export class ChatPanePage {
         ).__flickerSamples ?? [],
     );
   }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
