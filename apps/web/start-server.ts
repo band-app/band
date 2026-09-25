@@ -29,6 +29,7 @@ import {
 } from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
 import {
   startUsageScanner,
   stopUsageScanner,
@@ -496,6 +497,11 @@ async function main() {
   // cold cache and saves the boot path one synchronous SQL pass.
   // -----------------------------------------------------------------------
   runMigrations();
+
+  // Where terminals live: the detached terminal daemon (so shells survive a
+  // restart of this server) or this process. Nothing has spawned yet, and the
+  // daemon backend connects lazily, so this costs nothing at boot.
+  terminalService.setBackend(createTerminalBackend(SERVER_ROOT, bandHome()));
 
   // -----------------------------------------------------------------------
   // Dev vs prod renderer transport.

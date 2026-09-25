@@ -2,6 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import type { WorkspaceTerminalConfig } from "@/dashboard";
 import { loadProjectConfig } from "../infra/setup/project-config";
+import { TerminalDaemonUnavailableError } from "../infra/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "../infra/terminals/in-process-backend";
 import type {
   SpawnOptions,
@@ -143,13 +144,31 @@ export class TerminalService {
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);
     }
-    const entry = await this.backend.spawn({
+    const request = {
       workspaceId,
       terminalId,
       workspaceRoot: workspace.worktree.path,
       options,
       cleanupOnExit: opts?.cleanupOnExit,
-    });
+    };
+    const backend = this.backend;
+    let entry: TerminalListEntry;
+    try {
+      entry = await backend.spawn(request);
+    } catch (err) {
+      if (!(err instanceof TerminalDaemonUnavailableError)) throw err;
+      // A terminal that dies with the server beats no terminal. Swap only
+      // once: concurrent spawns that failed together must land on the same
+      // replacement.
+      if (this.backend === backend) {
+        log.error(
+          { err },
+          "terminal daemon unavailable; falling back to in-process terminals, which will not survive a server restart",
+        );
+        this.setBackend(new InProcessTerminalBackend());
+      }
+      entry = await this.backend.spawn(request);
+    }
 
     // Mirror what `createChat` and `createBrowser` do: register the new
     // terminal in the saved dockview layout so it survives a server
