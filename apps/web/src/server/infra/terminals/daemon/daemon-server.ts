@@ -267,6 +267,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         return;
       }
       if (mismatched) {
+        // Reachable only after a valid token: a bad hello is rejected and the
+        // socket ended above, before `mismatched` can be set.
         if ((frame as { t?: unknown }).t === "shutdown") shutdown("replaced by another version");
         return;
       }
@@ -344,6 +346,9 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
 
   function handleNotify(client: Client, message: ControlNotify): void {
     switch (message.t) {
+      case "input":
+        pool.write(message.terminalId, message.data);
+        return;
       case "resize":
         pool.resize(message.terminalId, message.cols, message.rows);
         return;
@@ -418,8 +423,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     const { terminalId, cols, rows } = request;
     const dims = cols !== undefined && rows !== undefined ? { cols, rows } : undefined;
     // Read before the await: the shell can exit while the snapshot drains.
-    const workspaceId = pool.info(terminalId)?.workspaceId;
-    if (workspaceId === undefined) return null;
+    const entry = pool.info(terminalId);
+    if (!entry) return null;
     const attached = await pool.attach(terminalId, dims, (d, seq) =>
       send(client, "stream", { t: "data", id: terminalId, seq, d } satisfies StreamEvent),
     );
@@ -431,7 +436,11 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     } else {
       client.attached.set(terminalId, attached.unsubscribe);
     }
-    return { ...attached.snapshot, workspaceId };
+    return {
+      ...attached.snapshot,
+      workspaceId: entry.workspaceId,
+      cleanupOnExit: entry.cleanupOnExit,
+    };
   }
 
   function tokenMatches(candidate: string): boolean {

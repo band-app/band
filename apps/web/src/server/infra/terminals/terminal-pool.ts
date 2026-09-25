@@ -146,6 +146,8 @@ export interface TerminalListEntry {
   pid: number;
   scrollbackLength: number;
   title: string;
+  /** Prune the tab when the shell exits on its own (see `SpawnExtras.cleanupOnExit`). */
+  cleanupOnExit: boolean;
 }
 
 /**
@@ -725,6 +727,7 @@ export class TerminalPool {
       pid: session.pty.pid,
       scrollbackLength: session.scrollback.length,
       title,
+      cleanupOnExit: session.cleanupOnExit,
     };
   }
 
@@ -955,5 +958,8 @@ export class TerminalPool {
     }
     this.terminals.clear();
     this.workspaceTerminals.clear();
+    // Output subscribers go with their sessions. Exit listeners stay: the
+    // kills above still report their exits through them.
+    this.outputListeners.clear();
   }
 }

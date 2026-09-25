@@ -323,6 +323,11 @@ export class TerminalService {
     return this.backend.write(terminalId, data);
   }
 
+  /** Keystrokes from a live terminal socket: fire-and-forget, ordered with {@link resize}. */
+  input(terminalId: string, data: string): void {
+    this.backend.input(terminalId, data);
+  }
+
   resize(terminalId: string, cols: number, rows: number): void {
     this.backend.resize(terminalId, cols, rows);
   }

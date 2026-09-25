@@ -129,7 +129,7 @@ export interface DaemonRequests {
    */
   attach: [
     { terminalId: string; cols?: number; rows?: number },
-    (TerminalSnapshot & { workspaceId: string }) | null,
+    (TerminalSnapshot & { workspaceId: string; cleanupOnExit: boolean }) | null,
   ];
   ping: [Record<string, never>, { pid: number; sessions: number }];
 }
@@ -142,6 +142,8 @@ export type ControlRequest = {
 
 /** Fire-and-forget, no `id`, no reply. Ordered with requests on one connection. */
 export type ControlNotify =
+  /** Keystrokes: fire-and-forget, unlike the `write` request, which reports whether the terminal was live. */
+  | { t: "input"; terminalId: string; data: string }
   | { t: "resize"; terminalId: string; cols: number; rows: number }
   | { t: "nudgeResize"; terminalId: string }
   | { t: "detach"; terminalId: string }
@@ -188,7 +190,8 @@ export function readFrames(
       return;
     }
     chunks.push(chunk);
-    let buffer = chunks.join("");
+    // Most frames arrive whole in one read; don't copy them.
+    let buffer = chunks.length === 1 ? chunk : chunks.join("");
     chunks = [];
     pendingBytes = 0;
     let newline = buffer.indexOf("\n");

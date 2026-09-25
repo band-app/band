@@ -453,7 +453,5 @@ function handleMessage(ws: WebSocket, terminalId: string, message: string): void
       // Not valid JSON, treat as regular input
     }
   }
-  void terminalService.write(terminalId, message).catch((err) => {
-    log.error("Failed to write to terminal %s: %s", terminalId, err);
-  });
+  terminalService.input(terminalId, message);
 }

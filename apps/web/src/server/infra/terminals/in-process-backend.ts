@@ -52,6 +52,10 @@ export class InProcessTerminalBackend implements TerminalBackend {
     return this.pool.write(terminalId, data);
   }
 
+  input(terminalId: string, data: string): void {
+    this.pool.write(terminalId, data);
+  }
+
   resize(terminalId: string, cols: number, rows: number): void {
     this.pool.resize(terminalId, cols, rows);
   }

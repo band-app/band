@@ -32,6 +32,8 @@ export interface TerminalBackend {
   getScrollback(terminalId: string, lines?: number): Promise<string | null>;
   /** Resolves `false` when the terminal isn't live. */
   write(terminalId: string, data: string): Promise<boolean>;
+  /** Keystrokes: like {@link write}, but fire-and-forget, ordered with `resize`. */
+  input(terminalId: string, data: string): void;
   resize(terminalId: string, cols: number, rows: number): void;
   /** Force a live TUI to repaint after a re-attach — see `TerminalPool.nudgeResize`. */
   nudgeResize(terminalId: string): void;

@@ -61,7 +61,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
    */
   private readonly lastSeq = new Map<string, number>();
   /** terminalId -> workspaceId for every session this server has seen, to report on disconnect. */
-  private readonly known = new Map<string, string>();
+  private readonly known = new Map<string, { workspaceId: string; cleanupOnExit: boolean }>();
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
 
   constructor(private readonly options: DaemonBackendOptions) {
@@ -136,6 +136,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
     return client.request("write", { terminalId, data });
   }
 
+  input(terminalId: string, data: string): void {
+    this.notify({ t: "input", terminalId, data });
+  }
+
   resize(terminalId: string, cols: number, rows: number): void {
     this.notify({ t: "resize", terminalId, cols, rows });
   }
@@ -171,7 +175,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
       return null;
     }
     // Remember it so a dropped daemon connection reports this viewer's exit.
-    this.known.set(terminalId, snapshot.workspaceId);
+    this.known.set(terminalId, {
+      workspaceId: snapshot.workspaceId,
+      cleanupOnExit: snapshot.cleanupOnExit,
+    });
     gate.setSnapshot(snapshot.data, snapshot.seq);
     return gate;
   }
@@ -285,8 +292,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
     this.gates.clear();
     // Release their buffers now. Their detach notify goes nowhere: `client` is null.
     for (const gate of gates) gate.detach();
-    for (const [terminalId, workspaceId] of lost) {
-      this.emitExit({ terminalId, workspaceId, exitCode: -1, killed: false, cleanupOnExit: false });
+    // Each session's own `cleanupOnExit`, so a self-closing pane (a cron run)
+    // whose daemon died is pruned like any other exit of that pane.
+    for (const [terminalId, { workspaceId, cleanupOnExit }] of lost) {
+      this.emitExit({ terminalId, workspaceId, exitCode: -1, killed: false, cleanupOnExit });
     }
   }
 
@@ -321,7 +330,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
   }
 
   private remember(entry: TerminalListEntry): void {
-    this.known.set(entry.terminalId, entry.workspaceId);
+    this.known.set(entry.terminalId, {
+      workspaceId: entry.workspaceId,
+      cleanupOnExit: entry.cleanupOnExit,
+    });
   }
 
   private forget(terminalId: string): void {
@@ -331,6 +343,9 @@ export class DaemonTerminalBackend implements TerminalBackend {
 }
 
 async function connectWithRetry(paths: DaemonPaths, buildId: string): Promise<DaemonClient> {
+  // A `rejected` hello right after launch is expected: the daemon publishes
+  // its socket a moment before it writes the token file, so a client can
+  // read the previous daemon's (or no) token. Retry only that.
   for (let attempt = 1; ; attempt++) {
     try {
       return await DaemonClient.connect(paths, buildId);
