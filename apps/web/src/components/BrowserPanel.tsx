@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
-import { registerBrowserView } from "../lib/browser-view-registry";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
@@ -187,9 +186,6 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
         });
         createdRef.current = true;
         setCreated(true);
-        // Record the live webview so the projects reconcile can destroy it when
-        // the workspace is deleted (a panel-LRU eviction only PARKS it).
-        registerBrowserView(workspaceId);
         // If a navigation was requested while we were creating, flush it now
         const pending = pendingNavRef.current;
         if (pending) {
@@ -374,20 +370,16 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     return () => observer.disconnect();
   }, [created, getBounds, invoke, workspaceId]);
 
-  // ------- park (hide, do NOT destroy) on unmount -------
+  // ------- destroy on unmount (workspace evicted from frontend cache) -------
   // Workspace *switches* are handled by the wsActive effect (hide/show).
-  // Unmount happens on panel-LRU eviction — but we PARK the native webview
-  // (hide it) rather than destroy it, so its page + session stay alive and are
-  // reused when the user returns (the desktop keeps a hidden view alive
-  // regardless of the CDP setting). The webview is only destroyed when the
-  // workspace is DELETED, via `reconcileBrowserWorkspaces` in the projects
-  // reconcile — the same lifetime the terminal parking model uses.
+  // Unmount only happens when the workspace view is fully evicted, so we
+  // destroy the native webview to free memory.
 
   useEffect(() => {
     return () => {
       if (isDesktop) {
         const wsId = workspaceIdRef.current;
-        desktopInvoke("browser_hide", { workspaceId: wsId }).catch(() => {});
+        desktopInvoke("browser_destroy", { workspaceId: wsId }).catch(() => {});
       }
     };
   }, []);
