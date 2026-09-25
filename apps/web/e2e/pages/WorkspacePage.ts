@@ -795,14 +795,18 @@ export class WorkspacePage {
    *  new pane focused). */
   async splitTerminalRight(): Promise<void> {
     await test.step("Split terminal pane right (⌘D)", async () => {
-      await this.page.keyboard.press(`${this.modifier}+d`);
+      // Split is bound to ⌘D only (`e.metaKey && !e.ctrlKey`): Ctrl+D is the
+      // shell's EOF and closes a pane. Send Meta on every platform, including
+      // the Linux CI runner, where the platform modifier would be Control.
+      await this.page.keyboard.press("Meta+d");
     });
   }
 
   /** Split the focused terminal pane BELOW (⌘⇧D). */
   async splitTerminalBelow(): Promise<void> {
     await test.step("Split terminal pane below (⌘⇧D)", async () => {
-      await this.page.keyboard.press(`${this.modifier}+Shift+d`);
+      // ⌘⇧D only; see `splitTerminalRight`.
+      await this.page.keyboard.press("Meta+Shift+d");
     });
   }
 
@@ -1104,7 +1108,8 @@ export class WorkspacePage {
         .first()
         .click();
       await host.getByRole("textbox", { name: "Terminal input" }).first().focus();
-      await this.page.keyboard.press(`${this.modifier}+d`);
+      // ⌘D only; see `splitTerminalRight`.
+      await this.page.keyboard.press("Meta+d");
     });
   }
 
