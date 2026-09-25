@@ -13,12 +13,18 @@ import { join } from "node:path";
 
 const STOP_TIMEOUT_MS = 5_000;
 
+export interface TerminalDaemonRecord {
+  pid: number;
+  /** The socket the daemon published; may live outside the run dir. */
+  socket: string;
+}
+
 /**
- * Pids of the daemons serving `home`, from their pid records. Every protocol
+ * The live daemons serving `home`, from their pid records. Every protocol
  * version writes its own `terminal-daemon-v<N>.pid`, so match them all rather
  * than hardcode one.
  */
-export function terminalDaemonPids(home: string): number[] {
+export function terminalDaemons(home: string): TerminalDaemonRecord[] {
   const runDir = join(home, ".band", "run");
   let names: string[];
   try {
@@ -26,16 +32,25 @@ export function terminalDaemonPids(home: string): number[] {
   } catch {
     return [];
   }
-  const pids: number[] = [];
+  const records: TerminalDaemonRecord[] = [];
   for (const name of names) {
     try {
-      const { pid } = JSON.parse(readFileSync(join(runDir, name), "utf8")) as { pid: number };
-      if (isTerminalDaemon(pid)) pids.push(pid);
+      const record = JSON.parse(readFileSync(join(runDir, name), "utf8")) as TerminalDaemonRecord;
+      if (isTerminalDaemon(record.pid)) records.push(record);
     } catch {
       // Half-written or unreadable record: nothing to stop.
     }
   }
-  return pids;
+  return records;
+}
+
+/** The daemon's log, where it records why it drains or exits. */
+export function terminalDaemonLog(home: string): string {
+  try {
+    return readFileSync(join(home, ".band", "run", "terminal-daemon.log"), "utf8");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -44,7 +59,7 @@ export function terminalDaemonPids(home: string): number[] {
  * it ran is still writing into `home`. No-op when none runs.
  */
 export async function stopTerminalDaemon(home: string): Promise<void> {
-  await Promise.all(terminalDaemonPids(home).map(stopPid));
+  await Promise.all(terminalDaemons(home).map((daemon) => stopPid(daemon.pid)));
 }
 
 async function stopPid(pid: number): Promise<void> {

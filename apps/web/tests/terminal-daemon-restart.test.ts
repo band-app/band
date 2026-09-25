@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,7 +16,7 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
-import { isAlive } from "./helpers/terminal-daemon";
+import { isAlive, terminalDaemonLog, terminalDaemons } from "./helpers/terminal-daemon";
 import { waitFor } from "./helpers/wait-for";
 
 // Terminals live in a detached terminal daemon, so restarting the web server
@@ -291,5 +291,94 @@ describe("terminal daemon — a deleted workspace's shells end", () => {
     expect(await listTerminals(server, MAIN_ID)).toEqual([
       expect.objectContaining({ workspaceId: MAIN_ID, pid: keptPid }),
     ]);
+  });
+});
+
+// When the daemon exits on its own. Mirrors orca's daemon: an empty daemon
+// retires the moment its last server leaves, and a daemon that loses its
+// socket drains, serving the shells it has until they end.
+describe("terminal daemon — when it exits on its own", () => {
+  let tmpHome: string;
+  let server: ServerHandle;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-td-exit-");
+    const worktree = join(tmpHome, PROJECT);
+    mkdirSync(worktree, { recursive: true });
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: PROJECT,
+          path: worktree,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: worktree }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server?.close();
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it("an empty daemon exits as soon as its last server disconnects", async () => {
+    const pid = await createTerminal(server, WORKSPACE_ID);
+    const [daemon] = terminalDaemons(tmpHome);
+    expect(daemon).toBeDefined();
+
+    // No shells left, but the server is still connected: the daemon stays.
+    const killRes = await trpcMutate(
+      server.url,
+      "terminal.kill",
+      { terminalId: (await listTerminals(server))[0].terminalId },
+      TOKEN,
+    );
+    expect(killRes.status).toBe(200);
+    await waitFor(async () => (isAlive(pid) ? undefined : true), { label: "shell exit" });
+    expect(isAlive(daemon.pid)).toBe(true);
+
+    // The server leaves: nothing keeps the daemon, so it exits right away,
+    // not after an idle timeout.
+    await server.close({ keepTerminalDaemon: true });
+    await waitFor(async () => (isAlive(daemon.pid) ? undefined : true), {
+      label: "daemon exit",
+      timeoutMs: 5_000,
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  it("a daemon that loses its socket keeps serving its shells, then exits", async () => {
+    const pid = await createTerminal(server, WORKSPACE_ID);
+    const [daemon] = terminalDaemons(tmpHome);
+    const [{ terminalId }] = await listTerminals(server);
+
+    // Take the socket's name away, as a replacement daemon publishing over it
+    // would. The daemon notices on its next watchdog tick and starts draining.
+    unlinkSync(daemon.socket);
+    await waitFor(
+      async () => (terminalDaemonLog(tmpHome).includes("draining") ? true : undefined),
+      {
+        label: "daemon drains",
+      },
+    );
+
+    // Draining, not dead: the shell lives, and the connected server still
+    // reaches it over its open connection.
+    expect(isAlive(pid)).toBe(true);
+    expect(isAlive(daemon.pid)).toBe(true);
+    expect(await listTerminals(server)).toEqual([
+      expect.objectContaining({ terminalId, workspaceId: WORKSPACE_ID, pid }),
+    ]);
+
+    // Once its last shell ends, the drained daemon exits.
+    const killRes = await trpcMutate(server.url, "terminal.kill", { terminalId }, TOKEN);
+    expect(killRes.status).toBe(200);
+    await waitFor(async () => (isAlive(daemon.pid) ? undefined : true), {
+      label: "drained daemon exit",
+    });
+    expect(isAlive(pid)).toBe(false);
   });
 });

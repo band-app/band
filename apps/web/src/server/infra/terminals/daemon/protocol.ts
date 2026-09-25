@@ -77,6 +77,8 @@ export interface PidRecord {
   protocol: number;
   buildId: string;
   startedAt: string;
+  /** The socket this daemon published, which may live outside the run dir. */
+  socket: string;
 }
 
 // ---------------------------------------------------------------------------

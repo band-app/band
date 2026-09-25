@@ -33,11 +33,13 @@ const log = createLogger("terminal-daemon");
 
 const HELLO_TIMEOUT_MS = 5_000;
 const WATCHDOG_INTERVAL_MS = 2_000;
-const IDLE_CHECK_INTERVAL_MS = 30_000;
 /** How long shutdown waits for killed shells to exit. */
 const SHUTDOWN_GRACE_MS = 2_000;
-/** Exit after this long with no sessions and no connected servers. */
-const IDLE_EXIT_MS = 5 * 60_000;
+/**
+ * How long a freshly launched daemon waits for its first server. The launcher
+ * connects within milliseconds, so this only matters when it died in between.
+ */
+const INITIAL_ADOPTION_MS = 2 * 60_000;
 /**
  * A server that stops reading its stream connection (hung, or stopped in a
  * debugger) would otherwise make the daemon buffer output without bound.
@@ -65,8 +67,15 @@ export interface DaemonOptions {
  * `workspaceId` is opaque metadata used only for `list` / `killWorkspace`.
  *
  * Resolves with an exit code when the daemon could not take the endpoint.
- * Otherwise it serves until SIGTERM, idle exit, or losing the endpoint, and
- * calls `process.exit` itself.
+ * Otherwise it serves until one of these, then calls `process.exit` itself:
+ *
+ *   - SIGTERM / SIGINT: kill every shell and exit.
+ *   - Idle: no shells, no spawn in flight, and no open connection. Checked on
+ *     every change, so an empty daemon exits as soon as its last server
+ *     disconnects (or `INITIAL_ADOPTION_MS` after launch if none ever came).
+ *   - Endpoint lost: stop taking new sessions but keep serving the shells it
+ *     has; exit once they are gone. Same drain as orca's daemon.
+ *   - Run dir removed: kill every shell and exit; nothing can reach them.
  */
 export async function runDaemon(options: DaemonOptions): Promise<number> {
   const { paths, buildId } = options;
@@ -77,6 +86,17 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   const pool = new TerminalPool();
   const clients = new Map<string, Client>();
   let shuttingDown = false;
+  /** Sockets accepted and not yet closed, including ones still in hello. */
+  let openConnections = 0;
+  /** Spawns in flight: their shell isn't in the pool yet, but it will be. */
+  let spawning = 0;
+  /** Another daemon replaced our socket, or it was removed. Drain, don't serve new work. */
+  let endpointLost = false;
+  /**
+   * Set once idleness should end the process: the last server disconnected,
+   * or none arrived within `INITIAL_ADOPTION_MS`. Cleared when one connects.
+   */
+  let retirementRequested = false;
 
   const server = createServer((socket) => acceptConnection(socket));
   const bindPath = privateBindPath(paths.socket);
@@ -106,6 +126,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     protocol: PROTOCOL_VERSION,
     buildId,
     startedAt: new Date().toISOString(),
+    socket: paths.socket,
   };
   writePrivateFile(paths.pid, JSON.stringify(pidRecord));
   log.info({ pid: process.pid, socket: paths.socket, buildId }, "terminal daemon ready");
@@ -115,29 +136,35 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       client.attached.delete(event.terminalId);
       send(client, "stream", { t: "exit", ...event } satisfies StreamEvent);
     }
+    reevaluateIdle();
   });
 
-  // Stand down when the endpoint is gone or taken, or the run dir was deleted
-  // (e.g. `rm -rf ~/.band`, or a test's temp home). No server can reach these
-  // sessions any more, and a daemon must never serve an endpoint it no longer
-  // holds, so kill them rather than leave orphaned shells.
   const watchdog = setInterval(() => {
-    const ownership = endpointOwnership(paths.socket, identity);
-    if (ownership === "lost" || !exists(paths.runDir)) {
-      shutdown(`endpoint ${ownership === "lost" ? "lost" : "run dir removed"}`);
+    // The run dir is gone (`rm -rf ~/.band`, a test's temp home): no server
+    // can ever find these shells again, so end them now.
+    if (!exists(paths.runDir)) {
+      shutdown("run dir removed");
+      return;
+    }
+    // Our socket was replaced or removed. Servers already connected can still
+    // reach their shells over their open connections, so keep serving those,
+    // take no new sessions, and exit once the last shell ends. Only positive
+    // evidence counts; `indeterminate` (e.g. EACCES) proves nothing.
+    if (!endpointLost && endpointOwnership(paths.socket, identity) === "lost") {
+      endpointLost = true;
+      log.warn({ sessions: pool.size }, "terminal daemon lost its endpoint; draining");
+      reevaluateIdle();
     }
   }, WATCHDOG_INTERVAL_MS);
   watchdog.unref();
 
-  let idleSince: number | null = null;
-  const idleTimer = setInterval(() => {
-    if (pool.size > 0 || clients.size > 0) {
-      idleSince = null;
-      return;
-    }
-    idleSince ??= Date.now();
-    if (Date.now() - idleSince >= IDLE_EXIT_MS) shutdown("idle");
-  }, IDLE_CHECK_INTERVAL_MS);
+  // Nobody has connected yet: the launcher connects right after `ready`, so
+  // this only fires when it died in between.
+  let adoptionTimer: NodeJS.Timeout | null = setTimeout(() => {
+    adoptionTimer = null;
+    retirementRequested = true;
+    reevaluateIdle();
+  }, INITIAL_ADOPTION_MS);
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
@@ -149,12 +176,26 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     // Serves until `shutdown` exits the process.
   });
 
+  function isIdle(): boolean {
+    if (spawning > 0 || pool.size > 0) return false;
+    // A lost endpoint can't gain new work, so connections don't keep it alive.
+    if (endpointLost) return true;
+    return openConnections === 0 && clients.size === 0;
+  }
+
+  /** Exit if idle and retirement is due. Called on every change that could make it so. */
+  function reevaluateIdle(): void {
+    if (shuttingDown || !isIdle()) return;
+    if (endpointLost) shutdown("endpoint lost; drained");
+    else if (retirementRequested) shutdown("idle");
+  }
+
   function shutdown(reason: string): void {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info({ reason, sessions: pool.listAll().length }, "terminal daemon shutting down");
+    log.info({ reason, sessions: pool.size }, "terminal daemon shutting down");
     clearInterval(watchdog);
-    clearInterval(idleTimer);
+    if (adoptionTimer) clearTimeout(adoptionTimer);
     const shells = pool.listAll().map((entry) => entry.pid);
     pool.killAll();
     for (const client of clients.values()) {
@@ -177,12 +218,15 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     let client: Client | null = null;
     let mismatched = false;
     const helloTimer = setTimeout(() => socket.destroy(), HELLO_TIMEOUT_MS);
+    openConnections += 1;
     socket.on("error", () => {
       // A peer reset surfaces as `close` below; nothing else to do.
     });
     socket.on("close", () => {
       clearTimeout(helloTimer);
+      openConnections -= 1;
       if (client && role) dropClient(client);
+      reevaluateIdle();
     });
 
     readFrames(socket, (frame) => {
@@ -239,6 +283,12 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     // One socket per role per client; a second one is a confused peer.
     if (client[role]) return null;
     client[role] = socket;
+    // A server is here: the startup wait is over and idleness no longer retires us.
+    retirementRequested = false;
+    if (adoptionTimer) {
+      clearTimeout(adoptionTimer);
+      adoptionTimer = null;
+    }
     return client;
   }
 
@@ -249,6 +299,10 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     client.attached.clear();
     client.control?.destroy();
     client.stream?.destroy();
+    // The last server left. With no shells that means exit now; with shells,
+    // exit once they end (unless a server reconnects first, e.g. a restart).
+    if (clients.size === 0) retirementRequested = true;
+    reevaluateIdle();
   }
 
   function send(client: Client, role: ClientRole, message: unknown): void {
@@ -316,14 +370,20 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       case "spawn": {
         // Never create a session on an endpoint we no longer hold: no server
         // could ever reach it.
-        if (endpointOwnership(paths.socket, identity) === "lost") {
+        if (endpointLost || endpointOwnership(paths.socket, identity) === "lost") {
           throw new Error("Terminal daemon no longer owns its endpoint");
         }
         const { workspaceId, terminalId, workspaceRoot, options, cleanupOnExit, baseEnv } = request;
-        await pool.spawn(workspaceId, terminalId, workspaceRoot, options, {
-          cleanupOnExit,
-          baseEnv,
-        });
+        spawning += 1;
+        try {
+          await pool.spawn(workspaceId, terminalId, workspaceRoot, options, {
+            cleanupOnExit,
+            baseEnv,
+          });
+        } finally {
+          spawning -= 1;
+          reevaluateIdle();
+        }
         const entry = pool.info(terminalId);
         if (!entry) throw new Error(`Terminal exited during spawn: ${terminalId}`);
         return entry;
