@@ -408,10 +408,10 @@ function SortableProject({
                       bump to full-foreground for the same emphasis a
                       WorkspaceCard would get. */}
                   <h2
-                    className={`text-sm truncate ${
+                    className={`text-[13px] truncate ${
                       (isPlain && plainIsActive) || gitHeaderIsActive
                         ? "font-bold text-foreground"
-                        : "font-semibold text-foreground/80"
+                        : "font-semibold text-foreground/90"
                     }`}
                   >
                     {project.name}
@@ -509,7 +509,7 @@ function SortableProject({
         <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
-              <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
+              <p className="text-[13px] text-foreground/60 px-4 py-2">No workspaces yet</p>
             )
           ) : (
             project.worktrees.map((wt) => {
@@ -558,7 +558,7 @@ function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: Droppable
       }`}
     >
       <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
-      <span className="text-sm font-semibold text-foreground/80">{label.name}</span>
+      <span className="text-[13px] font-semibold text-foreground/90">{label.name}</span>
       <ChevronRight
         className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
           collapsed ? "" : "rotate-90"
@@ -588,7 +588,7 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
       {/* Hollow circle mirrors the position of the filled color dot on labelled
           group headers, signalling "no label" without borrowing a real color. */}
       <Circle className="size-2.5 shrink-0 text-muted-foreground" />
-      <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
+      <span className="text-[13px] font-semibold text-foreground/90">Unlabeled</span>
       <ChevronRight
         className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
           collapsed ? "" : "rotate-90"
@@ -1009,7 +1009,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
             >
               <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
-              <span className="text-sm font-semibold text-foreground/80">Pinned</span>
+              <span className="text-[13px] font-semibold text-foreground/90">Pinned</span>
               <ChevronRight
                 className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
                   pinnedSectionCollapsed ? "" : "rotate-90"
@@ -1113,7 +1113,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
             {activeDragId ? (
               <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
                 <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-sm font-semibold text-foreground">{activeDragId}</span>
+                <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
               </div>
             ) : null}
           </DragOverlay>
