@@ -1020,7 +1020,11 @@ export class WorkspacePage {
    *  background xterm paints for that pane's terminal (xterm 6 sets the active
    *  theme's background inline on `.xterm-scrollable-element`; the
    *  `.xterm-viewport` under it keeps xterm.css's fixed #000). Both come out of
-   *  `getComputedStyle`, so they compare with `toBe`. */
+   *  `getComputedStyle`, so they compare as plain strings.
+   *
+   *  FRAGILITY: `.xterm-scrollable-element` is a class owned by xterm, which
+   *  exposes no testid hook on its own DOM. Centralised here so an xterm
+   *  upgrade that renames it flows through one place. */
   async paneActionsBackground(index: number): Promise<{ actions: string; terminal: string }> {
     const actions = await this.paneActions(index).evaluate(
       (el) => getComputedStyle(el).backgroundColor,
