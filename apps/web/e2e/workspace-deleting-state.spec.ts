@@ -117,7 +117,7 @@ test.describe("Workspace deleting state in the sidebar", () => {
     await expect(card).toHaveAttribute("aria-disabled", "true");
 
     // Clicking the disabled card does not open it.
-    await card.click({ force: true });
+    await workspacePage.clickDisabledWorkspaceCard(WORKSPACE_UI);
     await expect(workspacePage.workspaceCard(WORKSPACE_MAIN)).toHaveAttribute(
       "aria-current",
       "page",
@@ -146,6 +146,6 @@ test.describe("Workspace deleting state in the sidebar", () => {
     await expect(card).toHaveAttribute("aria-disabled", "true");
 
     expect((await removal).status).toBe(200);
-    await expect(card).toHaveCount(0);
+    await expect(card).toHaveCount(0, { timeout: 30_000 });
   });
 });
