@@ -701,7 +701,8 @@ export class WorkspaceService {
         teardownCmd,
         TEARDOWN_TIMEOUT_MS,
       );
-      if (outcome.kind !== "exited" || outcome.code !== 0) {
+      // `closed` from a duplicate run is not a failure; the first run reports.
+      if (outcome.kind !== "closed" && (outcome.kind !== "exited" || outcome.code !== 0)) {
         log.warn({ workspaceId, outcome }, "teardown did not succeed; removing anyway");
       }
       return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
@@ -723,7 +724,10 @@ export class WorkspaceService {
   ): Promise<{ ok: true }> {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
-    if (!project?.worktrees.some((wt) => wt.name === input.name)) {
+    if (!project) {
+      throw new ProjectNotFoundError(input.project);
+    }
+    if (!project.worktrees.some((wt) => wt.name === input.name)) {
       throw new WorkspaceNotFoundError(input.name);
     }
     const { command, env: gitEnv } = gitCmd();

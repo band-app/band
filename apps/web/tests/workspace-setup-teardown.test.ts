@@ -14,7 +14,16 @@
 // every prompt and logs each request so the test can see the prompt arrive.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
@@ -216,10 +225,11 @@ describe("a failing setup does not drop the prompt", () => {
 describe("teardown runs in a terminal before the workspace is removed", () => {
   let server: ServerHandle;
   let home: string;
+  let markerDir: string;
   let markerPath: string;
 
   beforeAll(async () => {
-    const markerDir = createTmpHome("band-teardown-marker-");
+    markerDir = mkdtempSync(join(tmpdir(), "band-teardown-marker-"));
     markerPath = join(markerDir, "teardown-marker");
     // The sleep proves `remove` waits: the marker is written last.
     ({ server, home } = await bootWithConfig("band-teardown-", {
@@ -230,7 +240,7 @@ describe("teardown runs in a terminal before the workspace is removed", () => {
   afterAll(async () => {
     await server.close();
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    rmSync(join(markerPath, ".."), { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
   });
 
   it("runs the teardown in the worktree's terminal and waits for it", async () => {
