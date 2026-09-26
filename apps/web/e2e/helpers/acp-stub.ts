@@ -34,6 +34,9 @@ export interface StubTurn {
 export interface AcpStubOptions {
   turns?: StubTurn[];
   caps?: { loadSession?: boolean; list?: boolean; resume?: boolean; image?: boolean };
+  /** Slash commands the agent advertises, in its order. Defaults to the
+   *  stub's `echo` and `review`. */
+  commands?: { name: string; description: string }[];
 }
 
 /** Where the stub saves sessions, so a restarted server (or `session/load`)
@@ -63,6 +66,7 @@ export function acpStubEnv(home: string, opts: AcpStubOptions = {}): Record<stri
     env.BAND_TEST_ACP_SCENARIO = scenarioPath;
   }
   if (opts.caps) env.BAND_TEST_ACP_CAPS = JSON.stringify(opts.caps);
+  if (opts.commands) env.BAND_TEST_ACP_COMMANDS = JSON.stringify(opts.commands);
   return env;
 }
 
