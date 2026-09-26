@@ -18,6 +18,7 @@ export {
   storeViewMode,
   type ViewMode,
 } from "./components/DiffFileContent";
+export { DiffOverviewRuler } from "./components/DiffOverviewRuler";
 export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
