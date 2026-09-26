@@ -107,6 +107,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
       <>
         <button
           type="button"
+          data-testid="message__image-preview-button"
           onClick={() => setOverlayOpen(true)}
           className="group/img relative max-w-xs cursor-pointer overflow-hidden rounded-md"
         >

@@ -422,6 +422,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <input
         ref={fileInputRef}
         type="file"
+        data-testid="prompt-input__file-input"
         multiple
         accept={ACCEPTED_TYPES}
         className="hidden"

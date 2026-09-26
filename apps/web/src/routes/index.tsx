@@ -23,7 +23,7 @@ function DashboardPage() {
   }
 
   // Mobile / narrow browser: full-screen dashboard shell. DashboardShell owns
-  // both safe-area insets.
+  // the bottom gap and both safe-area insets.
   return (
     <div className="h-dvh">
       <DashboardView />

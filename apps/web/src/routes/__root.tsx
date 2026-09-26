@@ -701,8 +701,7 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      {/* Pads the home-indicator inset once for every pane. */}
-      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground pb-[env(safe-area-inset-bottom)]">
+      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"
@@ -724,8 +723,10 @@ function AppShell() {
               {/* The whole sidebar column (its title-bar half + the project
                   list) is painted with the `--sidebar` surface so it reads as a
                   distinct panel from the workspace layout to its right. */}
+              {/* Each column pads the home-indicator inset itself, so the
+                  padding takes that column's surface colour. */}
               <div
-                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar"
+                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar pb-[env(safe-area-inset-bottom)]"
                 data-testid="app-shell__sidebar"
               >
                 {/* Pure drag/paint surface — the sidebar toggle + back/forward
@@ -741,7 +742,7 @@ function AppShell() {
             <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              <div className="h-full flex flex-col min-w-0 overflow-hidden">
+              <div className="h-full flex flex-col min-w-0 overflow-hidden pb-[env(safe-area-inset-bottom)]">
                 <WorkspaceTitleBar
                   workspaceName={activeWorkspaceId ?? undefined}
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}

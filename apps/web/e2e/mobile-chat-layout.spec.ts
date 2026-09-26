@@ -61,6 +61,15 @@ const NARROW_SCREENS = [
 const narrowProject = (width: number) => `narrow${width}`;
 // `pb-4` on the composer wrapper in ChatView.
 const COMPOSER_PADDING_BOTTOM = 16;
+// `lg:pb-3` on the Settings DialogFooter, where the dialog is a floating card.
+const SETTINGS_CARD_FOOTER_PADDING = 12;
+// The full-screen dashboard's minimum bottom gap, `max(1rem, inset)`.
+const DASHBOARD_BOTTOM_GAP = 16;
+// A 1x1 PNG, the smallest image the composer accepts as an attachment.
+const PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -221,6 +230,22 @@ test.describe("safe-area insets in a home-screen app", () => {
     expect(changes.paddingBottom).toBe(SAFE_AREA_BOTTOM);
   });
 
+  test("the full-screen file preview pads the home indicator", async () => {
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
+    await chat.attachFile({ name: "pixel.png", mimeType: "image/png", buffer: PIXEL_PNG });
+    await chat.typeMessage("Look at this picture");
+    await chat.submit();
+    const message = chat.userMessage("Look at this picture");
+    await expect(message).toBeVisible();
+
+    await chat.openImagePreview(message);
+    const content = await layout.readLayout(chat.filePreviewContent);
+    expect(content.paddingBottom).toBe(SAFE_AREA_BOTTOM);
+  });
+
   test("the Settings drawer footer pads the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const settings = new SettingsPage(page, server.url, TOKEN);
@@ -254,11 +279,16 @@ test.describe("safe-area insets in a wide home-screen app", () => {
     const viewport = await layout.readViewport();
     expect(viewport.standalone).toBe(true);
 
+    // The sidebar column pads the inset itself, so the gap under its action
+    // bar is painted in the sidebar colour rather than the app background.
+    const sidebar = await layout.readLayout(layout.sidebar);
+    expect(sidebar.paddingBottom).toBe(SAFE_AREA_BOTTOM);
     const sidebarBar = await layout.readLayout(layout.sidebarActionBar);
     expect(sidebarBar.bottom).toBe(viewport.height - SAFE_AREA_BOTTOM);
 
+    // Exactly one inset below the chat: a second one would lift it further.
     const composer = await layout.readLayout(layout.composer);
-    expect(composer.bottom).toBeLessThanOrEqual(viewport.height - SAFE_AREA_BOTTOM);
+    expect(composer.bottom).toBe(viewport.height - SAFE_AREA_BOTTOM);
     expect(composer.paddingBottom).toBe(COMPOSER_PADDING_BOTTOM);
   });
 
@@ -267,9 +297,27 @@ test.describe("safe-area insets in a wide home-screen app", () => {
     const settings = new SettingsPage(page, server.url, TOKEN);
     await settings.goto();
     await settings.openDialog();
+    // A floating card: it does not reach the bottom screen edge.
+    const box = await settings.dialogBox();
+    expect(box.y + box.height).toBeLessThan(TABLET.height - SAFE_AREA_BOTTOM);
 
     const footer = await layout.readLayout(settings.footer);
-    expect(footer.paddingBottom).toBe(12);
+    expect(footer.paddingBottom).toBe(SETTINGS_CARD_FOOTER_PADDING);
+  });
+});
+
+test.describe("in a phone browser tab", () => {
+  test.use({ viewport: PHONE });
+
+  test("the dashboard action bar keeps its gap above the bottom edge", async ({ page }) => {
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    await layout.gotoDashboard();
+    await expect(layout.dashboardActionBar).toBeVisible();
+
+    const viewport = await layout.readViewport();
+    expect(viewport.standalone).toBe(false);
+    const actionBar = await layout.readLayout(layout.dashboardActionBar);
+    expect(actionBar.bottom).toBe(viewport.height - DASHBOARD_BOTTOM_GAP);
   });
 });
 

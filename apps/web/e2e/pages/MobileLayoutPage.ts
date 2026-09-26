@@ -38,6 +38,8 @@ export class MobileLayoutPage {
   readonly dashboardActionBar: Locator;
   /** The action bar inside the mobile project-list fly-out. */
   readonly flyoutActionBar: Locator;
+  /** The wide-layout project-list sidebar column. */
+  readonly sidebar: Locator;
   /** The action bar at the foot of the wide-layout project-list sidebar. */
   readonly sidebarActionBar: Locator;
   readonly explorerSheetBody: Locator;
@@ -62,6 +64,7 @@ export class MobileLayoutPage {
       .getByTestId("project-list-flyout")
       .getByTestId("project-list__action-bar")
       .filter({ visible: true });
+    this.sidebar = page.getByTestId("app-shell__sidebar");
     this.sidebarActionBar = page
       .getByTestId("app-shell__sidebar")
       .getByTestId("project-list__action-bar")
