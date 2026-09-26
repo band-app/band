@@ -88,6 +88,7 @@ export {
 export { useWorkspacePath } from "./hooks/use-workspace-path";
 export {
   buildLspWsUrl,
+  createDiffLspNavigation,
   createLspExtension,
   getLspLanguageId,
   hasPendingNavigation,

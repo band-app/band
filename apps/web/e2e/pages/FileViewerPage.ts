@@ -19,6 +19,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
 
 /** Test id on the `FileViewer` root element (set in FileViewer.tsx).
@@ -57,6 +58,11 @@ export class FileViewerPage {
    *  can assert exactly one opened (the "stacked bars" regression, #435). */
   get allFileFindInputs(): Locator {
     return this.page.getByPlaceholder(/Find in (preview|file)\.\.\./);
+  }
+
+  /** Go-to-definition (Cmd/Ctrl+hover link, Cmd/Ctrl+Click) in the editor. */
+  get symbols(): CodeSymbolLinks {
+    return new CodeSymbolLinks(this.page, this.root);
   }
 
   /** The active file viewer's CodeMirror content element. */
@@ -200,6 +206,19 @@ export class FileViewerPage {
   async expectNotContent(text: string): Promise<void> {
     await test.step(`Editor does not show "${text}"`, async () => {
       await expect(this.editor).not.toContainText(text, { timeout: 8_000 });
+    });
+  }
+
+  /** Type `text` at the very start of the document without saving, so every
+   *  existing line moves down. */
+  async typeAtStart(text: string): Promise<void> {
+    await test.step(`Type "${text.trim()}" at the start of the editor`, async () => {
+      await this.editor.click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+      await this.page.keyboard.type(text);
+      await expect(this.editor).toContainText(text.trim(), { timeout: 15_000 });
     });
   }
 
