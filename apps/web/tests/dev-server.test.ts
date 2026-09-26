@@ -46,6 +46,7 @@ import { WebSocket } from "ws";
 import * as schema from "../src/server/infra/db/schema";
 import { findFreePort } from "../src/server/services/_utils/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
+import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "server", "infra", "db", "migrations");
@@ -126,14 +127,18 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
           port,
           home: tmpHome,
           child,
-          close: () =>
-            new Promise<void>((r) => {
+          close: async () => {
+            await new Promise<void>((r) => {
               child.on("exit", () => r());
               child.kill("SIGTERM");
               // Hard kill if SIGTERM hangs (tsx watch's signal handling
               // sometimes wedges in tests).
               setTimeout(() => child.kill("SIGKILL"), 3_000).unref();
-            }),
+            });
+            // The /terminal upgrade launches the detached terminal daemon,
+            // which outlives the server and keeps writing into the tmp home.
+            await stopTerminalDaemon(tmpHome);
+          },
         });
       }
     });

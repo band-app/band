@@ -303,23 +303,23 @@ function SortableProject({
         {labels.length > 0 && (
           <Sub>
             <SubTrigger>
-              <Tag className="size-4 mr-2" />
+              <Tag />
               Set label
             </SubTrigger>
             <Portal>
               <SubContent>
                 <Item onClick={() => updateProjectLabel(project.name, null)}>
                   <span className="flex-1">None</span>
-                  {!project.label && <Check className="size-3 ml-2" />}
+                  {!project.label && <Check className="size-3" />}
                 </Item>
                 {labels.map((lbl) => (
                   <Item key={lbl.id} onClick={() => updateProjectLabel(project.name, lbl.id)}>
                     <span
-                      className="size-2.5 rounded-full shrink-0 mr-2"
+                      className="size-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: lbl.color }}
                     />
                     <span className="flex-1">{lbl.name}</span>
-                    {project.label === lbl.id && <Check className="size-3 ml-2" />}
+                    {project.label === lbl.id && <Check className="size-3" />}
                   </Item>
                 ))}
               </SubContent>
