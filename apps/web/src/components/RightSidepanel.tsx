@@ -29,6 +29,7 @@ import {
 } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
+import { CommitsPanel } from "./CommitsPanel";
 import { usePerWorkspaceState } from "./per-workspace-state-store";
 import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
 
@@ -329,6 +330,14 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
     [workspaceId],
   );
 
+  // A file under an expanded commit in the Commits panel opens that file's
+  // diff for the commit.
+  const openCommitDiff = useCallback(
+    (sha: string, path: string, pinned: boolean) =>
+      getWorkspaceLeafActions(workspaceId)?.openCommitDiff(sha, path, { preview: !pinned }),
+    [workspaceId],
+  );
+
   // "Reset changes" in the Changes tree right-click menu — revert each path to
   // its diff-target baseline, then refresh the summary. Undefined when the
   // adapter can't revert (hides the menu item).
@@ -440,6 +449,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
                 />
               )}
             </div>
+            <CommitsPanel workspaceId={workspaceId} visible={visible} onOpenFile={openCommitDiff} />
           </div>
         )}
       </div>

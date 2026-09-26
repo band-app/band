@@ -170,7 +170,7 @@ function parseFileStatuses(nameStatusOutput: string): Record<string, string> {
  * with the existing files-service contract — the router maps it to a
  * 500 for the same wire shape as the rest of this router.
  */
-function assertWorktreeRelative(cwd: string, filePath: string): string {
+export function assertWorktreeRelative(cwd: string, filePath: string): string {
   const target = resolve(join(cwd, filePath));
   // Demand a separator after the root prefix so a sibling directory
   // with the same prefix can't sneak through.

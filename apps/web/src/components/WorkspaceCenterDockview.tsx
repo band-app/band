@@ -424,8 +424,12 @@ function reinjectParams(
       // back into the filePath param. Line/column are transient (jump targets)
       // and intentionally not persisted.
       else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
-      else if (comp === "diff") panel.params = { workspaceId, filePath: id.slice(5) };
-      else panel.params = { workspaceId };
+      else if (comp === "diff") {
+        const commit = COMMIT_DIFF_ID.exec(id);
+        panel.params = commit
+          ? { workspaceId, filePath: commit[2], commit: commit[1] }
+          : { workspaceId, filePath: id.slice(5) };
+      } else panel.params = { workspaceId };
     }
   }
   return clone;
@@ -546,6 +550,18 @@ interface DiffLeafParams {
   workspaceId: string;
   filePath: string;
   preview?: boolean;
+  /** Set for a diff opened from the Commits panel: the file's change in
+   *  this commit (vs its first parent) instead of the working-tree diff. */
+  commit?: string;
+}
+
+// Diff leaves are keyed `diff:<path>`; a commit's file diff is keyed
+// `diff@<sha>:<path>`, so renames/deletes in the Explorer (which match on
+// the `diff:` prefix) leave it alone.
+const COMMIT_DIFF_ID = /^diff@([0-9a-f]{7,40}):(.+)$/i;
+
+function commitDiffId(sha: string, filePath: string): string {
+  return `diff@${sha}:${filePath}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1384,7 +1400,7 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
   // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
-  const { workspaceId, filePath } = params;
+  const { workspaceId, filePath, commit } = params;
   const adapter = useAdapter();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
   useActiveFileTracking(api, workspaceId ?? "", filePath ?? "", visible);
@@ -1416,7 +1432,7 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
         diffMode,
         compareBranch: compareBranch ?? undefined,
       }),
-    enabled: !!workspaceId && !!filePath,
+    enabled: !!workspaceId && !!filePath && !commit,
     // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
     // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
     refetchInterval: visible ? 10_000 : false,
@@ -1435,13 +1451,28 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
         // opens its whole contents, not just the changed hunks.
         contextLines: FULL_FILE_CONTEXT,
       }),
-    enabled: !!workspaceId && !!filePath && !!mergeBase,
+    enabled: !!workspaceId && !!filePath && !!mergeBase && !commit,
     refetchInterval: visible ? 10_000 : false,
+  });
+
+  // A commit's diff never changes, so it is fetched once and never polled.
+  const commitDiffQuery = useQuery({
+    queryKey: ["diffLeafCommitFile", workspaceId, commit, filePath],
+    queryFn: () =>
+      trpc.workspace.getCommitFileDiff.query({
+        workspaceId,
+        sha: commit ?? "",
+        filePath,
+        contextLines: FULL_FILE_CONTEXT,
+      }),
+    enabled: !!workspaceId && !!filePath && !!commit,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
   // Publish this diff leaf's actions (view toggle, open-for-edit, revert) to the
   // group header — the tab content itself carries no toolbar (#643).
-  const canRevert = !!adapter.revertFile;
+  // A commit's diff is history: there is nothing to revert in the worktree.
+  const canRevert = !!adapter.revertFile && !commit;
   usePublishHeaderActions(
     api.id,
     workspaceId && filePath
@@ -1507,8 +1538,10 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
 
   if (!workspaceId || !filePath) return null;
 
-  const diff = fileDiffQuery.data?.diff;
-  const loading = summaryQuery.isLoading || fileDiffQuery.isLoading;
+  const diff = commit ? commitDiffQuery.data?.diff : fileDiffQuery.data?.diff;
+  const loading = commit
+    ? commitDiffQuery.isLoading
+    : summaryQuery.isLoading || fileDiffQuery.isLoading;
 
   return (
     <div
@@ -1606,6 +1639,8 @@ interface LeafActions {
     },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  /** Open `filePath`'s change in commit `sha` (Commits panel). */
+  openCommitDiff: (sha: string, filePath: string, opts?: { preview?: boolean }) => void;
   /** Retarget file / diff leaves at or under `oldPath` after the Explorer
    *  renamed or moved it (workspace-relative paths). */
   onPathMoved: (oldPath: string, newPath: string) => void;
@@ -2071,18 +2106,19 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
 }
 
 function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
-  const { workspaceId, filePath } = props.params;
+  const { workspaceId, filePath, commit } = props.params;
   const containerApi = props.containerApi;
+  const panelId = props.api.id;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api, props.params.preview);
-  const title = basename(filePath);
+  const title = commit ? `${basename(filePath)} @ ${commit.slice(0, 7)}` : basename(filePath);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      leafActionsByApiId.get(containerApi.id)?.current?.onClose(`diff:${filePath}`, "diff");
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(panelId, "diff");
     },
-    [containerApi, filePath],
+    [containerApi, panelId],
   );
 
   return (
@@ -2714,12 +2750,14 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
-  const handleOpenDiff = useCallback(
-    (filePath: string, opts?: { preview?: boolean }) => {
+  // Working-tree diffs (`diff:<path>`) and commit diffs (`diff@<sha>:<path>`)
+  // share one preview slot, so browsing either reuses the same italic tab.
+  const openDiffLeaf = useCallback(
+    (filePath: string, commit: string | undefined, opts?: { preview?: boolean }) => {
       const api = apiRef.current;
       if (!api) return;
       const preview = opts?.preview ?? false;
-      const id = `diff:${filePath}`;
+      const id = commit ? commitDiffId(commit, filePath) : `diff:${filePath}`;
       const existing = api.getPanel(id);
       if (existing) {
         if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
@@ -2744,13 +2782,24 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         component: "diff",
         tabComponent: "diff",
         title: basename(filePath),
-        params: { workspaceId, filePath, preview },
+        params: { workspaceId, filePath, preview, commit },
         position,
       } as AddPanelOptions);
       if (previewToRemove) api.removePanel(previewToRemove);
       previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
     },
     [workspaceId],
+  );
+
+  const handleOpenDiff = useCallback(
+    (filePath: string, opts?: { preview?: boolean }) => openDiffLeaf(filePath, undefined, opts),
+    [openDiffLeaf],
+  );
+
+  const handleOpenCommitDiff = useCallback(
+    (sha: string, filePath: string, opts?: { preview?: boolean }) =>
+      openDiffLeaf(filePath, sha, opts),
+    [openDiffLeaf],
   );
 
   // ---- keep file / diff leaves in step with Explorer renames and deletes ----
@@ -2855,6 +2904,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    openCommitDiff: () => {},
     onPathMoved: () => {},
     onPathRemoved: () => {},
   });
@@ -2864,6 +2914,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    openCommitDiff: handleOpenCommitDiff,
     onPathMoved: handlePathMoved,
     onPathRemoved: handlePathRemoved,
   };
