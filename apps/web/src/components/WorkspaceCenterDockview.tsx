@@ -1433,7 +1433,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     enabled: !!filePath,
     // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
     // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
-    refetchInterval: visible ? 10_000 : false,
+    // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
+    refetchInterval: visible ? 15_000 : false,
   });
 
   const mergeBase = summaryQuery.data?.mergeBase;
