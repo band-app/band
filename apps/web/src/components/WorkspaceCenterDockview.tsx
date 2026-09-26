@@ -1575,6 +1575,12 @@ interface LeafActions {
     },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  /** Retarget file / diff leaves at or under `oldPath` after the Explorer
+   *  renamed or moved it (workspace-relative paths). */
+  onPathMoved: (oldPath: string, newPath: string) => void;
+  /** Close file / diff leaves at or under `path` after the Explorer deleted
+   *  it. Dirty file leaves stay open so unsaved edits aren't lost. */
+  onPathRemoved: (path: string) => void;
 }
 
 const leafActionsByApiId = new Map<string, { current: LeafActions }>();
@@ -2709,12 +2715,89 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
+  // ---- keep file / diff leaves in step with Explorer renames and deletes ----
+  const handlePathMoved = useCallback(
+    (oldPath: string, newPath: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const remap = (p: string): string | null =>
+        p === oldPath
+          ? newPath
+          : p.startsWith(`${oldPath}/`)
+            ? newPath + p.slice(oldPath.length)
+            : null;
+      for (const panel of [...api.panels]) {
+        const isFile = panel.id.startsWith("file:");
+        if (!isFile && !panel.id.startsWith("diff:")) continue;
+        // Read `panel.params` (what the leaf was added with): `panel.api
+        // .getParameters()` came back empty for these leaves in the e2e run.
+        const params = (panel.params ?? {}) as Partial<FileLeafParams>;
+        if (isFile && (params.external || params.untitled)) continue;
+        const filePath = panel.id.slice(5);
+        const nextPath = remap(filePath);
+        if (nextPath == null) continue;
+        const prefix = isFile ? "file" : "diff";
+        const nextId = `${prefix}:${nextPath}`;
+        if (isFile) {
+          // Carry the tab's persisted state (cursor, unsaved edits) to the new
+          // path, and mark the old leaf closed so its unmount cleanup doesn't
+          // write the old key back.
+          const states = readTabStates(workspaceId);
+          if (filePath in states) {
+            states[nextPath] = states[filePath];
+            delete states[filePath];
+            writeTabStates(workspaceId, states);
+          }
+          closedFileLeaves.add(closedFileLeafKey(workspaceId, filePath));
+        }
+        const wasActive = panel.api.isActive;
+        api.addPanel({
+          id: nextId,
+          component: prefix,
+          tabComponent: prefix,
+          title: basename(nextPath),
+          params: { ...params, workspaceId, filePath: nextPath },
+          position: { referenceGroup: panel.group.id },
+          inactive: !wasActive,
+        } as AddPanelOptions);
+        api.removePanel(panel);
+        if (previewFileIdRef.current === panel.id) previewFileIdRef.current = nextId;
+        if (previewDiffIdRef.current === panel.id) previewDiffIdRef.current = nextId;
+      }
+    },
+    [workspaceId],
+  );
+
+  const handlePathRemoved = useCallback(
+    (path: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      for (const panel of [...api.panels]) {
+        const kind: LeafKind | null = panel.id.startsWith("file:")
+          ? "file"
+          : panel.id.startsWith("diff:")
+            ? "diff"
+            : null;
+        if (!kind) continue;
+        const params = (panel.params ?? {}) as Partial<FileLeafParams>;
+        if (kind === "file" && params.external) continue;
+        const p = panel.id.slice(5);
+        if (p !== path && !p.startsWith(`${path}/`)) continue;
+        if (kind === "file" && isFileDirty(workspaceId, p)) continue;
+        doCloseLeaf(panel.id, kind);
+      }
+    },
+    [workspaceId, doCloseLeaf],
+  );
+
   const actionsRef = useRef<LeafActions>({
     onAdd: () => {},
     onSplit: () => {},
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    onPathMoved: () => {},
+    onPathRemoved: () => {},
   });
   actionsRef.current = {
     onAdd: handleAdd,
@@ -2722,6 +2805,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    onPathMoved: handlePathMoved,
+    onPathRemoved: handlePathRemoved,
   };
 
   // ---- default layout ----

@@ -144,6 +144,106 @@ export class FileTreesPage {
     });
   }
 
+  // -------------------------------------------------------------------------
+  // Explorer header toolbar + file operations (new / rename / cut / copy /
+  // paste / delete / drag-and-drop). Menu items carry `file-tree__<action>`
+  // testids; the same single-open-menu caveat as the copy-path getters applies.
+  // -------------------------------------------------------------------------
+
+  /** A header toolbar button: New File, New Folder, Refresh, Collapse all. */
+  headerButton(action: "new-file" | "new-folder" | "refresh" | "collapse-all"): Locator {
+    return this.page.getByTestId(`explorer-header__${action}`);
+  }
+
+  /** The inline name input used by New File / New Folder / Rename. */
+  get nameInput(): Locator {
+    return this.page.getByTestId("file-tree__name-input");
+  }
+
+  /** The dismissable banner a failed paste or drop shows above the tree. */
+  get errorBanner(): Locator {
+    return this.page.getByTestId("file-tree__error");
+  }
+
+  menuItem(
+    action: "new-file" | "new-folder" | "cut" | "copy" | "paste" | "rename" | "delete",
+  ): Locator {
+    return this.page.getByTestId(`file-tree__${action}`);
+  }
+
+  /** Hover the Explorer header (its actions show on hover) and click one. */
+  async clickHeaderButton(
+    action: "new-file" | "new-folder" | "refresh" | "collapse-all",
+  ): Promise<void> {
+    await test.step(`Click Explorer header ${action}`, async () => {
+      await this.headerButton(action).hover();
+      await this.headerButton(action).click();
+    });
+  }
+
+  /** Type a name into the inline name input and submit it with Enter. */
+  async submitName(name: string): Promise<void> {
+    await test.step(`Submit name ${name}`, async () => {
+      await this.nameInput.waitFor({ state: "visible" });
+      await this.nameInput.fill(name);
+      await this.nameInput.press("Enter");
+    });
+  }
+
+  /** Right-click a Files-tree row and pick an action from its menu. */
+  async runRowAction(
+    path: string,
+    action: "new-file" | "new-folder" | "cut" | "copy" | "paste" | "rename" | "delete",
+  ): Promise<void> {
+    await test.step(`Run ${action} on Files-tree row ${path}`, async () => {
+      await this.openFileTreeMenu(path);
+      await this.menuItem(action).click();
+      // The item's action runs once the menu has finished closing, so wait
+      // for that before the next interaction opens another menu.
+      await this.menuItem(action).waitFor({ state: "hidden" });
+    });
+  }
+
+  /** Select a row with a click, then press a key while the tree has focus. */
+  async pressOnRow(path: string, key: string): Promise<void> {
+    await test.step(`Press ${key} on Files-tree row ${path}`, async () => {
+      await this.fileTreeRow(path).click();
+      await this.fileTreeRow(path).press(key);
+    });
+  }
+
+  /** Confirm the Delete dialog. */
+  async confirmDelete(): Promise<void> {
+    await test.step("Confirm delete", async () => {
+      await this.page.getByTestId("file-tree__delete-confirm").click();
+    });
+  }
+
+  /** Drag a Files-tree row onto another row (a folder lands inside it, a file
+   *  lands beside it). `copy` holds Alt during the drag, which copies. */
+  async dragRowOnto(from: string, to: string, opts?: { copy?: boolean }): Promise<void> {
+    await test.step(`Drag ${from} onto ${to}${opts?.copy ? " (copy)" : ""}`, async () => {
+      if (opts?.copy) await this.page.keyboard.down("Alt");
+      try {
+        await this.fileTreeRow(from).dragTo(this.fileTreeRow(to));
+      } finally {
+        if (opts?.copy) await this.page.keyboard.up("Alt");
+      }
+    });
+  }
+
+  /** Drag a Files-tree row onto the empty area below the rows (the root). */
+  async dragRowToRoot(from: string): Promise<void> {
+    await test.step(`Drag ${from} to the workspace root`, async () => {
+      const root = this.page.getByTestId("file-tree__root");
+      const box = await root.boundingBox();
+      if (!box) throw new Error("file tree root has no bounding box");
+      await this.fileTreeRow(from).dragTo(root, {
+        targetPosition: { x: box.width / 2, y: box.height - 10 },
+      });
+    });
+  }
+
   /** Named action methods for the copy menu items, so the test body drives
    *  interactions through the page object rather than clicking raw locators.
    *  The matching getters above remain for `expect(...).toBeVisible()`
