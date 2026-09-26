@@ -18,6 +18,8 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
+import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -82,6 +84,59 @@ export class ChangesPanelPage {
   /** The floating find widget of the visible diff leaf. */
   get diffFindWidget(): FindWidget {
     return new FindWidget(this.diffLeaf);
+  }
+
+  /** Go-to-definition on one editor of the visible diff leaf: `"new"` is the
+   *  working-tree side (the only editor in unified mode, the right one in
+   *  split mode), `"old"` the merge-base side of a split. */
+  symbols(side: "new" | "old" = "new"): CodeSymbolLinks {
+    return new CodeSymbolLinks(this.page, this.diffLeaf.getByTestId(`diff-file__editor--${side}`));
+  }
+
+  /** The editor tab a go-to-definition from the diff opened (the visible
+   *  file leaf). */
+  get openedEditor(): FileViewerPage {
+    return new FileViewerPage(this.page, this.workspace.fileLeafVisibilityMarker(true));
+  }
+
+  /** Open the visible diff's file in an editor tab (the diff leaf's "Open
+   *  file for editing" header button). */
+  async openDiffFileInEditor(): Promise<void> {
+    await test.step("Open the diffed file in an editor", async () => {
+      await this.page.getByTestId("center-diff-leaf__open-file").click();
+      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Close `path`'s editor tab. */
+  async closeEditor(path: string): Promise<void> {
+    await test.step(`Close the editor for ${path}`, async () => {
+      await this.workspace.fileTab(path).hover();
+      await this.page.getByTestId(`center-file-tab__close--${path}`).click();
+      await expect(this.workspace.fileTab(path)).toHaveCount(0);
+    });
+  }
+
+  /** Bring `path`'s editor tab to the front. */
+  async showEditor(path: string): Promise<void> {
+    await test.step(`Show the editor for ${path}`, async () => {
+      await this.workspace.fileTab(path).click();
+      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible();
+    });
+  }
+
+  /** Bring `path`'s diff tab back to the front. */
+  async showDiff(path: string): Promise<void> {
+    await test.step(`Show the diff for ${path}`, async () => {
+      await this.workspace.diffTab(path).click();
+      await expect(this.diffLeaf).toBeVisible();
+    });
+  }
+
+  /** Every file leaf in the workspace, visible or not. A go-to-definition
+   *  into another file adds one. */
+  get fileLeaves(): Locator {
+    return this.workspace.allFileLeaves();
   }
 
   /** A changed-file row in the Changes tree, keyed by workspace-relative path. */

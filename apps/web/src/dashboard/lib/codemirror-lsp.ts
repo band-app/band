@@ -7,14 +7,14 @@ import {
   Workspace,
   type WorkspaceFile,
 } from "@codemirror/lsp-client";
-import type { ChangeSet, Extension, Text } from "@codemirror/state";
 import {
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  ViewPlugin,
-  type ViewUpdate,
-} from "@codemirror/view";
+  type ChangeSet,
+  type Extension,
+  StateEffect,
+  StateField,
+  type Text,
+} from "@codemirror/state";
+import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
 
 // ---------------------------------------------------------------------------
 // LSP language ID mapping (CodeMirror language name -> LSP languageId)
@@ -118,6 +118,16 @@ class BandWorkspaceFile implements InternalWorkspaceFile {
 class BandWorkspace extends Workspace {
   files: BandWorkspaceFile[] = [];
   private fileVersions: Record<string, number> = Object.create(null);
+  /**
+   * Working-tree text shown by diff views, keyed by URI. A diff view has no
+   * LSPPlugin (it is read-only and must not own the file the way an editor
+   * does), but the server still needs the document open to answer
+   * go-to-definition. When no editor has the file open, the diff text is
+   * opened on the server in its place; an editor opening the file takes over.
+   */
+  private diffDocs = new Map<string, { languageId: string; doc: Text; count: number }>();
+  /** URIs currently open on the server with a diff view's text. */
+  private diffOpen = new Set<string>();
   private rootUri: string;
   private workspaceId: string | undefined;
 
@@ -158,6 +168,8 @@ class BandWorkspace extends Workspace {
       existing.view = view;
       return;
     }
+    // An editor takes the document over from a diff view.
+    if (this.diffOpen.delete(uri)) this.client.didClose(uri);
     const file = new BandWorkspaceFile(
       uri,
       languageId,
@@ -174,7 +186,57 @@ class BandWorkspace extends Workspace {
     if (file) {
       this.files = this.files.filter((f) => f !== file);
       this.client.didClose(uri);
+      // A diff view still showing the file hands the server its text again.
+      if (this.diffDocs.has(uri)) this.openDiffOnServer(uri);
     }
+  }
+
+  /** Register a diff view's working-tree text for `uri` (see `diffDocs`). */
+  openDiffDoc(uri: string, languageId: string, doc: Text): void {
+    const entry = this.diffDocs.get(uri);
+    if (entry) {
+      entry.count++;
+      entry.languageId = languageId;
+      entry.doc = doc;
+    } else {
+      this.diffDocs.set(uri, { languageId, doc, count: 1 });
+    }
+    if (!this.getFile(uri)) this.openDiffOnServer(uri);
+  }
+
+  closeDiffDoc(uri: string): void {
+    const entry = this.diffDocs.get(uri);
+    if (!entry) return;
+    if (--entry.count > 0) return;
+    this.diffDocs.delete(uri);
+    if (this.diffOpen.delete(uri)) this.client.didClose(uri);
+  }
+
+  /**
+   * The text the server currently holds for `uri`: the editor's document
+   * (synced first, so unsaved edits count) or the diff view's text.
+   */
+  serverDoc(uri: string): Text | null {
+    const file = this.getFile(uri);
+    if (file) {
+      this.client.sync();
+      return file.doc;
+    }
+    return this.diffOpen.has(uri) ? (this.diffDocs.get(uri)?.doc ?? null) : null;
+  }
+
+  private openDiffOnServer(uri: string): void {
+    const entry = this.diffDocs.get(uri);
+    if (!entry) return;
+    if (this.diffOpen.has(uri)) this.client.didClose(uri);
+    this.client.didOpen({
+      uri,
+      languageId: entry.languageId,
+      version: this.nextFileVersion(uri),
+      doc: entry.doc,
+      getView: () => null,
+    });
+    this.diffOpen.add(uri);
   }
 
   displayFile(uri: string): Promise<EditorView | null> {
@@ -226,7 +288,8 @@ class BandWorkspace extends Workspace {
     });
   }
 
-  private uriToWorkspacePath(uri: string): string {
+  uriToWorkspacePath(encodedUri: string): string {
+    const uri = decodeUri(encodedUri);
     const root = this.rootUri.endsWith("/") ? this.rootUri : `${this.rootUri}/`;
     if (uri.startsWith(root)) {
       return uri.slice(root.length);
@@ -294,9 +357,15 @@ function createWebSocketTransport(url: string): Promise<CloseableTransport> {
 // LSP Client cache (one client per WebSocket URL = per workspace+language)
 // ---------------------------------------------------------------------------
 
-interface CachedClient {
+interface ConnectedClient {
   client: LSPClient;
   transport: CloseableTransport;
+}
+
+interface CachedClient {
+  /** The connect in flight, cached before it resolves so concurrent callers
+   *  for one URL share a single client and WebSocket. */
+  ready: Promise<ConnectedClient>;
   refCount: number;
 }
 
@@ -312,30 +381,41 @@ const clientCache = new Map<string, CachedClient>();
  * already partitions clients by workspace and a hit is guaranteed to carry the
  * same workspaceId the caller passed. (If that URL↔workspace coupling ever
  * changes, this assumption must be revisited.)
+ *
+ * A rejected promise holds no reference, so callers release only after a
+ * successful acquire.
  */
 async function getOrCreateClient(
   wsUrl: string,
   rootUri: string,
   workspaceId?: string,
 ): Promise<LSPClient> {
-  const cached = clientCache.get(wsUrl);
+  let cached = clientCache.get(wsUrl);
   if (cached) {
     cached.refCount++;
-    return cached.client;
+  } else {
+    const client = new LSPClient({
+      rootUri,
+      workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
+      extensions: languageServerExtensions(),
+      timeout: 10000,
+    });
+    const ready = createWebSocketTransport(wsUrl).then((transport) => {
+      client.connect(transport);
+      return { client, transport };
+    });
+    cached = { ready, refCount: 1 };
+    clientCache.set(wsUrl, cached);
   }
-
-  const client = new LSPClient({
-    rootUri,
-    workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
-    extensions: languageServerExtensions(),
-    timeout: 10000,
-  });
-
-  const transport = await createWebSocketTransport(wsUrl);
-  client.connect(transport);
-
-  clientCache.set(wsUrl, { client, transport, refCount: 1 });
-  return client;
+  const entry = cached;
+  try {
+    return (await entry.ready).client;
+  } catch (err) {
+    // A failed connect is dropped so the next caller retries.
+    entry.refCount--;
+    if (clientCache.get(wsUrl) === entry) clientCache.delete(wsUrl);
+    throw err;
+  }
 }
 
 /**
@@ -347,27 +427,32 @@ export function releaseLspClient(wsUrl: string): void {
   const cached = clientCache.get(wsUrl);
   if (!cached) return;
   cached.refCount--;
-  if (cached.refCount <= 0) {
-    // Send LSP shutdown request followed by exit notification.
-    // This tells the language server to cleanly terminate.
-    cached.client
-      .request("shutdown", null)
-      .then(() => {
-        cached.transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
-      })
-      .catch(() => {
-        // Server may already be gone — that's fine
-      })
-      .finally(() => {
-        cached.client.disconnect();
-        cached.transport.close();
-      });
-    clientCache.delete(wsUrl);
-  }
+  if (cached.refCount > 0) return;
+  clientCache.delete(wsUrl);
+  cached.ready
+    .then(({ client, transport }) =>
+      // Send LSP shutdown request followed by exit notification.
+      // This tells the language server to cleanly terminate.
+      client
+        .request("shutdown", null)
+        .then(() => {
+          transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
+        })
+        .catch(() => {
+          // Server may already be gone — that's fine
+        })
+        .finally(() => {
+          client.disconnect();
+          transport.close();
+        }),
+    )
+    .catch(() => {
+      // Never connected: nothing to shut down.
+    });
 }
 
 // ---------------------------------------------------------------------------
-// Cmd+hover link underline (visual affordance for Cmd+Click go-to-definition)
+// Cmd+hover link (visual affordance for Cmd+Click go-to-definition)
 // ---------------------------------------------------------------------------
 
 /** Returns the word boundaries around `pos`, or null if not on a word. */
@@ -387,100 +472,226 @@ function wordRangeAt(view: EditorView, pos: number): { from: number; to: number 
   return { from: line.from + from, to: line.from + to + 1 };
 }
 
-const linkMark = Decoration.mark({ class: "cm-lsp-cmd-link" });
+/** An LSP `Location`, or the target half of a `LocationLink`. */
+interface DefinitionLocation {
+  uri: string;
+  range: { start: { line: number; character: number } };
+}
 
+type DefinitionResponse =
+  | DefinitionLocation
+  | DefinitionLocation[]
+  | { targetUri: string; targetSelectionRange: DefinitionLocation["range"] }[]
+  | null;
+
+/** Servers percent-encode URIs (`%20`, `%40`); Band builds them raw. */
+function decodeUri(uri: string): string {
+  try {
+    return decodeURIComponent(uri);
+  } catch {
+    return uri;
+  }
+}
+
+function firstLocation(response: DefinitionResponse): DefinitionLocation | null {
+  const first = Array.isArray(response) ? response[0] : response;
+  if (!first) return null;
+  if ("targetUri" in first) return { uri: first.targetUri, range: first.targetSelectionRange };
+  return first;
+}
+
+/** How long the pointer rests on a word before the server is asked about it. */
+const HOVER_CHECK_DELAY_MS = 80;
+
+/** Finds out whether the word at `pos` has a definition to jump to. */
+type CanNavigate = (view: EditorView, pos: number) => Promise<boolean>;
+
+const setLink = StateEffect.define<{ from: number; to: number } | null>();
+
+const linkMark = Decoration.mark({
+  class: "cm-lsp-cmd-link",
+  attributes: { "data-testid": "code-editor__definition-link" },
+});
+
+const linkField = StateField.define({
+  create: () => Decoration.none,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setLink)) {
+        return e.value
+          ? Decoration.set([linkMark.range(e.value.from, e.value.to)])
+          : Decoration.none;
+      }
+    }
+    return tr.docChanged ? Decoration.none : value;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// The whole symbol takes the link colour, not just the underline: syntax
+// highlighting nests its own coloured spans inside (or around) the mark, so
+// the colour is forced on the mark and everything inside it.
 const cmdClickLinkTheme = EditorView.baseTheme({
-  ".cm-lsp-cmd-link": {
+  ".cm-lsp-cmd-link, .cm-lsp-cmd-link *": {
+    color: "var(--link) !important",
     textDecoration: "underline",
-    color: "var(--cm-lsp-link-color, #3b82f6)",
     cursor: "pointer",
   },
 });
 
 /**
- * ViewPlugin that underlines the word under the mouse when Cmd/Ctrl is held,
- * giving a visual hint that Cmd+Click will jump to definition.
+ * Colours and underlines the word under the mouse while Cmd/Ctrl is held,
+ * once `canNavigate` confirms it has a definition, as a hint that
+ * Cmd/Ctrl+Click will jump there.
  */
-const cmdClickLinkPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet = Decoration.none;
-    private modDown = false;
-    private mouseX = -1;
-    private mouseY = -1;
+function cmdClickLink(canNavigate: CanNavigate): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      private modDown = false;
+      private mouseX = -1;
+      private mouseY = -1;
+      /** The word currently shown (or being checked), as `from:to`. */
+      private current: string | null = null;
+      /** Words (`from:to`) the server reported a definition for during the
+       *  current Cmd/Ctrl hold. Cleared on release: the answer can change
+       *  without this view's document changing (a diff view's text is fixed,
+       *  but an editor's unsaved edits move the server's copy). */
+      private navigable = new Set<string>();
+      private timer: ReturnType<typeof setTimeout> | undefined;
+      private checkedDoc: Text;
 
-    constructor(readonly view: EditorView) {
-      this.onKeyDown = this.onKeyDown.bind(this);
-      this.onKeyUp = this.onKeyUp.bind(this);
-      this.onMouseMove = this.onMouseMove.bind(this);
-      this.onBlur = this.onBlur.bind(this);
+      constructor(readonly view: EditorView) {
+        this.checkedDoc = view.state.doc;
+        this.onKeyDown = this.onKeyDown.bind(this);
+        this.onKeyUp = this.onKeyUp.bind(this);
+        this.onMouseMove = this.onMouseMove.bind(this);
+        this.onMouseLeave = this.onMouseLeave.bind(this);
+        this.onBlur = this.onBlur.bind(this);
 
-      window.addEventListener("keydown", this.onKeyDown);
-      window.addEventListener("keyup", this.onKeyUp);
-      view.dom.addEventListener("mousemove", this.onMouseMove);
-      window.addEventListener("blur", this.onBlur);
-    }
+        window.addEventListener("keydown", this.onKeyDown);
+        window.addEventListener("keyup", this.onKeyUp);
+        view.dom.addEventListener("mousemove", this.onMouseMove);
+        view.dom.addEventListener("mouseleave", this.onMouseLeave);
+        window.addEventListener("blur", this.onBlur);
+      }
 
-    update(_update: ViewUpdate) {
-      // Recompute decoration if doc changes while mod is held
-      if (_update.docChanged && this.modDown) {
+      destroy() {
+        clearTimeout(this.timer);
+        window.removeEventListener("keydown", this.onKeyDown);
+        window.removeEventListener("keyup", this.onKeyUp);
+        this.view.dom.removeEventListener("mousemove", this.onMouseMove);
+        this.view.dom.removeEventListener("mouseleave", this.onMouseLeave);
+        window.removeEventListener("blur", this.onBlur);
+      }
+
+      private onKeyDown(e: KeyboardEvent) {
+        if (e.key === "Meta" || e.key === "Control") {
+          this.modDown = true;
+          this.recompute();
+        }
+      }
+
+      private onKeyUp(e: KeyboardEvent) {
+        if (e.key === "Meta" || e.key === "Control") {
+          this.modDown = false;
+          this.navigable.clear();
+          this.show(null);
+        }
+      }
+
+      private onMouseMove(e: MouseEvent) {
+        this.mouseX = e.clientX;
+        this.mouseY = e.clientY;
+        // Track the modifier from the event too, so a Cmd pressed while
+        // focus was elsewhere (e.g. another pane) still counts.
+        this.modDown = e.metaKey || e.ctrlKey;
         this.recompute();
       }
-    }
 
-    destroy() {
-      window.removeEventListener("keydown", this.onKeyDown);
-      window.removeEventListener("keyup", this.onKeyUp);
-      this.view.dom.removeEventListener("mousemove", this.onMouseMove);
-      window.removeEventListener("blur", this.onBlur);
-    }
-
-    private onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Meta" || e.key === "Control") {
-        this.modDown = true;
-        this.recompute();
+      private onMouseLeave() {
+        this.mouseX = -1;
+        this.show(null);
       }
-    }
 
-    private onKeyUp(e: KeyboardEvent) {
-      if (e.key === "Meta" || e.key === "Control") {
+      private onBlur() {
         this.modDown = false;
-        this.decorations = Decoration.none;
+        this.navigable.clear();
+        this.show(null);
       }
-    }
 
-    private onMouseMove(e: MouseEvent) {
-      this.mouseX = e.clientX;
-      this.mouseY = e.clientY;
-      if (this.modDown) {
-        this.recompute();
-      }
-    }
+      private recompute() {
+        if (!this.modDown || this.mouseX < 0) return this.show(null);
+        const pos = this.view.posAtCoords({ x: this.mouseX, y: this.mouseY });
+        const range = pos == null ? null : wordRangeAt(this.view, pos);
+        if (!range) return this.show(null);
+        const key = `${range.from}:${range.to}`;
+        if (key === this.current) return;
+        this.show(null);
+        this.current = key;
 
-    private onBlur() {
-      this.modDown = false;
-      this.decorations = Decoration.none;
-    }
+        const doc = this.view.state.doc;
+        if (doc !== this.checkedDoc) {
+          this.checkedDoc = doc;
+          this.navigable.clear();
+        }
+        if (this.navigable.has(key)) return this.show(range, key);
+        // Ask the server only once the pointer rests on a word, so sweeping
+        // across a line doesn't queue a definition request per word crossed.
+        this.timer = setTimeout(() => {
+          void canNavigate(this.view, range.from)
+            .catch(() => false)
+            .then((ok) => {
+              // Only a hit is cached: a miss may be a server still loading
+              // the project, so the next hover asks again.
+              if (!ok || this.view.state.doc !== doc) return;
+              this.navigable.add(key);
+              if (this.current === key) this.show(range, key);
+            });
+        }, HOVER_CHECK_DELAY_MS);
+      }
 
-    private recompute() {
-      if (!this.modDown || this.mouseX < 0) {
-        this.decorations = Decoration.none;
-        return;
+      private show(range: { from: number; to: number } | null, key: string | null = null) {
+        clearTimeout(this.timer);
+        this.current = key;
+        const shown = this.view.state.field(linkField, false);
+        if (!range && (!shown || shown.size === 0)) return;
+        this.view.dispatch({ effects: setLink.of(range) });
       }
-      const pos = this.view.posAtCoords({ x: this.mouseX, y: this.mouseY });
-      if (pos == null) {
-        this.decorations = Decoration.none;
-        return;
-      }
-      const range = wordRangeAt(this.view, pos);
-      if (!range) {
-        this.decorations = Decoration.none;
-        return;
-      }
-      this.decorations = Decoration.set([linkMark.range(range.from, range.to)]);
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
+    },
+  );
+  return [linkField, plugin, cmdClickLinkTheme];
+}
+
+/**
+ * Handles Cmd+Click (Mac) / Ctrl+Click (other) by moving the cursor to the
+ * clicked position and running `jump`.
+ */
+function cmdClickHandler(jump: (view: EditorView, pos: number) => boolean): Extension {
+  return EditorView.domEventHandlers({
+    click(event: MouseEvent, view: EditorView) {
+      if (!(event.metaKey || event.ctrlKey)) return false;
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos == null) return false;
+      view.dispatch({ selection: { anchor: pos } });
+      return jump(view, pos);
+    },
+  });
+}
+
+function requestDefinition(
+  client: LSPClient,
+  uri: string,
+  position: { line: number; character: number },
+): Promise<DefinitionLocation | null> {
+  const caps = client.serverCapabilities;
+  if (caps && !caps.definitionProvider) return Promise.resolve(null);
+  return client
+    .request<unknown, DefinitionResponse>("textDocument/definition", {
+      textDocument: { uri },
+      position,
+    })
+    .then(firstLocation);
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -511,19 +722,101 @@ export async function createLspExtension(
     client.plugin(documentUri, languageId),
     // Cmd+Click (Mac) / Ctrl+Click (other) to jump to definition — the
     // library only binds F12 by default.
-    EditorView.domEventHandlers({
-      click(event: MouseEvent, view: EditorView) {
-        if (!(event.metaKey || event.ctrlKey)) return false;
-        // Place cursor at click position first
-        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-        if (pos == null) return false;
-        view.dispatch({ selection: { anchor: pos } });
-        return jumpToDefinition(view);
-      },
+    cmdClickHandler((view) => jumpToDefinition(view)),
+    cmdClickLink((view, pos) => {
+      const plugin = LSPPlugin.get(view);
+      if (!plugin) return Promise.resolve(false);
+      client.sync();
+      return requestDefinition(client, plugin.uri, plugin.toPosition(pos)).then((loc) => !!loc);
     }),
-    // Underline the word under the mouse when Cmd/Ctrl is held
-    cmdClickLinkPlugin,
-    cmdClickLinkTheme,
+  ];
+}
+
+/**
+ * Creates go-to-definition (Cmd/Ctrl+hover link, Cmd/Ctrl+Click) for the
+ * working-tree side of a diff. The caller must only attach it to a view whose
+ * document is the whole working-tree file, line for line, so a position in
+ * the view is the same position in the file.
+ *
+ * The view gets no LSPPlugin (no completions, diagnostics or edits in a
+ * read-only diff). Its text is opened on the server only while no editor has
+ * the file open (see `BandWorkspace.diffDocs`). Before each request the
+ * clicked line is compared with the server's copy of that line; if they
+ * differ (for example an editor holds unsaved edits above it), the symbol is
+ * not treated as navigable, since the position would point somewhere else.
+ *
+ * A definition in the same file scrolls the diff to it; any other file opens
+ * in an editor tab at the definition.
+ */
+export async function createDiffLspNavigation(
+  wsUrl: string,
+  rootUri: string,
+  documentUri: string,
+  languageId: string,
+  workspaceId?: string,
+): Promise<Extension> {
+  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
+  const workspace = client.workspace as BandWorkspace;
+
+  const register = ViewPlugin.fromClass(
+    class {
+      constructor(readonly view: EditorView) {
+        workspace.openDiffDoc(documentUri, languageId, view.state.doc);
+      }
+      destroy() {
+        workspace.closeDiffDoc(documentUri);
+      }
+    },
+  );
+
+  const definitionAt = (view: EditorView, pos: number): Promise<DefinitionLocation | null> => {
+    const line = view.state.doc.lineAt(pos);
+    const serverDoc = workspace.serverDoc(documentUri);
+    if (!serverDoc || line.number > serverDoc.lines) return Promise.resolve(null);
+    if (serverDoc.line(line.number).text !== line.text) return Promise.resolve(null);
+    return requestDefinition(client, documentUri, {
+      line: line.number - 1,
+      character: pos - line.from,
+    });
+  };
+
+  const jump = (view: EditorView, pos: number) => {
+    definitionAt(view, pos)
+      .then((loc) => {
+        if (!loc) return;
+        const { line, character } = loc.range.start;
+        if (decodeUri(loc.uri) === decodeUri(documentUri) && line < view.state.doc.lines) {
+          const target = Math.min(
+            view.state.doc.line(line + 1).from + character,
+            view.state.doc.length,
+          );
+          view.dispatch({
+            selection: { anchor: target },
+            effects: EditorView.scrollIntoView(target, { y: "center" }),
+          });
+          return;
+        }
+        // Same event the editor's cross-file jump uses (see
+        // `BandWorkspace.displayFile`), plus the position to land on.
+        window.dispatchEvent(
+          new CustomEvent("band:lsp-navigate", {
+            detail: {
+              filePath: workspace.uriToWorkspacePath(loc.uri),
+              workspaceId,
+              line: line + 1,
+              column: character + 1,
+            },
+          }),
+        );
+      })
+      .catch((err) => console.warn("[diff] go to definition failed:", err));
+    return true;
+  };
+
+  return [
+    register,
+    cmdClickHandler(jump),
+    cmdClickLink((view, pos) => definitionAt(view, pos).then((loc) => !!loc)),
   ];
 }
 

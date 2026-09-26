@@ -67,6 +67,14 @@ export function createFrameParser(onMessage: (json: string) => void): (chunk: Bu
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 
+function didCloseMessage(uri: string): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    method: "textDocument/didClose",
+    params: { textDocument: { uri } },
+  });
+}
+
 export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
@@ -114,6 +122,44 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // This happens when a definition request arrives before tsserver has finished
   // loading the configured project for the file (race condition after didOpen).
   const pendingRequests = new Map<number, string>();
+  // Documents this connection opened and has not closed. The language server
+  // outlives the connection and is shared by every connection to this
+  // workspace, so opens and closes are counted on the session: without that,
+  // a page reload's `didOpen` of a file the old page left open is rejected as
+  // "already open" (tsserver then answers "No Project"), and one tab closing
+  // would close a file another tab still has open.
+  //
+  // Limitation: with two connections holding one file, the server keeps the
+  // text of whichever opened it last. If that connection leaves first, the
+  // other's edits are applied to that text, which drifts when the two
+  // buffers differed.
+  const openDocuments = new Set<string>();
+  const { openDocuments: sessionDocuments } = session;
+
+  /** Count an open or close and say whether to forward it to the server. */
+  function trackDocument(method: string | undefined, uri: string): boolean {
+    const count = sessionDocuments.get(uri) ?? 0;
+    if (method === "textDocument/didOpen") {
+      if (openDocuments.has(uri)) return true;
+      openDocuments.add(uri);
+      sessionDocuments.set(uri, count + 1);
+      // Already open for another connection: the server refuses a second
+      // `didOpen`, and this client's `didChange` versions start from its own.
+      // Close and reopen so the server holds this client's text.
+      if (count > 0) writeToStdin(didCloseMessage(uri));
+      return true;
+    }
+    if (method === "textDocument/didClose") {
+      if (!openDocuments.delete(uri)) return false;
+      if (count <= 1) {
+        sessionDocuments.delete(uri);
+        return true;
+      }
+      sessionDocuments.set(uri, count - 1);
+      return false;
+    }
+    return true;
+  }
   const retriedIds = new Set<number>();
   const RETRY_DELAY_MS = 2000;
 
@@ -187,16 +233,33 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     );
 
     // Track requests (messages with an "id" field) so we can retry on
-    // transient errors from the language server.
+    // transient errors from the language server, and the documents this
+    // connection holds open so they can be closed when it goes away.
     try {
-      const msg = JSON.parse(json) as { id?: number; method?: string };
+      const msg = JSON.parse(json) as {
+        id?: number;
+        method?: string;
+        params?: { textDocument?: { uri?: string } };
+      };
       if (msg.id != null && msg.method) {
         pendingRequests.set(msg.id, json);
+      }
+      const uri = msg.params?.textDocument?.uri;
+      if (
+        uri &&
+        (msg.method === "textDocument/didOpen" || msg.method === "textDocument/didClose") &&
+        !trackDocument(msg.method, uri)
+      ) {
+        return;
       }
     } catch {
       // Not valid JSON — forward as-is
     }
 
+    writeToStdin(json);
+  }
+
+  function writeToStdin(json: string): void {
     if (lspProcess.stdin?.writable) {
       lspProcess.stdin.write(frameMessage(json));
     }
@@ -219,6 +282,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   ws.on("close", () => {
     lspProcess.stdout?.off("data", onStdoutData);
     lspProcess.off("exit", onExit);
+    for (const uri of [...openDocuments]) forwardToStdin(didCloseMessage(uri));
     log.debug("LSP client disconnected: %s/%s (server kept alive)", workspaceId, lang);
   });
 }

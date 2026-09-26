@@ -474,15 +474,26 @@ export function SharedDockviewLayout() {
   // clicking "Go to definition" across files did nothing.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filePath?: string; workspaceId?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{
+          filePath?: string;
+          workspaceId?: string;
+          line?: number;
+          column?: number;
+        }>
+      ).detail;
       if (!detail?.filePath) return;
       // Open in the ADDRESSED workspace (falling through to the active one when
       // the event carries no id, for backwards-compat). Targeting the owning
       // workspace directly is what prevents an A-relative path from leaking
       // into a cached hidden workspace B/C — the nav opens in A even when A is
       // not the active workspace.
+      // A diff view's jump carries the definition's 1-based position; the
+      // editor's own jump positions the cursor itself and sends none.
       getWorkspaceLeafActions(detail.workspaceId ?? activeWorkspaceId)?.openFile(detail.filePath, {
         preview: false,
+        line: detail.line,
+        column: detail.column,
       });
     };
     window.addEventListener("band:lsp-navigate", handler);
