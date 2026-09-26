@@ -17,7 +17,7 @@
  */
 
 import { createDecipheriv, createHash, pbkdf2Sync } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmod, copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -141,23 +141,30 @@ interface CookieRow {
 /**
  * Copy a live cookie DB (plus its WAL / rollback journal) into a fresh
  * private temp dir and return the copy's path and a cleanup function.
+ * Async so a multi-MB copy doesn't stall the Electron main process.
  */
-function snapshotCookieDb(cookiesPath: string): { dbPath: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "band-chrome-cookies-"));
-  const cleanup = () => rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+async function snapshotCookieDb(
+  cookiesPath: string,
+): Promise<{ dbPath: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "band-chrome-cookies-"));
+  const cleanup = () => rm(dir, { recursive: true, force: true, maxRetries: 3 });
   try {
     const dbPath = join(dir, "Cookies");
     // The copies are owner-only whatever the source's mode.
-    copyFileSync(cookiesPath, dbPath);
-    chmodSync(dbPath, 0o600);
+    await copyFile(cookiesPath, dbPath);
+    await chmod(dbPath, 0o600);
     for (const suffix of ["-wal", "-journal"]) {
-      if (!existsSync(cookiesPath + suffix)) continue;
-      copyFileSync(cookiesPath + suffix, dbPath + suffix);
-      chmodSync(dbPath + suffix, 0o600);
+      const exists = await stat(cookiesPath + suffix).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) continue;
+      await copyFile(cookiesPath + suffix, dbPath + suffix);
+      await chmod(dbPath + suffix, 0o600);
     }
     return { dbPath, cleanup };
   } catch (err) {
-    cleanup();
+    await cleanup();
     throw err;
   }
 }
@@ -176,7 +183,7 @@ export async function readChromeCookies(
   // Loaded here, not at module top: this module is imported at main-process
   // boot, and a failure to load `node:sqlite` must only fail the import.
   const { DatabaseSync } = await import("node:sqlite");
-  const { dbPath, cleanup } = snapshotCookieDb(cookiesPath);
+  const { dbPath, cleanup } = await snapshotCookieDb(cookiesPath);
   let rows: CookieRow[];
   let dbVersion = 0;
   try {
@@ -203,7 +210,7 @@ export async function readChromeCookies(
       db.close();
     }
   } finally {
-    cleanup();
+    await cleanup();
   }
 
   const result: ChromeCookieReadResult = {
