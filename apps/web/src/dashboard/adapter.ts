@@ -320,6 +320,12 @@ export interface PlatformCapabilities {
     defaultPath?: string;
   }): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
+  /**
+   * True when the window can show the desktop through the project-list
+   * sidebar: the Electron desktop shell on macOS, whose window has a
+   * vibrancy layer. Gates the "Translucent sidebar" setting.
+   */
+  translucentSidebar?: boolean;
   getWorkspaceHref?(workspaceId: string): string | undefined;
   /** Optional navigate function for client-side routing (avoids full page reload). */
   navigate?(href: string): void;

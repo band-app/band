@@ -103,6 +103,11 @@ export interface Settings {
   /** Dashboard theme preference. */
   theme?: "system" | "light" | "dark";
   /**
+   * Translucent project-list sidebar in the macOS desktop app. Mirrors
+   * `dashboard/types.ts::Settings.translucentSidebar`.
+   */
+  translucentSidebar?: boolean;
+  /**
    * GPU-accelerated WebGL terminal renderer. Mirrors
    * `dashboard/types.ts::Settings.useWebGLTerminalRenderer`.
    */

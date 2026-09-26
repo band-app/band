@@ -64,7 +64,9 @@ test.beforeAll(async () => {
       },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  // `translucentSidebar: true` is the default, seeded explicitly so the
+  // solid-sidebar test below proves the browser build ignores it.
+  seedSettings(tmpHome, { tokenSecret: TOKEN, translucentSidebar: true });
   server = await startServer({ tmpHome });
 });
 
@@ -215,4 +217,19 @@ test("the collapsed state persists across a reload", async ({ page }) => {
   // The mount effect re-collapses from persisted state.
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
   await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the browser build paints the sidebar solid even with translucentSidebar on", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Positive anchor: the sidebar rendered at full width.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  // The translucent sidebar needs the macOS desktop window's vibrancy layer,
+  // so a plain browser tab keeps the page opaque and the sidebar solid.
+  expect(await wp.translucentSidebarActive()).toBe(false);
+  expect(await wp.sidebarBackgroundAlpha()).toBe(1);
 });

@@ -219,6 +219,13 @@ export interface Settings {
   enableFilePreviewTabs?: boolean;
   theme?: Theme;
   /**
+   * Let the blurred desktop show through the project-list sidebar (macOS
+   * vibrancy). Only takes effect in the macOS desktop app; the browser build
+   * always paints the sidebar solid.
+   * @default true
+   */
+  translucentSidebar?: boolean;
+  /**
    * Use the GPU-accelerated WebGL renderer for terminal panels. Enables
    * `customGlyphs` (continuous box-drawing / powerline / block art) and
    * lets the panel use iTerm-style row spacing (`lineHeight: 1.2`). When

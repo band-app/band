@@ -334,8 +334,11 @@ export function DashboardShell({
         "w-full overflow-hidden flex flex-col text-foreground p-0",
         // Embedded as the project-list sidebar (hideTitleBar): paint the
         // `--sidebar` surface so the list reads as a panel distinct from the
-        // workspace layout. Standalone (mobile / narrow web): plain background.
-        hideTitleBar ? "h-full bg-sidebar" : "bg-background",
+        // workspace layout. Under the translucent sidebar (macOS desktop) the
+        // AppShell column already paints the tint, so stay transparent rather
+        // than stack a second layer. Standalone (mobile / narrow web): plain
+        // background.
+        hideTitleBar ? "h-full bg-sidebar translucent-sidebar:bg-transparent" : "bg-background",
         !isDesktop && "pt-[env(safe-area-inset-top)]",
         // Full screen the action bar keeps a 16px gap above the bottom edge,
         // widened to the home-indicator inset when there is one. In the

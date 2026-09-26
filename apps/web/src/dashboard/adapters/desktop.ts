@@ -126,6 +126,12 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     return isDesktopShell();
   }
 
+  // The desktop window only gets its vibrancy layer on macOS (see
+  // `apps/desktop/src/main/window.ts`).
+  get translucentSidebar(): boolean {
+    return isDesktopShell() && /Mac/.test(navigator.userAgent);
+  }
+
   getWorkspaceHref(workspaceId: string): string | undefined {
     return this.web.getWorkspaceHref(workspaceId);
   }

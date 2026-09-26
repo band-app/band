@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -427,6 +427,26 @@ describe("tRPC — settings CRUD", () => {
     expect(data.worktreesDir).toBeNull();
     // Previous keys are preserved (merge semantics, not replace)
     expect(data.autoStartTunnel).toBe(true);
+  });
+
+  it("settings.update persists translucentSidebar to settings.json", async () => {
+    const res = await trpcMutate(server.url, "settings.update", { translucentSidebar: false });
+    expect(res.status).toBe(200);
+
+    const getRes = await trpcQuery(server.url, "settings.get");
+    const data = await trpcData<Record<string, unknown>>(getRes);
+    expect(data.translucentSidebar).toBe(false);
+    const onDisk = JSON.parse(readFileSync(join(tmpHome, ".band", "settings.json"), "utf-8"));
+    expect(onDisk.translucentSidebar).toBe(false);
+  });
+
+  it("settings.update rejects a non-boolean translucentSidebar", async () => {
+    const res = await trpcMutate(server.url, "settings.update", { translucentSidebar: "yes" });
+    expect(res.status).toBe(400);
+
+    const getRes = await trpcQuery(server.url, "settings.get");
+    const data = await trpcData<Record<string, unknown>>(getRes);
+    expect(data.translucentSidebar).toBe(false);
   });
 });
 

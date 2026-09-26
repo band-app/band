@@ -154,17 +154,17 @@ export function NavControls({
   );
 }
 
-/** Draggable title bar over the project-list sidebar. A pure drag/paint
- *  surface: the navigation cluster that used to live here is now hosted in
+/** Draggable title bar over the project-list sidebar. A pure drag surface:
+ *  the navigation cluster that used to live here is now hosted in
  *  `AppShell`'s stationary overlay (see NavControlsProps), which sits on top of
- *  this bar while the list is visible. Painted with the sidebar surface so
- *  it reads as one panel with the list below it, visually separated from
- *  the workspace layout to its right. */
+ *  this bar while the list is visible. Unpainted: the sidebar column around it
+ *  paints the sidebar surface, so it reads as one panel with the list below
+ *  it, and a second layer would double the translucent sidebar's tint. */
 export function SidebarTitleBar() {
   return (
     <div
       data-testid="desktop-title-bar__sidebar-surface"
-      className="h-[38px] shrink-0 flex items-center border-b border-border bg-sidebar"
+      className="h-[38px] shrink-0 flex items-center border-b border-border"
       style={DRAG_STYLE}
     />
   );
