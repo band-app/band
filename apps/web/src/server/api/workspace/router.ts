@@ -214,8 +214,16 @@ export const workspaceRouter = t.router({
     }),
 
   listBranches: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => diffService.listBranches(input.workspaceId)),
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        query: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      diffService.listBranches(input.workspaceId, { query: input.query, limit: input.limit }),
+    ),
 
   getDiff: publicProcedure
     .input(

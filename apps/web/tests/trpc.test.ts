@@ -1467,6 +1467,57 @@ describe("tRPC — workspace operations", () => {
     expect(data.branches).not.toContain("main");
   });
 
+  it("workspace.listBranches searches local and remote branches server-side", async () => {
+    // Remote-tracking refs written straight into the repo, as `git fetch`
+    // would, plus `origin/HEAD` pointing at `origin/main`.
+    const refs = [
+      "refs/heads/search-local-a",
+      "refs/heads/search-local-b",
+      "refs/heads/domain-work",
+      "refs/remotes/origin/main",
+      "refs/remotes/origin/search-remote",
+    ];
+    for (const ref of refs) git(repoPath, ["update-ref", ref, "main"]);
+    git(repoPath, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+    try {
+      const list = async (input: Record<string, unknown>) => {
+        const res = await trpcQuery(server.url, "workspace.listBranches", {
+          workspaceId: "repo-feature-1",
+          ...input,
+        });
+        expect(res.status).toBe(200);
+        return trpcData<{ branches: string[]; truncated: boolean }>(res);
+      };
+
+      // No query: remote branches are listed, the `origin/HEAD` pointer isn't,
+      // and the default branch leads, followed by its remote copy.
+      const all = await list({});
+      expect(all.branches.slice(0, 2)).toEqual(["main", "origin/main"]);
+      expect(all.branches).toContain("origin/search-remote");
+      expect(all.branches).not.toContain("origin/HEAD");
+      expect(all.branches).not.toContain("origin");
+      expect(all.truncated).toBe(false);
+
+      // The query filters on the server, case-insensitively.
+      const remote = await list({ query: "SEARCH-REM" });
+      expect(remote.branches).toEqual(["origin/search-remote"]);
+
+      // `limit` caps the result and flags the rest as truncated.
+      const limited = await list({ query: "search", limit: 2 });
+      expect(limited.branches).toHaveLength(2);
+      expect(limited.truncated).toBe(true);
+
+      // Exact matches (with or without the remote prefix) rank above names
+      // that merely contain the query.
+      const main = await list({ query: "main" });
+      expect(main.branches).toEqual(["main", "origin/main", "domain-work"]);
+    } finally {
+      git(repoPath, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+      for (const ref of refs) git(repoPath, ["update-ref", "-d", ref]);
+    }
+  });
+
   // -- workspace.getDiff with compareBranch --
 
   it("workspace.getDiff with non-default compareBranch uses merge-base of that branch", async () => {

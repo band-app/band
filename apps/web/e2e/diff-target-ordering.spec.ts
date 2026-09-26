@@ -11,10 +11,10 @@
  *     the project's default branch, then every other branch
  *     alphabetically.
  *
- * The retired monolithic Changes view also had a head-branch label beside
- * the picker, with a flicker guard for it. The sidepanel has no such label,
- * and its trigger text comes from `useDiffTarget` state rather than the
- * refetched summary, so there is nothing left to blank during a switch.
+ * The ranking itself runs on the server (`DiffService.listBranches`), since
+ * the picker searches there instead of loading every branch. Search, the
+ * default-branch button and keyboard picking are covered in
+ * `diff-target-picker.spec.ts`.
  *
  * The branch list reaches the picker through the real git pipeline
  * (`workspace.listBranches` → `git for-each-ref` in an on-disk worktree)

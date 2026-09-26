@@ -2,8 +2,9 @@
  * Page object for the Changes UI of the unified workspace layout (#643):
  *
  *   - The Changes tab of the right sidepanel (`RightSidepanel.tsx`), which
- *     holds the diff-target picker (`right-sidepanel__diff-target-select`)
- *     and the changed-file tree (`changes-tree__row--<path>` rows).
+ *     holds the current-branch / diff-target header (`DiffTargetHeader.tsx`)
+ *     with its branch picker, and the changed-file tree
+ *     (`changes-tree__row--<path>` rows).
  *   - The per-file `diff` leaf a changed-file click opens in the center
  *     dockview (`center-diff-leaf__visible-*`), with its unified / split
  *     toggle (`center-diff-leaf__view--unified|split`).
@@ -28,9 +29,21 @@ export type DiffViewMode = "unified" | "split";
 export const UNCOMMITTED_OPTION_TESTID = "right-sidepanel__diff-target-option-uncommitted";
 
 export class ChangesPanelPage {
-  /** The diff-target `<Select>` trigger in the Changes tab. Its rendered text
-   *  is the selected target (e.g. "Uncommitted" or a branch name). */
+  /** The diff-target button in the Changes header. Its rendered text is the
+   *  selected target (e.g. "Uncommitted" or a branch name). */
   readonly diffTargetTrigger: Locator;
+  /** The worktree's current branch, shown above the diff target. */
+  readonly headBranch: Locator;
+  /** The branch picker popover the diff-target button opens. */
+  readonly diffTargetPicker: Locator;
+  /** Search input of the open branch picker. */
+  readonly diffTargetSearch: Locator;
+  /** The picker's "Default branch" button. */
+  readonly defaultBranchButton: Locator;
+  /** Branch options in the open picker (excludes "Uncommitted"). */
+  readonly branchOptions: Locator;
+  /** Notice shown when more branches matched than the picker lists. */
+  readonly truncatedNotice: Locator;
   /** First option in the open diff-target dropdown. */
   readonly firstDiffTargetOption: Locator;
   /** The body of the visible `diff` leaf. Scopes the CodeMirror locators below
@@ -60,6 +73,12 @@ export class ChangesPanelPage {
   ) {
     this.workspace = new WorkspacePage(page, baseUrl, token);
     this.diffTargetTrigger = page.getByTestId("right-sidepanel__diff-target-select");
+    this.headBranch = page.getByTestId("right-sidepanel__head-branch");
+    this.diffTargetPicker = page.getByTestId("right-sidepanel__diff-target-picker");
+    this.diffTargetSearch = page.getByTestId("right-sidepanel__diff-target-search");
+    this.defaultBranchButton = page.getByTestId("right-sidepanel__diff-target-default");
+    this.branchOptions = page.getByTestId("right-sidepanel__diff-target-option");
+    this.truncatedNotice = page.getByTestId("right-sidepanel__diff-target-truncated");
     this.firstDiffTargetOption = page.getByRole("option").first();
     this.diffLeaf = page.getByTestId("center-diff-leaf__visible-true");
     this.cmScrollers = this.diffLeaf.locator(".cm-scroller");
@@ -121,9 +140,63 @@ export class ChangesPanelPage {
     }, this.currentWorkspaceId);
   }
 
-  /** Open the diff-target dropdown. Radix renders the listbox into a portal
-   *  and re-renders it as the branch list arrives, so callers open ONCE here
-   *  and then poll `visibleDiffTargetOptions()`. Re-clicking the trigger in a
+  /** The stored compare branch, read from the per-workspace
+   *  `band:diff-compare-branch:<id>` localStorage key `useDiffTarget` writes.
+   *  `null` when nothing has been picked. */
+  async compareBranch(): Promise<string | null> {
+    if (!this.currentWorkspaceId) {
+      throw new Error("compareBranch() called before goto()");
+    }
+    return await this.page.evaluate(
+      (workspaceId) => localStorage.getItem(`band:diff-compare-branch:${workspaceId}`),
+      this.currentWorkspaceId,
+    );
+  }
+
+  /** Reload the page and reopen the Changes tab of the same workspace. */
+  async reload(): Promise<void> {
+    if (!this.currentWorkspaceId) {
+      throw new Error("reload() called before goto()");
+    }
+    await this.goto(this.currentWorkspaceId);
+  }
+
+  /** Type `query` into the open picker's search box. */
+  async searchBranches(query: string): Promise<void> {
+    await test.step(`Search branches for "${query}"`, async () => {
+      await this.diffTargetSearch.fill(query);
+    });
+  }
+
+  /** Press a key while the picker has focus (ArrowDown, Enter, Escape…). */
+  async pressInPicker(key: string): Promise<void> {
+    await test.step(`Press ${key} in the branch picker`, async () => {
+      await this.diffTargetSearch.press(key);
+    });
+  }
+
+  /** Click the picker's "Default branch" button. */
+  async pickDefaultBranch(): Promise<void> {
+    await test.step("Pick the default branch", async () => {
+      await this.defaultBranchButton.click();
+    });
+  }
+
+  /** Branch names listed in the open picker, in DOM order. */
+  async visibleBranchOptions(): Promise<string[]> {
+    return (await this.branchOptions.allTextContents()).map((t) => t.trim());
+  }
+
+  /** Name of the option the keyboard cursor is on (cmdk marks it with
+   *  `aria-selected`). */
+  async highlightedOption(): Promise<string | null> {
+    const option = this.page.getByRole("option", { selected: true });
+    return (await option.count()) === 0 ? null : (await option.textContent())?.trim() ?? null;
+  }
+
+  /** Open the diff-target dropdown. The picker renders into a portal and
+   *  re-renders as the branch list arrives, so callers open ONCE here and
+   *  then poll `visibleDiffTargetOptions()`. Re-clicking the trigger in a
    *  poll loop would toggle it shut. */
   async openDiffTargetDropdown(): Promise<void> {
     await test.step("Open diff-target dropdown", async () => {
@@ -133,8 +206,7 @@ export class ChangesPanelPage {
   }
 
   /** Every option label in the open diff-target dropdown, in DOM order. Each
-   *  `<SelectItem>` has `role="option"`; the `<SelectSeparator>` is
-   *  `role="separator"` and is excluded. Doesn't click, so it's safe inside
+   *  picker entry has `role="option"`. Doesn't click, so it's safe inside
    *  `expect.poll` while the branch list settles. */
   async visibleDiffTargetOptions(): Promise<string[]> {
     return (await this.page.getByRole("option").allTextContents()).map((t) => t.trim());

@@ -304,6 +304,16 @@ export type FileStatus = "A" | "M" | "D" | "R" | "U";
 
 export type DiffMode = "uncommitted" | "branch";
 
+export interface ListWorkspaceBranchesResult {
+  /** Matching branch names, local (`feature/x`) and remote (`origin/feature/x`). */
+  branches: string[];
+  /** The project's default branch (e.g. `main`). */
+  defaultBranch: string;
+  headBranch: string;
+  /** More branches matched than the requested limit. */
+  truncated: boolean;
+}
+
 export interface WorkspaceDiff {
   diff: string;
   stats: { filesChanged: number; insertions: number; deletions: number };

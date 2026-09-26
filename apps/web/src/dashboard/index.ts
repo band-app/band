@@ -159,6 +159,7 @@ export type {
   GitSyncState,
   HooksStatus,
   LabelDefinition,
+  ListWorkspaceBranchesResult,
   NotificationSettings,
   ProjectAvatarInfo,
   ProjectInfo,
