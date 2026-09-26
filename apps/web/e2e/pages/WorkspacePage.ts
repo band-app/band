@@ -14,6 +14,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 
 /** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
  *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
@@ -883,6 +884,157 @@ export class WorkspacePage {
    *  DOM/visual order). */
   paneInput(index: number): Locator {
     return this.terminalPanes().nth(index).getByRole("textbox", { name: "Terminal input" });
+  }
+
+  /** Start the in-app typing-latency probe (`window.__bandTypingLatency`). */
+  async startTypingLatencyProbe(): Promise<void> {
+    await this.page.evaluate(() => {
+      (window as unknown as { __bandTypingLatency: { start(): void } }).__bandTypingLatency.start();
+    });
+  }
+
+  /** Stop the typing-latency probe and return its report. */
+  async stopTypingLatencyProbe(): Promise<TypingLatencyReport> {
+    return await this.page.evaluate(() =>
+      (
+        window as unknown as { __bandTypingLatency: { stop(): TypingLatencyReport } }
+      ).__bandTypingLatency.stop(),
+    );
+  }
+
+  /** Readiness barrier that also works under the WebGL renderer (whose rows
+   *  aren't in the DOM): press a key into the focused terminal until the probe
+   *  records it echoed and painted, then erase it. */
+  async waitForTypingEcho(timeoutMs = 20_000): Promise<void> {
+    await test.step("Wait for a keystroke to echo in the focused terminal", async () => {
+      await this.startTypingLatencyProbe();
+      await expect
+        .poll(
+          async () => {
+            await this.page.keyboard.press("x");
+            await this.page.keyboard.press("Backspace");
+            return await this.page.evaluate(
+              () =>
+                (
+                  window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
+                ).__bandTypingLatency.report().samples,
+            );
+          },
+          { timeout: timeoutMs },
+        )
+        .toBeGreaterThan(0);
+      await this.stopTypingLatencyProbe();
+    });
+  }
+
+  /** Start recording long animation frames (>50 ms) for {@link stopFrameAttribution}. */
+  async startFrameAttribution(): Promise<void> {
+    await this.page.evaluate(() => {
+      const store = window as unknown as {
+        __benchLoaf?: PerformanceEntry[];
+        __benchObs?: PerformanceObserver;
+      };
+      store.__benchLoaf = [];
+      store.__benchObs = new PerformanceObserver((list) => {
+        store.__benchLoaf?.push(...list.getEntries());
+      });
+      store.__benchObs.observe({ type: "long-animation-frame", buffered: false });
+    });
+  }
+
+  /** Summarise the long animation frames since {@link startFrameAttribution}:
+   *  total time, how much of it was script vs rendering, and script time by
+   *  invoker (e.g. `WebSocket.onmessage`, `TimerHandler:setTimeout`). */
+  async stopFrameAttribution(): Promise<{
+    frames: number;
+    totalMs: number;
+    scriptMs: number;
+    renderMs: number;
+    byInvoker: Record<string, number>;
+  }> {
+    return await this.page.evaluate(() => {
+      interface Loaf extends PerformanceEntry {
+        renderStart: number;
+        scripts: { invoker: string; duration: number; sourceFunctionName: string }[];
+      }
+      const store = window as unknown as { __benchLoaf?: Loaf[]; __benchObs?: PerformanceObserver };
+      store.__benchObs?.disconnect();
+      const entries = store.__benchLoaf ?? [];
+      const byInvoker: Record<string, number> = {};
+      let scriptMs = 0;
+      let renderMs = 0;
+      let totalMs = 0;
+      for (const entry of entries) {
+        totalMs += entry.duration;
+        if (entry.renderStart > 0) renderMs += entry.startTime + entry.duration - entry.renderStart;
+        for (const script of entry.scripts) {
+          scriptMs += script.duration;
+          const key = `${script.invoker} ${script.sourceFunctionName}`.trim();
+          byInvoker[key] = Math.round((byInvoker[key] ?? 0) + script.duration);
+        }
+      }
+      return {
+        frames: entries.length,
+        totalMs: Math.round(totalMs),
+        scriptMs: Math.round(scriptMs),
+        renderMs: Math.round(renderMs),
+        byInvoker,
+      };
+    });
+  }
+
+  /** Record a V8 CPU profile of the page's main thread until the returned
+   *  function is called; it resolves with self time per function (ms), the
+   *  busiest first, plus the idle share. */
+  async profileMainThread(): Promise<
+    () => Promise<{ idlePct: number; top: { fn: string; ms: number }[] }>
+  > {
+    const cdp = await this.page.context().newCDPSession(this.page);
+    await cdp.send("Profiler.enable");
+    await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
+    await cdp.send("Profiler.start");
+    return async () => {
+      const { profile } = await cdp.send("Profiler.stop");
+      const selfUs = new Map<number, number>();
+      const samples = profile.samples ?? [];
+      const deltas = profile.timeDeltas ?? [];
+      for (let i = 0; i < samples.length; i++) {
+        selfUs.set(samples[i], (selfUs.get(samples[i]) ?? 0) + (deltas[i] ?? 0));
+      }
+      const byFn = new Map<string, number>();
+      let total = 0;
+      let idle = 0;
+      for (const node of profile.nodes) {
+        const us = selfUs.get(node.id) ?? 0;
+        total += us;
+        const { functionName, url, lineNumber, columnNumber } = node.callFrame;
+        if (functionName === "(idle)") idle += us;
+        const file = url.split("/").pop() ?? "";
+        const key = `${functionName || "(anonymous)"} ${file}:${lineNumber}:${columnNumber}`;
+        byFn.set(key, (byFn.get(key) ?? 0) + us);
+      }
+      await cdp.detach();
+      return {
+        idlePct: Math.round((idle / Math.max(total, 1)) * 100),
+        top: [...byFn.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 25)
+          .map(([fn, us]) => ({ fn, ms: Math.round(us / 1000) })),
+      };
+    };
+  }
+
+  /** Press `count` printable keys into the focused terminal, `intervalMs`
+   *  apart (a fast typist), clearing the line with Ctrl+U every 40 keys. */
+  async typeKeysPaced(count: number, intervalMs: number): Promise<void> {
+    await test.step(`Type ${count} keys, ${intervalMs} ms apart`, async () => {
+      const alphabet = "abcdefghijklmnopqrstuvwxyz";
+      for (let i = 0; i < count; i++) {
+        await this.page.keyboard.press(alphabet[i % alphabet.length]);
+        if (i % 40 === 39) await this.page.keyboard.press("Control+u");
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    });
   }
 
   /** Move focus into the nth terminal pane (activates it in the nested split). */

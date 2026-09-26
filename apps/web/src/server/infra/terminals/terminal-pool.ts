@@ -38,6 +38,50 @@ const MAX_COLS = 1_000;
 const MAX_ROWS = 1_000;
 
 /**
+ * The last `max` characters of a terminal's output, for the plain-text read
+ * paths. Appending is O(1): chunks are kept as-is and whole chunks drop off
+ * the front once the rest still covers `max`. Trimming to exactly `max`
+ * happens only on read. (A single string that is appended to and re-sliced
+ * copied the whole ~100 KB tail on every PTY chunk, even a one-byte echo.)
+ */
+class OutputTail {
+  private chunks: string[] = [];
+  /** Index of the oldest chunk still held; earlier slots are dropped. */
+  private head = 0;
+  /** Total characters in `chunks[head..]`. */
+  private size = 0;
+
+  constructor(private readonly max: number) {}
+
+  get length(): number {
+    return Math.min(this.size, this.max);
+  }
+
+  append(data: string): void {
+    if (data.length === 0) return;
+    this.chunks.push(data);
+    this.size += data.length;
+    while (this.size - this.chunks[this.head].length >= this.max) {
+      this.size -= this.chunks[this.head].length;
+      this.head += 1;
+    }
+    // Reclaim dropped slots once they outnumber the live ones.
+    if (this.head > 64 && this.head * 2 > this.chunks.length) {
+      this.chunks = this.chunks.slice(this.head);
+      this.head = 0;
+    }
+  }
+
+  toString(): string {
+    const joined = this.chunks.slice(this.head).join("");
+    // Keep the joined form so repeated reads don't join again.
+    this.chunks = [joined];
+    this.head = 0;
+    return joined.length > this.max ? joined.slice(-this.max) : joined;
+  }
+}
+
+/**
  * Options for spawning a new PTY session.
  *
  * The shape is shared between the tRPC `terminal.create` mutation, the
@@ -105,17 +149,17 @@ export interface TerminalSnapshot {
  *
  * The pool owns the `IPty` handle, the buffered scrollback, and the
  * `workspaceId` reverse-lookup so the service tier never has to touch
- * `node-pty` directly. `scrollback` is a single growing string capped at
- * `MAX_SCROLLBACK_SIZE` (~100 KB) — see `onData` below for the bounded
- * write. It serves the plain-text read paths (`terminal.output` /
- * `band terminals output`); replay-into-a-terminal paths use the
+ * `node-pty` directly. `scrollback` holds the last `MAX_SCROLLBACK_SIZE`
+ * (~100 KB) characters of output (see {@link OutputTail}). It serves the
+ * plain-text read paths (`terminal.output` / `band terminals output`);
+ * replay-into-a-terminal paths use the
  * `headless` mirror via {@link TerminalPool.serialize} instead, because
  * the tail-sliced raw bytes are not sound to replay (they can start
  * mid-escape-sequence).
  */
 export interface TerminalSession {
   pty: IPty;
-  scrollback: string;
+  scrollback: OutputTail;
   /**
    * Headless xterm that parses the same PTY stream the clients see, so
    * the pool can serialize a clean reconstruction of the current terminal
@@ -127,6 +171,12 @@ export interface TerminalSession {
   workspaceId: string;
   /** Number of output chunks emitted so far; the last chunk's `seq`. */
   seq: number;
+  /**
+   * Outstanding {@link TerminalPool.holdOutput} calls. The PTY is paused
+   * while this is above zero, so independent holders (a snapshot drain, a
+   * backed-up daemon stream) can't resume it under each other.
+   */
+  holds: number;
   cleanupOnExit: boolean;
   /**
    * Path of the temp file staging an auto-run command, if any. Removed
@@ -390,11 +440,12 @@ export class TerminalPool {
 
     const session: TerminalSession = {
       pty: ptyProcess,
-      scrollback: "",
+      scrollback: new OutputTail(MAX_SCROLLBACK_SIZE),
       headless,
       serializeAddon,
       workspaceId,
       seq: 0,
+      holds: 0,
       cleanupOnExit: extras?.cleanupOnExit ?? false,
     };
     this.terminals.set(terminalId, session);
@@ -417,10 +468,7 @@ export class TerminalPool {
     // Buffer all PTY output for the plain-text read paths, mirror it into
     // the headless terminal for replay-on-reconnect, and notify listeners.
     ptyProcess.onData((data: string) => {
-      session.scrollback += data;
-      if (session.scrollback.length > MAX_SCROLLBACK_SIZE) {
-        session.scrollback = session.scrollback.slice(-MAX_SCROLLBACK_SIZE);
-      }
+      session.scrollback.append(data);
       session.headless.write(data);
       session.seq += 1;
       const seq = session.seq;
@@ -742,8 +790,9 @@ export class TerminalPool {
   getScrollback(terminalId: string, lines?: number): string | null {
     const session = this.terminals.get(terminalId);
     if (!session) return null;
-    if (lines == null) return session.scrollback;
-    const allLines = session.scrollback.split("\n");
+    const scrollback = session.scrollback.toString();
+    if (lines == null) return scrollback;
+    const allLines = scrollback.split("\n");
     return allLines.slice(-lines).join("\n");
   }
 
@@ -794,7 +843,7 @@ export class TerminalPool {
     // client). A chunk that lands right after this check is simply
     // delivered live by the caller's forwarder — not lost, not duplicated.
     if (session.scrollback.length === 0) return { data: "", seq: session.seq };
-    session.pty.pause();
+    this.holdOutput(terminalId);
     let deathWatch: NodeJS.Timeout | undefined;
     let drainCap: NodeJS.Timeout | undefined;
     try {
@@ -827,9 +876,29 @@ export class TerminalPool {
     } finally {
       if (deathWatch) clearInterval(deathWatch);
       if (drainCap) clearTimeout(drainCap);
-      // Skip the resume if the session died mid-drain — the PTY is gone.
-      if (this.terminals.get(terminalId) === session) session.pty.resume();
+      // Skip the release if the session died mid-drain — the PTY is gone.
+      if (this.terminals.get(terminalId) === session) this.releaseOutput(terminalId);
     }
+  }
+
+  /**
+   * Stop reading the terminal's PTY until a matching {@link releaseOutput}.
+   * The shell blocks once the kernel's PTY buffer fills, so a flood stops at
+   * its source instead of piling up in memory. Holds nest.
+   */
+  holdOutput(terminalId: string): void {
+    const session = this.terminals.get(terminalId);
+    if (!session) return;
+    session.holds += 1;
+    if (session.holds === 1) session.pty.pause();
+  }
+
+  /** Undo one {@link holdOutput}; the PTY resumes when the last is released. */
+  releaseOutput(terminalId: string): void {
+    const session = this.terminals.get(terminalId);
+    if (!session || session.holds === 0) return;
+    session.holds -= 1;
+    if (session.holds === 0) session.pty.resume();
   }
 
   /**

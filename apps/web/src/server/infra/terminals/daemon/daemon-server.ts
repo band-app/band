@@ -49,6 +49,20 @@ const INITIAL_ADOPTION_MS = 2 * 60_000;
  * debugger) would otherwise make the daemon buffer output without bound.
  */
 const MAX_STREAM_BACKLOG_BYTES = 64 * 1024 * 1024;
+/**
+ * Stream backlog at which a flooding session's PTY is paused until the socket
+ * drains. The stream is one FIFO for every terminal a server watches, so a
+ * deep backlog puts a quiet terminal's echo behind another's bulk output, and
+ * without a bound the backlog reached `MAX_STREAM_BACKLOG_BYTES` within
+ * seconds of a full-speed flood, dropping the server. Orca's gate for the
+ * same socket.
+ */
+const STREAM_HOLD_BYTES = 128 * 1024;
+/**
+ * A session that sent less than this since the stream was last empty is
+ * never paused: echo, prompts and small redraws aren't the flood.
+ */
+const SMALL_SESSION_BYTES = 4 * 1024;
 
 interface Client {
   id: string;
@@ -56,6 +70,10 @@ interface Client {
   stream: Socket | null;
   /** terminalId -> pool unsubscribe, one per terminal this client attached. */
   attached: Map<string, () => void>;
+  /** Sessions this client's stream backlog paused; released when it drains. */
+  held: Set<string>;
+  /** terminalId -> characters streamed since the stream socket was last empty. */
+  sentSinceEmpty: Map<string, number>;
 }
 
 export interface DaemonOptions {
@@ -169,6 +187,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   pool.onExit((event) => {
     for (const client of clients.values()) {
       client.attached.delete(event.terminalId);
+      client.held.delete(event.terminalId);
       send(client, "stream", { t: "exit", ...event } satisfies StreamEvent);
     }
     reevaluateIdle();
@@ -334,7 +353,14 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   function registerClient(clientId: string, role: ClientRole, socket: Socket): Client | null {
     let client = clients.get(clientId);
     if (!client) {
-      client = { id: clientId, control: null, stream: null, attached: new Map() };
+      client = {
+        id: clientId,
+        control: null,
+        stream: null,
+        attached: new Map(),
+        held: new Set(),
+        sentSinceEmpty: new Map(),
+      };
       clients.set(clientId, client);
     }
     // One socket per role per client; a second one is a confused peer.
@@ -354,6 +380,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     clients.delete(client.id);
     for (const unsubscribe of client.attached.values()) unsubscribe();
     client.attached.clear();
+    // Its stream will never drain now; don't leave its floods paused.
+    releaseHolds(client);
     client.control?.destroy();
     client.stream?.destroy();
     // The last server left. With no shells that means exit now; with shells,
@@ -371,6 +399,37 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       return;
     }
     writeFrame(socket, message);
+  }
+
+  /**
+   * Stream one output chunk, pausing the session's PTY when it is flooding a
+   * backed-up stream (see `STREAM_HOLD_BYTES`). Small sessions keep flowing,
+   * so their echo waits behind at most the hold threshold.
+   */
+  function sendOutput(client: Client, terminalId: string, seq: number, d: string): void {
+    const socket = client.stream;
+    if (socket && socket.writableLength === 0) client.sentSinceEmpty.clear();
+    send(client, "stream", { t: "data", id: terminalId, seq, d } satisfies StreamEvent);
+    if (!socket || socket.destroyed || clients.get(client.id) !== client) return;
+    const sent = (client.sentSinceEmpty.get(terminalId) ?? 0) + d.length;
+    client.sentSinceEmpty.set(terminalId, sent);
+    if (
+      socket.writableLength < STREAM_HOLD_BYTES ||
+      sent <= SMALL_SESSION_BYTES ||
+      client.held.has(terminalId)
+    ) {
+      return;
+    }
+    client.held.add(terminalId);
+    pool.holdOutput(terminalId);
+    // A backlog this deep means a write returned false, so `drain` will fire.
+    if (client.held.size === 1) socket.once("drain", () => releaseHolds(client));
+  }
+
+  function releaseHolds(client: Client): void {
+    for (const terminalId of client.held) pool.releaseOutput(terminalId);
+    client.held.clear();
+    client.sentSinceEmpty.clear();
   }
 
   function handleControl(client: Client, frame: unknown): void {
@@ -414,6 +473,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         const unsubscribe = client.attached.get(message.terminalId);
         client.attached.delete(message.terminalId);
         unsubscribe?.();
+        if (client.held.delete(message.terminalId)) pool.releaseOutput(message.terminalId);
         return;
       }
       case "shutdown":
@@ -481,7 +541,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     const entry = pool.info(terminalId);
     if (!entry) return null;
     const attached = await pool.attach(terminalId, dims, (d, seq) =>
-      send(client, "stream", { t: "data", id: terminalId, seq, d } satisfies StreamEvent),
+      sendOutput(client, terminalId, seq, d),
     );
     if (!attached) return null;
     // One subscription per (client, terminal): the server fans a terminal out

@@ -6,6 +6,7 @@ import { listen as desktopListen } from "./desktop-ipc";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
+import { createTerminalOutputQueue } from "./terminal-output-queue";
 import {
   selectIdsBeyondHotRetain,
   TERMINAL_TAB_COLD_PARK_DELAY_MS,
@@ -23,6 +24,11 @@ import {
   wordSelectionAt,
 } from "./terminal-selection";
 import { ownerOfTerminal } from "./terminal-split-registry";
+import {
+  noteTypingLatencyDispatch,
+  noteTypingLatencyOutput,
+  registerTypingLatencyTerminal,
+} from "./terminal-typing-latency";
 import { isWorkspaceColdParked, subscribeWorkspaceColdPark } from "./workspace-cold-park";
 import { getCurrentZoomLevel, subscribeToZoomChanges } from "./zoom";
 
@@ -407,6 +413,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       theme: getTerminalTheme(),
     });
     terminal = term;
+    // All output reaches xterm through this queue: straight through while the
+    // terminal is attached, budgeted while it is parked (terminal-output-queue.ts).
+    const output = createTerminalOutputQueue((data, onParsed) => term.write(data, onParsed));
 
     const themeObserver = new MutationObserver(() => {
       term.options.theme = getTerminalTheme();
@@ -721,7 +730,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         // Replay state is per-connection: a reconnect must ask again.
         attachSent = false;
         clearReplayGuard();
-        if (isReconnect) term.reset();
+        if (isReconnect) {
+          // The replay reconstructs the whole screen; output queued from the
+          // previous connection would land on top of it.
+          output.clear();
+          term.reset();
+        }
 
         // Are we already fitted to a visible live box? If so we can carry our
         // dims in the handshake and get the replay in one round-trip.
@@ -768,13 +782,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       };
 
       sock.onmessage = (event) => {
+        // A socket replaced by `resync` can still deliver frames before it closes.
+        if (ws !== sock) return;
         if (event.data instanceof ArrayBuffer) {
           // A binary frame received while awaiting replay is the snapshot
           // (serialized at the dims we sent) — lift the refit suppression.
           // `finishReplay` is a no-op once `awaitingReplay` has cleared, so
           // later live frames fall straight through to the write below.
           finishReplay();
-          term.write(new Uint8Array(event.data));
+          output.push(new Uint8Array(event.data), attached, noteTypingLatencyOutput(terminalId));
         } else {
           try {
             const msg = JSON.parse(event.data as string);
@@ -792,10 +808,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
               // scrollback, screen clears, cursor moves) — we only want to show
               // its plain text, in red.
               const safe = msg.message.replace(/\p{Cc}/gu, "");
-              term.write(`\r\n\x1b[31m${safe}\x1b[0m\r\n`);
+              // Notices are written at once even while parked (after any
+              // queued output), so they survive a parked queue's overflow.
+              output.push(`\r\n\x1b[31m${safe}\x1b[0m\r\n`, true);
             }
           } catch {
-            term.write(event.data as string);
+            output.push(event.data as string, attached);
           }
         }
       };
@@ -817,12 +835,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         if (event.code === 1000 || event.code >= 4000) {
           terminated = true;
           if (event.code === 1000) {
-            term.write("\r\n\x1b[90m[Process completed]\x1b[0m\r\n");
+            output.push("\r\n\x1b[90m[Process completed]\x1b[0m\r\n", true);
           }
           setState({ terminated: true });
           return;
         }
-        term.write("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n");
+        output.push("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n", true);
         scheduleReconnect();
       };
     }
@@ -838,6 +856,21 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         probeConnection();
       }
     };
+    // Shown again after being parked: write the output that queued meanwhile.
+    // If the queue overflowed, output was dropped and xterm's state is stale,
+    // so reconnect: the server replays a serialized snapshot of the screen
+    // and scrollback, exactly as after a network drop.
+    showParkedOutput = () => {
+      if (output.flush()) return;
+      output.clear();
+      if (intentionalClose || terminated) return;
+      const stale = ws;
+      connect();
+      // `connect` replaced `ws`, so the stale socket's late frames and its
+      // close are ignored.
+      stale?.close();
+    };
+
     // Coming back to the foreground (tab re-shown, or — in the Electron app —
     // the window regaining OS focus, which does NOT fire `visibilitychange`).
     // Re-check the socket and do a CHEAP repaint: backgrounding/throttling can
@@ -901,7 +934,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     connect();
 
+    const disposeTypingLatency = registerTypingLatencyTerminal(terminalId, term, wrapper);
     term.onData((data) => {
+      noteTypingLatencyDispatch(terminalId);
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
     });
     term.onTitleChange((title) => emitTitle(title));
@@ -1108,6 +1143,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       searchResultsDisposable.dispose();
       selectionResizeDisposable.dispose();
       fileLinkProviderDisposable.dispose();
+      disposeTypingLatency();
+      output.dispose();
       if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
       if (reconcileRafId !== null) cancelAnimationFrame(reconcileRafId);
       webglContextLossDisposable?.dispose();
@@ -1125,6 +1162,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   let hostIsVisible = (): boolean =>
     !!liveContainer && liveContainer.clientWidth > 0 && liveContainer.clientHeight > 0;
   let repairAndFit: () => void = () => {};
+  let showParkedOutput: () => void = () => {};
 
   let repairRafId: number | null = null;
   const scheduleRepair = () => {
@@ -1160,8 +1198,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // removed wrapper and resurrect a killed terminal.
       if (destroyed) return;
       liveContainer = container;
-      if (!attached) activatedSeq = nextActivationSeq();
+      const wasParked = !attached;
+      if (wasParked) activatedSeq = nextActivationSeq();
       attached = true;
+      if (wasParked) showParkedOutput();
       hiddenSince = null;
       scheduleParkingPass();
       if (attachOpts?.autoFocus) autoFocusPending = true;
