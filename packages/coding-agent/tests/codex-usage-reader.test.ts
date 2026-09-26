@@ -216,9 +216,10 @@ describe("codexUsageReader file descriptors", () => {
       // A fresh mtime each scan so listSessions rereads every file.
       const t = 1_000 + scan;
       for (const f of readdirSync(dayDir)) utimesSync(join(dayDir, f), t, t);
+      // Before listSessions, so findRolloutFile's scan runs on a cold cache.
+      await codexUsageReader.getSessionUsage(sessionId(209), workspace);
       await codexUsageReader.listSessions(workspace);
       await codexUsageReader.getSessionUsage(sessionId(100), workspace);
-      await codexUsageReader.getSessionUsage(sessionId(209), workspace);
     }
 
     assert.equal(await settledFdCount(baseline), baseline);

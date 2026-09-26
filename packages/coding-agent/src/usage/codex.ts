@@ -50,13 +50,18 @@ async function findSessionFiles(): Promise<SessionFile[]> {
 
 type SessionMeta = { id: string; cwd: string };
 
-/** Read the `session_meta` record (the rollout's first line) from `file`. */
+/**
+ * Read the `session_meta` record from `file`. Only the first non-empty line is
+ * read: that's where Codex writes it, and a rollout can run to tens of MB.
+ */
 async function readSessionMeta(file: string): Promise<SessionMeta | undefined> {
   for await (const line of readLines(file)) {
+    if (!line.trim()) continue;
     const obj = JSON.parse(line) as { type?: string; payload?: { id?: string; cwd?: string } };
     if (obj.type === "session_meta" && obj.payload?.id && obj.payload.cwd) {
       return { id: obj.payload.id, cwd: obj.payload.cwd };
     }
+    return undefined;
   }
   return undefined;
 }
@@ -71,9 +76,16 @@ const metaCache = new Map<string, { mtimeMs: number; meta: SessionMeta | undefin
 async function getSessionMeta(file: SessionFile): Promise<SessionMeta | undefined> {
   const cached = metaCache.get(file.path);
   if (cached && cached.mtimeMs === file.mtimeMs) return cached.meta;
-  const meta = await readSessionMeta(file.path);
-  metaCache.set(file.path, { mtimeMs: file.mtimeMs, meta });
-  return meta;
+  try {
+    const meta = await readSessionMeta(file.path);
+    metaCache.set(file.path, { mtimeMs: file.mtimeMs, meta });
+    return meta;
+  } catch (err) {
+    // Cache the failure too, so a corrupt rollout isn't reparsed every scan.
+    // A half-written first line gets retried once the next write bumps mtime.
+    metaCache.set(file.path, { mtimeMs: file.mtimeMs, meta: undefined });
+    throw err;
+  }
 }
 
 /**
