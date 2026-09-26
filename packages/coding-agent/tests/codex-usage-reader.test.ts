@@ -194,7 +194,10 @@ describe("codexUsageReader.getSessionUsage", () => {
 
     const snap = await codexUsageReader.getSessionUsage(sessionId(1), workspace);
 
-    assert.equal(snap?.turns.length, 1);
+    assert.deepEqual(
+      snap?.turns.map((t) => t.inputTokens),
+      [5],
+    );
   });
 
   it("returns null for an unknown session", async () => {
@@ -237,6 +240,7 @@ describe("codexUsageReader file descriptors", () => {
       await codexUsageReader.getSessionUsage(sessionId(100), workspace);
     }
 
-    assert.equal(await settledFdCount(baseline), baseline);
+    const settled = await settledFdCount(baseline);
+    assert.equal(settled, baseline, `${settled - baseline} fd(s) still open 1 s after the scans`);
   });
 });
