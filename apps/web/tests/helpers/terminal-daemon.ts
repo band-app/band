@@ -10,6 +10,9 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DaemonClient } from "@/server/infra/terminals/daemon/client";
+import { launchDaemon } from "@/server/infra/terminals/daemon/launch";
+import { daemonPaths } from "@/server/infra/terminals/daemon/protocol";
 
 const STOP_TIMEOUT_MS = 5_000;
 
@@ -17,18 +20,22 @@ export interface TerminalDaemonRecord {
   pid: number;
   /** The socket the daemon published; may live outside the run dir. */
   socket: string;
+  buildId: string;
 }
 
 /**
  * The live daemons serving `home`, from their pid records. Every protocol
  * version writes its own `terminal-daemon-v<N>.pid`, so match them all rather
- * than hardcode one.
+ * than hardcode one. A daemon superseded by another build has its record
+ * copied to `terminal-daemon-v<N>.retired-<tag>.pid`; those count too.
  */
 export function terminalDaemons(home: string): TerminalDaemonRecord[] {
   const runDir = join(home, ".band", "run");
   let names: string[];
   try {
-    names = readdirSync(runDir).filter((name) => /^terminal-daemon-v\d+\.pid$/.test(name));
+    names = readdirSync(runDir).filter((name) =>
+      /^terminal-daemon-v\d+(\.retired-[0-9a-f]+)?\.pid$/.test(name),
+    );
   } catch {
     return [];
   }
@@ -42,6 +49,57 @@ export function terminalDaemons(home: string): TerminalDaemonRecord[] {
     }
   }
   return records;
+}
+
+/**
+ * Start a terminal daemon on `home` the way a server of build `buildId` would,
+ * from `entry`, as if an older (or deleted) build had left it running. Speaks
+ * the daemon's socket protocol directly, since the point is that no server of
+ * this build would put a shell on it.
+ */
+export async function startDaemonOfBuild(
+  home: string,
+  { entry, buildId }: { entry: string; buildId: string },
+): Promise<{ pid: number; spawnShell: (shell: ShellSpec) => Promise<number> }> {
+  const bandHome = join(home, ".band");
+  const paths = daemonPaths(join(bandHome, "run"));
+  const outcome = await launchDaemon({ entry, paths, cwd: bandHome, buildId });
+  if (outcome !== "launched") throw new Error(`expected a fresh daemon, got ${outcome}`);
+  const probe = await DaemonClient.connect(paths, buildId);
+  const pid = probe.pid;
+  probe.close();
+  return {
+    pid,
+    // Connects per call: the daemon may no longer own the endpoint by then,
+    // and a shell must land on this daemon or fail.
+    async spawnShell(shell) {
+      const client = await DaemonClient.connect(paths, buildId);
+      try {
+        if (client.pid !== pid) throw new Error("another daemon serves the endpoint");
+        const env: Record<string, string> = {};
+        for (const [key, value] of Object.entries(process.env)) {
+          if (value !== undefined) env[key] = value;
+        }
+        const spawned = await client.request("spawn", { ...shell, baseEnv: env });
+        return spawned.pid;
+      } finally {
+        client.close();
+      }
+    },
+  };
+}
+
+export interface ShellSpec {
+  workspaceId: string;
+  terminalId: string;
+  workspaceRoot: string;
+}
+
+/** The parent pid of `pid`: for a shell, the daemon hosting it. */
+export function parentPid(pid: number): number {
+  return Number(
+    execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim(),
+  );
 }
 
 /** The daemon's log, where it records why it drains or exits. */

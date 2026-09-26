@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 import type { Socket } from "node:net";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
   SpawnOptions,
   TerminalExitEvent,
@@ -25,6 +26,12 @@ export const PROTOCOL_VERSION = 1;
 export const EXIT_ENDPOINT_OCCUPIED = 20;
 /** Daemon exit code for "could not publish the endpoint" (lost the race, or can't tell). */
 export const EXIT_ENDPOINT_UNAVAILABLE = 21;
+
+/**
+ * The error a daemon answers `spawn` with once another daemon has replaced
+ * its endpoint. A server that sees it connects to the endpoint's new owner.
+ */
+export const ENDPOINT_LOST_ERROR = "Terminal daemon no longer owns its endpoint";
 
 /** macOS `sockaddr_un.sun_path` is 104 bytes including the NUL. */
 const MAX_SOCKET_PATH_BYTES = 103;
@@ -62,6 +69,45 @@ export function daemonPaths(runDir: string, version = PROTOCOL_VERSION): DaemonP
 }
 
 /**
+ * Where a superseded daemon stays reachable. When a daemon of a newer build
+ * takes over the endpoint from a live one (see `publishEndpoint`), it first
+ * hardlinks the incumbent's socket to a private name and copies its token and
+ * pid record beside it, so a restarted server can still reattach the shells
+ * the old daemon hosts. The old daemon never learns of these names; the
+ * daemon that created them removes them once the old one is gone.
+ *
+ * The socket name is shorter than the canonical one, so it always fits
+ * `sun_path` when the canonical path does.
+ */
+export function retiredDaemonPaths(paths: DaemonPaths, tag: string): DaemonPaths {
+  return {
+    ...paths,
+    socket: join(dirname(paths.socket), `.r${tag}`),
+    token: paths.token.replace(/\.token$/, `.retired-${tag}.token`),
+    pid: paths.pid.replace(/\.pid$/, `.retired-${tag}.pid`),
+  };
+}
+
+/** The retired daemons recorded next to `paths`, found by their token files. */
+export function listRetiredDaemons(paths: DaemonPaths): DaemonPaths[] {
+  const prefix = `${basename(paths.token, ".token")}.retired-`;
+  let names: string[];
+  try {
+    names = readdirSync(paths.runDir);
+  } catch {
+    return [];
+  }
+  return (
+    names
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".token"))
+      .map((name) => name.slice(prefix.length, -".token".length))
+      // The daemon's tags are 4 random bytes; any other length breaks the sun_path fit above.
+      .filter((tag) => /^[0-9a-f]{8}$/.test(tag))
+      .map((tag) => retiredDaemonPaths(paths, tag))
+  );
+}
+
+/**
  * Fallback socket directory for homes whose run dir makes the socket path
  * too long (deep `$TMPDIR`-based homes, mostly tests). `/tmp` rather than
  * `os.tmpdir()`: macOS gives each launch context its own `$TMPDIR`, and two
@@ -81,6 +127,12 @@ export interface PidRecord {
   startedAt: string;
   /** The socket this daemon published, which may live outside the run dir. */
   socket: string;
+  /**
+   * The daemon's entry file. A daemon whose entry is gone (its worktree or
+   * app bundle was deleted) can't load code it hasn't loaded yet, so a server
+   * never starts sessions on it. Absent in records from older daemons.
+   */
+  entry?: string;
 }
 
 // ---------------------------------------------------------------------------

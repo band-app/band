@@ -1,7 +1,7 @@
 import { fork } from "node:child_process";
 import { closeSync, openSync, readFileSync, renameSync, statSync } from "node:fs";
 import { retireDaemon } from "./client";
-import { ensurePrivateDir } from "./endpoint";
+import { type EndpointIdentity, ensurePrivateDir } from "./endpoint";
 import {
   type DaemonPaths,
   daemonPaths,
@@ -20,6 +20,8 @@ export interface LaunchOptions {
   /** The daemon's working directory: `~/.band`, never a worktree, since worktrees get deleted. */
   cwd: string;
   buildId: string;
+  /** Take the endpoint from the live daemon of another build at this entry. */
+  supersede?: EndpointIdentity;
 }
 
 /**
@@ -34,7 +36,7 @@ export interface LaunchOptions {
  * process's event loop alive, and the file still captures a startup crash.
  */
 export async function launchDaemon(options: LaunchOptions): Promise<"launched" | "occupied"> {
-  const { entry, paths, cwd, buildId } = options;
+  const { entry, paths, cwd, buildId, supersede } = options;
   ensurePrivateDir(paths.runDir);
   rotateLog(paths.log);
   const logFd = openSync(paths.log, "a", 0o600);
@@ -47,7 +49,9 @@ export async function launchDaemon(options: LaunchOptions): Promise<"launched" |
 
   const child = (() => {
     try {
-      return fork(entry, ["--run-dir", paths.runDir, "--build-id", buildId], {
+      const args = ["--run-dir", paths.runDir, "--build-id", buildId];
+      if (supersede) args.push("--supersede", `${supersede.dev}:${supersede.ino}`);
+      return fork(entry, args, {
         cwd,
         detached: true,
         stdio: ["ignore", logFd, logFd, "ipc"],
