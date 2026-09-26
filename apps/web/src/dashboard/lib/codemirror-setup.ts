@@ -475,6 +475,9 @@ const setSearch = StateEffect.define<{ query: string; opts?: SearchOpts }>();
 
 const searchMatchMark = Decoration.mark({ class: "cm-searchMatch" });
 
+/** Largest document (in characters) whose search highlights are rebuilt on every edit. */
+const SEARCH_RESCAN_MAX_DOC_LENGTH = 200_000;
+
 interface SearchHighlightState {
   query: string;
   opts?: SearchOpts;
@@ -497,10 +500,13 @@ const searchHighlightField = StateField.define<SearchHighlightState>({
         return { query, opts, decorations: buildSearchDecorations(tr.state, query, opts) };
       }
     }
-    if (tr.docChanged && value.query) {
+    if (!tr.docChanged) return value;
+    // Rescanning on each edit is a full-document regex pass, so large files
+    // only map their existing matches through the change.
+    if (value.query && tr.state.doc.length <= SEARCH_RESCAN_MAX_DOC_LENGTH) {
       return { ...value, decorations: buildSearchDecorations(tr.state, value.query, value.opts) };
     }
-    return value;
+    return { ...value, decorations: value.decorations.map(tr.changes) };
   },
   provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
 });
@@ -584,6 +590,8 @@ export function scrollToSearchMatch(match: { view: EditorView; from: number; to:
   match.view.dispatch({
     selection: { anchor: match.from, head: match.to },
     effects: EditorView.scrollIntoView(match.from, { y: "center" }),
+    // Lets the markdown preview reveal a match inside hidden syntax.
+    userEvent: "select.search",
   });
 }
 

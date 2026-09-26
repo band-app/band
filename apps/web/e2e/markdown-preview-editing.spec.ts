@@ -48,7 +48,15 @@ const ORIGINAL = [
   "|---|:-:|",
   "| 1   | 2 |",
   "",
+  "- [ ] ship it",
+  "",
 ].join("\n");
+
+// A 1x1 PNG, so the image test can check the image actually loaded.
+const PNG_1X1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -62,7 +70,17 @@ test.beforeAll(async () => {
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   writeFileSync(join(repo, "EDIT.md"), ORIGINAL);
-  writeFileSync(join(repo, "FIND.md"), "# Find\n\nOne needle here.\n");
+  writeFileSync(
+    join(repo, "FIND.md"),
+    "# Find\n\nOne needle here.\n\n| col |\n| --- |\n| needle cell |\n\n",
+  );
+  mkdirSync(join(repo, "assets"));
+  mkdirSync(join(repo, "docs"));
+  writeFileSync(join(repo, "assets", "logo.png"), PNG_1X1);
+  writeFileSync(
+    join(repo, "docs", "IMAGES.md"),
+    "# Images\n\n![logo](../assets/logo.png)\n\n![escape](%2E%2E/%2E%2E/logo.png)\n",
+  );
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
@@ -101,6 +119,10 @@ test("typing markdown in the preview formats it and saves it back without touchi
   await expect(viewer.previewRenderedBlock("table").getByRole("table")).toBeVisible();
   await expect(viewer.previewRenderedBlock("frontmatter")).toContainText("owner");
 
+  // Ticking a task rewrites just its `[ ]` marker.
+  await viewer.toggleTask("ship it");
+  await expect(viewer.previewFormatted("listitem", "ship it").getByRole("checkbox")).toBeChecked();
+
   await viewer.focusPreviewEnd();
   await viewer.typeInPreview(
     "\n## Added heading\n\nSome **bold** and `code` text\n\n- first item\nsecond item",
@@ -111,12 +133,14 @@ test("typing markdown in the preview formats it and saves it back without touchi
   await expect(viewer.previewHeading(2, "Added heading")).toBeVisible();
   await expect(viewer.previewFormatted("strong", "bold").last()).toHaveText("bold");
   await expect(viewer.previewFormatted("code", "code")).toHaveText("code");
+  await expect(viewer.markdownPreview).not.toContainText("**bold**");
+  await expect(viewer.markdownPreview).not.toContainText("`code`");
   // Enter after "- first item" continued the list.
   await expect(viewer.previewFormatted("listitem", "second item")).toBeVisible();
 
   await viewer.saveWithShortcut();
 
-  const expected = `${ORIGINAL}\n## Added heading\n\nSome **bold** and \`code\` text\n\n- first item\n- second item`;
+  const expected = `${ORIGINAL.replace("- [ ] ship it", "- [x] ship it")}\n## Added heading\n\nSome **bold** and \`code\` text\n\n- first item\n- second item`;
   await expect
     .poll(() => readFileSync(join(repo, "EDIT.md"), "utf8"), { timeout: 10_000 })
     .toBe(expected);
@@ -133,7 +157,7 @@ test("find in the preview counts and steps through matches, including text typed
   await expect(viewer.previewHeading(1, "Find")).toBeVisible({ timeout: 20_000 });
 
   await viewer.focusPreviewEnd();
-  await viewer.typeInPreview("A **needle** in bold and another needle.");
+  await viewer.typeInPreview("A **needle** in bold");
 
   await workspacePage.pressFindShortcut();
   const findInput = workspacePage.findInFileOrPreviewBar;
@@ -143,13 +167,42 @@ test("find in the preview counts and steps through matches, including text typed
   const counter = workspacePage.findMatchCount;
   await findInput.fill("needle");
   await expect(counter).toHaveText("1 of 3");
+
+  // The table cell's match is counted while the table is rendered, and
+  // stepping onto it swaps the table for its source so the match is visible.
+  await expect(viewer.previewRenderedBlock("table")).toBeVisible();
   await findInput.press("Enter");
   await expect(counter).toHaveText("2 of 3");
+  await expect(viewer.previewRenderedBlock("table")).toHaveCount(0);
+  await expect(viewer.markdownPreview).toContainText("| needle cell |");
+
+  // Text typed while the find bar is open is found too.
+  await viewer.focusPreviewEnd();
+  await viewer.typeInPreview(" and another needle.");
+  await findInput.focus();
   await findInput.press("Enter");
-  await expect(counter).toHaveText("3 of 3");
+  await expect(counter).toHaveText("3 of 4");
+  await findInput.press("Enter");
+  await expect(counter).toHaveText("4 of 4");
+  await findInput.press("Enter");
+  await expect(counter).toHaveText("1 of 4");
   await findInput.press("Shift+Enter");
-  await expect(counter).toHaveText("2 of 3");
+  await expect(counter).toHaveText("4 of 4");
 
   await findInput.fill("not in this file");
   await expect(counter).toHaveText("No results");
+});
+
+test("relative images load from the workspace and cannot climb out of it", async ({ page }) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const viewer = new FileViewerPage(page);
+  await workspacePage.goto(WORKSPACE);
+  await workspacePage.waitForReady();
+  await workspacePage.openFileLeaf("docs/IMAGES.md");
+  await expect(viewer.previewHeading(1, "Images")).toBeVisible({ timeout: 20_000 });
+
+  await expect(viewer.previewImage("logo")).toBeVisible();
+  await expect.poll(() => viewer.previewImageNaturalWidth("logo")).toBe(1);
+  // An encoded `..` that climbs above the workspace root is not turned into a URL.
+  await expect(viewer.previewImage("escape")).toHaveCount(0);
 });

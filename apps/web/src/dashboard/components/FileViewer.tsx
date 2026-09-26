@@ -501,12 +501,12 @@ export function FileViewer({
   // against the markdown file's directory through the raw file URL.
   const markdownPreview = useMemo(() => {
     if (!renderMarkdownBlock) return undefined;
-    const getFileUrl = !external ? adapter.getWorkspaceFileUrl : undefined;
+    const canLoadFiles = !external && !!adapter.getWorkspaceFileUrl;
     const resolveImageUrl = (src: string): string | undefined => {
       if (/^(https?:|data:)/i.test(src)) return src;
-      if (!getFileUrl || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
+      if (!canLoadFiles || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
       const path = resolveRelativePath(parentDirOf(filePath), src.split(/[?#]/)[0]);
-      return path == null ? undefined : getFileUrl(workspaceId, path);
+      return path == null ? undefined : adapter.getWorkspaceFileUrl?.(workspaceId, path);
     };
     return { renderBlock: renderMarkdownBlock, resolveImageUrl };
   }, [renderMarkdownBlock, external, adapter, workspaceId, filePath]);
@@ -581,16 +581,15 @@ export function FileViewer({
   onActionsChangeRef.current = onActionsChange;
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
-  const canShowMarkdownToggle = showMarkdownToggle;
   useEffect(() => {
     onActionsChangeRef.current?.({
       isDirty,
       canSave,
       saving,
       save: () => handleSaveRef.current(),
-      showMarkdownToggle: canShowMarkdownToggle,
+      showMarkdownToggle,
     });
-  }, [isDirty, canSave, saving, canShowMarkdownToggle]);
+  }, [isDirty, canSave, saving, showMarkdownToggle]);
 
   /**
    * Format the editor buffer in-place via Prettier.
@@ -688,10 +687,10 @@ export function FileViewer({
             });
           }
         } else {
-          // Read-only viewer / no live editor (e.g. markdown preview
-          // pane). The CodeMirrorViewer keys its document on the
-          // `content` prop, so swapping `editedContent` here is enough
-          // to re-render it with the formatted bytes.
+          // Read-only viewer (no live editor). The CodeMirrorViewer keys
+          // its document on the `content` prop, so swapping
+          // `editedContent` here is enough to re-render it with the
+          // formatted bytes.
           setEditedContent(formatted);
           onEditedContentChangeRef.current?.(formatted);
           window.dispatchEvent(new CustomEvent("band:dirty-change"));
@@ -828,9 +827,8 @@ export function FileViewer({
     // The editable CodeMirror intentionally ignores `content` prop changes
     // after creation (it owns its document), so drive the swap through the
     // live EditorView — the same mechanism `handleFormat` uses. The
-    // read-only viewer and markdown preview key off `data`/`displayContent`
-    // and re-render from `setData` alone. We reach this only when the buffer
-    // is clean and the content genuinely changed, so the live doc already
+    // read-only viewer keys off `data` and re-renders from `setData` alone.
+    // We reach this only when the buffer is clean and the content genuinely changed, so the live doc already
     // equals the old baseline — replacing it unconditionally avoids an
     // O(file_size) `doc.toString()` just to confirm what we already know.
     const view = editorViewRef.current;
@@ -1237,18 +1235,22 @@ export function FileViewer({
  * `../img/b.png`). Returns null when the path climbs above the workspace root.
  */
 function resolveRelativePath(dir: string, relative: string): string | null {
+  // Decode before splitting, so an encoded `%2E%2E` or `%2F` is validated as
+  // the `..` / `/` it becomes, not smuggled past the climb check.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(relative);
+  } catch {
+    return null;
+  }
   const parts = dir ? dir.split("/") : [];
-  for (const segment of relative.split("/")) {
+  for (const segment of decoded.split(/[\\/]/)) {
     if (segment === "" || segment === ".") continue;
     if (segment === "..") {
       if (parts.length === 0) return null;
       parts.pop();
     } else {
-      try {
-        parts.push(decodeURIComponent(segment));
-      } catch {
-        parts.push(segment);
-      }
+      parts.push(segment);
     }
   }
   return parts.join("/");

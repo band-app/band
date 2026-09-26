@@ -103,7 +103,24 @@ export class FileViewerPage {
   /** A heading rendered in the markdown preview. Heading lines carry
    *  `role="heading"` + `aria-level`. */
   previewHeading(level: number, name: string): Locator {
-    return this.markdownPreview.getByRole("heading", { level, name });
+    return this.markdownPreview.getByRole("heading", { level, name, exact: true });
+  }
+
+  /** An image the preview renders in place of `![alt](src)`. */
+  previewImage(alt: string): Locator {
+    return this.markdownPreview.getByRole("img", { name: alt, exact: true });
+  }
+
+  /** The loaded width of a preview image; 0 when its URL did not load. */
+  async previewImageNaturalWidth(alt: string): Promise<number> {
+    return this.previewImage(alt).evaluate((img) => (img as HTMLImageElement).naturalWidth);
+  }
+
+  /** Click the checkbox the preview renders for a task-list item. */
+  async toggleTask(text: string): Promise<void> {
+    await test.step(`Toggle the task "${text}"`, async () => {
+      await this.previewFormatted("listitem", text).getByRole("checkbox").click();
+    });
   }
 
   /** Bold / inline-code / list-item text rendered in the markdown preview,

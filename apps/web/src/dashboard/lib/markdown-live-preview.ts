@@ -39,6 +39,7 @@ import {
   type Range,
   StateEffect,
   StateField,
+  type Text,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -50,7 +51,6 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import type { MarkdownConfig } from "@lezer/markdown";
 import { loadLanguage } from "./codemirror-setup";
 
 /** Blocks the live preview swaps for a rendered version while the cursor is elsewhere. */
@@ -77,41 +77,44 @@ export interface MarkdownLivePreviewOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Frontmatter syntax
+// Frontmatter
 // ---------------------------------------------------------------------------
+//
+// The markdown grammar reads a leading YAML block as a horizontal rule and a
+// setext heading, so the block is found by scanning the first lines instead
+// and everything inside it is kept away from the markdown decorations.
 
 const YAML_KEY_LINE = /^[\w-]+\s*:/;
+/** A closing `---` further down than this does not count as frontmatter. */
+const FRONTMATTER_MAX_LINES = 200;
 
 /**
- * Parses a leading `---` YAML block as a `Frontmatter` node. Without this the
- * markdown grammar reads it as a horizontal rule followed by a setext heading.
- * The opening line must be followed by a `key:` line, so a document that just
- * starts with a horizontal rule is left alone.
+ * The range of a leading `---` YAML block, closing `---` line included. The
+ * opening line must be followed by a `key:` line and the block must be
+ * closed, so a document that starts with a horizontal rule, or frontmatter
+ * the user is still typing, stays ordinary markdown.
  */
-const frontmatterSyntax: MarkdownConfig = {
-  defineNodes: [{ name: "Frontmatter", block: true }],
-  parseBlock: [
-    {
-      name: "Frontmatter",
-      before: "HorizontalRule",
-      parse(cx, line) {
-        if (cx.lineStart !== 0 || line.text.trimEnd() !== "---") return false;
-        if (!YAML_KEY_LINE.test(cx.peekLine())) return false;
-        const from = cx.lineStart;
-        let to = from + line.text.length;
-        while (cx.nextLine()) {
-          to = cx.lineStart + line.text.length;
-          if (line.text.trimEnd() === "---") {
-            cx.nextLine();
-            break;
-          }
-        }
-        cx.addElement(cx.elt("Frontmatter", from, to));
-        return true;
-      },
-    },
-  ],
-};
+function findFrontmatter(doc: Text): { from: number; to: number } | null {
+  if (doc.lines < 3) return null;
+  if (doc.line(1).text.trimEnd() !== "---" || !YAML_KEY_LINE.test(doc.line(2).text)) return null;
+  const last = Math.min(doc.lines, FRONTMATTER_MAX_LINES);
+  for (let n = 3; n <= last; n++) {
+    const line = doc.line(n);
+    if (line.text.trimEnd() === "---") return { from: 0, to: line.to };
+  }
+  return null;
+}
+
+const frontmatterField = StateField.define<{ from: number; to: number } | null>({
+  create: (state) => findFrontmatter(state.doc),
+  update: (value, tr) => (tr.docChanged ? findFrontmatter(tr.state.doc) : value),
+});
+
+/** True for syntax nodes that lie inside the frontmatter block. */
+function inFrontmatter(state: EditorState, name: string, to: number): boolean {
+  const fm = state.field(frontmatterField);
+  return fm != null && name !== "Document" && to <= fm.to;
+}
 
 // ---------------------------------------------------------------------------
 // Focus tracking
@@ -135,9 +138,25 @@ const focusTracking = EditorView.focusChangeEffect.of((_state, focusing) =>
   setFocused.of(focusing),
 );
 
-/** True when the editor is focused and a selection range touches `[from, to]`. */
+/**
+ * True while the selection was last set by find (`scrollToSearchMatch` tags it
+ * `select.search`). Find keeps focus in the find bar, so without this a match
+ * inside a rendered table or hidden syntax would be selected but not shown.
+ */
+const searchRevealField = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    if (tr.isUserEvent("select.search")) return true;
+    return tr.selection || tr.docChanged ? false : value;
+  },
+});
+
+/**
+ * True when a selection range touches `[from, to]` and the selection is live:
+ * the editor has focus, or find just selected a match.
+ */
 function touches(state: EditorState, from: number, to: number): boolean {
-  if (!state.field(focusedField)) return false;
+  if (!state.field(focusedField) && !state.field(searchRevealField)) return false;
   return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
@@ -275,7 +294,6 @@ function renderedBlockKind(
   from: number,
 ): RenderedBlockKind | null {
   if (name === "Table") return "table";
-  if (name === "Frontmatter") return "frontmatter";
   if (name === "FencedCode") {
     const firstLine = state.doc.lineAt(from).text.trim();
     return /^(```|~~~)\s*mermaid\b/.test(firstLine) ? "mermaid" : null;
@@ -292,8 +310,22 @@ function isBlockRendered(state: EditorState, from: number, to: number): boolean 
 
 function buildBlockDecorations(state: EditorState, render: RenderMarkdownBlock): DecorationSet {
   const decos: Range<Decoration>[] = [];
+  const fm = state.field(frontmatterField);
+  if (fm && isBlockRendered(state, fm.from, fm.to)) {
+    decos.push(
+      Decoration.replace({
+        widget: new RenderedBlockWidget(
+          "frontmatter",
+          state.doc.sliceString(fm.from, fm.to),
+          render,
+        ),
+        block: true,
+      }).range(fm.from, fm.to),
+    );
+  }
   syntaxTree(state).iterate({
     enter(node) {
+      if (inFrontmatter(state, node.name, node.to)) return false;
       const kind = renderedBlockKind(state, node.name, node.from);
       if (kind) {
         const to = state.doc.lineAt(node.to).to;
@@ -378,13 +410,23 @@ function buildInlineDecorations(view: EditorView, opts: InlineOptions): Decorati
   const decos: Range<Decoration>[] = [];
   const tree = syntaxTree(state);
 
+  const fm = state.field(frontmatterField);
+  const fmSource = fm != null && (!opts.renderBlocks || !isBlockRendered(state, fm.from, fm.to));
+
   for (const { from, to } of view.visibleRanges) {
+    // Line decorations only for the visible lines of a block that runs off screen.
+    const lines = (lineFrom: number, lineTo: number, fn: (lineStart: number) => void) =>
+      eachLine(state, Math.max(lineFrom, from), Math.min(lineTo, to), fn);
+    if (fm && fmSource) {
+      lines(fm.from, fm.to, (lineFrom) => decos.push(sourceBlockLine.range(lineFrom)));
+    }
     tree.iterate({
       from,
       to,
       enter(ref) {
         const { name } = ref;
         const node = ref.node;
+        if (inFrontmatter(state, name, ref.to)) return false;
 
         const headingMatch = /^ATXHeading(\d)$/.exec(name);
         if (headingMatch) {
@@ -408,7 +450,7 @@ function buildInlineDecorations(view: EditorView, opts: InlineOptions): Decorati
         if (setextMatch) {
           const level = Number(setextMatch[1]);
           const underline = node.getChild("HeaderMark");
-          eachLine(state, ref.from, underline ? underline.from - 1 : ref.to, (lineFrom) =>
+          lines(ref.from, underline ? underline.from - 1 : ref.to, (lineFrom) =>
             decos.push(HEADING_LINES[level - 1].range(lineFrom)),
           );
           if (underline) decos.push(dim.range(underline.from, underline.to));
@@ -416,13 +458,10 @@ function buildInlineDecorations(view: EditorView, opts: InlineOptions): Decorati
         }
 
         switch (name) {
-          case "Frontmatter":
           case "Table": {
             const lineEnd = state.doc.lineAt(ref.to).to;
             if (!opts.renderBlocks || !isBlockRendered(state, ref.from, lineEnd)) {
-              eachLine(state, ref.from, ref.to, (lineFrom) =>
-                decos.push(sourceBlockLine.range(lineFrom)),
-              );
+              lines(ref.from, ref.to, (lineFrom) => decos.push(sourceBlockLine.range(lineFrom)));
             }
             return false;
           }
@@ -437,7 +476,7 @@ function buildInlineDecorations(view: EditorView, opts: InlineOptions): Decorati
             }
             const firstLine = state.doc.lineAt(ref.from);
             const lastLine = state.doc.lineAt(ref.to);
-            eachLine(state, ref.from, ref.to, (lineFrom) => {
+            lines(ref.from, ref.to, (lineFrom) => {
               const isFence =
                 (lineFrom === firstLine.from || lineFrom === lastLine.from) &&
                 /^\s*(```|~~~)/.test(state.doc.lineAt(lineFrom).text);
@@ -446,15 +485,13 @@ function buildInlineDecorations(view: EditorView, opts: InlineOptions): Decorati
             return false;
           }
           case "CodeBlock":
-            eachLine(state, ref.from, ref.to, (lineFrom) => decos.push(codeLine.range(lineFrom)));
+            lines(ref.from, ref.to, (lineFrom) => decos.push(codeLine.range(lineFrom)));
             return false;
           case "HTMLBlock":
-            eachLine(state, ref.from, ref.to, (lineFrom) =>
-              decos.push(sourceBlockLine.range(lineFrom)),
-            );
+            lines(ref.from, ref.to, (lineFrom) => decos.push(sourceBlockLine.range(lineFrom)));
             return false;
           case "Blockquote":
-            eachLine(state, ref.from, ref.to, (lineFrom) => decos.push(quoteLine.range(lineFrom)));
+            lines(ref.from, ref.to, (lineFrom) => decos.push(quoteLine.range(lineFrom)));
             return;
           case "QuoteMark":
             if (!touchesLines(state, ref.from, ref.from))
@@ -773,9 +810,11 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
     EditorState.tabSize.of(4),
     focusedField,
     focusTracking,
+    searchRevealField,
+    frontmatterField,
     // Adds GFM (tables, task lists, strikethrough, autolinks) and the
     // list-continuing Enter / marker-aware Backspace keymap.
-    markdown({ base: markdownLanguage, codeLanguages, extensions: [frontmatterSyntax] }),
+    markdown({ base: markdownLanguage, codeLanguages }),
     syntaxHighlighting(codeHighlightStyle(opts.isDark)),
     inlineDecorations({ renderBlocks: !!opts.renderBlock, resolveImageUrl: opts.resolveImageUrl }),
     ...(opts.renderBlock ? [renderedBlocks(opts.renderBlock)] : []),
