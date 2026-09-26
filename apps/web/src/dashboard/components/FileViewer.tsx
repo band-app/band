@@ -504,6 +504,8 @@ export function FileViewer({
     const canLoadFiles = !external && !!adapter.getWorkspaceFileUrl;
     const resolveImageUrl = (src: string): string | undefined => {
       if (/^(https?:|data:)/i.test(src)) return src;
+      // Absolute paths and other schemes (including protocol-relative `//host`)
+      // don't map to a workspace file.
       if (!canLoadFiles || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
       const path = resolveRelativePath(parentDirOf(filePath), src.split(/[?#]/)[0]);
       return path == null ? undefined : adapter.getWorkspaceFileUrl?.(workspaceId, path);

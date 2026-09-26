@@ -116,12 +116,12 @@ test("typing markdown in the preview formats it and saves it back without touchi
   await expect(viewer.previewHeading(1, "Notes")).toBeVisible({ timeout: 20_000 });
   await expect(viewer.previewFormatted("strong", "underscore bold")).toHaveText("underscore bold");
   await expect(viewer.previewFormatted("listitem", "star bullet two")).toBeVisible();
-  await expect(viewer.previewRenderedBlock("table").getByRole("table")).toBeVisible();
+  await expect(viewer.previewTable).toBeVisible();
   await expect(viewer.previewRenderedBlock("frontmatter")).toContainText("owner");
 
   // Ticking a task rewrites just its `[ ]` marker.
   await viewer.toggleTask("ship it");
-  await expect(viewer.previewFormatted("listitem", "ship it").getByRole("checkbox")).toBeChecked();
+  await expect(viewer.taskCheckbox("ship it")).toBeChecked();
 
   await viewer.focusPreviewEnd();
   await viewer.typeInPreview(
@@ -160,37 +160,33 @@ test("find in the preview counts and steps through matches, including text typed
   await viewer.typeInPreview("A **needle** in bold");
 
   await workspacePage.pressFindShortcut();
-  const findInput = workspacePage.findInFileOrPreviewBar;
-  await expect(findInput).toBeFocused();
-  await expect(findInput).toHaveAttribute("placeholder", "Find in preview...");
+  await expect(workspacePage.findInFileOrPreviewBar).toBeFocused();
 
-  const counter = workspacePage.findMatchCount;
-  await findInput.fill("needle");
-  await expect(counter).toHaveText("1 of 3");
+  await workspacePage.typeInFindBar("needle");
+  await workspacePage.expectFindMatch(1, 3);
 
   // The table cell's match is counted while the table is rendered, and
   // stepping onto it swaps the table for its source so the match is visible.
   await expect(viewer.previewRenderedBlock("table")).toBeVisible();
-  await findInput.press("Enter");
-  await expect(counter).toHaveText("2 of 3");
+  await workspacePage.stepFind("next");
+  await workspacePage.expectFindMatch(2, 3);
   await expect(viewer.previewRenderedBlock("table")).toHaveCount(0);
   await expect(viewer.markdownPreview).toContainText("| needle cell |");
 
   // Text typed while the find bar is open is found too.
   await viewer.focusPreviewEnd();
   await viewer.typeInPreview(" and another needle.");
-  await findInput.focus();
-  await findInput.press("Enter");
-  await expect(counter).toHaveText("3 of 4");
-  await findInput.press("Enter");
-  await expect(counter).toHaveText("4 of 4");
-  await findInput.press("Enter");
-  await expect(counter).toHaveText("1 of 4");
-  await findInput.press("Shift+Enter");
-  await expect(counter).toHaveText("4 of 4");
+  await workspacePage.stepFind("next");
+  await workspacePage.expectFindMatch(3, 4);
+  await workspacePage.stepFind("next");
+  await workspacePage.expectFindMatch(4, 4);
+  await workspacePage.stepFind("next");
+  await workspacePage.expectFindMatch(1, 4);
+  await workspacePage.stepFind("previous");
+  await workspacePage.expectFindMatch(4, 4);
 
-  await findInput.fill("not in this file");
-  await expect(counter).toHaveText("No results");
+  await workspacePage.typeInFindBar("not in this file");
+  await workspacePage.expectFindMatch(0, 0);
 });
 
 test("relative images load from the workspace and cannot climb out of it", async ({ page }) => {

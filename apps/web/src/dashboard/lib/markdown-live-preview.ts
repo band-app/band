@@ -308,60 +308,62 @@ function isBlockRendered(state: EditorState, from: number, to: number): boolean 
   return !touchesLines(state, from, to);
 }
 
-function buildBlockDecorations(state: EditorState, render: RenderMarkdownBlock): DecorationSet {
+interface RenderedBlocksState {
+  decorations: DecorationSet;
+  /** Every candidate block and whether it is currently shown rendered. */
+  blocks: Array<{ from: number; to: number; rendered: boolean }>;
+}
+
+function buildBlockDecorations(
+  state: EditorState,
+  render: RenderMarkdownBlock,
+): RenderedBlocksState {
   const decos: Range<Decoration>[] = [];
-  const fm = state.field(frontmatterField);
-  if (fm && isBlockRendered(state, fm.from, fm.to)) {
+  const blocks: RenderedBlocksState["blocks"] = [];
+  const addBlock = (kind: RenderedBlockKind, from: number, to: number) => {
+    const rendered = isBlockRendered(state, from, to);
+    blocks.push({ from, to, rendered });
+    if (!rendered) return;
     decos.push(
       Decoration.replace({
-        widget: new RenderedBlockWidget(
-          "frontmatter",
-          state.doc.sliceString(fm.from, fm.to),
-          render,
-        ),
+        widget: new RenderedBlockWidget(kind, state.doc.sliceString(from, to), render),
         block: true,
-      }).range(fm.from, fm.to),
+      }).range(from, to),
     );
-  }
+  };
+  const fm = state.field(frontmatterField);
+  if (fm) addBlock("frontmatter", fm.from, fm.to);
   syntaxTree(state).iterate({
     enter(node) {
       if (inFrontmatter(state, node.name, node.to)) return false;
       const kind = renderedBlockKind(state, node.name, node.from);
       if (kind) {
-        const to = state.doc.lineAt(node.to).to;
-        if (isBlockRendered(state, node.from, to)) {
-          const source = state.doc.sliceString(node.from, to);
-          decos.push(
-            Decoration.replace({
-              widget: new RenderedBlockWidget(kind, source, render),
-              block: true,
-            }).range(node.from, to),
-          );
-        }
+        addBlock(kind, node.from, state.doc.lineAt(node.to).to);
         return false;
       }
       // Tables and fences never sit inside inline content.
       return !(node.name === "Paragraph" || node.name.startsWith("ATXHeading"));
     },
   });
-  return Decoration.set(decos, true);
+  return { decorations: Decoration.set(decos, true), blocks };
 }
 
 function renderedBlocks(render: RenderMarkdownBlock): Extension {
-  return StateField.define<DecorationSet>({
+  return StateField.define<RenderedBlocksState>({
     create: (state) => buildBlockDecorations(state, render),
     update(value, tr) {
-      if (
-        tr.docChanged ||
-        tr.selection ||
-        tr.effects.some((e) => e.is(setFocused)) ||
-        syntaxTree(tr.startState) !== syntaxTree(tr.state)
-      ) {
+      if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
         return buildBlockDecorations(tr.state, render);
       }
-      return value;
+      if (!tr.selection && !tr.effects.some((e) => e.is(setFocused))) return value;
+      // A cursor move only matters when it enters or leaves a block, so skip
+      // the full-tree rebuild while every block keeps its rendered state.
+      const changed = value.blocks.some(
+        (b) => isBlockRendered(tr.state, b.from, b.to) !== b.rendered,
+      );
+      return changed ? buildBlockDecorations(tr.state, render) : value;
     },
-    provide: (f) => EditorView.decorations.from(f),
+    provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
   });
 }
 

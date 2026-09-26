@@ -119,7 +119,7 @@ export class FileViewerPage {
   /** Click the checkbox the preview renders for a task-list item. */
   async toggleTask(text: string): Promise<void> {
     await test.step(`Toggle the task "${text}"`, async () => {
-      await this.previewFormatted("listitem", text).getByRole("checkbox").click();
+      await this.taskCheckbox(text).click();
     });
   }
 
@@ -134,6 +134,16 @@ export class FileViewerPage {
    *  frontmatter, mermaid). */
   previewRenderedBlock(kind: "table" | "frontmatter" | "mermaid"): Locator {
     return this.markdownPreview.getByTestId(`markdown-preview__block--${kind}`);
+  }
+
+  /** The `<table>` inside the preview's rendered table block. */
+  get previewTable(): Locator {
+    return this.previewRenderedBlock("table").getByRole("table");
+  }
+
+  /** The checkbox the preview renders for the task-list item `text`. */
+  taskCheckbox(text: string): Locator {
+    return this.previewFormatted("listitem", text).getByRole("checkbox");
   }
 
   /** Put the cursor at the end of the markdown preview's document. Clicks the
