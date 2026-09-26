@@ -26,7 +26,7 @@ import {
 const FS = "\x1f";
 const RS = "\x1e";
 
-export const COMMIT_HISTORY_DEFAULT_LIMIT = 50;
+const COMMIT_HISTORY_DEFAULT_LIMIT = 50;
 
 /** A ref pointing at a commit, as the panel draws it as a pill. */
 export interface CommitRef {
@@ -85,7 +85,7 @@ export interface CommitDetails {
  * branch `origin/x`. Symbolic refs (`HEAD`, `origin/HEAD`) and the stash
  * are dropped.
  */
-export function parseDecorations(raw: string): CommitRef[] {
+function parseDecorations(raw: string): CommitRef[] {
   const refs: CommitRef[] = [];
   for (const part of raw.split(",")) {
     const ref = part.trim();
@@ -105,19 +105,28 @@ export function parseDecorations(raw: string): CommitRef[] {
   return refs.sort((a, b) => order[a.kind] - order[b.kind] || a.name.localeCompare(b.name));
 }
 
-/** Parse `git show --name-status` file lines into a `{path,status}` list. */
+/**
+ * Parse `git show --name-status -z` output into a `{path,status}` list.
+ * `-z` separates fields with NUL and leaves paths unquoted, so non-ASCII
+ * names come back as-is and work as pathspecs.
+ */
 function parseNameStatus(output: string): CommitFileChange[] {
   const files: CommitFileChange[] = [];
-  for (const line of output.trim().split("\n")) {
-    if (!line) continue;
-    const parts = line.split("\t");
-    const code = parts[0]?.[0];
-    if (!code) continue;
-    // Renames/copies emit "R100\told\tnew": report the new path.
-    if ((code === "R" || code === "C") && parts[2]) {
-      files.push({ path: parts[2], status: code, oldPath: parts[1] });
-    } else if (parts[1]) {
-      files.push({ path: parts[1], status: code });
+  const fields = output.replace(/^\n+/, "").split("\0");
+  let i = 0;
+  while (i < fields.length) {
+    const code = fields[i]?.[0];
+    if (!code) {
+      i++;
+      continue;
+    }
+    // Renames/copies carry two paths, old then new: report the new one.
+    if (code === "R" || code === "C") {
+      files.push({ path: fields[i + 2], status: code, oldPath: fields[i + 1] });
+      i += 3;
+    } else {
+      files.push({ path: fields[i + 1], status: code });
+      i += 2;
     }
   }
   return files;
@@ -247,7 +256,7 @@ export class GitGraphService {
    */
   private async commitFiles(cwd: string, sha: string): Promise<CommitFileChange[]> {
     const out = await execGit(
-      ["show", "--first-parent", "-M", "--name-status", "--format=", sha],
+      ["show", "--first-parent", "-M", "--name-status", "-z", "--format=", sha],
       cwd,
     );
     return parseNameStatus(out);

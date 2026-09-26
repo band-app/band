@@ -34,6 +34,9 @@ const LONG_REPO = "long-repo";
 const BRANCH = "main";
 // One more than the panel's page size, so the history has a second page.
 const LONG_HISTORY = 51;
+// The `edit` commit changes line 2; line 10 is outside git's default three
+// lines of context, so it shows only in a full-context diff.
+const NOTES = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -54,7 +57,7 @@ test.beforeAll(async () => {
   graphRepo = join(tmpHome, GRAPH_REPO);
   mkdirSync(graphRepo, { recursive: true });
   git(graphRepo, ["init", "-b", BRANCH]);
-  writeFileSync(join(graphRepo, "notes.txt"), "alpha\nbeta\ngamma\n");
+  writeFileSync(join(graphRepo, "notes.txt"), `${NOTES.join("\n")}\n`);
   sha.initial = gitCommit(graphRepo, "initial");
   git(graphRepo, ["tag", "v0.1"]);
 
@@ -67,7 +70,8 @@ test.beforeAll(async () => {
   sha.side = gitCommit(graphRepo, "side-work");
 
   git(graphRepo, ["checkout", BRANCH]);
-  writeFileSync(join(graphRepo, "notes.txt"), "alpha\nbeta changed in edit\ngamma\n");
+  const edited = NOTES.map((line, i) => (i === 1 ? "line 2 changed in edit" : line));
+  writeFileSync(join(graphRepo, "notes.txt"), `${edited.join("\n")}\n`);
   sha.edit = gitCommit(graphRepo, "edit");
   git(graphRepo, ["branch", "release"]);
   git(graphRepo, ["tag", "v1.0"]);
@@ -146,11 +150,18 @@ test.describe("Changes tab Commits panel", () => {
     await expect(changes.commitFile(sha.edit, "notes.txt")).toBeVisible();
 
     await changes.openCommitFile(sha.edit, "notes.txt");
-    await expect(changes.commitDiffTab("notes.txt")).toBeVisible();
+    await expect(changes.diffTab("notes.txt")).toHaveAttribute("data-commit", sha.edit);
     // The worktree has no uncommitted changes, so a working-tree diff would be
-    // empty: the added line is the commit's own change, shown in full context.
-    await expect(changes.diffLine("beta changed in edit")).toBeVisible({ timeout: 15_000 });
-    await expect(changes.diffLine("gamma")).toBeVisible();
+    // empty: the added line is the commit's own change, in full context.
+    await expect(changes.diffLine("line 2 changed in edit")).toBeVisible({ timeout: 15_000 });
+    await expect(changes.diffLine("line 10")).toBeVisible();
+
+    // The commit diff tab is restored on reload, then closes like any tab.
+    await changes.reload();
+    await expect(changes.diffTab("notes.txt")).toHaveAttribute("data-commit", sha.edit);
+    await expect(changes.diffLine("line 2 changed in edit")).toBeVisible({ timeout: 15_000 });
+    await changes.closeDiffTab("notes.txt");
+    await expect(changes.diffTab("notes.txt")).toHaveCount(0);
   });
 
   test("the collapsed state survives a reload", async ({ page }) => {
@@ -170,12 +181,18 @@ test.describe("Changes tab Commits panel", () => {
     await expect(changes.commitRow(sha.merge)).toBeVisible({ timeout: 15_000 });
   });
 
-  test("scrolling to the end loads the next page", async ({ page }) => {
+  test("scrolling to the end loads the next page, also after re-expanding", async ({ page }) => {
     const changes = new ChangesPanelPage(page, server.url, TOKEN);
     await changes.goto(longWorkspace);
 
     await expect(changes.commitsCount).toHaveText("50+", { timeout: 15_000 });
     await expect(changes.commitRow(sha.longOldest)).toHaveCount(0);
+
+    // Collapsing and expanding remounts the list; infinite scroll must still work.
+    await changes.toggleCommits();
+    await expect(changes.commitsList).toHaveCount(0);
+    await changes.toggleCommits();
+    await expect(changes.commitsCount).toHaveText("50+");
 
     await changes.scrollCommitsToEnd();
     await expect(changes.commitRow(sha.longOldest)).toBeVisible({ timeout: 15_000 });
@@ -191,12 +208,16 @@ test.describe("Changes tab Commits panel", () => {
 
     writeFileSync(join(graphRepo, "later.txt"), "later\n");
     const later = gitCommit(graphRepo, "later");
-
-    // The panel polls a HEAD/refs signature every 5 s and reloads on change.
-    await expect(changes.commitRow(later)).toHaveAttribute("data-head", "true", {
-      timeout: 15_000,
-    });
-    await expect(changes.commitRef(later, BRANCH)).toBeVisible();
-    await expect(changes.commitRow(sha.merge)).not.toHaveAttribute("data-head", "true");
+    try {
+      // The panel polls a HEAD/refs signature every 5 s and reloads on change.
+      await expect(changes.commitRow(later)).toHaveAttribute("data-head", "true", {
+        timeout: 15_000,
+      });
+      await expect(changes.commitRef(later, BRANCH)).toBeVisible();
+      await expect(changes.commitRow(sha.merge)).not.toHaveAttribute("data-head", "true");
+    } finally {
+      // Put `main` back so the other tests see the seeded history in any order.
+      git(graphRepo, ["reset", "--hard", sha.merge]);
+    }
   });
 });

@@ -1,7 +1,12 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileStatus } from "@/dashboard";
 import { FileStatusBadge } from "../dashboard/components/FileStatusBadge";
 import { getFileIcon } from "../dashboard/lib/file-icon";
@@ -213,7 +218,9 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
 });
 
-function CommitRow({
+// Memoized: `row` comes from the memoized row list and `onToggle` is stable,
+// so a resize drag or an expand re-renders only the rows that changed.
+const CommitRow = memo(function CommitRow({
   row,
   expanded,
   onToggle,
@@ -259,7 +266,7 @@ function CommitRow({
       )}
     </button>
   );
-}
+});
 
 /** git name-status codes the Changes badge knows; copies and type changes
  *  fall back to "modified". */
@@ -402,9 +409,11 @@ export function CommitsPanel({
     getNextPageParam: (last: HistoryPage, pages: HistoryPage[]) =>
       last.hasMore ? pages.reduce((n, p) => n + p.commits.length, 0) : undefined,
     enabled: active,
+    // The signature poll below decides when the history is stale.
+    refetchOnWindowFocus: false,
   });
 
-  // Reload the loaded pages when HEAD or any ref moves (commit, checkout,
+  // Reload the history when HEAD or any ref moves (commit, checkout,
   // reset, fetch, new branch or tag). Polling the signature is one cheap
   // `git show-ref` instead of a full `git log` every tick.
   const signatureQuery = useQuery({
@@ -414,12 +423,31 @@ export function CommitsPanel({
     refetchInterval: active ? SIGNATURE_POLL_MS : false,
   });
   const loadedSignature = historyQuery.data?.pages[0]?.signature;
-  const { refetch: refetchHistory, isFetching: historyFetching } = historyQuery;
+  const { isFetching: historyFetching } = historyQuery;
+  // Drop to the first page rather than re-reading every loaded page: each
+  // page is its own `git log --topo-order` walk, and remote refs move on
+  // every background fetch.
+  // The first page stays on screen while it reloads.
+  const queryClient = useQueryClient();
+  const { refetch: refetchHistory } = historyQuery;
+  const reloadHistory = useCallback(() => {
+    queryClient.setQueryData<InfiniteData<HistoryPage, number>>(
+      ["commitHistory", workspaceId],
+      (data) => data && { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) },
+    );
+    return refetchHistory();
+  }, [queryClient, workspaceId, refetchHistory]);
+  const { refetch: refetchSignature } = signatureQuery;
+  // Reload once per new signature, so a failing reload is not retried in a
+  // loop; the next ref change or the Refresh button tries again.
+  const reloadedForRef = useRef<string | null>(null);
   useEffect(() => {
     const current = signatureQuery.data;
     if (current === undefined || loadedSignature === undefined || historyFetching) return;
-    if (current !== loadedSignature) void refetchHistory();
-  }, [signatureQuery.data, loadedSignature, historyFetching, refetchHistory]);
+    if (current === loadedSignature || reloadedForRef.current === current) return;
+    reloadedForRef.current = current;
+    void reloadHistory();
+  }, [signatureQuery.data, loadedSignature, historyFetching, reloadHistory]);
 
   const pages = historyQuery.data?.pages;
   const rows = useMemo(() => {
@@ -440,14 +468,14 @@ export function CommitsPanel({
     });
   }, []);
 
-  // Load the next page when the end of the list scrolls into view.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  // Load the next page when the end of the list scrolls into view. The
+  // sentinel is a callback ref held in state, so collapsing and expanding
+  // the section (which remounts it) binds a fresh observer.
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
   const { fetchNextPage, isFetchingNextPage } = historyQuery;
   useEffect(() => {
-    const root = scrollRef.current;
-    const sentinel = sentinelRef.current;
-    if (!root || !sentinel || !hasMore) return;
+    const root = sentinel?.parentElement;
+    if (!sentinel || !root || !hasMore) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting) && !isFetchingNextPage) void fetchNextPage();
@@ -456,7 +484,7 @@ export function CommitsPanel({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, isFetchingNextPage, fetchNextPage]);
+  }, [sentinel, hasMore, isFetchingNextPage, fetchNextPage]);
 
   // Drag the top edge to resize; the height persists across reloads.
   const startResize = useCallback(
@@ -485,9 +513,9 @@ export function CommitsPanel({
       toggleCollapsed();
       return;
     }
-    void signatureQuery.refetch();
-    void refetchHistory();
-  }, [collapsed, toggleCollapsed, signatureQuery, refetchHistory]);
+    void refetchSignature();
+    void reloadHistory();
+  }, [collapsed, toggleCollapsed, refetchSignature, reloadHistory]);
 
   const count = rows.length;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
@@ -534,7 +562,6 @@ export function CommitsPanel({
       </div>
       {!collapsed && (
         <div
-          ref={scrollRef}
           className="overflow-y-auto"
           style={{ height: `min(${height}px, 50vh)` }}
           data-testid="commits-panel__list"
@@ -563,7 +590,7 @@ export function CommitsPanel({
                 );
               })}
               {hasMore && (
-                <div ref={sentinelRef} className="px-3 py-1">
+                <div ref={setSentinel} className="px-3 py-1">
                   <button
                     type="button"
                     onClick={() => void fetchNextPage()}

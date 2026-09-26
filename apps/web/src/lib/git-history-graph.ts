@@ -14,7 +14,7 @@
 export const GRAPH_REF_COLOR = "#3b82f6";
 
 /** Colours handed out, in rotation, to other lanes. */
-export const GRAPH_LANE_COLORS = ["#22c55e", "#a855f7", "#f97316", "#ec4899", "#14b8a6"] as const;
+const GRAPH_LANE_COLORS = ["#22c55e", "#a855f7", "#f97316", "#ec4899", "#14b8a6"] as const;
 
 export interface GraphCommit {
   sha: string;

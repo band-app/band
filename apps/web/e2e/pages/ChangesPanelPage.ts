@@ -128,9 +128,17 @@ export class ChangesPanelPage {
       .getByTestId(`commits-panel__file--${path}`);
   }
 
-  /** The dockview tab of a commit's file diff. */
-  commitDiffTab(path: string): Locator {
-    return this.page.getByTestId(`center-diff-tab--${path}`);
+  /** The dockview tab of a file's diff. A commit's diff tab carries the
+   *  commit SHA in `data-commit`; a working-tree diff tab has none. */
+  diffTab(path: string): Locator {
+    return this.workspace.diffTab(path);
+  }
+
+  /** Close the diff tab for `path` with its close button. */
+  async closeDiffTab(path: string): Promise<void> {
+    await test.step(`Close the diff tab for ${path}`, async () => {
+      await this.diffTab(path).getByRole("button", { name: "Close diff" }).click();
+    });
   }
 
   /** Expand a commit row to list its changed files. */

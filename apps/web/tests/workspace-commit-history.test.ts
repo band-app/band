@@ -24,6 +24,7 @@ import {
 const TOKEN = "workspace-commit-history-token";
 const WORKSPACE = "alpha-main";
 const EMPTY_WORKSPACE = "empty-main";
+const LONG_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`);
 
 const gitEnv = {
   ...process.env,
@@ -49,6 +50,7 @@ function commit(cwd: string, message: string): string {
  * side:            └─ side-work            (never merged)
  *
  * Tags: `v0.1` on initial, `v0.2` on rename. `origin/main` points at rename.
+ * `rename` also edits `long.txt` and adds `café.txt`.
  */
 function seedRepo(parent: string) {
   const path = join(parent, "alpha");
@@ -57,6 +59,9 @@ function seedRepo(parent: string) {
 
   writeFileSync(join(path, "README.md"), "# alpha\n");
   writeFileSync(join(path, "old-name.txt"), "one\ntwo\nthree\nfour\nfive\n");
+  // Ten lines: the rename commit edits line 2, so line 9 lies outside git's
+  // default three lines of context.
+  writeFileSync(join(path, "long.txt"), `${LONG_LINES.join("\n")}\n`);
   const initial = commit(path, "initial");
   git(path, ["tag", "v0.1"]);
 
@@ -70,6 +75,10 @@ function seedRepo(parent: string) {
 
   git(path, ["checkout", "main"]);
   git(path, ["mv", "old-name.txt", "new-name.txt"]);
+  const edited = LONG_LINES.map((line, i) => (i === 1 ? "EDITED" : line));
+  writeFileSync(join(path, "long.txt"), `${edited.join("\n")}\n`);
+  // A non-ASCII name, which git C-quotes in plain --name-status output.
+  writeFileSync(join(path, "café.txt"), "crème\n");
   writeFileSync(join(path, "new-name.txt"), "one\ntwo\nTHREE\nfour\nfive\n");
   const rename = commit(path, "rename");
   git(path, ["tag", "v0.2"]);
@@ -263,14 +272,22 @@ describe("tRPC — workspace commit history", () => {
       TOKEN,
     );
     expect(res.status).toBe(200);
-    const details = await trpcData<{
-      sha: string;
-      subject: string;
-      files: { path: string; status: string; oldPath?: string }[];
-    }>(res);
-    expect(details.sha).toBe(repo.rename);
-    expect(details.subject).toBe("rename");
-    expect(details.files).toEqual([{ path: "new-name.txt", status: "R", oldPath: "old-name.txt" }]);
+    expect(await trpcData(res)).toEqual({
+      sha: repo.rename,
+      parents: [repo.initial],
+      author: "Test",
+      email: "test@test.com",
+      authorTs: expect.any(Number),
+      committer: "Test",
+      committerTs: expect.any(Number),
+      subject: "rename",
+      body: "",
+      files: [
+        { path: "café.txt", status: "A" },
+        { path: "long.txt", status: "M" },
+        { path: "new-name.txt", status: "R", oldPath: "old-name.txt" },
+      ],
+    });
   });
 
   it("lists a merge's files against its first parent", async () => {
@@ -280,6 +297,7 @@ describe("tRPC — workspace commit history", () => {
       { workspaceId: WORKSPACE, sha: repo.merge },
       TOKEN,
     );
+    expect(res.status).toBe(200);
     const details = await trpcData<{ files: { path: string; status: string }[] }>(res);
     expect(details.files).toEqual([{ path: "feature.md", status: "A" }]);
   });
@@ -299,17 +317,48 @@ describe("tRPC — workspace commit history", () => {
     expect(diff).toContain("+THREE");
   });
 
-  it("diffs a root commit's file as an addition, with full context on request", async () => {
+  it("diffs a root commit's file as an addition", async () => {
     const res = await trpcQuery(
       server.url,
       "workspace.getCommitFileDiff",
-      { workspaceId: WORKSPACE, sha: repo.initial, filePath: "README.md", contextLines: 99999 },
+      { workspaceId: WORKSPACE, sha: repo.initial, filePath: "README.md" },
       TOKEN,
     );
     expect(res.status).toBe(200);
     const { diff } = await trpcData<{ diff: string }>(res);
     expect(diff).toContain("new file mode");
     expect(diff).toContain("+# alpha");
+  });
+
+  it("diffs a file with a non-ASCII name", async () => {
+    const res = await trpcQuery(
+      server.url,
+      "workspace.getCommitFileDiff",
+      { workspaceId: WORKSPACE, sha: repo.rename, filePath: "café.txt" },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const { diff } = await trpcData<{ diff: string }>(res);
+    expect(diff).toContain("+crème");
+  });
+
+  it("widens the diff context to contextLines", async () => {
+    const diffWith = async (contextLines?: number) => {
+      const res = await trpcQuery(
+        server.url,
+        "workspace.getCommitFileDiff",
+        { workspaceId: WORKSPACE, sha: repo.rename, filePath: "long.txt", contextLines },
+        TOKEN,
+      );
+      expect(res.status).toBe(200);
+      return (await trpcData<{ diff: string }>(res)).diff;
+    };
+    const narrow = await diffWith();
+    expect(narrow).toContain("+EDITED");
+    expect(narrow).not.toContain(" line 9");
+    const full = await diffWith(99999);
+    expect(full).toContain("+EDITED");
+    expect(full).toContain(" line 9");
   });
 
   it("rejects a sha that is not a hex object id", async () => {
