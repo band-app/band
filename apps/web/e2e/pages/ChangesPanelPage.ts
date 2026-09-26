@@ -223,7 +223,11 @@ export class ChangesPanelPage {
   }
 
   /** A line of the diff by its exact text. Specs pass fixture text they
-   *  wrote themselves, so matching on text is stable here. */
+   *  wrote themselves, so matching on text is stable here.
+   *
+   *  FRAGILITY: `.cm-line` is a class owned by CodeMirror, which exposes no
+   *  testid hook on its own DOM. Centralised here so a CodeMirror upgrade
+   *  that renames it flows through one file. */
   diffLine(text: string): Locator {
     return this.diffLeaf.locator(".cm-line").getByText(text, { exact: true }).first();
   }

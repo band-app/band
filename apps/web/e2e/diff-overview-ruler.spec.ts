@@ -106,6 +106,9 @@ for (const mode of ["unified", "split"] satisfies DiffViewMode[]) {
       expect(modified).toBeLessThan(removed);
     }).toPass();
 
+    // The diff opens at the top: the added lines are on screen, the removed
+    // lines' neighbourhood is not.
+    await expect(changes.diffLine("added line A")).toBeInViewport();
     await expect(changes.diffLine("line 279")).not.toBeInViewport();
 
     // Clicking the bottom marker scrolls the diff down to the removed lines.
@@ -124,7 +127,7 @@ test("Overview ruler scrolls the diff by slider drag and track click", async ({ 
   await changes.goto(workspaceId);
   await changes.openDiff(FILE_PATH, "unified");
   await expect(changes.rulerMarkers("removed")).toHaveCount(1);
-  expect(await changes.diffScrollTop()).toBe(0);
+  await expect.poll(() => changes.diffScrollTop()).toBe(0);
 
   // Dragging the slider down scrolls the diff down.
   await changes.dragRulerSlider(100);
