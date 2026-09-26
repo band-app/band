@@ -8,7 +8,8 @@
  * the theme's `--border` token. These tests read the computed edge colour of
  * one dialog per layout variant and compare it against the resolved tokens.
  *
- * The app's default theme is dark, so no theme seeding is needed.
+ * The settings seed pins the theme to dark, the theme the bug was reported
+ * in, so the tests keep covering it if the app default ever changes.
  *
  * Real production binary, no tRPC mocks, page objects only.
  */
@@ -58,7 +59,7 @@ test.beforeAll(async () => {
       },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  seedSettings(tmpHome, { tokenSecret: TOKEN, theme: "dark" });
   server = await startServer({ tmpHome });
 });
 
