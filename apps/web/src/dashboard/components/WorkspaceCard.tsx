@@ -14,6 +14,7 @@ import {
   Clipboard,
   FolderOpen,
   Home,
+  Loader,
   Pin,
   PinOff,
   Play,
@@ -24,6 +25,7 @@ import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { toWorkspaceId } from "../lib/workspace-id";
+import { isWorkspaceDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
@@ -144,6 +146,8 @@ export const WorkspaceCard = memo(function WorkspaceCard({
 
   const workspaceId = toWorkspaceId(projectName, worktree.name);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
+  // The card stays listed, disabled, until the workspace is gone.
+  const isDeleting = useDashboardStore((s) => isWorkspaceDeleting(s, workspaceId));
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
   // Scroll this card into view when it becomes the active workspace via
@@ -163,6 +167,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   }, [isActive, workspaceId]);
 
   const handleClick = () => {
+    if (isDeleting) return;
     clearNeedsAttention(workspaceId);
     markRecentActivation(workspaceId);
     if (href && capabilities.navigate) {
@@ -176,12 +181,14 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
   // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
   // drops the 300ms double-tap delay so taps register immediately.
-  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden cursor-pointer select-none touch-manipulation transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between rounded-md pl-3 pr-2 py-1 min-h-9 min-w-0 overflow-hidden select-none touch-manipulation transition-colors ${isDeleting ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-accent/50"} [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2 ${isActive ? "bg-primary/15 hover:bg-primary/15" : isFocused ? "bg-accent" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,
     className,
-    tabIndex: 0,
+    tabIndex: isDeleting ? -1 : 0,
+    "aria-disabled": isDeleting || undefined,
+    "data-deleting": isDeleting || undefined,
     // Semantic markers — let tests, screen readers, and future styling
     // changes target the active card without depending on the Tailwind
     // class string. `aria-current="page"` is the standard ARIA pattern for
@@ -226,7 +233,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
+      <ContextMenuTrigger asChild disabled={isDeleting}>
         <div {...containerProps}>
           {/* `delayDuration` overrides the provider's default 500 ms so
               the tooltip waits long enough that a short mouse pass while
@@ -288,7 +295,18 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 overlapping siblings. */}
             <TooltipContent side="right">{`${projectName}/${worktree.name}`}</TooltipContent>
           </Tooltip>
-          <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
+          {isDeleting && (
+            <span
+              data-testid="workspace-card__deleting"
+              className="flex items-center gap-1 shrink-0 ml-auto pl-2 text-xs text-muted-foreground"
+            >
+              <Loader className="size-3.5 animate-spin" />
+              Deleting…
+            </span>
+          )}
+          <div
+            className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
+          >
             <SetupStatusIndicator setup={setupStatus} />
             {/* Plain (non-git) projects have no branch state to surface —
                 no dirty/ahead/behind, no CI, no PR — so skip the indicators

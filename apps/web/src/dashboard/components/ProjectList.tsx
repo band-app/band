@@ -83,7 +83,8 @@ import {
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { toWorkspaceId } from "../lib/workspace-id";
-import { useDashboardStore } from "../stores/index";
+import { isWorkspaceDeleting } from "../stores/dashboard-store";
+import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
   LabelDefinition,
@@ -623,6 +624,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   /** Project name whose "Promote to git" confirmation dialog is open. */
   const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const rawStore = useRawDashboardStore();
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const keyboardNavRef = useRef(false);
@@ -930,9 +932,10 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       containerRef.current?.focus({ preventScroll: true });
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {
+      const wsId = allWorkspaceIds[focusedIndex];
+      if (wsId !== undefined && !isWorkspaceDeleting(rawStore.getState(), wsId)) {
         keyboardNavRef.current = false;
-        selectWorkspace(allWorkspaceIds[focusedIndex]);
+        selectWorkspace(wsId);
       }
     }
   }

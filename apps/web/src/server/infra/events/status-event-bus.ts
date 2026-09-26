@@ -83,6 +83,8 @@ export interface StatusEvent {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  /** For `kind: "setup-status"`: which `.band/config.json` script the state is for. */
+  script?: "setup" | "teardown";
   runningSetups?: string[];
   browserId?: string;
   terminalId?: string;
