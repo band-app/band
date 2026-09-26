@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -85,12 +93,12 @@ describe("terminal daemon — a daemon from another build", () => {
     return (await trpcData<{ terminals: TerminalEntry[] }>(res)).terminals;
   }
 
-  async function createTerminal(): Promise<TerminalEntry> {
+  async function createTerminal(id: string = randomUUID()): Promise<TerminalEntry> {
     if (!server) throw new Error("no server");
     const res = await trpcMutate(
       server.url,
       "terminal.create",
-      { workspaceId: WORKSPACE_ID, id: randomUUID() },
+      { workspaceId: WORKSPACE_ID, id },
       TOKEN,
     );
     expect(res.status).toBe(200);
@@ -115,8 +123,28 @@ describe("terminal daemon — a daemon from another build", () => {
     await socket.close();
   }
 
+  /**
+   * This home's retired names: the token and pid record in the run dir, and
+   * the socket beside the endpoint, which may be a directory other homes share.
+   */
   function retiredFiles(): string[] {
-    return readdirSync(join(tmpHome, ".band", "run")).filter((name) => name.includes(".retired-"));
+    const runDir = join(tmpHome, ".band", "run");
+    const inRunDir = readdirSync(runDir).filter((name) => name.includes(".retired-"));
+    const socketDir = dirname(
+      JSON.parse(readFileSync(join(runDir, "terminal-daemon-v1.pid"), "utf8")).socket,
+    );
+    const sockets = inRunDir
+      .map((name) => /\.retired-([0-9a-f]+)\.token$/.exec(name)?.[1])
+      .filter((tag) => tag !== undefined)
+      .map((tag) => `.r${tag}`);
+    return [...inRunDir, ...sockets.filter((name) => existsSync(join(socketDir, name)))];
+  }
+
+  /** Wait for the new daemon to remove the retired names once the old daemon is gone. */
+  async function waitForRetiredNamesRemoved(): Promise<void> {
+    await waitFor(async () => (retiredFiles().length === 0 ? true : undefined), {
+      label: "retired names removed",
+    });
   }
 
   it("starts new terminals on a daemon of this build, and the old daemon drains", async () => {
@@ -151,6 +179,14 @@ describe("terminal daemon — a daemon from another build", () => {
       ]),
     );
     await expectShellResponds(oldTerminalId, "OLD_BEFORE_RESTART");
+    expect(retiredFiles()).toHaveLength(3);
+
+    // Creating a terminal that already lives on the old daemon returns it
+    // rather than starting a second shell on the new one (#617).
+    const again = await createTerminal(oldTerminalId);
+    expect(again.pid).toBe(oldShell);
+    expect(parentPid(oldShell)).toBe(old.pid);
+    expect((await listTerminals()).filter((t) => t.terminalId === oldTerminalId)).toHaveLength(1);
 
     // A restarted server reaches it too, though the endpoint is the new daemon's now.
     await server.close({ keepTerminalDaemon: true });
@@ -167,9 +203,7 @@ describe("terminal daemon — a daemon from another build", () => {
     // removes the retired names it made for it. The new shell is untouched.
     await killTerminal(oldTerminalId);
     await waitFor(async () => (isAlive(old.pid) ? undefined : true), { label: "old daemon exit" });
-    await waitFor(async () => (retiredFiles().length === 0 ? true : undefined), {
-      label: "retired names removed",
-    });
+    await waitForRetiredNamesRemoved();
     expect(isAlive(newDaemon)).toBe(true);
     expect(await listTerminals()).toEqual([
       expect.objectContaining({ terminalId: created.terminalId, pid: created.pid }),
@@ -216,5 +250,6 @@ describe("terminal daemon — a daemon from another build", () => {
     await killTerminal(oldTerminalId);
     await waitFor(async () => (isAlive(old.pid) ? undefined : true), { label: "old daemon exit" });
     expect(isAlive(oldShell)).toBe(false);
+    await waitForRetiredNamesRemoved();
   });
 });

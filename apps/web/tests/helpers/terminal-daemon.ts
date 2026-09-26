@@ -63,7 +63,8 @@ export async function startDaemonOfBuild(
 ): Promise<{ pid: number; spawnShell: (shell: ShellSpec) => Promise<number> }> {
   const bandHome = join(home, ".band");
   const paths = daemonPaths(join(bandHome, "run"));
-  await launchDaemon({ entry, paths, cwd: bandHome, buildId });
+  const outcome = await launchDaemon({ entry, paths, cwd: bandHome, buildId });
+  if (outcome !== "launched") throw new Error(`expected a fresh daemon, got ${outcome}`);
   const probe = await DaemonClient.connect(paths, buildId);
   const pid = probe.pid;
   probe.close();
@@ -79,8 +80,8 @@ export async function startDaemonOfBuild(
         for (const [key, value] of Object.entries(process.env)) {
           if (value !== undefined) env[key] = value;
         }
-        const entry = await client.request("spawn", { ...shell, baseEnv: env });
-        return entry.pid;
+        const spawned = await client.request("spawn", { ...shell, baseEnv: env });
+        return spawned.pid;
       } finally {
         client.close();
       }

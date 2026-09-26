@@ -85,6 +85,8 @@ export class DaemonTerminalBackend implements TerminalBackend {
   private stale: { client: DaemonClient; identity: EndpointIdentity } | null = null;
   /** Look for daemons again: set at start and whenever one is lost or replaced. */
   private needsDiscovery = true;
+  /** The endpoint's inode at the last discovery. A different one means another daemon took it. */
+  private endpoint: EndpointIdentity | null = null;
   /** The one in-flight connect, shared so simultaneous callers don't each open a connection. */
   private connecting: Promise<DaemonClient | null> | null = null;
   private closed = false;
@@ -134,6 +136,9 @@ export class DaemonTerminalBackend implements TerminalBackend {
       this.demote(client);
       client = await this.connection(true);
       if (!client) throw new TerminalDaemonUnavailableError("Terminal daemon is shutting down");
+      // The server that took the endpoint may have started this very id.
+      const existing = await this.find(request.terminalId);
+      if (existing) return existing.entry;
       entry = await client.request("spawn", params);
     }
     this.remember(entry, client);
@@ -319,6 +324,15 @@ export class DaemonTerminalBackend implements TerminalBackend {
    */
   private async connection(launch: boolean): Promise<DaemonClient | null> {
     if (this.closed) return null;
+    // Another server's daemon may have superseded ours while our connection
+    // stays open; its sessions are only visible after a fresh discovery.
+    if (
+      !this.needsDiscovery &&
+      !sameEntry(entryIdentity(this.paths.socket, lstatSync), this.endpoint)
+    ) {
+      this.needsDiscovery = true;
+      if (this.current) this.demote(this.current);
+    }
     const current = this.current && !this.current.isClosed ? this.current : null;
     if (current || (!launch && !this.needsDiscovery && this.clients().length > 0)) {
       return current;
@@ -365,6 +379,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
       this.adopt(client);
       this.current = client;
       this.stale = null;
+      this.endpoint = entryIdentity(this.paths.socket, lstatSync);
       return client;
     } catch (err) {
       // Whatever serves the endpoint now, the next spawn must look again
@@ -383,6 +398,7 @@ export class DaemonTerminalBackend implements TerminalBackend {
   private async discover(): Promise<void> {
     const { buildId } = this.options;
     const before = entryIdentity(this.paths.socket, lstatSync);
+    this.endpoint = before;
     let client: DaemonClient | null;
     try {
       client = await DaemonClient.connect(this.paths, buildId);
@@ -403,10 +419,11 @@ export class DaemonTerminalBackend implements TerminalBackend {
       if (existing) client.close();
       const serving = existing ?? this.adopt(client);
       if (serving !== this.current) {
-        if (!existing && this.isOwnBuild(serving)) {
-          // Ours now serves the endpoint (e.g. another server of this build
-          // launched it after ours was superseded).
+        if (this.isOwnBuild(serving)) {
+          // A daemon of this build serves the endpoint (another server of this
+          // build launched it, or ours was only demoted on a stale check).
           if (this.current) this.demote(this.current);
+          this.others.delete(serving);
           this.current = serving;
         } else {
           this.others.add(serving);
@@ -550,6 +567,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
     this.known.delete(terminalId);
     this.lastSeq.delete(terminalId);
   }
+}
+
+function sameEntry(a: EndpointIdentity | null, b: EndpointIdentity | null): boolean {
+  return a === b || (a !== null && b !== null && a.dev === b.dev && a.ino === b.ino);
 }
 
 function readPidRecord(path: string): PidRecord | null {
