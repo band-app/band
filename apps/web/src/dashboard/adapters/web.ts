@@ -13,6 +13,7 @@ import type {
   FormatFileResult,
   GitStatus,
   HooksStatus,
+  ListWorkspaceBranchesResult,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
@@ -405,12 +406,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async listWorkspaceBranches(
     workspaceId: string,
-  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }> {
-    return (await this.trpc.workspace.listBranches.query({ workspaceId })) as {
-      branches: string[];
-      defaultBranch: string;
-      headBranch: string;
-    };
+    options?: { query?: string; limit?: number },
+  ): Promise<ListWorkspaceBranchesResult> {
+    return await this.trpc.workspace.listBranches.query({ workspaceId, ...options });
   }
 
   async getFileDiff(

@@ -1,12 +1,3 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@band-app/ui";
-import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import {
   ChevronsDownUp,
@@ -17,7 +8,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChangesFileTree,
   FileBrowser,
@@ -30,27 +21,9 @@ import {
 import { useDiffSummary } from "../hooks/useDiffSummary";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
+import { DiffTargetHeader } from "./DiffTargetHeader";
 import { usePerWorkspaceState } from "./per-workspace-state-store";
 import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
-
-// Uncommitted sentinel for the diff-target <Select> (a Select needs a
-// non-empty string value; `diffMode` "uncommitted" maps to this).
-const UNCOMMITTED_VALUE = "__uncommitted__";
-
-// Integration/staging branches floated to the top of the diff-target picker,
-// right after Uncommitted: they're the branches a user most often diffs
-// against. Matched case-insensitively; array order is the pin priority.
-const STAGING_BRANCH_PRIORITY = [
-  "develop",
-  "dev",
-  "development",
-  "stage",
-  "staging",
-  "integration",
-  "release",
-  "qa",
-  "uat",
-];
 
 // ---------------------------------------------------------------------------
 // Active-tab persistence (Explorer | Changes rendered as tabs, one at a time)
@@ -305,16 +278,6 @@ function RightSidepanelInner({
   // open file in the Explorer tree and the open diff in the Changes tree.
   const { currentFile } = usePerWorkspaceState(workspaceId);
 
-  // Branch list for the diff-target selector (Changes tab). Fetched once per
-  // workspace while the panel is visible; the summary query below is already
-  // keyed on diffMode/compareBranch, so switching the target refetches it.
-  const branchesQuery = useQuery({
-    queryKey: ["rightSidepanelBranches", workspaceId],
-    queryFn: async (): Promise<{ branches: string[]; defaultBranch?: string }> =>
-      (await adapter.listWorkspaceBranches?.(workspaceId)) ?? { branches: [] },
-    enabled: visible && !!adapter.listWorkspaceBranches,
-  });
-
   // Fetch the changes summary for both the Changes tab badge and the tree.
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
@@ -322,6 +285,27 @@ function RightSidepanelInner({
     enabled: visible,
     refetchInterval: visible ? 15_000 : false,
   });
+
+  // The header's branch names outlive the summary for one target: a new pick
+  // changes the summary's query key, and without this the current branch
+  // would blank out until the new summary arrives.
+  const [knownBranches, setKnownBranches] = useState<{
+    workspaceId: string;
+    headBranch: string;
+    defaultBranch: string;
+  } | null>(null);
+  useEffect(() => {
+    const data = summaryQuery.data;
+    if (data) {
+      setKnownBranches({
+        workspaceId,
+        headBranch: data.headBranch,
+        defaultBranch: data.defaultBranch,
+      });
+    }
+  }, [summaryQuery.data, workspaceId]);
+  const branchInfo =
+    summaryQuery.data ?? (knownBranches?.workspaceId === workspaceId ? knownBranches : undefined);
 
   // The server types `fileStatuses` values as plain `string`; the tree wants
   // the `FileStatus` union. Same runtime values — cast at this single seam.
@@ -331,35 +315,11 @@ function RightSidepanelInner({
   >;
   const changeCount = Object.keys(fileStatuses).length;
 
-  // Pinned above the separator: staging-style branches (priority order), then
-  // the project's default branch. Everything else follows alphabetically.
-  // Pinning the most common compare targets keeps them one click below
-  // Uncommitted (#599). `listBranches` drops the default branch when it IS the
-  // HEAD branch (no comparing against yourself), hence the `includes` guard.
-  const { topSectionBranches, otherBranches } = useMemo(() => {
-    const branchList = branchesQuery.data?.branches ?? [];
-    const defaultBranch = branchesQuery.data?.defaultBranch;
-    const pinned = STAGING_BRANCH_PRIORITY.map((name) =>
-      branchList.find((b) => b.toLowerCase() === name),
-    ).filter((b): b is string => b != null);
-    if (defaultBranch && branchList.includes(defaultBranch) && !pinned.includes(defaultBranch)) {
-      pinned.push(defaultBranch);
-    }
-    const others = branchList.filter((b) => !pinned.includes(b)).sort((a, b) => a.localeCompare(b));
-    return { topSectionBranches: pinned, otherBranches: others };
-  }, [branchesQuery.data]);
-
-  const diffSelectValue =
-    diffMode === "branch" && compareBranch ? compareBranch : UNCOMMITTED_VALUE;
-
-  const handleDiffSelectChange = useCallback(
-    (value: string) => {
-      if (value === UNCOMMITTED_VALUE) {
-        setDiffMode("uncommitted");
-      } else {
-        setDiffMode("branch");
-        setCompareBranch(value);
-      }
+  const selectUncommitted = useCallback(() => setDiffMode("uncommitted"), [setDiffMode]);
+  const selectBranch = useCallback(
+    (branch: string) => {
+      setDiffMode("branch");
+      setCompareBranch(branch);
     },
     [setDiffMode, setCompareBranch],
   );
@@ -441,38 +401,18 @@ function RightSidepanelInner({
             className="flex h-full flex-col overflow-hidden"
             data-testid="right-sidepanel__changes"
           >
-            {/* Diff-target selector: Uncommitted plus each branch. Changing it
-                updates the shared diff target; the summary query above is keyed
-                on diffMode/compareBranch, so it refetches automatically. */}
-            <div className="shrink-0 border-b border-border px-2 py-1.5">
-              <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
-                <SelectTrigger
-                  data-testid="right-sidepanel__diff-target-select"
-                  className="h-6 w-full gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:block [&>[data-slot=select-value]]:truncate"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    value={UNCOMMITTED_VALUE}
-                    data-testid="right-sidepanel__diff-target-option-uncommitted"
-                  >
-                    Uncommitted
-                  </SelectItem>
-                  {topSectionBranches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>
-                      {branch}
-                    </SelectItem>
-                  ))}
-                  {topSectionBranches.length > 0 && otherBranches.length > 0 && <SelectSeparator />}
-                  {otherBranches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>
-                      {branch}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Current branch and diff target. Picking a target updates the
+                shared diff target; the summary query above is keyed on
+                diffMode/compareBranch, so it refetches automatically. */}
+            <DiffTargetHeader
+              workspaceId={workspaceId}
+              headBranch={branchInfo?.headBranch}
+              defaultBranch={branchInfo?.defaultBranch}
+              diffMode={diffMode}
+              compareBranch={compareBranch}
+              onSelectUncommitted={selectUncommitted}
+              onSelectBranch={selectBranch}
+            />
             <div className="min-h-0 flex-1 overflow-auto">
               {changeCount === 0 ? (
                 <p className="px-3 py-2 text-xs text-muted-foreground">No changes</p>
