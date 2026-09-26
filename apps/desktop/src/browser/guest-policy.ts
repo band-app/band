@@ -106,7 +106,7 @@ export function hardenGuestWebPreferences(
  * attached. `will-attach-webview` only sees the first `src`, so the guest's
  * `will-navigate` / `will-redirect` listeners keep enforcing an allowlist.
  *
- *   - http(s) and about: are ordinary browsing.
+ *   - http(s) and about:blank are ordinary browsing.
  *   - `blob:http(s)` is needed by Cloudflare Turnstile style challenges; an
  *     opaque blob (`blob:null`) is not.
  *   - `band-action:` is how the in-view error pages report button clicks
@@ -119,7 +119,7 @@ export function isAllowedGuestNavigation(url: string): boolean {
   if (url.startsWith("blob:http://") || url.startsWith("blob:https://")) return true;
   try {
     const { protocol } = new URL(url);
-    return protocol === "http:" || protocol === "https:" || protocol === "about:";
+    return protocol === "http:" || protocol === "https:" || url.startsWith("about:blank");
   } catch {
     return false;
   }

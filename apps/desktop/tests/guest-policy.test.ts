@@ -109,8 +109,20 @@ describe("hardenGuestWebPreferences", () => {
       nodeIntegration: true,
     };
     hardenGuestWebPreferences(webPreferences, {}, "/app/guest.cjs");
-    assert.equal(webPreferences.partition, "persist:band-browser-profile-work");
-    assert.equal(webPreferences.nodeIntegration, false);
+    assert.deepEqual(webPreferences, {
+      partition: "persist:band-browser-profile-work",
+      preload: "/app/guest.cjs",
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      nodeIntegrationInWorker: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      enableBlinkFeatures: "",
+      disableBlinkFeatures: "",
+      webviewTag: false,
+    });
   });
 });
 
@@ -134,6 +146,7 @@ describe("isAllowedGuestNavigation", () => {
       "blob:null/1234",
       "chrome://gpu",
       "slack://open",
+      "about:srcdoc",
       "javascript:void(0)",
       "",
     ]) {

@@ -618,11 +618,6 @@ export function BrowserPaneComponent({
       {...paneDataAttrs}
       {...(paintRetained ? { "data-band-browser-paint-retained": "" } : {})}
     >
-      <style>{`@keyframes browser-bar-slide {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(200%); }
-  100% { transform: translateX(-100%); }
-}`}</style>
       <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
         <button
           type="button"

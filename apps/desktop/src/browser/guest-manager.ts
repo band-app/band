@@ -131,6 +131,8 @@ export class BrowserGuestManager {
    * the dashboard chrome needs to paint a "Not Secure" badge.
    */
   private readonly overriddenHosts = new Set<string>();
+  /** CDP target id per page WebContents, resolved on first request. */
+  private readonly targetIdByWebContentsId = new Map<number, string>();
 
   constructor(private readonly opts: GuestManagerOptions) {}
 
@@ -239,6 +241,9 @@ export class BrowserGuestManager {
   async getCdpTargetId(args: BrowserKeyArg): Promise<string> {
     const wc = this.pageByKey.get(args.browserId);
     if (!wc || wc.isDestroyed()) throw new Error(`Browser page not found: ${args.browserId}`);
+    // A WebContents keeps its target id for life; resolve it once.
+    const cached = this.targetIdByWebContentsId.get(wc.id);
+    if (cached) return cached;
     const dbg = wc.debugger;
     if (!dbg.isAttached()) {
       dbg.attach("1.3");
@@ -251,6 +256,7 @@ export class BrowserGuestManager {
       if (typeof targetId !== "string" || !targetId) {
         throw new Error(`Target.getTargetInfo returned no targetId for ${args.browserId}`);
       }
+      this.targetIdByWebContentsId.set(wc.id, targetId);
       return targetId;
     } finally {
       try {
@@ -282,6 +288,8 @@ export class BrowserGuestManager {
       page.openDevTools({ mode: "detach", activate: false });
       return true;
     } catch (err) {
+      // The pane drops this host on `false`; don't leave it marked meanwhile.
+      this.devToolsHostIds.delete(host.id);
       log.error({ err: String(err), browserId: args.browserId }, "openDevTools failed");
       return false;
     }
@@ -347,6 +355,7 @@ export class BrowserGuestManager {
     this.devToolsHostIds.delete(id);
     this.pendingCertErrors.delete(id);
     this.pendingLoadErrors.delete(id);
+    this.targetIdByWebContentsId.delete(id);
     const key = this.keyByWebContentsId.get(id);
     if (key === undefined) return;
     this.keyByWebContentsId.delete(id);

@@ -337,6 +337,19 @@ html[data-translucent-sidebar] {
   zoom: calc(1 / var(--app-zoom, 1));
 }
 
+/* Indeterminate loading bar under a browser pane's address bar. */
+@keyframes browser-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(200%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
 /*
  * Paint retention for the CDP screencast experiment. Chromium stops painting
  * a <webview> guest inside a display:none, visibility:hidden or
