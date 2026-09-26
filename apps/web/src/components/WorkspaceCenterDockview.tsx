@@ -1791,6 +1791,7 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
           onClick={handleContinueInTerminal}
           data-testid="center-chat-tab__context-menu-item--continue-in-terminal"
         >
+          <TerminalSquare className="size-4" />
           Continue in terminal
         </ContextMenuItem>
         <ContextMenuItem
@@ -1798,6 +1799,7 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
           onClick={handleCopySessionId}
           data-testid="center-chat-tab__context-menu-item--copy-session-id"
         >
+          <ClipboardCopy className="size-4" />
           Copy session ID
         </ContextMenuItem>
       </ContextMenuContent>

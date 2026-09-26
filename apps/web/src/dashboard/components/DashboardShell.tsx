@@ -402,9 +402,9 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
                     data-testid="dashboard__label-filter-item--all"
                     onClick={() => setLabelFilter(null)}
                   >
-                    <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
+                    <Tag />
                     <span className="truncate">All</span>
-                    {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
+                    {!labelFilter && <Check className="size-3 shrink-0" />}
                     <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
                       ⌘0
                     </span>
@@ -416,11 +416,11 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
                       onClick={() => setLabelFilter(lbl.id)}
                     >
                       <span
-                        className="size-2.5 rounded-full shrink-0 mr-2"
+                        className="size-2.5 rounded-full shrink-0"
                         style={{ backgroundColor: lbl.color }}
                       />
                       <span className="truncate">{lbl.name}</span>
-                      {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
+                      {labelFilter === lbl.id && <Check className="size-3 shrink-0" />}
                       {idx < 9 && (
                         <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
                           ⌘{idx + 1}
