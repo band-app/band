@@ -29,6 +29,7 @@ export {
 } from "./components/LanguagePickerDialog";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { PdfPreview } from "./components/PdfPreview";
+export { ProjectAvatar } from "./components/ProjectAvatar";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export {
@@ -159,6 +160,7 @@ export type {
   HooksStatus,
   LabelDefinition,
   NotificationSettings,
+  ProjectAvatarInfo,
   ProjectInfo,
   ProjectKind,
   Settings,
