@@ -121,6 +121,13 @@ export class SettingsPage {
     return this.dialog.getByRole("combobox", { name: "Theme" });
   }
 
+  /** "Translucent sidebar" toggle. Only rendered in the macOS desktop app
+   *  (`capabilities.translucentSidebar`); kept as a locator so browser-build
+   *  specs can assert its absence. */
+  translucentSidebarSwitch(): Locator {
+    return this.dialog.getByRole("switch", { name: "Translucent sidebar" });
+  }
+
   /** Worktrees folder text input. `<label htmlFor="worktrees-dir">` →
    *  `<input id="worktrees-dir">` contributes the accessible name. */
   worktreesFolderInput(): Locator {

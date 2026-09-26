@@ -598,6 +598,28 @@ export class WorkspacePage {
     return (await this.sidebar.boundingBox())?.width ?? 0;
   }
 
+  /** Alpha of the sidebar column's computed background colour (1 = solid).
+   *  The translucent sidebar (macOS desktop app only) paints it with a
+   *  partial alpha so the window's vibrancy layer shows through. */
+  async sidebarBackgroundAlpha(): Promise<number> {
+    return await this.sidebar.evaluate((el) => {
+      const probe = document.createElement("canvas").getContext("2d");
+      if (!probe) throw new Error("no 2d context");
+      // Normalise any CSS colour syntax (oklch, color-mix, …) through canvas.
+      probe.fillStyle = getComputedStyle(el).backgroundColor;
+      probe.fillRect(0, 0, 1, 1);
+      return probe.getImageData(0, 0, 1, 1).data[3] / 255;
+    });
+  }
+
+  /** Whether `<html>` carries `data-translucent-sidebar`, the switch that
+   *  makes the page transparent over the desktop window's vibrancy layer. */
+  async translucentSidebarActive(): Promise<boolean> {
+    return await this.page.evaluate(() =>
+      document.documentElement.hasAttribute("data-translucent-sidebar"),
+    );
+  }
+
   /** Click the header sidebar-toggle button. */
   async toggleSidebarViaButton(): Promise<void> {
     await test.step("Toggle the sidebar via the header button", async () => {

@@ -81,6 +81,7 @@ export const settingsUpdateInput = z
     useWebGLTerminalRenderer: z.boolean().optional(),
     webBrowserCdpEnabled: z.boolean().optional(),
     theme: z.enum(["system", "light", "dark"]).optional(),
+    translucentSidebar: z.boolean().optional(),
     // Retention window for the Reports `usage_events` table
     // (issue #425). Bounded to [1, 3650] days so a stray UI value
     // can't accidentally configure a 100-year window (which would
