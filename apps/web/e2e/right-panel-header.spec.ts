@@ -128,6 +128,6 @@ test("collapsing moves the toggle to the title bar, and expanding moves it back"
   expect(titleBar.x + titleBar.width - (toggle.x + toggle.width)).toBeLessThan(16);
 
   await wp.expandRightPanelViaTitleBar();
-  await expect(wp.rightPanelToggleInTitleBar).toHaveCount(0);
   await expect(wp.rightPanelToggleInHeader).toBeVisible();
+  await expect(wp.rightPanelToggleInTitleBar).toHaveCount(0);
 });
