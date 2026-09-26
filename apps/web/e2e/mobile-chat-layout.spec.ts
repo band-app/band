@@ -46,6 +46,8 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 const TOKEN = "e2e-mobile-chat-layout-token";
 const PROJECT = "mobilelayout";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
+// In an app-mode window `window.innerHeight` is the full screen height, so an
+// element that clears the home indicator ends at `innerHeight - SAFE_AREA_BOTTOM`.
 const SAFE_AREA_BOTTOM = 34;
 const SAFE_AREA_TOP = 47;
 const PHONE = { width: 390, height: 844 };

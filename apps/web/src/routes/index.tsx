@@ -22,8 +22,8 @@ function DashboardPage() {
     return null;
   }
 
-  // Mobile / narrow browser: full-screen dashboard shell. DashboardShell sizes
-  // itself to the viewport and pads both safe-area insets.
+  // Mobile / narrow browser: full-screen dashboard shell. DashboardShell owns
+  // both safe-area insets.
   return (
     <div className="h-dvh">
       <DashboardView />

@@ -337,10 +337,7 @@ export function DashboardShell({
         // workspace layout. Standalone (mobile / narrow web): plain background.
         hideTitleBar ? "h-full bg-sidebar" : "bg-background",
         !isDesktop && "pt-[env(safe-area-inset-top)]",
-        // Full-screen (mobile) and in the mobile fly-out the bottom action bar
-        // sits on the screen's bottom edge, so it clears the home indicator
-        // here. Embedded as the wide-layout sidebar, the AppShell below it
-        // already pads that inset.
+        // In the wide-layout sidebar the AppShell pads the bottom inset.
         !isDesktop && (!hideTitleBar || padBottomInset) && "pb-[env(safe-area-inset-bottom)]",
       )}
       // CSS `zoom` does not scale viewport units (vh, dvh, svh, lvh) per

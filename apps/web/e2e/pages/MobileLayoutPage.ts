@@ -60,10 +60,12 @@ export class MobileLayoutPage {
       .filter({ visible: true });
     this.flyoutActionBar = page
       .getByTestId("project-list-flyout")
-      .getByTestId("project-list__action-bar");
+      .getByTestId("project-list__action-bar")
+      .filter({ visible: true });
     this.sidebarActionBar = page
       .getByTestId("app-shell__sidebar")
-      .getByTestId("project-list__action-bar");
+      .getByTestId("project-list__action-bar")
+      .filter({ visible: true });
     this.explorerSheetBody = page.getByTestId("mobile-workspace__explorer-body");
     this.changesSheetBody = page.getByTestId("mobile-workspace__changes-body");
     this.composer = page.getByTestId("chat-pane__composer").filter({ visible: true });

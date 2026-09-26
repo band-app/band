@@ -142,7 +142,7 @@ function configOptions(s) {
   return [
     { id: "model", name: "Model", category: "model", type: "select", currentValue: s.model, options: MODELS },
     { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: MODES },
-    ...EXTRA_OPTIONS.map((o) => ({ type: "select", currentValue: o.options[0].value, ...o })),
+    ...EXTRA_OPTIONS.map((o) => ({ type: "select", currentValue: o.options[0]?.value ?? "", ...o })),
   ];
 }
 
