@@ -89,10 +89,11 @@ test("View changes shows only for a file with changes and follows saves", async 
   // Saving an edit makes it changed: the button appears.
   await viewer.replaceAll(CLEAN_EDITED);
   await workspacePage.saveFileLeaf();
-  await expect(workspacePage.fileLeafViewChangesButton).toBeVisible({ timeout: 15_000 });
+  // Well under the leaf's 15 s poll, so only the refetch on save can pass it.
+  await expect(workspacePage.fileLeafViewChangesButton).toBeVisible({ timeout: 5_000 });
 
   // Saving it back to the committed content makes it clean: the button goes.
   await viewer.replaceAll(CLEAN_ORIGINAL);
   await workspacePage.saveFileLeaf();
-  await expect(workspacePage.fileLeafViewChangesButton).toBeHidden({ timeout: 15_000 });
+  await expect(workspacePage.fileLeafViewChangesButton).toBeHidden({ timeout: 5_000 });
 });

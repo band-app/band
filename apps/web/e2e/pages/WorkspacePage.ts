@@ -747,12 +747,12 @@ export class WorkspacePage {
   }
 
   /** Open `path` as a pinned file leaf through Quick Open (type the name,
-   *  Enter) and wait until its tab is the active one. */
+   *  Enter) and wait until its tab exists. */
   async openFileViaQuickOpen(path: string): Promise<void> {
     await test.step(`Open ${path} via Quick Open`, async () => {
       await this.openQuickOpen();
       await this.typeQuickOpen(path);
-      await expect.poll(() => this.selectedQuickOpenValue()).toContain(path);
+      await expect.poll(() => this.selectedQuickOpenValue()).toBe(path);
       await this.pressQuickOpenKey("Enter");
       await expect(this.fileTab(path)).toBeAttached({ timeout: 15_000 });
     });

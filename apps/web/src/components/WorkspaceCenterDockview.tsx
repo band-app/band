@@ -1218,7 +1218,9 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     enabled: diffSummaryEnabled && visible,
     refetchInterval: visible ? 15_000 : false,
   });
-  const canViewDiff = diffSummaryEnabled && !!diffSummaryQuery.data?.fileStatuses[filePathRaw];
+  const fileStatuses = diffSummaryQuery.data?.fileStatuses;
+  const canViewDiff =
+    diffSummaryEnabled && !!fileStatuses && Object.hasOwn(fileStatuses, filePathRaw);
   const refetchDiffSummary = diffSummaryQuery.refetch;
   const wasDirtyRef = useRef(false);
   const isDirty = fileActions?.isDirty ?? false;
