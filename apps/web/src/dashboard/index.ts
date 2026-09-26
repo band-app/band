@@ -117,6 +117,10 @@ export {
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "./lib/language-map";
+export type {
+  RenderedBlockKind,
+  RenderMarkdownBlock,
+} from "./lib/markdown-live-preview";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export {
   type AddToTerminalDetail,
