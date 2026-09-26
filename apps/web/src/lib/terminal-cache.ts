@@ -87,6 +87,8 @@ function toXtermSearchOptions(opts: SearchOptions): ISearchOptions {
   };
 }
 
+// The `background` values are mirrored as `--terminal-background` in
+// styles/globals.css (dark and light); change both together.
 const DARK_TERMINAL_THEME: ITheme = {
   background: "#1e1e1e",
   foreground: "#e8e8e8",
