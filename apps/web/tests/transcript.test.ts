@@ -2,7 +2,10 @@
  * Transcript reducer tests (issue #648): fold fixed lists of the chat events
  * the server streams (`src/shared/chat-events.ts`) through
  * `transcriptReducer` / `foldEvents` and assert on the resulting transcript.
- * Pure, no I/O.
+ * Pure, no I/O, no mocks: the reducer is a pure function, so the edge cases
+ * (orphan tool updates, revision resets, dedupe by id) are cheaper and more
+ * exhaustive here than through the browser. The user-visible paths are also
+ * covered end to end by the chat e2e specs.
  */
 
 import { describe, expect, it } from "vitest";

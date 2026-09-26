@@ -16,7 +16,7 @@
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_DISPATCH_ENV } from "@band-app/coding-agent";
 import { shellPath } from "../process/path";
@@ -72,8 +72,28 @@ function nodeFor(path: string): string {
   return findOnPath("node", path) ?? process.execPath;
 }
 
+function isExecutableFile(file: string): boolean {
+  try {
+    accessSync(file, constants.X_OK);
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The agent binary: the settings `command` when it names an executable
+ * file (a path, or a name found on PATH), else the first default name on
+ * PATH. A `command` that resolves to nothing counts as not installed.
+ */
 function binary(def: AcpAgentDefinition, names: string[], path: string, extra: string[] = []) {
-  if (def.command) return def.command;
+  if (def.command) {
+    if (def.command.includes("/")) {
+      const resolved = resolvePath(def.command);
+      return isExecutableFile(resolved) ? resolved : null;
+    }
+    return findOnPath(def.command, path, extra);
+  }
   for (const name of names) {
     const found = findOnPath(name, path, extra);
     if (found) return found;

@@ -377,7 +377,7 @@ function describe(err: unknown): string {
 }
 
 function killTree(child: ChildProcess): void {
-  if (child.exitCode !== null || child.pid === undefined) return;
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
   try {
     if (process.platform === "win32") child.kill("SIGTERM");
     else process.kill(-child.pid, "SIGTERM");

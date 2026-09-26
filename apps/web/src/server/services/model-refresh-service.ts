@@ -355,7 +355,7 @@ function modelsFromCatalog(entry: CatalogEntry): CachedAgentModel[] {
  */
 function classifyRefreshError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
-  if (/ENOENT|not found|spawn .* ENOENT/i.test(raw)) return "agent binary not found";
+  if (/ENOENT|not found|not installed|spawn .* ENOENT/i.test(raw)) return "agent binary not found";
   if (/ETIMEDOUT|timed out|timeout/i.test(raw)) return "agent did not respond in time";
   if (/ECONNREFUSED|ECONNRESET|ENETUNREACH|EAI_AGAIN/i.test(raw)) return "network error";
   if (/SyntaxError|Unexpected token|JSON/i.test(raw)) return "could not parse model catalog";

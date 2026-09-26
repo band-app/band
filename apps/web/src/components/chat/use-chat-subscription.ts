@@ -82,7 +82,10 @@ const INITIAL_BACKOFF_MS = 500;
 async function fileToWirePart(file: File): Promise<ChatEventFile> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  // In 32 KB slices: one string per slice, not one per byte.
+  for (let i = 0; i < bytes.byteLength; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
   const mediaType = file.type || "application/octet-stream";
   return { mediaType, url: `data:${mediaType};base64,${btoa(binary)}`, filename: file.name };
 }

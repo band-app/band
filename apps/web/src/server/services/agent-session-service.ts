@@ -263,6 +263,8 @@ function scheduleIdle(rt: Runtime): void {
     rt.process?.close();
     rt.process = null;
     rt.sessionId = null;
+    // The next use builds a fresh runtime and reattaches the session.
+    if (runtimes.get(rt.chatId) === rt) runtimes.delete(rt.chatId);
   }, IDLE_TIMEOUT_MS);
   rt.idleTimer.unref?.();
 }
@@ -440,7 +442,9 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
     onElicitation: (req, signal) => requestElicitation(rt, req, signal),
     onExit: (code, stderr) => {
       if (rt.generation !== generation) return;
-      log.info({ chatId: rt.chatId, code, stderr: stderr.slice(-500) }, "agent exited");
+      log.info({ chatId: rt.chatId, code }, "agent exited");
+      // stderr can hold auth details; keep it out of info-level logs.
+      log.debug({ chatId: rt.chatId, stderr: stderr.slice(-500) }, "agent stderr");
       for (const p of [...rt.pending.values()]) p.cancel();
       // `sessionId` stays: the failed turn still logs its end there. With
       // no process, the next `ensureSession` reattaches.
@@ -1051,6 +1055,8 @@ export class AgentSessionService {
       if (proc.canList) agentSessions = await proc.listSessions(workspace.worktree.path);
     } catch (err) {
       log.warn({ chatId, err }, "session/list failed; using Band's log");
+      // Let the idle timer drop a runtime that never got a process.
+      if (!rt.inTurn) scheduleIdle(rt);
     }
 
     if (agentSessions) {

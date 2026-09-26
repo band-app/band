@@ -33,8 +33,7 @@ import {
 //   • Negative auth — both procedures reject without the `band_token` cookie.
 //
 // Pattern: vitest + `startServer` + real production bundle. No tRPC
-// mocking, no in-process React. Matches the doctrine in
-// `.claude/skills/write-integration-test/`.
+// mocking, no in-process React.
 
 const DEFAULT_TOKEN = "chat-lifecycle-test-token";
 

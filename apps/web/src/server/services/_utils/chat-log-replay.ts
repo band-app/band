@@ -55,7 +55,7 @@ export function rowsToEvents(rows: ChatEventRow[]): ChatEvent[] {
       run.update.sessionUpdate === chunk.sessionUpdate &&
       (run.update.messageId ?? null) === (chunk.messageId ?? null)
     ) {
-      run.text += chunk.content.type === "text" ? chunk.content.text : "";
+      if (chunk.content.type === "text") run.text += chunk.content.text;
       run.lastId = row.id;
       continue;
     }

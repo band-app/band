@@ -26,9 +26,13 @@ import {
 import type { ServerHandle } from "./helpers/server";
 
 let servers: ServerHandle[] = [];
+/** Homes a test seeded itself; removed even when the test fails. */
+let homes: string[] = [];
 afterEach(async () => {
   await Promise.all(servers.map((s) => s.close()));
   servers = [];
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
 });
 
 async function boot(opts: Parameters<typeof startAcpServer>[0] = {}) {
@@ -57,12 +61,16 @@ describe("chat over ACP", () => {
 
     // What Band told the agent: no fs, no terminal (#649), form elicitation.
     const [init] = stubRequests(server.home, "initialize");
-    expect(init.params.clientCapabilities).toEqual({
-      fs: { readTextFile: false, writeTextFile: false },
-      terminal: false,
-      elicitation: { form: {} },
-      session: { notices: {} },
-      auth: { terminal: false },
+    expect(init.params).toEqual({
+      protocolVersion: expect.any(Number),
+      clientInfo: { name: "band", version: "0.1.0" },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+        elicitation: { form: {} },
+        session: { notices: {} },
+        auth: { terminal: false },
+      },
     });
     // The agent runs in the workspace, with chat dispatch for nested `band`
     // calls. (Other `session/new`s come from the boot-time model probe,
@@ -383,6 +391,7 @@ describe("chat over ACP", () => {
 describe("chat over ACP: sessions", () => {
   it("resumes the session after a server restart and keeps the log", async () => {
     const home = seedAcpHome();
+    homes.push(home);
     const first = await boot({ home });
     const chatId = newChatId();
     const turn1 = await runTurn(first.url, chatId, "before restart");
@@ -425,9 +434,6 @@ describe("chat over ACP: sessions", () => {
     expect(resume.params.sessionId).toBe(
       attached?.type === "session-attached" ? attached.sessionId : "",
     );
-    await second.close();
-    servers = servers.filter((s) => s !== second);
-    rmSync(home, { recursive: true, force: true });
   });
 
   it("loads a session Band never recorded, writing the replay as a new revision", async () => {
@@ -486,5 +492,20 @@ describe("chat over ACP: sessions", () => {
     expect(listed.supported).toBe(true);
     expect(listed.sessions.map((s) => s.summary)).toEqual(["remember me"]);
     expect(stubRequests(server.home, "session/list")).toHaveLength(0);
+  });
+});
+
+describe("chat over ACP: auth", () => {
+  it.each([
+    "chat.answer",
+    "chat.answerElicitation",
+  ])("%s rejects a request without the band_token cookie", async (procedure) => {
+    const server = await boot();
+    const res = await fetch(`${server.url}/trpc/${procedure}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: "x", requestId: "y", optionId: null, action: "decline" }),
+    });
+    expect(res.status).toBe(401);
   });
 });
