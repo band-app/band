@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
 import { loadProjectConfig } from "../infra/setup/project-config";
-import { prepareScriptRun, type ScriptRun } from "../infra/setup/script-run";
+import { prepareScriptRun, runScriptHidden, type ScriptRun } from "../infra/setup/script-run";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
@@ -34,6 +34,10 @@ export type ScriptOutcome =
  * {@link getRunning} via the watcher snapshot. The running set lives in
  * memory, so a server restart forgets it; the terminal itself (and the
  * script in it) keeps running in the terminal daemon.
+ *
+ * On Windows the commands run hidden through cmd.exe instead (see
+ * `runHidden`), since the terminal there cannot run the bash wrapper that
+ * reports the exit code.
  */
 export class WorkspaceScriptService {
   /** `${workspaceId}\0${script}` -> the running script. */
@@ -81,6 +85,15 @@ export class WorkspaceScriptService {
     this.running.set(key, { workspaceId, script });
     emit({ kind: "setup-status", workspaceId, script, setupState: "running" });
 
+    if (process.platform === "win32") {
+      return this.finish(
+        workspaceId,
+        script,
+        key,
+        await runHidden(workspaceId, command, timeoutMs),
+      );
+    }
+
     const terminalId = randomUUID();
     let prepared: ScriptRun | undefined;
     let unsubscribeExit = () => {};
@@ -108,15 +121,32 @@ export class WorkspaceScriptService {
       unsubscribeExit();
       clearTimeout(timer);
       prepared?.dispose();
-      this.running.delete(key);
     }
+    return this.finish(workspaceId, script, key, outcome, terminalId);
+  }
 
+  /** Clear the running entry, report the outcome, and pass it through. */
+  private finish(
+    workspaceId: string,
+    script: WorkspaceScript,
+    key: string,
+    outcome: ScriptOutcome,
+    terminalId?: string,
+  ): ScriptOutcome {
+    this.running.delete(key);
     log.info({ workspaceId, script, terminalId, outcome }, "workspace script finished");
     // A removed workspace has no card left to update. A finished teardown
     // reports nothing either: the removal follows at once, and its `remove`
     // event clears the card's status, so it stays marked as deleting until
-    // then rather than flashing back to normal.
-    if (script === "setup" && workspaceService.resolve(workspaceId)) {
+    // then rather than flashing back to normal. For the same reason a setup
+    // that ends while the workspace is tearing down reports nothing: the
+    // dashboard keeps one status per workspace, and it would replace the
+    // teardown's.
+    if (
+      script === "setup" &&
+      !this.running.has(`${workspaceId}\0teardown`) &&
+      workspaceService.resolve(workspaceId)
+    ) {
       const error = describeFailure(script, outcome);
       emit(
         error
@@ -125,6 +155,25 @@ export class WorkspaceScriptService {
       );
     }
     return outcome;
+  }
+}
+
+/**
+ * Windows: run the command without a terminal. Terminals there use cmd.exe,
+ * which cannot run the bash wrapper that reports the exit code.
+ */
+async function runHidden(
+  workspaceId: string,
+  command: string,
+  timeoutMs: number | undefined,
+): Promise<ScriptOutcome> {
+  const workspace = workspaceService.resolve(workspaceId);
+  if (!workspace) return { kind: "error", message: `Workspace not found: ${workspaceId}` };
+  try {
+    const code = await runScriptHidden(command, workspace.worktree.path, timeoutMs);
+    return code === null ? { kind: "timeout" } : { kind: "exited", code };
+  } catch (err) {
+    return { kind: "error", message: err instanceof Error ? err.message : String(err) };
   }
 }
 

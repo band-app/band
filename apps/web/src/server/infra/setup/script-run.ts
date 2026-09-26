@@ -1,9 +1,22 @@
-import { existsSync, type FSWatcher, mkdtempSync, readFileSync, rmSync, watch } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  type FSWatcher,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
+import { prependBinDirs } from "../process/path";
 
 const log = createLogger("script-run");
+
+/** How often {@link prepareScriptRun} checks for the exit-code file, in case `fs.watch` misses it. */
+const POLL_MS = 1_000;
 
 /**
  * A `.band/config.json` `setup` / `teardown` command prepared to run inside
@@ -11,11 +24,17 @@ const log = createLogger("script-run");
  *
  * The terminal types {@link command} into the user's interactive shell, so
  * the PTY's own exit code says nothing about the script (the shell stays
- * open afterwards, keeping the output on screen). Instead the command runs
- * the script under `bash -c` with an EXIT trap that writes the script's exit
- * code to a private temp file, and {@link exited} resolves when that file
- * appears. The trap fires on a normal end, an explicit `exit N`, and a
- * `set -e` abort alike.
+ * open afterwards, keeping the output on screen). Instead the script runs
+ * under bash with an EXIT trap that writes its exit code to a private temp
+ * file, and {@link exited} resolves when that file appears. The trap fires
+ * on a normal end, an explicit `exit N`, and a `set -e` abort alike.
+ *
+ * The script itself lives in the same temp dir, so {@link command} is just
+ * `bash '<path>'`: no user text passes through the interactive shell's
+ * quoting (which differs in fish). The dir is removed once the script
+ * ends, so if the terminal is later respawned from its saved layout with
+ * the same command, bash finds no file rather than running the script a
+ * second time.
  */
 export interface ScriptRun {
   /** Shell line for `SpawnOptions.command`. */
@@ -26,7 +45,7 @@ export interface ScriptRun {
   dispose(): void;
 }
 
-/** POSIX single-quote a string (`'` becomes `'\''`). Also valid in zsh and fish. */
+/** POSIX single-quote a string (`'` becomes `'\''`). */
 function quote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -34,12 +53,14 @@ function quote(value: string): string {
 /**
  * Wrap `script` so it runs with bash semantics (as the old hidden runner's
  * `bash -c <script>` did) regardless of the user's login shell, prints what
- * it is running and how it ended, and reports its exit code.
+ * it is running and how it ended, and reports its exit code. POSIX only;
+ * see {@link runScriptHidden} for Windows.
  */
 export function prepareScriptRun(script: string, label: "setup" | "teardown"): ScriptRun {
   // mkdtemp creates the dir with mode 0700, so no other user can plant or
-  // read the exit-code file.
+  // read the script or the exit-code file.
   const dir = mkdtempSync(join(tmpdir(), "band-script-"));
+  const scriptFile = join(dir, `${label}.sh`);
   const exitFile = join(dir, "exit-code");
   const partialFile = `${exitFile}.partial`;
 
@@ -50,14 +71,17 @@ export function prepareScriptRun(script: string, label: "setup" | "teardown"): S
     `printf %s "$rc" > ${quote(partialFile)}`,
     `mv ${quote(partialFile)} ${quote(exitFile)}`,
   ].join("; ");
-  const inner = [
+  const body = [
     `trap ${quote(onExit)} EXIT`,
     `printf '[band] running ${label}: %s\\n\\n' ${quote(script)}`,
     script,
+    "",
   ].join("\n");
-  const command = `bash -c ${quote(inner)}`;
+  writeFileSync(scriptFile, body, { mode: 0o600 });
+  const command = `bash ${quote(scriptFile)}`;
 
   let watcher: FSWatcher | null = null;
+  let poll: NodeJS.Timeout | null = null;
   let disposed = false;
   let resolveExited!: (code: number) => void;
   const exited = new Promise<number>((resolve) => {
@@ -76,15 +100,57 @@ export function prepareScriptRun(script: string, label: "setup" | "teardown"): S
     disposed = true;
     watcher?.close();
     watcher = null;
+    if (poll) clearInterval(poll);
+    poll = null;
     rmSync(dir, { recursive: true, force: true });
   };
 
+  // `fs.watch` reports the file promptly; the poll covers a watcher that
+  // fails to start or errors later, so `exited` still resolves.
   try {
     watcher = watch(dir, check);
-    watcher.on("error", (err) => log.warn({ err }, "exit-code watcher failed"));
+    watcher.on("error", (err) => log.warn({ err }, "exit-code watcher failed; polling instead"));
   } catch (err) {
-    log.warn({ err }, "could not watch for the script's exit code");
+    log.warn({ err }, "could not watch for the script's exit code; polling instead");
   }
+  poll = setInterval(check, POLL_MS);
+  poll.unref();
 
   return { command, exited, dispose };
+}
+
+/**
+ * Run `script` through `cmd.exe /d /s /c` in `cwd`, without a terminal,
+ * and resolve with its exit code (or `null` on `timeoutMs`). The Windows
+ * path: terminals there cannot run {@link prepareScriptRun}'s bash wrapper.
+ */
+export function runScriptHidden(
+  script: string,
+  cwd: string,
+  timeoutMs?: number,
+): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const { PORT: _port, ...parentEnv } = process.env;
+    const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", script], {
+      cwd,
+      env: { ...parentEnv, PATH: prependBinDirs(process.env.PATH) },
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            child.kill();
+            resolve(null);
+          }, timeoutMs);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code ?? 1);
+    });
+  });
 }

@@ -14,11 +14,11 @@
  * tRPC mocking, no `page.route()`.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -39,27 +39,14 @@ const WORKSPACE_MAIN = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
 const WORKSPACE_UI = toWorkspaceId(PROJECT, BRANCH_UI);
 const WORKSPACE_API = toWorkspaceId(PROJECT, BRANCH_API);
 
-// Long enough to observe the deleting state, well under the 60s cap.
-const TEARDOWN = "sleep 6";
+// Long enough to observe the deleting state, well under the 60s cap. The
+// API case asserts the marker within MARKER_TIMEOUT_MS, well before the
+// teardown ends and the `remove` event arrives, so only the teardown's
+// `setup-status` event can satisfy it.
+const TEARDOWN = "sleep 10";
+const MARKER_TIMEOUT_MS = 3_000;
 
 test.use({ viewport: { width: 1280, height: 800 } });
-
-function makeGitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@test.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@test.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-}
-
-function git(cwd: string, args: string[], home: string): string {
-  return execFileSync("git", args, { cwd, env: makeGitEnv(home), encoding: "utf-8" });
-}
 
 /** `workspaces.remove` straight over HTTP, the way the `band` CLI calls it. */
 function removeViaApi(serverUrl: string, name: string): Promise<Response> {
@@ -77,18 +64,18 @@ test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, PROJECT);
   mkdirSync(repoPath, { recursive: true });
-  git(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
+  gitInHome(repoPath, ["init", "-b", DEFAULT_BRANCH], tmpHome);
   writeFileSync(join(repoPath, "README.md"), "# Deleting state test\n");
-  git(repoPath, ["add", "."], tmpHome);
-  git(repoPath, ["commit", "-m", "initial commit"], tmpHome);
+  gitInHome(repoPath, ["add", "."], tmpHome);
+  gitInHome(repoPath, ["commit", "-m", "initial commit"], tmpHome);
   // Untracked, so the worktrees fall back to the project's copy.
   mkdirSync(join(repoPath, ".band"), { recursive: true });
   writeFileSync(join(repoPath, ".band", "config.json"), JSON.stringify({ teardown: TEARDOWN }));
 
   const uiPath = join(tmpHome, `${PROJECT}-${BRANCH_UI}`);
   const apiPath = join(tmpHome, `${PROJECT}-${BRANCH_API}`);
-  git(repoPath, ["worktree", "add", "-b", BRANCH_UI, uiPath], tmpHome);
-  git(repoPath, ["worktree", "add", "-b", BRANCH_API, apiPath], tmpHome);
+  gitInHome(repoPath, ["worktree", "add", "-b", BRANCH_UI, uiPath], tmpHome);
+  gitInHome(repoPath, ["worktree", "add", "-b", BRANCH_API, apiPath], tmpHome);
 
   seedState(tmpHome, {
     projects: [
@@ -153,7 +140,9 @@ test.describe("Workspace deleting state in the sidebar", () => {
     // Not awaited yet: the request resolves only after the teardown.
     const removal = removeViaApi(server.url, BRANCH_API);
 
-    await expect(workspacePage.workspaceDeletingMarker(WORKSPACE_API)).toBeVisible();
+    await expect(workspacePage.workspaceDeletingMarker(WORKSPACE_API)).toBeVisible({
+      timeout: MARKER_TIMEOUT_MS,
+    });
     await expect(card).toHaveAttribute("aria-disabled", "true");
 
     expect((await removal).status).toBe(200);

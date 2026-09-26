@@ -636,7 +636,9 @@ export class WorkspaceService {
    * in a terminal tab of the still-listed workspace, and this call waits
    * for it (up to {@link TEARDOWN_TIMEOUT_MS}) before either phase. The
    * dashboard shows the workspace as tearing down meanwhile. A failing
-   * teardown is logged and does not stop the removal.
+   * teardown is logged and does not stop the removal. The workspace's
+   * chats, agents and cronjobs are still live while it runs; they stop in
+   * the fast path afterwards.
    *
    * Resolves the worktree path via `listWorktrees` rather than re-parsing
    * `git worktree list --porcelain` inline so detached-HEAD worktrees

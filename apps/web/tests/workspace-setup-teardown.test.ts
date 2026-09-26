@@ -111,17 +111,17 @@ async function readOutput(server: ServerHandle, terminalId: string): Promise<str
   return (JSON.parse(body) as { result: { data: { output: string } } }).result.data.output;
 }
 
-/** Wait until one of the workspace's terminals prints `marker`; returns its output. */
+/** Wait until one of the workspace's terminals prints `marker`; returns that terminal. */
 async function waitForTerminalOutput(
   server: ServerHandle,
   workspaceId: string,
   marker: string,
-): Promise<string> {
+): Promise<{ terminalId: string; output: string }> {
   return waitFor(
     async () => {
-      for (const id of await listTerminalIds(server, workspaceId)) {
-        const output = await readOutput(server, id);
-        if (output.includes(marker)) return output;
+      for (const terminalId of await listTerminalIds(server, workspaceId)) {
+        const output = await readOutput(server, terminalId);
+        if (output.includes(marker)) return { terminalId, output };
       }
       return undefined;
     },
@@ -155,7 +155,11 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
     const workspaceId = toWorkspaceId(PROJECT, "feat/slow-setup");
     await createWorkspace(server, "feat/slow-setup", "prompt during slow setup");
 
-    const output = await waitForTerminalOutput(server, workspaceId, "SETUP-STARTED");
+    const { terminalId: setupTerminal, output } = await waitForTerminalOutput(
+      server,
+      workspaceId,
+      "SETUP-STARTED",
+    );
     expect(output).toContain("[band] running setup: echo SETUP-STARTED; sleep 600");
 
     const prompts = await waitFor(
@@ -168,7 +172,6 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
     expect(prompts).toEqual(["prompt during slow setup"]);
 
     // The setup is still running: its terminal never printed a result.
-    const [setupTerminal] = await listTerminalIds(server, workspaceId);
     expect(await readOutput(server, setupTerminal)).not.toContain("[band] setup finished");
   });
 });
@@ -192,7 +195,7 @@ describe("a failing setup does not drop the prompt", () => {
     const workspaceId = toWorkspaceId(PROJECT, "feat/bad-setup");
     await createWorkspace(server, "feat/bad-setup", "prompt despite failing setup");
 
-    const output = await waitForTerminalOutput(
+    const { output } = await waitForTerminalOutput(
       server,
       workspaceId,
       "[band] setup finished with exit code 3",
@@ -267,5 +270,50 @@ describe("teardown runs in a terminal before the workspace is removed", () => {
       body: JSON.stringify({ project: PROJECT, name: "feat/teardown" }),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("a failing teardown does not stop the removal", () => {
+  let server: ServerHandle;
+  let home: string;
+
+  beforeAll(async () => {
+    ({ server, home } = await bootWithConfig("band-teardown-failing-", {
+      teardown: "echo TEARDOWN-FAILING; exit 4",
+    }));
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("removes the workspace and its worktree anyway", async () => {
+    const worktreePath = await createWorkspace(server, "feat/bad-teardown");
+
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.remove",
+      { project: PROJECT, name: "feat/bad-teardown" },
+      TOKEN,
+    );
+    const body = await res.text();
+    expect(res.status, body).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "projects.list", undefined, TOKEN);
+    const listBody = await listRes.text();
+    expect(listRes.status, listBody).toBe(200);
+    const { projects } = (
+      JSON.parse(listBody) as {
+        result: { data: { projects: { name: string; worktrees: { branch: string }[] }[] } };
+      }
+    ).result.data;
+    const project = projects.find((p) => p.name === PROJECT);
+    expect(project?.worktrees.map((wt) => wt.branch)).toEqual(["main"]);
+
+    // The worktree directory goes in the background after `remove` returns.
+    await waitFor(async () => (existsSync(worktreePath) ? undefined : true), {
+      label: "worktree directory removed",
+    });
   });
 });
