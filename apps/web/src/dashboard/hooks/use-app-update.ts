@@ -1,59 +1,43 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { UpdateStatus } from "../adapter";
 import { useAdapter } from "../context";
 
-/**
- * Banner state for the desktop auto-updater. Driven by:
- *   - Main process (`apps/desktop/src/main/updater.ts`) running a 10s startup
- *     check + a 2h periodic check.
- *   - The renderer subscribing to `updater-status-changed` and, on mount,
- *     polling `updater_status` once to catch the race where the renderer
- *     mounted after the startup check already completed.
- *
- * Outside the desktop shell (plain browser tab, or web adapter that doesn't
- * implement `getUpdateStatus`), the hook stays permanently at `"none"` so the
- * banner never appears.
- */
-export type AppUpdateState =
-  | { status: "none" }
-  | { status: "available"; version: string }
-  | { status: "installing" }
-  | { status: "error"; message: string };
+/** How long "You're on the latest version" stays up before it dismisses itself. */
+const UP_TO_DATE_DISMISS_MS = 4000;
 
+/**
+ * State for the update toast. The desktop main process
+ * (`apps/desktop/src/main/updater.ts`) owns the update flow; this hook reads
+ * its status once on mount (the startup check may have finished before the
+ * renderer subscribed) and follows `updater-status-changed` after that.
+ *
+ * `status` is `null` when the toast should be hidden: outside the desktop
+ * shell (the web adapter has no updater methods), when idle, and for the
+ * checking / up-to-date / error steps of a background check, which stay
+ * silent unless they find an update.
+ */
 export function useAppUpdate() {
   const adapter = useAdapter();
-  const [state, setState] = useState<AppUpdateState>({ status: "none" });
+  const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
 
   useEffect(() => {
-    // Web adapter doesn't implement these — the banner stays hidden.
     if (!adapter.getUpdateStatus || !adapter.subscribeUpdateStatus) return;
-
     let cancelled = false;
+    let received = false;
 
-    // Seed initial state. If the main-process startup check fired before
-    // this component mounted, the subscription below would miss that
-    // broadcast — the one-shot query catches it.
+    const unsubscribe = adapter.subscribeUpdateStatus((next) => {
+      received = true;
+      setStatus(next);
+    });
     adapter
       .getUpdateStatus()
-      .then((pending) => {
-        if (cancelled) return;
-        if (pending) {
-          setState({ status: "available", version: pending.version });
-        }
+      .then((initial) => {
+        // A broadcast that arrived first is newer than this snapshot.
+        if (!cancelled && !received) setStatus(initial);
       })
       .catch(() => {
-        // Swallow — the hook's job is the banner, not error surfacing.
-        // The main process logs failures via `dashLog`.
+        // The main process logs updater failures; the toast stays hidden.
       });
-
-    const unsubscribe = adapter.subscribeUpdateStatus((pending) => {
-      // Don't clobber an in-flight install with a stale broadcast (the
-      // periodic check could fire after the user clicked Install but
-      // before quitAndInstall takes the process down).
-      setState((prev) => {
-        if (prev.status === "installing") return prev;
-        return pending ? { status: "available", version: pending.version } : { status: "none" };
-      });
-    });
 
     return () => {
       cancelled = true;
@@ -61,22 +45,44 @@ export function useAppUpdate() {
     };
   }, [adapter]);
 
-  const install = async () => {
-    if (!adapter.installUpdate) return;
-    // Optimistic state flip BEFORE awaiting — the OS quits the process on
-    // success, so the awaited promise typically never resolves in
-    // production. The banner needs to swap to the "Installing…" state
-    // before that happens so the user has visible feedback.
-    setState({ status: "installing" });
-    try {
-      await adapter.installUpdate();
-    } catch (err) {
-      setState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
+  const dismiss = useCallback(() => {
+    // Hide right away; main confirms with an `idle` broadcast.
+    setStatus({ state: "idle" });
+    void adapter.dismissUpdate?.();
+  }, [adapter]);
 
-  return { state, install };
+  useEffect(() => {
+    if (status.state !== "up-to-date") return;
+    const timer = setTimeout(dismiss, UP_TO_DATE_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [status, dismiss]);
+
+  const retry = useCallback(() => {
+    if (status.state !== "error") return;
+    if (status.phase === "download") void adapter.downloadUpdate?.();
+    else void adapter.checkForUpdates?.();
+  }, [adapter, status]);
+
+  return {
+    status: isVisible(status) ? status : null,
+    download: useCallback(() => void adapter.downloadUpdate?.(), [adapter]),
+    restart: useCallback(() => void adapter.restartToUpdate?.(), [adapter]),
+    retry,
+    dismiss,
+  };
+}
+
+function isVisible(status: UpdateStatus): boolean {
+  switch (status.state) {
+    case "idle":
+      return false;
+    case "checking":
+    case "up-to-date":
+    case "error":
+      return status.userInitiated;
+    case "available":
+    case "downloading":
+    case "downloaded":
+      return true;
+  }
 }

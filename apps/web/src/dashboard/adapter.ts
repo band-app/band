@@ -17,6 +17,29 @@ import type {
 
 export type Unsubscribe = () => void;
 
+/**
+ * Auto-update status from the desktop main process. Structural copy of
+ * `UpdateStatus` in `apps/desktop/src/shared/update-status.ts`; change both
+ * together. `userInitiated` marks a check the user asked for: the toast
+ * shows checking, up-to-date and check errors only for those.
+ */
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking"; userInitiated: boolean }
+  | { state: "up-to-date"; currentVersion: string; userInitiated: boolean }
+  | ({ state: "available" } & UpdateRelease)
+  | ({ state: "downloading"; percent: number } & UpdateRelease)
+  | ({ state: "downloaded" } & UpdateRelease)
+  | { state: "error"; message: string; phase: "check" | "download"; userInitiated: boolean };
+
+export interface UpdateRelease {
+  version: string;
+  currentVersion: string;
+  releaseName: string | null;
+  releaseNotes: string | null;
+  releaseUrl: string;
+}
+
 export interface DashboardAdapter {
   // Projects
   listProjects(): Promise<ProjectInfo[]>;
@@ -141,12 +164,16 @@ export interface DashboardAdapter {
   checkCli(): Promise<CliStatus>;
   installCli(opts?: { allowPrompt?: boolean }): Promise<void>;
 
-  // Background app-update banner (desktop only — the web adapter omits these
-  // and the hook short-circuits to "none" so the banner never appears in a
-  // plain browser tab).
-  getUpdateStatus?(): Promise<{ version: string } | null>;
-  installUpdate?(): Promise<void>;
-  subscribeUpdateStatus?(cb: (pending: { version: string } | null) => void): Unsubscribe;
+  // App-update toast (desktop only). The web adapter omits these, so a plain
+  // browser tab never shows the toast. The desktop main process runs the
+  // checks; the action methods resolve when a step starts, and its progress
+  // and result arrive through `subscribeUpdateStatus`.
+  getUpdateStatus?(): Promise<UpdateStatus>;
+  subscribeUpdateStatus?(cb: (status: UpdateStatus) => void): Unsubscribe;
+  checkForUpdates?(): Promise<void>;
+  downloadUpdate?(): Promise<void>;
+  restartToUpdate?(): Promise<void>;
+  dismissUpdate?(): Promise<void>;
 
   // Agent status (optional)
   clearNeedsAttention?(workspaceId: string): Promise<void>;

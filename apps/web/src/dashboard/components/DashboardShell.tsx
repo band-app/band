@@ -20,7 +20,6 @@ import {
 import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
-import { useAppUpdate } from "../hooks/use-app-update";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
   LABELS_COLLAPSE_KEY,
@@ -101,7 +100,6 @@ export function DashboardShell({
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
-  const { state: updateState, install: installUpdate } = useAppUpdate();
 
   const [appTitle, setAppTitle] = useState("Band");
 
@@ -519,35 +517,6 @@ export function DashboardShell({
           )}
         </main>
       </ScrollArea>
-
-      {updateState.status === "available" && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-blue-700 dark:text-blue-200">
-            {`Band v${updateState.version} is available`}
-          </span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installUpdate}>
-            Install
-          </Button>
-        </div>
-      )}
-
-      {updateState.status === "installing" && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-blue-700 dark:text-blue-200">Installing update…</span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" disabled>
-            Install
-          </Button>
-        </div>
-      )}
-
-      {updateState.status === "error" && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
-          <span className="truncate">{`Update failed: ${updateState.message}`}</span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installUpdate}>
-            Retry
-          </Button>
-        </div>
-      )}
 
       {(cliState.status === "manual" || cliState.status === "conflict") && (
         <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">

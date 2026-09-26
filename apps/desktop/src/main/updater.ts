@@ -1,162 +1,90 @@
 /**
- * Auto-updater. Direct port of
- * `apps/dashboard/src-tauri/src/commands/updater.rs`, backed by
- * `electron-updater` instead of `tauri-plugin-updater`.
+ * Auto-updater, backed by `electron-updater` and the GitHub Releases feed
+ * configured in `electron-builder.yml` (`latest-mac.yml` on band-app/band).
  *
- * Parity goals (issue #363):
- *   - Boot-time silent check: 10s after launch, mirroring the
- *     `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run.
- *   - Interactive "Check for Updates…" menu item: dialog when up-to-date,
- *     dialog with Update/Later when an update exists, progress reporting
- *     during download, restart on install.
- *   - Same UPDATER_ENABLED gating: only active in CI release builds.
+ * `UpdateController` owns the whole update flow and its state. The renderer
+ * shows that state as a bottom-right toast (`UpdateToast` in apps/web): it
+ * reads it once with `updater_status`, follows `updater-status-changed`, and
+ * drives the flow with `updater_check` / `updater_download` /
+ * `updater_restart` / `updater_dismiss`. Main never shows an OS dialog for
+ * updates.
  *
- * Why electron-updater (not Squirrel.Mac directly): it shares the
- * publish/feed semantics with `electron-builder`, generates the
- * `app-update.yml` manifest baked into the .app, and matches the GitHub
- * Releases hosting we already use. The legacy `latest.json` (minisign-signed,
- * Tauri-format) stays in the same release for users still on the Tauri shell.
+ * Checks run 10s after launch, every hour after that, and on wake from sleep
+ * when the last check is older than the interval. These background checks
+ * change the status only when they find an update, so the toast appears only
+ * then. The "Check for Updates…" menu item runs a user-initiated check, which
+ * the toast follows from "Checking for updates…" to its result. Only one
+ * check runs at a time: a check requested while one is in flight joins it.
  *
- * The publish endpoint itself is configured in `electron-builder.yml`; the
- * runtime simply calls `autoUpdater.checkForUpdates()` and reads the feed
- * from the bundled `app-update.yml`.
- *
- * Implementation note — lazy electron imports: the top of this file
- * deliberately avoids importing `electron` or `electron-updater` eagerly.
- * Both packages bind to the running Electron binary at module-load time,
- * so a plain `node` process loading `updater.ts` (e.g. our integration
- * tests) would either get back `undefined` exports (in electron's case
- * `index.js` returns a path string) or hard-fail (in electron-updater's
- * case it imports `electron`). The runtime defaults are resolved inside
- * the helper functions; tests inject a `CheckForUpdateDeps` and never
- * touch the live modules.
+ * Lazy electron imports: this file never imports `electron` or
+ * `electron-updater` at module load. Both bind to the running Electron
+ * binary, so a plain `node` process (the integration tests) cannot load
+ * them. The controller loads the live `autoUpdater` on first use; tests pass
+ * `loadUpdater` returning a fake with the same surface.
  */
 
-// Type-only imports erase at compile time — these don't trigger module
-// loading at runtime, even under plain Node.
-import type { BrowserWindow } from "electron";
+import type { UpdateRelease, UpdateStatus } from "../shared/update-status.js";
 import { createLogger } from "./services/log.js";
 
 const log = createLogger("updater");
 
-/**
- * The "we've seen a newer version" carrier shared between the background
- * periodic check, the main-process broadcast layer, and the renderer banner.
- * `null` means no update is currently known to be available.
- */
-export type PendingUpdate = { version: string } | null;
+export type { UpdateRelease, UpdateStatus };
+
+const STARTUP_CHECK_DELAY_MS = 10_000;
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
+const RELEASES_URL = "https://github.com/band-app/band/releases";
+const RELEASE_NOTES_MAX_CHARS = 600;
 
 /**
- * Module-scoped single-flight guards. The `electron-updater` singleton has
- * one set of listeners shared across all callers, so a second invocation
- * while a check or install is in flight would cross-wire listener teardowns.
- *
- * The guards return immediately (no-op) when something is already running,
- * which is the right semantics for both the background loop firing while
- * an install is downloading and for a double-clicked Install button.
- *
- * Visible for tests (`__resetUpdaterGuardsForTests`) so a process-level
- * mutex doesn't leak state across the test suite's back-to-back cases.
- */
-let inFlightCheck = false;
-let inFlightInstall = false;
-
-export function __resetUpdaterGuardsForTests(): void {
-  inFlightCheck = false;
-  inFlightInstall = false;
-}
-
-/**
- * Whether the updater is enabled at runtime.
- *
- * Tauri gated this on `option_env!("TAURI_SIGNING_PRIVATE_KEY").is_some()`,
- * a compile-time check that baked a boolean into the binary. The first port
- * to Electron mirrored that with a `process.env.BAND_UPDATER_ENABLED` read
- * — which is wrong, because env variables exported during the CI build
- * step do not survive into the user's launch environment, so the flag was
- * always `false` in shipped DMGs and the auto-updater never fired.
- *
- * Replacement: gate purely on `app.isPackaged`. `electron-updater` itself
- * refuses to run in unpacked dev (logs "skip checkForUpdates because
- * application is not packed"), and our local electron-builder dev DMGs go
- * through code-signing the same way CI builds do, so the packaged check
- * is the right boundary. Callers pass `app.isPackaged` in (so this module
- * doesn't need to import electron eagerly — see file-header note).
+ * Whether the updater is enabled at runtime. `electron-updater` refuses to
+ * run in unpacked dev ("skip checkForUpdates because application is not
+ * packed"), and local electron-builder DMGs are signed the same way CI
+ * builds are, so `app.isPackaged` is the boundary. Callers pass it in so
+ * this module does not import electron eagerly.
  */
 export function isUpdaterEnabled(isPackaged: boolean): boolean {
   return isPackaged;
 }
 
+/** The subset of electron-updater's `UpdateInfo` the toast shows. */
+export interface UpdateInfoLike {
+  version: string;
+  releaseName?: string | null;
+  releaseNotes?: string | Array<{ version: string; note: string | null }> | null;
+}
+
 /**
  * The subset of the `electron-updater` `AppUpdater` interface we use. Tests
- * inject a fake satisfying this; production code passes the live singleton.
+ * inject a fake satisfying this; production passes the live singleton.
+ *
+ * `checkForUpdates` resolves with the feed's latest release (`null` when the
+ * updater is inactive) and rejects on failure. `downloadUpdate` resolves
+ * once the update is downloaded and verified, and rejects on failure. Both
+ * also emit `error`, which must have a listener: an EventEmitter throws on
+ * an unhandled `error` event.
  */
 export interface UpdaterLike {
-  checkForUpdates(): Promise<unknown>;
+  checkForUpdates(): Promise<{ isUpdateAvailable?: boolean; updateInfo: UpdateInfoLike } | null>;
   downloadUpdate(): Promise<unknown>;
   quitAndInstall(): void;
-  on(event: "update-available", listener: (info: { version: string }) => void): void;
-  on(event: "update-not-available", listener: () => void): void;
-  on(event: "download-progress", listener: (info: ProgressInfo) => void): void;
-  on(event: "update-downloaded", listener: () => void): void;
-  on(event: "error", listener: (err: Error) => void): void;
-  removeAllListeners(event?: string): void;
+  on(event: "download-progress", listener: (info: { percent: number }) => void): unknown;
+  on(event: "error", listener: (err: Error) => void): unknown;
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
 }
 
-interface ProgressInfo {
-  percent: number;
-  bytesPerSecond: number;
-  transferred: number;
-  total: number;
-}
-
-/**
- * Visible for tests. The default updater is the singleton from
- * electron-updater; tests pass a fake to avoid touching the network.
- */
-export interface CheckForUpdateDeps {
-  updater?: UpdaterLike;
-  /** Window to parent dialogs to. Falls back to no-parent dialogs. */
-  parentWindow?: BrowserWindow | null;
-  /** Override `autoUpdater.quitAndInstall` (used by interactive flow tests). */
-  restart?: () => void;
-  /** Override the info dialog (used in tests). */
-  showInfo?: (title: string, message: string) => Promise<void>;
-  /**
-   * Override the confirm dialog. Resolves true when the user clicks
-   * "Update", false otherwise.
-   */
-  showConfirm?: (title: string, message: string) => Promise<boolean>;
-}
-
-const ZERO_DEPS: Readonly<CheckForUpdateDeps> = Object.freeze({});
-
 /**
  * Pick the `autoUpdater` singleton out of an `import()`ed electron-updater
- * module. Exported for tests — see notes below for the bug it documents.
+ * module.
  *
- * `electron-updater` is CJS and exposes its `autoUpdater` singleton via a
- * lazy CJS getter:
- *
- *   Object.defineProperty(exports, "autoUpdater", {
- *     get: () => _autoUpdater ?? doLoadAutoUpdater(),
- *   });
- *
- * Node's dynamic-`import()` ESM⇄CJS interop does NOT hoist getter-defined
- * properties onto the namespace's named exports. They're reachable only
- * through `.default` (which IS the entire `module.exports`). So
- * `mod.autoUpdater` resolves to `undefined`, and downstream code blows up
- * with "Cannot set properties of undefined (setting 'autoDownload')" —
- * which is exactly what every shipped DMG up to v0.5.3 did when the user
- * clicked "Check for Updates…".
- *
- * We try `.default.autoUpdater` first, fall back to `.autoUpdater` for
- * any future bundler / interop combo that does hoist it, and throw with a
- * clear message if neither resolves so the existing `checkForUpdate`
- * try/catch can surface the failure as a dialog instead of leaving the
- * user clicking into the void.
+ * `electron-updater` is CJS and exposes `autoUpdater` through a lazy getter
+ * on `module.exports`. Node's dynamic-`import()` interop does not hoist
+ * getter-defined properties onto the namespace's named exports, so
+ * `mod.autoUpdater` is `undefined` and only `mod.default.autoUpdater` works.
+ * Every DMG up to v0.5.3 read the named export and failed on "Check for
+ * Updates…". We try `.default.autoUpdater` first, fall back to
+ * `.autoUpdater`, and throw a clear message when neither resolves.
  */
 export function pickAutoUpdater(mod: unknown): UpdaterLike {
   const m = mod as { default?: { autoUpdater?: unknown }; autoUpdater?: unknown };
@@ -170,419 +98,288 @@ export function pickAutoUpdater(mod: unknown): UpdaterLike {
   return candidate as UpdaterLike;
 }
 
-/**
- * Lazy-load the live `electron-updater` singleton. Only called when no
- * `deps.updater` was supplied — i.e. in production. Tests inject a fake
- * via `deps.updater` and never reach this.
- */
 async function loadDefaultUpdater(): Promise<UpdaterLike> {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const mod = await import("electron-updater");
   return pickAutoUpdater(mod);
 }
 
-async function loadElectron(): Promise<typeof import("electron")> {
-  return import("electron");
-}
-
-async function defaultShowInfo(
-  parent: BrowserWindow | null,
-  title: string,
-  message: string,
-): Promise<void> {
-  const { dialog } = await loadElectron();
-  const opts = {
-    type: "info" as const,
-    title,
-    message,
-    buttons: ["OK"],
-    defaultId: 0,
-  };
-  if (parent) {
-    await dialog.showMessageBox(parent, opts);
-  } else {
-    await dialog.showMessageBox(opts);
-  }
-}
-
-async function defaultShowConfirm(
-  parent: BrowserWindow | null,
-  title: string,
-  message: string,
-): Promise<boolean> {
-  const { dialog } = await loadElectron();
-  const opts = {
-    type: "question" as const,
-    title,
-    message,
-    buttons: ["Update", "Later"],
-    defaultId: 0,
-    cancelId: 1,
-  };
-  const result = parent
-    ? await dialog.showMessageBox(parent, opts)
-    : await dialog.showMessageBox(opts);
-  return result.response === 0;
-}
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+  apos: "'",
+  nbsp: " ",
+};
 
 /**
- * Check for updates and prompt the user to install if one is available.
- *
- * When `interactive` is true, a dialog is shown even when no update is found
- * (used for the "Check for Updates…" menu item). When false, the check is
- * silent unless an update exists (used for the automatic startup check).
- *
- * Mirror of `commands::updater::check_for_update` in updater.rs. The control
- * flow there is request/response (`updater.check().await` returns the update
- * descriptor); electron-updater is event-driven, so we wire one-shot
- * listeners and bridge them back to the same linear flow here.
+ * Turn the feed's release notes into short plain text for the toast. The
+ * GitHub provider returns the release body as HTML (a `<ul>` of commit
+ * subjects for our releases). The toast renders text, never HTML, so a
+ * release body can't inject markup into the dashboard.
  */
-export async function checkForUpdate(
-  interactive: boolean,
-  deps: CheckForUpdateDeps = ZERO_DEPS,
-): Promise<void> {
-  const parent = deps.parentWindow ?? null;
-  const showInfo = deps.showInfo ?? ((t, m) => defaultShowInfo(parent, t, m));
-  const showConfirm = deps.showConfirm ?? ((t, m) => defaultShowConfirm(parent, t, m));
-
-  // Share the check guard with `checkForUpdateBackground` — both touch the
-  // same `electron-updater` listener bus. If a background tick or another
-  // menu click is already in flight, no-op rather than cross-wiring events.
-  if (inFlightCheck) {
-    log.info("check already in flight, skipping");
-    if (interactive) {
-      await showInfo("Checking for Updates", "An update check is already in progress.");
-    }
-    return;
-  }
-  inFlightCheck = true;
-  try {
-    let updater: UpdaterLike;
-    try {
-      updater = deps.updater ?? (await loadDefaultUpdater());
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.error({ err: msg }, "failed to create updater");
-      if (interactive) {
-        await showInfo("Update Error", `Failed to check for updates: ${msg}`);
-      }
-      return;
-    }
-
-    const result = await performCheck(updater);
-
-    if (result.kind === "error") {
-      log.error({ err: result.error.message }, "check failed");
-      if (interactive) {
-        await showInfo("Update Error", "Failed to check for updates. Please try again later.");
-      }
-      return;
-    }
-
-    if (result.kind === "not-available") {
-      log.info("no update available");
-      if (interactive) {
-        await showInfo("No Updates Available", "You're running the latest version of Band.");
-      }
-      return;
-    }
-
-    const { version } = result;
-    log.info({ version }, "update available");
-
-    const accepted = await showConfirm(
-      "Update Available",
-      `Band v${version} is available. Would you like to download and install it now?`,
-    );
-    if (!accepted) {
-      return;
-    }
-
-    const installed = await performDownload(updater);
-
-    if (!installed.ok) {
-      log.error({ err: installed.error.message }, "install failed");
-      await showInfo("Update Failed", `Failed to install the update: ${installed.error.message}`);
-      return;
-    }
-
-    log.info({ version }, "installed, restarting");
-    if (deps.restart) {
-      deps.restart();
-    } else {
-      // electron-updater's quitAndInstall handles the relaunch flow. It
-      // closes all windows, fires `before-quit`, then runs the installer.
-      updater.quitAndInstall();
-    }
-  } finally {
-    inFlightCheck = false;
-  }
+function releaseNotesToText(notes: UpdateInfoLike["releaseNotes"]): string | null {
+  if (!notes) return null;
+  const raw = Array.isArray(notes) ? notes.map((n) => n.note ?? "").join("\n") : notes;
+  const text = raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<\/(p|li|h[1-6]|div|ul|ol)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_m, name: string) => ENTITIES[name] ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+  if (!text) return null;
+  if (text.length <= RELEASE_NOTES_MAX_CHARS) return text;
+  return `${text.slice(0, RELEASE_NOTES_MAX_CHARS).trimEnd()}…`;
 }
 
-/**
- * Shared check-phase helper used by both `checkForUpdate` (menu / dialog path)
- * and `checkForUpdateBackground` (banner path). Drives a single
- * `checkForUpdates()` round-trip and bridges the event-based result back to
- * a linear value. Always tears down its listeners before returning.
- */
-type CheckOutcome =
-  | { kind: "available"; version: string }
-  | { kind: "not-available" }
-  | { kind: "error"; error: Error };
+function releaseUrlFor(version: string): string {
+  return `${RELEASES_URL}/tag/v${version}`;
+}
 
-async function performCheck(updater: UpdaterLike): Promise<CheckOutcome> {
-  // We drive the download + install ourselves so the caller can decide whether
-  // to confirm via dialog (interactive) or via in-app banner (background).
-  // With `autoDownload=false`, electron-updater emits `update-available` and
-  // stops; we then call `downloadUpdate()` later if the caller proceeds.
-  updater.autoDownload = false;
-  updater.autoInstallOnAppQuit = false;
+export interface UpdateControllerOptions {
+  /** The running app version (`app.getVersion()`). */
+  currentVersion: string;
+  /** Called with every status change. The bootstrap broadcasts it. */
+  onStatus: (status: UpdateStatus) => void;
+  /** Defaults to the live electron-updater singleton. */
+  loadUpdater?: () => Promise<UpdaterLike>;
+  /** Defaults to `updater.quitAndInstall()`. */
+  restart?: (updater: UpdaterLike) => void;
+  /** Clock for the wake-from-sleep staleness check. */
+  now?: () => number;
+}
 
-  try {
-    return await new Promise<CheckOutcome>((resolve) => {
-      let settled = false;
-      const settle = (o: CheckOutcome) => {
-        if (settled) return;
-        settled = true;
-        resolve(o);
-      };
+export class UpdateController {
+  private status: UpdateStatus = { state: "idle" };
+  private updater: UpdaterLike | null = null;
+  private checkInFlight: Promise<void> | null = null;
+  private checkUserInitiated = false;
+  private downloadInFlight: Promise<void> | null = null;
+  /** The release the last successful check found, kept for download retries. */
+  private release: UpdateRelease | null = null;
+  private downloaded: UpdateRelease | null = null;
+  /** A background check that finds this version again stays silent. */
+  private dismissedVersion: string | null = null;
+  private lastCheckAt = 0;
+  private readonly opts: UpdateControllerOptions;
 
-      updater.on("update-available", (info) => {
-        settle({ kind: "available", version: info.version });
-      });
-      updater.on("update-not-available", () => {
-        settle({ kind: "not-available" });
-      });
-      updater.on("error", (err) => {
-        settle({ kind: "error", error: err });
-      });
+  constructor(opts: UpdateControllerOptions) {
+    this.opts = opts;
+  }
 
-      Promise.resolve(updater.checkForUpdates()).catch((err) => {
-        settle({
-          kind: "error",
-          error: err instanceof Error ? err : new Error(String(err)),
-        });
-      });
+  getStatus(): UpdateStatus {
+    return this.status;
+  }
+
+  /**
+   * Check the feed. A user-initiated check reports every step; a background
+   * check changes the status only when it finds an update the user has not
+   * dismissed. A check requested while another is in flight joins it, and a
+   * user-initiated one upgrades the running check so its result is shown.
+   */
+  check(opts: { userInitiated: boolean }): Promise<void> {
+    if (this.downloaded || this.downloadInFlight) {
+      // The update is already downloading or waiting for a restart. Asking
+      // again brings the toast back instead of checking a second time.
+      if (opts.userInitiated) {
+        this.dismissedVersion = null;
+        this.setStatus(this.downloadedOrDownloadingStatus());
+      }
+      return this.downloadInFlight ?? Promise.resolve();
+    }
+    if (this.checkInFlight) {
+      if (opts.userInitiated && !this.checkUserInitiated) {
+        this.checkUserInitiated = true;
+        this.setStatus({ state: "checking", userInitiated: true });
+      }
+      return this.checkInFlight;
+    }
+    this.checkUserInitiated = opts.userInitiated;
+    this.checkInFlight = this.runCheck().finally(() => {
+      this.checkInFlight = null;
     });
-  } finally {
-    // Tear the check-phase listeners down so a second invocation doesn't
-    // double-fire, and so the download phase below can re-wire `error`.
-    updater.removeAllListeners("update-available");
-    updater.removeAllListeners("update-not-available");
-    updater.removeAllListeners("error");
+    return this.checkInFlight;
   }
-}
 
-/** Shared download-phase helper used by `checkForUpdate` and
- *  `installPendingUpdate`. Drives `downloadUpdate()`, logs progress ticks,
- *  resolves on `update-downloaded` / `error`. Listener teardown is
- *  guaranteed via the `finally` block. */
-async function performDownload(
-  updater: UpdaterLike,
-): Promise<{ ok: true } | { ok: false; error: Error }> {
-  try {
-    return await new Promise<{ ok: true } | { ok: false; error: Error }>((resolve) => {
-      let settled = false;
-      const settle = (r: { ok: true } | { ok: false; error: Error }) => {
-        if (settled) return;
-        settled = true;
-        resolve(r);
-      };
-
-      updater.on("download-progress", (info) => {
-        // electron-updater emits at a sensible interval (~every few hundred
-        // ms) so we just forward to the log.
-        const transferred = Math.round(info.transferred);
-        const total = Math.round(info.total);
-        const pct = info.percent.toFixed(1);
-        log.info({ transferred, total, pct }, "progress");
-      });
-      updater.on("update-downloaded", () => {
-        log.info("download finished, installing");
-        settle({ ok: true });
-      });
-      updater.on("error", (err) => {
-        settle({ ok: false, error: err });
-      });
-
-      Promise.resolve(updater.downloadUpdate()).catch((err) => {
-        settle({
-          ok: false,
-          error: err instanceof Error ? err : new Error(String(err)),
-        });
-      });
+  /** Download the release the last check found. */
+  async download(): Promise<void> {
+    if (this.downloadInFlight) return this.downloadInFlight;
+    if (this.checkInFlight) await this.checkInFlight;
+    const release = this.release;
+    const s = this.status;
+    const canDownload = s.state === "available" || (s.state === "error" && s.phase === "download");
+    if (!release || !canDownload) return;
+    this.downloadInFlight = this.runDownload(release).finally(() => {
+      this.downloadInFlight = null;
     });
-  } finally {
-    updater.removeAllListeners("download-progress");
-    updater.removeAllListeners("update-downloaded");
-    updater.removeAllListeners("error");
+    return this.downloadInFlight;
   }
-}
 
-/**
- * Silent check used by the background path (startup + 2h periodic). Returns
- * the available `{ version }` or `null`. Never shows a dialog. The renderer
- * is notified separately via `broadcastUpdaterStatus` in the bootstrap.
- *
- * Shares the `inFlightCheck` mutex with `checkForUpdate`, so a menu-click
- * mid-periodic-tick can't cross-fire listeners on the shared singleton.
- */
-export async function checkForUpdateBackground(
-  deps: CheckForUpdateDeps = ZERO_DEPS,
-): Promise<PendingUpdate> {
-  if (inFlightCheck) {
-    log.info("background check skipped (check already in flight)");
-    return null;
-  }
-  inFlightCheck = true;
-  try {
-    let updater: UpdaterLike;
-    try {
-      updater = deps.updater ?? (await loadDefaultUpdater());
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.error({ err: msg }, "failed to create updater (background)");
-      return null;
-    }
-
-    const result = await performCheck(updater);
-    if (result.kind === "available") {
-      log.info({ version: result.version }, "background check found update");
-      return { version: result.version };
-    }
-    if (result.kind === "error") {
-      log.error({ err: result.error.message }, "background check failed");
+  /** Quit and install the downloaded update. */
+  restart(): void {
+    if (!this.downloaded || !this.updater) return;
+    log.info({ version: this.downloaded.version }, "restarting to install");
+    if (this.opts.restart) {
+      this.opts.restart(this.updater);
     } else {
-      log.info("background check: no update");
+      // Closes all windows, fires `before-quit`, then installs and relaunches.
+      this.updater.quitAndInstall();
     }
-    return null;
-  } finally {
-    inFlightCheck = false;
   }
-}
 
-/**
- * Download + install a pending update without any dialogs. Invoked from the
- * IPC handler when the user clicks the in-app banner's Install button.
- *
- * Single-flight: a second click while a download is in flight is a no-op.
- * The renderer also disables its button optimistically, but a stray invoke
- * from another window would otherwise re-enter and cross-wire listeners.
- *
- * On success, calls `updater.quitAndInstall()` (or the test `restart`
- * override), which terminates the process — anything after that point
- * never runs in production.
- */
-export async function installPendingUpdate(deps: CheckForUpdateDeps = ZERO_DEPS): Promise<void> {
-  if (inFlightInstall) {
-    log.info("install already in flight, skipping");
-    return;
-  }
-  inFlightInstall = true;
-  try {
-    let updater: UpdaterLike;
-    try {
-      updater = deps.updater ?? (await loadDefaultUpdater());
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.error({ err: msg }, "failed to create updater (install)");
-      throw e instanceof Error ? e : new Error(msg);
+  /** The user closed the toast. */
+  dismiss(): void {
+    const s = this.status;
+    if (s.state === "checking" || s.state === "downloading") return;
+    if (s.state === "available" || s.state === "downloaded") {
+      this.dismissedVersion = s.version;
     }
+    this.setStatus({ state: "idle" });
+  }
+
+  /**
+   * Schedule background checks: one `startupDelayMs` after the call, then
+   * every `intervalMs`. Returns a function that cancels both timers.
+   */
+  start(opts: { startupDelayMs?: number; intervalMs?: number } = {}): () => void {
+    const background = () => {
+      void this.check({ userInitiated: false });
+    };
+    const startup = setTimeout(background, opts.startupDelayMs ?? STARTUP_CHECK_DELAY_MS);
+    const interval = setInterval(background, opts.intervalMs ?? CHECK_INTERVAL_MS);
+    return () => {
+      clearTimeout(startup);
+      clearInterval(interval);
+    };
+  }
+
+  /**
+   * Run a background check when the last one started more than `maxAgeMs`
+   * ago. Timers don't advance while a Mac sleeps, so the bootstrap calls this
+   * on wake to catch up on checks the interval missed.
+   */
+  checkIfStale(maxAgeMs = CHECK_INTERVAL_MS): void {
+    const now = this.opts.now?.() ?? Date.now();
+    if (now - this.lastCheckAt < maxAgeMs) return;
+    void this.check({ userInitiated: false });
+  }
+
+  private async runCheck(): Promise<void> {
+    this.lastCheckAt = this.opts.now?.() ?? Date.now();
+    if (this.checkUserInitiated) {
+      this.setStatus({ state: "checking", userInitiated: true });
+    }
+    try {
+      const updater = await this.getUpdater();
+      const result = await updater.checkForUpdates();
+      const info = result?.updateInfo;
+      const available =
+        !!result &&
+        !!info &&
+        (result.isUpdateAvailable ?? info.version !== this.opts.currentVersion);
+      if (available && info) {
+        const release = this.toRelease(info);
+        this.release = release;
+        log.info(
+          { version: release.version, userInitiated: this.checkUserInitiated },
+          "update available",
+        );
+        if (this.checkUserInitiated) {
+          this.dismissedVersion = null;
+        } else if (this.dismissedVersion === release.version) {
+          return;
+        }
+        this.setStatus({ state: "available", ...release });
+        return;
+      }
+      log.info({ userInitiated: this.checkUserInitiated }, "no update available");
+      this.release = null;
+      if (this.checkUserInitiated) {
+        this.setStatus({
+          state: "up-to-date",
+          currentVersion: this.opts.currentVersion,
+          userInitiated: true,
+        });
+      } else if (this.status.state === "available") {
+        // The release we were offering is gone from the feed.
+        this.setStatus({ state: "idle" });
+      }
+    } catch (err) {
+      const message = errorMessage(err);
+      log.error({ err: message, userInitiated: this.checkUserInitiated }, "check failed");
+      if (this.checkUserInitiated) {
+        this.setStatus({ state: "error", message, phase: "check", userInitiated: true });
+      }
+    }
+  }
+
+  private async runDownload(release: UpdateRelease): Promise<void> {
+    this.setStatus({ state: "downloading", percent: 0, ...release });
+    try {
+      const updater = await this.getUpdater();
+      await updater.downloadUpdate();
+      log.info({ version: release.version }, "update downloaded");
+      this.downloaded = release;
+      this.setStatus({ state: "downloaded", ...release });
+    } catch (err) {
+      const message = errorMessage(err);
+      log.error({ err: message, version: release.version }, "download failed");
+      this.setStatus({ state: "error", message, phase: "download", userInitiated: true });
+    }
+  }
+
+  private downloadedOrDownloadingStatus(): UpdateStatus {
+    if (this.downloaded) return { state: "downloaded", ...this.downloaded };
+    if (this.status.state === "downloading") return this.status;
+    // `downloadInFlight` is set, so `release` is the one downloading.
+    return { state: "downloading", percent: 0, ...(this.release as UpdateRelease) };
+  }
+
+  private async getUpdater(): Promise<UpdaterLike> {
+    if (this.updater) return this.updater;
+    const updater = await (this.opts.loadUpdater ?? loadDefaultUpdater)();
+    // The toast drives the download. A downloaded update still installs on
+    // quit when the user never clicks "Restart to update".
     updater.autoDownload = false;
-    updater.autoInstallOnAppQuit = false;
+    updater.autoInstallOnAppQuit = true;
+    updater.on("download-progress", (info) => {
+      const s = this.status;
+      if (s.state !== "downloading") return;
+      const percent = Math.floor(info.percent);
+      if (percent === s.percent) return;
+      this.setStatus({ ...s, percent });
+    });
+    updater.on("error", (err) => {
+      // Failures reach us through the rejected promises above. This listener
+      // exists so the emitter doesn't throw on an unhandled `error` event.
+      log.warn({ err: err.message }, "electron-updater error event");
+    });
+    this.updater = updater;
+    return updater;
+  }
 
-    const installed = await performDownload(updater);
-    if (!installed.ok) {
-      log.error({ err: installed.error.message }, "install failed");
-      throw installed.error;
-    }
+  private toRelease(info: UpdateInfoLike): UpdateRelease {
+    return {
+      version: info.version,
+      currentVersion: this.opts.currentVersion,
+      releaseName: info.releaseName ?? null,
+      releaseNotes: releaseNotesToText(info.releaseNotes),
+      releaseUrl: releaseUrlFor(info.version),
+    };
+  }
 
-    log.info("install complete, restarting");
-    if (deps.restart) {
-      deps.restart();
-      return;
-    }
-    updater.quitAndInstall();
-  } finally {
-    inFlightInstall = false;
+  private setStatus(next: UpdateStatus): void {
+    if (JSON.stringify(next) === JSON.stringify(this.status)) return;
+    this.status = next;
+    this.opts.onStatus(next);
   }
 }
 
-/**
- * Schedule the boot-time silent check. Mirrors the
- * `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run: hold off
- * 10s after launch so the dashboard is fully loaded before we hit the
- * network.
- *
- * Returns a cancellation function so the caller can abort the pending check
- * during shutdown (avoids a stray banner state flip after Cmd+Q).
- *
- * `isPackaged` is supplied by the caller (typically `app.isPackaged`) so
- * this module doesn't need to import `electron` eagerly. `delayMs` is
- * overridable for tests; production always uses the 10s default to match
- * the legacy Tauri shell.
- *
- * Background mode: this used to call the interactive `checkForUpdate` which
- * popped OS dialogs to confirm download. The flow is now a silent
- * `checkForUpdateBackground`; the result is fed to `opts.onResult` so the
- * bootstrap can broadcast it to the renderer banner.
- */
-export function scheduleStartupCheck(
-  isPackaged: boolean,
-  opts: CheckForUpdateDeps & {
-    delayMs?: number;
-    onResult?: (pending: PendingUpdate) => void;
-  } = {},
-): () => void {
-  // Skip in unpacked dev runs — electron-updater refuses to operate
-  // without a packaged `app-update.yml` and would log a confusing warning
-  // on every launch.
-  if (!isUpdaterEnabled(isPackaged)) {
-    return () => undefined;
-  }
-
-  const handle = setTimeout(() => {
-    void checkForUpdateBackground(opts)
-      .then((pending) => opts.onResult?.(pending))
-      .catch((err) => {
-        log.error({ err: String(err) }, "startup check threw");
-      });
-  }, opts.delayMs ?? 10_000);
-
-  return () => clearTimeout(handle);
-}
-
-/**
- * Periodic background update check. Fires every `intervalMs` (default 2h)
- * starting `intervalMs` after the call (it does NOT fire immediately — the
- * 10s startup check already covered that). Each tick runs
- * `checkForUpdateBackground` and forwards the result to `opts.onResult`,
- * which the bootstrap uses to update state + broadcast to the renderer.
- *
- * No-op in unpacked dev (mirrors `scheduleStartupCheck`).
- *
- * Returns a cancellation function — call it in `cleanupOnce` so the
- * interval doesn't outlive the process.
- */
-export function schedulePeriodicCheck(
-  isPackaged: boolean,
-  opts: CheckForUpdateDeps & {
-    intervalMs?: number;
-    onResult?: (pending: PendingUpdate) => void;
-  } = {},
-): () => void {
-  if (!isUpdaterEnabled(isPackaged)) {
-    return () => undefined;
-  }
-
-  const intervalMs = opts.intervalMs ?? 2 * 60 * 60 * 1000;
-  const handle = setInterval(() => {
-    void checkForUpdateBackground(opts)
-      .then((pending) => opts.onResult?.(pending))
-      .catch((err) => {
-        log.error({ err: String(err) }, "periodic check threw");
-      });
-  }, intervalMs);
-
-  return () => clearInterval(handle);
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

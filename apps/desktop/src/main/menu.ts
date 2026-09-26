@@ -15,14 +15,14 @@
  * the Tauri shell uses (`webview.eval`); here we use Electron's
  * `executeJavaScript`.
  *
- * Phase 5 of issue #306 added everything except "Check for Updates…",
- * which Phase 6 (issue #363) wires up here against `electron-updater`.
+ * "Check for Updates…" starts a user-initiated check on the bootstrap's
+ * `UpdateController`; the renderer's update toast shows its progress.
  */
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import type { BrowserViewManager } from "../browser/view-manager.js";
 import { createLogger } from "./services/log.js";
-import { checkForUpdate, isUpdaterEnabled } from "./updater.js";
+import { isUpdaterEnabled } from "./updater.js";
 
 const log = createLogger("menu");
 
@@ -33,6 +33,8 @@ const log = createLogger("menu");
  */
 export interface MenuDeps {
   getBrowserManager: () => BrowserViewManager | null;
+  /** "Check for Updates…": a user-initiated check the update toast follows. */
+  checkForUpdates: () => void;
 }
 
 /** Run JS in whichever window is focused, falling back to the main window. */
@@ -163,11 +165,7 @@ export function buildAppMenu(deps: MenuDeps): Menu {
         { type: "separator" },
         {
           label: "Check for Updates…",
-          click: () => {
-            void checkForUpdate(true).catch((err) => {
-              log.error({ err: String(err) }, "check for updates failed");
-            });
-          },
+          click: () => deps.checkForUpdates(),
         },
       ]
     : [];
