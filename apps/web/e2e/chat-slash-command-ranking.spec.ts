@@ -115,9 +115,12 @@ test.describe("slash-command dropdown ranking", () => {
       .toEqual(["/loop", "/loop-status", "/band-loop"]);
   });
 
-  test("a Codex $-skill counts as an exact match without its $", async () => {
+  test("a Codex $-skill matches as if it had no $", async () => {
     await chatPane.typeMessage("/tdd");
+    await expect.poll(() => chatPane.slashCommandNames()).toEqual(["/$tdd", "/no-tdd-guard"]);
 
+    // A prefix too: `$tdd` starts with "td" once the `$` is dropped.
+    await chatPane.typeMessage("/td");
     await expect.poll(() => chatPane.slashCommandNames()).toEqual(["/$tdd", "/no-tdd-guard"]);
   });
 });
