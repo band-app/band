@@ -354,3 +354,16 @@ export interface ContentSearchMatch {
   line: number;
   content: string;
 }
+
+/**
+ * A Band browser profile: its own cookie jar for browser-pane tabs. The
+ * built-in Default profile has no entry and is `null` wherever a profile id
+ * is expected.
+ */
+export interface BrowserProfileInfo {
+  id: string;
+  name: string;
+  /** Where its cookies came from, e.g. `"chrome"`. `null` for an empty profile. */
+  source: string | null;
+  createdAt: number;
+}

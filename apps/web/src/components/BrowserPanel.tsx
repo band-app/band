@@ -1,13 +1,13 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useSettingsQuery } from "@/dashboard";
+import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { registerBrowserGuest } from "../lib/browser-guest-retention";
 import {
-  BROWSER_PARTITION,
   type BrowserWebview,
+  partitionForProfile,
   registerBrowserWebview,
 } from "../lib/browser-webview";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
@@ -15,11 +15,16 @@ import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
+import { BrowserProfileMenu } from "./BrowserProfileMenu";
 import { HistoryPopover } from "./HistoryPopover";
 import { NotSecureBadge } from "./NotSecureBadge";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
+// How long a pane waits for its tab record to exist (see the fetch effect
+// in `BrowserPaneComponent`): 10 tries, 150 ms apart.
+const TAB_RECORD_ATTEMPTS = 10;
+const TAB_RECORD_RETRY_MS = 150;
 
 // ---------------------------------------------------------------------------
 // Favicon store — tracks per-browser favicon URLs for the tab strip.
@@ -65,16 +70,17 @@ interface RegisterGuestResult {
 }
 
 /**
- * Create a `<webview>` for a tab. The main process admits it only in
- * `BROWSER_PARTITION` with an http(s) or about:blank `src`, and overwrites
+ * Create a `<webview>` for a tab in its browser profile's partition. The main
+ * process admits it only in the default browser partition or a profile's,
+ * with an http(s) or about:blank `src`, and overwrites
  * its security preferences (see `apps/desktop/src/main/webview-security.ts`),
  * so nothing here has to be trusted. `allowpopups` lets page popups reach
  * the main process, which always denies the OS window and opens a Band tab
  * instead.
  */
-function createWebview(src: string): BrowserWebview {
+function createWebview(src: string, partition: string): BrowserWebview {
   const webview = document.createElement("webview") as BrowserWebview;
-  webview.setAttribute("partition", BROWSER_PARTITION);
+  webview.setAttribute("partition", partition);
   webview.setAttribute("allowpopups", "");
   // Opaque page canvas: a page without its own background paints white, as
   // in Chrome, instead of showing Band's theme through. Fullscreen requests
@@ -153,6 +159,23 @@ export function BrowserPaneComponent({
   const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
+  // Browser profile (cookie jar) of this tab, from the server's tab record.
+  // `null` is the Default profile. A guest's partition is fixed when it is
+  // created, so the page is only created once the profile is known, and is
+  // recreated when it changes.
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileResolved, setProfileResolved] = useState(false);
+  const { profiles, isLoaded: profilesLoaded } = useBrowserProfiles();
+  const invalidateProfiles = useInvalidateBrowserProfiles();
+  // A tab whose profile was deleted falls back to Default (the server also
+  // rewrites the tab record).
+  const effectiveProfileId =
+    profileId !== null && profilesLoaded && !profiles.some((p) => p.id === profileId)
+      ? null
+      : profileId;
+  const profileReady = profileResolved && (profileId === null || profilesLoaded);
+  const profileIdRef = useRef(effectiveProfileId);
+  profileIdRef.current = effectiveProfileId;
   const { isOverriddenHost } = useOverriddenHosts();
   const { settings } = useSettingsQuery();
   const cdpEnabled = (settings as { webBrowserCdpEnabled?: boolean }).webBrowserCdpEnabled ?? false;
@@ -204,9 +227,9 @@ export function BrowserPaneComponent({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!isDesktop || !wantGuest || !host) return;
+    if (!isDesktop || !wantGuest || !profileReady || !host) return;
     const startUrl = currentUrlRef.current || BLANK_URL;
-    const wv = createWebview(initialSrc(startUrl));
+    const wv = createWebview(initialSrc(startUrl), partitionForProfile(effectiveProfileId));
     readyRef.current = false;
     pendingNavRef.current = null;
 
@@ -265,7 +288,31 @@ export function BrowserPaneComponent({
       readyRef.current = false;
       setWebview(null);
     };
-  }, [wantGuest, navigateWebview]);
+  }, [wantGuest, profileReady, effectiveProfileId, navigateWebview]);
+
+  const handleProfileSelect = useCallback(
+    (next: string | null) => {
+      if (next === profileIdRef.current) return;
+      trpc.browsers.setProfile
+        .mutate({ browserId, profileId: next })
+        .then(() => {
+          // Recreates the page in the new profile at the current URL.
+          setProfileId(next);
+          // The project's default changed too; Settings shows it.
+          void invalidateProfiles();
+        })
+        .catch((e) => console.error("Failed to switch browser profile:", e));
+    },
+    [browserId, invalidateProfiles],
+  );
+
+  const handleProfileImported = useCallback(
+    (next: string) => {
+      // Refetch first so the new id is in `profiles` before the tab uses it.
+      void invalidateProfiles().then(() => handleProfileSelect(next));
+    },
+    [invalidateProfiles, handleProfileSelect],
+  );
 
   // ------- hidden-workspace guest budget -------
   // While the page exists, offer it to the budget in
@@ -324,35 +371,50 @@ export function BrowserPaneComponent({
     };
   }, []);
 
-  // ------- fetch URL from server when no initialUrl param -------
-  // The server browser record is the source of truth for the URL.
-  // When a browser is created via CLI with --url, or on workspace revisit,
-  // the panel is added without an initialUrl param — fetch it from the server.
+  // ------- fetch the tab record from the server -------
+  // The server browser record is the source of truth for the profile, and
+  // for the URL when there is no initialUrl param (a browser created via CLI
+  // with --url, or a workspace revisit adds the panel without one).
+  //
+  // A new tab's pane mounts while its `browsers.create` is still in flight,
+  // so the record can be missing for a moment. Retry briefly before falling
+  // back to Default, or a new tab would open outside its project's profile.
   useEffect(() => {
-    if (!browserId || initialUrl) return;
+    if (!browserId) return;
 
     let cancelled = false;
-    trpc.browsers.get
-      .query({ browserId })
-      .then((result) => {
-        if (cancelled) return;
-        const ws = result.browser?.workspaceId;
-        if (ws && !workspaceIdRef.current) {
-          // Lazy workspace backfill — see comment on `workspaceId`
-          // state above.
-          setWorkspaceId(ws);
+    const load = async () => {
+      let browser: Awaited<ReturnType<typeof trpc.browsers.get.query>>["browser"] = null;
+      for (let attempt = 0; attempt < TAB_RECORD_ATTEMPTS && !cancelled; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, TAB_RECORD_RETRY_MS));
+        try {
+          browser = (await trpc.browsers.get.query({ browserId })).browser;
+        } catch {
+          // Server fetch failed — the user can still type a URL manually,
+          // and the tab opens in the Default profile.
+          break;
         }
-        const url = result.browser?.url;
-        if (!url || url === BLANK_URL) return;
-        setCurrentUrl(url);
-        setInputUrl(url);
-        // Before the guest exists the create effect picks the URL up from
-        // `currentUrlRef`; afterwards navigate it.
-        navigateWebview(url);
-      })
-      .catch(() => {
-        // Server fetch failed — the user can still type a URL manually
-      });
+        if (browser) break;
+      }
+      if (cancelled) return;
+      setProfileId(browser?.profileId ?? null);
+      setProfileResolved(true);
+      if (initialUrl || !browser) return;
+      const ws = browser.workspaceId;
+      if (ws && !workspaceIdRef.current) {
+        // Lazy workspace backfill — see comment on `workspaceId`
+        // state above.
+        setWorkspaceId(ws);
+      }
+      const url = browser.url;
+      if (!url || url === BLANK_URL) return;
+      setCurrentUrl(url);
+      setInputUrl(url);
+      // Before the guest exists the create effect picks the URL up from
+      // `currentUrlRef`; afterwards navigate it.
+      navigateWebview(url);
+    };
+    void load();
     return () => {
       cancelled = true;
     };
@@ -560,7 +622,9 @@ export function BrowserPaneComponent({
   useEffect(() => {
     const host = devToolsHostRef.current;
     if (!devToolsOpen || !webview || !host) return;
-    const dt = createWebview(BLANK_URL);
+    // Same partition as the page, so DevTools' own fetches (source maps)
+    // use the tab's profile.
+    const dt = createWebview(BLANK_URL, partitionForProfile(profileIdRef.current));
     let opened = false;
     // Wait for the host's own blank page to commit: DevTools opened before
     // that are replaced by the host's initial `about:blank` navigation.
@@ -669,6 +733,12 @@ export function BrowserPaneComponent({
           // `input[type='text']`, which would also match the find-bar's
           // search input.
           data-band-address-input=""
+        />
+        <BrowserProfileMenu
+          profiles={profiles}
+          profileId={effectiveProfileId}
+          onSelect={handleProfileSelect}
+          onImported={handleProfileImported}
         />
         {workspaceId ? (
           <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />

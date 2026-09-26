@@ -20,6 +20,7 @@ import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/ad
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
+import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
   NavControls,
   RightPanelHeaderActions,
@@ -795,6 +796,7 @@ function AppShell() {
                         <Outlet />
                         <SharedDockviewLayout />
                         <BrowserHostBridge />
+                        <BrowserProfileSweeper />
                       </div>
                     </div>
                   </Panel>

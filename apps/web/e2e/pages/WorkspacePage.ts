@@ -739,6 +739,33 @@ export class WorkspacePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** The active file leaf's "View changes" button in the group header
+   *  (`center-file-leaf__view-diff`). It only renders while that file has
+   *  changes against the workspace's diff target. */
+  get fileLeafViewChangesButton(): Locator {
+    return this.page.getByTestId("center-file-leaf__view-diff");
+  }
+
+  /** Open `path` as a pinned file leaf through Quick Open (type the name,
+   *  Enter) and wait until its tab exists. */
+  async openFileViaQuickOpen(path: string): Promise<void> {
+    await test.step(`Open ${path} via Quick Open`, async () => {
+      await this.openQuickOpen();
+      await this.typeQuickOpen(path);
+      await expect.poll(() => this.selectedQuickOpenValue()).toBe(path);
+      await this.pressQuickOpenKey("Enter");
+      await expect(this.fileTab(path)).toBeAttached({ timeout: 15_000 });
+    });
+  }
+
+  /** Save the active file leaf through its group-header Save button, which
+   *  only renders while the buffer is dirty. */
+  async saveFileLeaf(): Promise<void> {
+    await test.step("Save the active file leaf", async () => {
+      await this.page.getByTestId("center-file-leaf__save").click();
+    });
+  }
+
   /** Locate the per-path `diff` leaf tab opened from the sidepanel Changes
    *  section (`center-diff-tab--<path>`). */
   diffTab(path: string): Locator {
