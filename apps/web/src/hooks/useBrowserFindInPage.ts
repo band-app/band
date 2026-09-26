@@ -6,8 +6,8 @@
  *   - On query / case-toggle changes, calls the tab's
  *     `webview.findInPage` so Chromium re-runs its native scan and
  *     re-paints the highlights.
- *   - `findNext` / `findPrevious` reuse the cached match set
- *     (`{ findNext: true }`) instead of rescanning.
+ *   - `findNext` / `findPrevious` step through the current match set
+ *     instead of rescanning.
  *   - Reads back the webview's `found-in-page` events to drive the match
  *     counter ("3 of 12"). Intermediate updates are shown immediately;
  *     `finalUpdate: true` is just the authoritative total.
@@ -101,7 +101,7 @@ export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowser
   }, []);
 
   const issueFind = useCallback(
-    (text: string, opts: { findNext?: boolean; forward?: boolean } = {}): void => {
+    (text: string, opts: { step?: boolean; forward?: boolean } = {}): void => {
       if (!text) {
         setMatchInfo(null);
         // Forget the in-flight request so any straggling `found-in-page`
@@ -113,9 +113,9 @@ export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowser
       // When starting a brand-new scan (not just stepping through the
       // existing match set), clear the stale counter from the previous
       // query so the UI doesn't briefly flash the old "3 of 12" while the
-      // new scan is in flight. Stepping (`findNext: true`) reuses the
+      // new scan is in flight. Stepping (`step: true`) reuses the
       // previous result set so the counter stays accurate.
-      if (!(opts.findNext ?? false)) {
+      if (!opts.step) {
         setMatchInfo(null);
         activeRequestIdRef.current = null;
       }
@@ -124,9 +124,11 @@ export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowser
       try {
         activeRequestIdRef.current = target.findInPage(text, {
           matchCase: options.caseSensitive,
-          // First search for a query → omit findNext so Chromium rescans.
-          // Stepping → set findNext: true and toggle forward.
-          findNext: opts.findNext ?? false,
+          // Electron's `findNext` means "start a new find session": true for
+          // a new query (Chromium rescans and reports the total), false when
+          // stepping through the current matches. A new query sent with
+          // `findNext: false` gets no `found-in-page` reply at all.
+          findNext: !opts.step,
           forward: opts.forward ?? true,
         });
       } catch (e) {
@@ -180,12 +182,12 @@ export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowser
 
   const findNext = useCallback(() => {
     if (!query) return;
-    issueFind(query, { findNext: true, forward: true });
+    issueFind(query, { step: true, forward: true });
   }, [query, issueFind]);
 
   const findPrevious = useCallback(() => {
     if (!query) return;
-    issueFind(query, { findNext: true, forward: false });
+    issueFind(query, { step: true, forward: false });
   }, [query, issueFind]);
 
   return {
