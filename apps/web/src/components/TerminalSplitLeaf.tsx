@@ -126,7 +126,7 @@ function TerminalPaneHeader(props: IDockviewPanelHeaderProps<PaneParams>) {
 
   return (
     <div className="term-pane-header" data-testid={`term-pane-header__${terminalId}`}>
-      <div className="term-pane-header__actions">
+      <div className="term-pane-header__actions" data-testid={`term-pane-actions__${terminalId}`}>
         <button
           type="button"
           onMouseDown={stopDrag}

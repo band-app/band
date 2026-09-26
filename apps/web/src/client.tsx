@@ -1,11 +1,11 @@
 import { StartClient } from "@tanstack/react-start/client";
 import { hydrateRoot } from "react-dom/client";
-import { startPopupWatcher } from "./lib/browser-pane-freeze";
+import { startBrowserWebviewDomBridge } from "./lib/browser-webview-dom-bridge";
 
-// Install the DOM observer that flips `useBrowserPaneFrozen()` whenever
-// any Radix-portalled overlay is on screen — see
-// `lib/browser-pane-freeze.ts` for the full rationale. Cheap and
-// idempotent; runs once for the life of the page.
-startPopupWatcher();
+// Repair outside-click dismissal and drag-and-drop across desktop browser
+// tabs, which are `<webview>` elements — see
+// `lib/browser-webview-dom-bridge.ts`. Cheap and idempotent; a no-op
+// without webviews.
+startBrowserWebviewDomBridge();
 
 hydrateRoot(document, <StartClient />);

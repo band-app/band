@@ -50,6 +50,11 @@ export interface BrowserRow {
   name: string;
   url: string;
   status: BrowserStatus;
+  /**
+   * Band browser profile the tab's session runs in (see
+   * `browser-profiles.ts`). `null` is the built-in Default profile.
+   */
+  profileId: string | null;
 }
 
 /**
@@ -60,6 +65,8 @@ export interface BrowserUpdatePatch {
   name?: string;
   url?: string;
   status?: BrowserStatus;
+  /** `null` switches the tab back to the Default profile. */
+  profileId?: string | null;
 }
 
 /**
@@ -72,13 +79,21 @@ interface BrowserStateBlob {
   name: string;
   url: string;
   status: BrowserStatus;
+  /** Absent on rows written before browser profiles existed. */
+  profileId?: string | null;
 }
 
-function serializeState(row: { name: string; url: string; status: BrowserStatus }): string {
+function serializeState(row: {
+  name: string;
+  url: string;
+  status: BrowserStatus;
+  profileId: string | null;
+}): string {
   const blob: BrowserStateBlob = {
     name: row.name,
     url: row.url,
     status: row.status,
+    profileId: row.profileId,
   };
   return JSON.stringify(blob);
 }
@@ -125,6 +140,7 @@ export class BrowserQueries {
       name: patch.name ?? current.name,
       url: patch.url ?? current.url,
       status: patch.status ?? current.status,
+      profileId: patch.profileId !== undefined ? patch.profileId : current.profileId,
     };
     updatePanelState(id, {
       state: serializeState(merged),
@@ -175,6 +191,7 @@ export class BrowserQueries {
         name: parsed.name,
         url: parsed.url,
         status: parsed.status,
+        profileId: parsed.profileId ?? null,
       });
     }
     return out;

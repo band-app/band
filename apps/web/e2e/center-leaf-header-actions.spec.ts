@@ -4,7 +4,7 @@
  * file leaf's side of that: opening a markdown file publishes its preview/source
  * toggle to the header, and doing so must NOT trigger an infinite render loop
  * (a regression where FileViewer.onActionsChange re-fired every render because it
- * depended on the inline renderMarkdown function reference).
+ * depended on the markdown renderer's function reference).
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

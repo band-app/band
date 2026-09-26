@@ -30,20 +30,9 @@ interface ToolbarOverflowContextValue {
   openResources: () => void;
   /** Tunnel state hint for the menu item (so we can show running/error coloring). */
   tunnelStatus: "idle" | "running" | "error";
-  /** True when any toolbar dialog (Tasks, Cronjobs, Reports, Tunnel,
-   *  Prereq, Resources) is open. SharedDockviewLayout merges this with
-   *  its own dialog state to hide Electron BrowserView webviews that
-   *  would otherwise render on top. */
-  anyDialogOpen: boolean;
 }
 
 const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>(null);
-
-/** Read whether any toolbar overflow dialog is open. Returns false when no
- *  provider is mounted (mobile/web fallback). */
-export function useAnyToolbarDialogOpen(): boolean {
-  return useContext(ToolbarOverflowContext)?.anyDialogOpen ?? false;
-}
 
 /**
  * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
@@ -85,14 +74,6 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       ? "running"
       : "idle";
 
-  const anyDialogOpen =
-    showTasksDialog ||
-    showCronjobsDialog ||
-    showReportsDialog ||
-    showTunnelDialog ||
-    showPrereq ||
-    showResourcesDialog;
-
   const value = useMemo(
     () => ({
       openTasks,
@@ -101,9 +82,8 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       openTunnel,
       openResources,
       tunnelStatus,
-      anyDialogOpen,
     }),
-    [openTasks, openCronjobs, openReports, openTunnel, openResources, tunnelStatus, anyDialogOpen],
+    [openTasks, openCronjobs, openReports, openTunnel, openResources, tunnelStatus],
   );
 
   return (

@@ -29,6 +29,7 @@ export {
 } from "./components/LanguagePickerDialog";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { PdfPreview } from "./components/PdfPreview";
+export { ProjectAvatar } from "./components/ProjectAvatar";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export {
@@ -46,6 +47,13 @@ export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export {
+  useBrowserProfiles,
+  useInvalidateBrowserProfiles,
+  useProjectBrowserProfiles,
+  useRemoveBrowserProfile,
+  useSetProjectBrowserProfile,
+} from "./hooks/use-browser-profiles";
 export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
 export {
   type EditorHistoryEntry,
@@ -116,6 +124,10 @@ export {
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "./lib/language-map";
+export type {
+  RenderedBlockKind,
+  RenderMarkdownBlock,
+} from "./lib/markdown-live-preview";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export {
   type AddToTerminalDetail,
@@ -141,6 +153,7 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
+  BrowserProfileInfo,
   CIState,
   CIStatus,
   CodingAgentConfig,
@@ -159,6 +172,7 @@ export type {
   HooksStatus,
   LabelDefinition,
   NotificationSettings,
+  ProjectAvatarInfo,
   ProjectInfo,
   ProjectKind,
   Settings,

@@ -1,27 +1,19 @@
 /**
- * Standalone HTML templates for the in-WebContentsView error pages
+ * Standalone HTML templates for the in-page error pages
  * (issue #444 + cast follow-up).
  *
- * The error pages render INSIDE the WebContentsView (via a `data:`
- * URI) rather than as a React overlay above it. Two reasons:
- *
- *   1. The native `WebContentsView` is an OS-level compositor layer
- *      that paints on top of the dashboard's React DOM. Overlay
- *      approaches need to `setVisible(false)` the view, which
- *      throttles Chromium's load pipeline and races against the
- *      renderer's state-change effects.
- *   2. When the browser is being **cast** via Band's CDP screencast
- *      feature, the screencast captures the WebContentsView's
- *      content, NOT the dashboard chrome above it. A React-overlay
- *      interstitial would be invisible to remote viewers — they'd
- *      see a blank cert-blocked page and have no way to Proceed.
- *      Rendering inside the view itself makes the error page part of
- *      the screencast, so the cast workflow stays usable.
+ * The error pages render INSIDE the tab's page (via a `data:` URI)
+ * rather than as a React overlay above it. When the browser is being
+ * **cast** via Band's CDP screencast feature, the screencast captures
+ * the page's content, NOT the dashboard chrome around it. A
+ * React-overlay interstitial would be invisible to remote viewers:
+ * they'd see a blank cert-blocked page and have no way to Proceed.
+ * Rendering inside the page makes the error page part of the
+ * screencast, so the cast workflow stays usable.
  *
  * Button actions are encoded as navigations to `band-action://`
- * URLs; a `will-navigate` listener in `view-manager.ts` intercepts
- * those, prevents the navigation, and dispatches to the matching
- * `BrowserViewManager` method.
+ * URLs; the `did-start-navigation` listener in `guest-manager.ts`
+ * intercepts those and dispatches to the matching action.
  *
  * No Electron imports — these helpers are pure HTML / string
  * manipulation and run unchanged under `node:test`.
@@ -174,7 +166,7 @@ function shell(title: string, bodyHtml: string): string {
  * Build the Chrome-style cert-error interstitial page. Action links
  * navigate to `band-action://cert-back` and
  * `band-action://cert-proceed?host=...&fingerprint=...` — see
- * `view-manager.ts::wireBandActionInterceptor` for the receiver.
+ * `guest-manager.ts::wireEvents` for the receiver.
  */
 export function buildCertErrorHtml(args: {
   url: string;
@@ -273,7 +265,7 @@ export function htmlToDataUrl(html: string): string {
 
 /**
  * Recognised receiver for `band-action://` URLs the in-view error
- * pages navigate to. Centralised so `view-manager.ts` can pattern-
+ * pages navigate to. Centralised so `guest-manager.ts` can pattern-
  * match on a stable enum rather than string-matching everywhere.
  */
 export type BandAction =

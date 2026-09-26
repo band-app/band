@@ -6,12 +6,10 @@
  * find UX through the renderer: open with Cmd+F, count matches, step
  * through them with Enter / Shift+Enter, and dismiss with Escape.
  *
- * The test runs against Playwright's bundled Chromium, which supports
- * the CSS Custom Highlight API the preview uses for painting. The
- * assertions key off observable UI state (the match counter, the
- * input's presence and focus) rather than the highlight overlay
- * itself, so the test stays useful even on browsers that fall back to
- * the no-paint path.
+ * The preview is an editable CodeMirror view (see
+ * `markdown-live-preview.ts`), so it uses the same find as the source
+ * editor. The assertions key off observable UI state (the match counter,
+ * the input's presence and focus) rather than the highlight paint.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -134,58 +132,57 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // preview modes — only the search target differs internally. The
   // placeholder flips to "Find in preview..." while the preview is the
   // active surface.
-  const findInput = page.getByPlaceholder(/Find in (preview|file)\.\.\./);
-  await expect(findInput).toHaveCount(0);
+  const viewer = new FileViewerPage(page);
+  const find = viewer.findWidget;
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
 
   // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
   // the way a user clicks into what they're reading. (Tapping the file in the
   // Explorer sheet leaves focus on the tree row, outside the leaf.)
-  await new FileViewerPage(page).clickIntoPreview("Test Document");
+  await viewer.clickIntoPreview("Test Document");
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
-  // SearchBar. CodeBrowserView routes the input through to
-  // MarkdownPreview's imperative ref while preview mode is active.
+  // SearchBar, which searches the preview's editor view.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+f`);
 
-  // Exactly one find bar should appear — the unified top one. The old
+  // Exactly one find widget should appear, floating over the preview. The old
   // "stacked bars" regression (#435 follow-up) would surface here as a
   // second input with the same placeholder.
-  await expect(findInput).toHaveCount(1);
-  await expect(findInput).toBeVisible();
-  await expect(findInput).toBeFocused();
-  await expect(findInput).toHaveAttribute("placeholder", "Find in preview...");
+  await expect(viewer.allFileFindInputs).toHaveCount(1);
+  await expect(find.input).toBeVisible();
+  await expect(find.input).toBeFocused();
+  await expect(find.input).toHaveAttribute("placeholder", "Find in preview...");
 
-  await findInput.fill("needle");
+  await find.type("needle");
 
   // "needle" appears 3× in the fixture — once in the first paragraph,
   // once under Section A, and once under Section B. The counter starts
   // on the first match.
-  await expect(page.getByText("1 of 3")).toBeVisible();
+  await expect(find.count).toHaveText("1/3");
 
   // Enter advances to the next match.
-  await findInput.press("Enter");
-  await expect(page.getByText("2 of 3")).toBeVisible();
+  await find.press("Enter");
+  await expect(find.count).toHaveText("2/3");
 
-  await findInput.press("Enter");
-  await expect(page.getByText("3 of 3")).toBeVisible();
+  await find.press("Enter");
+  await expect(find.count).toHaveText("3/3");
 
   // Wrap-around: another Enter cycles back to the first match.
-  await findInput.press("Enter");
-  await expect(page.getByText("1 of 3")).toBeVisible();
+  await find.press("Enter");
+  await expect(find.count).toHaveText("1/3");
 
   // Shift+Enter walks backwards.
-  await findInput.press("Shift+Enter");
-  await expect(page.getByText("3 of 3")).toBeVisible();
+  await find.press("Shift+Enter");
+  await expect(find.count).toHaveText("3/3");
 
-  // No-result query updates the counter to "No results" (the SearchBar
-  // renders this string when matchInfo.total === 0 and there is a
-  // query).
-  await findInput.fill("xyzzzzzzzzzzzz");
-  await expect(page.getByText("No results")).toBeVisible();
+  // A query with no matches marks the input invalid (the counter then reads
+  // "No results").
+  await find.type("xyzzzzzzzzzzzz");
+  await find.expectNoResults();
 
   // Escape closes the bar.
-  await findInput.press("Escape");
-  await expect(findInput).toHaveCount(0);
+  await find.press("Escape");
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
 });

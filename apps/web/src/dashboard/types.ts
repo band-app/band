@@ -37,6 +37,20 @@ export interface ProjectInfo {
    * UI consumers can therefore branch on `kind` without `?? "git"` guards.
    */
   kind: ProjectKind;
+  /**
+   * The GitHub owner's avatar when the project's `origin` is on GitHub,
+   * served from Band's cache (`/api/project-avatar/<name>`). `null` or
+   * absent for plain projects, non-GitHub remotes, no remote, and owners
+   * GitHub has no avatar for; the UI then shows its folder icon.
+   */
+  avatar?: ProjectAvatarInfo | null;
+}
+
+export interface ProjectAvatarInfo {
+  /** Same-origin image URL. */
+  src: string;
+  /** `owner/repo`, used as alt text. */
+  label: string;
 }
 
 export interface WorktreeInfo {
@@ -339,4 +353,17 @@ export interface ContentSearchMatch {
   file: string;
   line: number;
   content: string;
+}
+
+/**
+ * A Band browser profile: its own cookie jar for browser-pane tabs. The
+ * built-in Default profile has no entry and is `null` wherever a profile id
+ * is expected.
+ */
+export interface BrowserProfileInfo {
+  id: string;
+  name: string;
+  /** Where its cookies came from, e.g. `"chrome"`. `null` for an empty profile. */
+  source: string | null;
+  createdAt: number;
 }

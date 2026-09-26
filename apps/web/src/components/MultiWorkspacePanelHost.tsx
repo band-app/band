@@ -14,7 +14,7 @@ import { clearPerWorkspaceState } from "./per-workspace-state-store";
 // existing (deleted, worktree removed). There is no LRU and no cap. Memory is
 // bounded by parking the heavy resources of hidden workspaces instead:
 // terminals, LSP clients and file watchers of a cold workspace
-// (`workspace-cold-park.ts`), and browser webviews beyond a hidden-workspace
+// (`workspace-cold-park.ts`), and browser pages beyond a hidden-workspace
 // budget (`browser-guest-retention.ts`).
 // ---------------------------------------------------------------------------
 
@@ -241,7 +241,11 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             // a focus() call or Tab key could land in a background editor or
             // chat composer. `pointer-events: none` stays as
             // belt-and-suspenders in case a descendant re-asserts visibility.
-            className="absolute inset-0"
+            // `band-workspace-entry` is the hook for the browser paint
+            // retention rule in `globals.css`: a hidden entry holding a
+            // browser tab that must keep painting (CDP screencast) drops
+            // its `content-visibility` skip.
+            className="band-workspace-entry absolute inset-0"
             style={isActive ? ACTIVE_ENTRY_STYLE : HIDDEN_ENTRY_STYLE}
             inert={!isActive}
           >

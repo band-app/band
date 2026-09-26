@@ -96,6 +96,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
+import { ProjectAvatar } from "./ProjectAvatar";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
 
@@ -392,13 +393,26 @@ function SortableProject({
                 ) : (
                   <Folder className="size-4 shrink-0 text-muted-foreground" />
                 )
-              ) : collapsed ? (
-                <Folder
-                  className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
-                />
               ) : (
-                <FolderOpen
-                  className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                // Git project: the GitHub owner's avatar when `origin` is
+                // on GitHub, else the open/closed folder.
+                <ProjectAvatar
+                  avatar={project.avatar}
+                  className="size-4"
+                  testId={`project-list__project-avatar--${project.name}`}
+                  fallback={
+                    collapsed ? (
+                      <Folder
+                        data-testid={`project-list__project-folder--${project.name}`}
+                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                    ) : (
+                      <FolderOpen
+                        data-testid={`project-list__project-folder--${project.name}`}
+                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                    )
+                  }
                 />
               )}
               <Tooltip>
@@ -1115,7 +1129,11 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           <DragOverlay dropAnimation={null}>
             {activeDragId ? (
               <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
-                <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                <ProjectAvatar
+                  avatar={projects.find((p) => p.name === activeDragId)?.avatar}
+                  className="size-3.5"
+                  fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
+                />
                 <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
               </div>
             ) : null}

@@ -18,8 +18,15 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
+import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
+import {
+  NavControls,
+  RightPanelHeaderActions,
+  SidebarTitleBar,
+  WorkspaceTitleBar,
+} from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -28,7 +35,7 @@ import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
-import { getElectronBridge } from "../lib/desktop-ipc";
+import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
@@ -189,41 +196,39 @@ function TranslucentSidebarSync() {
   return null;
 }
 
+/** The page of the browser tab whose pane holds keyboard focus, if any. */
+function focusedBrowserWebview(): BrowserWebview | null {
+  const active = document.activeElement as HTMLElement | null;
+  const paneEl = active?.closest<HTMLElement>("[data-band-browser-pane]");
+  const browserId = paneEl?.dataset.bandBrowserPaneKey;
+  return browserId ? getBrowserWebview(browserId) : null;
+}
+
 /**
  * Exposes `window.__bandReload` for the desktop menu's Cmd+R handler.
  *
  * Routes the reload based on what's currently focused in the React DOM:
  *
- *   - Focus inside a browser pane (address bar, find bar, tab handle,
- *     etc., identified by the `data-band-browser-pane` attribute the
- *     `BrowserPanel` root sets): reload that browser tab via the
- *     `browser_reload` IPC instead of reloading the whole dashboard.
+ *   - Focus inside a browser pane (address bar, find bar, or the page
+ *     itself, whose `<webview>` is then the active element; the pane root
+ *     carries the `data-band-browser-pane` attribute): reload that tab
+ *     instead of reloading the whole dashboard.
  *   - Anywhere else: `location.reload()`, matching the previous
  *     default-menu behaviour.
- *
- * The webview-focused case (user is clicked inside a rendered web page)
- * is handled in the main process *before* this global is called — see
- * `menu.ts::reloadFocused`. By the time `__bandReload` runs, focus is
- * inside the main-window DOM.
  */
 function ReloadSync() {
   useEffect(() => {
     const globalKey = "__bandReload";
     const win = window as unknown as Record<string, unknown>;
     const handler = () => {
-      // Walk up from the focused element looking for a browser-pane root.
-      const active = document.activeElement as HTMLElement | null;
-      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
-      if (paneEl) {
-        const key = paneEl.dataset.bandBrowserPaneKey;
-        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
-        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = getElectronBridge();
-          if (bridge) {
-            void bridge.invoke("browser_reload", { [keyName]: key });
-            return;
-          }
+      const webview = focusedBrowserWebview();
+      if (webview) {
+        try {
+          webview.reload();
+        } catch {
+          // The page hasn't finished attaching yet; nothing to reload.
         }
+        return;
       }
       // No browser pane focused — preserve the historical "Cmd+R reloads
       // the dashboard" behaviour.
@@ -256,24 +261,13 @@ function ZoomSync() {
     // webContents.executeJavaScript("if(window.__bandZoom)window.__bandZoom('in')").
     //
     // Same routing shape as `__bandReload`: if focus is inside a browser
-    // pane's React chrome (address bar, find bar, etc.), zoom that
-    // tab's WebContentsView via IPC. Otherwise fall through to the
-    // dashboard-wide CSS zoom. The "focus inside the rendered web page"
-    // case is handled in the main process before this function is
-    // called — see `menu.ts::zoomFocused`.
+    // pane (its chrome or the page itself), zoom that tab's page.
+    // Otherwise fall through to the dashboard-wide CSS zoom.
     (window as unknown as Record<string, unknown>).__bandZoom = (action: string) => {
-      const active = document.activeElement as HTMLElement | null;
-      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
-      if (paneEl) {
-        const key = paneEl.dataset.bandBrowserPaneKey;
-        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
-        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = getElectronBridge();
-          if (bridge) {
-            void bridge.invoke("browser_zoom", { [keyName]: key, action });
-            return;
-          }
-        }
+      const webview = focusedBrowserWebview();
+      if (webview && (action === "in" || action === "out" || action === "reset")) {
+        zoomBrowserWebview(webview, action);
+        return;
       }
       if (action === "in") zoomIn();
       else if (action === "out") zoomOut();
@@ -774,56 +768,70 @@ function AppShell() {
             <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              <div className="h-full flex flex-col min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
-                <WorkspaceTitleBar
-                  workspaceName={activeWorkspaceId ?? undefined}
-                  workspacePath={activeWorkspaceId ? workspacePath : undefined}
-                  onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-                  onWorkspaceNameClick={activeWorkspaceId ? handleWorkspaceNameClick : undefined}
-                  onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
-                  rightPanelVisible={rightVisible}
-                />
-                {/* Below the title bar the dockview and the right sidepanel share
-                    one horizontal row, so the sidepanel aligns with the dockview
-                    content rather than spanning up alongside the title-bar row. */}
-                <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-                  <Group
-                    orientation="horizontal"
-                    defaultLayout={centerDefaultLayout}
-                    onLayoutChanged={handleCenterLayoutChanged}
-                    className="h-full w-full"
-                  >
-                    <Panel id="center" elementRef={centerElRef} minSize="30%">
+              {/* The dockview column and the right sidepanel share one
+                  full-height row. The workspace title bar sits at the top of
+                  the dockview column only; the sidepanel's own header row
+                  (tabs, open in editor, collapse) fills the title-bar row
+                  above it. */}
+              <div className="h-full min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
+                <Group
+                  orientation="horizontal"
+                  defaultLayout={centerDefaultLayout}
+                  onLayoutChanged={handleCenterLayoutChanged}
+                  className="h-full w-full"
+                >
+                  <Panel id="center" elementRef={centerElRef} minSize="30%">
+                    <div className="h-full flex flex-col min-w-0 overflow-hidden">
+                      <WorkspaceTitleBar
+                        workspaceName={activeWorkspaceId ?? undefined}
+                        onWorkspaceNameClick={
+                          activeWorkspaceId ? handleWorkspaceNameClick : undefined
+                        }
+                        onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
+                        rightPanelVisible={rightVisible}
+                      />
                       {/* `relative` anchors SharedDockviewLayout's `absolute
                           inset-0` overlay to the dockview area. */}
-                      <div className="h-full min-w-0 overflow-hidden relative">
+                      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
                         <Outlet />
                         <SharedDockviewLayout />
                         <BrowserHostBridge />
+                        <BrowserProfileSweeper />
                       </div>
-                    </Panel>
-                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-                    <Panel
-                      id="rightpanel"
-                      panelRef={rightPanelRef}
-                      elementRef={rightPanelElRef}
-                      defaultSize={RIGHT_PANEL_MIN_SIZE}
-                      minSize={RIGHT_PANEL_MIN_SIZE}
-                      maxSize={RIGHT_PANEL_MAX_SIZE}
-                      collapsible
-                      collapsedSize="0%"
-                      onResize={handleRightResize}
+                    </div>
+                  </Panel>
+                  <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                  <Panel
+                    id="rightpanel"
+                    panelRef={rightPanelRef}
+                    elementRef={rightPanelElRef}
+                    defaultSize={RIGHT_PANEL_MIN_SIZE}
+                    minSize={RIGHT_PANEL_MIN_SIZE}
+                    maxSize={RIGHT_PANEL_MAX_SIZE}
+                    collapsible
+                    collapsedSize="0%"
+                    onResize={handleRightResize}
+                  >
+                    <div
+                      className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
+                      data-testid="app-shell__right-panel"
+                      data-visible={rightVisible ? "true" : "false"}
                     >
-                      <div
-                        className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
-                        data-testid="app-shell__right-panel"
-                        data-visible={rightVisible ? "true" : "false"}
-                      >
-                        <RightSidepanel visible={rightVisible} />
-                      </div>
-                    </Panel>
-                  </Group>
-                </div>
+                      <RightSidepanel
+                        visible={rightVisible}
+                        headerActions={
+                          <RightPanelHeaderActions
+                            workspacePath={activeWorkspaceId ? workspacePath : undefined}
+                            onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+                            onToggleRightPanel={
+                              activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
+                            }
+                          />
+                        }
+                      />
+                    </div>
+                  </Panel>
+                </Group>
               </div>
             </Panel>
           </Group>
@@ -874,6 +882,7 @@ function RootLayout() {
           <ReloadSync />
           <TooltipProvider>
             <AppShell />
+            <UpdateToast />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />

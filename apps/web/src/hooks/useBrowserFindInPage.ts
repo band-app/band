@@ -1,44 +1,28 @@
 /**
  * Find-in-page state machine for a single browser pane.
  *
- * The hook is shared by both browser-pane variants (`BrowserPanelComponent`,
- * keyed by `workspaceId`, and the multi-tab `BrowserPaneComponent`, keyed by
- * `browserId`). Pass whichever identifier the pane uses; the hook scopes
- * its IPC subscriptions accordingly.
- *
  * Behaviour:
  *   - Owns `query`, `options`, `matchInfo`, and `isOpen` state.
- *   - On query / case-toggle changes, calls `browser_find_in_page` so
- *     Chromium re-runs its native scan and re-paints the highlights.
- *   - `findNext` / `findPrevious` reuse the cached match set
- *     (`{ findNext: true }`) instead of rescanning.
- *   - Reads back `browser-found-in-page` events to drive the match
+ *   - On query / case-toggle changes, calls the tab's
+ *     `webview.findInPage` so Chromium re-runs its native scan and
+ *     re-paints the highlights.
+ *   - `findNext` / `findPrevious` step through the current match set
+ *     instead of rescanning.
+ *   - Reads back the webview's `found-in-page` events to drive the match
  *     counter ("3 of 12"). Intermediate updates are shown immediately;
- *     `final_update: true` is just the authoritative total.
- *   - Reacts to the main-process `browser-find-shortcut` event so the
- *     shortcut works even when keyboard focus is inside the
- *     `WebContentsView` (where the renderer's DOM keydown listener never
- *     fires).
- *   - Closes itself when the tab navigates to a new URL — matches the
- *     "the find bar resets when … navigating away" requirement without
- *     persisting anything.
+ *     `finalUpdate: true` is just the authoritative total.
+ *   - Closes itself when the tab starts a new main-frame navigation —
+ *     matches the "the find bar resets when … navigating away"
+ *     requirement without persisting anything.
  *
- * No-op outside the Electron desktop shell.
+ * Cmd/Ctrl+F typed inside the page reaches the pane's keydown handler as a
+ * forwarded shortcut (`browser-guest-shortcut`), so no extra listener is
+ * needed here.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SearchBarHandle, SearchOptions } from "@/dashboard";
-import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-desktop";
-
-export type BrowserKeyName = "browserId" | "workspaceId";
-
-export interface UseBrowserFindInPageArgs {
-  /** The opaque LRU key of the underlying WebContentsView. */
-  key: string;
-  /** Whether `key` is a multi-tab `browserId` or a legacy `workspaceId`. */
-  keyName: BrowserKeyName;
-}
+import type { BrowserWebview, WebviewFoundInPageResult } from "../lib/browser-webview";
 
 export interface UseBrowserFindInPageReturn {
   isOpen: boolean;
@@ -60,7 +44,7 @@ export interface UseBrowserFindInPageReturn {
  * `SearchOptions` is shared with other search bars in the app (file
  * search, diff search, etc.), which need all three toggles. Browser
  * find-in-page only honours `caseSensitive` — Chromium's
- * `webContents.findInPage` API does not expose whole-word or regex
+ * `findInPage` API does not expose whole-word or regex
  * mode. `BrowserFindBar` therefore renders only the case-sensitive
  * toggle (`visibleOptions={["caseSensitive"]}`); `wholeWord` and
  * `regex` are accepted on the type but silently ignored here.
@@ -77,61 +61,27 @@ const DEFAULT_OPTIONS: SearchOptions = {
   regex: false,
 };
 
-interface FoundInPagePayload {
-  browser_id: string;
-  workspace_id: string;
-  request_id: number;
-  active_match_ordinal: number;
-  matches: number;
-  final_update: boolean;
-}
-
-interface FindShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-}
-
-interface UrlChangedPayload {
-  browser_id: string;
-  workspace_id: string;
-  url: string;
-  loading: boolean;
-}
-
-export function useBrowserFindInPage({
-  key,
-  keyName,
-}: UseBrowserFindInPageArgs): UseBrowserFindInPageReturn {
+/**
+ * `webview` is the tab's page element, or null while the pane has none
+ * (not created yet, or evicted by the hidden-workspace budget).
+ */
+export function useBrowserFindInPage(webview: BrowserWebview | null): UseBrowserFindInPageReturn {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<SearchOptions>(DEFAULT_OPTIONS);
   const [matchInfo, setMatchInfo] = useState<{ total: number; current: number } | null>(null);
 
   const searchBarRef = useRef<SearchBarHandle>(null);
-  const keyRef = useRef(key);
-  keyRef.current = key;
+  const webviewRef = useRef(webview);
+  webviewRef.current = webview;
   /**
-   * The `requestId` returned by the most recent `webContents.findInPage`
-   * call. Chromium can keep emitting `found-in-page` events for a
-   * cancelled request after the next request has already started; the
-   * stale match counter would briefly overwrite the new one. Filtering
-   * the listener by `requestId` discards those late stragglers.
+   * The `requestId` returned by the most recent `findInPage` call.
+   * Chromium can keep emitting `found-in-page` events for a cancelled
+   * request after the next request has already started; the stale match
+   * counter would briefly overwrite the new one. Filtering the listener by
+   * `requestId` discards those late stragglers.
    */
   const activeRequestIdRef = useRef<number | null>(null);
-
-  // Pull the right id field out of an event payload — both fields carry
-  // the same value today, but using the renderer's chosen `keyName` keeps
-  // the code honest if that ever diverges.
-  const payloadKey = useCallback(
-    (payload: { browser_id: string; workspace_id: string }): string =>
-      keyName === "browserId" ? payload.browser_id : payload.workspace_id,
-    [keyName],
-  );
-
-  const buildArgs = useCallback(
-    (extra: Record<string, unknown> = {}) => ({ [keyName]: keyRef.current, ...extra }),
-    [keyName],
-  );
 
   const focusInput = useCallback(() => {
     // Defer so the input is mounted before we try to focus it (the
@@ -142,59 +92,50 @@ export function useBrowserFindInPage({
     });
   }, []);
 
-  // ---- Issue a findInPage request through the desktop IPC bridge ----
+  const stopFind = useCallback(() => {
+    try {
+      webviewRef.current?.stopFindInPage("clearSelection");
+    } catch {
+      // best-effort — the guest may not be attached yet or already gone
+    }
+  }, []);
+
   const issueFind = useCallback(
-    async (text: string, opts: { findNext?: boolean; forward?: boolean } = {}): Promise<void> => {
-      if (!isDesktop) return;
+    (text: string, opts: { step?: boolean; forward?: boolean } = {}): void => {
       if (!text) {
         setMatchInfo(null);
         // Forget the in-flight request so any straggling `found-in-page`
         // events for it are dropped by the listener.
         activeRequestIdRef.current = null;
-        try {
-          await desktopInvoke("browser_stop_find_in_page", buildArgs({ action: "clearSelection" }));
-        } catch {
-          // best-effort — the view may already be gone
-        }
+        stopFind();
         return;
       }
       // When starting a brand-new scan (not just stepping through the
       // existing match set), clear the stale counter from the previous
-      // query so the UI doesn't briefly flash the old "3 of 12" while
-      // the new scan is in flight. Stepping (`findNext: true`) reuses
-      // the previous result set so the counter stays accurate.
-      if (!(opts.findNext ?? false)) {
+      // query so the UI doesn't briefly flash the old "3 of 12" while the
+      // new scan is in flight. Stepping (`step: true`) reuses the
+      // previous result set so the counter stays accurate.
+      if (!opts.step) {
         setMatchInfo(null);
-        // Also forget the in-flight request id so the listener doesn't
-        // accept any late events from the previous scan during the
-        // race window between this clear and the new invoke
-        // returning.
         activeRequestIdRef.current = null;
       }
+      const target = webviewRef.current;
+      if (!target) return;
       try {
-        const reqId = await desktopInvoke<number | undefined>(
-          "browser_find_in_page",
-          buildArgs({
-            text,
-            options: {
-              matchCase: options.caseSensitive,
-              // First search for a query → omit findNext so Chromium
-              // rescans. Stepping → set findNext: true and toggle forward.
-              findNext: opts.findNext ?? false,
-              forward: opts.forward ?? true,
-            },
-          }),
-        );
-        // Track the new requestId so the `found-in-page` listener can
-        // ignore late events from the previous query.
-        if (typeof reqId === "number") activeRequestIdRef.current = reqId;
+        activeRequestIdRef.current = target.findInPage(text, {
+          matchCase: options.caseSensitive,
+          // Electron's `findNext` means "start a new find session": true for
+          // a new query (Chromium rescans and reports the total), false when
+          // stepping through the current matches. A new query sent with
+          // `findNext: false` gets no `found-in-page` reply at all.
+          findNext: !opts.step,
+          forward: opts.forward ?? true,
+        });
       } catch (e) {
-        // Network is in-process IPC; only fails on shape mismatch /
-        // missing handler. Log but don't propagate.
-        console.error("browser_find_in_page failed:", e);
+        console.error("findInPage failed:", e);
       }
     },
-    [buildArgs, options.caseSensitive],
+    [options.caseSensitive, stopFind],
   );
 
   const close = useCallback(() => {
@@ -202,99 +143,51 @@ export function useBrowserFindInPage({
     setQuery("");
     setMatchInfo(null);
     activeRequestIdRef.current = null;
-    if (!isDesktop) return;
-    desktopInvoke("browser_stop_find_in_page", buildArgs({ action: "clearSelection" })).catch(
-      () => {},
-    );
-  }, [buildArgs]);
+    stopFind();
+  }, [stopFind]);
 
   const open = useCallback(() => {
     setIsOpen(true);
     focusInput();
   }, [focusInput]);
 
-  // ---- Re-issue the search whenever the query or case toggle changes ----
-  // Debounce-free: Chromium's findInPage already handles rapid succession
-  // gracefully (it cancels the prior request before starting a new scan),
-  // and the renderer feels snappier without a typing delay.
+  // Re-issue the search whenever the query or case toggle changes while
+  // the bar is open.
   useEffect(() => {
     if (!isOpen) return;
-    void issueFind(query);
+    issueFind(query);
   }, [query, isOpen, issueFind]);
 
-  // ---- Subscribe to streamed `found-in-page` results ----
   useEffect(() => {
-    if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
-    void (async () => {
-      unlisten = await desktopListen<FoundInPagePayload>("browser-found-in-page", (event) => {
-        if (payloadKey(event.payload) !== keyRef.current) return;
-        // Drop late events from a cancelled request — Chromium can
-        // emit them after we've already started a new scan, and the
-        // stale `matches` / `activeMatchOrdinal` would briefly flicker
-        // into the visible counter.
-        if (
-          activeRequestIdRef.current !== null &&
-          event.payload.request_id !== activeRequestIdRef.current
-        ) {
-          return;
-        }
-        setMatchInfo({
-          total: event.payload.matches,
-          // Chromium reports `0` while a query is being typed and the
-          // scan is mid-flight; promote to 0 of N so the UI shows
-          // "No results" until a match is selected.
-          current: event.payload.active_match_ordinal,
-        });
-      });
-    })();
-    return () => unlisten?.();
-  }, [payloadKey]);
-
-  // ---- Subscribe to the main-process Cmd+F intercept ----
-  // Fired when the WebContentsView itself has focus and consumed the
-  // keydown before the renderer DOM could see it.
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
-    void (async () => {
-      unlisten = await desktopListen<FindShortcutPayload>("browser-find-shortcut", (event) => {
-        if (payloadKey(event.payload) !== keyRef.current) return;
-        setIsOpen(true);
-        focusInput();
-      });
-    })();
-    return () => unlisten?.();
-  }, [focusInput, payloadKey]);
-
-  // ---- Auto-close on navigation ----
-  // The find bar resets when the underlying page changes; matches from
-  // the old document would be meaningless on the new one anyway.
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
-    void (async () => {
-      unlisten = await desktopListen<UrlChangedPayload>("browser-url-changed", (event) => {
-        if (payloadKey(event.payload) !== keyRef.current) return;
-        // Only react to a fresh load (loading=true) — the trailing
-        // loading=false event would otherwise close the bar
-        // immediately after the user opens it on a finished page.
-        if (event.payload.loading) {
-          close();
-        }
-      });
-    })();
-    return () => unlisten?.();
-  }, [close, payloadKey]);
+    if (!webview) return;
+    const onFound = (event: Event) => {
+      const result = (event as Event & { result: WebviewFoundInPageResult }).result;
+      if (activeRequestIdRef.current !== null && result.requestId !== activeRequestIdRef.current) {
+        return;
+      }
+      setMatchInfo({ total: result.matches, current: result.activeMatchOrdinal });
+    };
+    // A new main-frame document invalidates the match set; close the bar.
+    const onNavigate = (event: Event) => {
+      const nav = event as Event & { isMainFrame: boolean; isInPlace: boolean };
+      if (nav.isMainFrame && !nav.isInPlace) close();
+    };
+    webview.addEventListener("found-in-page", onFound);
+    webview.addEventListener("did-start-navigation", onNavigate);
+    return () => {
+      webview.removeEventListener("found-in-page", onFound);
+      webview.removeEventListener("did-start-navigation", onNavigate);
+    };
+  }, [webview, close]);
 
   const findNext = useCallback(() => {
     if (!query) return;
-    void issueFind(query, { findNext: true, forward: true });
+    issueFind(query, { step: true, forward: true });
   }, [query, issueFind]);
 
   const findPrevious = useCallback(() => {
     if (!query) return;
-    void issueFind(query, { findNext: true, forward: false });
+    issueFind(query, { step: true, forward: false });
   }, [query, issueFind]);
 
   return {

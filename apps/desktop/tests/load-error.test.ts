@@ -111,7 +111,6 @@ describe("buildLoadErrorPayload", () => {
       errorCode: -105,
     });
     assert.equal(payload.browser_id, "tab-99");
-    assert.equal(payload.workspace_id, "tab-99");
     assert.equal(payload.url, "https://nonexistent.example/foo");
     assert.equal(payload.error_code, -105);
     assert.equal(payload.error_name, "ERR_NAME_NOT_RESOLVED");

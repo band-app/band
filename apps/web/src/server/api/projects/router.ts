@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { browserProfileService } from "../../services/browser-profile-service";
 import { cronjobService } from "../../services/cronjob-service";
 import { projectService } from "../../services/project-service";
 import { publicProcedure, t } from "../trpc";
@@ -64,6 +65,8 @@ export const projectsRouter = t.router({
     // + scheduler — not project state — so this teardown is composed at
     // the API layer rather than buried inside `ProjectService.remove`.
     cronjobService.removeForKey(input.name);
+    // Same for the project's default browser profile mapping.
+    browserProfileService.forgetProject(input.name);
 
     return { ok: true };
   }),

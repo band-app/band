@@ -1,6 +1,6 @@
 /**
  * Pure-function tests for `decideWindowOpenAction` (the routing rule
- * used by `BrowserViewManager`'s `setWindowOpenHandler` to convert
+ * used by `BrowserGuestManager`'s `setWindowOpenHandler` to convert
  * page-initiated new-window requests into Band browser tabs — issue
  * #488). No Electron deps, so the test runs under `node:test` like
  * the other desktop unit tests.
@@ -40,8 +40,8 @@ describe("decideWindowOpenAction", () => {
   test("about:blank → ignore (about-blank)", () => {
     // Common popup pattern: `const w = window.open("about:blank");
     // w.document.write(...)`. We deny the OS window and skip making
-    // a Band tab — the page can't script into a WebContentsView we
-    // never handed back, so a fresh tab would just be litter.
+    // a Band tab — the page can't script into a page we never handed
+    // back, so a fresh tab would just be litter.
     const result = decideWindowOpenAction("about:blank");
     assert.deepEqual(result, { kind: "ignore", reason: "about-blank" });
   });

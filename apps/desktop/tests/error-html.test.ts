@@ -1,10 +1,10 @@
 /**
- * Tests for the in-WebContentsView error page HTML and the
- * `band-action://` URL parser (issue #444 — cast follow-up).
+ * Tests for the in-page error page HTML and the `band-action://` URL
+ * parser (issue #444 — cast follow-up).
  *
- * The HTML is loaded into the WebContentsView via a `data:` URI;
- * its button clicks become `band-action://…` navigations that the
- * view manager intercepts via `will-navigate`. So the things worth
+ * The HTML is loaded into the tab's page via a `data:` URI; its button
+ * clicks become `band-action://…` navigations that the guest manager
+ * intercepts via `did-start-navigation`. So the things worth
  * exercising are:
  *
  *   - HTML output contains the user-facing strings (host, error

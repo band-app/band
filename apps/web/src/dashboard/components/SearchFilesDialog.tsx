@@ -213,7 +213,7 @@ export function SearchFilesDialog({
             })}
           </CommandList>
           {totalMatches > 0 && (
-            <div className="border-t px-3 py-1.5 text-xs text-muted-foreground">
+            <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
               {totalMatches} result{totalMatches !== 1 ? "s" : ""} in {grouped.length} file
               {grouped.length !== 1 ? "s" : ""}
             </div>

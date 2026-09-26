@@ -1,11 +1,12 @@
 /**
  * Thin presentational wrapper around the shared `SearchBar` for the
- * browser pane. Renders as a full-width strip directly below the
- * address bar — the WebContentsView shrinks naturally because the
- * strip participates in the flex column.
+ * browser pane. Uses the same floating find widget as the terminal and
+ * editor panes, pinned to the top-right corner of the page. The page is a
+ * `<webview>` in the pane's DOM, so the widget lays over it like any other
+ * element; the pane renders it inside a `relative` box around the page.
  *
  * The toggles other than match-case are hidden: Chromium's
- * `webContents.findInPage` only reliably implements `matchCase` —
+ * `findInPage` only reliably implements `matchCase` —
  * `wholeWord`/`regex` would be silent no-ops.
  */
 
@@ -17,6 +18,7 @@ export function BrowserFindBar({ find }: { find: UseBrowserFindInPageReturn }) {
   return (
     <SearchBar
       ref={find.searchBarRef}
+      variant="floating"
       query={find.query}
       onQueryChange={find.setQuery}
       options={find.options}

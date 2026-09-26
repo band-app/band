@@ -15,18 +15,15 @@ import {
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
-import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import {
   findFocusedInnerDockview,
   prepareMaximizeRestoreAnimation,
   toggleEdgeGroup,
 } from "../lib/dockview-edge-groups";
-import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
 import { getPerWorkspaceState, subscribePerWorkspaceState } from "./per-workspace-state-store";
-import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 import {
   firstLeafOfKind,
   getWorkspaceDockviewApi,
@@ -627,41 +624,6 @@ export function SharedDockviewLayout() {
     window.addEventListener("band:open-file-external", handler);
     return () => window.removeEventListener("band:open-file-external", handler);
   }, [pickFile]);
-
-  // Hide all browser webviews (desktop) while a dialog is open (active ws only).
-  const toolbarDialogOpen = useAnyToolbarDialogOpen();
-  useEffect(() => {
-    if (!isDesktop || !activeWorkspaceId) return;
-    const isDialogOpen =
-      quickOpenOpen ||
-      searchFilesOpen ||
-      workspacePickerOpen ||
-      commandPaletteOpen ||
-      toolbarDialogOpen;
-
-    if (isDialogOpen) {
-      desktopInvoke("browser_hide_all_for_workspace", { workspaceId: activeWorkspaceId }).catch(
-        () => {},
-      );
-    } else {
-      const api = getWorkspaceDockviewApi(activeWorkspaceId);
-      const anyBrowserActive = api?.panels.some(
-        (p) => p.api.component === "browser" && p.api.isActive,
-      );
-      if (anyBrowserActive) {
-        desktopInvoke("browser_show_all_for_workspace", {
-          workspaceId: activeWorkspaceId,
-        }).catch(() => {});
-      }
-    }
-  }, [
-    quickOpenOpen,
-    searchFilesOpen,
-    workspacePickerOpen,
-    commandPaletteOpen,
-    toolbarDialogOpen,
-    activeWorkspaceId,
-  ]);
 
   // ---------------------------------------------------------------------
   // Render

@@ -7,18 +7,22 @@
  */
 
 import { type BrowserWindow, ipcMain } from "electron";
-import type { BrowserViewManager } from "../../browser/view-manager.js";
+import {
+  clearProfileData,
+  importChromeProfile,
+  listChromeImportProfiles,
+  pruneProfileData,
+} from "../../browser/chrome-import/import.js";
+import type { BrowserGuestManager } from "../../browser/guest-manager.js";
 import { Channels } from "../../shared/ipc-channels.js";
 import type {
-  BrowserBoundsArgs,
-  BrowserCreateArgs,
+  BrowserChromeImportArgs,
   BrowserEnsureArgs,
-  BrowserEvalArgs,
-  BrowserFindInPageArgs,
   BrowserKeyArg,
-  BrowserNavigateArgs,
-  BrowserStopFindInPageArgs,
-  BrowserZoomArgs,
+  BrowserOpenDevToolsArgs,
+  BrowserProfileArg,
+  BrowserProfilePruneArgs,
+  BrowserRegisterGuestArgs,
   CheckAppExistsArgs,
   InstallCliArgs,
   OpenExternalArgs,
@@ -28,6 +32,7 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
+import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
 import { browserHandlers } from "./browser.js";
 import {
@@ -46,7 +51,7 @@ export interface RegisterOptions {
   mainWindow: BrowserWindow;
   webDir: string;
   managed: ManagedProcess;
-  browserManager: BrowserViewManager;
+  browserManager: BrowserGuestManager;
   /**
    * Host paths used by the bundled-CLI resolver in `installCli` (issue #364).
    * `app.isPackaged`, `process.resourcesPath`, and `app.getAppPath()` from
@@ -54,14 +59,8 @@ export interface RegisterOptions {
    * resolve the sidecar binary inside the trust boundary.
    */
   cliPaths: CliPathOptions;
-  /**
-   * Background app-update banner state. The bootstrap owns the
-   * `pendingUpdate` cache and the install closure (which captures the
-   * `electron-updater` deps). Passing them in keeps `register.ts`
-   * decoupled from the updater module.
-   */
-  getPendingUpdate: () => { version: string } | null;
-  installUpdate: () => Promise<void>;
+  /** The bootstrap's auto-update controller, which the update toast drives. */
+  updates: UpdateController;
 }
 
 /**
@@ -111,67 +110,59 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   handle(Channels.openExternal, (args: OpenExternalArgs) => openExternal(args.url));
 
-  // ---- Background app-update banner ----
-  // The renderer calls `updater_status` once on mount to seed initial state
-  // (a missed broadcast race) and subscribes to `updater-status-changed`
-  // for subsequent transitions. `updater_install` kicks off
-  // `installPendingUpdate` — the response never resolves on success because
-  // `electron-updater` quits the process to install.
-  handle(Channels.updaterStatus, () => opts.getPendingUpdate());
-  handle(Channels.updaterInstall, () => opts.installUpdate());
+  // ---- App-update toast ----
+  // The renderer reads `updater_status` once on mount (it may mount after a
+  // check already finished) and follows `updater-status-changed` after
+  // that. The action channels resolve when the step starts, not when it
+  // finishes: progress and results arrive as status events.
+  handle(Channels.updaterStatus, () => opts.updates.getStatus());
+  handle(Channels.updaterCheck, () => {
+    void opts.updates.check({ userInitiated: true });
+  });
+  handle(Channels.updaterDownload, () => {
+    void opts.updates.download();
+  });
+  handle(Channels.updaterRestart, () => opts.updates.restart());
+  handle(Channels.updaterDismiss, () => opts.updates.dismiss());
 
-  // ---- Browser panels ----
+  // ---- Browser panes ----
   const bm = { manager: opts.browserManager };
-  handle(Channels.browserCreate, (args: BrowserCreateArgs) => browserHandlers.create(bm, args));
-  handle(Channels.browserNavigate, (args: BrowserNavigateArgs) =>
-    browserHandlers.navigate(bm, args),
+  handle(Channels.browserRegisterGuest, (args: BrowserRegisterGuestArgs) =>
+    browserHandlers.registerGuest(bm, args),
   );
-  handle(Channels.browserSetBounds, (args: BrowserBoundsArgs) =>
-    browserHandlers.setBounds(bm, args),
-  );
-  handle(Channels.browserShow, (args: BrowserKeyArg) => browserHandlers.show(bm, args));
-  handle(Channels.browserHide, (args: BrowserKeyArg) => browserHandlers.hide(bm, args));
-  handle(Channels.browserReload, (args: BrowserKeyArg) => browserHandlers.reload(bm, args));
-  handle(Channels.browserGoBack, (args: BrowserKeyArg) => browserHandlers.goBack(bm, args));
-  handle(Channels.browserGoForward, (args: BrowserKeyArg) => browserHandlers.goForward(bm, args));
-  handle(Channels.browserEval, (args: BrowserEvalArgs) => browserHandlers.evalJs(bm, args));
-  handle(Channels.browserDestroy, (args: BrowserKeyArg) => browserHandlers.destroy(bm, args));
-  handle(Channels.browserHideAllForWorkspace, () => browserHandlers.hideAll(bm));
-  handle(Channels.browserShowAllForWorkspace, () => browserHandlers.showAll(bm));
   // CDP screencast experiment bridge
   handle(Channels.browserEnsure, (args: BrowserEnsureArgs) => browserHandlers.ensure(bm, args));
   handle(Channels.browserGetCdpTarget, (args: BrowserKeyArg) =>
     browserHandlers.getCdpTarget(bm, args),
   );
-  // Find in page
-  handle(Channels.browserFindInPage, (args: BrowserFindInPageArgs) =>
-    browserHandlers.findInPage(bm, args),
+  // DevTools docked into the pane's second <webview>
+  handle(Channels.browserOpenDevTools, (args: BrowserOpenDevToolsArgs) =>
+    browserHandlers.openDevTools(bm, args),
   );
-  handle(Channels.browserStopFindInPage, (args: BrowserStopFindInPageArgs) =>
-    browserHandlers.stopFindInPage(bm, args),
+  handle(Channels.browserCloseDevTools, (args: BrowserKeyArg) =>
+    browserHandlers.closeDevTools(bm, args),
   );
-  // Capture-page (JPEG snapshot for the freeze-on-overlay mechanism)
-  handle(Channels.browserCapturePage, (args: BrowserKeyArg) =>
-    browserHandlers.capturePage(bm, args),
-  );
-  // Pause / resume media on freeze
-  handle(Channels.browserPauseMedia, (args: BrowserKeyArg) => browserHandlers.pauseMedia(bm, args));
-  handle(Channels.browserResumeMedia, (args: BrowserKeyArg) =>
-    browserHandlers.resumeMedia(bm, args),
-  );
-  // Per-tab zoom
-  handle(Channels.browserZoom, (args: BrowserZoomArgs) => browserHandlers.zoom(bm, args));
-  // Toggle DevTools for a browser tab
-  handle(Channels.browserToggleDevTools, (args: BrowserKeyArg) =>
-    browserHandlers.toggleDevTools(bm, args),
-  );
-  // Cert / load error pages are rendered inside the WebContentsView
-  // via a `data:` URI (issue #444); button clicks become
-  // `band-action://` navigations intercepted by the view manager. The
-  // only renderer-facing surface is this catch-up call so the
-  // dashboard chrome can paint the "Not Secure" badge for hosts the
-  // user already proceeded to in this session.
+  // Cert / load error pages are rendered inside the guest via a `data:`
+  // URI (issue #444); button clicks become `band-action://` navigations
+  // intercepted by the guest manager. The only renderer-facing surface is
+  // this catch-up call so the dashboard chrome can paint the "Not Secure"
+  // badge for hosts the user already proceeded to in this session.
   handle(Channels.browserGetOverriddenHosts, () => browserHandlers.getOverriddenHosts(bm));
+
+  // ---- Browser profiles ----
+  // Reads Chrome's profile list and cookie DB on this Mac. The renderer
+  // asks the user first; only counts come back over IPC.
+  handle(Channels.browserChromeProfiles, () => listChromeImportProfiles());
+  handle(Channels.browserChromeImport, (args: BrowserChromeImportArgs) =>
+    importChromeProfile(args),
+  );
+  const stopProfilePages = (profileId: string) => opts.browserManager.stopProfilePages(profileId);
+  handle(Channels.browserProfileClearData, (args: BrowserProfileArg) =>
+    clearProfileData(args.profileId, stopProfilePages),
+  );
+  handle(Channels.browserProfilePrune, (args: BrowserProfilePruneArgs) =>
+    pruneProfileData(Array.isArray(args?.keep) ? args.keep : [], stopProfilePages),
+  );
 
   return () => {
     for (const [channel] of handlers) {

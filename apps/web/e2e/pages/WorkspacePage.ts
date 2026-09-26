@@ -15,6 +15,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
+import { FindWidget } from "./FindWidget";
 
 /** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
  *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
@@ -229,6 +230,24 @@ export class WorkspacePage {
   /** The header's "⋮" project-actions button (revealed on hover / focus). */
   projectMenuTrigger(projectName: string): Locator {
     return this.page.getByTestId(`project-list__project-menu-trigger--${projectName}`);
+  }
+
+  /** The GitHub owner avatar in a project header. Present in the DOM (hidden)
+   *  while it loads, visible once it has, removed if it fails to load. */
+  projectAvatar(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-avatar--${projectName}`);
+  }
+
+  /** The folder icon a git project header shows when it has no avatar. */
+  projectFolderIcon(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-folder--${projectName}`);
+  }
+
+  /** Decoded width of a project's avatar image; 0 when it did not decode. */
+  async readProjectAvatarNaturalWidth(projectName: string): Promise<number> {
+    return await this.projectAvatar(projectName).evaluate(
+      (el) => (el as HTMLImageElement).naturalWidth,
+    );
   }
 
   /** Right-click a project header to open its context menu. */
@@ -721,6 +740,33 @@ export class WorkspacePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** The active file leaf's "View changes" button in the group header
+   *  (`center-file-leaf__view-diff`). It only renders while that file has
+   *  changes against the workspace's diff target. */
+  get fileLeafViewChangesButton(): Locator {
+    return this.page.getByTestId("center-file-leaf__view-diff");
+  }
+
+  /** Open `path` as a pinned file leaf through Quick Open (type the name,
+   *  Enter) and wait until its tab exists. */
+  async openFileViaQuickOpen(path: string): Promise<void> {
+    await test.step(`Open ${path} via Quick Open`, async () => {
+      await this.openQuickOpen();
+      await this.typeQuickOpen(path);
+      await expect.poll(() => this.selectedQuickOpenValue()).toBe(path);
+      await this.pressQuickOpenKey("Enter");
+      await expect(this.fileTab(path)).toBeAttached({ timeout: 15_000 });
+    });
+  }
+
+  /** Save the active file leaf through its group-header Save button, which
+   *  only renders while the buffer is dirty. */
+  async saveFileLeaf(): Promise<void> {
+    await test.step("Save the active file leaf", async () => {
+      await this.page.getByTestId("center-file-leaf__save").click();
+    });
+  }
+
   /** Locate the per-path `diff` leaf tab opened from the sidepanel Changes
    *  section (`center-diff-tab--<path>`). */
   diffTab(path: string): Locator {
@@ -732,6 +778,17 @@ export class WorkspacePage {
   fileLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
     const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
+  }
+
+  /** A line of the visible `file` leaf's editor by its exact text. Specs pass
+   *  fixture text they wrote themselves, so matching on text is stable. */
+  fileLeafLine(text: string): Locator {
+    return this.fileLeafVisibilityMarker(true).first().getByText(text, { exact: true });
+  }
+
+  /** The floating find widget of the visible `file` leaf. */
+  fileLeafFindWidget(): FindWidget {
+    return new FindWidget(this.fileLeafVisibilityMarker(true).first());
   }
 
   /** The `diff` leaf body's visibility marker (`center-diff-leaf__visible-*`). */
@@ -841,6 +898,20 @@ export class WorkspacePage {
    *  currently-shown terminal leaf. Count === number of split panes. */
   terminalPanes(): Locator {
     return this.page.getByTestId(/^term-pane__/).filter({ visible: true });
+  }
+
+  /** The rendered screen of the nth visible terminal pane.
+   *
+   *  FRAGILITY: `.xterm-screen` is a class owned by xterm, which exposes no
+   *  testid hook on its own DOM. Centralised here so an xterm upgrade that
+   *  renames it flows through one place. */
+  terminalScreen(index = 0): Locator {
+    return this.terminalPanes().nth(index).locator(".xterm-screen");
+  }
+
+  /** The floating find widget of the nth visible terminal pane. */
+  terminalPaneFindWidget(index = 0): FindWidget {
+    return new FindWidget(this.terminalPanes().nth(index));
   }
 
   /** Visible center TERMINAL tabs in the outer dockview strip — used to prove a
@@ -1089,6 +1160,32 @@ export class WorkspacePage {
       .getByTestId(/^term-pane-header__/)
       .filter({ visible: true })
       .nth(index);
+  }
+
+  /** The split / close icon cluster (`term-pane-actions__<id>`) that floats over
+   *  the top-right of the nth visible pane's terminal. */
+  paneActions(index: number): Locator {
+    return this.paneHeader(index).getByTestId(/^term-pane-actions__/);
+  }
+
+  /** The computed background of the nth pane's icon cluster next to the
+   *  background xterm paints for that pane's terminal (xterm 6 sets the active
+   *  theme's background inline on `.xterm-scrollable-element`; the
+   *  `.xterm-viewport` under it keeps xterm.css's fixed #000). Both come out of
+   *  `getComputedStyle`, so they compare as plain strings.
+   *
+   *  FRAGILITY: `.xterm-scrollable-element` is a class owned by xterm, which
+   *  exposes no testid hook on its own DOM. Centralised here so an xterm
+   *  upgrade that renames it flows through one place. */
+  async paneActionsBackground(index: number): Promise<{ actions: string; terminal: string }> {
+    const actions = await this.paneActions(index).evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    const terminal = await this.terminalPanes()
+      .nth(index)
+      .locator(".xterm-scrollable-element")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    return { actions, terminal };
   }
 
   /** Drag one pane's header onto another pane to reorder — dockview moves the
@@ -1433,6 +1530,53 @@ export class WorkspacePage {
       });
       await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
     });
+  }
+
+  /** The workspace title bar over the center (dockview) column
+   *  (`WorkspaceTitleBar` in `DesktopTitleBar.tsx`). */
+  get workspaceTitleBar(): Locator {
+    return this.page.getByTestId("desktop-title-bar__workspace-surface");
+  }
+
+  /** The right sidepanel's header row (tabs + open-in-editor + collapse), level
+   *  with the workspace title bar. */
+  get rightPanelHeader(): Locator {
+    return this.page.getByTestId("right-sidepanel__header");
+  }
+
+  /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
+  get rightPanelToggleInHeader(): Locator {
+    return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** The right-sidepanel toggle hosted in the workspace title bar (expand).
+   *  Rendered only while the sidepanel is collapsed. */
+  get rightPanelToggleInTitleBar(): Locator {
+    return this.workspaceTitleBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** Collapse the right sidepanel with the button in its own header. */
+  async collapseRightPanelViaHeader(): Promise<void> {
+    await test.step("Collapse the right sidepanel from its header", async () => {
+      await this.rightPanelToggleInHeader.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "false");
+    });
+  }
+
+  /** Expand the collapsed right sidepanel with the button in the title bar. */
+  async expandRightPanelViaTitleBar(): Promise<void> {
+    await test.step("Expand the right sidepanel from the title bar", async () => {
+      await this.rightPanelToggleInTitleBar.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
+    });
+  }
+
+  /** Viewport bounding box of a locator. Throws when it has none (hidden), so
+   *  a geometric comparison can't pass vacuously. */
+  async boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no bounding box — not visible");
+    return box;
   }
 
   /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
@@ -2250,6 +2394,55 @@ export class WorkspacePage {
       }
       return 0;
     }, workspaceId);
+  }
+
+  /** Read the first `cols` cells of the top `rows` rows of a workspace
+   *  terminal's active xterm buffer, plus the cursor position. Each entry is
+   *  the cell's chars; the right half of a wide character (and an unwritten
+   *  cell) is the empty string. This is xterm's own column layout, so a test
+   *  can assert where text lands after a wide emoji regardless of renderer.
+   *  Same one-terminal-per-workspace assumption as `terminalCols`. Returns
+   *  null when the terminal isn't loaded yet. */
+  async readTerminalBufferCells(
+    workspaceId: string,
+    rows: number,
+    cols: number,
+  ): Promise<{ rows: string[][]; cursor: { x: number; y: number } } | null> {
+    return await this.page.evaluate(
+      ([id, rowCount, colCount]) => {
+        type Buffer = {
+          cursorX: number;
+          cursorY: number;
+          viewportY: number;
+          getLine(
+            y: number,
+          ): { getCell(x: number): { getChars(): string } | undefined } | undefined;
+        };
+        const cache = (
+          globalThis as unknown as {
+            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          }
+        ).__bandTerminalCache__;
+        if (!cache) return null;
+        for (const entry of cache.values()) {
+          if (entry.workspaceId !== id) continue;
+          const term = entry.getTerminal() as { buffer: { active: Buffer } } | null;
+          if (!term) return null;
+          const buffer = term.buffer.active;
+          const rows: string[][] = [];
+          for (let y = 0; y < rowCount; y++) {
+            const line = buffer.getLine(buffer.viewportY + y);
+            if (!line) return null;
+            const cells: string[] = [];
+            for (let x = 0; x < colCount; x++) cells.push(line.getCell(x)?.getChars() ?? "");
+            rows.push(cells);
+          }
+          return { rows, cursor: { x: buffer.cursorX, y: buffer.cursorY } };
+        }
+        return null;
+      },
+      [workspaceId, rows, cols] as const,
+    );
   }
 
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM

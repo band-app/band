@@ -30,6 +30,7 @@ import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
+import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsSection } from "./settings/SettingsSection";
 
@@ -564,6 +565,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   onCheckedChange={setWebBrowserCdpEnabled}
                 />
               </SettingsRow>
+              <BrowserProfilesSettings />
             </SettingsSection>
 
             {/* ── Labels ─────────────────────────────────────── */}

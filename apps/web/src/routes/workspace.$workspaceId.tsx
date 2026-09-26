@@ -1,5 +1,4 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
-import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { ChevronsUpDown, FolderOpen, GitCompare, Menu, SquareTerminal } from "lucide-react";
 import type React from "react";
@@ -13,7 +12,6 @@ import {
   QuickOpenDialog,
   SearchFilesDialog,
   useDashboardStore,
-  useDiffTarget,
   useWorkspacePath,
   WorkspacePickerDialog,
 } from "@/dashboard";
@@ -23,9 +21,9 @@ import {
   getWorkspaceLeafActions,
   WorkspaceCenterDockview,
 } from "../components/WorkspaceCenterDockview";
+import { useDiffSummary } from "../hooks/useDiffSummary";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
-import { trpc } from "../lib/trpc-client";
 
 /** Stable empty fileStatuses reference so a "no changes" render doesn't churn. */
 const EMPTY_STATUSES: Record<string, FileStatus> = {};
@@ -85,17 +83,7 @@ function useAppHeight() {
  *  same diff target (mode + compare branch) the user picked, mirroring the
  *  desktop RightSidepanel query so the badge count matches the tree. */
 function useChangesSummary(workspaceId: string) {
-  const { diffMode, compareBranch } = useDiffTarget(workspaceId);
-  const summaryQuery = useQuery({
-    queryKey: ["mobileChanges", workspaceId, diffMode, compareBranch],
-    queryFn: () =>
-      trpc.workspace.getDiffSummary.query({
-        workspaceId,
-        diffMode,
-        compareBranch: compareBranch ?? undefined,
-      }),
-    refetchInterval: 15_000,
-  });
+  const summaryQuery = useDiffSummary(workspaceId, { refetchInterval: 15_000 });
   // The server types `fileStatuses` values as plain `string`; the tree wants
   // the `FileStatus` union. Same runtime values — cast at this single seam.
   const fileStatuses = (summaryQuery.data?.fileStatuses ?? EMPTY_STATUSES) as Record<

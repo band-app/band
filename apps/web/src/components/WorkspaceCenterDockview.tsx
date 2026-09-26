@@ -76,7 +76,6 @@ import {
   getStoredViewMode,
   releaseLspClient,
   SearchBar,
-  type SearchOptions,
   serializeViewPosition,
   storeViewMode,
   type TerminalInsertDetail,
@@ -90,10 +89,12 @@ import {
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
+import { useDiffSummary } from "../hooks/useDiffSummary";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
+import { listen as desktopListen } from "../lib/desktop-ipc";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -131,11 +132,7 @@ import {
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
-import {
-  MarkdownPreview,
-  type MarkdownPreviewHandle,
-  type MarkdownPreviewMatchInfo,
-} from "./MarkdownPreview";
+import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
@@ -413,14 +410,22 @@ function reinjectParams(
       const comp = panel.contentComponent as LeafKind;
       if (comp === "chat") panel.params = { workspaceId, chatId: id };
       else if (comp === "term") panel.params = { workspaceId, terminalId: id };
-      else if (comp === "browser")
+      else if (comp === "browser") {
         panel.params = { workspaceId, browserId: id, initialUrl: urls.get(id) };
+        // Same as `addBrowserLeaf`; layouts saved before browser tabs were
+        // `<webview>`s carry no renderer.
+        panel.renderer = "always";
+      }
       // `"file:".length === 5` and `"diff:".length === 5` — strip the prefix
       // back into the filePath param. Line/column are transient (jump targets)
       // and intentionally not persisted.
       else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
-      else if (comp === "diff") panel.params = { workspaceId, filePath: id.slice(5) };
-      else panel.params = { workspaceId };
+      else if (comp === "diff") {
+        const commit = COMMIT_DIFF_ID.exec(id);
+        panel.params = commit
+          ? { workspaceId, filePath: commit[2], commit: commit[1] }
+          : { workspaceId, filePath: id.slice(5) };
+      } else panel.params = { workspaceId };
     }
   }
   return clone;
@@ -541,6 +546,18 @@ interface DiffLeafParams {
   workspaceId: string;
   filePath: string;
   preview?: boolean;
+  /** Set for a diff opened from the Commits panel: the file's change in
+   *  this commit (vs its first parent) instead of the working-tree diff. */
+  commit?: string;
+}
+
+// Diff leaves are keyed `diff:<path>`; a commit's file diff is keyed
+// `diff@<sha>:<path>`, so renames/deletes in the Explorer (which match on
+// the `diff:` prefix) leave it alone.
+const COMMIT_DIFF_ID = /^diff@([0-9a-f]{7,40}):(.+)$/i;
+
+function commitDiffId(sha: string, filePath: string): string {
+  return `diff@${sha}:${filePath}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -836,14 +853,10 @@ function removeFileTabState(ws: string, path: string): void {
 function useLeafFind(
   workspaceId: string,
   visible: boolean,
-  // When set + `active`, ⌘F drives the rendered markdown preview (a DOM find)
-  // instead of the CodeMirror editor — the file leaf passes this while a
-  // markdown file is shown in preview mode.
-  previewSearch?: {
-    active: boolean;
-    ref: React.RefObject<MarkdownPreviewHandle | null>;
-    matchInfo: MarkdownPreviewMatchInfo;
-  },
+  // True while a markdown file is shown as its rendered preview. The preview
+  // is a CodeMirror view too, so find works the same; only the placeholder
+  // changes.
+  previewActive = false,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The set of CodeMirror EditorViews to search. `file` leaves have one;
@@ -901,37 +914,19 @@ function useLeafFind(
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, search.handleOpenSearch]);
 
-  // When a markdown file is shown as preview, the same SearchBar drives the
-  // preview's DOM find (via the MarkdownPreview handle) instead of CodeMirror.
-  const previewActive = previewSearch?.active ?? false;
-  const runPreviewSearch = useCallback(
-    (q: string, opts: SearchOptions) => previewSearch?.ref.current?.search(q, opts),
-    [previewSearch?.ref],
-  );
-
   const searchBar = search.searchOpen ? (
     <SearchBar
       ref={search.searchBarRef}
+      variant="floating"
       query={search.searchQuery}
-      onQueryChange={(q) => {
-        search.setSearchQuery(q);
-        if (previewActive) runPreviewSearch(q, search.searchOptions);
-      }}
+      onQueryChange={search.setSearchQuery}
       options={search.searchOptions}
-      onOptionsChange={(o) => {
-        search.setSearchOptions(o);
-        if (previewActive) runPreviewSearch(search.searchQuery, o);
-      }}
+      onOptionsChange={search.setSearchOptions}
       placeholder={previewActive ? "Find in preview..." : "Find in file..."}
-      matchInfo={previewActive && previewSearch ? previewSearch.matchInfo : search.matchInfo}
-      onNext={previewActive ? () => previewSearch?.ref.current?.next() : search.handleNext}
-      onPrevious={
-        previewActive ? () => previewSearch?.ref.current?.previous() : search.handlePrevious
-      }
-      onClose={() => {
-        if (previewActive) previewSearch?.ref.current?.clear();
-        search.handleCloseSearch();
-      }}
+      matchInfo={search.matchInfo}
+      onNext={search.handleNext}
+      onPrevious={search.handlePrevious}
+      onClose={search.handleCloseSearch}
     />
   ) : undefined;
 
@@ -1067,22 +1062,14 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     () => getFileTabState(workspaceIdRaw, filePathRaw)?.viewMode,
   );
 
-  // Markdown preview find target: the rendered MarkdownPreview exposes an
-  // imperative search handle, and reports its match counter here. `⌘F` routes
-  // to it (instead of CodeMirror) while a markdown file is shown as preview
-  // (markdown defaults to preview, so anything but explicit "source").
-  const markdownRef = useRef<MarkdownPreviewHandle | null>(null);
-  const [previewMatchInfo, setPreviewMatchInfo] = useState<MarkdownPreviewMatchInfo>({
-    total: 0,
-    current: 0,
-  });
+  // Markdown defaults to the rendered preview, so anything but explicit "source".
   const previewFindActive = getFilePreviewType(filePathRaw) === "markdown" && viewMode !== "source";
 
-  const { containerRef, setViews, searchBar } = useLeafFind(workspaceIdRaw, visible, {
-    active: previewFindActive,
-    ref: markdownRef,
-    matchInfo: previewMatchInfo,
-  });
+  const { containerRef, setViews, searchBar } = useLeafFind(
+    workspaceIdRaw,
+    visible,
+    previewFindActive,
+  );
   useActiveFileTracking(api, workspaceIdRaw, filePathRaw, visible);
   const capabilities = useCapabilities();
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
@@ -1158,21 +1145,6 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     // mount/unmount.
   }, [workspaceIdRaw, filePathRaw]);
 
-  // Stable renderer (identity never changes — markdownRef/setPreviewMatchInfo
-  // are stable) so FileViewer's `showMarkdownToggle` doesn't churn each render.
-  // Threads the imperative find handle + match-counter so ⌘F can drive the
-  // rendered preview (see `useLeafFind`'s `previewSearch`).
-  const renderMarkdown = useCallback(
-    (content: string) => (
-      <MarkdownPreview
-        ref={markdownRef}
-        content={content}
-        onMatchInfoChange={setPreviewMatchInfo}
-      />
-    ),
-    [],
-  );
-
   // Save-as flow for untitled buffers. `capabilities.pickSaveFile` bundles the
   // OS "Save As" dialog + the disk write and resolves with the absolute path
   // (null on cancel). On success we open the now-real file as its own leaf
@@ -1201,9 +1173,29 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
+  // "View changes" only shows while this file has changes against the diff
+  // target, read from the same cached summary the Changes panel uses (a
+  // renamed file is keyed by its new path). Untitled and external files are
+  // never in it. The poll runs only while the leaf is visible; a save
+  // refetches at once so the button appears without waiting for the next poll.
+  const diffSummaryEnabled = !untitled && !external;
+  const diffSummaryQuery = useDiffSummary(workspaceIdRaw, {
+    enabled: diffSummaryEnabled && visible,
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const fileStatuses = diffSummaryQuery.data?.fileStatuses;
+  const canViewDiff =
+    diffSummaryEnabled && !!fileStatuses && Object.hasOwn(fileStatuses, filePathRaw);
+  const refetchDiffSummary = diffSummaryQuery.refetch;
+  const wasDirtyRef = useRef(false);
+  const isDirty = fileActions?.isDirty ?? false;
+  useEffect(() => {
+    if (wasDirtyRef.current && !isDirty && diffSummaryEnabled) void refetchDiffSummary();
+    wasDirtyRef.current = isDirty;
+  }, [isDirty, diffSummaryEnabled, refetchDiffSummary]);
+
   // Publish this file leaf's actions (markdown toggle, Save, View changes) to
   // the group header — the FileViewer's own title bar is hidden (#643).
-  const canViewDiff = !untitled && !external;
   usePublishHeaderActions(
     api.id,
     workspaceIdRaw && filePathRaw
@@ -1323,11 +1315,12 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
           removeFileTabState(workspaceId, filePath);
           getWorkspaceLeafActions(workspaceId)?.onClose(`file:${filePath}`, "file");
         }}
-        // Markdown files get a code/preview toggle in the title bar; the
-        // preview reuses the shared MarkdownPreview renderer.
-        renderMarkdown={renderMarkdown}
+        // Markdown files open in an editable rendered preview with a
+        // preview/source toggle; tables, frontmatter and mermaid blocks render
+        // through Streamdown.
+        renderMarkdownBlock={renderMarkdownBlock}
         onEditorView={handleEditorView}
-        toolbar={searchBar}
+        overlay={searchBar}
         // Cursor selection + scroll restore: seeded from the per-tab store;
         // `CodeMirrorEditor` applies them on view creation, on top of the
         // document from disk. Captured back by `persistEditorState` on
@@ -1378,10 +1371,12 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
   // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
-  const { workspaceId, filePath } = params;
+  const { workspaceId, filePath, commit } = params;
   const adapter = useAdapter();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
-  useActiveFileTracking(api, workspaceId ?? "", filePath ?? "", visible);
+  // A commit's diff is history, not the worktree file: it doesn't mark a row
+  // in the Explorer / Changes trees as the open file.
+  useActiveFileTracking(api, workspaceId ?? "", commit ? "" : (filePath ?? ""), visible);
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
@@ -1402,18 +1397,14 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     storeViewMode(mode);
   }, []);
 
-  const summaryQuery = useQuery({
-    queryKey: ["diffLeafSummary", workspaceId, diffMode, compareBranch],
-    queryFn: () =>
-      trpc.workspace.getDiffSummary.query({
-        workspaceId,
-        diffMode,
-        compareBranch: compareBranch ?? undefined,
-      }),
-    enabled: !!workspaceId && !!filePath,
+  // A commit's diff doesn't compare against the diff target, so it never
+  // reads the workspace's changes summary.
+  const summaryQuery = useDiffSummary(workspaceId ?? "", {
+    enabled: !!filePath && !commit,
     // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
     // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
-    refetchInterval: visible ? 10_000 : false,
+    // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
+    refetchInterval: visible ? 15_000 : false,
   });
 
   const mergeBase = summaryQuery.data?.mergeBase;
@@ -1429,13 +1420,28 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
         // opens its whole contents, not just the changed hunks.
         contextLines: FULL_FILE_CONTEXT,
       }),
-    enabled: !!workspaceId && !!filePath && !!mergeBase,
+    enabled: !!workspaceId && !!filePath && !!mergeBase && !commit,
     refetchInterval: visible ? 10_000 : false,
+  });
+
+  // A commit's diff never changes, so it is fetched once and never polled.
+  const commitDiffQuery = useQuery({
+    queryKey: ["diffLeafCommitFile", workspaceId, commit, filePath],
+    queryFn: () =>
+      trpc.workspace.getCommitFileDiff.query({
+        workspaceId,
+        sha: commit ?? "",
+        filePath,
+        contextLines: FULL_FILE_CONTEXT,
+      }),
+    enabled: !!workspaceId && !!filePath && !!commit,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
   // Publish this diff leaf's actions (view toggle, open-for-edit, revert) to the
   // group header — the tab content itself carries no toolbar (#643).
-  const canRevert = !!adapter.revertFile;
+  // A commit's diff is history: there is nothing to revert in the worktree.
+  const canRevert = !!adapter.revertFile && !commit;
   usePublishHeaderActions(
     api.id,
     workspaceId && filePath
@@ -1471,17 +1477,20 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
                 </button>
               </>
             )}
-            <button
-              type="button"
-              onClick={() =>
-                getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
-              }
-              title="Open file for editing"
-              data-testid="center-diff-leaf__open-file"
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <SquarePen className="size-3.5" />
-            </button>
+            {/* The file may no longer exist in the worktree for a commit's diff. */}
+            {!commit && (
+              <button
+                type="button"
+                onClick={() =>
+                  getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+                }
+                title="Open file for editing"
+                data-testid="center-diff-leaf__open-file"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <SquarePen className="size-3.5" />
+              </button>
+            )}
             {canRevert && (
               <button
                 type="button"
@@ -1496,13 +1505,15 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           </div>
         )
       : null,
-    [viewMode, workspaceId, filePath, canRevert],
+    [viewMode, workspaceId, filePath, canRevert, commit],
   );
 
   if (!workspaceId || !filePath) return null;
 
-  const diff = fileDiffQuery.data?.diff;
-  const loading = summaryQuery.isLoading || fileDiffQuery.isLoading;
+  const diff = commit ? commitDiffQuery.data?.diff : fileDiffQuery.data?.diff;
+  const loading = commit
+    ? commitDiffQuery.isLoading
+    : summaryQuery.isLoading || fileDiffQuery.isLoading;
 
   return (
     <div
@@ -1510,8 +1521,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {searchBar}
       <div className="relative min-h-0 flex-1">
+        {searchBar}
         {/* The overview ruler stands in for this scroller's vertical scrollbar,
             so the native one is hidden and the content leaves room for it. */}
         <div
@@ -1530,7 +1541,13 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-              {loading ? "Loading diff…" : "No changes"}
+              {loading
+                ? "Loading diff…"
+                : commit && commitDiffQuery.isError
+                  ? commitDiffQuery.error instanceof Error
+                    ? commitDiffQuery.error.message
+                    : "Failed to load the diff"
+                  : "No changes"}
             </div>
           )}
         </div>
@@ -1600,6 +1617,8 @@ interface LeafActions {
     },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  /** Open `filePath`'s change in commit `sha` (Commits panel). */
+  openCommitDiff: (sha: string, filePath: string, opts?: { preview?: boolean }) => void;
   /** Retarget file / diff leaves at or under `oldPath` after the Explorer
    *  renamed or moved it (workspace-relative paths). */
   onPathMoved: (oldPath: string, newPath: string) => void;
@@ -2065,18 +2084,19 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
 }
 
 function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
-  const { workspaceId, filePath } = props.params;
+  const { workspaceId, filePath, commit } = props.params;
   const containerApi = props.containerApi;
+  const panelId = props.api.id;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api, props.params.preview);
-  const title = basename(filePath);
+  const title = commit ? `${basename(filePath)} @ ${commit.slice(0, 7)}` : basename(filePath);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      leafActionsByApiId.get(containerApi.id)?.current?.onClose(`diff:${filePath}`, "diff");
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(panelId, "diff");
     },
-    [containerApi, filePath],
+    [containerApi, panelId],
   );
 
   return (
@@ -2085,7 +2105,11 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
       filePath={filePath}
       testidPrefix={`center-diff-tab--${filePath}`}
     >
-      <div className={TAB_ROOT_CLASS} data-testid={`center-diff-tab--${filePath}`}>
+      <div
+        className={TAB_ROOT_CLASS}
+        data-testid={`center-diff-tab--${filePath}`}
+        data-commit={commit}
+      >
         <div className={TAB_CONTENT_WRAP}>
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
@@ -2334,6 +2358,11 @@ function addBrowserLeaf(
     title: "New Tab",
     params: { workspaceId, browserId, ...(initialUrl ? { initialUrl } : {}) },
     position: position ?? centralPanelPosition(api),
+    // The page is a `<webview>`, and detaching it from the DOM (dockview's
+    // default `onlyWhenVisible` renderer does that for an unselected tab)
+    // destroys its guest and reloads the page. Keep the leaf mounted and let
+    // dockview hide it with `display: none` instead.
+    renderer: "always",
   } as AddPanelOptions);
 }
 
@@ -2703,12 +2732,14 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
-  const handleOpenDiff = useCallback(
-    (filePath: string, opts?: { preview?: boolean }) => {
+  // Working-tree diffs (`diff:<path>`) and commit diffs (`diff@<sha>:<path>`)
+  // share one preview slot, so browsing either reuses the same italic tab.
+  const openDiffLeaf = useCallback(
+    (filePath: string, commit: string | undefined, opts?: { preview?: boolean }) => {
       const api = apiRef.current;
       if (!api) return;
       const preview = opts?.preview ?? false;
-      const id = `diff:${filePath}`;
+      const id = commit ? commitDiffId(commit, filePath) : `diff:${filePath}`;
       const existing = api.getPanel(id);
       if (existing) {
         if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
@@ -2733,13 +2764,24 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         component: "diff",
         tabComponent: "diff",
         title: basename(filePath),
-        params: { workspaceId, filePath, preview },
+        params: { workspaceId, filePath, preview, commit },
         position,
       } as AddPanelOptions);
       if (previewToRemove) api.removePanel(previewToRemove);
       previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
     },
     [workspaceId],
+  );
+
+  const handleOpenDiff = useCallback(
+    (filePath: string, opts?: { preview?: boolean }) => openDiffLeaf(filePath, undefined, opts),
+    [openDiffLeaf],
+  );
+
+  const handleOpenCommitDiff = useCallback(
+    (sha: string, filePath: string, opts?: { preview?: boolean }) =>
+      openDiffLeaf(filePath, sha, opts),
+    [openDiffLeaf],
   );
 
   // ---- keep file / diff leaves in step with Explorer renames and deletes ----
@@ -2844,6 +2886,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    openCommitDiff: () => {},
     onPathMoved: () => {},
     onPathRemoved: () => {},
   });
@@ -2853,6 +2896,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    openCommitDiff: handleOpenCommitDiff,
     onPathMoved: handlePathMoved,
     onPathRemoved: handlePathRemoved,
   };
@@ -3159,6 +3203,35 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       }
     });
   }, [adapter, workspaceId]);
+
+  // Page popups (window.open, target="_blank", middle-click) reach us as a
+  // request for a new Band tab; the main process has already denied the OS
+  // window (issue #488). Only the workspace holding the source tab acts.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void desktopListen<{ browser_id: string; url: string }>("browser-open-window", (event) => {
+      const api = apiRef.current;
+      const source = api?.getPanel(event.payload.browser_id);
+      if (!api || !source) return;
+      const id = newBrowserId();
+      markBrowserFresh(id);
+      addBrowserLeaf(api, workspaceId, id, event.payload.url, {
+        referenceGroup: source.group.id,
+      });
+      trpc.browsers.create.mutate({ workspaceId, id, url: event.payload.url }).catch((err) => {
+        console.error("[WorkspaceCenterDockview] popup browser create failed:", err);
+      });
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [workspaceId]);
 
   // Bring a specific chat/terminal leaf forward when "Add to Chat/Terminal" targets it.
   useEffect(() => {

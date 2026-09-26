@@ -20,7 +20,6 @@
  */
 export interface BrowserLoadErrorPayload {
   browser_id: string;
-  workspace_id: string;
   /** The URL Chromium was trying to load when the failure occurred. */
   url: string;
   /** Chromium's negative integer error code (e.g. -105 for
@@ -184,11 +183,9 @@ export function describeLoadError(errorCode: number): {
 }
 
 /**
- * Build a renderer-facing payload from the raw arguments Chromium
- * hands the `did-fail-load` event. Caller provides the LRU `key`
- * so the payload can be filtered to the right tab — both
- * `browser_id` and `workspace_id` are set to the same value to
- * match the dual-key convention in `view-manager.ts::wireEvents`.
+ * Build a payload from the raw arguments Chromium hands the
+ * `did-fail-load` event. Caller provides the tab's `key` (its Band
+ * browser id) as `browser_id`.
  *
  * Chromium also passes an `errorDescription` string but it's
  * notoriously empty for most codes (Chromium emits it from
@@ -203,7 +200,6 @@ export function buildLoadErrorPayload(args: {
   const { name, headline, description } = describeLoadError(args.errorCode);
   return {
     browser_id: args.key,
-    workspace_id: args.key,
     url: args.url,
     error_code: args.errorCode,
     error_name: name,

@@ -1,10 +1,9 @@
 /**
- * Hidden BrowserWindow used by `BrowserViewManager` to host
- * `WebContentsView`s the desktop UI hasn't currently mounted a panel for —
- * including tabs that the web/agent ensure'd through the
- * `browserHost.ensureView` bridge but the user hasn't opened on desktop
- * yet, and tabs that the desktop just hid because the user switched
- * workspace.
+ * Hidden BrowserWindow used by `BrowserGuestManager` to host the offscreen
+ * `WebContentsView`s of tabs that the web/agent ensure'd through the
+ * `browserHost.ensureView` bridge but that no desktop pane has mounted.
+ * Tabs with a mounted pane are `<webview>` guests of the dashboard window
+ * instead.
  *
  * Why this exists: chromium parks its compositor for `WebContentsView`s
  * whose parent isn't on screen — including views positioned outside the

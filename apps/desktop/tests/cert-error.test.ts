@@ -86,7 +86,6 @@ describe("buildCertErrorPayload", () => {
       },
     });
     assert.equal(payload.browser_id, "tab-42");
-    assert.equal(payload.workspace_id, "tab-42");
     assert.equal(payload.url, "https://EXAMPLE.com:8443/login");
     assert.equal(payload.host, "example.com");
     assert.equal(payload.error_code, "net::ERR_CERT_DATE_INVALID");

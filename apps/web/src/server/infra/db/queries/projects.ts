@@ -243,4 +243,19 @@ export class ProjectQueries {
     const db = getDb();
     db.update(projectsTable).set({ hasOrigin }).where(eq(projectsTable.name, name)).run();
   }
+
+  /**
+   * Path and kind of one project, by primary key. For per-request lookups
+   * (e.g. the avatar route) that don't need the worktree tree `loadAll`
+   * assembles.
+   */
+  findLocation(name: string): { path: string; kind: ProjectKind } | undefined {
+    const db = getDb();
+    const row = db
+      .select({ path: projectsTable.path, kind: projectsTable.kind })
+      .from(projectsTable)
+      .where(eq(projectsTable.name, name))
+      .get();
+    return row ? { path: row.path, kind: (row.kind ?? "git") as ProjectKind } : undefined;
+  }
 }

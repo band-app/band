@@ -43,20 +43,23 @@ export async function trpcMutate(
 
 /**
  * Call a tRPC query against the real server's HTTP surface and return its
- * `result.data`. Throws on non-2xx, like {@link trpcMutate}.
+ * `result.data`. Throws on non-2xx, like `trpcMutate`.
  */
 export async function trpcQuery<T>(
   serverUrl: string,
   token: string,
   procedure: string,
-  input: unknown,
+  input?: unknown,
 ): Promise<T> {
-  const url = `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`;
-  const res = await fetch(url, { headers: { Cookie: `band_token=${token}` } });
+  const query = input === undefined ? "" : `?input=${encodeURIComponent(JSON.stringify(input))}`;
+  const res = await fetch(`${serverUrl}/trpc/${procedure}${query}`, {
+    headers: { Cookie: `band_token=${token}` },
+  });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     const snippet = text.length > 200 ? `${text.slice(0, 200)}…` : text;
     throw new Error(`trpcQuery(${procedure}) failed: ${res.status} ${snippet}`);
   }
-  return ((await res.json()) as { result: { data: T } }).result.data;
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
 }

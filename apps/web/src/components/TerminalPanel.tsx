@@ -172,21 +172,22 @@ export function TerminalPanel({
 
   return (
     <div className="relative flex h-full w-full flex-col">
-      {state.searchOpen && (
-        <SearchBar
-          ref={searchBarRef}
-          query={state.searchQuery}
-          onQueryChange={entry.setSearchQuery}
-          options={state.searchOptions}
-          onOptionsChange={entry.setSearchOptions}
-          placeholder="Find in terminal..."
-          matchInfo={state.matchInfo}
-          onNext={entry.findNext}
-          onPrevious={entry.findPrevious}
-          onClose={entry.closeSearch}
-        />
-      )}
       <div className="relative min-h-0 flex-1">
+        {state.searchOpen && (
+          <SearchBar
+            ref={searchBarRef}
+            variant="floating"
+            query={state.searchQuery}
+            onQueryChange={entry.setSearchQuery}
+            options={state.searchOptions}
+            onOptionsChange={entry.setSearchOptions}
+            placeholder="Find in terminal..."
+            matchInfo={state.matchInfo}
+            onNext={entry.findNext}
+            onPrevious={entry.findPrevious}
+            onClose={entry.closeSearch}
+          />
+        )}
         {/* Sizing box only — the cache's persistent wrapper (which carries the
             counter-zoom and hosts xterm) is appended here on `attach` and moved
             to the parking container on `detach`. `absolute` makes it the

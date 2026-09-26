@@ -40,7 +40,7 @@ function electronBridge(): ElectronBridge | null {
 }
 
 /**
- * Invoke a main-process command (e.g. `"browser_create"`,
+ * Invoke a main-process command (e.g. `"browser_register_guest"`,
  * `"webserver_start"`). Throws if called outside the desktop shell — call
  * sites should gate on `isDesktop` first.
  */
