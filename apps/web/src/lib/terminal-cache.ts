@@ -808,9 +808,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
               // scrollback, screen clears, cursor moves) — we only want to show
               // its plain text, in red.
               const safe = msg.message.replace(/\p{Cc}/gu, "");
-              // Notices are written at once even while parked (after any
-              // queued output), so they survive a parked queue's overflow.
-              output.push(`\r\n\x1b[31m${safe}\x1b[0m\r\n`, true);
+              output.pushNotice(`\r\n\x1b[31m${safe}\x1b[0m\r\n`);
             }
           } catch {
             output.push(event.data as string, attached);
@@ -835,12 +833,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         if (event.code === 1000 || event.code >= 4000) {
           terminated = true;
           if (event.code === 1000) {
-            output.push("\r\n\x1b[90m[Process completed]\x1b[0m\r\n", true);
+            output.pushNotice("\r\n\x1b[90m[Process completed]\x1b[0m\r\n");
           }
           setState({ terminated: true });
           return;
         }
-        output.push("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n", true);
+        // The reconnect replays the whole screen, so queued output from this
+        // connection would only be parsed to be thrown away.
+        output.clear();
+        output.pushNotice("\r\n\x1b[90m[Reconnecting…]\x1b[0m\r\n");
         scheduleReconnect();
       };
     }
@@ -863,7 +864,12 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     showParkedOutput = () => {
       if (output.flush()) return;
       output.clear();
-      if (intentionalClose || terminated) return;
+      if (terminated) {
+        // No shell left to replay from: say what the pane is missing.
+        term.write("\r\n\x1b[90m[Output skipped while hidden]\x1b[0m\r\n");
+        return;
+      }
+      if (intentionalClose) return;
       const stale = ws;
       connect();
       // `connect` replaced `ws`, so the stale socket's late frames and its

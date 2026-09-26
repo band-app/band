@@ -17,7 +17,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -44,6 +44,7 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server!: ServerHandle;
 let tmpHome!: string;
+let workdirA!: string;
 const workdirs: string[] = [];
 
 function makeGitWorkdir(prefix: string): string {
@@ -71,7 +72,7 @@ async function serverOutput(workspaceId: string): Promise<string> {
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  const workdirA = makeGitWorkdir("band-parked-output-a-");
+  workdirA = makeGitWorkdir("band-parked-output-a-");
   const workdirB = makeGitWorkdir("band-parked-output-b-");
   seedState(tmpHome, {
     projects: [
@@ -118,9 +119,15 @@ test("a parked terminal that overflows its output queue is resynced when shown",
   await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE_A);
   await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
-  // The sleep gives the switch below time to park A before the flood starts.
-  // `$((40+2))` keeps the typed command line from matching the marker.
-  await workspacePage.runInTerminal("sleep 3; seq 1 600000; echo PARKED_DONE_$((40+2))");
+  // The flood waits for a gate file, created only once A is parked. The
+  // quoted fragments and `$((40+2))` keep the typed command line from
+  // matching either marker.
+  const gate = join(workdirA, "go");
+  await workspacePage.runInTerminalUntilRendered(
+    WORKSPACE_A,
+    `echo GATE_"ARMED"; while [ ! -e ${gate} ]; do sleep 0.1; done; seq 1 600000; echo PARKED_DONE_$((40+2))`,
+    /GATE_ARMED/,
+  );
 
   await workspacePage.switchWorkspace(WORKSPACE_B);
   await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
@@ -129,6 +136,7 @@ test("a parked terminal that overflows its output queue is resynced when shown",
   await expect
     .poll(() => workspacePage.isTerminalParked(WORKSPACE_A), { timeout: 20_000 })
     .toBe(true);
+  writeFileSync(gate, "");
 
   // The whole flood (~4 MB, twice the queue cap) reached A while it was parked.
   await expect

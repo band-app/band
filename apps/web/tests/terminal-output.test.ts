@@ -87,7 +87,18 @@ describe("terminal.output", () => {
     );
     await socket.close();
 
-    const output = await outputText(terminalId);
+    // Let the shell finish printing (its prompt comes after the marker), so
+    // the reads below see the same tail.
+    let previous = "";
+    const output = await waitFor(
+      async () => {
+        const current = await outputText(terminalId);
+        const settled = current === previous;
+        previous = current;
+        return settled ? current : undefined;
+      },
+      { label: "terminal.output settles" },
+    );
     expect(output).toHaveLength(MAX_OUTPUT_CHARS);
     // Every full `seq` line in the tail follows the one before it, up to 50000:
     // no chunk was dropped from the middle or reordered.
@@ -98,9 +109,7 @@ describe("terminal.output", () => {
       .map(Number);
     expect(numbers.length).toBeGreaterThan(10_000);
     expect(numbers.at(-1)).toBe(50_000);
-    numbers.forEach((n, i) => {
-      if (i > 0) expect(n).toBe(numbers[i - 1] + 1);
-    });
+    expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => numbers[0] + i));
 
     // `lines` slices the same tail.
     const lastLines = await outputText(terminalId, 3);

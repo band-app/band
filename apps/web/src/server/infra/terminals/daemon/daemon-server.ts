@@ -59,10 +59,10 @@ const MAX_STREAM_BACKLOG_BYTES = 64 * 1024 * 1024;
  */
 const STREAM_HOLD_BYTES = 128 * 1024;
 /**
- * A session that sent less than this since the stream was last empty is
- * never paused: echo, prompts and small redraws aren't the flood.
+ * A session that sent fewer characters than this since the stream was last
+ * empty is never paused: echo, prompts and small redraws aren't the flood.
  */
-const SMALL_SESSION_BYTES = 4 * 1024;
+const SMALL_SESSION_CHARS = 4 * 1024;
 
 interface Client {
   id: string;
@@ -415,7 +415,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     client.sentSinceEmpty.set(terminalId, sent);
     if (
       socket.writableLength < STREAM_HOLD_BYTES ||
-      sent <= SMALL_SESSION_BYTES ||
+      sent <= SMALL_SESSION_CHARS ||
       client.held.has(terminalId)
     ) {
       return;

@@ -52,6 +52,13 @@ export interface TerminalOutputQueue {
    */
   push(data: Chunk, foreground: boolean, onParsed?: () => void): void;
   /**
+   * Deliver a client-side notice (an error, `[Process completed]`). It must
+   * survive an overflow, so it is written at once when nothing is queued, and
+   * otherwise queued behind the output it follows, past the cap, so it drains
+   * on the shared budget instead of forcing the whole queue through.
+   */
+  pushNotice(text: string): void;
+  /**
    * The terminal became visible: write everything queued now. Returns `false`
    * when the queue overflowed and output was dropped, so the caller must
    * resync the terminal instead.
@@ -142,6 +149,14 @@ export function createTerminalOutputQueue(
       }
       pending.add(state);
       scheduleDrain(BACKGROUND_FLUSH_DELAY_MS);
+    },
+    pushNotice(text) {
+      if (state.chunks.length === 0) {
+        write(text);
+        return;
+      }
+      state.chunks.push(text);
+      state.bytes += text.length;
     },
     flush() {
       if (state.overflowed) return false;

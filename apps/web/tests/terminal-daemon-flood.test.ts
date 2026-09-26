@@ -13,6 +13,7 @@ import {
   trpcQuery,
 } from "./helpers/server";
 import { TerminalSocket } from "./helpers/terminal-socket";
+import { waitFor } from "./helpers/wait-for";
 
 // A terminal printing as fast as its PTY allows must not cost the server its
 // connection to the terminal daemon. All of a server's terminals share one
@@ -91,10 +92,16 @@ describe("terminal daemon under a full-speed flood", () => {
     flood.type(
       `perl -e '$|=1; my $l = "\\e[32m" . ("x" x 150) . "\\e[0m\\n"; print $l for 1..${Math.ceil(FLOOD_BYTES / 160)}'; echo FLOOD_DONE_$((40+2))\r`,
     );
-    // Mid-flood, the quiet terminal still answers.
-    await waitForBytes(flood, 20_000_000);
+    // Mid-flood, the quiet terminal still answers, and promptly. The bound is
+    // loose for loaded CI runners; a backed-up stream delays echo by seconds.
+    await waitFor(async () => flood.bytes >= 20_000_000 || undefined, {
+      timeoutMs: 30_000,
+      label: "flood under way",
+    });
+    const typedAt = Date.now();
     quiet.type("echo QUIET_DURING_$((40+3))\r");
     await quiet.waitForOutput("QUIET_DURING_43", 30_000);
+    expect(Date.now() - typedAt).toBeLessThan(5_000);
 
     await flood.waitForOutput("FLOOD_DONE_42", 90_000);
     expect(flood.bytes).toBeGreaterThan(FLOOD_BYTES);
@@ -108,12 +115,10 @@ describe("terminal daemon under a full-speed flood", () => {
     await flood.close();
     await quiet.close();
   });
-});
 
-async function waitForBytes(socket: TerminalSocket, bytes: number): Promise<void> {
-  const start = Date.now();
-  while (socket.bytes < bytes) {
-    if (Date.now() - start > 30_000) throw new Error(`flood stalled at ${socket.bytes} bytes`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
+  it("refuses to list terminals without the token", async () => {
+    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const res = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
+    expect(res.status).toBe(401);
+  });
+});
