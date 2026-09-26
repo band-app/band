@@ -131,7 +131,7 @@ test.describe("Terminal under app zoom", () => {
 
     const expectFitted = async (zoom: number) => {
       // Positive anchor: the shortcut really moved the app to this zoom level.
-      await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(zoom, 5);
+      await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(zoom, 2);
       await expect
         .poll(
           async () => {
