@@ -238,8 +238,10 @@ test.describe("safe-area insets in a home-screen app", () => {
     await chat.attachFile({ name: "pixel.png", mimeType: "image/png", buffer: PIXEL_PNG });
     await chat.typeMessage("Look at this picture");
     await chat.submit();
+    // Wait for the turn to end: the confirmed message replaces the optimistic
+    // one, which would unmount a preview opened on it.
+    await expect(chat.assistantMessage('Heard "Look at this picture"')).toBeVisible();
     const message = chat.userMessage("Look at this picture");
-    await expect(message).toBeVisible();
 
     await chat.openImagePreview(message);
     const content = await layout.readLayout(chat.filePreviewContent);
