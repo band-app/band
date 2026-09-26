@@ -2171,6 +2171,55 @@ export class WorkspacePage {
     }, workspaceId);
   }
 
+  /** Read the first `cols` cells of the top `rows` rows of a workspace
+   *  terminal's active xterm buffer, plus the cursor position. Each entry is
+   *  the cell's chars; the right half of a wide character (and an unwritten
+   *  cell) is the empty string. This is xterm's own column layout, so a test
+   *  can assert where text lands after a wide emoji regardless of renderer.
+   *  Same one-terminal-per-workspace assumption as `terminalCols`. Returns
+   *  null when the terminal isn't loaded yet. */
+  async readTerminalBufferCells(
+    workspaceId: string,
+    rows: number,
+    cols: number,
+  ): Promise<{ rows: string[][]; cursor: { x: number; y: number } } | null> {
+    return await this.page.evaluate(
+      ([id, rowCount, colCount]) => {
+        type Buffer = {
+          cursorX: number;
+          cursorY: number;
+          viewportY: number;
+          getLine(
+            y: number,
+          ): { getCell(x: number): { getChars(): string } | undefined } | undefined;
+        };
+        const cache = (
+          globalThis as unknown as {
+            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          }
+        ).__bandTerminalCache__;
+        if (!cache) return null;
+        for (const entry of cache.values()) {
+          if (entry.workspaceId !== id) continue;
+          const term = entry.getTerminal() as { buffer: { active: Buffer } } | null;
+          if (!term) return null;
+          const buffer = term.buffer.active;
+          const rows: string[][] = [];
+          for (let y = 0; y < rowCount; y++) {
+            const line = buffer.getLine(buffer.viewportY + y);
+            if (!line) return null;
+            const cells: string[] = [];
+            for (let x = 0; x < colCount; x++) cells.push(line.getCell(x)?.getChars() ?? "");
+            rows.push(cells);
+          }
+          return { rows, cursor: { x: buffer.cursorX, y: buffer.cursorY } };
+        }
+        return null;
+      },
+      [workspaceId, rows, cols] as const,
+    );
+  }
+
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
    *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
    *  `readTerminalRenderedText` (which joins everything into one string), this

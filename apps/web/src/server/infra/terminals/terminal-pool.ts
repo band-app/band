@@ -366,6 +366,11 @@ export class TerminalPool {
         | { default: typeof import("@xterm/addon-serialize") };
       const { SerializeAddon } =
         "SerializeAddon" in serializeNs ? serializeNs : serializeNs.default;
+      const unicode11Ns = (await import("@xterm/addon-unicode11")) as
+        | typeof import("@xterm/addon-unicode11")
+        | { default: typeof import("@xterm/addon-unicode11") };
+      const { Unicode11Addon } =
+        "Unicode11Addon" in unicode11Ns ? unicode11Ns : unicode11Ns.default;
 
       // Dims match the PTY spawn above; `resize` keeps them in lock-step.
       headless = new Terminal({
@@ -379,6 +384,12 @@ export class TerminalPool {
       // `@xterm/xterm` Terminal; the headless Terminal exposes the same core
       // surface minus the DOM members, so the addon works but needs the cast.
       headless.loadAddon(serializeAddon as unknown as Parameters<typeof headless.loadAddon>[0]);
+      // Match the client's Unicode 11 width tables (`terminal-cache.ts`), or
+      // a replayed screen puts the text after a wide emoji one column off.
+      headless.loadAddon(
+        new Unicode11Addon() as unknown as Parameters<typeof headless.loadAddon>[0],
+      );
+      headless.unicode.activeVersion = "11";
     } catch (err) {
       // The PTY spawned above but the session was never registered — kill it
       // so a failed headless setup can't leak an orphaned shell process.
