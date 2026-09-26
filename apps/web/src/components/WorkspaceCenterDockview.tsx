@@ -90,6 +90,7 @@ import {
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
+import { useDiffSummary } from "../hooks/useDiffSummary";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
@@ -1207,9 +1208,27 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
+  // "View changes" only shows while this file has changes against the diff
+  // target, read from the same cached summary the Changes panel uses (a
+  // renamed file is keyed by its new path). Untitled and external files are
+  // never in it. The poll runs only while the leaf is visible; a save
+  // refetches at once so the button appears without waiting for the next poll.
+  const diffSummaryEnabled = !untitled && !external;
+  const diffSummaryQuery = useDiffSummary(workspaceIdRaw, {
+    enabled: diffSummaryEnabled && visible,
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const canViewDiff = diffSummaryEnabled && !!diffSummaryQuery.data?.fileStatuses[filePathRaw];
+  const refetchDiffSummary = diffSummaryQuery.refetch;
+  const wasDirtyRef = useRef(false);
+  const isDirty = fileActions?.isDirty ?? false;
+  useEffect(() => {
+    if (wasDirtyRef.current && !isDirty && diffSummaryEnabled) void refetchDiffSummary();
+    wasDirtyRef.current = isDirty;
+  }, [isDirty, diffSummaryEnabled, refetchDiffSummary]);
+
   // Publish this file leaf's actions (markdown toggle, Save, View changes) to
   // the group header — the FileViewer's own title bar is hidden (#643).
-  const canViewDiff = !untitled && !external;
   usePublishHeaderActions(
     api.id,
     workspaceIdRaw && filePathRaw
@@ -1408,15 +1427,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     storeViewMode(mode);
   }, []);
 
-  const summaryQuery = useQuery({
-    queryKey: ["diffLeafSummary", workspaceId, diffMode, compareBranch],
-    queryFn: () =>
-      trpc.workspace.getDiffSummary.query({
-        workspaceId,
-        diffMode,
-        compareBranch: compareBranch ?? undefined,
-      }),
-    enabled: !!workspaceId && !!filePath,
+  const summaryQuery = useDiffSummary(workspaceId ?? "", {
+    enabled: !!filePath,
     // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
     // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
     refetchInterval: visible ? 10_000 : false,
