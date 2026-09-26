@@ -8,12 +8,20 @@ import {
 } from "@band-app/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
-import { FolderOpen, GitCompare } from "lucide-react";
+import {
+  ChevronsDownUp,
+  FilePlus,
+  FolderOpen,
+  FolderPlus,
+  GitCompare,
+  RefreshCw,
+} from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChangesFileTree,
   FileBrowser,
+  type FileBrowserHandle,
   type FileStatus,
   useAdapter,
   useDiffTarget,
@@ -111,6 +119,79 @@ function TabButton({
 }
 
 // ---------------------------------------------------------------------------
+// Explorer header (folder name + New File / New Folder / Refresh / Collapse)
+// ---------------------------------------------------------------------------
+
+function ExplorerHeaderButton({
+  label,
+  icon: Icon,
+  onClick,
+  testid,
+}: {
+  label: string;
+  icon: React.FC<{ className?: string }>;
+  onClick: () => void;
+  testid: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      data-testid={testid}
+      className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      <Icon className="size-3.5" />
+    </button>
+  );
+}
+
+function ExplorerHeader({
+  folderName,
+  browserRef,
+}: {
+  folderName: string;
+  browserRef: React.RefObject<FileBrowserHandle | null>;
+}) {
+  return (
+    // The actions appear on hover or keyboard focus, as in VS Code; devices
+    // without hover always show them.
+    <div className="group flex h-7 shrink-0 items-center gap-1 pr-2 pl-3">
+      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        {folderName}
+      </span>
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+        <ExplorerHeaderButton
+          label="New File"
+          icon={FilePlus}
+          onClick={() => browserRef.current?.startNewFile()}
+          testid="explorer-header__new-file"
+        />
+        <ExplorerHeaderButton
+          label="New Folder"
+          icon={FolderPlus}
+          onClick={() => browserRef.current?.startNewFolder()}
+          testid="explorer-header__new-folder"
+        />
+        <ExplorerHeaderButton
+          label="Refresh Explorer"
+          icon={RefreshCw}
+          onClick={() => void browserRef.current?.refresh()}
+          testid="explorer-header__refresh"
+        />
+        <ExplorerHeaderButton
+          label="Collapse Folders in Explorer"
+          icon={ChevronsDownUp}
+          onClick={() => browserRef.current?.collapseAll()}
+          testid="explorer-header__collapse-all"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Right sidepanel root
 // ---------------------------------------------------------------------------
 
@@ -155,6 +236,13 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
   }, []);
 
   const workspacePath = useWorkspacePath(workspaceId);
+  const fileBrowserRef = useRef<FileBrowserHandle>(null);
+  // The worktree folder's name, as VS Code titles its Explorer.
+  const folderName =
+    workspacePath
+      ?.replace(/[/\\]+$/, "")
+      .split(/[/\\]/)
+      .pop() || "Explorer";
   const { diffMode, compareBranch, setDiffMode, setCompareBranch } = useDiffTarget(workspaceId);
   const adapter = useAdapter();
 
@@ -279,17 +367,27 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
 
       <div className="min-h-0 flex-1 overflow-auto">
         {activeTab === "explorer" ? (
-          <div className="h-full" data-testid="right-sidepanel__explorer">
-            <FileBrowser
-              workspaceId={workspaceId}
-              workspacePath={workspacePath}
-              onOpenFile={(p) => openFile(p, false)}
-              onOpenFilePinned={(p) => openFile(p, true)}
-              selectedFile={currentFile}
-              // Match the ChangesFileTree row size (text-[13px] / h-28) so the
-              // Explorer and Changes trees read identically in the sidepanel.
-              compact
-            />
+          <div className="flex h-full flex-col" data-testid="right-sidepanel__explorer">
+            <ExplorerHeader folderName={folderName} browserRef={fileBrowserRef} />
+            <div className="min-h-0 flex-1">
+              <FileBrowser
+                ref={fileBrowserRef}
+                workspaceId={workspaceId}
+                workspacePath={workspacePath}
+                onOpenFile={(p) => openFile(p, false)}
+                onOpenFilePinned={(p) => openFile(p, true)}
+                selectedFile={currentFile}
+                // Keep open editor tabs pointed at renamed / moved paths, and
+                // close the tabs of deleted ones.
+                onPathRenamed={(oldPath, newPath) =>
+                  getWorkspaceLeafActions(workspaceId)?.onPathMoved(oldPath, newPath)
+                }
+                onPathDeleted={(path) => getWorkspaceLeafActions(workspaceId)?.onPathRemoved(path)}
+                // Match the ChangesFileTree row size (text-[13px] / h-28) so the
+                // Explorer and Changes trees read identically in the sidepanel.
+                compact
+              />
+            </div>
           </div>
         ) : (
           <div

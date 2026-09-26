@@ -21,14 +21,24 @@ import {
   Copy as CopyIcon,
   File as FileIconLucide,
   Folder,
+  FolderOpen,
   FolderPlus,
   Pencil,
   Scissors,
   Trash2,
+  X,
 } from "lucide-react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { writeClipboardText } from "../../lib/clipboard";
-import { useAdapter } from "../context";
+import { useAdapter, useCapabilities } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
 import { joinWorkspacePath } from "../lib/workspace-path";
@@ -81,6 +91,53 @@ export interface FileBrowserHandle {
   startNewFile(parentPath?: string): void;
   /** Begin creating a new folder at the given parent (defaults to root). */
   startNewFolder(parentPath?: string): void;
+  /** Re-fetch every loaded directory from disk. */
+  refresh(): Promise<void>;
+  /** Collapse every expanded folder back to the root listing. */
+  collapseAll(): void;
+}
+
+type EntryKind = "file" | "directory";
+
+/** `dataTransfer` type carrying a dragged tree entry. Rows only accept drops
+ *  that carry it, so files dragged in from the OS are ignored. */
+const DRAG_MIME = "application/x-band-tree-entry";
+
+/** How long a dragged entry must hover a collapsed folder before it expands. */
+const DRAG_EXPAND_DELAY_MS = 600;
+
+function parentOf(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
+}
+
+function joinChild(folder: string, name: string): string {
+  return folder ? `${folder}/${name}` : name;
+}
+
+function baseNameOf(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** Rewrite `path` when it is `from` or sits inside it; `null` otherwise. */
+function remapPath(path: string, from: string, to: string): string | null {
+  if (path === from) return to;
+  if (path.startsWith(`${from}/`)) return to + path.slice(from.length);
+  return null;
+}
+
+/**
+ * Drag-and-drop wiring shared by every row. The root owns the state; rows
+ * report which folder they would drop into (their own path for a folder,
+ * their parent for a file) and render the highlight when it matches.
+ */
+interface TreeDnd {
+  /** Folder the current drag would land in, or null when nothing is hovered. */
+  dropTarget: string | null;
+  onDragStart: (path: string, kind: EntryKind, e: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (folder: string, e: React.DragEvent) => void;
+  onDrop: (folder: string, e: React.DragEvent) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +312,7 @@ function EntryNameInput({
           placeholder={placeholder ?? (kind === "directory" ? "Folder name" : "File name")}
           className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1 py-0 text-foreground outline-none ring-1 ring-ring/40 focus:ring-2 focus:ring-ring disabled:opacity-60"
           aria-label={kind === "directory" ? "Folder name" : "File name"}
+          data-testid="file-tree__name-input"
         />
       </div>
       {error && (
@@ -319,6 +377,9 @@ interface TreeNodeProps {
   renamingPath: string | null;
   onRenameSubmit: (newName: string) => Promise<void>;
   onRenameCancel: () => void;
+  dnd: TreeDnd;
+  /** Reveal the entry in the OS file manager. Desktop shell only. */
+  onRevealInFinder?: (path: string) => void;
 }
 
 function TreeNode({
@@ -354,6 +415,8 @@ function TreeNode({
   renamingPath,
   onRenameSubmit,
   onRenameCancel,
+  dnd,
+  onRevealInFinder,
 }: TreeNodeProps) {
   const entryPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
   const isDir = entry.type === "directory";
@@ -369,6 +432,10 @@ function TreeNode({
     (clipboard.path === entryPath || entryPath.startsWith(`${clipboard.path}/`));
   const isLoading = isDir && loadingPaths.has(entryPath);
   const children = isDir ? dirContents.get(entryPath) : undefined;
+  const kind: EntryKind = isDir ? "directory" : "file";
+  // Dropping on a folder lands inside it; dropping on a file lands beside it.
+  const dropFolder = isDir ? entryPath : parentPath;
+  const isDropTarget = isDir && dnd.dropTarget === entryPath;
 
   // Defer every menu action until after the menu's close transition
   // finishes — see `useDeferredMenuAction` for the why.
@@ -419,13 +486,21 @@ function TreeNode({
       // menu); only propagation to the parent is killed.
       onContextMenu={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
+      draggable
+      onDragStart={(e) => dnd.onDragStart(entryPath, kind, e)}
+      onDragEnd={dnd.onDragEnd}
+      onDragOver={(e) => dnd.onDragOver(dropFolder, e)}
+      onDrop={(e) => dnd.onDrop(dropFolder, e)}
+      data-drop-target={isDropTarget ? "true" : undefined}
       className={`flex w-full items-center text-left select-none hover:bg-accent/50 [-webkit-touch-callout:none] ${
         compact ? "h-[28px] gap-1 pr-3 text-[13px]" : "h-[32px] gap-1.5 pr-4 text-[15px]"
       } ${
         isSelected
           ? "bg-blue-500/30 text-foreground outline outline-1 -outline-offset-1 outline-blue-400/60 hover:bg-blue-500/30 dark:bg-blue-500/40 dark:outline-blue-400/70 dark:hover:bg-blue-500/40"
           : ""
-      } ${isCut ? "opacity-50" : ""}`}
+      } ${isCut ? "opacity-50" : ""} ${
+        isDropTarget ? "bg-blue-500/20 outline outline-1 -outline-offset-1 outline-blue-400/60" : ""
+      }`}
       style={{ paddingLeft: `${depth * indent + basePad}px` }}
     >
       {/* Chevron / spacer */}
@@ -461,6 +536,7 @@ function TreeNode({
   // current name so submitting the same name is treated as a cancel.
   const renameSiblings = (() => {
     const set = new Set<string>();
+    if (!isRenaming) return set;
     const cached = dirContents.get(parentPath);
     if (cached) {
       for (const e of cached) {
@@ -508,12 +584,14 @@ function TreeNode({
         {isDir && (
           <>
             <ContextMenuItem
+              data-testid="file-tree__new-file"
               onSelect={() => menu.queue(() => onRequestNewEntry(entryPath, "file"))}
             >
               <FileIconLucide className="size-4" />
               New File
             </ContextMenuItem>
             <ContextMenuItem
+              data-testid="file-tree__new-folder"
               onSelect={() => menu.queue(() => onRequestNewEntry(entryPath, "directory"))}
             >
               <FolderPlus className="size-4" />
@@ -522,8 +600,21 @@ function TreeNode({
             <ContextMenuSeparator />
           </>
         )}
+        {onRevealInFinder && (
+          <>
+            <ContextMenuItem
+              data-testid="file-tree__reveal-in-finder"
+              onSelect={() => menu.queue(() => onRevealInFinder(entryPath))}
+            >
+              <FolderOpen className="size-4" />
+              Reveal in Finder
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {canCut && (
           <ContextMenuItem
+            data-testid="file-tree__cut"
             onSelect={() => menu.queue(() => onCut(entryPath, isDir ? "directory" : "file"))}
           >
             <Scissors className="size-4" />
@@ -532,18 +623,20 @@ function TreeNode({
         )}
         {canCopy && (
           <ContextMenuItem
+            data-testid="file-tree__copy"
             onSelect={() => menu.queue(() => onCopy(entryPath, isDir ? "directory" : "file"))}
           >
             <CopyIcon className="size-4" />
             Copy
           </ContextMenuItem>
         )}
-        {/* Paste only appears on folder rows — pasting onto a file is
-            ambiguous (do you mean its parent dir?). Users who want to
-            paste alongside a file can right-click the parent folder or
-            the empty tree area instead. */}
-        {isDir && canPaste && (
-          <ContextMenuItem onSelect={() => menu.queue(() => void onPaste(entryPath))}>
+        {/* Pasting onto a folder lands inside it; pasting onto a file lands
+            beside it in the file's folder, as in VS Code. */}
+        {canPaste && (
+          <ContextMenuItem
+            data-testid="file-tree__paste"
+            onSelect={() => menu.queue(() => void onPaste(dropFolder))}
+          >
             <ClipboardPaste className="size-4" />
             Paste
           </ContextMenuItem>
@@ -554,7 +647,7 @@ function TreeNode({
             directly above — a directory's New File/New Folder block already
             renders its own trailing separator, so gating on `isDir` here would
             produce two consecutive separators for a read-only directory row. */}
-        {(canCut || canCopy || (isDir && canPaste)) && <ContextMenuSeparator />}
+        {(canCut || canCopy || canPaste) && <ContextMenuSeparator />}
         <ContextMenuItem
           data-testid="file-tree__copy-relative-path"
           onSelect={() => menu.queue(() => void writeClipboardText(entryPath))}
@@ -575,7 +668,10 @@ function TreeNode({
         )}
         {(canRename || canDelete) && <ContextMenuSeparator />}
         {canRename && (
-          <ContextMenuItem onSelect={() => menu.queue(() => onRequestRename(entryPath))}>
+          <ContextMenuItem
+            data-testid="file-tree__rename"
+            onSelect={() => menu.queue(() => onRequestRename(entryPath))}
+          >
             <Pencil className="size-4" />
             Rename
           </ContextMenuItem>
@@ -583,6 +679,7 @@ function TreeNode({
         {canDelete && (
           <ContextMenuItem
             variant="destructive"
+            data-testid="file-tree__delete"
             onSelect={() =>
               menu.queue(() => onRequestDelete(entryPath, isDir ? "directory" : "file"))
             }
@@ -650,6 +747,8 @@ function TreeNode({
               renamingPath={renamingPath}
               onRenameSubmit={onRenameSubmit}
               onRenameCancel={onRenameCancel}
+              dnd={dnd}
+              onRevealInFinder={onRevealInFinder}
             />
           );
           const newEntryInput = showInlineInput ? (
@@ -719,6 +818,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   handleRef,
 ) {
   const adapter = useAdapter();
+  const capabilities = useCapabilities();
 
   // React state mirroring the module-level caches so changes trigger renders
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
@@ -758,6 +858,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     op: "copy" | "cut";
   } | null>(null);
 
+  // Failure of the last paste / drag-and-drop, shown in a dismissable banner
+  // above the tree (e.g. moving onto a name that already exists).
+  const [operationError, setOperationError] = useState<string | null>(null);
+
   // The currently-highlighted tree row. Tracks files AND folders in a
   // single source of truth so:
   //  * Only one row ever shows the selection highlight at a time.
@@ -792,6 +896,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       setDeleteSubmitting(false);
       setRenamingPath(null);
       setClipboard(null);
+      setOperationError(null);
     }
   }, [workspaceId]);
 
@@ -1099,6 +1204,41 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   // ------- Rename flow -------
   const canRename = Boolean(adapter.renameWorkspacePath);
 
+  /**
+   * Rewrite path-keyed tree state after `from` moved to `to` (rename, cut +
+   * paste, or drag-and-drop): cached listings and expanded folders in the
+   * moved subtree follow it to the new prefix, the selection follows the
+   * moved row, and a pending new-entry input inside it is dropped because its
+   * parent path is stale.
+   */
+  const remapCachesAfterMove = useCallback(
+    (from: string, to: string) => {
+      const cache = getCachedContents(workspaceId);
+      const remapped = new Map<string, FileEntry[]>();
+      for (const [key, value] of cache.entries()) {
+        remapped.set(remapPath(key, from, to) ?? key, value);
+      }
+      cache.clear();
+      for (const [k, v] of remapped) cache.set(k, v);
+      setDirContents(new Map(cache));
+
+      const expanded = new Set<string>();
+      for (const key of getCachedExpanded(workspaceId)) {
+        expanded.add(remapPath(key, from, to) ?? key);
+      }
+      expandedStateCache.set(workspaceId, expanded);
+      setExpandedPaths(new Set(expanded));
+
+      setTreeSelection((prev) => {
+        if (prev == null) return prev;
+        const moved = remapPath(prev.path, from, to);
+        return moved == null ? prev : { ...prev, path: moved };
+      });
+      setNewEntry((prev) => (prev && remapPath(prev.parentPath, from, to) != null ? null : prev));
+    },
+    [workspaceId],
+  );
+
   const requestRename = useCallback((path: string) => {
     setRenamingPath(path);
   }, []);
@@ -1116,57 +1256,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       const newPath = parent ? `${parent}/${newName}` : newName;
 
       const result = await adapter.renameWorkspacePath(workspaceId, oldPath, newPath);
-
-      // Rewrite path-keyed caches: anything sitting in the renamed
-      // subtree needs to be moved to its new prefix.
-      const cache = getCachedContents(workspaceId);
-      const oldPrefix = `${oldPath}/`;
-      const newKeys = new Map<string, FileEntry[]>();
-      for (const [key, value] of cache.entries()) {
-        if (key === oldPath) {
-          newKeys.set(newPath, value);
-        } else if (key.startsWith(oldPrefix)) {
-          newKeys.set(newPath + key.slice(oldPath.length), value);
-        } else {
-          newKeys.set(key, value);
-        }
-      }
-      cache.clear();
-      for (const [k, v] of newKeys) cache.set(k, v);
-
-      const cachedExpanded = getCachedExpanded(workspaceId);
-      const newExpanded = new Set<string>();
-      for (const key of cachedExpanded) {
-        if (key === oldPath) {
-          newExpanded.add(newPath);
-        } else if (key.startsWith(oldPrefix)) {
-          newExpanded.add(newPath + key.slice(oldPath.length));
-        } else {
-          newExpanded.add(key);
-        }
-      }
-      expandedStateCache.set(workspaceId, newExpanded);
-      setExpandedPaths(new Set(newExpanded));
-
-      // Update tree selection if it was inside the renamed subtree.
-      setTreeSelection((prev) => {
-        if (prev == null) return prev;
-        if (prev.path === oldPath) return { ...prev, path: newPath };
-        if (prev.path.startsWith(oldPrefix)) {
-          return { ...prev, path: newPath + prev.path.slice(oldPath.length) };
-        }
-        return prev;
-      });
-
-      // Drop any pending new-entry input rooted in the renamed subtree
-      // (its parentPath is now stale).
-      setNewEntry((prev) => {
-        if (!prev) return prev;
-        if (prev.parentPath === oldPath || prev.parentPath.startsWith(oldPrefix)) {
-          return null;
-        }
-        return prev;
-      });
+      remapCachesAfterMove(oldPath, newPath);
 
       // Refresh the parent directory listing so the row reflects the new name.
       await fetchDir(parent, { force: true });
@@ -1176,7 +1266,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       // Tell the host to update open tabs / editor state for the rename.
       onPathRenamed?.(oldPath, newPath, result.kind);
     },
-    [adapter, renamingPath, fetchDir, onPathRenamed, workspaceId],
+    [adapter, renamingPath, fetchDir, onPathRenamed, remapCachesAfterMove, workspaceId],
   );
 
   // Derive the implicit target for "New File" / "New Folder" actions
@@ -1202,11 +1292,11 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         (clipboard.op === "cut" && adapter.renameWorkspacePath)),
   );
 
-  const cutPath = useCallback((path: string, kind: "file" | "directory") => {
+  const cutPath = useCallback((path: string, kind: EntryKind) => {
     setClipboard({ path, kind, op: "cut" });
   }, []);
 
-  const copyPath = useCallback((path: string, kind: "file" | "directory") => {
+  const copyPath = useCallback((path: string, kind: EntryKind) => {
     setClipboard({ path, kind, op: "copy" });
   }, []);
 
@@ -1214,7 +1304,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   // Mirrors Finder/Explorer behaviour: `foo.txt` → `foo copy.txt`,
   // then `foo copy 2.txt`, `foo copy 3.txt`, ...
   const uniqueCopyName = useCallback(
-    (baseName: string, destFolder: string, kind: "file" | "directory"): string => {
+    (baseName: string, destFolder: string, kind: EntryKind): string => {
       const siblings = new Set(
         (getCachedContents(workspaceId).get(destFolder) ?? []).map((e) => e.name),
       );
@@ -1235,96 +1325,218 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     [workspaceId],
   );
 
-  /**
-   * Paste the current clipboard entry into `destFolder` (workspace
-   * root if empty string). For copy operations, the entry's name is
-   * auto-suffixed with "copy" if it would collide. For cut operations,
-   * we surface a collision as an error (matching rename semantics).
-   */
-  const pasteInto = useCallback(
-    async (destFolder: string): Promise<void> => {
-      if (!clipboard) return;
-      const sourcePath = clipboard.path;
-      const sourceParent = (() => {
-        const idx = sourcePath.lastIndexOf("/");
-        return idx === -1 ? "" : sourcePath.slice(0, idx);
-      })();
-      const baseName = sourcePath.slice(sourceParent.length === 0 ? 0 : sourceParent.length + 1);
+  /** Whether `source` may be copied (`op: "copy"`) or moved into `destFolder`. */
+  const canTransferInto = useCallback(
+    (source: { path: string; kind: EntryKind }, destFolder: string, op: "copy" | "cut") => {
+      // A folder can't go into itself or any of its descendants.
+      if (
+        source.kind === "directory" &&
+        (destFolder === source.path || destFolder.startsWith(`${source.path}/`))
+      ) {
+        return false;
+      }
+      // Moving an entry into the folder it already lives in is a no-op.
+      if (op === "cut" && destFolder === parentOf(source.path)) return false;
+      return op === "copy" ? canCopyOp : canCutCopy;
+    },
+    [canCopyOp, canCutCopy],
+  );
 
-      // Refuse to paste a directory into itself or any descendant of
-      // itself — the backend rejects this too, but failing fast keeps
-      // the cached filesystem state consistent.
-      if (clipboard.kind === "directory") {
-        if (destFolder === sourcePath || destFolder.startsWith(`${sourcePath}/`)) {
+  /**
+   * Copy or move `source` into `destFolder` (workspace root if empty
+   * string). A copy is auto-suffixed with "copy" if it would collide; a
+   * move surfaces a collision as an error, matching rename semantics.
+   * Shared by Paste and drag-and-drop. Resolves `false` when the target is
+   * rejected (e.g. moving an entry into the folder it's already in).
+   */
+  const transferInto = useCallback(
+    async (
+      source: { path: string; kind: EntryKind },
+      destFolder: string,
+      op: "copy" | "cut",
+    ): Promise<boolean> => {
+      if (!canTransferInto(source, destFolder, op)) return false;
+      const baseName = baseNameOf(source.path);
+
+      if (op === "copy") {
+        if (!adapter.copyWorkspacePath) return false;
+        const destPath = joinChild(destFolder, uniqueCopyName(baseName, destFolder, source.kind));
+        await adapter.copyWorkspacePath(workspaceId, source.path, destPath);
+        await fetchDir(destFolder, { force: true });
+        // Open the destination so the new row is visible, as in VS Code.
+        if (destFolder) await ensureDirExpanded(destFolder);
+        setTreeSelection({ path: destPath, kind: source.kind });
+        return true;
+      }
+
+      if (!adapter.renameWorkspacePath) return false;
+      const destPath = joinChild(destFolder, baseName);
+      const result = await adapter.renameWorkspacePath(workspaceId, source.path, destPath);
+      remapCachesAfterMove(source.path, destPath);
+      if (destFolder) await ensureDirExpanded(destFolder);
+
+      // Both source-parent and destination need a re-fetch so the row
+      // appears in its new home and vanishes from its old one.
+      await Promise.all([
+        fetchDir(parentOf(source.path), { force: true }),
+        fetchDir(destFolder, { force: true }),
+      ]);
+
+      // Notify the host so it can keep open tabs / editor state pointed
+      // at the moved path — identical to a rename.
+      onPathRenamed?.(source.path, destPath, result.kind);
+      setTreeSelection({ path: destPath, kind: source.kind });
+      return true;
+    },
+    [
+      adapter,
+      canTransferInto,
+      ensureDirExpanded,
+      fetchDir,
+      onPathRenamed,
+      remapCachesAfterMove,
+      uniqueCopyName,
+      workspaceId,
+    ],
+  );
+
+  /** Run a tree mutation, showing its failure in the error banner. */
+  const runOperation = useCallback(async (op: () => Promise<void>) => {
+    setOperationError(null);
+    try {
+      await op();
+    } catch (err) {
+      setOperationError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  /** Paste the current clipboard entry into `destFolder`. */
+  const pasteInto = useCallback(
+    (destFolder: string): Promise<void> =>
+      runOperation(async () => {
+        if (!clipboard) return;
+        const moved = await transferInto(clipboard, destFolder, clipboard.op);
+        // Cut is one-shot. Clear the clipboard so a subsequent ⌘V
+        // doesn't try to re-move an already-moved entry. A rejected paste
+        // (into the entry's own folder) keeps the cut pending.
+        if (moved && clipboard.op === "cut") setClipboard(null);
+      }),
+    [clipboard, runOperation, transferInto],
+  );
+
+  // ------- Drag and drop -------
+  // The dragged entry lives in a ref as well as `dataTransfer`: browsers hide
+  // `dataTransfer` data during `dragover`, and validating the target there is
+  // what decides whether the cursor shows "no drop".
+  const dragSourceRef = useRef<{ path: string; kind: EntryKind } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const expandTimerRef = useRef<{ folder: string; timer: ReturnType<typeof setTimeout> } | null>(
+    null,
+  );
+
+  const clearExpandTimer = useCallback(() => {
+    if (expandTimerRef.current) clearTimeout(expandTimerRef.current.timer);
+    expandTimerRef.current = null;
+  }, []);
+
+  useEffect(() => clearExpandTimer, [clearExpandTimer]);
+
+  const endDrag = useCallback(() => {
+    dragSourceRef.current = null;
+    setDropTarget(null);
+    clearExpandTimer();
+  }, [clearExpandTimer]);
+
+  const dnd = useMemo<TreeDnd>(
+    () => ({
+      dropTarget,
+      onDragStart(path, kind, e) {
+        dragSourceRef.current = { path, kind };
+        e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ path, kind }));
+        // Dragging into an editor or terminal drops the relative path as text.
+        e.dataTransfer.setData("text/plain", path);
+        e.dataTransfer.effectAllowed = "copyMove";
+      },
+      onDragEnd: endDrag,
+      onDragOver(folder, e) {
+        const source = dragSourceRef.current;
+        if (!source) return;
+        // The row handles it; keep the root container from overriding the target.
+        e.stopPropagation();
+        // Holding Option/Alt copies instead of moving, as in VS Code and Finder.
+        const op = e.altKey ? "copy" : "cut";
+        if (!canTransferInto(source, folder, op)) {
+          setDropTarget(null);
+          clearExpandTimer();
           return;
         }
-      }
-
-      if (clipboard.op === "copy") {
-        if (!adapter.copyWorkspacePath) return;
-        const newName = uniqueCopyName(baseName, destFolder, clipboard.kind);
-        const destPath = destFolder ? `${destFolder}/${newName}` : newName;
-        await adapter.copyWorkspacePath(workspaceId, sourcePath, destPath);
-        await fetchDir(destFolder, { force: true });
-        setTreeSelection({ path: destPath, kind: clipboard.kind });
-      } else {
-        // cut → move. If the destination is the same as the source's
-        // current parent the move is a no-op; bail out to avoid an
-        // "already exists" error from the backend.
-        if (destFolder === sourceParent) return;
-        if (!adapter.renameWorkspacePath) return;
-        const destPath = destFolder ? `${destFolder}/${baseName}` : baseName;
-        const result = await adapter.renameWorkspacePath(workspaceId, sourcePath, destPath);
-
-        // Patch the path-keyed caches: anything in the moved subtree
-        // needs its key rewritten to the new prefix.
-        const cache = getCachedContents(workspaceId);
-        const oldPrefix = `${sourcePath}/`;
-        const remapped = new Map<string, FileEntry[]>();
-        for (const [key, value] of cache.entries()) {
-          if (key === sourcePath) {
-            remapped.set(destPath, value);
-          } else if (key.startsWith(oldPrefix)) {
-            remapped.set(destPath + key.slice(sourcePath.length), value);
-          } else {
-            remapped.set(key, value);
-          }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = op === "copy" ? "copy" : "move";
+        setDropTarget(folder);
+        // Hovering a collapsed folder expands it after a short delay, so a
+        // drag can reach entries nested several levels down.
+        if (expandTimerRef.current?.folder === folder) return;
+        clearExpandTimer();
+        if (folder && !getCachedExpanded(workspaceId).has(folder)) {
+          expandTimerRef.current = {
+            folder,
+            timer: setTimeout(() => {
+              expandTimerRef.current = null;
+              void ensureDirExpanded(folder);
+            }, DRAG_EXPAND_DELAY_MS),
+          };
         }
-        cache.clear();
-        for (const [k, v] of remapped) cache.set(k, v);
+      },
+      onDrop(folder, e) {
+        const source = dragSourceRef.current;
+        endDrag();
+        if (!source) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void runOperation(async () => {
+          await transferInto(source, folder, e.altKey ? "copy" : "cut");
+        });
+      },
+    }),
+    [
+      canTransferInto,
+      clearExpandTimer,
+      dropTarget,
+      endDrag,
+      ensureDirExpanded,
+      runOperation,
+      transferInto,
+      workspaceId,
+    ],
+  );
 
-        const cachedExpanded = getCachedExpanded(workspaceId);
-        const remappedExpanded = new Set<string>();
-        for (const key of cachedExpanded) {
-          if (key === sourcePath) {
-            remappedExpanded.add(destPath);
-          } else if (key.startsWith(oldPrefix)) {
-            remappedExpanded.add(destPath + key.slice(sourcePath.length));
-          } else {
-            remappedExpanded.add(key);
-          }
-        }
-        expandedStateCache.set(workspaceId, remappedExpanded);
-        setExpandedPaths(new Set(remappedExpanded));
+  // ------- Refresh / collapse all -------
+  const refreshTree = useCallback(async () => {
+    const cache = getCachedContents(workspaceId);
+    const expanded = getCachedExpanded(workspaceId);
+    // Collapsed folders drop out of the cache so their next expand reads
+    // disk; expanded ones re-fetch now.
+    for (const key of Array.from(cache.keys())) {
+      if (!expanded.has(key)) cache.delete(key);
+    }
+    setDirContents(new Map(cache));
+    await Promise.all(Array.from(expanded, (dir) => fetchDir(dir, { force: true })));
+  }, [fetchDir, workspaceId]);
 
-        // Both source-parent and destination need a re-fetch so the
-        // row appears in its new home and vanishes from its old one.
-        await Promise.all([
-          fetchDir(sourceParent, { force: true }),
-          fetchDir(destFolder, { force: true }),
-        ]);
+  const collapseAll = useCallback(() => {
+    const root = new Set([""]);
+    expandedStateCache.set(workspaceId, root);
+    setExpandedPaths(new Set(root));
+  }, [workspaceId]);
 
-        // Notify the host so it can keep open tabs / editor state
-        // pointed at the moved path — identical to a rename.
-        onPathRenamed?.(sourcePath, destPath, result.kind);
-
-        setTreeSelection({ path: destPath, kind: clipboard.kind });
-        // Cut is one-shot. Clear the clipboard so a subsequent ⌘V
-        // doesn't try to re-move an already-moved entry.
-        setClipboard(null);
-      }
-    },
-    [adapter, clipboard, fetchDir, onPathRenamed, uniqueCopyName, workspaceId],
+  // ------- Reveal in Finder (desktop shell only) -------
+  const revealInFinder = capabilities.revealInFinder;
+  const onRevealInFinder = useMemo(
+    () =>
+      revealInFinder && workspacePath
+        ? (path: string) => void revealInFinder(joinWorkspacePath(workspacePath, path))
+        : undefined,
+    [revealInFinder, workspacePath],
   );
 
   // ------- Imperative handle for parent toolbars -------
@@ -1337,8 +1549,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       startNewFolder(parentPath) {
         requestNewEntry(parentPath ?? resolveDefaultTarget(), "directory");
       },
+      refresh: refreshTree,
+      collapseAll,
     }),
-    [requestNewEntry, resolveDefaultTarget],
+    [requestNewEntry, resolveDefaultTarget, refreshTree, collapseAll],
   );
 
   // Defer the root-area context menu's items the same way the per-row
@@ -1394,11 +1608,28 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       return;
     }
 
+    const noModifiers = !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+
+    // F2 → rename the selected row, as in VS Code.
+    if (e.key === "F2" && noModifiers) {
+      if (!treeSelection || !canRename) return;
+      e.preventDefault();
+      requestRename(treeSelection.path);
+      return;
+    }
+
+    // Escape → cancel a pending cut so the dimmed rows return to normal.
+    if (e.key === "Escape" && noModifiers && clipboard?.op === "cut") {
+      e.preventDefault();
+      setClipboard(null);
+      return;
+    }
+
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
     const key = e.key.toLowerCase();
 
     if (key === "c") {
-      if (!treeSelection || !canCutCopy) return;
+      if (!treeSelection || !canCopyOp) return;
       e.preventDefault();
       copyPath(treeSelection.path, treeSelection.kind);
       return;
@@ -1434,8 +1665,46 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
           if (open) clearTreeSelection();
         }}
       >
+        {operationError && (
+          <div
+            role="alert"
+            data-testid="file-tree__error"
+            className="mx-2 mt-1 flex shrink-0 items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 break-words">{operationError}</span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setOperationError(null)}
+              className="shrink-0 rounded-sm hover:bg-destructive/20"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         <ContextMenuTrigger asChild>
-          <div className="min-h-0 flex-1 overflow-y-auto py-1 pl-px">
+          <div
+            data-testid="file-tree__root"
+            data-drop-target={dropTarget === "" ? "true" : undefined}
+            // Rows stop propagation of the drag events they handle, so what
+            // reaches here is a drag over empty space: it targets the root.
+            onDragOver={(e) => dnd.onDragOver("", e)}
+            onDrop={(e) => dnd.onDrop("", e)}
+            onDragLeave={(e) => {
+              // Leaving the tree entirely (not just moving between rows)
+              // clears the highlight; the drag itself may still end elsewhere.
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setDropTarget(null);
+                clearExpandTimer();
+              }
+            }}
+            className={`min-h-0 flex-1 overflow-y-auto py-1 pl-px ${
+              dropTarget === ""
+                ? "bg-blue-500/10 outline outline-1 -outline-offset-1 outline-blue-400/60"
+                : ""
+            }`}
+          >
             {(() => {
               // rootEntries is pre-sorted folders-first; slot the new
               // entry input at its natural landing position so the user
@@ -1482,6 +1751,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
                   renamingPath={renamingPath}
                   onRenameSubmit={submitRename}
                   onRenameCancel={cancelRename}
+                  dnd={dnd}
+                  onRevealInFinder={onRevealInFinder}
                 />
               );
               const rootInput = showRootInput ? (
@@ -1521,18 +1792,27 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         {/* Each item queues its action; `rootMenu.flush` runs it once
             the menu has finished closing — see `useDeferredMenuAction`. */}
         <ContextMenuContent onCloseAutoFocus={rootMenu.flush}>
-          <ContextMenuItem onSelect={() => rootMenu.queue(() => requestNewEntry("", "file"))}>
+          <ContextMenuItem
+            data-testid="file-tree__new-file"
+            onSelect={() => rootMenu.queue(() => requestNewEntry("", "file"))}
+          >
             <FileIconLucide className="size-4" />
             New File
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => rootMenu.queue(() => requestNewEntry("", "directory"))}>
+          <ContextMenuItem
+            data-testid="file-tree__new-folder"
+            onSelect={() => rootMenu.queue(() => requestNewEntry("", "directory"))}
+          >
             <FolderPlus className="size-4" />
             New Folder
           </ContextMenuItem>
           {canPaste && (
             <>
               <ContextMenuSeparator />
-              <ContextMenuItem onSelect={() => rootMenu.queue(() => void pasteInto(""))}>
+              <ContextMenuItem
+                data-testid="file-tree__paste"
+                onSelect={() => rootMenu.queue(() => void pasteInto(""))}
+              >
                 <ClipboardPaste className="size-4" />
                 Paste
               </ContextMenuItem>
@@ -1585,6 +1865,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
             </Button>
             <Button
               variant="destructive"
+              data-testid="file-tree__delete-confirm"
               onClick={() => void confirmDelete()}
               disabled={deleteSubmitting}
             >

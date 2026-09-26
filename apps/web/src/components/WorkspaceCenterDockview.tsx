@@ -1575,6 +1575,12 @@ interface LeafActions {
     },
   ) => void;
   openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  /** Retarget file / diff leaves at or under `oldPath` after the Explorer
+   *  renamed or moved it (workspace-relative paths). */
+  onPathMoved: (oldPath: string, newPath: string) => void;
+  /** Close file / diff leaves at or under `path` after the Explorer deleted
+   *  it. Dirty file leaves stay open so unsaved edits aren't lost. */
+  onPathRemoved: (path: string) => void;
 }
 
 const leafActionsByApiId = new Map<string, { current: LeafActions }>();
@@ -2709,12 +2715,110 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
+  // ---- keep file / diff leaves in step with Explorer renames and deletes ----
+  const handlePathMoved = useCallback(
+    (oldPath: string, newPath: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const remap = (p: string): string | null =>
+        p === oldPath
+          ? newPath
+          : p.startsWith(`${oldPath}/`)
+            ? newPath + p.slice(oldPath.length)
+            : null;
+      const moves: { panel: IDockviewPanel; prefix: "file" | "diff"; nextPath: string }[] = [];
+      for (const panel of api.panels) {
+        const prefix = panel.id.startsWith("file:")
+          ? "file"
+          : panel.id.startsWith("diff:")
+            ? "diff"
+            : null;
+        if (!prefix) continue;
+        // Read `panel.params` (what the leaf was added with): `panel.api
+        // .getParameters()` came back empty for these leaves in the e2e run.
+        const params = (panel.params ?? {}) as Partial<FileLeafParams>;
+        if (prefix === "file" && (params.external || params.untitled)) continue;
+        const nextPath = remap(panel.id.slice(5));
+        if (nextPath != null) moves.push({ panel, prefix, nextPath });
+      }
+      if (moves.length === 0) return;
+
+      // Carry each file tab's persisted state (cursor, unsaved edits) to its
+      // new path before the new leaves mount and read it, and mark the old
+      // leaves closed so their unmount cleanup doesn't write the old keys back.
+      const states = readTabStates(workspaceId);
+      let statesChanged = false;
+      for (const { panel, prefix, nextPath } of moves) {
+        if (prefix !== "file") continue;
+        const filePath = panel.id.slice(5);
+        if (filePath in states) {
+          states[nextPath] = states[filePath];
+          delete states[filePath];
+          statesChanged = true;
+        }
+        closedFileLeaves.add(closedFileLeafKey(workspaceId, filePath));
+      }
+      if (statesChanged) writeTabStates(workspaceId, states);
+
+      for (const { panel, prefix, nextPath } of moves) {
+        const nextId = `${prefix}:${nextPath}`;
+        const wasVisible = panel.api.isVisible;
+        const existing = api.getPanel(nextId);
+        if (existing) {
+          // A tab for the destination path is already open (e.g. a dirty tab
+          // kept after its file was deleted): reuse it rather than adding a
+          // duplicate id, which dockview rejects.
+          if (wasVisible) existing.api.setActive();
+        } else {
+          // Same group and tab position, so the rename doesn't reorder tabs.
+          api.addPanel({
+            id: nextId,
+            component: prefix,
+            tabComponent: prefix,
+            title: basename(nextPath),
+            params: { ...panel.params, workspaceId, filePath: nextPath },
+            position: { referenceGroup: panel.group.id, index: panel.group.panels.indexOf(panel) },
+            inactive: !wasVisible,
+          } as AddPanelOptions);
+        }
+        api.removePanel(panel);
+        if (previewFileIdRef.current === panel.id) previewFileIdRef.current = nextId;
+        if (previewDiffIdRef.current === panel.id) previewDiffIdRef.current = nextId;
+      }
+    },
+    [workspaceId],
+  );
+
+  const handlePathRemoved = useCallback(
+    (path: string) => {
+      const api = apiRef.current;
+      if (!api) return;
+      for (const panel of [...api.panels]) {
+        const kind: LeafKind | null = panel.id.startsWith("file:")
+          ? "file"
+          : panel.id.startsWith("diff:")
+            ? "diff"
+            : null;
+        if (!kind) continue;
+        const params = (panel.params ?? {}) as Partial<FileLeafParams>;
+        if (kind === "file" && params.external) continue;
+        const p = panel.id.slice(5);
+        if (p !== path && !p.startsWith(`${path}/`)) continue;
+        if (kind === "file" && isFileDirty(workspaceId, p)) continue;
+        doCloseLeaf(panel.id, kind);
+      }
+    },
+    [workspaceId, doCloseLeaf],
+  );
+
   const actionsRef = useRef<LeafActions>({
     onAdd: () => {},
     onSplit: () => {},
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    onPathMoved: () => {},
+    onPathRemoved: () => {},
   });
   actionsRef.current = {
     onAdd: handleAdd,
@@ -2722,6 +2826,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    onPathMoved: handlePathMoved,
+    onPathRemoved: handlePathRemoved,
   };
 
   // ---- default layout ----
