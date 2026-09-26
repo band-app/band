@@ -18,6 +18,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { FindWidget } from "./FindWidget";
 import { WorkspacePage } from "./WorkspacePage";
 
 export type DiffViewMode = "unified" | "split";
@@ -76,6 +77,11 @@ export class ChangesPanelPage {
     await this.workspace.revealRightPanel();
     await this.workspace.selectRightPanelTab("changes");
     await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** The floating find widget of the visible diff leaf. */
+  get diffFindWidget(): FindWidget {
+    return new FindWidget(this.diffLeaf);
   }
 
   /** A changed-file row in the Changes tree, keyed by workspace-relative path. */

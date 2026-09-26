@@ -14,6 +14,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import { FindWidget } from "./FindWidget";
 
 /** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
  *  per-group active-state model (`{ activeGroup, groups, maximizedGroup }`).
@@ -751,6 +752,17 @@ export class WorkspacePage {
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
   }
 
+  /** A line of the visible `file` leaf's editor by its exact text. Specs pass
+   *  fixture text they wrote themselves, so matching on text is stable. */
+  fileLeafLine(text: string): Locator {
+    return this.fileLeafVisibilityMarker(true).first().getByText(text, { exact: true });
+  }
+
+  /** The floating find widget of the visible `file` leaf. */
+  fileLeafFindWidget(): FindWidget {
+    return new FindWidget(this.fileLeafVisibilityMarker(true).first());
+  }
+
   /** The `diff` leaf body's visibility marker (`center-diff-leaf__visible-*`). */
   diffLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
     const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
@@ -858,6 +870,20 @@ export class WorkspacePage {
    *  currently-shown terminal leaf. Count === number of split panes. */
   terminalPanes(): Locator {
     return this.page.getByTestId(/^term-pane__/).filter({ visible: true });
+  }
+
+  /** The rendered screen of the nth visible terminal pane.
+   *
+   *  FRAGILITY: `.xterm-screen` is a class owned by xterm, which exposes no
+   *  testid hook on its own DOM. Centralised here so an xterm upgrade that
+   *  renames it flows through one place. */
+  terminalScreen(index = 0): Locator {
+    return this.terminalPanes().nth(index).locator(".xterm-screen");
+  }
+
+  /** The floating find widget of the nth visible terminal pane. */
+  terminalPaneFindWidget(index = 0): FindWidget {
+    return new FindWidget(this.terminalPanes().nth(index));
   }
 
   /** Visible center TERMINAL tabs in the outer dockview strip — used to prove a

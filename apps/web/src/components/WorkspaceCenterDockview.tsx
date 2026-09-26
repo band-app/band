@@ -912,6 +912,7 @@ function useLeafFind(
   const searchBar = search.searchOpen ? (
     <SearchBar
       ref={search.searchBarRef}
+      variant="floating"
       query={search.searchQuery}
       onQueryChange={(q) => {
         search.setSearchQuery(q);
@@ -1327,7 +1328,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // preview reuses the shared MarkdownPreview renderer.
         renderMarkdown={renderMarkdown}
         onEditorView={handleEditorView}
-        toolbar={searchBar}
+        overlay={searchBar}
         // Cursor selection + scroll restore: seeded from the per-tab store;
         // `CodeMirrorEditor` applies them on view creation, on top of the
         // document from disk. Captured back by `persistEditorState` on
@@ -1510,8 +1511,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
       className="flex h-full w-full flex-col overflow-hidden"
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
-      {searchBar}
       <div className="relative min-h-0 flex-1">
+        {searchBar}
         {/* The overview ruler stands in for this scroller's vertical scrollbar,
             so the native one is hidden and the content leaves room for it. */}
         <div

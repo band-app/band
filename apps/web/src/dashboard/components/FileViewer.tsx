@@ -41,8 +41,9 @@ interface FileViewerProps {
   column?: number;
   /** Called when the CodeMirror EditorView is created or destroyed */
   onEditorView?: (view: EditorView | null) => void;
-  /** Optional toolbar rendered between the title bar and the content area */
-  toolbar?: React.ReactNode;
+  /** Optional overlay laid over the content area, e.g. the floating find
+   *  widget (it positions itself against the content area's top-right). */
+  overlay?: React.ReactNode;
   /** Optional markdown renderer — when provided, markdown files show a rendered preview with source toggle */
   renderMarkdown?: (content: string) => React.ReactNode;
   /** When true, code files open in an editable editor instead of read-only viewer */
@@ -249,7 +250,7 @@ export function FileViewer({
   lineEnd,
   column,
   onEditorView,
-  toolbar,
+  overlay,
   renderMarkdown,
   editable,
   onGoBack,
@@ -1050,10 +1051,9 @@ export function FileViewer({
           )}
         </div>
       )}
-      {toolbar}
-
       {/* Content area */}
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {overlay}
         {loading && (
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
             Loading...
