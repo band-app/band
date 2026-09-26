@@ -27,6 +27,13 @@ export function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, env: gitEnv });
 }
 
+/** Commit everything in `cwd` with `message` and return the new SHA. */
+export function gitCommit(cwd: string, message: string): string {
+  git(cwd, ["add", "-A"]);
+  git(cwd, ["commit", "--allow-empty", "-m", message]);
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd, env: gitEnv, encoding: "utf-8" }).trim();
+}
+
 /**
  * Fully hermetic git environment rooted at `home`. Unlike `gitEnv` (which
  * inherits the host `process.env`, including the real `HOME`), this pins
