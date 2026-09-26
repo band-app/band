@@ -55,7 +55,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.close();
-  if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
+  if (tmpHome) rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** A minimal LSP client over the proxy's WebSocket (JSON-RPC, no framing). */

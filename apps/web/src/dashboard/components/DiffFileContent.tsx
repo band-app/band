@@ -302,11 +302,12 @@ export function DiffFileContent({
         oldHunkBoundaryLines,
       } = parseDiff(hunks);
       // Line numbers only ever increase, so 1..N with no gaps is exactly
-      // "starts at 1 and ends at N".
+      // "starts at 1 and ends at N". An empty new side (a deleted file) has
+      // no working-tree text to navigate.
       const wholeFile =
-        newLineNumbers.length === 0 ||
-        (newLineNumbers[0] === 1 &&
-          newLineNumbers[newLineNumbers.length - 1] === newLineNumbers.length);
+        newLineNumbers.length > 0 &&
+        newLineNumbers[0] === 1 &&
+        newLineNumbers[newLineNumbers.length - 1] === newLineNumbers.length;
       const lspExtension = lspCompartment.of(
         wholeFile && lspNavigationRef.current ? lspNavigationRef.current : [],
       );
