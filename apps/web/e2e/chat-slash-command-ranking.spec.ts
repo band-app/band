@@ -19,7 +19,7 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
@@ -52,7 +52,6 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
-let chatPane: ChatPanePage;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -80,14 +79,16 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test.beforeEach(async ({ page }) => {
-  chatPane = new ChatPanePage(page, server.url, TOKEN);
+async function openChat(page: Page): Promise<ChatPanePage> {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
   await chatPane.goto(WORKSPACE);
   await chatPane.waitForReady();
-});
+  return chatPane;
+}
 
 test.describe("slash-command dropdown ranking", () => {
-  test("a bare / lists the commands in the agent's order", async () => {
+  test("a bare / lists the commands in the agent's order", async ({ page }) => {
+    const chatPane = await openChat(page);
     await chatPane.typeMessage("/");
 
     await expect
@@ -95,7 +96,10 @@ test.describe("slash-command dropdown ranking", () => {
       .toEqual(COMMANDS.map((c) => `/${c.name}`));
   });
 
-  test("/loop puts the exact command first, then prefix, name and description matches", async () => {
+  test("/loop puts the exact command first, then prefix, name and description matches", async ({
+    page,
+  }) => {
+    const chatPane = await openChat(page);
     await chatPane.typeMessage("/loop");
 
     await expect
@@ -107,7 +111,8 @@ test.describe("slash-command dropdown ranking", () => {
     await expect.poll(() => chatPane.promptValue()).toBe("/loop ");
   });
 
-  test("a two-letter query ignores descriptions", async () => {
+  test("a two-letter query ignores descriptions", async ({ page }) => {
+    const chatPane = await openChat(page);
     await chatPane.typeMessage("/lo");
 
     await expect
@@ -115,7 +120,8 @@ test.describe("slash-command dropdown ranking", () => {
       .toEqual(["/loop", "/loop-status", "/band-loop"]);
   });
 
-  test("a Codex $-skill matches as if it had no $", async () => {
+  test("a Codex $-skill matches as if it had no $", async ({ page }) => {
+    const chatPane = await openChat(page);
     await chatPane.typeMessage("/tdd");
     await expect.poll(() => chatPane.slashCommandNames()).toEqual(["/$tdd", "/no-tdd-guard"]);
 

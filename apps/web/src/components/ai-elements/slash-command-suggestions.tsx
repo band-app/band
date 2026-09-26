@@ -1,6 +1,6 @@
 import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";
 
 export interface SlashCommandSkill {
@@ -75,7 +75,10 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
   const ctx = skills.length > 0 ? getCommandContext(inputValue) : null;
   const isOpen = ctx !== null;
   const query = ctx?.query ?? "";
-  const filteredSkills = isOpen ? filterSkills(skills, query) : [];
+  const filteredSkills = useMemo(
+    () => (isOpen ? filterSkills(skills, query) : []),
+    [isOpen, skills, query],
+  );
   const hasResults = filteredSkills.length > 0;
 
   // Reset selection when query changes
