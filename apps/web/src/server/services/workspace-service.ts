@@ -54,6 +54,10 @@ import {
 import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
+// FRAGILE: ESM cycle leg #3 — `./workspace-script-service` imports
+// `workspaceService` from this file. Keep every `workspaceScriptService`
+// reference inside a function body; capturing it at module load would
+// silently get `undefined`.
 import { workspaceScriptService } from "./workspace-script-service";
 
 const execFileAsync = promisify(execFile);

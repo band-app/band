@@ -4,6 +4,13 @@ import { loadProjectConfig } from "../infra/setup/project-config";
 import { prepareScriptRun, runScriptHidden, type ScriptRun } from "../infra/setup/script-run";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
+// FRAGILE: ESM cycle leg — `./workspace-service` imports
+// `workspaceScriptService` from this file. Safe only because every
+// `workspaceService` (and `terminalService`, which also imports
+// `./workspace-service`) reference below is inside a function body, where
+// ESM live binding has filled it in. Capturing either at module load, or
+// taking them as constructor parameters of the singleton below, would
+// silently get `undefined`.
 import { workspaceService } from "./workspace-service";
 
 const log = createLogger("workspace-script-service");
@@ -81,6 +88,9 @@ export class WorkspaceScriptService {
     timeoutMs?: number,
   ): Promise<ScriptOutcome> {
     const key = `${workspaceId}\0${script}`;
+    // No second terminal and no status event for a duplicate: the first run
+    // reports for both. `WorkspaceService.remove` joins a repeat removal to
+    // the first one before it gets here, so this is only a backstop.
     if (this.running.has(key)) return { kind: "closed" };
     this.running.set(key, { workspaceId, script });
     emit({ kind: "setup-status", workspaceId, script, setupState: "running" });
@@ -100,7 +110,7 @@ export class WorkspaceScriptService {
     let timer: NodeJS.Timeout | undefined;
     let outcome: ScriptOutcome;
     try {
-      prepared = prepareScriptRun(command, script);
+      prepared = await prepareScriptRun(command, script);
       const { exited } = prepared;
       // Subscribe before the spawn so an exit during it still counts.
       const closed = new Promise<ScriptOutcome>((resolve) => {

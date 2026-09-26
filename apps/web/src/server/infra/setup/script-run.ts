@@ -1,13 +1,6 @@
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  type FSWatcher,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  watch,
-  writeFileSync,
-} from "node:fs";
+import { type FSWatcher, watch } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
@@ -56,10 +49,13 @@ function quote(value: string): string {
  * it is running and how it ended, and reports its exit code. POSIX only;
  * see {@link runScriptHidden} for Windows.
  */
-export function prepareScriptRun(script: string, label: "setup" | "teardown"): ScriptRun {
+export async function prepareScriptRun(
+  script: string,
+  label: "setup" | "teardown",
+): Promise<ScriptRun> {
   // mkdtemp creates the dir with mode 0700, so no other user can plant or
   // read the script or the exit-code file.
-  const dir = mkdtempSync(join(tmpdir(), "band-script-"));
+  const dir = await mkdtemp(join(tmpdir(), "band-script-"));
   const scriptFile = join(dir, `${label}.sh`);
   const exitFile = join(dir, "exit-code");
   const partialFile = `${exitFile}.partial`;
@@ -77,7 +73,7 @@ export function prepareScriptRun(script: string, label: "setup" | "teardown"): S
     script,
     "",
   ].join("\n");
-  writeFileSync(scriptFile, body, { mode: 0o600 });
+  await writeFile(scriptFile, body, { mode: 0o600 });
   const command = `bash ${quote(scriptFile)}`;
 
   let watcher: FSWatcher | null = null;
@@ -89,10 +85,17 @@ export function prepareScriptRun(script: string, label: "setup" | "teardown"): S
   });
 
   const check = () => {
-    if (disposed || !existsSync(exitFile)) return;
-    const code = Number.parseInt(readFileSync(exitFile, "utf-8").trim(), 10);
-    resolveExited(Number.isNaN(code) ? 1 : code);
-    dispose();
+    if (disposed) return;
+    readFile(exitFile, "utf-8").then(
+      (text) => {
+        if (disposed) return;
+        const code = Number.parseInt(text.trim(), 10);
+        resolveExited(Number.isNaN(code) ? 1 : code);
+        dispose();
+      },
+      // Not written yet.
+      () => {},
+    );
   };
 
   const dispose = () => {
@@ -102,7 +105,9 @@ export function prepareScriptRun(script: string, label: "setup" | "teardown"): S
     watcher = null;
     if (poll) clearInterval(poll);
     poll = null;
-    rmSync(dir, { recursive: true, force: true });
+    void rm(dir, { recursive: true, force: true }).catch((err) =>
+      log.warn({ err }, "could not remove the script's temp dir"),
+    );
   };
 
   // `fs.watch` reports the file promptly; the poll covers a watcher that

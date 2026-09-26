@@ -148,7 +148,7 @@ describe("setup runs in a terminal, in parallel with the agent", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("delivers the prompt while setup is still running in its own terminal", async () => {
@@ -188,7 +188,7 @@ describe("a failing setup does not drop the prompt", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("shows the exit code in the setup terminal and still delivers the prompt", async () => {
@@ -229,7 +229,7 @@ describe("teardown runs in a terminal before the workspace is removed", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     rmSync(join(markerPath, ".."), { recursive: true, force: true });
   });
 
@@ -285,7 +285,7 @@ describe("a failing teardown does not stop the removal", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("removes the workspace and its worktree anyway", async () => {
