@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import {
   ChevronsDownUp,
@@ -19,8 +18,8 @@ import {
   useDiffTarget,
   useWorkspacePath,
 } from "@/dashboard";
+import { useDiffSummary } from "../hooks/useDiffSummary";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { trpc } from "../lib/trpc-client";
 import { DiffTargetHeader } from "./DiffTargetHeader";
 import { usePerWorkspaceState } from "./per-workspace-state-store";
 import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
@@ -228,14 +227,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
   // Fetch the changes summary for both the Changes tab badge and the tree.
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
-  const summaryQuery = useQuery({
-    queryKey: ["rightSidepanelChanges", workspaceId, diffMode, compareBranch],
-    queryFn: () =>
-      trpc.workspace.getDiffSummary.query({
-        workspaceId,
-        diffMode,
-        compareBranch: compareBranch ?? undefined,
-      }),
+  const summaryQuery = useDiffSummary(workspaceId, {
     enabled: visible,
     refetchInterval: visible ? 15_000 : false,
   });

@@ -260,3 +260,29 @@ export const browserHistory = sqliteTable(
     index("browser_history_workspace_visited_idx").on(t.workspaceId, t.lastVisitedAt),
   ],
 );
+
+// Band browser profiles. Each profile is a separate Electron session
+// partition in the desktop app (`persist:band-browser-profile-<id>`), so
+// cookies and storage never leak between profiles. The built-in "Default"
+// profile (the pre-existing `persist:band-browser` partition) has no row.
+//
+// Only metadata lives here. Cookie data stays in the desktop's partition
+// and is never sent to the server.
+export const browserProfiles = sqliteTable("browser_profiles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  // Where the profile's cookies came from, e.g. "chrome". Null for an
+  // empty profile.
+  source: text("source"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// The browser profile each project opens new browser tabs with. Keyed by
+// project name with no FK, because `ProjectQueries.saveAll` rewrites the
+// `projects` table wholesale and a cascade would wipe this mapping. The
+// projects router removes the row when a project is removed.
+export const projectBrowserProfiles = sqliteTable("project_browser_profiles", {
+  projectName: text("project_name").primaryKey(),
+  profileId: text("profile_id").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

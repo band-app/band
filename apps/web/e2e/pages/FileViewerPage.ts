@@ -95,6 +95,88 @@ export class FileViewerPage {
     });
   }
 
+  /** The editable markdown preview (`file-viewer__markdown-preview`). */
+  get markdownPreview(): Locator {
+    return this.root.getByTestId("file-viewer__markdown-preview");
+  }
+
+  /** A heading rendered in the markdown preview. Heading lines carry
+   *  `role="heading"` + `aria-level`. */
+  previewHeading(level: number, name: string): Locator {
+    return this.markdownPreview.getByRole("heading", { level, name, exact: true });
+  }
+
+  /** An image the preview renders in place of `![alt](src)`. */
+  previewImage(alt: string): Locator {
+    return this.markdownPreview.getByRole("img", { name: alt, exact: true });
+  }
+
+  /** The loaded width of a preview image; 0 when its URL did not load. */
+  async previewImageNaturalWidth(alt: string): Promise<number> {
+    return this.previewImage(alt).evaluate((img) => (img as HTMLImageElement).naturalWidth);
+  }
+
+  /** Click the checkbox the preview renders for a task-list item. */
+  async toggleTask(text: string): Promise<void> {
+    await test.step(`Toggle the task "${text}"`, async () => {
+      await this.taskCheckbox(text).click();
+    });
+  }
+
+  /** Bold / inline-code / list-item text rendered in the markdown preview,
+   *  located by the element's implicit role (`<strong>`, `<code>`) or the
+   *  line's `role="listitem"`. */
+  previewFormatted(role: "strong" | "code" | "listitem", text: string): Locator {
+    return this.markdownPreview.getByRole(role).filter({ hasText: text });
+  }
+
+  /** A block the preview renders instead of showing its source (table,
+   *  frontmatter, mermaid). */
+  previewRenderedBlock(kind: "table" | "frontmatter" | "mermaid"): Locator {
+    return this.markdownPreview.getByTestId(`markdown-preview__block--${kind}`);
+  }
+
+  /** The `<table>` inside the preview's rendered table block. */
+  get previewTable(): Locator {
+    return this.previewRenderedBlock("table").getByRole("table");
+  }
+
+  /** The checkbox the preview renders for the task-list item `text`. */
+  taskCheckbox(text: string): Locator {
+    return this.previewFormatted("listitem", text).getByRole("checkbox");
+  }
+
+  /** Put the cursor at the end of the markdown preview's document. Clicks the
+   *  editable surface (CodeMirror reports role="textbox") and presses the
+   *  doc-end binding: Cmd+Down on macOS, Ctrl+End elsewhere. */
+  async focusPreviewEnd(): Promise<void> {
+    await test.step("Put the cursor at the end of the markdown preview", async () => {
+      await this.markdownPreview.getByRole("textbox").click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
+      );
+    });
+  }
+
+  /** Type into the focused preview. Each `\n` in `text` is an Enter press, so
+   *  the markdown keymap (list continuation) runs the way it does for a user. */
+  async typeInPreview(text: string): Promise<void> {
+    await test.step(`Type into the markdown preview: ${JSON.stringify(text)}`, async () => {
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) await this.page.keyboard.press("Enter");
+        if (lines[i]) await this.page.keyboard.type(lines[i]);
+      }
+    });
+  }
+
+  /** Save the focused editor with Cmd/Ctrl+S. */
+  async saveWithShortcut(): Promise<void> {
+    await test.step("Save with Cmd/Ctrl+S", async () => {
+      await this.page.keyboard.press("ControlOrMeta+s");
+    });
+  }
+
   /** Assert (auto-retrying) that the file viewer is mounted and visible.
    *  Used for previews (e.g. markdown) that render outside the CodeMirror
    *  `.cm-content` surface, where `expectContent` doesn't apply. */

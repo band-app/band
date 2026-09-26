@@ -20,6 +20,11 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { BrowserProfileNotFoundError } from "../../errors";
+import {
+  BROWSER_PROFILE_ID_PATTERN,
+  browserProfileService,
+} from "../../services/browser-profile-service";
 import { browserService } from "../../services/browser-service";
 import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
@@ -27,6 +32,13 @@ import { publicProcedure, t } from "../trpc";
 // ---------------------------------------------------------------------------
 // Browsers (multi-tab browser management)
 // ---------------------------------------------------------------------------
+
+function rethrowProfileNotFound(err: unknown): never {
+  if (err instanceof BrowserProfileNotFoundError) {
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+  }
+  throw err;
+}
 
 export const browsersRouter = t.router({
   list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
@@ -40,15 +52,24 @@ export const browsersRouter = t.router({
         id: z.string().optional(),
         name: z.string().optional(),
         url: z.string().optional(),
+        // Omitted: the project's default profile. `null`: the Default profile.
+        profileId: z.string().regex(BROWSER_PROFILE_ID_PATTERN).nullish(),
       }),
     )
     .mutation(({ input }) => {
+      let profileId: string | null;
+      try {
+        profileId = browserProfileService.resolveForNewTab(input.workspaceId, input.profileId);
+      } catch (err) {
+        rethrowProfileNotFound(err);
+      }
       // `browserService.create` also registers the tab in the saved
       // dockview layout — see `chatService.create` for the same pattern.
       const browser = browserService.create(input.workspaceId, {
         id: input.id,
         name: input.name,
         url: input.url,
+        profileId,
       });
       emit({ kind: "browser-created", workspaceId: input.workspaceId, browserId: browser.id });
       return { browser };
@@ -78,6 +99,29 @@ export const browsersRouter = t.router({
         // the new 404 is absorbed the same way the silent 200 was.
         throw new TRPCError({ code: "NOT_FOUND", message: "Browser not found" });
       }
+      return { browser };
+    }),
+
+  /**
+   * Switch a tab to another profile (`null` is Default). Also makes it the
+   * default profile of the tab's project, so new tabs in any workspace of
+   * that project open with it.
+   */
+  setProfile: publicProcedure
+    .input(
+      z.object({
+        browserId: z.string(),
+        profileId: z.string().regex(BROWSER_PROFILE_ID_PATTERN).nullable(),
+      }),
+    )
+    .mutation(({ input }) => {
+      let browser: ReturnType<typeof browserProfileService.setTabProfile>;
+      try {
+        browser = browserProfileService.setTabProfile(input.browserId, input.profileId);
+      } catch (err) {
+        rethrowProfileNotFound(err);
+      }
+      if (!browser) throw new TRPCError({ code: "NOT_FOUND", message: "Browser not found" });
       return { browser };
     }),
 

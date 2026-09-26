@@ -55,6 +55,27 @@ export interface BrowserRegisterGuestResult {
  */
 export interface BrowserEnsureArgs extends BrowserKeyArg {
   url: string;
+  /**
+   * Band browser profile whose session the offscreen page runs in. `null`
+   * or omitted is the Default profile.
+   */
+  profileId?: string | null;
+}
+
+export interface BrowserChromeImportArgs {
+  /** Band browser profile to import into. */
+  profileId: string;
+  /** Chrome profile directory from `browser_chrome_profiles`. */
+  chromeProfileDirectory: string;
+}
+
+export interface BrowserProfileArg {
+  profileId: string;
+}
+
+export interface BrowserProfilePruneArgs {
+  /** Profile ids the server still has. Every other profile partition is wiped. */
+  keep: string[];
 }
 
 /**

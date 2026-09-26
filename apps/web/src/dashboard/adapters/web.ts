@@ -2,6 +2,7 @@ import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } fr
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
+  BrowserProfileInfo,
   CIStatus,
   CliStatus,
   ContentSearchMatch,
@@ -113,6 +114,28 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async gitPush(project: string, name: string): Promise<void> {
     await this.trpc.workspaces.gitPush.mutate({ project, name });
+  }
+
+  async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {
+    const data = await this.trpc.browserProfiles.list.query();
+    return data.profiles as BrowserProfileInfo[];
+  }
+
+  async removeBrowserProfile(profileId: string): Promise<void> {
+    await this.trpc.browserProfiles.remove.mutate({ profileId });
+  }
+
+  async listProjectBrowserProfiles(): Promise<Record<string, string>> {
+    const data = await this.trpc.browserProfiles.projectDefaults.query();
+    const byProject: Record<string, string> = {};
+    for (const row of data.defaults as { projectName: string; profileId: string }[]) {
+      byProject[row.projectName] = row.profileId;
+    }
+    return byProject;
+  }
+
+  async setProjectBrowserProfile(projectName: string, profileId: string | null): Promise<void> {
+    await this.trpc.browserProfiles.setProjectDefault.mutate({ projectName, profileId });
   }
 
   async getSettings(): Promise<Settings> {
