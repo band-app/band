@@ -2,8 +2,7 @@
  * Real-network integration test for the cert-error interstitial
  * pipeline (issue #444).
  *
- * Per CLAUDE.md (`.claude/skills/integration-tests/SKILL.md`): boots
- * a real HTTPS server with a *real* self-signed certificate on an
+ * Boots a real HTTPS server with a *real* self-signed certificate on an
  * OS-assigned port, performs a real TLS handshake with `node:tls`,
  * and exercises the production code paths end-to-end with the same
  * fingerprint Chromium would compute against the same cert.
@@ -225,7 +224,7 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     const peer = await fetchPeerCert("127.0.0.1", port);
     // Electron's `Certificate.fingerprint` format is `sha256/<hex>`
     // computed over the DER bytes — match that here so the assertion
-    // mirrors what the BrowserViewManager would store.
+    // mirrors what the BrowserGuestManager would store.
     const der = pemToDer(certPem);
     const ours = `sha256/${createHash("sha256").update(der).digest("hex")}`;
     // Node's `getPeerCertificate(true)` returns the same hash as
@@ -287,6 +286,7 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     });
     // Host: extracted from URL, lowercased. 127.0.0.1 stays as-is.
     assert.equal(payload.host, "127.0.0.1");
+    assert.equal(payload.browser_id, "tab-test");
     assert.equal(payload.url, `https://127.0.0.1:${port}/protected`);
     // Fingerprint flows through verbatim — same string the exception
     // store will key off.

@@ -1,11 +1,7 @@
 /**
- * Shared controls for the browser pane chrome.
- *
- * `BrowserPanelComponent` (legacy workspace-keyed) and
- * `BrowserPaneComponent` (multi-tab browserId-keyed) need the same
- * behaviour around the address bar, find bar, DevTools toggle, and
- * pane-scoped keyboard shortcuts. This hook owns that surface so the
- * two variants stop drifting:
+ * Chrome controls for `BrowserPaneComponent` (one browser tab, keyed by
+ * `browserId`): the address bar, find bar, DevTools toggle, and
+ * pane-scoped keyboard shortcuts.
  *
  *   - `find` — the `useBrowserFindInPage` state machine for this tab.
  *   - `handleAddressFocus` / `handleAddressBlur` — manage the

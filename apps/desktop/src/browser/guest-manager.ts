@@ -58,7 +58,7 @@ import {
   htmlToDataUrl,
   parseBandAction,
 } from "./error-html.js";
-import { BROWSER_PARTITION, isAllowedGuestNavigation } from "./guest-policy.js";
+import { admitWebviewAttach, BROWSER_PARTITION, isAllowedGuestNavigation } from "./guest-policy.js";
 import {
   type BrowserLoadErrorPayload,
   buildLoadErrorPayload,
@@ -167,6 +167,12 @@ export class BrowserGuestManager {
       adoptUrl = committedUrl(offscreen.webContents);
       this.closeOffscreen(args.browserId);
     }
+    // A guest re-registered under another tab id leaves its old id.
+    const oldKey = this.keyByWebContentsId.get(guest.id);
+    if (oldKey !== undefined && oldKey !== args.browserId && this.pageByKey.get(oldKey) === guest) {
+      this.pageByKey.delete(oldKey);
+      this.emitViewDestroyed(oldKey);
+    }
     const previous = this.pageByKey.get(args.browserId);
     if (previous && previous.id !== guest.id) {
       this.keyByWebContentsId.delete(previous.id);
@@ -213,7 +219,12 @@ export class BrowserGuestManager {
     this.offscreenViews.set(args.browserId, view);
     this.pageByKey.set(args.browserId, wc);
     this.keyByWebContentsId.set(wc.id, args.browserId);
-    void wc.loadURL(args.url);
+    // The URL comes from the server's tab record, which anything can write;
+    // hold it to the same rule as a guest's first `src`.
+    const url = admitWebviewAttach({ src: args.url, partition: BROWSER_PARTITION })
+      ? args.url
+      : "about:blank";
+    void wc.loadURL(url);
   }
 
   /**
@@ -727,17 +738,31 @@ function isForwardedShortcut(input: Input): boolean {
   return !input.shift && (key === "f" || key === "t" || key === "w");
 }
 
+const preparedSessions = new WeakSet<Session>();
+
 /**
- * Register the no-op `band-action://` handler on a tab's session. Each
- * partition's `Session` has its own protocol registry, and a guest's
- * partition (the default one or a browser profile's) is only known once it
- * attaches. Without the handler an in-page error page's buttons pop the
- * macOS "no application set to open this URL" dialog. The actual action
- * dispatch happens in `did-start-navigation` (see `wireEvents`).
+ * One-time setup of a tab's session. Each partition's `Session` has its own
+ * protocol registry and request hooks, and a guest's partition (the default
+ * one or a browser profile's) is only known once it attaches.
+ *
+ *   - The no-op `band-action://` handler. Without it an in-page error page's
+ *     buttons pop the macOS "no application set to open this URL" dialog.
+ *     The action itself is dispatched in `did-start-navigation` (see
+ *     `wireEvents`).
+ *   - No `file:` requests. The navigation guard only sees navigations the
+ *     page starts; one the dashboard starts (`webview.loadURL`) never fires
+ *     `will-navigate`, so the session refuses the scheme outright and a
+ *     compromised dashboard still can't read local files through a tab.
  */
 function prepareBrowserSession(sess: Session): void {
-  if (sess.protocol.isProtocolHandled("band-action")) return;
-  sess.protocol.handle("band-action", () => new Response(null, { status: 204 }));
+  if (preparedSessions.has(sess)) return;
+  preparedSessions.add(sess);
+  if (!sess.protocol.isProtocolHandled("band-action")) {
+    sess.protocol.handle("band-action", () => new Response(null, { status: 204 }));
+  }
+  sess.webRequest.onBeforeRequest({ urls: ["file://*/*"] }, (_details, callback) => {
+    callback({ cancel: true });
+  });
 }
 
 /** The page's committed URL, or null for blank and error pages. */

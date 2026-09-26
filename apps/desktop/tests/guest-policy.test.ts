@@ -27,6 +27,7 @@ describe("admitWebviewAttach", () => {
     for (const partition of [
       "persist:band-browser-profile-work",
       "persist:band-browser-profile-a_B-9",
+      `persist:band-browser-profile-${"a".repeat(64)}`,
     ]) {
       assert.equal(admitWebviewAttach({ src: "https://example.com/", partition }), true, partition);
     }
@@ -101,6 +102,15 @@ describe("hardenGuestWebPreferences", () => {
       webviewTag: false,
     });
     assert.deepEqual(params, { src: "x" });
+  });
+  test("keeps a browser profile partition", () => {
+    const webPreferences: Record<string, unknown> = {
+      partition: "persist:band-browser-profile-work",
+      nodeIntegration: true,
+    };
+    hardenGuestWebPreferences(webPreferences, {}, "/app/guest.cjs");
+    assert.equal(webPreferences.partition, "persist:band-browser-profile-work");
+    assert.equal(webPreferences.nodeIntegration, false);
   });
 });
 

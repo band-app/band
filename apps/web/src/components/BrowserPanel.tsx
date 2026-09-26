@@ -225,13 +225,23 @@ export function BrowserPaneComponent({
         webContentsId,
       })
         .then((result) => {
+          if (!result.ok) {
+            // Refused (should not happen for our own guest). Let the next
+            // `dom-ready` try again rather than leave the tab unregistered.
+            registeredId = null;
+            console.error("[BrowserPane] browser_register_guest refused");
+            return;
+          }
           // An agent may have been driving this tab offscreen (CDP bridge)
           // before the pane mounted; continue from where it left off.
           if (result.adoptUrl && result.adoptUrl !== currentUrlRef.current) {
             navigateWebview(result.adoptUrl);
           }
         })
-        .catch((err) => console.error("[BrowserPane] browser_register_guest failed", err));
+        .catch((err) => {
+          registeredId = null;
+          console.error("[BrowserPane] browser_register_guest failed", err);
+        });
     };
     const onDomReady = () => {
       register();
