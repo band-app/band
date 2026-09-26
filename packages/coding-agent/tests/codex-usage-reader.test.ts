@@ -61,6 +61,7 @@ function writeRollout(id: string, records: object[], fileName?: string): string 
   return file;
 }
 
+/** Open fds of this process. `/dev/fd` exists on macOS and Linux, where CI runs. */
 function openFdCount(): number {
   return readdirSync("/dev/fd").length;
 }

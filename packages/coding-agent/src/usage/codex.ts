@@ -45,6 +45,11 @@ async function findSessionFiles(): Promise<SessionFile[]> {
     }
   }
   await walk(sessionsDir());
+  // Drop cached `session_meta` for rollouts that no longer exist.
+  const seen = new Set(results.map((f) => f.path));
+  for (const path of metaCache.keys()) {
+    if (!seen.has(path)) metaCache.delete(path);
+  }
   return results;
 }
 
@@ -55,13 +60,16 @@ type SessionMeta = { id: string; cwd: string };
  * read: that's where Codex writes it, and a rollout can run to tens of MB.
  */
 async function readSessionMeta(file: string): Promise<SessionMeta | undefined> {
+  let first: string | undefined;
   for await (const line of readLines(file)) {
     if (!line.trim()) continue;
-    const obj = JSON.parse(line) as { type?: string; payload?: { id?: string; cwd?: string } };
-    if (obj.type === "session_meta" && obj.payload?.id && obj.payload.cwd) {
-      return { id: obj.payload.id, cwd: obj.payload.cwd };
-    }
-    return undefined;
+    first = line;
+    break;
+  }
+  if (first === undefined) return undefined;
+  const obj = JSON.parse(first) as { type?: string; payload?: { id?: string; cwd?: string } };
+  if (obj.type === "session_meta" && obj.payload?.id && obj.payload.cwd) {
+    return { id: obj.payload.id, cwd: obj.payload.cwd };
   }
   return undefined;
 }
@@ -94,10 +102,7 @@ async function getSessionMeta(file: SessionFile): Promise<SessionMeta | undefine
  */
 async function listSessions(dir: string): Promise<UsageSessionItem[]> {
   const sessions: UsageSessionItem[] = [];
-  const files = await findSessionFiles();
-  const seen = new Set<string>();
-  for (const file of files) {
-    seen.add(file.path);
+  for (const file of await findSessionFiles()) {
     try {
       const meta = await getSessionMeta(file);
       if (!meta || meta.cwd !== dir) continue;
@@ -105,10 +110,6 @@ async function listSessions(dir: string): Promise<UsageSessionItem[]> {
     } catch (err) {
       log.debug({ err, file: file.path }, "failed to parse codex session file");
     }
-  }
-  // Drop entries for rollouts that no longer exist.
-  for (const path of metaCache.keys()) {
-    if (!seen.has(path)) metaCache.delete(path);
   }
   return sessions.sort((a, b) => b.lastModified - a.lastModified);
 }
