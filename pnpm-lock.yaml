@@ -205,6 +205,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.4)
+      '@lezer/highlight':
+        specifier: ^1.2.3
+        version: 1.2.3
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)

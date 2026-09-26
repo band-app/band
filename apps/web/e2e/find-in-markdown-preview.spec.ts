@@ -6,12 +6,10 @@
  * find UX through the renderer: open with Cmd+F, count matches, step
  * through them with Enter / Shift+Enter, and dismiss with Escape.
  *
- * The test runs against Playwright's bundled Chromium, which supports
- * the CSS Custom Highlight API the preview uses for painting. The
- * assertions key off observable UI state (the match counter, the
- * input's presence and focus) rather than the highlight overlay
- * itself, so the test stays useful even on browsers that fall back to
- * the no-paint path.
+ * The preview is an editable CodeMirror view (see
+ * `markdown-live-preview.ts`), so it uses the same find as the source
+ * editor. The assertions key off observable UI state (the match counter,
+ * the input's presence and focus) rather than the highlight paint.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -145,8 +143,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
-  // SearchBar. CodeBrowserView routes the input through to
-  // MarkdownPreview's imperative ref while preview mode is active.
+  // SearchBar, which searches the preview's editor view.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+f`);
 

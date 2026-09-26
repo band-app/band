@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
 import WebSocket, { type WebSocket as WsServerSocket } from "ws";
+import { lookupBrowser } from "./browser-lookup";
 import {
   DESKTOP_CDP_HOST,
   DESKTOP_CDP_PORT,
@@ -21,6 +22,13 @@ const log = createLogger("cdp-proxy");
  * Close codes:
  *   - 4000 — bad request (missing bandTabId)
  *   - 4001 — could not reach the desktop or its underlying chromium target
+ *   - 4003 — the tab runs in a non-Default browser profile
+ *
+ * Tabs in a browser profile (e.g. cookies imported from Chrome) are never
+ * relayed: raw CDP can read the session's cookies (`Network.getAllCookies`,
+ * request headers in `Network.*` events), and those must not pass through
+ * this server. Screenshots (`cdp-targets.ts`) carry no cookie data and stay
+ * available.
  */
 export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url ?? "", `http://${req.headers.host}`);
@@ -28,6 +36,11 @@ export async function handleCdpConnection(ws: WsServerSocket, req: IncomingMessa
 
   if (!bandTabId) {
     ws.close(4000, "Missing bandTabId");
+    return;
+  }
+
+  if (lookupBrowser(bandTabId)?.profileId) {
+    ws.close(4003, "Tabs in a browser profile can't be streamed over CDP");
     return;
   }
 

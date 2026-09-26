@@ -21,6 +21,15 @@ import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP } from "./zoom";
  */
 export const BROWSER_PARTITION = "persist:band-browser";
 
+/**
+ * Session partition of a Band browser profile (`null` is Default). Must match
+ * `partitionForProfile` in `apps/desktop/src/browser/profiles.ts`; the main
+ * process admits only `persist:band-browser-profile-<id>` besides Default.
+ */
+export function partitionForProfile(profileId: string | null): string {
+  return profileId === null ? BROWSER_PARTITION : `persist:band-browser-profile-${profileId}`;
+}
+
 /** The subset of Electron's `WebviewTag` API the panes use. */
 export interface BrowserWebview extends HTMLElement {
   src: string;

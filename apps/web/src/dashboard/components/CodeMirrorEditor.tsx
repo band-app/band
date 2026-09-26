@@ -14,6 +14,10 @@ import {
   serializeEditorState,
   setHighlightLines,
 } from "../lib/codemirror-setup";
+import {
+  type MarkdownLivePreviewOptions,
+  markdownLivePreviewExtensions,
+} from "../lib/markdown-live-preview";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
 
 interface CodeMirrorEditorProps {
@@ -54,6 +58,15 @@ interface CodeMirrorEditorProps {
   savedSelection?: unknown;
   /** Scroll position to restore after editor creation */
   savedScrollTop?: number;
+  /**
+   * Render the document as an editable markdown preview (hidden syntax,
+   * rendered headings, lists, tables) instead of a code editor. `language` is
+   * ignored in this mode. Read once at creation; toggling it recreates the
+   * editor.
+   */
+  markdownPreview?: Pick<MarkdownLivePreviewOptions, "renderBlock" | "resolveImageUrl">;
+  /** Make the document read-only (used for a markdown preview that cannot be saved). */
+  readOnly?: boolean;
 }
 
 export function CodeMirrorEditor({
@@ -72,6 +85,8 @@ export function CodeMirrorEditor({
   lspExtension,
   savedSelection,
   savedScrollTop,
+  markdownPreview,
+  readOnly = false,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -86,6 +101,9 @@ export function CodeMirrorEditor({
   const lspExtensionRef = useRef(lspExtension);
   lspExtensionRef.current = lspExtension;
   const isDark = useIsDark();
+  const markdownPreviewRef = useRef(markdownPreview);
+  markdownPreviewRef.current = markdownPreview;
+  const isMarkdownPreview = markdownPreview != null;
 
   // Store line props in refs so the creation effect can read them without re-running
   const lineRef = useRef(line);
@@ -124,7 +142,8 @@ export function CodeMirrorEditor({
     let cancelled = false;
 
     const setup = async () => {
-      const langSupport = await loadLanguage(language);
+      // The markdown preview brings its own markdown language setup.
+      const langSupport = isMarkdownPreview ? null : await loadLanguage(language);
       if (cancelled) return;
 
       // Destroy previous instance — current doc was already saved in cleanup
@@ -134,8 +153,12 @@ export function CodeMirrorEditor({
         onEditorViewRef.current?.(null);
       }
 
+      const onSave = () => onSaveRef.current?.();
+      const preview = markdownPreviewRef.current;
       const extensions = [
-        ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
+        ...(preview
+          ? markdownLivePreviewExtensions({ ...preview, isDark, onSave })
+          : baseEditorExtensions(isDark, onSave)),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
         cursorLineTracker((departureLine, arrivalLine) =>
@@ -151,7 +174,10 @@ export function CodeMirrorEditor({
       if (filePath) {
         extensions.push(selectionToChatExtension(filePath));
       }
-      if (lspExtensionRef.current) {
+      if (readOnly) {
+        extensions.push(EditorState.readOnly.of(true));
+      }
+      if (lspExtensionRef.current && !preview) {
         extensions.push(lspExtensionRef.current);
       }
       if (langSupport) {
@@ -248,7 +274,7 @@ export function CodeMirrorEditor({
         onEditorViewRef.current?.(null);
       }
     };
-  }, [language, isDark, filePath]);
+  }, [language, isDark, filePath, isMarkdownPreview, readOnly]);
 
   // Handle line/lineEnd/column changes without recreating the editor
   useEffect(() => {
