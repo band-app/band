@@ -211,10 +211,14 @@ function SidepanelHeader({
       style={DRAG_STYLE}
       data-testid="right-sidepanel__header"
     >
-      <div role="tablist" className="flex min-w-0 flex-1">
-        {children}
-      </div>
-      {actions && <div className="flex shrink-0 items-center">{actions}</div>}
+      {children ? (
+        <div role="tablist" className="flex min-w-0 flex-1">
+          {children}
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
+      {actions}
     </div>
   );
 }

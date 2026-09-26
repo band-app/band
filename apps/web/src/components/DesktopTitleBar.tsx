@@ -121,7 +121,7 @@ export function RightPanelHeaderActions({
   if (!hasEditorPicker && !onToggleRightPanel) return null;
   return (
     <div
-      className="flex shrink-0 items-center gap-1"
+      className="flex shrink-0 items-center gap-1 self-center"
       style={NO_DRAG_STYLE}
       data-testid="right-sidepanel__header-actions"
     >
@@ -236,8 +236,9 @@ export function SidebarTitleBar() {
 /** Draggable title bar over the center (dockview) column. It stops at the
  *  right sidepanel, whose own header row takes the rest of the title-bar
  *  height. Holds the workspace name (centered on the bar) and, while the
- *  right sidepanel is collapsed, its expand button (right). The navigation cluster lives in `AppShell`'s stationary overlay, not
- *  here — see NavControlsProps. */
+ *  right sidepanel is collapsed, its expand button (right). The navigation
+ *  cluster lives in `AppShell`'s stationary overlay, not here — see
+ *  NavControlsProps. */
 export function WorkspaceTitleBar({
   title,
   workspaceName,

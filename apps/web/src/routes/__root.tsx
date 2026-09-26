@@ -821,7 +821,9 @@ function AppShell() {
                           <RightPanelHeaderActions
                             workspacePath={activeWorkspaceId ? workspacePath : undefined}
                             onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-                            onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
+                            onToggleRightPanel={
+                              activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
+                            }
                           />
                         }
                       />

@@ -115,6 +115,14 @@ test("collapsing moves the toggle to the title bar, and expanding moves it back"
 
   // With the sidepanel collapsed, the expand button sits at the window's
   // right edge (the title bar now spans the whole center column).
+  // The collapse runs a 200 ms width transition, so poll until the bar
+  // reaches the viewport edge (1400 px wide, less the 3 px separator).
+  await expect
+    .poll(async () => {
+      const bar = await wp.boxOf(wp.workspaceTitleBar);
+      return bar.x + bar.width;
+    })
+    .toBeGreaterThan(1400 - 8);
   const toggle = await wp.boxOf(wp.rightPanelToggleInTitleBar);
   const titleBar = await wp.boxOf(wp.workspaceTitleBar);
   expect(titleBar.x + titleBar.width - (toggle.x + toggle.width)).toBeLessThan(16);
