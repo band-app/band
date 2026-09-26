@@ -1,6 +1,6 @@
 import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";
 
 export interface SlashCommandSkill {
@@ -40,15 +40,31 @@ function getCommandContext(inputValue: string): { prefix: string; query: string 
 }
 
 /**
- * Filter skills by fuzzy-matching against the partial command name.
+ * Commands matching the partial name, best first, ranked the way Claude
+ * Code's own picker ranks them: an exact name, then names starting with the
+ * query (shortest first), then names containing it, then descriptions
+ * containing it. Codex prefixes skills with `$`, so `/tdd` still finds
+ * `$tdd` as an exact or prefix match. Ties keep the agent's order.
  */
 function filterSkills(skills: SlashCommandSkill[], query: string): SlashCommandSkill[] {
   if (!query) return skills;
-  const lower = query.toLowerCase();
-  return skills.filter(
-    (skill) =>
-      skill.name.toLowerCase().includes(lower) || skill.description.toLowerCase().includes(lower),
-  );
+  const q = query.toLowerCase();
+  const rank = (skill: SlashCommandSkill): [number, number] => {
+    const name = skill.name.toLowerCase();
+    const bare = name.replace(/^\$/, "");
+    if (name === q || bare === q) return [0, 0];
+    if (name.startsWith(q) || bare.startsWith(q)) return [1, bare.length];
+    if (name.includes(q)) return [2, 0];
+    // Two letters appear in half of all descriptions ("un" in "run"), so
+    // descriptions only count once the query says something.
+    if (q.length >= 3 && skill.description.toLowerCase().includes(q)) return [3, 0];
+    return [-1, 0];
+  };
+  return skills
+    .map((skill, index) => ({ skill, index, rank: rank(skill) }))
+    .filter((m) => m.rank[0] >= 0)
+    .sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.index - b.index)
+    .map((m) => m.skill);
 }
 
 export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps) {
@@ -59,7 +75,10 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
   const ctx = skills.length > 0 ? getCommandContext(inputValue) : null;
   const isOpen = ctx !== null;
   const query = ctx?.query ?? "";
-  const filteredSkills = isOpen ? filterSkills(skills, query) : [];
+  const filteredSkills = useMemo(
+    () => (isOpen ? filterSkills(skills, query) : []),
+    [isOpen, skills, query],
+  );
   const hasResults = filteredSkills.length > 0;
 
   // Reset selection when query changes
@@ -169,7 +188,9 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
             <CommandIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="font-medium">/{skill.name}</span>
+                <span className="font-medium" data-testid="slash-command-suggestions__name">
+                  /{skill.name}
+                </span>
                 {skill.argumentHint && (
                   <span className="truncate text-xs text-muted-foreground">
                     {skill.argumentHint}

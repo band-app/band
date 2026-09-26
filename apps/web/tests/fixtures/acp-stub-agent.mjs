@@ -21,6 +21,9 @@
  *                           { "loadSession": false, "list": false,
  *                             "resume": false, "image": false }.
  *   BAND_TEST_ACP_FAIL_START  When set, `initialize` fails with this message.
+ *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
+ *                           default `echo` and `review` commands, in the
+ *                           order the agent advertises them.
  *
  * Scenario file:
  *
@@ -89,10 +92,12 @@ const MODES = [
   { value: "default", name: "Default" },
   { value: "plan", name: "Plan" },
 ];
-const COMMANDS = [
-  { name: "echo", description: "Repeat the message back", input: { hint: "text to repeat" } },
-  { name: "review", description: "Review the pending changes" },
-];
+const COMMANDS = env.BAND_TEST_ACP_COMMANDS
+  ? JSON.parse(env.BAND_TEST_ACP_COMMANDS)
+  : [
+      { name: "echo", description: "Repeat the message back", input: { hint: "text to repeat" } },
+      { name: "review", description: "Review the pending changes" },
+    ];
 
 /** sessionId → { cwd, title, updatedAt, model, mode, history: SessionUpdate[] } */
 const sessions = new Map();

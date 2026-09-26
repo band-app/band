@@ -76,6 +76,8 @@ export class ChatPanePage {
    *  the prompt. ARIA name is system-controlled in
    *  `file-mention-suggestions.tsx`. */
   readonly fileMentionDropdown: Locator;
+  /** The `/`-command dropdown above the prompt. */
+  readonly slashCommandDropdown: Locator;
   /** The StickToBottom scroll container — the element whose `scrollTop`
    *  drives the chat virtualizer. The testid is attached in
    *  `ChatView.tsx` via the `stickyContextRef.scrollRef.current` since
@@ -114,6 +116,7 @@ export class ChatPanePage {
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
+    this.slashCommandDropdown = page.getByRole("listbox", { name: "Slash commands" });
     this.scroller = page.getByTestId("chat-pane__scroller");
     this.virtualList = page.getByTestId("chat-pane__virtual-list");
     this.messageRows = page.getByTestId("chat-pane__message-row");
@@ -413,6 +416,15 @@ export class ChatPanePage {
     await test.step(`Press "${key}" in the prompt`, async () => {
       await this.promptInput.press(key);
     });
+  }
+
+  /** The command names in the slash dropdown, top to bottom, with their
+   *  leading `/`. */
+  async slashCommandNames(): Promise<string[]> {
+    return this.slashCommandDropdown
+      .getByTestId("slash-command-suggestions__name")
+      .allTextContents()
+      .then((names) => names.map((n) => n.trim()));
   }
 
   /** Focus the prompt textarea so subsequent `pressKey()` calls land
