@@ -26,7 +26,7 @@ function readUpdatedAt(tmpHome: string, workspaceId: string): number | undefined
 // ---------------------------------------------------------------------------
 // upsertWorkspaceStatus — heals stale rows with empty identity fields.
 //
-// The desktop title-bar EditorPicker dropdown is gated on a non-empty
+// The desktop EditorPicker dropdown (right sidepanel header) is gated on a non-empty
 // `worktreePath` (see DesktopTitleBar.tsx). Some rows in older Band
 // installs were inserted with `worktreePath = ""` (agent started before
 // the project's worktree was persisted, or rows left behind by a prior

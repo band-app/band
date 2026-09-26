@@ -29,6 +29,7 @@ import {
 } from "@/dashboard";
 import { useDiffSummary } from "../hooks/useDiffSummary";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { usePerWorkspaceState } from "./per-workspace-state-store";
 import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
 
@@ -101,7 +102,8 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       data-testid={testid}
-      className={`flex h-full w-[120px] items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
+      style={NO_DRAG_STYLE}
+      className={`flex h-full min-w-0 max-w-[120px] flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
         active
           ? "border-primary text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground"
@@ -192,22 +194,59 @@ function ExplorerHeader({
 }
 
 // ---------------------------------------------------------------------------
+// Header row (tabs + actions). Sits in the title-bar row, level with the
+// workspace title bar, so it is a window drag surface in the desktop app.
+// ---------------------------------------------------------------------------
+
+function SidepanelHeader({
+  children,
+  actions,
+}: {
+  children?: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex h-[38px] shrink-0 items-stretch gap-1 border-b border-border pr-2"
+      style={DRAG_STYLE}
+      data-testid="right-sidepanel__header"
+    >
+      {children ? (
+        <div role="tablist" className="flex min-w-0 flex-1">
+          {children}
+        </div>
+      ) : (
+        <div className="flex-1" />
+      )}
+      {actions}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Right sidepanel root
 // ---------------------------------------------------------------------------
 
-export function RightSidepanel({ visible = true }: { visible?: boolean }) {
+export function RightSidepanel({
+  visible = true,
+  headerActions,
+}: {
+  visible?: boolean;
+  /** Controls at the right edge of the header row (open in editor, collapse). */
+  headerActions?: React.ReactNode;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const workspaceId = parseWorkspaceFromPath(pathname);
 
   if (!workspaceId) {
     return (
-      <div
-        className="flex h-full items-center justify-center px-6 text-center"
-        data-testid="right-sidepanel"
-      >
-        <div className="flex flex-col items-center gap-2">
-          <FolderOpen className="size-6 text-muted-foreground/30" />
-          <p className="text-xs text-muted-foreground">No workspace selected</p>
+      <div className="flex h-full flex-col" data-testid="right-sidepanel">
+        <SidepanelHeader actions={headerActions} />
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+          <div className="flex flex-col items-center gap-2">
+            <FolderOpen className="size-6 text-muted-foreground/30" />
+            <p className="text-xs text-muted-foreground">No workspace selected</p>
+          </div>
         </div>
       </div>
     );
@@ -215,10 +254,25 @@ export function RightSidepanel({ visible = true }: { visible?: boolean }) {
 
   // Keyed by workspaceId so the panel's per-workspace tree state resets cleanly
   // on a workspace switch instead of leaking across workspaces.
-  return <RightSidepanelInner key={workspaceId} workspaceId={workspaceId} visible={visible} />;
+  return (
+    <RightSidepanelInner
+      key={workspaceId}
+      workspaceId={workspaceId}
+      visible={visible}
+      headerActions={headerActions}
+    />
+  );
 }
 
-function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; visible: boolean }) {
+function RightSidepanelInner({
+  workspaceId,
+  visible,
+  headerActions,
+}: {
+  workspaceId: string;
+  visible: boolean;
+  headerActions?: React.ReactNode;
+}) {
   const [activeTab, setActiveTab] = useState<RightTab>(() => loadActiveTab());
   useEffect(() => {
     saveActiveTab(activeTab);
@@ -340,7 +394,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
-      <div role="tablist" className="flex h-9 shrink-0 border-b border-border">
+      <SidepanelHeader actions={headerActions}>
         <TabButton
           label="Explorer"
           icon={FolderOpen}
@@ -356,7 +410,7 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
           onClick={() => setActiveTab("changes")}
           testid="right-sidepanel__tab--changes"
         />
-      </div>
+      </SidepanelHeader>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {activeTab === "explorer" ? (
