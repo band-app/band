@@ -1,10 +1,9 @@
-import { createReadStream } from "node:fs";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { computeCost } from "../pricing.ts";
 import type { SessionUsageSnapshot, SessionUsageTurn } from "../types.ts";
+import { readLines } from "./read-lines.ts";
 import type { UsageReader, UsageSessionItem } from "./types.ts";
 
 /**
@@ -244,12 +243,7 @@ async function getSessionUsage(
   let updatedAt = 0;
   let modelFallback = "";
 
-  const rl = createInterface({
-    input: createReadStream(file),
-    crlfDelay: Number.POSITIVE_INFINITY,
-  });
-
-  for await (const line of rl) {
+  for await (const line of readLines(file)) {
     if (!line.trim()) continue;
     let record: ClaudeTranscriptRecord;
     try {

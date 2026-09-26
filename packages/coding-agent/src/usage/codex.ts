@@ -1,11 +1,10 @@
-import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { createLogger } from "@band-app/logger";
 import { computeCost } from "../pricing.ts";
 import type { SessionUsageSnapshot, SessionUsageTurn } from "../types.ts";
+import { readLines } from "./read-lines.ts";
 import type { UsageReader, UsageSessionItem } from "./types.ts";
 
 const log = createLogger("coding-agent:usage:codex");
@@ -19,9 +18,23 @@ function sessionsDir(): string {
   return join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
 }
 
+interface SessionFile {
+  path: string;
+  mtimeMs: number;
+}
+
+type SessionMeta = { id: string; cwd: string };
+
+/**
+ * `session_meta` per rollout path, valid while the file's mtime is unchanged.
+ * Every scan lists every rollout under `$CODEX_HOME/sessions/`, so without
+ * this each scan reopens thousands of files that haven't changed.
+ */
+const metaCache = new Map<string, { mtimeMs: number; meta: SessionMeta | undefined }>();
+
 /** Recursively find all .jsonl rollout files under `$CODEX_HOME/sessions/`. */
-async function findSessionFiles(): Promise<string[]> {
-  const results: string[] = [];
+async function findSessionFiles(): Promise<SessionFile[]> {
+  const results: SessionFile[] = [];
   async function walk(dir: string): Promise<void> {
     let entries: string[];
     try {
@@ -36,30 +49,50 @@ async function findSessionFiles(): Promise<string[]> {
       if (s.isDirectory()) {
         await walk(full);
       } else if (entry.endsWith(".jsonl")) {
-        results.push(full);
+        results.push({ path: full, mtimeMs: s.mtimeMs });
       }
     }
   }
   await walk(sessionsDir());
+  // Drop cached `session_meta` for rollouts that no longer exist.
+  const seen = new Set(results.map((f) => f.path));
+  for (const path of metaCache.keys()) {
+    if (!seen.has(path)) metaCache.delete(path);
+  }
   return results;
 }
 
-/** Read the `session_meta` record (the rollout's first line) from `file`. */
-async function readSessionMeta(file: string): Promise<{ id: string; cwd: string } | undefined> {
-  const rl = createInterface({
-    input: createReadStream(file),
-    crlfDelay: Number.POSITIVE_INFINITY,
-  });
+/**
+ * Read the `session_meta` record from `file`. Only the first non-empty line is
+ * read: that's where Codex writes it, and a rollout can run to tens of MB.
+ */
+async function readSessionMeta(file: string): Promise<SessionMeta | undefined> {
+  let first: string | undefined;
+  for await (const line of readLines(file)) {
+    if (!line.trim()) continue;
+    first = line;
+    break;
+  }
+  if (first === undefined) return undefined;
+  const obj = JSON.parse(first) as { type?: string; payload?: { id?: string; cwd?: string } };
+  if (obj.type === "session_meta" && obj.payload?.id && obj.payload.cwd) {
+    return { id: obj.payload.id, cwd: obj.payload.cwd };
+  }
+  return undefined;
+}
+
+async function getSessionMeta(file: SessionFile): Promise<SessionMeta | undefined> {
+  const cached = metaCache.get(file.path);
+  if (cached && cached.mtimeMs === file.mtimeMs) return cached.meta;
   try {
-    for await (const line of rl) {
-      const obj = JSON.parse(line) as { type?: string; payload?: { id?: string; cwd?: string } };
-      if (obj.type === "session_meta" && obj.payload?.id && obj.payload.cwd) {
-        return { id: obj.payload.id, cwd: obj.payload.cwd };
-      }
-    }
-    return undefined;
-  } finally {
-    rl.close();
+    const meta = await readSessionMeta(file.path);
+    metaCache.set(file.path, { mtimeMs: file.mtimeMs, meta });
+    return meta;
+  } catch (err) {
+    // Cache the failure too, so a corrupt rollout isn't reparsed every scan.
+    // A half-written first line gets retried once the next write bumps mtime.
+    metaCache.set(file.path, { mtimeMs: file.mtimeMs, meta: undefined });
+    throw err;
   }
 }
 
@@ -71,12 +104,11 @@ async function listSessions(dir: string): Promise<UsageSessionItem[]> {
   const sessions: UsageSessionItem[] = [];
   for (const file of await findSessionFiles()) {
     try {
-      const meta = await readSessionMeta(file);
+      const meta = await getSessionMeta(file);
       if (!meta || meta.cwd !== dir) continue;
-      const fileStat = await stat(file);
-      sessions.push({ sessionId: meta.id, lastModified: fileStat.mtimeMs });
+      sessions.push({ sessionId: meta.id, lastModified: file.mtimeMs });
     } catch (err) {
-      log.debug({ err, file }, "failed to parse codex session file");
+      log.debug({ err, file: file.path }, "failed to parse codex session file");
     }
   }
   return sessions.sort((a, b) => b.lastModified - a.lastModified);
@@ -87,23 +119,11 @@ async function findRolloutFile(sessionId: string): Promise<string | undefined> {
   // Optimistic path: rollout files end with the session id (e.g.
   // `rollout-2026-04-19T11-23-00-<sessionId>.jsonl`). Fall back to a
   // `session_meta` scan if naming drifts.
-  const byName = files.find((f) => f.endsWith(`${sessionId}.jsonl`));
-  if (byName) return byName;
+  const byName = files.find((f) => f.path.endsWith(`${sessionId}.jsonl`));
+  if (byName) return byName.path;
   for (const f of files) {
     try {
-      const rl = createInterface({
-        input: createReadStream(f),
-        crlfDelay: Number.POSITIVE_INFINITY,
-      });
-      let match = false;
-      for await (const line of rl) {
-        const obj = JSON.parse(line) as { type?: string; payload?: { id?: string } };
-        match = obj.type === "session_meta" && obj.payload?.id === sessionId;
-        // Only the first line is the meta.
-        break;
-      }
-      rl.close();
-      if (match) return f;
+      if ((await getSessionMeta(f))?.id === sessionId) return f.path;
     } catch {
       // Skip unreadable files.
     }
@@ -145,12 +165,7 @@ async function getSessionUsage(
   let currentModel: string | undefined;
   let isSubagent = false;
 
-  const rl = createInterface({
-    input: createReadStream(targetFile),
-    crlfDelay: Number.POSITIVE_INFINITY,
-  });
-
-  for await (const line of rl) {
+  for await (const line of readLines(targetFile)) {
     if (!line.trim()) continue;
     let obj: {
       type?: string;
