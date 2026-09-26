@@ -277,6 +277,16 @@ export class WorkspacePage {
     });
   }
 
+  /** Zoom the app out by one step via the real Ctrl/Cmd+- shortcut. Mirror
+   *  of `zoomInViaShortcut`; "Minus" so `e.key` resolves to "-". */
+  async zoomOutViaShortcut(): Promise<void> {
+    await test.step("Zoom out via Ctrl+- keyboard shortcut", async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press("Control+Minus");
+    });
+  }
+
   /** Left-click the first action ("Add workspace") in the open menu. */
   async clickAddWorkspaceMenuItem(): Promise<void> {
     await test.step("Click the Add workspace menu item", async () => {
@@ -1977,6 +1987,51 @@ export class WorkspacePage {
         .map((w) => (w.querySelector(".xterm-rows") as HTMLElement | null)?.textContent ?? "")
         .join("\n");
     }, workspaceId);
+  }
+
+  /** The app zoom factor currently applied, read from the `--app-zoom` custom
+   *  property `applyZoomLevel` mirrors onto `<html>` (1 when unset). */
+  async readAppZoom(): Promise<number> {
+    return await this.page.evaluate(
+      () =>
+        Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--app-zoom"),
+        ) || 1,
+    );
+  }
+
+  /** Visual geometry (getBoundingClientRect, so zoom-scaled viewport px) of a
+   *  workspace's visible terminal leaf and of the rendered xterm row holding
+   *  `marker`, plus the window height. A terminal that is laid out correctly
+   *  under app zoom keeps its leaf's bottom edge inside the window and the
+   *  marker row inside the leaf. `markerRow` is null until a row containing
+   *  `marker` renders (needs the DOM renderer). */
+  async readTerminalGeometry(
+    workspaceId: string,
+    marker: string,
+  ): Promise<{
+    leafBottom: number;
+    markerRow: { bottom: number; height: number } | null;
+    viewportHeight: number;
+  }> {
+    const leafBottom = await this.terminalTabVisibilityMarker(workspaceId, true).evaluate(
+      (el) => el.getBoundingClientRect().bottom,
+    );
+    const { markerRow, viewportHeight } = await this.page.evaluate(
+      ([id, text]) => {
+        const rows = Array.from(
+          document.querySelectorAll(`[data-workspace-id="${id}"] .xterm-rows > *`),
+        );
+        const row = rows.find((r) => (r.textContent ?? "").includes(text));
+        const rect = row?.getBoundingClientRect();
+        return {
+          markerRow: rect ? { bottom: rect.bottom, height: rect.height } : null,
+          viewportHeight: window.innerHeight,
+        };
+      },
+      [workspaceId, marker] as const,
+    );
+    return { leafBottom, markerRow, viewportHeight };
   }
 
   /** Read the live xterm column count for a workspace's terminal from the

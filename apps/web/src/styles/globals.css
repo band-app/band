@@ -266,10 +266,31 @@ body {
   scale: var(--app-zoom, 1);
 }
 
+/*
+ * Same doubled scaling for dockview's `renderer: "always"` panels (terminal
+ * leaves). dockview positions each panel's `.dv-render-overlay` by writing
+ * getBoundingClientRect() deltas (visual pixels) into its inline
+ * left/top/width/height, which the <html> zoom then scales again. At 110% the
+ * overlay came out 10% too big, so its bottom rows (a TUI's prompt and status
+ * line) fell outside the clipped group; below 100% it came out too small.
+ *
+ * Counter-zoom the overlay so those inline pixel values apply 1:1, then zoom
+ * its content back to the app zoom. `zoom` (not `scale`) so the content's
+ * layout box really has the corrected size: xterm fits to it and hit-tests in
+ * it. No-op when --app-zoom is unset or 1.
+ */
+.dv-render-overlay {
+  zoom: calc(1 / var(--app-zoom, 1));
+}
+
+.dv-render-overlay > * {
+  zoom: var(--app-zoom, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize tw-animate-css movement; opacity fades
      (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
-  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper transform rule. */
+  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper `scale` or dockview overlay `zoom` rules. */
   * {
     --tw-enter-translate-x: 0;
     --tw-enter-translate-y: 0;
