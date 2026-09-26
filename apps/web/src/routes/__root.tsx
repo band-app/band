@@ -18,6 +18,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
@@ -874,6 +875,7 @@ function RootLayout() {
           <ReloadSync />
           <TooltipProvider>
             <AppShell />
+            <UpdateToast />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />

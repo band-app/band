@@ -1,128 +1,114 @@
 /**
- * Integration tests for the auto-updater logic.
+ * Integration tests for the auto-update controller behind the update toast.
  *
- * Per CLAUDE.md: black-box, no mocks of our own modules. The only thing we
- * substitute is the third-party `electron-updater` singleton (out of our
- * control + binds to the running Electron binary at module-load time —
- * impractical in CI). The substitution is via dependency injection at the
- * `checkForUpdate` call site, not a network or loader-level mock — so the
- * production code under test is exactly the same code that ships.
+ * Black-box, no mocks of our own modules. The only thing we
+ * substitute is the third-party `electron-updater` singleton, which binds to
+ * the running Electron binary at module load and cannot run under plain
+ * Node. The controller takes it through `loadUpdater`, so the code under
+ * test is the code that ships. Assertions go through the controller's
+ * public surface: the statuses it broadcasts (what the renderer's toast
+ * receives over `updater-status-changed`) and `getStatus()` (what
+ * `updater_status` returns).
  *
- * Each test drives a fresh `FakeUpdater` through the same event sequence
- * the real `electron-updater` emits (`checking-for-update` →
- * `update-available` / `update-not-available` / `error` → optionally
- * `download-progress` ... → `update-downloaded`). Dialog interactions are
- * captured as a list, and the install path replaces `quitAndInstall` with
- * a `restart` callback so the test process doesn't actually exit.
- *
- * The startup-check schedule is exercised with a synthetic `delayMs: 0` so
- * the suite runs in <1s.
+ * `FakeUpdater` behaves like electron-updater 6: `checkForUpdates` resolves
+ * with `{ isUpdateAvailable, updateInfo }` or rejects, `downloadUpdate`
+ * emits `download-progress` and resolves or rejects.
  */
 
 import { strict as assert } from "node:assert";
-import { beforeEach, describe, test } from "node:test";
+import { describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
-  __resetUpdaterGuardsForTests,
-  type CheckForUpdateDeps,
-  checkForUpdate,
-  checkForUpdateBackground,
-  installPendingUpdate,
-  type PendingUpdate,
   pickAutoUpdater,
-  schedulePeriodicCheck,
-  scheduleStartupCheck,
+  UpdateController,
+  type UpdateInfoLike,
   type UpdaterLike,
+  type UpdateStatus,
 } from "../src/main/updater.ts";
 
-// Module-scoped guards (`inFlightCheck`, `inFlightInstall`) persist across
-// the suite. Reset them before every test so a previous "skip" case doesn't
-// leak into the next.
-beforeEach(() => {
-  __resetUpdaterGuardsForTests();
-});
+const CURRENT = "0.30.0";
 
-// ---------------------------------------------------------------------------
-// FakeUpdater: same event surface as electron-updater's AppUpdater singleton
-// ---------------------------------------------------------------------------
+/** Let every pending promise callback run: `setImmediate` fires after the microtask queue drains. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 interface FakeUpdaterOptions {
-  /** Outcome to fire from `checkForUpdates`. Defaults to "not-available". */
-  checkOutcome?: "available" | "not-available" | "error";
-  /** Version to report in the `update-available` event. */
-  version?: string;
-  /** Error message for the "error" outcome. */
-  errorMessage?: string;
-  /** Outcome to fire from `downloadUpdate`. */
-  downloadOutcome?: "downloaded" | "error";
-  /** Error message for download failure. */
-  downloadErrorMessage?: string;
+  /** Latest release in the feed. `null` means the feed has nothing newer. */
+  latest?: UpdateInfoLike | null;
+  /** Reject `checkForUpdates` with this message. */
+  checkError?: string;
+  /** Reject `downloadUpdate` with this message (first call only when `downloadFailsOnce`). */
+  downloadError?: string;
+  downloadFailsOnce?: boolean;
+  /** Hold `checkForUpdates` until `releaseCheck()` is called. */
+  holdCheck?: boolean;
 }
 
 class FakeUpdater implements UpdaterLike {
   autoDownload = true;
-  autoInstallOnAppQuit = true;
-  checkForUpdatesCalls = 0;
-  downloadUpdateCalls = 0;
+  autoInstallOnAppQuit = false;
+  checkCalls = 0;
+  downloadCalls = 0;
   quitAndInstallCalls = 0;
-  private listeners = new Map<string, Array<(...args: unknown[]) => void>>();
-  private opts: FakeUpdaterOptions;
+  private listeners = new Map<string, Array<(arg: never) => void>>();
+  private releaseHeldCheck: (() => void) | null = null;
+  opts: FakeUpdaterOptions;
 
   constructor(opts: FakeUpdaterOptions = {}) {
     this.opts = opts;
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: matches the AppUpdater contract
-  on(event: string, listener: (...args: any[]) => void): void {
+  on(event: string, listener: (arg: never) => void): this {
     const arr = this.listeners.get(event) ?? [];
     arr.push(listener);
     this.listeners.set(event, arr);
+    return this;
   }
 
-  removeAllListeners(event?: string): void {
-    if (event) this.listeners.delete(event);
-    else this.listeners.clear();
+  listenerCount(event: string): number {
+    return this.listeners.get(event)?.length ?? 0;
   }
 
-  private emit(event: string, ...args: unknown[]): void {
-    const arr = this.listeners.get(event);
-    if (!arr) return;
-    for (const fn of arr) fn(...args);
+  private emit(event: string, arg: unknown): void {
+    for (const fn of this.listeners.get(event) ?? []) fn(arg as never);
   }
 
-  async checkForUpdates(): Promise<unknown> {
-    this.checkForUpdatesCalls++;
-    // Simulate the async dispatch: real electron-updater emits the event
-    // off-microtask after the network round-trip completes.
-    await Promise.resolve();
-    const outcome = this.opts.checkOutcome ?? "not-available";
-    if (outcome === "available") {
-      this.emit("update-available", { version: this.opts.version ?? "1.2.3" });
-    } else if (outcome === "not-available") {
-      this.emit("update-not-available");
-    } else {
-      this.emit("error", new Error(this.opts.errorMessage ?? "boom"));
+  releaseCheck(): void {
+    this.releaseHeldCheck?.();
+  }
+
+  async checkForUpdates() {
+    this.checkCalls++;
+    if (this.opts.holdCheck) {
+      await new Promise<void>((resolve) => {
+        this.releaseHeldCheck = resolve;
+      });
     }
-    return null;
+    await Promise.resolve();
+    if (this.opts.checkError) {
+      const err = new Error(this.opts.checkError);
+      this.emit("error", err);
+      throw err;
+    }
+    const latest = this.opts.latest ?? null;
+    if (!latest) {
+      return { isUpdateAvailable: false, updateInfo: { version: CURRENT } };
+    }
+    return { isUpdateAvailable: true, updateInfo: latest };
   }
 
-  async downloadUpdate(): Promise<unknown> {
-    this.downloadUpdateCalls++;
+  async downloadUpdate() {
+    this.downloadCalls++;
     await Promise.resolve();
-    if (this.opts.downloadOutcome === "error") {
-      this.emit("error", new Error(this.opts.downloadErrorMessage ?? "download failed"));
-      return [];
+    if (this.opts.downloadError && (!this.opts.downloadFailsOnce || this.downloadCalls === 1)) {
+      const err = new Error(this.opts.downloadError);
+      this.emit("error", err);
+      throw err;
     }
-    // Emit one progress tick so we can assert the listener path runs.
-    this.emit("download-progress", {
-      percent: 50,
-      bytesPerSecond: 1024,
-      transferred: 512,
-      total: 1024,
-    });
-    this.emit("update-downloaded");
-    return [];
+    for (const percent of [12.4, 12.9, 57.2, 100]) {
+      this.emit("download-progress", { percent });
+    }
+    return ["/tmp/Band.zip"];
   }
 
   quitAndInstall(): void {
@@ -130,245 +116,362 @@ class FakeUpdater implements UpdaterLike {
   }
 }
 
-interface DialogCall {
-  kind: "info" | "confirm";
-  title: string;
-  message: string;
-}
-
-interface Recorder {
-  dialogs: DialogCall[];
+interface Harness {
+  controller: UpdateController;
+  updater: FakeUpdater;
+  statuses: UpdateStatus[];
   restarts: number;
-  deps: CheckForUpdateDeps;
+  clock: { now: number };
 }
 
-/** Builds a fresh deps bundle that records every dialog + restart call. */
-function recorder(updater: UpdaterLike, confirmAnswer = true): Recorder {
-  const dialogs: DialogCall[] = [];
-  let restarts = 0;
-  const deps: CheckForUpdateDeps = {
+function harness(opts: FakeUpdaterOptions = {}): Harness {
+  const updater = new FakeUpdater(opts);
+  const statuses: UpdateStatus[] = [];
+  const clock = { now: 1_000_000 };
+  const h: Harness = {
     updater,
-    showInfo: async (title, message) => {
-      dialogs.push({ kind: "info", title, message });
-    },
-    showConfirm: async (title, message) => {
-      dialogs.push({ kind: "confirm", title, message });
-      return confirmAnswer;
-    },
-    restart: () => {
-      restarts++;
-    },
+    statuses,
+    restarts: 0,
+    clock,
+    controller: new UpdateController({
+      currentVersion: CURRENT,
+      onStatus: (s) => statuses.push(s),
+      loadUpdater: async () => updater,
+      restart: () => {
+        h.restarts++;
+      },
+      now: () => clock.now,
+    }),
   };
-  return {
-    dialogs,
-    get restarts() {
-      return restarts;
-    },
-    deps,
-  };
+  return h;
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const RELEASE: UpdateInfoLike = {
+  version: "0.31.0",
+  releaseName: "v0.31.0",
+  releaseNotes:
+    "<ul>\n<li>feat(web): update toast &amp; hourly checks (#663)</li>\n<li>fix(web): keep rows &lt;inside&gt; the pane</li>\n</ul>",
+};
 
-describe("checkForUpdate (silent / startup mode)", () => {
-  test("no update available — no dialog, no restart", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    const rec = recorder(updater);
+const RELEASE_FIELDS = {
+  version: "0.31.0",
+  currentVersion: CURRENT,
+  releaseName: "v0.31.0",
+  releaseNotes:
+    "• feat(web): update toast & hourly checks (#663)\n• fix(web): keep rows <inside> the pane",
+  releaseUrl: "https://github.com/band-app/band/releases/tag/v0.31.0",
+};
 
-    await checkForUpdate(false, rec.deps);
-
-    assert.equal(updater.checkForUpdatesCalls, 1);
-    assert.equal(updater.downloadUpdateCalls, 0);
-    assert.equal(rec.dialogs.length, 0);
-    assert.equal(rec.restarts, 0);
+describe("background checks (startup + interval)", () => {
+  test("no update: status stays idle and nothing is broadcast", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: false });
+    assert.equal(h.updater.checkCalls, 1);
+    assert.deepEqual(h.statuses, []);
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
   });
 
-  test("check error — silent, no dialog", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "error",
-      errorMessage: "DNS lookup failed",
-    });
-    const rec = recorder(updater);
-
-    await checkForUpdate(false, rec.deps);
-
-    assert.equal(rec.dialogs.length, 0);
-    assert.equal(updater.downloadUpdateCalls, 0);
+  test("check error: stays silent", async () => {
+    const h = harness({ checkError: "net::ERR_INTERNET_DISCONNECTED" });
+    await h.controller.check({ userInitiated: false });
+    assert.deepEqual(h.statuses, []);
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
   });
 
-  test("update available + accepted — downloads and restarts", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "available",
-      version: "9.8.7",
-    });
-    const rec = recorder(updater, true);
-
-    await checkForUpdate(false, rec.deps);
-
-    // Confirm dialog fired with the version.
-    assert.equal(rec.dialogs.length, 1);
-    assert.equal(rec.dialogs[0]?.kind, "confirm");
-    assert.equal(rec.dialogs[0]?.title, "Update Available");
-    assert.match(rec.dialogs[0]?.message ?? "", /v9\.8\.7/);
-
-    assert.equal(updater.downloadUpdateCalls, 1);
-    assert.equal(rec.restarts, 1);
-    // We never call quitAndInstall when restart override is supplied.
-    assert.equal(updater.quitAndInstallCalls, 0);
+  test("update found: broadcasts the release with plain-text notes and a release link", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    assert.deepEqual(h.statuses, [{ state: "available", ...RELEASE_FIELDS }]);
+    assert.deepEqual(h.controller.getStatus(), { state: "available", ...RELEASE_FIELDS });
   });
 
-  test("update available + declined — no download, no restart", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "available",
-      version: "1.0.1",
-    });
-    const rec = recorder(updater, false);
-
-    await checkForUpdate(false, rec.deps);
-
-    assert.equal(rec.dialogs.length, 1);
-    assert.equal(rec.dialogs[0]?.kind, "confirm");
-    assert.equal(updater.downloadUpdateCalls, 0);
-    assert.equal(rec.restarts, 0);
+  test("the updater is configured for a toast-driven download that installs on quit", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: false });
+    assert.equal(h.updater.autoDownload, false);
+    assert.equal(h.updater.autoInstallOnAppQuit, true);
+    // An `error` listener keeps the emitter from throwing on failures.
+    assert.equal(h.updater.listenerCount("error"), 1);
   });
 
-  test("download fails — info dialog is shown", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "available",
-      version: "2.0.0",
-      downloadOutcome: "error",
-      downloadErrorMessage: "checksum mismatch",
-    });
-    const rec = recorder(updater, true);
-
-    await checkForUpdate(false, rec.deps);
-
-    // 1 confirm + 1 info (failure)
-    assert.equal(rec.dialogs.length, 2);
-    assert.equal(rec.dialogs[1]?.kind, "info");
-    assert.equal(rec.dialogs[1]?.title, "Update Failed");
-    assert.match(rec.dialogs[1]?.message ?? "", /checksum mismatch/);
-    assert.equal(rec.restarts, 0);
+  test("repeated checks don't stack updater listeners", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    await h.controller.check({ userInitiated: false });
+    await h.controller.check({ userInitiated: true });
+    assert.equal(h.updater.listenerCount("error"), 1);
+    assert.equal(h.updater.listenerCount("download-progress"), 1);
   });
 
-  test("autoDownload + autoInstallOnAppQuit are forced off", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    updater.autoDownload = true;
-    updater.autoInstallOnAppQuit = true;
-    const rec = recorder(updater);
+  test("an unchanged result is not re-broadcast", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    await h.controller.check({ userInitiated: false });
+    assert.equal(h.updater.checkCalls, 2);
+    assert.equal(h.statuses.length, 1);
+  });
 
-    await checkForUpdate(false, rec.deps);
+  test("a release pulled from the feed clears the offer", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    h.updater.opts.latest = null;
+    await h.controller.check({ userInitiated: false });
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
+  });
 
-    // We need to drive download + install ourselves so the user can confirm
-    // before we touch their bandwidth. Regression-guard against someone
-    // flipping these back to defaults.
-    assert.equal(updater.autoDownload, false);
-    assert.equal(updater.autoInstallOnAppQuit, false);
+  test("a dismissed version stays hidden on later background checks", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    h.controller.dismiss();
+    await h.controller.check({ userInitiated: false });
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
+
+    h.updater.opts.latest = { version: "0.32.0" };
+    await h.controller.check({ userInitiated: false });
+    const status = h.controller.getStatus();
+    assert.equal(status.state, "available");
+    assert.equal(status.state === "available" && status.version, "0.32.0");
   });
 });
 
-describe("checkForUpdate (interactive / menu mode)", () => {
-  test("no update available — info dialog says you're up to date", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    const rec = recorder(updater);
-
-    await checkForUpdate(true, rec.deps);
-
-    assert.equal(rec.dialogs.length, 1);
-    assert.equal(rec.dialogs[0]?.kind, "info");
-    assert.equal(rec.dialogs[0]?.title, "No Updates Available");
+describe("user-initiated checks (Check for Updates…)", () => {
+  test("no update: checking, then up to date with the current version", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: true });
+    assert.deepEqual(h.statuses, [
+      { state: "checking", userInitiated: true },
+      { state: "up-to-date", currentVersion: CURRENT, userInitiated: true },
+    ]);
   });
 
-  test("check error — info dialog mentions the failure", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "error",
-      errorMessage: "503 Service Unavailable",
-    });
-    const rec = recorder(updater);
+  test("update found: checking, then the release", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: true });
+    assert.deepEqual(h.statuses, [
+      { state: "checking", userInitiated: true },
+      { state: "available", ...RELEASE_FIELDS },
+    ]);
+  });
 
-    await checkForUpdate(true, rec.deps);
+  test("a long error message is truncated", async () => {
+    const h = harness({ checkError: `HttpError: 502\n${"x".repeat(2000)}` });
+    await h.controller.check({ userInitiated: true });
+    const status = h.controller.getStatus();
+    assert.equal(status.state === "error" && status.message.length, 501);
+  });
 
-    assert.equal(rec.dialogs.length, 1);
-    assert.equal(rec.dialogs[0]?.kind, "info");
-    assert.equal(rec.dialogs[0]?.title, "Update Error");
+  test("check error: checking, then the error", async () => {
+    const h = harness({ checkError: "HttpError: 404" });
+    await h.controller.check({ userInitiated: true });
+    assert.deepEqual(h.statuses, [
+      { state: "checking", userInitiated: true },
+      { state: "error", message: "HttpError: 404", phase: "check", userInitiated: true },
+    ]);
+  });
+
+  test("shows a version the user dismissed earlier", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    h.controller.dismiss();
+    await h.controller.check({ userInitiated: true });
+    assert.deepEqual(h.controller.getStatus(), { state: "available", ...RELEASE_FIELDS });
+  });
+
+  test("an up-to-date result can be dismissed back to idle", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: true });
+    h.controller.dismiss();
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
   });
 });
 
-describe("checkForUpdate listener teardown", () => {
-  test("two back-to-back checks don't double-fire on the second outcome", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    const rec = recorder(updater);
+describe("overlapping checks", () => {
+  test("concurrent checks share one request to the feed", async () => {
+    const h = harness({ latest: RELEASE, holdCheck: true });
+    const a = h.controller.check({ userInitiated: false });
+    const b = h.controller.check({ userInitiated: false });
+    await settle();
+    h.updater.releaseCheck();
+    await Promise.all([a, b]);
+    assert.equal(h.updater.checkCalls, 1);
+  });
 
-    await checkForUpdate(false, rec.deps);
-    await checkForUpdate(true, rec.deps);
-
-    // Only the second (interactive) call should have surfaced a dialog.
-    assert.equal(rec.dialogs.length, 1);
-    assert.equal(rec.dialogs[0]?.kind, "info");
-    assert.equal(rec.dialogs[0]?.title, "No Updates Available");
-    assert.equal(updater.checkForUpdatesCalls, 2);
+  test("a menu check during a background check joins it and shows its result", async () => {
+    const h = harness({ holdCheck: true });
+    const background = h.controller.check({ userInitiated: false });
+    await settle();
+    const menu = h.controller.check({ userInitiated: true });
+    assert.deepEqual(h.controller.getStatus(), { state: "checking", userInitiated: true });
+    h.updater.releaseCheck();
+    await Promise.all([background, menu]);
+    assert.equal(h.updater.checkCalls, 1);
+    assert.deepEqual(h.controller.getStatus(), {
+      state: "up-to-date",
+      currentVersion: CURRENT,
+      userInitiated: true,
+    });
   });
 });
 
-describe("scheduleStartupCheck", () => {
-  test("returns no-op when not packaged (dev runs)", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available" });
+describe("download and restart", () => {
+  test("Update downloads with progress, then offers a restart", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    h.statuses.length = 0;
 
-    scheduleStartupCheck(false, {
-      updater,
-      delayMs: 5,
-      showInfo: async () => undefined,
-      showConfirm: async () => false,
-    });
+    await h.controller.download();
 
-    await delay(30);
-    assert.equal(updater.checkForUpdatesCalls, 0);
+    assert.equal(h.updater.downloadCalls, 1);
+    assert.deepEqual(
+      h.statuses.map((s) => (s.state === "downloading" ? `downloading ${s.percent}` : s.state)),
+      ["downloading 0", "downloading 12", "downloading 57", "downloading 100", "downloaded"],
+    );
+    assert.deepEqual(h.controller.getStatus(), { state: "downloaded", ...RELEASE_FIELDS });
+    assert.equal(h.restarts, 0);
+
+    h.controller.restart();
+    assert.equal(h.restarts, 1);
   });
 
-  test("fires checkForUpdate after delay when packaged", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-
-    scheduleStartupCheck(true, {
-      updater,
-      delayMs: 10,
-      showInfo: async () => undefined,
-      showConfirm: async () => false,
+  test("a download failure is reported and Retry downloads again", async () => {
+    const h = harness({
+      latest: RELEASE,
+      downloadError: "sha512 checksum mismatch",
+      downloadFailsOnce: true,
+    });
+    await h.controller.check({ userInitiated: false });
+    await h.controller.download();
+    assert.deepEqual(h.controller.getStatus(), {
+      state: "error",
+      message: "sha512 checksum mismatch",
+      phase: "download",
+      userInitiated: true,
     });
 
-    // Just past the delay.
+    await h.controller.download();
+    assert.equal(h.updater.downloadCalls, 2);
+    assert.equal(h.controller.getStatus().state, "downloaded");
+  });
+
+  test("a second click while downloading does not start another download", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    await Promise.all([h.controller.download(), h.controller.download()]);
+    assert.equal(h.updater.downloadCalls, 1);
+  });
+
+  test("download does nothing without an available update", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: true });
+    await h.controller.download();
+    assert.equal(h.updater.downloadCalls, 0);
+  });
+
+  test("restart does nothing before a download finishes", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    h.controller.restart();
+    assert.equal(h.restarts, 0);
+  });
+
+  test("after a download, checks skip the feed; a menu check brings back the restart offer", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    await h.controller.download();
+    h.controller.dismiss();
+
+    await h.controller.check({ userInitiated: false });
+    assert.deepEqual(h.controller.getStatus(), { state: "idle" });
+
+    await h.controller.check({ userInitiated: true });
+    assert.equal(h.updater.checkCalls, 1);
+    assert.deepEqual(h.controller.getStatus(), { state: "downloaded", ...RELEASE_FIELDS });
+  });
+
+  test("the toast can't be dismissed mid-download", async () => {
+    const h = harness({ latest: RELEASE });
+    await h.controller.check({ userInitiated: false });
+    const download = h.controller.download();
+    h.controller.dismiss();
+    assert.equal(h.controller.getStatus().state, "downloading");
+    await download;
+  });
+});
+
+describe("scheduling", () => {
+  test("checks after the startup delay, then on every interval, until stopped", async () => {
+    const h = harness();
+    const stop = h.controller.start({ startupDelayMs: 5, intervalMs: 200 });
+    assert.equal(h.updater.checkCalls, 0);
     await delay(50);
-    assert.equal(updater.checkForUpdatesCalls, 1);
+    assert.equal(h.updater.checkCalls, 1);
+    await delay(400);
+    stop();
+    const calls = h.updater.checkCalls;
+    assert.ok(calls >= 3, `expected startup + >=2 interval checks, got ${calls}`);
+    await delay(250);
+    assert.equal(h.updater.checkCalls, calls);
+    // Background checks with no update never show the toast.
+    assert.deepEqual(h.statuses, []);
   });
 
-  test("cancellation prevents the deferred check from running", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available" });
+  test("stopping before the startup delay prevents any check", async () => {
+    const h = harness();
+    const stop = h.controller.start({ startupDelayMs: 10, intervalMs: 10_000 });
+    stop();
+    await delay(30);
+    assert.equal(h.updater.checkCalls, 0);
+  });
 
-    const cancel = scheduleStartupCheck(true, {
-      updater,
-      delayMs: 50,
-      showInfo: async () => undefined,
-      showConfirm: async () => false,
-    });
-    cancel();
+  test("on wake, checks only when the last check is older than the interval", async () => {
+    const h = harness();
+    await h.controller.check({ userInitiated: false });
+    h.clock.now += 10 * 60 * 1000;
+    h.controller.checkIfStale();
+    await settle();
+    assert.equal(h.updater.checkCalls, 1);
 
-    await delay(80);
-    assert.equal(updater.checkForUpdatesCalls, 0);
+    h.clock.now += 60 * 60 * 1000;
+    h.controller.checkIfStale();
+    await settle();
+    assert.equal(h.updater.checkCalls, 2);
   });
 });
 
-// ---------------------------------------------------------------------------
-// pickAutoUpdater
-// ---------------------------------------------------------------------------
-//
-// Regression test for the bug shipped through v0.5.3: `electron-updater`
-// exposes `autoUpdater` via a CJS getter, and Node's dynamic-`import()` ESM
-// interop does not hoist getter-defined props onto the namespace's named
-// exports — they're reachable only through `.default`. The original code
-// read `mod.autoUpdater`, got `undefined`, and threw
-//   "Cannot set properties of undefined (setting 'autoDownload')"
-// when the user clicked "Check for Updates…".
+describe("release notes", () => {
+  test("long notes are truncated", async () => {
+    const note = `<p>${"a".repeat(2000)}</p>`;
+    const h = harness({ latest: { version: "0.31.0", releaseNotes: note } });
+    await h.controller.check({ userInitiated: false });
+    const status = h.controller.getStatus();
+    assert.equal(status.state, "available");
+    const notes = status.state === "available" ? status.releaseNotes : null;
+    assert.equal(notes, `${"a".repeat(600)}…`);
+  });
+
+  test("missing notes and name come through as null", async () => {
+    const h = harness({ latest: { version: "0.31.0" } });
+    await h.controller.check({ userInitiated: false });
+    const status = h.controller.getStatus();
+    assert.equal(status.state === "available" && status.releaseNotes, null);
+    assert.equal(status.state === "available" && status.releaseName, null);
+  });
+});
+
+describe("failure to load electron-updater", () => {
+  test("a menu check reports it in the toast", async () => {
+    const statuses: UpdateStatus[] = [];
+    const controller = new UpdateController({
+      currentVersion: CURRENT,
+      onStatus: (s) => statuses.push(s),
+      loadUpdater: async () => pickAutoUpdater({ default: {} }),
+    });
+    await controller.check({ userInitiated: true });
+    const last = statuses.at(-1);
+    assert.equal(last?.state, "error");
+    assert.match(last?.state === "error" ? last.message : "", /did not expose autoUpdater/);
+  });
+});
 
 describe("pickAutoUpdater", () => {
   test("prefers .default.autoUpdater (CJS-via-import shape)", () => {
@@ -388,250 +491,5 @@ describe("pickAutoUpdater", () => {
     // `autoUpdater` is undefined because Node didn't hoist the CJS getter.
     const mod = { default: {}, AppUpdater: class {} };
     assert.throws(() => pickAutoUpdater(mod), /did not expose autoUpdater singleton/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkForUpdateBackground — silent check used by the 10s startup + 2h
-// periodic banner pipeline. No dialogs. Returns { version } or null.
-// ---------------------------------------------------------------------------
-
-describe("checkForUpdateBackground", () => {
-  test("returns { version } when an update is available", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available", version: "4.5.6" });
-    const result = await checkForUpdateBackground({ updater });
-    assert.deepEqual(result, { version: "4.5.6" });
-    assert.equal(updater.checkForUpdatesCalls, 1);
-    assert.equal(updater.downloadUpdateCalls, 0); // banner-driven, not auto-download
-  });
-
-  test("returns null when no update is available", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    const result = await checkForUpdateBackground({ updater });
-    assert.equal(result, null);
-  });
-
-  test("returns null on error (silent — no dialog escape hatch)", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "error", errorMessage: "503" });
-    const result = await checkForUpdateBackground({ updater });
-    assert.equal(result, null);
-  });
-
-  test("forces autoDownload + autoInstallOnAppQuit off", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    updater.autoDownload = true;
-    updater.autoInstallOnAppQuit = true;
-    await checkForUpdateBackground({ updater });
-    assert.equal(updater.autoDownload, false);
-    assert.equal(updater.autoInstallOnAppQuit, false);
-  });
-
-  test("back-to-back calls don't cross-fire listeners", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available", version: "1.0.0" });
-    const r1 = await checkForUpdateBackground({ updater });
-    const r2 = await checkForUpdateBackground({ updater });
-    assert.deepEqual(r1, { version: "1.0.0" });
-    assert.deepEqual(r2, { version: "1.0.0" });
-    assert.equal(updater.checkForUpdatesCalls, 2);
-  });
-
-  test("skips when a check is already in flight (shared mutex)", async () => {
-    // Hold the first call inside `performCheck` by capturing the
-    // `update-not-available` listener and only invoking it once we want
-    // the first call to complete. Until then `inFlightCheck` is true and
-    // any second call should no-op.
-    let notAvailableListener: (() => void) | null = null;
-    const blockingUpdater: UpdaterLike = {
-      autoDownload: false,
-      autoInstallOnAppQuit: false,
-      on(event: string, listener: (...args: unknown[]) => void): void {
-        if (event === "update-not-available") notAvailableListener = listener as () => void;
-      },
-      removeAllListeners(): void {
-        notAvailableListener = null;
-      },
-      async checkForUpdates() {
-        return null; // resolves but doesn't emit — we drive the event below
-      },
-      async downloadUpdate() {
-        return null;
-      },
-      quitAndInstall() {},
-    };
-
-    const first = checkForUpdateBackground({ updater: blockingUpdater });
-    // Yield so the first call enters performCheck and registers its listener.
-    await delay(5);
-
-    // Second call: should no-op without touching its updater.
-    const tracker = new FakeUpdater({ checkOutcome: "available" });
-    const second = await checkForUpdateBackground({ updater: tracker });
-    assert.equal(second, null);
-    assert.equal(tracker.checkForUpdatesCalls, 0);
-
-    // Unblock the first call.
-    notAvailableListener?.();
-    const firstResult = await first;
-    assert.equal(firstResult, null);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// installPendingUpdate — banner-driven install. No dialogs.
-// ---------------------------------------------------------------------------
-
-describe("installPendingUpdate", () => {
-  test("downloads and restarts on success", async () => {
-    const updater = new FakeUpdater({
-      checkOutcome: "available", // unused — we don't run a check here
-      downloadOutcome: "downloaded",
-    });
-    let restarts = 0;
-    await installPendingUpdate({ updater, restart: () => restarts++ });
-    assert.equal(updater.downloadUpdateCalls, 1);
-    assert.equal(restarts, 1);
-  });
-
-  test("throws when the download fails (renderer flips banner to error)", async () => {
-    const updater = new FakeUpdater({
-      downloadOutcome: "error",
-      downloadErrorMessage: "checksum",
-    });
-    await assert.rejects(installPendingUpdate({ updater, restart: () => undefined }), /checksum/);
-  });
-
-  test("skips when an install is already in flight (mutex)", async () => {
-    // Hold the first install in the download phase by capturing the
-    // `update-downloaded` listener but never invoking it until we say so.
-    let downloadedListener: (() => void) | null = null;
-    let resolveDownload: (() => void) | null = null;
-    const blockingUpdater: UpdaterLike = {
-      autoDownload: false,
-      autoInstallOnAppQuit: false,
-      on(event: string, listener: (...args: unknown[]) => void): void {
-        if (event === "update-downloaded") downloadedListener = listener as () => void;
-      },
-      removeAllListeners(): void {
-        downloadedListener = null;
-      },
-      async checkForUpdates() {
-        return null;
-      },
-      async downloadUpdate() {
-        return new Promise<void>((resolve) => {
-          resolveDownload = resolve;
-        });
-      },
-      quitAndInstall() {},
-    };
-
-    let firstRestarts = 0;
-    const first = installPendingUpdate({
-      updater: blockingUpdater,
-      restart: () => firstRestarts++,
-    });
-    // Yield so the first call sets the guard and registers its listener.
-    await delay(5);
-
-    // Second call: should bail on the mutex without touching its updater.
-    const tracker = new FakeUpdater({ downloadOutcome: "downloaded" });
-    await installPendingUpdate({ updater: tracker, restart: () => undefined });
-    assert.equal(tracker.downloadUpdateCalls, 0);
-
-    // Unblock the first install so the test ends cleanly: emit downloaded,
-    // then resolve `downloadUpdate`'s promise.
-    downloadedListener?.();
-    resolveDownload?.();
-    await first;
-    assert.equal(firstRestarts, 1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// schedulePeriodicCheck — 2h ticker, banner-driven.
-// ---------------------------------------------------------------------------
-
-describe("schedulePeriodicCheck", () => {
-  test("returns no-op when not packaged (dev runs)", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available" });
-    let results = 0;
-    schedulePeriodicCheck(false, {
-      updater,
-      intervalMs: 10,
-      onResult: () => results++,
-    });
-    await delay(40);
-    assert.equal(updater.checkForUpdatesCalls, 0);
-    assert.equal(results, 0);
-  });
-
-  test("fires onResult on every tick", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available", version: "2.0.0" });
-    const observed: PendingUpdate[] = [];
-    const cancel = schedulePeriodicCheck(true, {
-      updater,
-      intervalMs: 15,
-      onResult: (p) => observed.push(p),
-    });
-
-    // Wait for a few ticks. setInterval doesn't fire immediately — first tick
-    // lands at ~intervalMs.
-    await delay(55);
-    cancel();
-
-    assert.ok(observed.length >= 2, `expected >=2 ticks, got ${observed.length}`);
-    for (const o of observed) {
-      assert.deepEqual(o, { version: "2.0.0" });
-    }
-  });
-
-  test("cancellation stops further ticks", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    let results = 0;
-    const cancel = schedulePeriodicCheck(true, {
-      updater,
-      intervalMs: 10,
-      onResult: () => results++,
-    });
-    // Let one tick fire, then cancel.
-    await delay(25);
-    cancel();
-    const callsAfterCancel = updater.checkForUpdatesCalls;
-    await delay(40);
-    assert.equal(updater.checkForUpdatesCalls, callsAfterCancel);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// scheduleStartupCheck — refactored to use the background flow + onResult.
-// ---------------------------------------------------------------------------
-
-describe("scheduleStartupCheck (background mode)", () => {
-  test("invokes onResult with the available update", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "available", version: "7.7.7" });
-    let observed: PendingUpdate = "sentinel" as unknown as PendingUpdate;
-    scheduleStartupCheck(true, {
-      updater,
-      delayMs: 5,
-      onResult: (p) => {
-        observed = p;
-      },
-    });
-    await delay(40);
-    assert.deepEqual(observed, { version: "7.7.7" });
-  });
-
-  test("invokes onResult with null when no update is available", async () => {
-    const updater = new FakeUpdater({ checkOutcome: "not-available" });
-    let observed: PendingUpdate = "sentinel" as unknown as PendingUpdate;
-    scheduleStartupCheck(true, {
-      updater,
-      delayMs: 5,
-      onResult: (p) => {
-        observed = p;
-      },
-    });
-    await delay(40);
-    assert.equal(observed, null);
   });
 });

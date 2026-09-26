@@ -13,7 +13,7 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow, powerMonitor, protocol, session } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BROWSER_PARTITION, BrowserViewManager } from "../browser/view-manager.js";
 import { Events } from "../shared/ipc-channels.js";
@@ -27,12 +27,7 @@ import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
-import {
-  installPendingUpdate,
-  type PendingUpdate,
-  schedulePeriodicCheck,
-  scheduleStartupCheck,
-} from "./updater.js";
+import { isUpdaterEnabled, UpdateController } from "./updater.js";
 import { createMainWindow } from "./window.js";
 
 const log = createLogger("desktop");
@@ -50,13 +45,8 @@ interface AppState {
    */
   certExceptions: CertExceptionStore;
   unregisterIpc: (() => void) | null;
-  cancelStartupUpdateCheck: (() => void) | null;
-  cancelPeriodicUpdateCheck: (() => void) | null;
-  /** The most recently observed available update, or null. Owned here so
-   *  the renderer can ask via `updater_status` (catching the race where it
-   *  mounts after the startup check completed) and so the broadcast layer
-   *  can dedupe by version. */
-  pendingUpdate: PendingUpdate;
+  /** Cancels the background update checks started in `bootstrap`. */
+  stopUpdateChecks: (() => void) | null;
   activityMonitor: ActivityMonitorHandle | null;
   cleanedUp: boolean;
   port: number;
@@ -73,9 +63,7 @@ const state: AppState = {
   browserManager: null,
   certExceptions: new CertExceptionStore(),
   unregisterIpc: null,
-  cancelStartupUpdateCheck: null,
-  cancelPeriodicUpdateCheck: null,
-  pendingUpdate: null,
+  stopUpdateChecks: null,
   activityMonitor: null,
   cleanedUp: false,
   port: getConfiguredPort(),
@@ -83,18 +71,76 @@ const state: AppState = {
 };
 
 /**
- * Broadcast the current `pendingUpdate` to every renderer (multi-window
- * safe). Dedupes by version so a stable periodic-no-update tick doesn't
- * re-render the banner every 2h.
+ * Owns the auto-update flow for the life of the process, so a download
+ * started from the toast keeps its state across a dashboard reload. Every
+ * status change goes to every renderer, which shows it in the update toast.
  */
-function setPendingUpdate(next: PendingUpdate): void {
-  const prevVersion = state.pendingUpdate?.version ?? null;
-  const nextVersion = next?.version ?? null;
-  if (prevVersion === nextVersion) return;
-  state.pendingUpdate = next;
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    win.webContents.send("updater-status-changed", next);
+const updates = new UpdateController({
+  currentVersion: app.getVersion(),
+  onStatus: (status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send(Events.updaterStatusChanged, status);
+    }
+  },
+});
+
+/** "Check for Updates…": bring the dashboard forward so its toast is seen. */
+function checkForUpdatesFromMenu(): void {
+  const win = state.mainWindow;
+  if (!win || win.isDestroyed()) {
+    // On macOS the app outlives its closed window, and no renderer is left
+    // to show the toast. Run the same flow with native dialogs instead.
+    void checkForUpdatesWithDialogs().catch((err) => {
+      log.error({ err: String(err) }, "check for updates (no window) failed");
+    });
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  void updates.check({ userInitiated: true });
+}
+
+async function checkForUpdatesWithDialogs(): Promise<void> {
+  await updates.check({ userInitiated: true });
+  let status = updates.getStatus();
+  if (status.state === "available") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is available`,
+      detail: `You have v${status.currentVersion}.`,
+      buttons: ["Update", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+    await updates.download();
+    status = updates.getStatus();
+  }
+  if (status.state === "downloaded") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is ready`,
+      detail: "Restart Band to finish updating. It also installs when you quit.",
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) updates.restart();
+  } else if (status.state === "up-to-date") {
+    await dialog.showMessageBox({
+      type: "info",
+      message: "You're on the latest version",
+      detail: `Band v${status.currentVersion}`,
+    });
+  } else if (status.state === "error") {
+    await dialog.showMessageBox({
+      type: "warning",
+      message:
+        status.phase === "download" ? "Couldn't download the update" : "Couldn't check for updates",
+      detail: status.message,
+    });
   }
 }
 
@@ -141,11 +187,10 @@ async function cleanupOnce(): Promise<void> {
   if (state.cleanedUp) return;
   state.cleanedUp = true;
 
-  // Cancel any pending update checks so the deferred timers don't fire
-  // mid-shutdown. The 10s startup delay can outlive a quick Cmd+Q, and
-  // the 2h periodic interval would otherwise tick during teardown.
-  state.cancelStartupUpdateCheck?.();
-  state.cancelPeriodicUpdateCheck?.();
+  // Cancel the update timers so they don't fire mid-shutdown. The 10s
+  // startup delay can outlive a quick Cmd+Q.
+  state.stopUpdateChecks?.();
+  state.stopUpdateChecks = null;
   state.activityMonitor?.stop();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
@@ -215,7 +260,10 @@ async function bootstrap(): Promise<void> {
   // creating the window so Cmd+, etc. are bound from the first frame.
   // The Reload item resolves `state.browserManager` lazily because the
   // manager is constructed later, after `createMainWindow`.
-  installAppMenu({ getBrowserManager: () => state.browserManager });
+  installAppMenu({
+    getBrowserManager: () => state.browserManager,
+    checkForUpdates: checkForUpdatesFromMenu,
+  });
 
   // macOS dock icon. In a packaged build this comes from the .app's .icns
   // (Info.plist resolves CFBundleIconFile); in dev there's no bundle so we
@@ -302,27 +350,15 @@ async function bootstrap(): Promise<void> {
       resourcesPath: process.resourcesPath,
       appPath: app.getAppPath(),
     },
-    // Background app-update banner: the renderer reads `pendingUpdate`
-    // on mount and subscribes to `updater-status-changed`; `installUpdate`
-    // drives electron-updater's download + quitAndInstall.
-    getPendingUpdate: () => state.pendingUpdate,
-    installUpdate: () => installPendingUpdate(),
+    updates,
   });
 
-  // Auto-update check 10s after launch (matches the Tauri shell's
-  // `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run). No-op
-  // in unpacked dev runs (`!app.isPackaged`) — see updater.ts. The
-  // result feeds the in-app banner via `setPendingUpdate` instead of an
-  // OS dialog (the menu item "Check for Updates…" keeps the dialog flow).
-  state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
-    onResult: setPendingUpdate,
-  });
-
-  // Periodic re-check every 2h while the app is running. Same gating + same
-  // banner pipeline as the startup check.
-  state.cancelPeriodicUpdateCheck = schedulePeriodicCheck(app.isPackaged, {
-    onResult: setPendingUpdate,
-  });
+  // Background update checks: 10s after launch so the dashboard has loaded,
+  // then hourly. They surface in the toast only when they find an update.
+  // Skipped in unpacked dev runs, where electron-updater refuses to run.
+  if (isUpdaterEnabled(app.isPackaged)) {
+    state.stopUpdateChecks = updates.start();
+  }
 
   // Watch focus + AC/battery state and tell the web server to widen the
   // branch-status poller interval whenever the user isn't actively using
@@ -359,6 +395,11 @@ async function bootstrap(): Promise<void> {
     };
     powerMonitor.on("resume", sendSystemResumed);
     powerMonitor.on("unlock-screen", sendSystemResumed);
+    // The hourly update timer doesn't advance while the Mac sleeps, so a
+    // laptop woken each morning would otherwise wait up to an hour more.
+    powerMonitor.on("resume", () => {
+      if (state.stopUpdateChecks) updates.checkIfStale();
+    });
   }
 }
 
