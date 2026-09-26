@@ -8,9 +8,9 @@
  * The browser pane's find-in-page is not covered here: it needs the Electron
  * WebContentsView, which the web build that e2e boots does not create.
  *
- * Architecture (repo integration doctrine): boots the real production server
- * against a fresh tmp home and a real git worktree, and drives a real Chromium
- * through page objects. No tRPC mocking, no `page.route()` on own routes.
+ * Boots the real production server against a fresh tmp home and a real git
+ * worktree, and drives a real Chromium through page objects. No tRPC mocking,
+ * no `page.route()` on own routes.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -27,7 +27,7 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
-import { FindWidget, topOf, type WidgetPlacement } from "./pages/FindWidget";
+import { topOf, type WidgetPlacement } from "./pages/FindWidget";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-find-widget-floating-token";
@@ -98,14 +98,13 @@ test("file editor: the find widget floats top-right and steps through matches", 
   await workspacePage.openFileLeaf(FILE, WORKSPACE);
   await workspacePage.focusFileEditor(FILE);
 
-  const leaf = workspacePage.fileLeafVisibilityMarker(true).first();
   // A fixture line, not the editor's textbox: once the widget opens, its own
   // input is the leaf's first textbox.
   const firstLine = workspacePage.fileLeafLine("const needle = 1;");
   const lineTopBefore = await topOf(firstLine);
 
   await workspacePage.pressFindShortcut();
-  const find = new FindWidget(leaf);
+  const find = workspacePage.fileLeafFindWidget();
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
   // Laid over the editor, not stacked above it.
@@ -144,7 +143,7 @@ test("diff: the find widget floats top-right over the diff", async ({ page }) =>
   const scrollerTopBefore = await topOf(changes.diffScroller);
 
   await workspacePage.pressFindShortcut();
-  const find = new FindWidget(changes.diffLeaf);
+  const find = changes.diffFindWidget;
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
   expect(await topOf(changes.diffScroller)).toBe(scrollerTopBefore);
@@ -169,12 +168,11 @@ test("terminal: the find widget floats top-right over the terminal", async ({ pa
     /ZQX_FOUND[\s\S]*ZQX_FOUND/,
   );
 
-  const pane = workspacePage.terminalPanes().first();
   const screen = workspacePage.terminalScreen();
   const screenTopBefore = await topOf(screen);
 
   await workspacePage.pressFindShortcut();
-  const find = new FindWidget(pane);
+  const find = workspacePage.terminalPaneFindWidget();
   await expect(find.input).toBeFocused();
   expectTopRight(await find.placement());
   expect(await topOf(screen)).toBe(screenTopBefore);

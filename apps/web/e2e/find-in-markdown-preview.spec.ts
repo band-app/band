@@ -134,15 +134,14 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // preview modes — only the search target differs internally. The
   // placeholder flips to "Find in preview..." while the preview is the
   // active surface.
-  const findInput = page.getByPlaceholder(/Find in (preview|file)\.\.\./);
-  await expect(findInput).toHaveCount(0);
+  const viewer = new FileViewerPage(page);
+  const find = viewer.findWidget;
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
 
   // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
   // the way a user clicks into what they're reading. (Tapping the file in the
   // Explorer sheet leaves focus on the tree row, outside the leaf.)
-  const viewer = new FileViewerPage(page);
   await viewer.clickIntoPreview("Test Document");
-  const find = viewer.findWidget;
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
@@ -154,12 +153,12 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // Exactly one find widget should appear, floating over the preview. The old
   // "stacked bars" regression (#435 follow-up) would surface here as a
   // second input with the same placeholder.
-  await expect(findInput).toHaveCount(1);
-  await expect(findInput).toBeVisible();
-  await expect(findInput).toBeFocused();
-  await expect(findInput).toHaveAttribute("placeholder", "Find in preview...");
+  await expect(viewer.allFileFindInputs).toHaveCount(1);
+  await expect(find.input).toBeVisible();
+  await expect(find.input).toBeFocused();
+  await expect(find.input).toHaveAttribute("placeholder", "Find in preview...");
 
-  await findInput.fill("needle");
+  await find.type("needle");
 
   // "needle" appears 3× in the fixture — once in the first paragraph,
   // once under Section A, and once under Section B. The counter starts
@@ -167,26 +166,26 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   await expect(find.count).toHaveText("1/3");
 
   // Enter advances to the next match.
-  await findInput.press("Enter");
+  await find.press("Enter");
   await expect(find.count).toHaveText("2/3");
 
-  await findInput.press("Enter");
+  await find.press("Enter");
   await expect(find.count).toHaveText("3/3");
 
   // Wrap-around: another Enter cycles back to the first match.
-  await findInput.press("Enter");
+  await find.press("Enter");
   await expect(find.count).toHaveText("1/3");
 
   // Shift+Enter walks backwards.
-  await findInput.press("Shift+Enter");
+  await find.press("Shift+Enter");
   await expect(find.count).toHaveText("3/3");
 
   // A query with no matches marks the input invalid (the counter then reads
   // "No results").
-  await findInput.fill("xyzzzzzzzzzzzz");
+  await find.type("xyzzzzzzzzzzzz");
   await find.expectNoResults();
 
   // Escape closes the bar.
-  await findInput.press("Escape");
-  await expect(findInput).toHaveCount(0);
+  await find.press("Escape");
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
 });

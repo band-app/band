@@ -53,6 +53,12 @@ export class FileViewerPage {
     return new FindWidget(this.root);
   }
 
+  /** Every file or preview find input on the whole page, unscoped, so a spec
+   *  can assert exactly one opened (the "stacked bars" regression, #435). */
+  get allFileFindInputs(): Locator {
+    return this.page.getByPlaceholder(/Find in (preview|file)\.\.\./);
+  }
+
   /** The active file viewer's CodeMirror content element. */
   private get editor(): Locator {
     return this.root.locator(".cm-content").first();

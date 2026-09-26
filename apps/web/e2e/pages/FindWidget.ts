@@ -30,7 +30,9 @@ export class FindWidget {
 
   constructor(private readonly pane: Locator) {
     this.root = pane.getByTestId("find-widget");
-    this.input = this.root.getByRole("textbox");
+    // Accessible name is the pane's placeholder ("Find in file...", "Find in
+    // terminal...", ...), set as `aria-label` in `SearchBar.tsx`.
+    this.input = this.root.getByRole("textbox", { name: /^Find in/ });
     this.count = this.root.getByTestId("find-widget__count");
     // Button names come from the `title` attributes set in `SearchBar.tsx`.
     this.matchCaseToggle = this.root.getByRole("button", { name: "Match Case" });
