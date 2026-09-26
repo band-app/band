@@ -19,6 +19,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
 
 /** Test id on the `FileViewer` root element (set in FileViewer.tsx).
@@ -57,6 +58,11 @@ export class FileViewerPage {
    *  can assert exactly one opened (the "stacked bars" regression, #435). */
   get allFileFindInputs(): Locator {
     return this.page.getByPlaceholder(/Find in (preview|file)\.\.\./);
+  }
+
+  /** Go-to-definition (Cmd/Ctrl+hover link, Cmd/Ctrl+Click) in the editor. */
+  get symbols(): CodeSymbolLinks {
+    return new CodeSymbolLinks(this.page, this.root);
   }
 
   /** The active file viewer's CodeMirror content element. */

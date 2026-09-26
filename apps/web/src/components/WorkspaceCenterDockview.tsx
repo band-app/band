@@ -66,6 +66,7 @@ import {
   AgentIcon,
   buildLspWsUrl,
   type ChatInsertDetail,
+  createDiffLspNavigation,
   createLspExtension,
   DiffFileContent,
   DiffOverviewRuler,
@@ -918,18 +919,15 @@ function useLeafFind(
 }
 
 // ---------------------------------------------------------------------------
-// Per-file LSP extension for the file leaf
+// Per-file LSP extensions for the file and diff leaves
 // ---------------------------------------------------------------------------
 //
-// Mirrors CodeBrowserView's LSP wiring (createLspExtension on mount /
-// path+language change, releaseLspClient on cleanup). External + untitled
-// paths get no LSP (external files are outside the project root; untitled
-// buffers have no file URI). `createLspExtension` / `releaseLspClient`
-// refcount a shared client per WS url, so multiple file leaves open at once
-// acquire/release safely — same guarantee CodeBrowserView relies on.
+// External + untitled paths get no LSP (external files are outside the project
+// root; untitled buffers have no file URI). The LSP clients are refcounted per
+// WS url, so several leaves on one workspace share a language server; each
+// effect run releases exactly the reference it acquired.
 
-// Maps a file extension to the CodeMirror language name used by the LSP layer
-// (identical table to CodeBrowserView's).
+// Maps a file extension to the CodeMirror language name used by the LSP layer.
 const LSP_EXT_LANG_MAP: Record<string, string> = {
   ts: "typescript",
   tsx: "tsx",
@@ -946,10 +944,19 @@ function fileCmLang(filePath: string): string | undefined {
   return ext ? LSP_EXT_LANG_MAP[ext] : undefined;
 }
 
-function useFileLeafLsp(
+type LspExtensionFactory = (
+  wsUrl: string,
+  rootUri: string,
+  documentUri: string,
+  languageId: string,
+  workspaceId: string,
+) => Promise<Extension>;
+
+function useLeafLsp(
   workspaceId: string,
   filePath: string,
-  external: boolean,
+  disabled: boolean,
+  create: LspExtensionFactory,
 ): Extension | null {
   const { settings } = useSettingsQuery();
   const workspacePath = useWorkspacePath(workspaceId);
@@ -958,14 +965,12 @@ function useFileLeafLsp(
   // can hold hundreds of MB) and re-acquires it when shown again.
   const coldParked = useWorkspaceColdParked(workspaceId);
 
-  // External / untitled files skip LSP entirely (no useful project context /
-  // no file URI). Only TS/JS-family files have a mapped server language.
+  // Only TS/JS-family files have a mapped server language.
   const lspServerLang = useMemo(() => {
-    if (!settings.enableLSP || coldParked) return null;
-    if (external || isUntitledPath(filePath)) return null;
+    if (!settings.enableLSP || coldParked || disabled) return null;
     const cmLang = fileCmLang(filePath);
     return cmLang ? toLspServerLang(cmLang) : null;
-  }, [filePath, external, settings.enableLSP, coldParked]);
+  }, [filePath, disabled, settings.enableLSP, coldParked]);
 
   const lspWsUrl = useMemo(
     () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
@@ -973,34 +978,31 @@ function useFileLeafLsp(
   );
 
   useEffect(() => {
-    if (!lspWsUrl || !workspacePath) {
-      setLspExtension(null);
-      return;
-    }
+    setLspExtension(null);
+    if (!lspWsUrl || !workspacePath) return;
     let cancelled = false;
-    const rootUri = toFileUri(workspacePath);
-    const documentUri = toFileUri(workspacePath, filePath);
     const cmLang = fileCmLang(filePath);
-    const languageId = cmLang ? getLspLanguageId(cmLang) : undefined;
-    createLspExtension(lspWsUrl, rootUri, documentUri, languageId, workspaceId)
+    const created = create(
+      lspWsUrl,
+      toFileUri(workspacePath),
+      toFileUri(workspacePath, filePath),
+      (cmLang && getLspLanguageId(cmLang)) || "",
+      workspaceId,
+    );
+    created
       .then((ext) => {
         if (!cancelled) setLspExtension(ext);
       })
-      .catch((err) => {
-        console.warn("[FileLeaf] LSP extension creation failed:", err);
-        if (!cancelled) setLspExtension(null);
-      });
+      .catch((err) => console.warn("[leaf] LSP extension creation failed:", err));
     return () => {
       cancelled = true;
+      // Release only once the client was acquired (a failed connect holds none).
+      created.then(
+        () => releaseLspClient(lspWsUrl),
+        () => {},
+      );
     };
-  }, [lspWsUrl, workspacePath, filePath, workspaceId]);
-
-  // Release the shared client for the *previous* url on change / unmount.
-  useEffect(() => {
-    return () => {
-      if (lspWsUrl) releaseLspClient(lspWsUrl);
-    };
-  }, [lspWsUrl]);
+  }, [lspWsUrl, workspacePath, filePath, workspaceId, create]);
 
   return lspExtension;
 }
@@ -1058,7 +1060,12 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   const capabilities = useCapabilities();
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
   const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
-  const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+  const lspExtension = useLeafLsp(
+    workspaceIdRaw,
+    filePathRaw,
+    external || untitled,
+    createLspExtension,
+  );
   const coldParked = useWorkspaceColdParked(workspaceIdRaw);
 
   const workspacePath = useWorkspacePath(workspaceIdRaw);
@@ -1277,7 +1284,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         external={external}
         untitled={untitled}
         // LSP is workspace-scoped: external files have no project root and
-        // untitled buffers have no file URI, so `useFileLeafLsp` returns null
+        // untitled buffers have no file URI, so `useLeafLsp` returns null
         // for both — pass it straight through.
         lspExtension={lspExtension}
         // A cold-parked hidden workspace releases its server-side file watcher.
@@ -1359,6 +1366,13 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
   const adapter = useAdapter();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
   useActiveFileTracking(api, workspaceId ?? "", filePath ?? "", visible);
+  // Go-to-definition on the working-tree side (see `createDiffLspNavigation`).
+  const lspNavigation = useLeafLsp(
+    workspaceId ?? "",
+    filePath ?? "",
+    false,
+    createDiffLspNavigation,
+  );
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
@@ -1498,6 +1512,7 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
               viewMode={isMobile ? "unified" : viewMode}
               onEditorViews={handleEditorViews}
               copyReferenceOnly={!isMobile}
+              lspNavigation={lspNavigation}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">

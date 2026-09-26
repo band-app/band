@@ -29,6 +29,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-sidebar: var(--sidebar);
   --color-destructive: var(--destructive);
+  --color-link: var(--link);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -72,6 +73,8 @@
      the workspace layout. */
   --sidebar: oklch(0.962 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Clickable text in code, e.g. a Cmd/Ctrl+hover go-to-definition link. */
+  --link: oklch(0.546 0.245 262.881);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -112,6 +115,7 @@
      from the workspace layout (mirrors the VS Code editor/sidebar contrast). */
   --sidebar: #252526;
   --destructive: oklch(0.704 0.191 22.216);
+  --link: oklch(0.707 0.165 254.624);
   --border: oklch(0.35 0 0);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.556 0 0);

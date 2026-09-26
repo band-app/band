@@ -1,5 +1,5 @@
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
-import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
+import { Compartment, EditorState, type Extension, RangeSetBuilder, Text } from "@codemirror/state";
 import { Decoration, EditorView, lineNumbers, WidgetType } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
@@ -242,6 +242,7 @@ export function DiffFileContent({
   onEditorViews,
   onLoadMoreContext,
   copyReferenceOnly = false,
+  lspNavigation = null,
 }: {
   hunks: string;
   filename: string;
@@ -251,10 +252,23 @@ export function DiffFileContent({
   /** When true, the selection tooltip shows only "Copy reference" (no Add to
    *  Chat/Terminal) — used by the desktop diff leaf (#643). */
   copyReferenceOnly?: boolean;
+  /** Go-to-definition for the working-tree (new) side, from
+   *  `createDiffLspNavigation`. Attached only while the diff shows the whole
+   *  file, where a line in the view is the same line on disk. The old side
+   *  never gets it: its text is the merge-base revision, which the language
+   *  server does not have. */
+  lspNavigation?: Extension | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
   const isDark = useIsDark();
+  // The navigation arrives after the editor is built (the LSP client connects
+  // asynchronously), so it goes in a compartment instead of rebuilding.
+  const lspCompartment = useRef(new Compartment()).current;
+  const lspNavigationRef = useRef(lspNavigation);
+  lspNavigationRef.current = lspNavigation;
+  /** The working-tree view, set only when its document is the whole file. */
+  const lspTargetRef = useRef<EditorView | null>(null);
 
   // Use ref pattern so callback identity changes don't re-run the setup effect
   const onEditorViewsRef = useRef(onEditorViews);
@@ -287,6 +301,10 @@ export function DiffFileContent({
         newHunkBoundaryLines,
         oldHunkBoundaryLines,
       } = parseDiff(hunks);
+      const wholeFile = newLineNumbers.every((n, i) => n === i + 1);
+      const lspExtension = lspCompartment.of(
+        wholeFile && lspNavigationRef.current ? lspNavigationRef.current : [],
+      );
 
       const loadMore = () => onLoadMoreRef.current?.();
 
@@ -325,6 +343,7 @@ export function DiffFileContent({
               makeLineNumbers(newLineNumbers),
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
+              lspExtension,
               ...sharedExtensions,
             ],
           },
@@ -333,6 +352,7 @@ export function DiffFileContent({
           gutter: true,
         });
 
+        lspTargetRef.current = wholeFile ? viewRef.current.b : null;
         onEditorViewsRef.current?.([viewRef.current.a, viewRef.current.b]);
       } else {
         const extensions = [
@@ -341,6 +361,7 @@ export function DiffFileContent({
           hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
           selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
+          lspExtension,
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
@@ -363,6 +384,7 @@ export function DiffFileContent({
           parent: container,
         });
 
+        lspTargetRef.current = wholeFile ? viewRef.current : null;
         onEditorViewsRef.current?.([viewRef.current]);
       }
     };
@@ -394,13 +416,18 @@ export function DiffFileContent({
 
     return () => {
       cancelled = true;
+      lspTargetRef.current = null;
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
       }
       onEditorViewsRef.current?.([]);
     };
-  }, [hunks, filename, viewMode, isDark, copyReferenceOnly]);
+  }, [hunks, filename, viewMode, isDark, copyReferenceOnly, lspCompartment]);
+
+  useEffect(() => {
+    lspTargetRef.current?.dispatch({ effects: lspCompartment.reconfigure(lspNavigation ?? []) });
+  }, [lspNavigation, lspCompartment]);
 
   return <div ref={containerRef} />;
 }

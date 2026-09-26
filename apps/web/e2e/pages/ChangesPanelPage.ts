@@ -18,6 +18,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -82,6 +83,14 @@ export class ChangesPanelPage {
   /** The floating find widget of the visible diff leaf. */
   get diffFindWidget(): FindWidget {
     return new FindWidget(this.diffLeaf);
+  }
+
+  /** Go-to-definition on one editor of the visible diff leaf: `"new"` is the
+   *  working-tree side (the only editor in unified mode, the right one in
+   *  split mode), `"old"` the merge-base side of a split. */
+  symbols(side: "new" | "old" = "new"): CodeSymbolLinks {
+    const editors = this.diffLeaf.locator(".cm-editor");
+    return new CodeSymbolLinks(this.page, side === "old" ? editors.first() : editors.last());
   }
 
   /** A changed-file row in the Changes tree, keyed by workspace-relative path. */

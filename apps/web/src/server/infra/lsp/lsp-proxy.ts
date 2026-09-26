@@ -114,6 +114,11 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // This happens when a definition request arrives before tsserver has finished
   // loading the configured project for the file (race condition after didOpen).
   const pendingRequests = new Map<number, string>();
+  // Documents this connection opened and has not closed. The language server
+  // outlives the connection, so without closing them on disconnect the next
+  // connection's `didOpen` of the same file (a page reload) is rejected as
+  // "already open" and tsserver answers "No Project" for it.
+  const openDocuments = new Set<string>();
   const retriedIds = new Set<number>();
   const RETRY_DELAY_MS = 2000;
 
@@ -187,12 +192,20 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
     );
 
     // Track requests (messages with an "id" field) so we can retry on
-    // transient errors from the language server.
+    // transient errors from the language server, and the documents this
+    // connection holds open so they can be closed when it goes away.
     try {
-      const msg = JSON.parse(json) as { id?: number; method?: string };
+      const msg = JSON.parse(json) as {
+        id?: number;
+        method?: string;
+        params?: { textDocument?: { uri?: string } };
+      };
       if (msg.id != null && msg.method) {
         pendingRequests.set(msg.id, json);
       }
+      const uri = msg.params?.textDocument?.uri;
+      if (uri && msg.method === "textDocument/didOpen") openDocuments.add(uri);
+      if (uri && msg.method === "textDocument/didClose") openDocuments.delete(uri);
     } catch {
       // Not valid JSON — forward as-is
     }
@@ -219,6 +232,15 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   ws.on("close", () => {
     lspProcess.stdout?.off("data", onStdoutData);
     lspProcess.off("exit", onExit);
+    for (const uri of openDocuments) {
+      forwardToStdin(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "textDocument/didClose",
+          params: { textDocument: { uri } },
+        }),
+      );
+    }
     log.debug("LSP client disconnected: %s/%s (server kept alive)", workspaceId, lang);
   });
 }
