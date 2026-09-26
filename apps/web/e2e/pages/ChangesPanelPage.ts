@@ -42,6 +42,10 @@ export class ChangesPanelPage {
   readonly defaultBranchButton: Locator;
   /** Branch options in the open picker (excludes "Uncommitted"). */
   readonly branchOptions: Locator;
+  /** The picker's "Uncommitted" option. */
+  readonly uncommittedOption: Locator;
+  /** Shown when no branch matches the search. */
+  readonly noBranchesMatch: Locator;
   /** Notice shown when more branches matched than the picker lists. */
   readonly truncatedNotice: Locator;
   /** First option in the open diff-target dropdown. */
@@ -78,6 +82,8 @@ export class ChangesPanelPage {
     this.diffTargetSearch = page.getByTestId("right-sidepanel__diff-target-search");
     this.defaultBranchButton = page.getByTestId("right-sidepanel__diff-target-default");
     this.branchOptions = page.getByTestId("right-sidepanel__diff-target-option");
+    this.uncommittedOption = page.getByTestId(UNCOMMITTED_OPTION_TESTID);
+    this.noBranchesMatch = page.getByTestId("right-sidepanel__diff-target-empty");
     this.truncatedNotice = page.getByTestId("right-sidepanel__diff-target-truncated");
     this.firstDiffTargetOption = page.getByRole("option").first();
     this.diffLeaf = page.getByTestId("center-diff-leaf__visible-true");
@@ -175,6 +181,13 @@ export class ChangesPanelPage {
     });
   }
 
+  /** Click the picker's "Uncommitted" option. */
+  async pickUncommitted(): Promise<void> {
+    await test.step("Pick Uncommitted", async () => {
+      await this.uncommittedOption.click();
+    });
+  }
+
   /** Click the picker's "Default branch" button. */
   async pickDefaultBranch(): Promise<void> {
     await test.step("Pick the default branch", async () => {
@@ -191,7 +204,7 @@ export class ChangesPanelPage {
    *  `aria-selected`). */
   async highlightedOption(): Promise<string | null> {
     const option = this.page.getByRole("option", { selected: true });
-    return (await option.count()) === 0 ? null : (await option.textContent())?.trim() ?? null;
+    return (await option.count()) === 0 ? null : ((await option.textContent())?.trim() ?? null);
   }
 
   /** Open the diff-target dropdown. The picker renders into a portal and

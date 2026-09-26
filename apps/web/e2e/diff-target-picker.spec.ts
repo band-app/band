@@ -10,6 +10,8 @@
  *    it, and the pick survives a reload (persisted per workspace).
  *  - The "Default branch" button resets the target to the project default.
  *  - Escape closes the picker without changing the target.
+ *  - "Uncommitted" switches back from a branch target, and is only offered
+ *    while the search box is empty.
  *
  * The repo is real git in a temp dir: 60 filler branches (more than the
  * picker's 50-branch page), plus remote-tracking refs written with
@@ -124,7 +126,8 @@ test("Picker lists one page of branches and narrows to remote matches as you typ
   await expect(changes.truncatedNotice).toHaveCount(0);
   // The remote pointer `origin/HEAD` is never offered.
   await changes.searchBranches("HEAD");
-  await expect.poll(() => changes.visibleBranchOptions()).toEqual([]);
+  await expect(changes.noBranchesMatch).toBeVisible();
+  await expect(changes.branchOptions).toHaveCount(0);
 });
 
 test("Keyboard picks a branch, the tree diffs against it, and the pick persists", async ({
@@ -165,6 +168,7 @@ test("Default branch button resets the target, and Escape closes without a chang
   await changes.openDiffTargetDropdown();
   await changes.searchBranches("release-cand");
   await expect.poll(() => changes.visibleBranchOptions()).toEqual([REMOTE_BRANCH]);
+  await expect.poll(() => changes.highlightedOption()).toBe(REMOTE_BRANCH);
   await changes.pressInPicker("Enter");
   await expect.poll(() => changes.compareBranch()).toBe(REMOTE_BRANCH);
 
@@ -181,4 +185,27 @@ test("Default branch button resets the target, and Escape closes without a chang
   await changes.pressInPicker("Escape");
   await expect(changes.diffTargetPicker).toHaveCount(0);
   await expect.poll(() => changes.compareBranch()).toBe(DEFAULT_BRANCH);
+});
+
+test("Uncommitted switches back from a branch target and hides while searching", async ({
+  page,
+}) => {
+  const changes = new ChangesPanelPage(page, server.url, TOKEN);
+  await changes.goto(workspaceId);
+
+  await changes.openDiffTargetDropdown();
+  await changes.pickDefaultBranch();
+  await expect(changes.changesTreeRow(COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
+
+  await changes.openDiffTargetDropdown();
+  await changes.searchBranches("filler-1");
+  await expect(changes.branchOptions.first()).toBeVisible();
+  await expect(changes.uncommittedOption).toHaveCount(0);
+  await changes.searchBranches("");
+  await expect(changes.uncommittedOption).toBeVisible();
+  await changes.pickUncommitted();
+
+  await expect.poll(() => changes.diffMode()).toBe("uncommitted");
+  await expect(changes.changesTreeRow(EDITED_FILE)).toBeVisible();
+  await expect(changes.changesTreeRow(COMMITTED_FILE)).toHaveCount(0);
 });

@@ -99,17 +99,26 @@ export function DiffTargetHeader({
     if (open) setActiveValue(selectedValue);
   }, [open, selectedValue]);
 
+  // True while the list still shows the matches of an earlier query.
+  const pending = query.trim() !== debouncedQuery || branchesQuery.isPlaceholderData;
+
   // Results arrive after cmdk has reacted to the typed text, so move the
   // cursor here: to the best match of a search, or to the first option when
   // the one under the cursor is gone. Without this, Enter would pick nothing.
+  // While a search is pending the cursor stays off the stale matches, so an
+  // early Enter can't pick a branch that doesn't match the typed text.
   const results = branchesQuery.data;
   useEffect(() => {
+    if (pending && !showUncommitted) {
+      setActiveValue("");
+      return;
+    }
     if (!results) return;
     const values = showUncommitted ? [UNCOMMITTED_VALUE, ...results.branches] : results.branches;
     setActiveValue((current) =>
       !showUncommitted || !values.includes(current) ? (values[0] ?? "") : current,
     );
-  }, [results, showUncommitted]);
+  }, [results, showUncommitted, pending]);
 
   const pick = (value: string) => {
     if (value === UNCOMMITTED_VALUE) onSelectUncommitted();
@@ -174,7 +183,10 @@ export function DiffTargetHeader({
             )}
             <CommandList data-testid="right-sidepanel__diff-target-list">
               {!branchesQuery.isFetching && (
-                <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
+                <CommandEmpty
+                  className="py-4 text-center text-xs text-muted-foreground"
+                  data-testid="right-sidepanel__diff-target-empty"
+                >
                   No matching branches
                 </CommandEmpty>
               )}

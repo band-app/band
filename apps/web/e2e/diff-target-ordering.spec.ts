@@ -8,8 +8,8 @@
  *     first item in the dropdown.
  *  2. Below Uncommitted, the picker floats staging-style integration
  *     branches (develop, staging, …) to the top in priority order, then
- *     the project's default branch, then every other branch
- *     alphabetically.
+ *     the project's default branch, then every other branch, most recent
+ *     commit first.
  *
  * The ranking itself runs on the server (`DiffService.listBranches`), since
  * the picker searches there instead of loading every branch. Search, the
@@ -22,11 +22,12 @@
  * locators and the dropdown-open dance live in `pages/ChangesPanelPage.ts`.
  */
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { git } from "./helpers/git";
+import { git, gitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -72,12 +73,22 @@ test.beforeAll(async () => {
   // to the input creation order — this pins the priority-list traversal
   // (develop→stage→staging) rather than a two-entry endpoints check that a
   // buggy comparator could still satisfy. Two feature branches (`apple`,
-  // `zebra`) fall to the alphabetical remainder.
+  // `zebra`) fall to the remainder, where `zebra` gets the newer commit so
+  // recency, not the alphabet, decides their order.
   git(repoPath, ["branch", "develop"]);
   git(repoPath, ["branch", "staging"]);
   git(repoPath, ["branch", "stage"]);
   git(repoPath, ["branch", "apple"]);
-  git(repoPath, ["branch", "zebra"]);
+  git(repoPath, ["checkout", "-b", "zebra"]);
+  writeFileSync(join(repoPath, "zebra.txt"), "zebra\n");
+  git(repoPath, ["add", "."]);
+  // A committer date past the other commits', which all land in the same
+  // second, so `zebra` is unambiguously the most recent.
+  execFileSync("git", ["commit", "-m", "zebra"], {
+    cwd: repoPath,
+    env: { ...gitEnv, GIT_COMMITTER_DATE: "2099-01-01T00:00:00Z" },
+  });
+  git(repoPath, ["checkout", DEFAULT_BRANCH]);
   git(repoPath, ["checkout", "-b", HEAD_BRANCH]);
   writeFileSync(join(repoPath, FILE_PATH), "first line\nsecond line\nthird line\n");
 
@@ -112,7 +123,7 @@ test("Diff target defaults to Uncommitted on a fresh workspace", async ({ page }
   await expect.poll(() => changes.diffMode(), { timeout: 15_000 }).toBe("uncommitted");
 });
 
-test("Diff target dropdown pins Uncommitted, then staging branches, then default, then the rest", async ({
+test("Diff target dropdown pins Uncommitted, then staging branches, then default, then the most recent", async ({
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
@@ -136,5 +147,5 @@ test("Diff target dropdown pins Uncommitted, then staging branches, then default
     .poll(async () => (await changes.visibleDiffTargetOptions()).slice(1).join(","), {
       timeout: 15_000,
     })
-    .toBe(["develop", "stage", "staging", "main", "apple", "zebra"].join(","));
+    .toBe(["develop", "stage", "staging", "main", "zebra", "apple"].join(","));
 });

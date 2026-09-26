@@ -240,6 +240,27 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
     refetchInterval: visible ? 15_000 : false,
   });
 
+  // The header's branch names outlive the summary for one target: a new pick
+  // changes the summary's query key, and without this the current branch
+  // would blank out until the new summary arrives.
+  const [knownBranches, setKnownBranches] = useState<{
+    workspaceId: string;
+    headBranch: string;
+    defaultBranch: string;
+  } | null>(null);
+  useEffect(() => {
+    const data = summaryQuery.data;
+    if (data) {
+      setKnownBranches({
+        workspaceId,
+        headBranch: data.headBranch,
+        defaultBranch: data.defaultBranch,
+      });
+    }
+  }, [summaryQuery.data, workspaceId]);
+  const branchInfo =
+    summaryQuery.data ?? (knownBranches?.workspaceId === workspaceId ? knownBranches : undefined);
+
   // The server types `fileStatuses` values as plain `string`; the tree wants
   // the `FileStatus` union. Same runtime values — cast at this single seam.
   const fileStatuses = (summaryQuery.data?.fileStatuses ?? EMPTY_STATUSES) as Record<
@@ -339,8 +360,8 @@ function RightSidepanelInner({ workspaceId, visible }: { workspaceId: string; vi
                 diffMode/compareBranch, so it refetches automatically. */}
             <DiffTargetHeader
               workspaceId={workspaceId}
-              headBranch={summaryQuery.data?.headBranch}
-              defaultBranch={summaryQuery.data?.defaultBranch}
+              headBranch={branchInfo?.headBranch}
+              defaultBranch={branchInfo?.defaultBranch}
               diffMode={diffMode}
               compareBranch={compareBranch}
               onSelectUncommitted={selectUncommitted}

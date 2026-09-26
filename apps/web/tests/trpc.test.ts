@@ -1474,6 +1474,9 @@ describe("tRPC — workspace operations", () => {
       "refs/heads/search-local-a",
       "refs/heads/search-local-b",
       "refs/heads/domain-work",
+      "refs/heads/develop",
+      "refs/heads/dev-tools",
+      "refs/remotes/origin/develop",
       "refs/remotes/origin/main",
       "refs/remotes/origin/search-remote",
     ];
@@ -1491,9 +1494,15 @@ describe("tRPC — workspace operations", () => {
       };
 
       // No query: remote branches are listed, the `origin/HEAD` pointer isn't,
-      // and the default branch leads, followed by its remote copy.
+      // staging-style branches lead, then the default branch, each followed
+      // by its remote copy.
       const all = await list({});
-      expect(all.branches.slice(0, 2)).toEqual(["main", "origin/main"]);
+      expect(all.branches.slice(0, 4)).toEqual([
+        "develop",
+        "origin/develop",
+        "main",
+        "origin/main",
+      ]);
       expect(all.branches).toContain("origin/search-remote");
       expect(all.branches).not.toContain("origin/HEAD");
       expect(all.branches).not.toContain("origin");
@@ -1505,13 +1514,17 @@ describe("tRPC — workspace operations", () => {
 
       // `limit` caps the result and flags the rest as truncated.
       const limited = await list({ query: "search", limit: 2 });
-      expect(limited.branches).toHaveLength(2);
+      expect(limited.branches).toEqual(["search-local-a", "search-local-b"]);
       expect(limited.truncated).toBe(true);
 
       // Exact matches (with or without the remote prefix) rank above names
       // that merely contain the query.
       const main = await list({ query: "main" });
       expect(main.branches).toEqual(["main", "origin/main", "domain-work"]);
+
+      // Within one match quality, staging-style branches still lead.
+      const dev = await list({ query: "dev" });
+      expect(dev.branches).toEqual(["develop", "origin/develop", "dev-tools"]);
     } finally {
       git(repoPath, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
       for (const ref of refs) git(repoPath, ["update-ref", "-d", ref]);
