@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, lstatSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 import { createLogger } from "@band-app/logger";
@@ -8,7 +8,9 @@ import {
   type EndpointIdentity,
   endpointOwnership,
   ensurePrivateDir,
+  isProvenDead,
   privateBindPath,
+  probeEndpoint,
   publishEndpoint,
 } from "./endpoint";
 import {
@@ -18,6 +20,7 @@ import {
   type ControlRequest,
   type DaemonPaths,
   type DaemonRequests,
+  ENDPOINT_LOST_ERROR,
   EXIT_ENDPOINT_OCCUPIED,
   EXIT_ENDPOINT_UNAVAILABLE,
   type HelloMessage,
@@ -25,6 +28,7 @@ import {
   type PidRecord,
   PROTOCOL_VERSION,
   readFrames,
+  retiredDaemonPaths,
   type StreamEvent,
   writeFrame,
 } from "./protocol";
@@ -57,6 +61,13 @@ interface Client {
 export interface DaemonOptions {
   paths: DaemonPaths;
   buildId: string;
+  /** This daemon's entry file, recorded so servers can tell when it has been deleted. */
+  entry: string;
+  /**
+   * The canonical entry of a live daemon of another build to take the
+   * endpoint from. It drains; see `retiredDaemonPaths`.
+   */
+  supersede?: EndpointIdentity;
   /** Called once the endpoint is published and the token and pid files are written. */
   onReady: () => void;
 }
@@ -74,11 +85,12 @@ export interface DaemonOptions {
  *     every change, so an empty daemon exits as soon as its last server
  *     disconnects (or `INITIAL_ADOPTION_MS` after launch if none ever came).
  *   - Endpoint lost: stop taking new sessions but keep serving the shells it
- *     has; exit once they are gone. Same drain as orca's daemon.
+ *     has; exit once they are gone. Same drain as orca's daemon. This is also
+ *     what a daemon superseded by a newer build does.
  *   - Run dir removed: kill every shell and exit; nothing can reach them.
  */
 export async function runDaemon(options: DaemonOptions): Promise<number> {
-  const { paths, buildId } = options;
+  const { paths, buildId, supersede } = options;
   ensurePrivateDir(paths.runDir);
   ensurePrivateDir(dirname(paths.socket));
 
@@ -109,7 +121,24 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   });
   chmodSync(bindPath, 0o600);
 
-  const outcome = await publishEndpoint(bindPath, paths.socket);
+  // The incumbent's token and pid record are copied before its socket is
+  // retired, so whoever finds the retired socket can already authenticate.
+  let retired = supersede ? retiredDaemonPaths(paths, randomBytes(4).toString("hex")) : null;
+  if (retired) {
+    copyPrivateFile(paths.token, retired.token);
+    copyPrivateFile(paths.pid, retired.pid);
+  }
+  const outcome = await publishEndpoint(
+    bindPath,
+    paths.socket,
+    supersede && retired ? { incumbent: supersede, retiredPath: retired.socket } : undefined,
+  );
+  if (retired && (outcome.status !== "published" || !outcome.superseded)) {
+    // We won't serve, so nobody would ever remove these. The names are random
+    // and ours alone. The old daemon keeps its open connections.
+    removeRetiredFiles(retired);
+    retired = null;
+  }
   if (outcome.status !== "published") {
     log.warn({ outcome: outcome.status }, "terminal daemon could not publish its endpoint");
     // Closing unlinks only our private bind name, never the canonical one.
@@ -117,6 +146,11 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     return outcome.status === "occupied" ? EXIT_ENDPOINT_OCCUPIED : EXIT_ENDPOINT_UNAVAILABLE;
   }
   const identity: EndpointIdentity = outcome.identity;
+  if (retired) {
+    log.info({ retired: retired.socket }, "terminal daemon superseded a daemon of another build");
+  }
+  /** A retired-daemon probe is in flight; the watchdog doesn't start a second. */
+  let probingRetired = false;
 
   // Token and pid record are written only once the endpoint is ours, so a
   // daemon that lost the race can never overwrite the winner's.
@@ -127,6 +161,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     buildId,
     startedAt: new Date().toISOString(),
     socket: paths.socket,
+    entry: options.entry,
   };
   writePrivateFile(paths.pid, JSON.stringify(pidRecord));
   log.info({ pid: process.pid, socket: paths.socket, buildId }, "terminal daemon ready");
@@ -155,6 +190,19 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
       log.warn({ sessions: pool.size }, "terminal daemon lost its endpoint; draining");
       reevaluateIdle();
     }
+    if (retired && !probingRetired) {
+      const target = retired;
+      probingRetired = true;
+      void probeEndpoint(target.socket).then((probe) => {
+        probingRetired = false;
+        // Only a refused or missing connect proves the old daemon gone.
+        if (!isProvenDead(probe) || retired !== target) return;
+        removeRetiredFiles(target);
+        retired = null;
+        log.info({ retired: target.socket }, "superseded terminal daemon exited");
+        reevaluateIdle();
+      });
+    }
   }, WATCHDOG_INTERVAL_MS);
   watchdog.unref();
 
@@ -178,6 +226,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
 
   function isIdle(): boolean {
     if (spawning > 0 || pool.size > 0) return false;
+    // We created the retired names, so we stay until we can remove them.
+    if (retired) return false;
     // A lost endpoint can't gain new work, so connections don't keep it alive.
     if (endpointLost) return true;
     return openConnections === 0 && clients.size === 0;
@@ -376,7 +426,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         // Never create a session on an endpoint we no longer hold: no server
         // could ever reach it.
         if (endpointLost || endpointOwnership(paths.socket, identity) === "lost") {
-          throw new Error("Terminal daemon no longer owns its endpoint");
+          throw new Error(ENDPOINT_LOST_ERROR);
         }
         const { workspaceId, terminalId, workspaceRoot, options, cleanupOnExit, baseEnv } = request;
         spawning += 1;
@@ -490,6 +540,28 @@ function writePrivateFile(path: string, content: string): void {
   const tmp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
   writeFileSync(tmp, content, { mode: 0o600 });
   renameSync(tmp, path);
+}
+
+/** Copy a private runtime file, if it exists. */
+function copyPrivateFile(from: string, to: string): void {
+  let content: string;
+  try {
+    content = readFileSync(from, "utf8");
+  } catch {
+    return;
+  }
+  writePrivateFile(to, content);
+}
+
+/** Remove the retired names this daemon created. */
+function removeRetiredFiles(retired: DaemonPaths): void {
+  for (const path of [retired.socket, retired.token, retired.pid]) {
+    try {
+      unlinkSync(path);
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 function exists(path: string): boolean {

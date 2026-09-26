@@ -55,6 +55,8 @@ export class DaemonRejectedError extends Error {
  */
 export class DaemonClient {
   readonly pid: number;
+  /** The build of the daemon's code, from its hello reply. */
+  readonly buildId: string;
   private nextId = 1;
   private readonly pending = new Map<
     number,
@@ -72,6 +74,7 @@ export class DaemonClient {
     streamFrames: FrameSink,
   ) {
     this.pid = ready.pid;
+    this.buildId = ready.buildId;
     controlFrames.set((frame) => this.settle(frame as ControlReply));
     streamFrames.set((frame) => {
       for (const listener of this.eventListeners) listener(frame as StreamEvent);

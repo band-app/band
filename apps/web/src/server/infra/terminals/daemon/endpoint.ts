@@ -27,6 +27,15 @@ import { dirname, join } from "node:path";
  *     `rename` to replace a proven-dead entry in one syscall. Never
  *     unlink-then-link: that leaves the name absent in between.
  *   - Never remove the endpoint on shutdown. The next publisher replaces it.
+ *
+ * One exception to "only replace a proven-dead entry", which band adds for
+ * builds (issue #652): a server that finds a live daemon of another build (or
+ * one whose entry file is gone) may launch a daemon that supersedes it. The
+ * new daemon replaces the entry only if it is still the exact inode the
+ * server identified, and hardlinks it to a private retired name first (see
+ * `retiredDaemonPaths`), so the old daemon stays reachable. The old daemon
+ * sees its endpoint lost and drains. The new daemon created the retired name,
+ * so it is the one that removes it, once the old daemon is proven dead.
  */
 
 const PROBE_TIMEOUT_MS = 500;
@@ -89,7 +98,8 @@ export function privateBindPath(socketPath: string): string {
 }
 
 export type PublishOutcome =
-  | { status: "published"; identity: EndpointIdentity }
+  /** `superseded`: a live incumbent was moved to the retired name. */
+  | { status: "published"; identity: EndpointIdentity; superseded: boolean }
   /** A live daemon owns the name. Connect to it; never serve beside it. */
   | { status: "occupied" }
   /** Another daemon replaced us right after we published. Do not serve. */
@@ -97,15 +107,26 @@ export type PublishOutcome =
   /** The incumbent could not be classified, so it was left alone. */
   | { status: "inconclusive" };
 
+/** A live incumbent the publisher may replace; see the header. */
+export interface Supersede {
+  /** The canonical entry the server found serving another build. */
+  incumbent: EndpointIdentity;
+  /** Where to hardlink the incumbent before replacing it. */
+  retiredPath: string;
+}
+
 /**
  * Publish the listener bound at `boundPath` under `canonicalPath`: an
  * exclusive `link`, or on EEXIST a proven-dead check followed by one `rename`.
- * On `published` the private name is gone; on any other outcome the caller
- * still owns `boundPath` and must close its server (which unlinks it).
+ * With `supersede`, an incumbent that is still that exact entry is replaced
+ * even though it is live. On `published` the private name is gone; on any
+ * other outcome the caller still owns `boundPath` and must close its server
+ * (which unlinks it).
  */
 export async function publishEndpoint(
   boundPath: string,
   canonicalPath: string,
+  supersede?: Supersede,
 ): Promise<PublishOutcome> {
   const identity = entryIdentity(boundPath, statSync);
   if (!identity) throw new Error(`Cannot stat the bound daemon socket at ${boundPath}`);
@@ -114,17 +135,21 @@ export async function publishEndpoint(
       linkSync(boundPath, canonicalPath);
     } catch (err) {
       if (errorCode(err) !== "EEXIST") throw err;
+      if (supersede && retireIncumbent(canonicalPath, supersede)) {
+        renameSync(boundPath, canonicalPath);
+        return confirmPublished(canonicalPath, identity, true);
+      }
       const replaced = await replaceProvenDead(boundPath, canonicalPath);
       if (replaced === "stale") continue;
       if (replaced !== "renamed") return replaced;
-      return confirmPublished(canonicalPath, identity);
+      return confirmPublished(canonicalPath, identity, false);
     }
     try {
       unlinkSync(boundPath);
     } catch {
       // Harmless: clients use the canonical name, and this one is ours alone.
     }
-    return confirmPublished(canonicalPath, identity);
+    return confirmPublished(canonicalPath, identity, false);
   }
   // Outrun every time: the name keeps changing hands, but no probe ever
   // connected, so nothing proves an owner either.
@@ -154,11 +179,46 @@ async function replaceProvenDead(
 }
 
 /**
+ * Hardlink the canonical entry to `retiredPath` if it is still the incumbent
+ * the server identified. `false` when it isn't (another daemon already
+ * replaced it, or it died): publish the ordinary way instead.
+ *
+ * The retired link is checked after it exists, not before: it pins the inode
+ * we linked, so if it is the incumbent, the rename right after replaces a
+ * name that pointed at the incumbent a moment ago. A publisher that slips in
+ * between is replaced in turn and drains like any superseded daemon.
+ */
+function retireIncumbent(canonicalPath: string, supersede: Supersede): boolean {
+  if (!sameEntry(entryIdentity(canonicalPath, lstatSync), supersede.incumbent)) return false;
+  try {
+    linkSync(canonicalPath, supersede.retiredPath);
+  } catch {
+    return false;
+  }
+  if (sameEntry(entryIdentity(supersede.retiredPath, lstatSync), supersede.incumbent)) return true;
+  // We linked something else: the incumbent changed in between. The name is ours.
+  try {
+    unlinkSync(supersede.retiredPath);
+  } catch {
+    // Already gone.
+  }
+  return false;
+}
+
+function sameEntry(a: EndpointIdentity | null, b: EndpointIdentity): boolean {
+  return a !== null && a.dev === b.dev && a.ino === b.ino;
+}
+
+/**
  * Two daemons can prove the same entry dead and both replace it; the loser
  * must not serve. Our listener holds the inode open, so it can't be recycled
  * while we compare.
  */
-function confirmPublished(canonicalPath: string, identity: EndpointIdentity): PublishOutcome {
+function confirmPublished(
+  canonicalPath: string,
+  identity: EndpointIdentity,
+  superseded: boolean,
+): PublishOutcome {
   let published: EndpointIdentity | null;
   try {
     const stats = statSync(canonicalPath, { bigint: true });
@@ -167,7 +227,7 @@ function confirmPublished(canonicalPath: string, identity: EndpointIdentity): Pu
     return errorCode(err) === "ENOENT" ? { status: "lost" } : { status: "inconclusive" };
   }
   return published.dev === identity.dev && published.ino === identity.ino
-    ? { status: "published", identity: published }
+    ? { status: "published", identity: published, superseded }
     : { status: "lost" };
 }
 
@@ -241,7 +301,7 @@ export function checkEndpointOwner(socketPath: string): "ok" | "missing" {
   return "ok";
 }
 
-function entryIdentity(
+export function entryIdentity(
   path: string,
   stat: typeof statSync | typeof lstatSync,
 ): EndpointIdentity | null {
