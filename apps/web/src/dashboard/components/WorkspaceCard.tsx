@@ -267,7 +267,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                   />
                 ) : (
                   <span
-                    className={`text-sm truncate ${isActive ? "font-bold text-foreground" : "font-medium text-muted-foreground"}`}
+                    className={`text-[13px] truncate ${isActive ? "font-bold text-foreground" : "font-medium text-foreground/75"}`}
                   >
                     {worktree.name}
                   </span>

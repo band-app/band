@@ -379,7 +379,7 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
                     size="sm"
                     variant="ghost"
                     data-testid="dashboard__label-filter-trigger"
-                    className={`min-w-0 text-sm h-7 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                    className={`min-w-0 text-[13px] h-7 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-foreground/75"}`}
                   >
                     {activeLabel ? (
                       <>

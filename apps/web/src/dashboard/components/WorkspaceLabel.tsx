@@ -11,10 +11,9 @@ import { cn } from "@band-app/ui";
  * currently-open workspace, matching the card's active styling.
  *
  * `tone` adapts the text colour to the surface:
- *  - "sidebar" (default): muted text so the label sits quietly inside the dense
- *    project tree, matching the surrounding cards.
- *  - "switcher": brighter text for the command-palette overlay, where muted
- *    grey-on-dark is hard to read.
+ *  - "sidebar" (default): compact 13px/11px text at reduced foreground opacity,
+ *    matching the surrounding cards in the dense project tree.
+ *  - "switcher": full-size, brighter text for the command-palette overlay.
  */
 interface WorkspaceLabelProps {
   /** Stable workspace identity/label (see `WorktreeInfo.name`). */
@@ -35,18 +34,23 @@ export function WorkspaceLabel({
       ? `text-foreground ${isActive ? "font-semibold" : "font-medium"}`
       : isActive
         ? "font-bold text-foreground"
-        : "font-medium text-muted-foreground";
+        : "font-medium text-foreground/75";
   const projectClass =
     tone === "switcher"
       ? "text-foreground/70"
       : isActive
         ? "text-foreground/80"
-        : "text-muted-foreground";
+        : "text-foreground/60";
+  const isSidebar = tone === "sidebar";
 
   return (
     <div className="flex flex-col min-w-0 leading-tight">
-      <span className={cn("text-sm truncate", nameClass)}>{name}</span>
-      <span className={cn("text-xs truncate", projectClass)}>{projectName}</span>
+      <span className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}>
+        {name}
+      </span>
+      <span className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", projectClass)}>
+        {projectName}
+      </span>
     </div>
   );
 }
