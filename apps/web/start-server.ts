@@ -40,6 +40,7 @@ import { branchStatusPoller } from "./src/server/services/branch-status-poller.t
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,
@@ -587,6 +588,34 @@ async function main() {
     // Serve uploaded files (images, attachments)
     if (req.url?.startsWith("/api/uploads/")) {
       serveStaticFile(res, bandHome(), "uploads", req.url.slice("/api/uploads/".length));
+      return;
+    }
+
+    // Serve a project's cached GitHub owner avatar — URL: /api/project-avatar/<projectName>
+    // (see `ProjectAvatarService`). 404 means "render the fallback icon".
+    const projectAvatarMatch = req.url?.match(/^\/api\/project-avatar\/([^/?]+)(?:\?|$)/);
+    if (projectAvatarMatch && req.method === "GET") {
+      let projectName: string;
+      try {
+        projectName = decodeURIComponent(projectAvatarMatch[1]);
+      } catch {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
+      }
+      const avatar = await projectAvatarService.image(projectName);
+      if (!avatar) {
+        res.writeHead(404, { "Cache-Control": "no-store" });
+        res.end("Not found");
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": avatar.contentType,
+        "Content-Length": avatar.bytes.length.toString(),
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(avatar.bytes);
       return;
     }
 

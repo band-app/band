@@ -230,6 +230,24 @@ export class WorkspacePage {
     return this.page.getByTestId(`project-list__project-menu-trigger--${projectName}`);
   }
 
+  /** The GitHub owner avatar in a project header. Present in the DOM (hidden)
+   *  while it loads, visible once it has, removed if it fails to load. */
+  projectAvatar(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-avatar--${projectName}`);
+  }
+
+  /** The folder icon a git project header shows when it has no avatar. */
+  projectFolderIcon(projectName: string): Locator {
+    return this.page.getByTestId(`project-list__project-folder--${projectName}`);
+  }
+
+  /** Decoded width of a project's avatar image; 0 when it did not decode. */
+  async readProjectAvatarNaturalWidth(projectName: string): Promise<number> {
+    return await this.projectAvatar(projectName).evaluate(
+      (el) => (el as HTMLImageElement).naturalWidth,
+    );
+  }
+
   /** Right-click a project header to open its context menu. */
   async openProjectContextMenu(projectName: string): Promise<void> {
     await test.step(`Open context menu for project ${projectName}`, async () => {

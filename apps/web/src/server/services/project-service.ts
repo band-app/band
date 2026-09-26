@@ -12,6 +12,11 @@ import {
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
 import { GitClient } from "../infra/git/git-client";
+import {
+  type ProjectAvatar,
+  type ProjectAvatarService,
+  projectAvatarService,
+} from "./project-avatar-service";
 import { type SettingsService, settingsService } from "./settings-service";
 
 /**
@@ -36,6 +41,7 @@ export class ProjectService {
     private readonly git: GitClient = new GitClient(),
     private readonly settings: SettingsService = settingsService,
     private readonly statusQueries: WorkspaceStatusQueries = new WorkspaceStatusQueries(),
+    private readonly avatars: ProjectAvatarService = projectAvatarService,
   ) {}
 
   /**
@@ -61,6 +67,8 @@ export class ProjectService {
       defaultBranch: string;
       label: string | undefined;
       kind: ProjectKind;
+      /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
+      avatar: ProjectAvatar | null;
       worktrees: Array<{
         name: string;
         branch: string;
@@ -153,6 +161,9 @@ export class ProjectService {
           defaultBranch: project.defaultBranch,
           label: project.label,
           kind: project.kind,
+          // Reads the memoised remote and the on-disk cache only; the
+          // GitHub fetch happens when the browser requests `avatar.src`.
+          avatar: await this.avatars.describe(project).catch(() => null),
           worktrees: worktrees.map((wt) => {
             // Identity is by the immutable `name`, not the live branch.
             const workspaceId = toWorkspaceId(project.name, wt.name);

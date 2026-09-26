@@ -20,6 +20,7 @@ import {
 } from "@band-app/ui";
 import { Clock, Loader2, Pencil, Play, Plus, RefreshCw, Timer, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ProjectAvatar, type ProjectAvatarInfo } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 
 interface CronjobRecord {
@@ -39,6 +40,7 @@ interface CronjobRecord {
 interface ProjectInfo {
   name: string;
   defaultBranch: string;
+  avatar?: ProjectAvatarInfo | null;
   worktrees: { branch: string; workspaceId?: string }[];
 }
 
@@ -559,6 +561,7 @@ function CronjobDialog({
                   <SelectContent>
                     {projects.map((p) => (
                       <SelectItem key={p.name} value={p.name}>
+                        <ProjectAvatar avatar={p.avatar} className="size-4" fallback={null} />
                         {p.name}
                       </SelectItem>
                     ))}
