@@ -470,24 +470,39 @@ export function baseEditorExtensions(
 // searchHighlighter to avoid module-identity issues with setSearchQuery)
 // ---------------------------------------------------------------------------
 
-/** Effect that replaces the current search-match decorations. */
-const setSearchDecorations = StateEffect.define<DecorationSet>();
+/** Effect that sets (or, with an empty query, clears) the active search. */
+const setSearch = StateEffect.define<{ query: string; opts?: SearchOpts }>();
 
 const searchMatchMark = Decoration.mark({ class: "cm-searchMatch" });
 
-/** StateField that holds search-match decorations. */
-const searchHighlightField = StateField.define<DecorationSet>({
+interface SearchHighlightState {
+  query: string;
+  opts?: SearchOpts;
+  decorations: DecorationSet;
+}
+
+/**
+ * StateField that holds the active search and its match decorations. Edits
+ * re-run the search so text typed while the find bar is open (for example in
+ * the editable markdown preview) is highlighted too.
+ */
+const searchHighlightField = StateField.define<SearchHighlightState>({
   create() {
-    return Decoration.none;
+    return { query: "", decorations: Decoration.none };
   },
   update(value, tr) {
     for (const effect of tr.effects) {
-      if (effect.is(setSearchDecorations)) return effect.value;
+      if (effect.is(setSearch)) {
+        const { query, opts } = effect.value;
+        return { query, opts, decorations: buildSearchDecorations(tr.state, query, opts) };
+      }
     }
-    // Map existing decorations through document changes so positions stay correct.
-    return value.map(tr.changes);
+    if (tr.docChanged && value.query) {
+      return { ...value, decorations: buildSearchDecorations(tr.state, value.query, value.opts) };
+    }
+    return value;
   },
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
 });
 
 /**
@@ -498,12 +513,17 @@ export function searchHighlightOnly(): Extension {
   return searchHighlightField;
 }
 
-/** Build a sorted DecorationSet for the given query against a view. */
-function buildSearchDecorations(view: EditorView, query: string, opts?: SearchOpts): DecorationSet {
+/** Build a sorted DecorationSet for the given query against a state. */
+function buildSearchDecorations(
+  state: EditorState,
+  query: string,
+  opts?: SearchOpts,
+): DecorationSet {
   if (!query) return Decoration.none;
   const cmQuery = makeSearchQuery(query, opts);
+  if (!cmQuery.valid) return Decoration.none;
   const builder = new RangeSetBuilder<Decoration>();
-  const cursor = cmQuery.getCursor(view.state);
+  const cursor = cmQuery.getCursor(state);
   let result = cursor.next();
   while (!result.done) {
     builder.add(result.value.from, result.value.to, searchMatchMark);
@@ -530,9 +550,7 @@ function makeSearchQuery(query: string, opts?: SearchOpts): SearchQuery {
  */
 export function dispatchSearch(views: EditorView[], query: string, opts?: SearchOpts): void {
   for (const view of views) {
-    view.dispatch({
-      effects: setSearchDecorations.of(buildSearchDecorations(view, query, opts)),
-    });
+    view.dispatch({ effects: setSearch.of({ query, opts }) });
   }
 }
 
@@ -575,7 +593,7 @@ export function scrollToSearchMatch(match: { view: EditorView; from: number; to:
 export function clearSearch(views: EditorView[]): void {
   for (const view of views) {
     view.dispatch({
-      effects: setSearchDecorations.of(Decoration.none),
+      effects: setSearch.of({ query: "" }),
       selection: { anchor: view.state.selection.main.head },
     });
   }

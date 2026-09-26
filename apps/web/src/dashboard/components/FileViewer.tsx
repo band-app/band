@@ -13,7 +13,7 @@ import {
   Save,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import {
@@ -22,6 +22,7 @@ import {
   languageLabel,
   languageToExtension,
 } from "../lib/language-map";
+import type { RenderMarkdownBlock } from "../lib/markdown-live-preview";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
@@ -44,8 +45,12 @@ interface FileViewerProps {
   /** Optional overlay laid over the content area, e.g. the floating find
    *  widget (it positions itself against the content area's top-right). */
   overlay?: React.ReactNode;
-  /** Optional markdown renderer — when provided, markdown files show a rendered preview with source toggle */
-  renderMarkdown?: (content: string) => React.ReactNode;
+  /**
+   * Renders tables, frontmatter and mermaid blocks inside the markdown
+   * preview. When provided, markdown files open in an editable rendered
+   * preview with a preview/source toggle.
+   */
+  renderMarkdownBlock?: RenderMarkdownBlock;
   /** When true, code files open in an editable editor instead of read-only viewer */
   editable?: boolean;
   /** Called when user clicks the back navigation button */
@@ -251,7 +256,7 @@ export function FileViewer({
   column,
   onEditorView,
   overlay,
-  renderMarkdown,
+  renderMarkdownBlock,
   editable,
   onGoBack,
   onGoForward,
@@ -397,12 +402,13 @@ export function FileViewer({
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  // Notify parent that editor view is unavailable in preview mode
+  // Image and PDF previews have no editor view. (The markdown preview is an
+  // editor and reports its own view.)
   useEffect(() => {
-    if (previewType !== "code" && viewMode === "preview") {
+    if (previewType === "image" || previewType === "pdf") {
       onEditorView?.(null);
     }
-  }, [previewType, viewMode, onEditorView]);
+  }, [previewType, onEditorView]);
 
   useEffect(() => {
     // Untitled tabs have no backing file — synthesise an empty
@@ -489,7 +495,21 @@ export function FileViewer({
       ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
       : undefined;
 
-  const showMarkdownToggle = previewType === "markdown" && renderMarkdown;
+  const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
+
+  // Options for the editable markdown preview. Relative image paths resolve
+  // against the markdown file's directory through the raw file URL.
+  const markdownPreview = useMemo(() => {
+    if (!renderMarkdownBlock) return undefined;
+    const getFileUrl = !external ? adapter.getWorkspaceFileUrl : undefined;
+    const resolveImageUrl = (src: string): string | undefined => {
+      if (/^(https?:|data:)/i.test(src)) return src;
+      if (!getFileUrl || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
+      const path = resolveRelativePath(parentDirOf(filePath), src.split(/[?#]/)[0]);
+      return path == null ? undefined : getFileUrl(workspaceId, path);
+    };
+    return { renderBlock: renderMarkdownBlock, resolveImageUrl };
+  }, [renderMarkdownBlock, external, adapter, workspaceId, filePath]);
 
   // The content to display — use edited content when available, otherwise server content
   const displayContent = editedContent ?? data?.content;
@@ -561,10 +581,7 @@ export function FileViewer({
   onActionsChangeRef.current = onActionsChange;
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
-  // Depend on the BOOLEAN, not the raw `showMarkdownToggle` (which is the
-  // inline `renderMarkdown` function for markdown files — a new reference every
-  // render, which would fire this effect every render → setState loop).
-  const canShowMarkdownToggle = !!showMarkdownToggle;
+  const canShowMarkdownToggle = showMarkdownToggle;
   useEffect(() => {
     onActionsChangeRef.current?.({
       isDirty,
@@ -1079,19 +1096,35 @@ export function FileViewer({
           <PdfPreview src={fileUrl} filename={getFilename(filePath)} />
         )}
 
-        {/* Markdown preview (rendered) — uses displayContent so edits show live.
-             Note: check `!== undefined` not truthiness so an empty file
-             (content === "") still renders the preview pane. */}
+        {/* Markdown preview: an editor over the same markdown text that
+             renders it as you type (see markdown-live-preview.ts). Edits go
+             through the same dirty/save path as the source editor. Check
+             `!== undefined` so an empty file still renders the preview. */}
         {!loading &&
           !error &&
           previewType === "markdown" &&
-          renderMarkdown &&
+          markdownPreview &&
           viewMode === "preview" &&
-          displayContent !== undefined && (
-            <div className="h-full overflow-auto">
-              <div className="mx-auto max-w-3xl px-8 py-6 text-sm">
-                {renderMarkdown(displayContent)}
-              </div>
+          data?.content !== undefined && (
+            <div data-testid="file-viewer__markdown-preview" className="h-full">
+              <CodeMirrorEditor
+                content={displayContent ?? ""}
+                originalContent={data.content}
+                language="markdown"
+                className="h-full"
+                filePath={filePath}
+                line={line}
+                lineEnd={lineEnd}
+                column={column}
+                onEditorView={handleEditorView}
+                onContentChange={handleContentChange}
+                onSave={handleSave}
+                onCursorLineChange={onCursorLineChange}
+                savedSelection={savedSelection}
+                savedScrollTop={savedScrollTop}
+                markdownPreview={markdownPreview}
+                readOnly={!canEdit}
+              />
             </div>
           )}
 
@@ -1102,7 +1135,7 @@ export function FileViewer({
           !error &&
           data?.content !== undefined &&
           (previewType === "code" ||
-            (previewType === "markdown" && (!renderMarkdown || viewMode === "source"))) &&
+            (previewType === "markdown" && (!renderMarkdownBlock || viewMode === "source"))) &&
           (canEdit ? (
             <CodeMirrorEditor
               content={displayContent ?? ""}
@@ -1197,6 +1230,28 @@ export function FileViewer({
       )}
     </div>
   );
+}
+
+/**
+ * Join a workspace-relative directory and a relative path (`./a.png`,
+ * `../img/b.png`). Returns null when the path climbs above the workspace root.
+ */
+function resolveRelativePath(dir: string, relative: string): string | null {
+  const parts = dir ? dir.split("/") : [];
+  for (const segment of relative.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else {
+      try {
+        parts.push(decodeURIComponent(segment));
+      } catch {
+        parts.push(segment);
+      }
+    }
+  }
+  return parts.join("/");
 }
 
 function formatSize(bytes: number): string {

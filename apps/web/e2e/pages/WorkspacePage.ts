@@ -779,6 +779,11 @@ export class WorkspacePage {
     return this.page.getByPlaceholder(/Find in (file|preview)\.\.\./);
   }
 
+  /** The find bar's match counter ("2 of 3" / "No results"). */
+  get findMatchCount(): Locator {
+    return this.page.getByTestId("search-bar__match-count");
+  }
+
   /** The terminal's own find bar input (`Find in terminal...`, see
    *  `TerminalPanel.tsx`). Distinct placeholder from the file/preview bar, so a
    *  test can assert which surface's find bar a Cmd+F opened. */
