@@ -122,6 +122,20 @@ describe("codexUsageReader.listSessions", () => {
       { sessionId: sessionId(1), lastModified: 2_000_000 },
     ]);
   });
+
+  it("lists a rollout once a half-written session_meta is completed", async () => {
+    const file = join(dayDir, `rollout-2026-04-19T11-23-00-${sessionId(1)}.jsonl`);
+    writeFileSync(file, '{"type":"session_meta","payload":{"id":');
+    utimesSync(file, 1_000, 1_000);
+    assert.deepEqual(await codexUsageReader.listSessions(workspace), []);
+
+    writeRollout(sessionId(1), [metaRecord(sessionId(1), workspace)]);
+    utimesSync(file, 2_000, 2_000);
+
+    assert.deepEqual(await codexUsageReader.listSessions(workspace), [
+      { sessionId: sessionId(1), lastModified: 2_000_000 },
+    ]);
+  });
 });
 
 describe("codexUsageReader.getSessionUsage", () => {

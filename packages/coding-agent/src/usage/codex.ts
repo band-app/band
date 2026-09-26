@@ -23,6 +23,15 @@ interface SessionFile {
   mtimeMs: number;
 }
 
+type SessionMeta = { id: string; cwd: string };
+
+/**
+ * `session_meta` per rollout path, valid while the file's mtime is unchanged.
+ * Every scan lists every rollout under `$CODEX_HOME/sessions/`, so without
+ * this each scan reopens thousands of files that haven't changed.
+ */
+const metaCache = new Map<string, { mtimeMs: number; meta: SessionMeta | undefined }>();
+
 /** Recursively find all .jsonl rollout files under `$CODEX_HOME/sessions/`. */
 async function findSessionFiles(): Promise<SessionFile[]> {
   const results: SessionFile[] = [];
@@ -53,8 +62,6 @@ async function findSessionFiles(): Promise<SessionFile[]> {
   return results;
 }
 
-type SessionMeta = { id: string; cwd: string };
-
 /**
  * Read the `session_meta` record from `file`. Only the first non-empty line is
  * read: that's where Codex writes it, and a rollout can run to tens of MB.
@@ -73,13 +80,6 @@ async function readSessionMeta(file: string): Promise<SessionMeta | undefined> {
   }
   return undefined;
 }
-
-/**
- * `session_meta` per rollout path, valid while the file's mtime is unchanged.
- * Every scan lists every rollout under `$CODEX_HOME/sessions/`, so without
- * this each scan reopens thousands of files that haven't changed.
- */
-const metaCache = new Map<string, { mtimeMs: number; meta: SessionMeta | undefined }>();
 
 async function getSessionMeta(file: SessionFile): Promise<SessionMeta | undefined> {
   const cached = metaCache.get(file.path);
