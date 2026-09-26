@@ -29,6 +29,9 @@ import {
 
 const CURRENT = "0.30.0";
 
+/** Let every pending promise callback run: `setImmediate` fires after the microtask queue drains. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 interface FakeUpdaterOptions {
   /** Latest release in the feed. `null` means the feed has nothing newer. */
   latest?: UpdateInfoLike | null;
@@ -250,6 +253,13 @@ describe("user-initiated checks (Check for Updates…)", () => {
     ]);
   });
 
+  test("a long error message is truncated", async () => {
+    const h = harness({ checkError: `HttpError: 502\n${"x".repeat(2000)}` });
+    await h.controller.check({ userInitiated: true });
+    const status = h.controller.getStatus();
+    assert.equal(status.state === "error" && status.message.length, 501);
+  });
+
   test("check error: checking, then the error", async () => {
     const h = harness({ checkError: "HttpError: 404" });
     await h.controller.check({ userInitiated: true });
@@ -280,7 +290,7 @@ describe("overlapping checks", () => {
     const h = harness({ latest: RELEASE, holdCheck: true });
     const a = h.controller.check({ userInitiated: false });
     const b = h.controller.check({ userInitiated: false });
-    await delay(5);
+    await settle();
     h.updater.releaseCheck();
     await Promise.all([a, b]);
     assert.equal(h.updater.checkCalls, 1);
@@ -289,7 +299,7 @@ describe("overlapping checks", () => {
   test("a menu check during a background check joins it and shows its result", async () => {
     const h = harness({ holdCheck: true });
     const background = h.controller.check({ userInitiated: false });
-    await delay(5);
+    await settle();
     const menu = h.controller.check({ userInitiated: true });
     assert.deepEqual(h.controller.getStatus(), { state: "checking", userInitiated: true });
     h.updater.releaseCheck();
@@ -418,12 +428,12 @@ describe("scheduling", () => {
     await h.controller.check({ userInitiated: false });
     h.clock.now += 10 * 60 * 1000;
     h.controller.checkIfStale();
-    await delay(5);
+    await settle();
     assert.equal(h.updater.checkCalls, 1);
 
     h.clock.now += 60 * 60 * 1000;
     h.controller.checkIfStale();
-    await delay(5);
+    await settle();
     assert.equal(h.updater.checkCalls, 2);
   });
 });

@@ -6,8 +6,8 @@
  * shows that state as a bottom-right toast (`UpdateToast` in apps/web): it
  * reads it once with `updater_status`, follows `updater-status-changed`, and
  * drives the flow with `updater_check` / `updater_download` /
- * `updater_restart` / `updater_dismiss`. Main never shows an OS dialog for
- * updates.
+ * `updater_restart` / `updater_dismiss`. The only OS dialogs are the menu
+ * check's fallback in `index.ts` for when no dashboard window is open.
  *
  * Checks run 10s after launch, every hour after that, and on wake from sleep
  * when the last check is older than the interval. These background checks
@@ -138,7 +138,7 @@ function releaseNotesToText(notes: UpdateInfoLike["releaseNotes"]): string | nul
 }
 
 function releaseUrlFor(version: string): string {
-  return `${RELEASES_URL}/tag/v${version}`;
+  return `${RELEASES_URL}/tag/v${encodeURIComponent(version)}`;
 }
 
 export interface UpdateControllerOptions {
@@ -380,6 +380,11 @@ export class UpdateController {
   }
 }
 
+const ERROR_MESSAGE_MAX_CHARS = 500;
+
+/** electron-updater errors can carry a whole HTTP response body. */
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.length <= ERROR_MESSAGE_MAX_CHARS) return message;
+  return `${message.slice(0, ERROR_MESSAGE_MAX_CHARS).trimEnd()}…`;
 }
