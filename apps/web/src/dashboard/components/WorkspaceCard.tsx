@@ -2,6 +2,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
   Tooltip,
@@ -299,6 +300,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuLabel>Workspace</ContextMenuLabel>
         <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.name, isPinned)}>
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin workspace" : "Pin workspace"}
