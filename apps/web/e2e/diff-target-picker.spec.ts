@@ -183,6 +183,7 @@ test("Default branch button resets the target, and Escape closes without a chang
   await changes.searchBranches("filler-59");
   await expect.poll(() => changes.visibleBranchOptions()).toEqual(["feature/filler-59"]);
   await changes.pressInPicker("Escape");
+  await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH);
   await expect(changes.diffTargetPicker).toHaveCount(0);
   await expect.poll(() => changes.compareBranch()).toBe(DEFAULT_BRANCH);
 });

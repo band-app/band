@@ -309,6 +309,7 @@ export interface ListWorkspaceBranchesResult {
   branches: string[];
   /** The project's default branch (e.g. `main`). */
   defaultBranch: string;
+  /** The worktree's current branch; `defaultBranch` when HEAD is detached or unborn. */
   headBranch: string;
   /** More branches matched than the requested limit. */
   truncated: boolean;

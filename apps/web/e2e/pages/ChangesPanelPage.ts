@@ -203,7 +203,7 @@ export class ChangesPanelPage {
   /** Name of the option the keyboard cursor is on (cmdk marks it with
    *  `aria-selected`). */
   async highlightedOption(): Promise<string | null> {
-    const option = this.page.getByRole("option", { selected: true });
+    const option = this.diffTargetPicker.getByRole("option", { selected: true });
     return (await option.count()) === 0 ? null : ((await option.textContent())?.trim() ?? null);
   }
 
