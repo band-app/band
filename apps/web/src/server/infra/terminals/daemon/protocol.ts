@@ -97,11 +97,14 @@ export function listRetiredDaemons(paths: DaemonPaths): DaemonPaths[] {
   } catch {
     return [];
   }
-  return names
-    .filter((name) => name.startsWith(prefix) && name.endsWith(".token"))
-    .map((name) => name.slice(prefix.length, -".token".length))
-    .filter((tag) => /^[0-9a-f]+$/.test(tag))
-    .map((tag) => retiredDaemonPaths(paths, tag));
+  return (
+    names
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".token"))
+      .map((name) => name.slice(prefix.length, -".token".length))
+      // The daemon's tags are 4 random bytes; any other length breaks the sun_path fit above.
+      .filter((tag) => /^[0-9a-f]{8}$/.test(tag))
+      .map((tag) => retiredDaemonPaths(paths, tag))
+  );
 }
 
 /**

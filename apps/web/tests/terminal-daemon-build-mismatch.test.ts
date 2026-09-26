@@ -13,7 +13,13 @@ import {
   trpcMutate,
   trpcQuery,
 } from "./helpers/server";
-import { isAlive, parentPid, startDaemonOfBuild, terminalDaemons } from "./helpers/terminal-daemon";
+import {
+  isAlive,
+  parentPid,
+  startDaemonOfBuild,
+  stopTerminalDaemon,
+  terminalDaemons,
+} from "./helpers/terminal-daemon";
 import { TerminalSocket } from "./helpers/terminal-socket";
 import { waitFor } from "./helpers/wait-for";
 
@@ -65,6 +71,8 @@ describe("terminal daemon — a daemon from another build", () => {
     // Stops every daemon on the home, the superseded one included.
     await server?.close();
     server = undefined;
+    // A test that failed before booting its server still left the old daemon.
+    await stopTerminalDaemon(tmpHome);
     if (entryCopyDir) rmSync(entryCopyDir, { recursive: true, force: true });
     entryCopyDir = undefined;
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -167,6 +175,11 @@ describe("terminal daemon — a daemon from another build", () => {
       expect.objectContaining({ terminalId: created.terminalId, pid: created.pid }),
     ]);
     await expectShellResponds(created.terminalId, "NEW");
+
+    // Terminals across two daemons still need the token.
+    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const unauthenticated = await fetch(`${server.url}/trpc/terminal.list?input=${input}`);
+    expect(unauthenticated.status).toBe(401);
   });
 
   it("takes no new terminals on a daemon whose entry file is gone, even of this build", async () => {
@@ -191,7 +204,12 @@ describe("terminal daemon — a daemon from another build", () => {
     server = await startServer({ tmpHome });
 
     const created = await createTerminal();
-    expect(parentPid(created.pid)).not.toBe(old.pid);
+    const newDaemon = parentPid(created.pid);
+    expect(newDaemon).not.toBe(old.pid);
+    // Same build as the old daemon, so only the missing entry set them apart.
+    expect(terminalDaemons(tmpHome).find((daemon) => daemon.pid === newDaemon)?.buildId).toBe(
+      buildId,
+    );
     await expectShellResponds(created.terminalId, "NEW");
     await expectShellResponds(oldTerminalId, "OLD");
 

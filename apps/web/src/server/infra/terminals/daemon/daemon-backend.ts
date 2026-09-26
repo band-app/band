@@ -69,6 +69,11 @@ interface KnownSession {
  * launches a daemon of this build that supersedes it. The old daemon drains:
  * it keeps its shells, and this server keeps using them over its connection
  * (or, after a restart, over the retired name the new daemon left for it).
+ *
+ * Nothing orders builds, so two live servers of different builds on one home
+ * (the desktop app and `pnpm dev`) each supersede the other's daemon when
+ * they next spawn after the other did. Every shell stays reachable; the cost
+ * is a draining daemon per flip until its shells end.
  */
 export class DaemonTerminalBackend implements TerminalBackend {
   private readonly paths: DaemonPaths;
@@ -362,6 +367,9 @@ export class DaemonTerminalBackend implements TerminalBackend {
       this.stale = null;
       return client;
     } catch (err) {
+      // Whatever serves the endpoint now, the next spawn must look again
+      // (and read its entry afresh for `--supersede`) rather than repeat this.
+      this.needsDiscovery = true;
       throw new TerminalDaemonUnavailableError(`Cannot start the terminal daemon: ${err}`, {
         cause: err,
       });

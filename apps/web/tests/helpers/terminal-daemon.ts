@@ -20,6 +20,7 @@ export interface TerminalDaemonRecord {
   pid: number;
   /** The socket the daemon published; may live outside the run dir. */
   socket: string;
+  buildId: string;
 }
 
 /**

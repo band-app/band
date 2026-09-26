@@ -243,6 +243,11 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
   function shutdown(reason: string): void {
     if (shuttingDown) return;
     shuttingDown = true;
+    if (retired) {
+      // Only we may remove the retired names, and the old daemon still lives,
+      // so they stay: servers can still reach its shells through them.
+      log.warn({ retired: retired.socket }, "exiting while a superseded daemon is still running");
+    }
     log.info({ reason, sessions: pool.size }, "terminal daemon shutting down");
     clearInterval(watchdog);
     if (adoptionTimer) clearTimeout(adoptionTimer);
