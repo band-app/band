@@ -1344,29 +1344,30 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
    * Copy or move `source` into `destFolder` (workspace root if empty
    * string). A copy is auto-suffixed with "copy" if it would collide; a
    * move surfaces a collision as an error, matching rename semantics.
-   * Shared by Paste and drag-and-drop.
+   * Shared by Paste and drag-and-drop. Resolves `false` when the target is
+   * rejected (e.g. moving an entry into the folder it's already in).
    */
   const transferInto = useCallback(
     async (
       source: { path: string; kind: EntryKind },
       destFolder: string,
       op: "copy" | "cut",
-    ): Promise<void> => {
-      if (!canTransferInto(source, destFolder, op)) return;
+    ): Promise<boolean> => {
+      if (!canTransferInto(source, destFolder, op)) return false;
       const baseName = baseNameOf(source.path);
 
       if (op === "copy") {
-        if (!adapter.copyWorkspacePath) return;
+        if (!adapter.copyWorkspacePath) return false;
         const destPath = joinChild(destFolder, uniqueCopyName(baseName, destFolder, source.kind));
         await adapter.copyWorkspacePath(workspaceId, source.path, destPath);
         await fetchDir(destFolder, { force: true });
         // Open the destination so the new row is visible, as in VS Code.
         if (destFolder) await ensureDirExpanded(destFolder);
         setTreeSelection({ path: destPath, kind: source.kind });
-        return;
+        return true;
       }
 
-      if (!adapter.renameWorkspacePath) return;
+      if (!adapter.renameWorkspacePath) return false;
       const destPath = joinChild(destFolder, baseName);
       const result = await adapter.renameWorkspacePath(workspaceId, source.path, destPath);
       remapCachesAfterMove(source.path, destPath);
@@ -1383,6 +1384,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       // at the moved path — identical to a rename.
       onPathRenamed?.(source.path, destPath, result.kind);
       setTreeSelection({ path: destPath, kind: source.kind });
+      return true;
     },
     [
       adapter,
@@ -1411,10 +1413,11 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     (destFolder: string): Promise<void> =>
       runOperation(async () => {
         if (!clipboard) return;
-        await transferInto(clipboard, destFolder, clipboard.op);
+        const moved = await transferInto(clipboard, destFolder, clipboard.op);
         // Cut is one-shot. Clear the clipboard so a subsequent ⌘V
-        // doesn't try to re-move an already-moved entry.
-        if (clipboard.op === "cut") setClipboard(null);
+        // doesn't try to re-move an already-moved entry. A rejected paste
+        // (into the entry's own folder) keeps the cut pending.
+        if (moved && clipboard.op === "cut") setClipboard(null);
       }),
     [clipboard, runOperation, transferInto],
   );
@@ -1462,6 +1465,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         const op = e.altKey ? "copy" : "cut";
         if (!canTransferInto(source, folder, op)) {
           setDropTarget(null);
+          clearExpandTimer();
           return;
         }
         e.preventDefault();
@@ -1487,7 +1491,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
         if (!source) return;
         e.preventDefault();
         e.stopPropagation();
-        void runOperation(() => transferInto(source, folder, e.altKey ? "copy" : "cut"));
+        void runOperation(async () => {
+          await transferInto(source, folder, e.altKey ? "copy" : "cut");
+        });
       },
     }),
     [
@@ -1688,6 +1694,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
               // clears the highlight; the drag itself may still end elsewhere.
               if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
                 setDropTarget(null);
+                clearExpandTimer();
               }
             }}
             className={`min-h-0 flex-1 overflow-y-auto py-1 pl-px ${

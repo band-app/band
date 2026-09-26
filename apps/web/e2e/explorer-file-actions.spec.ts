@@ -19,7 +19,7 @@
 
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
@@ -31,6 +31,7 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileTreesPage } from "./pages/FileTreesPage";
+import { FileViewerPage } from "./pages/FileViewerPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 test.use({ viewport: { width: 1600, height: 900 } });
@@ -41,6 +42,8 @@ const BRANCH = "main";
 
 const SEED_FILES = [
   "header/nested/deep.txt",
+  // The worktree watcher ignores `dist`, so only Refresh picks up changes here.
+  "header/dist/old.js",
   "dnd/src.txt",
   "dnd/copyme.txt",
   "dnd/dup.txt",
@@ -49,6 +52,7 @@ const SEED_FILES = [
   "clip/a.txt",
   "clip/dest/keep.txt",
   "ren/old.txt",
+  "dirty/keep-open.txt",
 ];
 
 let server: ServerHandle;
@@ -91,7 +95,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-async function openExplorer(page: import("@playwright/test").Page, firstRow: string) {
+async function openExplorer(page: Page, firstRow: string) {
   const workspace = new WorkspacePage(page, server.url, TOKEN);
   const trees = new FileTreesPage(page, workspace);
   await workspace.goto(workspaceId);
@@ -120,10 +124,12 @@ test.describe("Explorer file actions", () => {
     await expect.poll(() => isDirOnDisk("header/made")).toBe(true);
     await expect(trees.fileTreeRow("header/made")).toBeVisible();
 
-    // Refresh re-reads the loaded folders from disk.
-    writeFileSync(join(repoPath, "header", "external.txt"), "external\n");
+    // Refresh re-reads the loaded folders from disk. The watcher skips
+    // `dist`, so without Refresh the new file would never show up.
+    await trees.expandFileTreeFolder("header/dist", "header/dist/old.js");
+    writeFileSync(join(repoPath, "header", "dist", "new.js"), "new\n");
     await trees.clickHeaderButton("refresh");
-    await expect(trees.fileTreeRow("header/external.txt")).toBeVisible();
+    await expect(trees.fileTreeRow("header/dist/new.js")).toBeVisible();
 
     // Collapse all folds every open folder back to the root listing.
     await trees.expandFileTreeFolder("header/nested", "header/nested/deep.txt");
@@ -174,7 +180,15 @@ test.describe("Explorer file actions", () => {
     await trees.runRowAction("clip/dest/a.txt", "copy");
     await trees.runRowAction("clip/dest/a.txt", "paste");
     await expect.poll(() => onDisk("clip/dest/a copy.txt")).toBe(true);
+    expect(onDisk("clip/dest/a.txt")).toBe(true);
     await expect(trees.fileTreeRow("clip/dest/a copy.txt")).toBeVisible();
+
+    // Escape cancels a pending cut, so Paste is no longer offered.
+    await trees.runRowAction("clip/dest/a copy.txt", "cut");
+    await trees.pressOnRow("clip/dest/a copy.txt", "Escape");
+    await trees.openFileTreeMenu("clip/dest");
+    await expect(trees.menuItem("copy")).toBeVisible();
+    await expect(trees.menuItem("paste")).toHaveCount(0);
   });
 
   test("rename and delete keep the open editor tab in step", async ({ page }) => {
@@ -196,11 +210,37 @@ test.describe("Explorer file actions", () => {
     await expect.poll(() => onDisk("ren/f2.txt")).toBe(true);
     await expect(workspace.fileTab("ren/f2.txt")).toBeVisible();
 
-    // Deleting the file closes its tab.
-    await trees.runRowAction("ren/f2.txt", "delete");
-    await trees.confirmDelete();
-    await expect.poll(() => onDisk("ren/f2.txt")).toBe(false);
-    await expect(trees.fileTreeRow("ren/f2.txt")).toHaveCount(0);
+    // Renaming the parent folder retargets tabs of files inside it.
+    await trees.runRowAction("ren", "rename");
+    await trees.submitName("ren2");
+    await expect.poll(() => onDisk("ren2/f2.txt")).toBe(true);
+    await expect(workspace.fileTab("ren2/f2.txt")).toBeVisible();
     await expect(workspace.fileTab("ren/f2.txt")).toHaveCount(0);
+
+    // A drag-and-drop move retargets the tab too.
+    await trees.dragRowToRoot("ren2/f2.txt");
+    await expect.poll(() => onDisk("f2.txt")).toBe(true);
+    await expect(workspace.fileTab("f2.txt")).toBeVisible();
+    await expect(workspace.fileTab("ren2/f2.txt")).toHaveCount(0);
+
+    // Deleting the file closes its tab.
+    await trees.runRowAction("f2.txt", "delete");
+    await trees.confirmDelete();
+    await expect.poll(() => onDisk("f2.txt")).toBe(false);
+    await expect(trees.fileTreeRow("f2.txt")).toHaveCount(0);
+    await expect(workspace.fileTab("f2.txt")).toHaveCount(0);
+  });
+
+  test("deleting a file with unsaved edits keeps its tab open", async ({ page }) => {
+    const { workspace, trees } = await openExplorer(page, "dirty");
+    await trees.expandFileTreeFolder("dirty", "dirty/keep-open.txt");
+    await trees.openFile("dirty/keep-open.txt");
+    await new FileViewerPage(page).replaceAll("unsaved edit");
+
+    await trees.runRowAction("dirty/keep-open.txt", "delete");
+    await trees.confirmDelete();
+    await expect.poll(() => onDisk("dirty/keep-open.txt")).toBe(false);
+    await expect(trees.fileTreeRow("dirty/keep-open.txt")).toHaveCount(0);
+    await expect(workspace.fileTab("dirty/keep-open.txt")).toBeVisible();
   });
 });

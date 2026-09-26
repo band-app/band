@@ -160,6 +160,16 @@ export class FileTreesPage {
     return this.page.getByTestId("file-tree__name-input");
   }
 
+  /** The Delete dialog's confirm button. */
+  get deleteConfirmButton(): Locator {
+    return this.page.getByTestId("file-tree__delete-confirm");
+  }
+
+  /** The scrollable tree container; empty space in it targets the root. */
+  get treeRoot(): Locator {
+    return this.page.getByTestId("file-tree__root");
+  }
+
   /** The dismissable banner a failed paste or drop shows above the tree. */
   get errorBanner(): Locator {
     return this.page.getByTestId("file-tree__error");
@@ -215,7 +225,7 @@ export class FileTreesPage {
   /** Confirm the Delete dialog. */
   async confirmDelete(): Promise<void> {
     await test.step("Confirm delete", async () => {
-      await this.page.getByTestId("file-tree__delete-confirm").click();
+      await this.deleteConfirmButton.click();
     });
   }
 
@@ -235,11 +245,20 @@ export class FileTreesPage {
   /** Drag a Files-tree row onto the empty area below the rows (the root). */
   async dragRowToRoot(from: string): Promise<void> {
     await test.step(`Drag ${from} to the workspace root`, async () => {
-      const root = this.page.getByTestId("file-tree__root");
-      const box = await root.boundingBox();
-      if (!box) throw new Error("file tree root has no bounding box");
-      await this.fileTreeRow(from).dragTo(root, {
-        targetPosition: { x: box.width / 2, y: box.height - 10 },
+      const box = await this.treeRoot.boundingBox();
+      const lastRow = await this.page
+        .getByTestId(/^file-tree__row--/)
+        .last()
+        .boundingBox();
+      if (!box || !lastRow) throw new Error("file tree has no bounding box");
+      // Drop halfway between the last row and the bottom of the tree, and
+      // refuse when the rows fill the tree: a drop on a row targets its folder.
+      const y = (lastRow.y + lastRow.height + box.y + box.height) / 2 - box.y;
+      if (lastRow.y + lastRow.height >= box.y + box.height - 8) {
+        throw new Error("no empty space below the rows to drop on");
+      }
+      await this.fileTreeRow(from).dragTo(this.treeRoot, {
+        targetPosition: { x: box.width / 2, y },
       });
     });
   }
