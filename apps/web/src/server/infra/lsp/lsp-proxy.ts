@@ -67,6 +67,14 @@ export function createFrameParser(onMessage: (json: string) => void): (chunk: Bu
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 
+function didCloseMessage(uri: string): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    method: "textDocument/didClose",
+    params: { textDocument: { uri } },
+  });
+}
+
 export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
@@ -115,10 +123,38 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // loading the configured project for the file (race condition after didOpen).
   const pendingRequests = new Map<number, string>();
   // Documents this connection opened and has not closed. The language server
-  // outlives the connection, so without closing them on disconnect the next
-  // connection's `didOpen` of the same file (a page reload) is rejected as
-  // "already open" and tsserver answers "No Project" for it.
+  // outlives the connection and is shared by every connection to this
+  // workspace, so opens and closes are counted on the session: without that,
+  // a page reload's `didOpen` of a file the old page left open is rejected as
+  // "already open" (tsserver then answers "No Project"), and one tab closing
+  // would close a file another tab still has open.
   const openDocuments = new Set<string>();
+  const { openDocuments: sessionDocuments } = session;
+
+  /** Count an open or close and say whether to forward it to the server. */
+  function trackDocument(method: string | undefined, uri: string): boolean {
+    const count = sessionDocuments.get(uri) ?? 0;
+    if (method === "textDocument/didOpen") {
+      if (openDocuments.has(uri)) return true;
+      openDocuments.add(uri);
+      sessionDocuments.set(uri, count + 1);
+      // Already open for another connection: the server refuses a second
+      // `didOpen`, and this client's `didChange` versions start from its own.
+      // Close and reopen so the server holds this client's text.
+      if (count > 0) writeToStdin(didCloseMessage(uri));
+      return true;
+    }
+    if (method === "textDocument/didClose") {
+      if (!openDocuments.delete(uri)) return false;
+      if (count <= 1) {
+        sessionDocuments.delete(uri);
+        return true;
+      }
+      sessionDocuments.set(uri, count - 1);
+      return false;
+    }
+    return true;
+  }
   const retriedIds = new Set<number>();
   const RETRY_DELAY_MS = 2000;
 
@@ -204,12 +240,21 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
         pendingRequests.set(msg.id, json);
       }
       const uri = msg.params?.textDocument?.uri;
-      if (uri && msg.method === "textDocument/didOpen") openDocuments.add(uri);
-      if (uri && msg.method === "textDocument/didClose") openDocuments.delete(uri);
+      if (
+        uri &&
+        (msg.method === "textDocument/didOpen" || msg.method === "textDocument/didClose") &&
+        !trackDocument(msg.method, uri)
+      ) {
+        return;
+      }
     } catch {
       // Not valid JSON — forward as-is
     }
 
+    writeToStdin(json);
+  }
+
+  function writeToStdin(json: string): void {
     if (lspProcess.stdin?.writable) {
       lspProcess.stdin.write(frameMessage(json));
     }
@@ -232,15 +277,7 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   ws.on("close", () => {
     lspProcess.stdout?.off("data", onStdoutData);
     lspProcess.off("exit", onExit);
-    for (const uri of openDocuments) {
-      forwardToStdin(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          method: "textDocument/didClose",
-          params: { textDocument: { uri } },
-        }),
-      );
-    }
+    for (const uri of [...openDocuments]) forwardToStdin(didCloseMessage(uri));
     log.debug("LSP client disconnected: %s/%s (server kept alive)", workspaceId, lang);
   });
 }

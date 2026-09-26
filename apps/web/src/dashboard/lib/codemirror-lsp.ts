@@ -289,11 +289,7 @@ class BandWorkspace extends Workspace {
   }
 
   uriToWorkspacePath(encodedUri: string): string {
-    // Servers percent-encode URIs (`%20`, `%40`); the root URI is built raw.
-    let uri = encodedUri;
-    try {
-      uri = decodeURIComponent(encodedUri);
-    } catch {}
+    const uri = decodeUri(encodedUri);
     const root = this.rootUri.endsWith("/") ? this.rootUri : `${this.rootUri}/`;
     if (uri.startsWith(root)) {
       return uri.slice(root.length);
@@ -361,9 +357,15 @@ function createWebSocketTransport(url: string): Promise<CloseableTransport> {
 // LSP Client cache (one client per WebSocket URL = per workspace+language)
 // ---------------------------------------------------------------------------
 
-interface CachedClient {
+interface ConnectedClient {
   client: LSPClient;
   transport: CloseableTransport;
+}
+
+interface CachedClient {
+  /** The connect in flight, cached before it resolves so concurrent callers
+   *  for one URL share a single client and WebSocket. */
+  ready: Promise<ConnectedClient>;
   refCount: number;
 }
 
@@ -379,30 +381,41 @@ const clientCache = new Map<string, CachedClient>();
  * already partitions clients by workspace and a hit is guaranteed to carry the
  * same workspaceId the caller passed. (If that URL↔workspace coupling ever
  * changes, this assumption must be revisited.)
+ *
+ * A rejected promise holds no reference, so callers release only after a
+ * successful acquire.
  */
 async function getOrCreateClient(
   wsUrl: string,
   rootUri: string,
   workspaceId?: string,
 ): Promise<LSPClient> {
-  const cached = clientCache.get(wsUrl);
+  let cached = clientCache.get(wsUrl);
   if (cached) {
     cached.refCount++;
-    return cached.client;
+  } else {
+    const client = new LSPClient({
+      rootUri,
+      workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
+      extensions: languageServerExtensions(),
+      timeout: 10000,
+    });
+    const ready = createWebSocketTransport(wsUrl).then((transport) => {
+      client.connect(transport);
+      return { client, transport };
+    });
+    cached = { ready, refCount: 1 };
+    clientCache.set(wsUrl, cached);
   }
-
-  const client = new LSPClient({
-    rootUri,
-    workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
-    extensions: languageServerExtensions(),
-    timeout: 10000,
-  });
-
-  const transport = await createWebSocketTransport(wsUrl);
-  client.connect(transport);
-
-  clientCache.set(wsUrl, { client, transport, refCount: 1 });
-  return client;
+  const entry = cached;
+  try {
+    return (await entry.ready).client;
+  } catch (err) {
+    // A failed connect is dropped so the next caller retries.
+    entry.refCount--;
+    if (clientCache.get(wsUrl) === entry) clientCache.delete(wsUrl);
+    throw err;
+  }
 }
 
 /**
@@ -414,23 +427,28 @@ export function releaseLspClient(wsUrl: string): void {
   const cached = clientCache.get(wsUrl);
   if (!cached) return;
   cached.refCount--;
-  if (cached.refCount <= 0) {
-    // Send LSP shutdown request followed by exit notification.
-    // This tells the language server to cleanly terminate.
-    cached.client
-      .request("shutdown", null)
-      .then(() => {
-        cached.transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
-      })
-      .catch(() => {
-        // Server may already be gone — that's fine
-      })
-      .finally(() => {
-        cached.client.disconnect();
-        cached.transport.close();
-      });
-    clientCache.delete(wsUrl);
-  }
+  if (cached.refCount > 0) return;
+  clientCache.delete(wsUrl);
+  cached.ready
+    .then(({ client, transport }) =>
+      // Send LSP shutdown request followed by exit notification.
+      // This tells the language server to cleanly terminate.
+      client
+        .request("shutdown", null)
+        .then(() => {
+          transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
+        })
+        .catch(() => {
+          // Server may already be gone — that's fine
+        })
+        .finally(() => {
+          client.disconnect();
+          transport.close();
+        }),
+    )
+    .catch(() => {
+      // Never connected: nothing to shut down.
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +484,15 @@ type DefinitionResponse =
   | { targetUri: string; targetSelectionRange: DefinitionLocation["range"] }[]
   | null;
 
+/** Servers percent-encode URIs (`%20`, `%40`); Band builds them raw. */
+function decodeUri(uri: string): string {
+  try {
+    return decodeURIComponent(uri);
+  } catch {
+    return uri;
+  }
+}
+
 function firstLocation(response: DefinitionResponse): DefinitionLocation | null {
   const first = Array.isArray(response) ? response[0] : response;
   if (!first) return null;
@@ -473,12 +500,18 @@ function firstLocation(response: DefinitionResponse): DefinitionLocation | null 
   return first;
 }
 
+/** How long the pointer rests on a word before the server is asked about it. */
+const HOVER_CHECK_DELAY_MS = 80;
+
 /** Finds out whether the word at `pos` has a definition to jump to. */
 type CanNavigate = (view: EditorView, pos: number) => Promise<boolean>;
 
 const setLink = StateEffect.define<{ from: number; to: number } | null>();
 
-const linkMark = Decoration.mark({ class: "cm-lsp-cmd-link" });
+const linkMark = Decoration.mark({
+  class: "cm-lsp-cmd-link",
+  attributes: { "data-testid": "code-editor__definition-link" },
+});
 
 const linkField = StateField.define({
   create: () => Decoration.none,
@@ -519,7 +552,9 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
       private mouseY = -1;
       /** The word currently shown (or being checked), as `from:to`. */
       private current: string | null = null;
-      private checked = new Map<string, Promise<boolean>>();
+      /** Words (`from:to`) the server reported a definition for. */
+      private navigable = new Set<string>();
+      private timer: ReturnType<typeof setTimeout> | undefined;
       private checkedDoc: Text;
 
       constructor(readonly view: EditorView) {
@@ -538,6 +573,7 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
       }
 
       destroy() {
+        clearTimeout(this.timer);
         window.removeEventListener("keydown", this.onKeyDown);
         window.removeEventListener("keyup", this.onKeyUp);
         this.view.dom.removeEventListener("mousemove", this.onMouseMove);
@@ -591,19 +627,26 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
         const doc = this.view.state.doc;
         if (doc !== this.checkedDoc) {
           this.checkedDoc = doc;
-          this.checked.clear();
+          this.navigable.clear();
         }
-        let check = this.checked.get(key);
-        if (!check) {
-          check = canNavigate(this.view, range.from).catch(() => false);
-          this.checked.set(key, check);
-        }
-        void check.then((ok) => {
-          if (ok && this.current === key && this.view.state.doc === doc) this.show(range, key);
-        });
+        if (this.navigable.has(key)) return this.show(range, key);
+        // Ask the server only once the pointer rests on a word, so sweeping
+        // across a line doesn't queue a definition request per word crossed.
+        this.timer = setTimeout(() => {
+          void canNavigate(this.view, range.from)
+            .catch(() => false)
+            .then((ok) => {
+              // Only a hit is cached: a miss may be a server still loading
+              // the project, so the next hover asks again.
+              if (!ok || this.view.state.doc !== doc) return;
+              this.navigable.add(key);
+              if (this.current === key) this.show(range, key);
+            });
+        }, HOVER_CHECK_DELAY_MS);
       }
 
       private show(range: { from: number; to: number } | null, key: string | null = null) {
+        clearTimeout(this.timer);
         this.current = key;
         const shown = this.view.state.field(linkField, false);
         if (!range && (!shown || shown.size === 0)) return;
@@ -737,7 +780,7 @@ export async function createDiffLspNavigation(
       .then((loc) => {
         if (!loc) return;
         const { line, character } = loc.range.start;
-        if (loc.uri === documentUri && line < view.state.doc.lines) {
+        if (decodeUri(loc.uri) === decodeUri(documentUri) && line < view.state.doc.lines) {
           const target = Math.min(
             view.state.doc.line(line + 1).from + character,
             view.state.doc.length,

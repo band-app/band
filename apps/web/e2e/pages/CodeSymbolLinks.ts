@@ -7,9 +7,10 @@
  * (`ChangesPanelPage`), scoped to one editor's root so a link in another
  * editor on the page never matches.
  *
- * FRAGILITY: `.cm-line` is CodeMirror-owned DOM with no testid hook; it is
- * centralised here, the same caveat `ChangesPanelPage.diffLine` records.
- * `cm-lsp-cmd-link` is our own class (set in `codemirror-lsp.ts`).
+ * The link is located by its `code-editor__definition-link` testid (set on
+ * the mark in `codemirror-lsp.ts`). FRAGILITY: `.cm-line` is CodeMirror-owned
+ * DOM with no testid hook; it is centralised here, the same caveat
+ * `ChangesPanelPage.diffLine` records.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -22,7 +23,7 @@ export class CodeSymbolLinks {
     private readonly page: Page,
     private readonly scope: Locator,
   ) {
-    this.link = scope.locator(".cm-lsp-cmd-link");
+    this.link = scope.getByTestId("code-editor__definition-link");
   }
 
   /** A rendered line of the editor, by text the fixture wrote. */
@@ -81,27 +82,41 @@ export class CodeSymbolLinks {
     });
   }
 
+  /**
+   * Assert no link appears for `windowMs` while the pointer stays where it
+   * is. A link arrives only after a server round trip, so an immediate
+   * "count is 0" would pass even if one were on its way; this keeps sampling
+   * for longer than a round trip the caller has just seen succeed.
+   */
+  async expectNoLinkFor(windowMs = 1_500): Promise<void> {
+    await test.step(`No link appears within ${windowMs} ms`, async () => {
+      const start = Date.now();
+      let seen = false;
+      await expect
+        .poll(
+          async () => {
+            seen ||= (await this.link.count()) > 0;
+            if (seen) return "link shown";
+            return Date.now() - start >= windowMs ? "window elapsed" : "waiting";
+          },
+          { timeout: windowMs + 5_000, intervals: [100] },
+        )
+        .toBe("window elapsed");
+    });
+  }
+
   /** Wait for the Cmd/Ctrl+hover link to show `word`. */
   async expectLinkOn(word: string): Promise<void> {
     await expect(this.link).toHaveText(word, { timeout: 15_000 });
   }
 
-  /**
-   * The computed text colour of the link and of every element inside it
-   * (syntax highlighting nests coloured spans), plus the theme's `--link`
-   * colour resolved the same way, for comparison.
-   */
-  async linkColours(): Promise<{ expected: string; actual: string[] }> {
-    return await this.link.evaluate((el) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--link)";
-      document.body.appendChild(probe);
-      const expected = getComputedStyle(probe).color;
-      probe.remove();
-      const actual = [el, ...Array.from(el.querySelectorAll("*"))].map(
-        (node) => getComputedStyle(node).color,
-      );
-      return { expected, actual };
-    });
+  /** The computed text colour of the link and of every element inside it
+   *  (syntax highlighting nests coloured spans), de-duplicated. */
+  async linkColours(): Promise<string[]> {
+    return await this.link.evaluate((el) => [
+      ...new Set(
+        [el, ...Array.from(el.querySelectorAll("*"))].map((n) => getComputedStyle(n).color),
+      ),
+    ]);
   }
 }

@@ -333,6 +333,7 @@ export function DiffFileContent({
               makeLineNumbers(oldLineNumbers),
               hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, oldLineNumbers, { copyReferenceOnly }),
+              EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--old" }),
               ...sharedExtensions,
             ],
           },
@@ -344,6 +345,7 @@ export function DiffFileContent({
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
               lspExtension,
+              EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--new" }),
               ...sharedExtensions,
             ],
           },
@@ -362,6 +364,7 @@ export function DiffFileContent({
           searchHighlightOnly(),
           selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
           lspExtension,
+          EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--new" }),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,

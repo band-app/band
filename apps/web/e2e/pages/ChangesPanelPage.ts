@@ -19,6 +19,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
+import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -89,8 +90,19 @@ export class ChangesPanelPage {
    *  working-tree side (the only editor in unified mode, the right one in
    *  split mode), `"old"` the merge-base side of a split. */
   symbols(side: "new" | "old" = "new"): CodeSymbolLinks {
-    const editors = this.diffLeaf.locator(".cm-editor");
-    return new CodeSymbolLinks(this.page, side === "old" ? editors.first() : editors.last());
+    return new CodeSymbolLinks(this.page, this.diffLeaf.getByTestId(`diff-file__editor--${side}`));
+  }
+
+  /** The editor tab a go-to-definition from the diff opened (the visible
+   *  file leaf). */
+  get openedEditor(): FileViewerPage {
+    return new FileViewerPage(this.page, this.workspace.fileLeafVisibilityMarker(true));
+  }
+
+  /** Every file leaf in the workspace, visible or not. A go-to-definition
+   *  into another file adds one. */
+  get fileLeaves(): Locator {
+    return this.page.getByTestId(/^center-file-leaf__visible-/);
   }
 
   /** A changed-file row in the Changes tree, keyed by workspace-relative path. */

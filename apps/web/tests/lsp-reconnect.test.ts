@@ -15,12 +15,12 @@
  * which is where the LSP manager looks (`<worktree>/node_modules/.bin`).
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { toWorkspaceId } from "@/dashboard";
+import { createTsLspRepo } from "./fixtures/ts-lsp-repo";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 
@@ -28,20 +28,7 @@ const TOKEN = "lsp-reconnect-token";
 const PROJECT = "lsp-reconnect-repo";
 const MAIN_TS =
   "function addNumbers(a: number, b: number): number {\n  return a + b;\n}\nexport const total = addNumbers(1, 2);\n";
-const APP_NODE_MODULES = join(import.meta.dirname, "..", "node_modules");
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, {
-    cwd,
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "Test",
-      GIT_AUTHOR_EMAIL: "test@test.com",
-      GIT_COMMITTER_NAME: "Test",
-      GIT_COMMITTER_EMAIL: "test@test.com",
-    },
-  });
-}
+const REQUEST_TIMEOUT_MS = 20_000;
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -50,22 +37,7 @@ let repoPath: string;
 beforeAll(async () => {
   tmpHome = createTmpHome("band-lsp-reconnect-");
   repoPath = join(tmpHome, PROJECT);
-  mkdirSync(join(repoPath, "src"), { recursive: true });
-  git(repoPath, ["init", "-b", "main"]);
-  writeFileSync(join(repoPath, ".gitignore"), "node_modules\n");
-  writeFileSync(join(repoPath, "tsconfig.json"), JSON.stringify({ include: ["src"] }));
-  writeFileSync(join(repoPath, "src/main.ts"), MAIN_TS);
-  git(repoPath, ["add", "."]);
-  git(repoPath, ["commit", "-m", "initial"]);
-  mkdirSync(join(repoPath, "node_modules/.bin"), { recursive: true });
-  symlinkSync(
-    realpathSync(join(APP_NODE_MODULES, "typescript")),
-    join(repoPath, "node_modules/typescript"),
-  );
-  symlinkSync(
-    join(APP_NODE_MODULES, ".bin/typescript-language-server"),
-    join(repoPath, "node_modules/.bin/typescript-language-server"),
-  );
+  createTsLspRepo({ repoPath, branch: "main", committed: { "src/main.ts": MAIN_TS } });
 
   seedState(tmpHome, {
     projects: [
@@ -83,6 +55,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.close();
+  if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
 });
 
 /** A minimal LSP client over the proxy's WebSocket (JSON-RPC, no framing). */
@@ -92,8 +65,9 @@ class LspSocket {
 
   private constructor(private readonly ws: WebSocket) {
     ws.on("message", (data) => {
-      const msg = JSON.parse(data.toString()) as { id?: number; result?: unknown };
-      if (msg.id != null && this.pending.has(msg.id)) {
+      const msg = JSON.parse(data.toString()) as { id?: number; method?: string };
+      // Responses only: a server-to-client request also carries an `id`.
+      if (msg.method === undefined && msg.id != null && this.pending.has(msg.id)) {
         this.pending.get(msg.id)?.(msg);
         this.pending.delete(msg.id);
       }
@@ -115,8 +89,15 @@ class LspSocket {
 
   request(method: string, params: unknown): Promise<{ result?: unknown; error?: unknown }> {
     const id = this.nextId++;
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`no response to ${method} within ${REQUEST_TIMEOUT_MS} ms`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, (msg) => {
+        clearTimeout(timer);
+        resolve(msg);
+      });
       this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
     });
   }
@@ -159,27 +140,47 @@ async function definitionOfAddNumbers(lsp: LspSocket) {
 
 describe("/lsp proxy reconnects", () => {
   it("rejects a connection without the auth cookie", async () => {
-    await expect(LspSocket.open()).rejects.toThrow();
+    // The upgrade handler destroys an unauthenticated socket before replying.
+    await expect(LspSocket.open()).rejects.toThrow(/socket hang up/);
+    await expect(LspSocket.open("band_token=wrong-token")).rejects.toThrow(/socket hang up/);
+  });
+
+  // The function's name on line 0.
+  const definition = () => ({
+    uri: `file://${repoPath}/src/main.ts`,
+    range: { start: { line: 0, character: 9 }, end: { line: 0, character: 19 } },
   });
 
   it("answers go-to-definition on a file a previous, disconnected client had open", async () => {
-    // The function's name on line 0.
-    const definition = {
-      uri: `file://${repoPath}/src/main.ts`,
-      range: { start: { line: 0, character: 9 }, end: { line: 0, character: 19 } },
-    };
-
     const first = await LspSocket.open(`band_token=${TOKEN}`);
     const firstResponse = await definitionOfAddNumbers(first);
     expect(firstResponse.error).toBeUndefined();
-    expect(firstResponse.result).toEqual([definition]);
+    expect(firstResponse.result).toEqual([definition()]);
     // Disconnect without closing the document, as a page reload does.
     await first.close();
 
     const second = await LspSocket.open(`band_token=${TOKEN}`);
     const secondResponse = await definitionOfAddNumbers(second);
     expect(secondResponse.error).toBeUndefined();
-    expect(secondResponse.result).toEqual([definition]);
+    expect(secondResponse.result).toEqual([definition()]);
     await second.close();
+  }, 60_000);
+
+  it("keeps a file open for a client while another client that had it open disconnects", async () => {
+    // Two tabs on one workspace share the language server.
+    const leaving = await LspSocket.open(`band_token=${TOKEN}`);
+    const staying = await LspSocket.open(`band_token=${TOKEN}`);
+    expect((await definitionOfAddNumbers(leaving)).result).toEqual([definition()]);
+    expect((await definitionOfAddNumbers(staying)).result).toEqual([definition()]);
+
+    await leaving.close();
+
+    const response = await staying.request("textDocument/definition", {
+      textDocument: { uri: `file://${repoPath}/src/main.ts` },
+      position: { line: 3, character: 21 },
+    });
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual([definition()]);
+    await staying.close();
   }, 60_000);
 });

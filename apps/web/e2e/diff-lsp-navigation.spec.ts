@@ -18,12 +18,10 @@
  * mocked; the server spawns the language server as it does for a user.
  */
 
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { git } from "./helpers/git";
+import { createTsLspRepo } from "../tests/fixtures/ts-lsp-repo";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -33,7 +31,6 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChangesPanelPage } from "./pages/ChangesPanelPage";
-import { FileViewerPage } from "./pages/FileViewerPage";
 
 // Wide enough for the desktop layout and a side-by-side split.
 test.use({ viewport: { width: 1800, height: 800 } });
@@ -41,7 +38,11 @@ test.use({ viewport: { width: 1800, height: 800 } });
 const TOKEN = "e2e-diff-lsp-navigation-token";
 const REPO_NAME = "lsp-diff-repo";
 const BRANCH = "main";
-const APP_NODE_MODULES = fileURLToPath(new URL("../node_modules", import.meta.url));
+// The `--link` token in `styles/globals.css`, as the browser computes it.
+const LINK_COLOUR = {
+  light: "oklch(0.546 0.245 262.881)",
+  dark: "oklch(0.707 0.165 254.624)",
+};
 
 // Long runs of filler lines put each definition far below the line that
 // uses it, so "the definition scrolled into view" is observable.
@@ -80,34 +81,6 @@ const DOUBLED_LINE = "export const doubled = addNumbers(total, localHelper());";
 const ADD_NUMBERS_DEF = "export function addNumbers(a: number, b: number): number {";
 const LOCAL_HELPER_DEF = "function localHelper(): number {";
 
-/** A TypeScript repo with `src/main.ts` modified in the working tree. */
-function createRepo(tmpHome: string): string {
-  const repoPath = join(tmpHome, REPO_NAME);
-  mkdirSync(join(repoPath, "src"), { recursive: true });
-  git(repoPath, ["init", "-b", BRANCH]);
-  writeFileSync(join(repoPath, ".gitignore"), "node_modules\n");
-  writeFileSync(
-    join(repoPath, "tsconfig.json"),
-    JSON.stringify({ compilerOptions: { strict: true, module: "esnext" }, include: ["src"] }),
-  );
-  writeFileSync(join(repoPath, "src/math.ts"), MATH_TS);
-  writeFileSync(join(repoPath, "src/main.ts"), MAIN_BEFORE);
-  git(repoPath, ["add", "."]);
-  git(repoPath, ["commit", "-m", "initial"]);
-  writeFileSync(join(repoPath, "src/main.ts"), MAIN_AFTER);
-
-  mkdirSync(join(repoPath, "node_modules/.bin"), { recursive: true });
-  symlinkSync(
-    realpathSync(join(APP_NODE_MODULES, "typescript")),
-    join(repoPath, "node_modules/typescript"),
-  );
-  symlinkSync(
-    join(APP_NODE_MODULES, ".bin/typescript-language-server"),
-    join(repoPath, "node_modules/.bin/typescript-language-server"),
-  );
-  return repoPath;
-}
-
 function bootServer(theme: "light" | "dark") {
   const ctx: { server: ServerHandle; tmpHome: string; workspaceId: string } = {
     server: undefined as unknown as ServerHandle,
@@ -116,7 +89,13 @@ function bootServer(theme: "light" | "dark") {
   };
   test.beforeAll(async () => {
     ctx.tmpHome = createTmpHome();
-    const repoPath = createRepo(ctx.tmpHome);
+    const repoPath = join(ctx.tmpHome, REPO_NAME);
+    createTsLspRepo({
+      repoPath,
+      branch: BRANCH,
+      committed: { "src/math.ts": MATH_TS, "src/main.ts": MAIN_BEFORE },
+      working: { "src/main.ts": MAIN_AFTER },
+    });
     seedState(ctx.tmpHome, {
       projects: [
         {
@@ -151,21 +130,20 @@ for (const theme of ["light", "dark"] as const) {
 
       await diff.cmdHover(DOUBLED_LINE, "addNumbers");
       await diff.expectLinkOn("addNumbers");
-      const diffColours = await diff.linkColours();
-      for (const colour of diffColours.actual) expect(colour).toBe(diffColours.expected);
+      // The whole symbol, including any highlighted span inside the link.
+      expect(await diff.linkColours()).toEqual([LINK_COLOUR[theme]]);
       await diff.releaseModifier();
       await expect(diff.link).toHaveCount(0);
 
       await diff.cmdClick(DOUBLED_LINE, "addNumbers");
-      const editor = new FileViewerPage(page, page.getByTestId("center-file-leaf__visible-true"));
+      const editor = changes.openedEditor;
       await editor.expectContent(ADD_NUMBERS_DEF);
       await expect(editor.symbols.line(ADD_NUMBERS_DEF)).toBeInViewport();
 
       // The editor draws the same link.
       await editor.symbols.cmdHover(ADD_NUMBERS_DEF, "addNumbers");
       await editor.symbols.expectLinkOn("addNumbers");
-      const editorColours = await editor.symbols.linkColours();
-      for (const colour of editorColours.actual) expect(colour).toBe(editorColours.expected);
+      expect(await editor.symbols.linkColours()).toEqual([LINK_COLOUR[theme]]);
       await editor.symbols.releaseModifier();
     });
   });
@@ -181,7 +159,7 @@ test.describe("diff go-to-definition", () => {
     await changes.goto(ctx.workspaceId);
     await changes.openDiff("src/main.ts", "unified");
     const diff = changes.symbols("new");
-    await expect(diff.line(LOCAL_HELPER_DEF)).not.toBeInViewport();
+    await expect(diff.line(DOUBLED_LINE)).toBeInViewport();
 
     await diff.cmdHover(DOUBLED_LINE, "localHelper");
     await diff.expectLinkOn("localHelper");
@@ -189,7 +167,25 @@ test.describe("diff go-to-definition", () => {
     await diff.cmdClick(DOUBLED_LINE, "localHelper");
 
     await expect(diff.line(LOCAL_HELPER_DEF)).toBeInViewport();
-    await expect(changes.diffLeaf).toBeVisible();
+    await expect(diff.line(DOUBLED_LINE)).not.toBeInViewport();
+    await expect(changes.fileLeaves).toHaveCount(0);
+  });
+
+  test("A word with no definition is not linked", async ({ page }) => {
+    const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
+    await changes.goto(ctx.workspaceId);
+    await changes.openDiff("src/main.ts", "unified");
+    const diff = changes.symbols("new");
+
+    // Positive anchor: a symbol on a nearby line links within a round trip.
+    await diff.cmdHover(DOUBLED_LINE, "addNumbers");
+    await diff.expectLinkOn("addNumbers");
+    await diff.releaseModifier();
+
+    // A word inside a comment has nothing to jump to.
+    await diff.cmdHover("// main filler 1", "filler");
+    await diff.expectNoLinkFor();
+    await diff.releaseModifier();
   });
 
   test("Split view links only the working-tree side, not the merge-base side", async ({ page }) => {
@@ -203,17 +199,18 @@ test.describe("diff go-to-definition", () => {
     await newSide.expectLinkOn("addNumbers");
     await newSide.releaseModifier();
 
-    // ...the merge-base side does not, and Cmd+Click there opens nothing.
+    // ...the merge-base side does not.
     const oldSide = changes.symbols("old");
     await oldSide.cmdHover(TOTAL_LINE, "addNumbers");
-    await expect(oldSide.link).toHaveCount(0);
+    await oldSide.expectNoLinkFor();
     await oldSide.releaseModifier();
-    await oldSide.cmdClick(TOTAL_LINE, "addNumbers");
-    await expect(changes.diffLeaf).toBeVisible();
 
-    // Positive anchor: the same click on the working-tree side does navigate.
-    await newSide.cmdClick(TOTAL_LINE, "addNumbers");
-    const editor = new FileViewerPage(page, page.getByTestId("center-file-leaf__visible-true"));
-    await editor.expectContent(ADD_NUMBERS_DEF);
+    // Cmd+Click there opens nothing. A same-file jump on the working-tree side
+    // afterwards completes a full server round trip, after which a navigation
+    // from the old side would already have opened an editor.
+    await oldSide.cmdClick(TOTAL_LINE, "addNumbers");
+    await newSide.cmdClick(DOUBLED_LINE, "localHelper");
+    await expect(newSide.line(LOCAL_HELPER_DEF)).toBeInViewport();
+    await expect(changes.fileLeaves).toHaveCount(0);
   });
 });
