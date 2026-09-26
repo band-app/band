@@ -78,6 +78,13 @@ export const Channels = {
   // wired up with `setDevToolsWebContents` — not as a detached OS
   // window.
   browserToggleDevTools: "browser_toggle_dev_tools",
+  // Browser profiles: list the user's Chrome profiles, import one's
+  // cookies into a Band profile's session partition, and wipe a deleted
+  // profile's partition. The renderer asks the user before calling the
+  // first two; cookie values never cross IPC (only counts come back).
+  browserChromeProfiles: "browser_chrome_profiles",
+  browserChromeImport: "browser_chrome_import",
+  browserProfileClearData: "browser_profile_clear_data",
   // Chrome-style error pages for cert / load failures are rendered
   // INSIDE the WebContentsView via a `data:` URI (issue #444 — see
   // `browser/error-html.ts`). The user's button clicks become

@@ -273,6 +273,45 @@ export class SettingsPage {
     });
   }
 
+  /** One row per Band browser profile in the Browser section (the built-in
+   *  Default row is not included). `data-testid` set in
+   *  `BrowserProfilesSettings.tsx`. */
+  browserProfileRows(): Locator {
+    return this.dialog.getByTestId("settings__browser-profile");
+  }
+
+  /** Trash button of a browser profile row. `aria-label="Delete browser
+   *  profile <name>"` is set explicitly in `BrowserProfilesSettings.tsx`. */
+  deleteBrowserProfileButton(profileName: string): Locator {
+    return this.dialog.getByRole("button", { name: `Delete browser profile ${profileName}` });
+  }
+
+  /** Per-project default profile dropdown. `aria-label="Browser profile for
+   *  <project label>"` is set explicitly in `BrowserProfilesSettings.tsx`. */
+  projectBrowserProfileSelect(projectLabel: string): Locator {
+    return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectLabel}` });
+  }
+
+  /** Pick a project's default browser profile. Applies immediately. */
+  async selectProjectBrowserProfile(projectLabel: string, profileName: string): Promise<void> {
+    await test.step(`Set ${projectLabel}'s browser profile to "${profileName}"`, async () => {
+      const trigger = this.projectBrowserProfileSelect(projectLabel);
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByRole("option", { name: profileName }).click();
+      await expect(trigger).toContainText(profileName);
+    });
+  }
+
+  /** Click a browser profile row's trash button. */
+  async deleteBrowserProfile(profileName: string): Promise<void> {
+    await test.step(`Delete browser profile "${profileName}"`, async () => {
+      const button = this.deleteBrowserProfileButton(profileName);
+      await button.scrollIntoViewIfNeeded();
+      await button.click();
+    });
+  }
+
   /**
    * Scroll the given locator into view and assert it is visible.
    *

@@ -49,3 +49,15 @@ export class WorkspaceNotFoundError extends Error {
     this.name = "WorkspaceNotFoundError";
   }
 }
+
+/**
+ * Thrown by `BrowserProfileService` for an unknown browser profile id.
+ * `api/browser-profiles/router.ts` and `api/browsers/router.ts` map it to
+ * 404 `NOT_FOUND`.
+ */
+export class BrowserProfileNotFoundError extends Error {
+  constructor(profileId: string) {
+    super(`Browser profile not found: ${profileId}`);
+    this.name = "BrowserProfileNotFoundError";
+  }
+}

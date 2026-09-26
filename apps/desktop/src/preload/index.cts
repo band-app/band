@@ -80,6 +80,10 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_zoom",
   // Toggle Chromium DevTools for a browser tab
   "browser_toggle_dev_tools",
+  // Browser profiles + Chrome cookie import
+  "browser_chrome_profiles",
+  "browser_chrome_import",
+  "browser_profile_clear_data",
   // Chrome-style cert / load error pages (issue #444). Painted
   // inside the WebContentsView; only the overridden-hosts catch-up
   // crosses the IPC boundary.

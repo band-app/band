@@ -37,6 +37,12 @@ export interface BrowserCreateArgs extends BrowserKeyArg {
   width: number;
   height: number;
   url: string;
+  /**
+   * Band browser profile whose session the view runs in. `null` is the
+   * Default profile. When it differs from an existing view's profile, the
+   * view is destroyed and respawned. Omitted keeps whatever view exists.
+   */
+  profileId?: string | null;
 }
 
 export interface BrowserNavigateArgs extends BrowserKeyArg {
@@ -61,6 +67,19 @@ export interface BrowserEvalArgs extends BrowserKeyArg {
  */
 export interface BrowserEnsureArgs extends BrowserKeyArg {
   url: string;
+  /** Same as `BrowserCreateArgs.profileId`. */
+  profileId?: string | null;
+}
+
+export interface BrowserChromeImportArgs {
+  /** Band browser profile to import into. */
+  profileId: string;
+  /** Chrome profile directory from `browser_chrome_profiles`. */
+  chromeProfileDirectory: string;
+}
+
+export interface BrowserProfileArg {
+  profileId: string;
 }
 
 /**

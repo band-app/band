@@ -7,16 +7,23 @@
  */
 
 import { type BrowserWindow, ipcMain } from "electron";
+import {
+  clearProfileData,
+  importChromeProfile,
+  listChromeImportProfiles,
+} from "../../browser/chrome-import/import.js";
 import type { BrowserViewManager } from "../../browser/view-manager.js";
 import { Channels } from "../../shared/ipc-channels.js";
 import type {
   BrowserBoundsArgs,
+  BrowserChromeImportArgs,
   BrowserCreateArgs,
   BrowserEnsureArgs,
   BrowserEvalArgs,
   BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
+  BrowserProfileArg,
   BrowserStopFindInPageArgs,
   BrowserZoomArgs,
   CheckAppExistsArgs,
@@ -172,6 +179,17 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // dashboard chrome can paint the "Not Secure" badge for hosts the
   // user already proceeded to in this session.
   handle(Channels.browserGetOverriddenHosts, () => browserHandlers.getOverriddenHosts(bm));
+
+  // ---- Browser profiles ----
+  // Reads Chrome's profile list and cookie DB on this Mac. The renderer
+  // asks the user first; only counts come back over IPC.
+  handle(Channels.browserChromeProfiles, () => listChromeImportProfiles());
+  handle(Channels.browserChromeImport, (args: BrowserChromeImportArgs) =>
+    importChromeProfile(args),
+  );
+  handle(Channels.browserProfileClearData, (args: BrowserProfileArg) =>
+    clearProfileData(args.profileId),
+  );
 
   return () => {
     for (const [channel] of handlers) {

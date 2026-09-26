@@ -15,7 +15,8 @@
 
 import { app, BrowserWindow, powerMonitor, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
-import { BROWSER_PARTITION, BrowserViewManager } from "../browser/view-manager.js";
+import { sessionForProfile } from "../browser/profiles.js";
+import { BrowserViewManager } from "../browser/view-manager.js";
 import { Events } from "../shared/ipc-channels.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -280,17 +281,15 @@ async function bootstrap(): Promise<void> {
   // setImmediate, so we just return an empty no-content response
   // and Chromium quietly throws away the result.
   //
-  // Registered on BOTH sessions in play: `session.defaultSession`
-  // (the dashboard window) and the browser panes' dedicated
-  // `BROWSER_PARTITION` (each partition's `Session` is a separate
-  // object with its own protocol registry — without the second
-  // registration, band-action navigations in tabs would pop the
-  // macOS "no application set to open this URL" dialog before our
-  // setImmediate fires). If another partition is ever introduced,
-  // register the handler on it too.
-  const bandActionHandler = () => new Response(null, { status: 204 });
-  session.defaultSession.protocol.handle("band-action", bandActionHandler);
-  session.fromPartition(BROWSER_PARTITION).protocol.handle("band-action", bandActionHandler);
+  // Registered on `session.defaultSession` (the dashboard window) and on
+  // every browser-pane session. Each partition's `Session` is a separate
+  // object with its own protocol registry; without the registration,
+  // band-action navigations in tabs would pop the macOS "no application
+  // set to open this URL" dialog before our setImmediate fires. Browser
+  // profile sessions get it from `prepareBrowserSession` (`profiles.ts`)
+  // when their first view spawns; the Default profile's is prepared here.
+  session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
+  sessionForProfile(null);
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,

@@ -65,6 +65,14 @@ All issues are created in the `band-app/band` GitHub repo.
 
 The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
 
+## Architecture: browser profiles
+
+A browser profile is a separate cookie jar for browser-pane tabs: one Electron session partition per profile (`persist:band-browser-profile-<id>`, see `apps/desktop/src/browser/profiles.ts`). The built-in Default profile is `null` everywhere and keeps the original `persist:band-browser` partition.
+
+- The web server stores only metadata: the `browser_profiles` table, each project's default profile (`project_browser_profiles`), and each tab's `profileId` in its `panel_states` blob. `browsers.create` without a `profileId` uses the project default. `browsers.setProfile` switches a tab and makes that profile the project default.
+- Chrome import runs entirely in the desktop app (`apps/desktop/src/browser/chrome-import/`): it reads Chrome's `Local State` and a snapshot of the profile's cookie DB, gets the "Chrome Safe Storage" key through `security find-generic-password` (the macOS Keychain prompt), decrypts, and writes the cookies into the new profile's partition. Cookie values never cross IPC, reach the web server, or get logged. The renderer asks for consent before any Chrome data is read (`ChromeImportDialog.tsx`).
+- Every session a tab uses must go through `prepareBrowserSession`, which registers the per-session `band-action://` handler.
+
 ## Architecture: Web Server vs Terminal Daemon
 
 Terminal PTYs do not live in the web server. They live in the **terminal daemon** (`apps/web/terminal-daemon.ts`, bundled to `dist/terminal-daemon.mjs`), a detached process the server launches on the first terminal spawn, so shells survive a server restart (desktop relaunch, auto-update, `pnpm dev` reload, crash). The restarted server reattaches to the same shells, and the browser replays their screens over the unchanged `/terminal` WebSocket.

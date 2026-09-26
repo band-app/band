@@ -1,4 +1,5 @@
 import type {
+  BrowserProfileInfo,
   CIStatus,
   CliStatus,
   ContentSearchMatch,
@@ -43,6 +44,16 @@ export interface DashboardAdapter {
   runScript(path: string, scriptType: string): Promise<void>;
   gitPull(project: string, name: string): Promise<void>;
   gitPush(project: string, name: string): Promise<void>;
+
+  // Browser profiles (optional). Profiles hold the browser pane's cookies;
+  // each project remembers which one its new tabs open with.
+  listBrowserProfiles?(): Promise<BrowserProfileInfo[]>;
+  /** Delete a profile. The desktop adapter also wipes its cookies from disk. */
+  removeBrowserProfile?(profileId: string): Promise<void>;
+  /** `projectName → profileId` for every project with a non-Default profile. */
+  listProjectBrowserProfiles?(): Promise<Record<string, string>>;
+  /** `profileId: null` resets the project to the Default profile. */
+  setProjectBrowserProfile?(projectName: string, profileId: string | null): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;

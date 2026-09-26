@@ -1,6 +1,7 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useBrowserProfiles, useInvalidateBrowserProfiles } from "@/dashboard";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
@@ -10,6 +11,7 @@ import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
+import { BrowserProfileMenu } from "./BrowserProfileMenu";
 import { HistoryPopover } from "./HistoryPopover";
 import { NotSecureBadge } from "./NotSecureBadge";
 
@@ -688,6 +690,24 @@ export function BrowserPaneComponent({
   const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
+  // Browser profile (cookie jar) of this tab, from the server's tab record.
+  // `null` is the Default profile. The native view is only created once it
+  // is known, because a view can't change its session after creation.
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileResolved, setProfileResolved] = useState(false);
+  const { profiles, isLoaded: profilesLoaded } = useBrowserProfiles();
+  const invalidateProfiles = useInvalidateBrowserProfiles();
+  // A tab whose profile was deleted falls back to Default (the server also
+  // rewrites the tab record).
+  const effectiveProfileId =
+    profileId !== null && profilesLoaded && !profiles.some((p) => p.id === profileId)
+      ? null
+      : profileId;
+  const profileReady = profileResolved && (profileId === null || profilesLoaded);
+  const profileIdRef = useRef(effectiveProfileId);
+  profileIdRef.current = effectiveProfileId;
+  // Profile the live native view was created with.
+  const viewProfileRef = useRef<string | null>(null);
   // Freeze on overlay — see `useBrowserPaneFreeze` hook.
   const ipcKeyRef = useRef({ browserId });
   ipcKeyRef.current = { browserId };
@@ -730,18 +750,21 @@ export function BrowserPaneComponent({
     return desktopInvoke(cmd, args);
   }, []);
 
-  // ------- fetch URL from server when no initialUrl param -------
-  // The server browser record is the source of truth for the URL.
-  // When a browser is created via CLI with --url, or on workspace revisit,
-  // the panel is added without an initialUrl param — fetch it from the server.
+  // ------- fetch the tab record from the server -------
+  // The server browser record is the source of truth for the profile, and
+  // for the URL when there is no initialUrl param (a browser created via CLI
+  // with --url, or a workspace revisit adds the panel without one).
   useEffect(() => {
-    if (!browserId || initialUrl) return;
+    if (!browserId) return;
 
     let cancelled = false;
     trpc.browsers.get
       .query({ browserId })
       .then((result) => {
         if (cancelled) return;
+        setProfileId(result.browser?.profileId ?? null);
+        setProfileResolved(true);
+        if (initialUrl) return;
         const ws = result.browser?.workspaceId;
         if (ws && !workspaceIdRef.current) {
           // Lazy workspace backfill — see comment on `workspaceId`
@@ -762,7 +785,9 @@ export function BrowserPaneComponent({
         }
       })
       .catch(() => {
-        // Server fetch failed — the user can still type a URL manually
+        // Server fetch failed — the user can still type a URL manually,
+        // and the tab opens in the Default profile.
+        if (!cancelled) setProfileResolved(true);
       });
     return () => {
       cancelled = true;
@@ -776,7 +801,7 @@ export function BrowserPaneComponent({
   // not in the background.
   const wsActive = params.wsActive !== false;
   useEffect(() => {
-    if (!isDesktop || created || creatingRef.current || !wsActive) return;
+    if (!isDesktop || created || creatingRef.current || !wsActive || !profileReady) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -790,11 +815,14 @@ export function BrowserPaneComponent({
       observer.disconnect();
       creatingRef.current = true;
       try {
+        const viewProfile = profileIdRef.current;
         await invoke("browser_create", {
           browserId,
           ...bounds,
           url: currentUrlRef.current || BLANK_URL,
+          profileId: viewProfile,
         });
+        viewProfileRef.current = viewProfile;
         createdRef.current = true;
         setCreated(true);
         const pending = pendingNavRef.current;
@@ -823,7 +851,42 @@ export function BrowserPaneComponent({
       clearTimeout(timer);
       observer.disconnect();
     };
-  }, [created, wsActive, getBounds, invoke, browserId]);
+  }, [created, wsActive, profileReady, getBounds, invoke, browserId]);
+
+  // ------- profile switch -------
+  // A view's session is fixed when it is created, so when the tab's profile
+  // changes (picked in the menu, or its profile was deleted) the view is
+  // destroyed and the create effect above rebuilds it at the current URL.
+  useEffect(() => {
+    if (!isDesktop || !created) return;
+    if (viewProfileRef.current === effectiveProfileId) return;
+    createdRef.current = false;
+    setCreated(false);
+    desktopInvoke("browser_destroy", { browserId }).catch(() => {});
+  }, [created, effectiveProfileId, browserId]);
+
+  const handleProfileSelect = useCallback(
+    (next: string | null) => {
+      if (next === profileIdRef.current) return;
+      trpc.browsers.setProfile
+        .mutate({ browserId, profileId: next })
+        .then(() => {
+          setProfileId(next);
+          // The project's default changed too; Settings shows it.
+          void invalidateProfiles();
+        })
+        .catch((e) => console.error("Failed to switch browser profile:", e));
+    },
+    [browserId, invalidateProfiles],
+  );
+
+  const handleProfileImported = useCallback(
+    (next: string) => {
+      // Refetch first so the new id is in `profiles` before the tab uses it.
+      void invalidateProfiles().then(() => handleProfileSelect(next));
+    },
+    [invalidateProfiles, handleProfileSelect],
+  );
 
   // ------- hidden-workspace guest budget -------
   // While the native view exists, offer it to the budget in
@@ -1261,6 +1324,12 @@ export function BrowserPaneComponent({
           // than `input[type='text']`, which would also match the
           // find-bar's search input.
           data-band-address-input=""
+        />
+        <BrowserProfileMenu
+          profiles={profiles}
+          profileId={effectiveProfileId}
+          onSelect={handleProfileSelect}
+          onImported={handleProfileImported}
         />
         {workspaceId ? (
           <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />

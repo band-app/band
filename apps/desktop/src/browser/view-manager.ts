@@ -59,28 +59,24 @@ import {
   buildLoadErrorPayload,
   isMainFrameFailure,
 } from "./load-error.js";
+import { BROWSER_PARTITION, partitionForProfile, sessionForProfile } from "./profiles.js";
 import { decideWindowOpenAction } from "./window-open.js";
 
 const log = createLogger("view-manager");
 
 const MAX_BROWSER_VIEWS = 10;
 
-/**
- * Session partition for every browser-pane `WebContentsView`.
- *
- * Isolating the tabs from `session.defaultSession` (which the dashboard
- * window uses) matters for zoom: Chromium's zoom is stored per-origin
- * per-StoragePartition and propagates live to every webContents in the
- * partition — so with a shared session, zooming a tab pointed at the
- * dashboard's own origin (localhost:<port>) zoomed the dashboard window
- * itself and persisted that on disk. A dedicated partition keeps tab
- * zoom (and cookies/storage) away from the dashboard entirely.
- *
- * Anything registered on `session.defaultSession` that tabs rely on must
- * also be registered on this partition's session — currently the
- * `band-action://` protocol handler (see `apps/desktop/src/main/index.ts`).
- */
-export const BROWSER_PARTITION = "persist:band-browser";
+// Browser-pane `WebContentsView`s never use `session.defaultSession`
+// (which the dashboard window uses). Chromium's zoom is stored per-origin
+// per-StoragePartition and propagates live to every webContents in the
+// partition, so with a shared session, zooming a tab pointed at the
+// dashboard's own origin (localhost:<port>) zoomed the dashboard window
+// itself. Each Band browser profile gets its own partition (see
+// `profiles.ts`); the Default profile is `BROWSER_PARTITION`.
+//
+// Anything registered on `session.defaultSession` that tabs rely on must
+// also be registered on every profile's session: see `prepareBrowserSession`.
+export { BROWSER_PARTITION };
 
 // Zoom range + step, intentionally aligned with the dashboard's zoom
 // settings (`apps/web/src/lib/zoom.ts`). Keeping them in sync avoids
@@ -208,6 +204,8 @@ export class BrowserViewManager {
    * the user is browsing a site with an overridden cert.
    */
   private readonly overriddenHosts = new Set<string>();
+  /** Browser profile each view's session belongs to. `null` is Default. */
+  private readonly profileByKey = new Map<string, string | null>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -222,6 +220,7 @@ export class BrowserViewManager {
   create(args: BrowserCreateArgs): void {
     const key = browserKey(args);
     if (!key) return;
+    this.dropIfProfileChanged(key, args.profileId);
     const existing = this.views.get(key);
     if (existing) {
       this.touch(key);
@@ -239,7 +238,7 @@ export class BrowserViewManager {
     // over the failure mode where `spawn` is unable to insert into the
     // map — `moveTo` would then be handed `undefined`, and
     // `addChildView(undefined)` takes down the window.
-    const view = this.spawn(args.url, key);
+    const view = this.spawn(args.url, key, args.profileId ?? null);
     this.moveTo(key, view, "main");
     this.lastBoundsByKey.set(key, args);
     this.applyTabLayout(key, args);
@@ -270,6 +269,7 @@ export class BrowserViewManager {
   ensure(args: BrowserEnsureArgs): void {
     const key = browserKey(args);
     if (!key) return;
+    this.dropIfProfileChanged(key, args.profileId);
     const existing = this.views.get(key);
     if (existing) {
       // Leave the parent alone. `show()` and `hide()` keep the
@@ -287,7 +287,18 @@ export class BrowserViewManager {
       return;
     }
     this.enforceLru();
-    this.spawn(args.url, key);
+    this.spawn(args.url, key, args.profileId ?? null);
+  }
+
+  /**
+   * A view's partition is fixed at construction, so a view whose tab moved
+   * to another profile is destroyed here and respawned by the caller.
+   * `undefined` means the caller didn't say, and keeps the current view.
+   */
+  private dropIfProfileChanged(key: string, profileId: string | null | undefined): void {
+    if (profileId === undefined || !this.views.has(key)) return;
+    if ((this.profileByKey.get(key) ?? null) === profileId) return;
+    this.destroy({ browserId: key });
   }
 
   /**
@@ -752,7 +763,7 @@ export class BrowserViewManager {
 
     // Create the DevTools-host sibling. Same security flags and partition
     // as the page view — DevTools is just a webpage from Chromium's POV,
-    // and keeping it in BROWSER_PARTITION means its network activity
+    // and keeping it in the tab's profile partition means its network activity
     // (e.g. source-map fetches declared by the inspected page) and any
     // per-origin zoom writes stay out of the dashboard's default session.
     const dt = new WebContentsView({
@@ -760,7 +771,7 @@ export class BrowserViewManager {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
-        partition: BROWSER_PARTITION,
+        partition: partitionForProfile(this.profileByKey.get(key) ?? null),
       },
     });
     const parent = this.parentByKey.get(key) ?? "main";
@@ -843,6 +854,7 @@ export class BrowserViewManager {
     }
     this.views.delete(key);
     this.parentByKey.delete(key);
+    this.profileByKey.delete(key);
     this.lastBoundsByKey.delete(key);
     this.visibleByKey.delete(key);
     this.pendingCertErrors.delete(key);
@@ -953,15 +965,16 @@ export class BrowserViewManager {
    * `ensure()` (which leaves the view in the hidden window where the
    * compositor runs out of sight).
    */
-  private spawn(url: string, key: string): WebContentsView {
+  private spawn(url: string, key: string, profileId: string | null): WebContentsView {
     const view = new WebContentsView({
       webPreferences: {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
-        partition: BROWSER_PARTITION,
+        session: sessionForProfile(profileId),
       },
     });
+    this.profileByKey.set(key, profileId);
     this.wireEvents(key, view);
     if (this.opts.hiddenWindow) {
       // CDP screencast enabled — host fresh views in the hidden window
