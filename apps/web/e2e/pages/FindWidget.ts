@@ -41,6 +41,11 @@ export class FindWidget {
     this.closeButton = this.root.getByRole("button", { name: /^Close/ });
   }
 
+  /** Set on the input (`aria-invalid`) once a query has matched nothing. */
+  async expectNoResults(): Promise<void> {
+    await expect(this.input).toHaveAttribute("aria-invalid", "true");
+  }
+
   async type(query: string): Promise<void> {
     await test.step(`Type "${query}" into the find widget`, async () => {
       await this.input.fill(query);

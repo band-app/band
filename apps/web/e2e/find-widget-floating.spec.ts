@@ -123,7 +123,7 @@ test("file editor: the find widget floats top-right and steps through matches", 
 
   // Regex toggle changes the search: `needle (again|three)` matches two lines.
   await find.type("needle (again|three)");
-  await expect(find.count).toHaveText("No results");
+  await find.expectNoResults();
   await find.regexToggle.click();
   await expect(find.count).toHaveText("1/2");
 
@@ -158,6 +158,13 @@ test("terminal: the find widget floats top-right over the terminal", async ({ pa
   await workspacePage.goto(WORKSPACE);
   await workspacePage.waitForReady();
   await workspacePage.focusTerminal();
+  // Two output lines to find. The quotes keep the typed command itself from
+  // matching, so only the executed output does.
+  await workspacePage.runInTerminalUntilRendered(
+    WORKSPACE,
+    'echo ZQX_"FOUND"; echo ZQX_"FOUND"',
+    /ZQX_FOUND[\s\S]*ZQX_FOUND/,
+  );
 
   const pane = workspacePage.terminalPanes().first();
   const screen = workspacePage.terminalScreen();
@@ -172,6 +179,13 @@ test("terminal: the find widget floats top-right over the terminal", async ({ pa
   await expect(find.matchCaseToggle).toBeVisible();
   await expect(find.regexToggle).toBeVisible();
   await expect(find.count).toHaveText("0/0");
+
+  await find.type("ZQX_FOUND");
+  await expect(find.count).toHaveText("1/2");
+  await find.press("Enter");
+  await expect(find.count).toHaveText("2/2");
+  await find.press("Shift+Enter");
+  await expect(find.count).toHaveText("1/2");
 
   await find.press("Escape");
   await expect(find.root).toHaveCount(0);

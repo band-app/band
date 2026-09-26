@@ -123,6 +123,9 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
 
   const floating = variant === "floating";
   const hasMatches = !!matchInfo && matchInfo.total > 0;
+  // Only "No results" once the engine has answered; before that (e.g. the
+  // browser's async find-in-page) the counter stays a neutral `0/0`.
+  const noResults = !!query && !!matchInfo && !hasMatches;
 
   return (
     <div
@@ -143,6 +146,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
         )}
         placeholder={placeholder}
         aria-label={placeholder}
+        aria-invalid={noResults || undefined}
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => {
@@ -179,10 +183,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
           data-testid="find-widget__count"
           className={cn(
             "shrink-0 px-1 text-xs tabular-nums",
-            query && !hasMatches ? "text-destructive" : "text-muted-foreground",
+            noResults ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {query && matchInfo && !hasMatches
+          {noResults
             ? "No results"
             : `${hasMatches ? matchInfo.current : 0}/${hasMatches ? matchInfo.total : 0}`}
         </span>
