@@ -175,12 +175,16 @@ function ThemeSync() {
  *  `settings.translucentSidebar` (default on). A no-op outside the macOS
  *  desktop app, where the attribute is never set. */
 function TranslucentSidebarSync() {
-  const { settings } = useSettingsQuery();
+  const { settings, isLoading, error } = useSettingsQuery();
   const enabled = settings.translucentSidebar ?? true;
 
+  // Wait for the real settings: applying the loading-state (or failed-fetch)
+  // default would undo the pre-paint script for a user who turned it off.
+  const loaded = !isLoading && !error;
   useEffect(() => {
+    if (!loaded) return;
     applyTranslucentSidebar(enabled);
-  }, [enabled]);
+  }, [enabled, loaded]);
 
   return null;
 }
@@ -761,9 +765,12 @@ function AppShell() {
                 </div>
               </div>
             </Panel>
-            {/* Solid under the translucent sidebar so the vibrancy layer stops
-                at the sidebar's border, as the root below it is transparent. */}
-            <Separator className="w-[3px] bg-transparent translucent-sidebar:bg-background hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+            {/* Opaque in every state, hover and drag included: under the
+                translucent sidebar the root behind it is transparent, so a
+                see-through tint would let the vibrancy layer through past the
+                sidebar's border. The colours equal the other separator's
+                accent tints over `--background`. */}
+            <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
             <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}

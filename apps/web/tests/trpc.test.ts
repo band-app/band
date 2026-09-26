@@ -441,6 +441,9 @@ describe("tRPC — settings CRUD", () => {
   });
 
   it("settings.update rejects a non-boolean translucentSidebar", async () => {
+    const seed = await trpcMutate(server.url, "settings.update", { translucentSidebar: false });
+    expect(seed.status).toBe(200);
+
     const res = await trpcMutate(server.url, "settings.update", { translucentSidebar: "yes" });
     expect(res.status).toBe(400);
 
