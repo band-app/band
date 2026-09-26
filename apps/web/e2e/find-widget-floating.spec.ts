@@ -68,7 +68,9 @@ test.beforeAll(async () => {
       },
     ],
   });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  // DOM renderer, so the terminal test can wait for echoed text in
+  // `.xterm-rows` (a WebGL terminal leaves them empty).
+  seedSettings(tmpHome, { tokenSecret: TOKEN, useWebGLTerminalRenderer: false });
   server = await startServer({ tmpHome });
 });
 
@@ -158,6 +160,7 @@ test("terminal: the find widget floats top-right over the terminal", async ({ pa
   await workspacePage.goto(WORKSPACE);
   await workspacePage.waitForReady();
   await workspacePage.focusTerminal();
+  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
   // Two output lines to find. The quotes keep the typed command itself from
   // matching, so only the executed output does.
   await workspacePage.runInTerminalUntilRendered(
