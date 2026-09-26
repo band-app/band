@@ -106,6 +106,16 @@ test("settings dialog renders every section in a single scrolling list", async (
   await settingsPage.expectRowVisible(settingsPage.defaultAgentSelect());
 });
 
+test("the General section no longer offers a cached-workspaces count", async ({ page }) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  // Positive anchor: the General section rendered (LSP is one of its rows).
+  await settingsPage.expectRowVisible(settingsPage.lspSwitch());
+  await expect(settingsPage.cachedWorkspacesInput()).toHaveCount(0);
+});
+
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();

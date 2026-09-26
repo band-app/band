@@ -128,7 +128,6 @@ test.beforeAll(async () => {
   // `readTerminalRenderedText` — CI's Chromium has WebGL (canvas → empty rows).
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    maxCachedWorkspaces: 3,
     useWebGLTerminalRenderer: false,
   });
   server = await startServer({ tmpHome });
@@ -181,7 +180,7 @@ test.describe("Terminal parking: liveness + focus isolation", () => {
     // Record the highest marker visible just before we switch away.
     const beforePark = maxTick(await workspacePage.readTerminalRenderedText(WORKSPACE_A));
 
-    // Switch away → A parks. In-app nav keeps A cached (maxCachedWorkspaces=3).
+    // Switch away → A parks. In-app nav keeps A's workspace mounted.
     await workspacePage.switchWorkspace(WORKSPACE_B);
     await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible({
       timeout: 20_000,

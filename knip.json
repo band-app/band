@@ -22,7 +22,8 @@
         "src/dashboard/adapters/web.ts",
         "src/dashboard/adapters/desktop.ts",
         "bin/band-server.mjs",
-        "start-server.ts"
+        "start-server.ts",
+        "terminal-daemon.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
       "ignoreDependencies": [

@@ -27,6 +27,20 @@ esbuild start-server.ts \
   --external:@trpc/openapi \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
+# Bundle the terminal daemon: the detached process that owns terminal PTYs
+# so shells survive a server restart (src/server/infra/terminals/daemon/).
+# The server forks it from next to its own bundle, so it must land in dist/
+# beside start-server.mjs; the desktop app ships all of dist/. Same flags as
+# the server bundle: node-pty stays external and resolves from
+# dist/node_modules, copied below.
+esbuild terminal-daemon.ts \
+  --bundle \
+  --platform=node \
+  --format=esm \
+  --outfile=dist/terminal-daemon.mjs \
+  --external:node-pty \
+  --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
+
 # Copy native modules into dist/ for self-contained builds (Electron app).
 # When building for npm publish, skip this — npm consumers install native
 # modules as regular dependencies.

@@ -29,6 +29,7 @@ import {
 } from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
 import {
   startUsageScanner,
   stopUsageScanner,
@@ -496,6 +497,11 @@ async function main() {
   // cold cache and saves the boot path one synchronous SQL pass.
   // -----------------------------------------------------------------------
   runMigrations();
+
+  // Where terminals live: the detached terminal daemon (so shells survive a
+  // restart of this server) or this process. Nothing has spawned yet, and the
+  // daemon backend connects lazily, so this costs nothing at boot.
+  terminalService.setBackend(createTerminalBackend(SERVER_ROOT, bandHome()));
 
   // -----------------------------------------------------------------------
   // Dev vs prod renderer transport.
@@ -1126,6 +1132,12 @@ async function main() {
         console.error("First-time setup failed:", err);
       }
 
+      // Terminals outlive this server in the terminal daemon; drop the ones
+      // whose workspace was deleted while no server was running.
+      await terminalService.reconcile().catch((err) => {
+        console.error("Failed to reconcile terminals:", err);
+      });
+
       // Start cronjob scheduler AFTER setup so any setting tweaks
       // `runFirstTimeSetup` applied (default-disable etc.) are visible
       // to the first scheduled load.
@@ -1151,7 +1163,11 @@ async function main() {
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
     stopUsageScanner();
-    terminalService.killAll();
+    // Disconnect only: terminals live in the terminal daemon and must survive
+    // this restart. (In-process terminals, the fallback, die here.)
+    await terminalService.close().catch((err) => {
+      console.error("Failed to close terminal backend:", err);
+    });
     killAllServers();
 
     // Wait for any still-in-flight Phase B work to settle so we don't

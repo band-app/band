@@ -47,6 +47,8 @@ Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/
 
 - `apps/web/tests/terminal-pool-spawn-dedup.test.ts` drives `TerminalPool.spawn` directly (real PTY in a temp dir, no mocks) instead of booting the full server. It guards the spawn-dedup fix (issue #617): a terminal is created via two concurrent paths — the WebSocket handler's spawn-on-`getSession`-miss and the tRPC `terminal.create` mutation — and without dedup both spawned competing PTYs, so the client attached to one while the server's session map / scrollback pointed at the other. That double-spawn is a genuine nondeterministic race that can't be forced reliably through the full WS + tRPC stack, so the test asserts the pool-level invariant (concurrent + repeated spawns of one terminalId share a single PTY) through the pool's public surface — the same direct-function style as `git.test.ts`. Do not weaken it into a mocked test.
 
+- `apps/web/tests/browser-guest-retention.test.ts` drives `registerBrowserGuest` + `activateBrowserGuestWorkspace` (`apps/web/src/lib/browser-guest-retention.ts`) directly, with no mocks. It covers the hidden-workspace browser guest budget: at most 4 hidden workspaces keep live native webviews, least recently activated evicted first, the active workspace never evicted. The only consumer, `BrowserPaneComponent`, creates and destroys native views only on the desktop build (`isDesktop`), and the e2e harness boots the web build, so a real-server Playwright test cannot observe it. What stays untested is the IPC glue in `BrowserPaneComponent` (register while the view exists, `browser_destroy` on evict, recreate at the last URL when the workspace is shown).
+
 ## Git Hooks & CI
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.
@@ -60,6 +62,18 @@ All issues are created in the `band-app/band` GitHub repo.
 ## Architecture: Web Server vs Desktop App
 
 The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
+
+## Architecture: Web Server vs Terminal Daemon
+
+Terminal PTYs do not live in the web server. They live in the **terminal daemon** (`apps/web/terminal-daemon.ts`, bundled to `dist/terminal-daemon.mjs`), a detached process the server launches on the first terminal spawn, so shells survive a server restart (desktop relaunch, auto-update, `pnpm dev` reload, crash). The restarted server reattaches to the same shells, and the browser replays their screens over the unchanged `/terminal` WebSocket.
+
+- `TerminalService` talks to a `TerminalBackend` (`src/server/infra/terminals/terminal-backend.ts`). `DaemonTerminalBackend` is the default. `InProcessTerminalBackend` is used on Windows, when `BAND_TERMINAL_DAEMON=0`, and as a fallback when the daemon cannot start; its terminals die with the server. Nothing outside `infra/terminals/` touches node-pty.
+- The daemon knows nothing about workspaces, layouts or events. It runs a `TerminalPool` behind a Unix socket (NDJSON, token hello, separate control and stream connections). The wire protocol is in `src/server/infra/terminals/daemon/protocol.ts`; bump `PROTOCOL_VERSION` on any change to it.
+- Runtime files live in `~/.band/run/` (mode 0700): `terminal-daemon-v1.sock`, `.token`, `.pid`, and `terminal-daemon.log`. If the socket path would exceed the 104-byte `sun_path` limit, the socket moves to `/tmp/band-<uid>/`, named by a hash of the run dir.
+- Socket publishing follows orca's endpoint-ownership rules (see the header of `daemon/endpoint.ts`): never unlink a socket you did not create, only a refused or missing connect proves a daemon dead, and a daemon never removes its endpoint on shutdown.
+- Server shutdown only disconnects. A session ends when its tab is closed, its workspace is deleted (or found deleted at boot), or its shell exits.
+- The daemon exits on its own, following orca's daemon: when it has no shells, no spawn in flight and no connection, the moment its last server disconnects (or 2 minutes after launch if none ever connects). If its socket is replaced or removed, it drains: no new sessions, existing shells keep working over already-open connections, and it exits when the last one ends. If `~/.band/run` disappears, it kills its shells and exits.
+- Tests: the server helpers' `close()` stops the home's daemon (`tests/helpers/terminal-daemon.ts`), because it is detached and escapes the process-group kill. Pass `{ keepTerminalDaemon: true }`, or use the e2e fixture's `restart()`, to model a restart.
 
 ## Band CLI Skills
 

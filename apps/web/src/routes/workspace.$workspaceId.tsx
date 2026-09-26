@@ -454,7 +454,19 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
         {/* The project list fly-out reuses the exact same DashboardShell
             the `/` home route renders, so labels, add-project, settings
             and the full workspace tree are all available from here. */}
-        <SheetContent side="left" showCloseButton={false} data-testid="project-list-flyout">
+        <SheetContent
+          side="left"
+          showCloseButton={false}
+          data-testid="project-list-flyout"
+          // Focus the drawer itself on open, not its first button. That
+          // button ("Add project") has a tooltip that opens on focus, and an
+          // open tooltip takes the first Escape, so Escape didn't close the
+          // drawer whenever it was pressed after the auto-focus landed.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement | null)?.focus();
+          }}
+        >
           <SheetTitle className="sr-only">Projects</SheetTitle>
           <SheetDescription className="sr-only">
             Browse projects and open a workspace

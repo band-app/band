@@ -16,8 +16,8 @@ import { openExternalUrl } from "../../lib/open-external-url";
 // that owns the chat dispatching the click.
 //
 // Multiple workspaces can be alive at once (the per-panel content cache in
-// MultiWorkspacePanelHost keeps up to `maxCachedWorkspaces` workspace
-// subtrees mounted), and `dispatchOpenFile` is a window-scoped CustomEvent.
+// MultiWorkspacePanelHost keeps every visited workspace's subtree
+// mounted), and `dispatchOpenFile` is a window-scoped CustomEvent.
 // Without a workspace label on the event, every mounted layout's listener
 // races to open the file against its OWN active workspace — and the
 // `SharedDockviewLayout` listener (the only one for the desktop dockview)
@@ -179,7 +179,7 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
 
   const isBandFile = typeof href === "string" && href.startsWith("band-file:");
   // Workspace id is read at click time so that a `MessageResponse` rendered
-  // inside two workspaces (LRU cache) routes each click to the workspace
+  // inside two mounted workspaces routes each click to the workspace
   // that *owns* the surrounding subtree — not whichever workspace happens
   // to be active when the listener fires.
   const workspaceId = useContext(FileLinkWorkspaceContext);

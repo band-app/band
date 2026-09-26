@@ -208,8 +208,8 @@ class BandWorkspace extends Workspace {
       // Dispatch navigation event to CodeBrowserView.
       //
       // Scope the event to the owning workspace. Multiple workspace subtrees
-      // stay mounted at once (MultiWorkspacePanelHost keeps up to
-      // `maxCachedWorkspaces` alive, hidden with visibility:hidden), and each
+      // stay mounted at once (MultiWorkspacePanelHost keeps every visited
+      // workspace alive, hidden with visibility:hidden), and each
       // one's CodeBrowserView listens for `band:lsp-navigate` on `window`.
       // Without a workspace label, a go-to-definition in the active workspace
       // A would also open the (A-relative) file in hidden workspaces B/C,

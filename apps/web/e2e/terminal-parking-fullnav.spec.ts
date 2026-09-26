@@ -84,7 +84,6 @@ test.beforeAll(async () => {
   // `readTerminalRenderedText` — CI's Chromium has WebGL (canvas → empty rows).
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    maxCachedWorkspaces: 3,
     useWebGLTerminalRenderer: false,
   });
   server = await startServer({ tmpHome });

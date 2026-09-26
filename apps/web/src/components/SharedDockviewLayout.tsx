@@ -119,7 +119,7 @@ function NoWorkspaceMessage() {
 /**
  * The app-shell layout. No longer owns a dockview: it renders a single
  * `MultiWorkspacePanelHost` whose child is a `WorkspaceCenterDockview` per
- * cached workspace (the LRU keeps ~3 alive for instant switching). This
+ * visited workspace (all stay mounted for instant switching). This
  * component keeps the shell-level concerns: the command dialogs, the global
  * keyboard shortcuts, and the cross-panel handler registry. Panel-activation
  * shortcuts resolve the active workspace's dockview from

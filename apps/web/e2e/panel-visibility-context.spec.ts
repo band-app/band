@@ -28,13 +28,13 @@
  * report `visible-true` instead of `visible-false`. The test below
  * checks exactly that case for both the chat and terminal containers.
  *
- * Why we use the LRU-cached entry as the regression lever
- * --------------------------------------------------------
+ * Why we use the hidden mounted entry as the regression lever
+ * -----------------------------------------------------------
  * The outer Shared Dockview's default `onlyWhenVisible` mode detaches a
  * panel's content from the DOM when its outer tab is inactive — so a
  * test that just clicks outer tabs back and forth couldn't distinguish
  * "context propagated visible=false" from "container unmounted". The
- * `MultiWorkspacePanelHost` LRU cache keeps the inactive workspace's
+ * `MultiWorkspacePanelHost` keeps the inactive workspace's
  * subtree MOUNTED but passes `wsActive=false` into its
  * `DockviewChatContainer` / `DockviewTerminalContainer`. The shared
  * context is the only channel that propagates that `wsActive=false`
@@ -137,8 +137,8 @@ test.describe("Panel visibility context (issue #469)", () => {
     await expect(workspacePage.chatTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible();
 
     // Switch to B via the sidebar card. This uses TanStack Router's
-    // in-app navigation, which keeps A's panels mounted in the LRU
-    // cache while flipping `wsActive` from true→false for A and
+    // in-app navigation, which keeps A's panels mounted
+    // while flipping `wsActive` from true→false for A and
     // false→true for B. The full-page `goto()` would tear down the
     // React tree and defeat the regression lever.
     await workspacePage.switchWorkspace(WORKSPACE_B);

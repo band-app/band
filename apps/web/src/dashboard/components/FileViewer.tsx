@@ -74,6 +74,10 @@ interface FileViewerProps {
   onViewModeChange?: (mode: "preview" | "source") => void;
   /** Optional LSP extension to wire into the editor for code intelligence */
   lspExtension?: Extension | null;
+  /** Subscribe to the workspace file watcher (default true). While false the
+   *  subscription is closed; turning it back on reloads the file once, since
+   *  changes made in between were not observed. */
+  watchFileChanges?: boolean;
   /** Initial edited content to restore (from tab state). null = no cached edits. */
   initialEditedContent?: string | null;
   /** Saved cursor selection (from `serializeViewPosition`) to re-apply on creation */
@@ -258,6 +262,7 @@ export function FileViewer({
   viewMode: controlledViewMode,
   onViewModeChange,
   lspExtension,
+  watchFileChanges = true,
   initialEditedContent,
   savedSelection,
   savedScrollTop,
@@ -825,17 +830,35 @@ export function FileViewer({
   // previews render straight off the raw file URL (no in-memory content to
   // refresh), and untitled/external tabs have no watcher path — skip all
   // of them.
+  const missedFileChangesRef = useRef(false);
   useEffect(() => {
     if (untitled || external) return;
     if (previewType === "image" || previewType === "pdf") return;
     if (!adapter.subscribeFileChanges) return;
+    if (!watchFileChanges) {
+      missedFileChangesRef.current = true;
+      return;
+    }
+    if (missedFileChangesRef.current) {
+      missedFileChangesRef.current = false;
+      void reloadFromDisk();
+    }
     const watchedDir = parentDirOf(filePath);
     const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedDir) => {
       if (changedDir !== watchedDir) return;
       void reloadFromDisk();
     });
     return unsubscribe;
-  }, [adapter, workspaceId, filePath, untitled, external, previewType, reloadFromDisk]);
+  }, [
+    adapter,
+    workspaceId,
+    filePath,
+    untitled,
+    external,
+    previewType,
+    reloadFromDisk,
+    watchFileChanges,
+  ]);
 
   const handleBack = useCallback(() => {
     if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {

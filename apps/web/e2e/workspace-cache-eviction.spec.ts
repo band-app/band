@@ -1,8 +1,8 @@
 /**
  * Regression coverage for issue #508 —
- * `MultiWorkspacePanelHost`'s LRU cache evicts a workspace as soon as
- * that workspace disappears from the projects query, not only when a
- * NEW workspace overflows the capacity-bound.
+ * `MultiWorkspacePanelHost` unmounts a workspace as soon as that
+ * workspace disappears from the projects query. Deletion is the only way a
+ * visited workspace leaves the mounted set.
  *
  * Test architecture:
  *
@@ -136,12 +136,7 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Pin `maxCachedWorkspaces` explicitly so the test's "neither workspace
-  // is LRU-evicted by capacity" assumption can't be invalidated by a
-  // future PR lowering `DEFAULT_MAX_CACHED_WORKSPACES`. The test needs
-  // capacity >= 2 (one cached + one active) to keep both alive at the
-  // assertion point.
-  seedSettings(tmpHome, { tokenSecret: TOKEN, maxCachedWorkspaces: 3 });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
 
@@ -151,23 +146,20 @@ test.afterAll(async () => {
 });
 
 test.describe("MultiWorkspacePanelHost cache eviction (issue #508)", () => {
-  test("evicts a deleted workspace from the LRU cache after deletion via the sidebar", async ({
-    page,
-  }) => {
+  test("unmounts a deleted workspace after deletion via the sidebar", async ({ page }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
     // Land on workspace A via a real navigation, then switch to B via a
     // CLIENT-SIDE click on B's sidebar card. The distinction matters:
     // `goto()` triggers a full browser navigation that wipes React
-    // state, including `MultiWorkspacePanelHost`'s LRU cache. The
+    // state, including `MultiWorkspacePanelHost`'s mounted set. The
     // bug we're guarding is "deleted workspace stays cached", which
     // only manifests when the cache survives a workspace switch — so
     // the test must use the SAME in-app switch path the user takes
     // (TanStack Router via the workspace card's onClick), not a full
-    // page navigation. With the default `maxCachedWorkspaces = 3`,
-    // neither workspace is LRU-evicted by capacity, so any later
-    // eviction is unambiguously attributable to the reconcile-against-
-    // projects effect being tested.
+    // page navigation. Visited workspaces are never evicted by age or
+    // count, so any later unmount is unambiguously attributable to the
+    // reconcile-against-projects effect being tested.
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
     // Wait for the projects-query to land so the workspace cards exist

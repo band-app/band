@@ -334,10 +334,15 @@ export class CronjobService {
     // Best-effort: tear down the terminal a via="terminal" job last spawned so
     // deleting the job doesn't leave a stray pane running the agent. No-op when
     // the id is unset or the PTY already exited. `kill()` emits `terminal-killed`
-    // once — the pool suppresses the `cleanupOnExit` hook on an explicit kill
-    // (it detects the session was already removed), so there's no double-emit.
+    // once — the exit event of an explicit kill is flagged `killed`, which the
+    // service's `cleanupOnExit` handling skips, so there's no double-emit.
+    // Fire-and-forget: the kill may hop to the terminal daemon, and deleting
+    // the job must not wait on (or fail because of) the pane.
     if (removed?.lastTerminalId) {
-      terminalService.kill(removed.lastTerminalId);
+      const terminalId = removed.lastTerminalId;
+      void terminalService.kill(terminalId).catch((err) => {
+        log.warn({ jobId: id, terminalId, err }, "failed to kill the job's terminal");
+      });
     }
     this.reloadSchedules();
     return { ok: true };
@@ -582,7 +587,7 @@ export class CronjobService {
       // actually spawned. A live PTY means the previous headless run is still
       // working (a finished one has exited and self-closed).
       const prevTerminalId = this.findJob(fileKey, job.id)?.lastTerminalId;
-      if (prevTerminalId && terminalService.getSession(prevTerminalId)) {
+      if (prevTerminalId && (await terminalService.info(prevTerminalId))) {
         throw new TaskConflictError(`Cronjob ${job.id} terminal run is still in progress`);
       }
 

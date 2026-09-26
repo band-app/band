@@ -431,6 +431,58 @@ describe("tRPC — settings CRUD", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Settings written by an older build
+// ---------------------------------------------------------------------------
+
+// `maxCachedWorkspaces` was a user setting until every visited workspace
+// started staying mounted. A settings.json written by an older build still
+// carries the key, and an older client may still send it; neither may break
+// loading or saving settings.
+describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, { projects: [] });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN, maxCachedWorkspaces: 1, enableLSP: true });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("settings.get still requires auth", async () => {
+    const res = await fetch(`${server.url}/trpc/settings.get`);
+    expect(res.status).toBe(401);
+  });
+
+  it("settings.get loads a settings file that still stores the key", async () => {
+    const res = await trpcQuery(server.url, "settings.get");
+    expect(res.status).toBe(200);
+    const data = await trpcData<Record<string, unknown>>(res);
+    expect(data.enableLSP).toBe(true);
+    // Ignored, not stripped: the passthrough schema keeps the stored value.
+    expect(data.maxCachedWorkspaces).toBe(1);
+  });
+
+  it("settings.update accepts an update that still sends the key", async () => {
+    const res = await trpcMutate(server.url, "settings.update", {
+      maxCachedWorkspaces: 2,
+      enableLSP: false,
+    });
+    expect(res.status).toBe(200);
+
+    const getRes = await trpcQuery(server.url, "settings.get");
+    const data = await trpcData<Record<string, unknown>>(getRes);
+    expect(data.enableLSP).toBe(false);
+    expect(data.maxCachedWorkspaces).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Workspace create, remove, and file operations
 // ---------------------------------------------------------------------------
 

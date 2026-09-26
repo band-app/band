@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { stopTerminalDaemon } from "../../tests/helpers/terminal-daemon";
 import { ACP_STUB_AGENT_PATH } from "./acp-stub";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
@@ -14,7 +15,19 @@ const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
 export interface ServerHandle {
   url: string;
   home: string;
-  close: () => Promise<void>;
+  /**
+   * Stop the server, then the terminal daemon it may have launched for
+   * `home` (see `stopTerminalDaemon`). Pass `keepTerminalDaemon` to model a
+   * server restart, where the daemon and its shells must survive.
+   */
+  close: (opts?: { keepTerminalDaemon?: boolean }) => Promise<void>;
+  /**
+   * Restart the way a desktop relaunch does: stop this server, leave the
+   * terminal daemon (and every shell in it) running, and boot a new server on
+   * the same home, port and env. The port matters: the page's sockets
+   * reconnect to the original URL.
+   */
+  restart: () => Promise<ServerHandle>;
 }
 
 export function createTmpHome(): string {
@@ -173,6 +186,25 @@ export async function startServer(
       stderr += chunk.toString();
     });
 
+    const close = async (closeOpts?: { keepTerminalDaemon?: boolean }) => {
+      await new Promise<void>((r) => {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          r();
+          return;
+        }
+        // Hard backstop: if the group hasn't drained in 5 s,
+        // escalate to SIGKILL so test teardown can't hang
+        // forever waiting on a stuck PTY or language server.
+        const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
+        child.on("exit", () => {
+          clearTimeout(fallback);
+          r();
+        });
+        killGroup("SIGTERM");
+      });
+      if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(home);
+    };
+
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       if (text.includes("listening") && !settled) {
@@ -180,15 +212,11 @@ export async function startServer(
         resolve({
           url: `http://127.0.0.1:${port}`,
           home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              killGroup("SIGTERM");
-              // Hard backstop: if the group hasn't drained in 5 s,
-              // escalate to SIGKILL so test teardown can't hang
-              // forever waiting on a stuck PTY or language server.
-              setTimeout(() => killGroup("SIGKILL"), 5_000).unref();
-            }),
+          close,
+          restart: async () => {
+            await close({ keepTerminalDaemon: true });
+            return startServer({ ...opts, tmpHome: home, port });
+          },
         });
       }
     });

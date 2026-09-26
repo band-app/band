@@ -31,7 +31,7 @@ export class FileViewerPage {
    * @param page  The Playwright page.
    * @param scope Optional locator to scope the viewer lookup to a single
    *   workspace's subtree. Several workspace subtrees stay mounted at once
-   *   (`MultiWorkspacePanelHost`'s LRU cache), so `file-viewer__root` can
+   *   (`MultiWorkspacePanelHost`), so `file-viewer__root` can
    *   resolve to more than one element — pass a per-workspace scope (e.g.
    *   `workspacePage.cachedPanelEntries(id)`) to disambiguate. Defaults to the
    *   whole page for the common single-workspace case.

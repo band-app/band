@@ -453,7 +453,7 @@ export function QuickOpenDialog({
     // so this dialog stays free of workspace-state knowledge.
     //
     // Address the event to *this* workspace: multiple CodeBrowserView
-    // instances may be mounted (the workspace dockview is LRU-cached),
+    // instances may be mounted (every visited workspace stays mounted),
     // and an undelimited broadcast would race every cached instance to
     // open its own picker — the file would land in whichever instance
     // won, not the one the user is looking at.

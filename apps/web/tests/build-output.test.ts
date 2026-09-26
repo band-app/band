@@ -15,6 +15,12 @@ describe("build output", () => {
     expect(existsSync(join(dist, "start-server.mjs"))).toBe(true);
   });
 
+  // The server forks this from next to its own bundle; the desktop app and
+  // the npm package ship it only if it lands in dist/.
+  it("contains the terminal daemon bundle", () => {
+    expect(existsSync(join(dist, "terminal-daemon.mjs"))).toBe(true);
+  });
+
   it("contains the OpenAPI spec", () => {
     expect(existsSync(join(dist, "openapi.json"))).toBe(true);
   });

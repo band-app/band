@@ -150,6 +150,12 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "Play sound on needs attention" });
   }
 
+  /** The retired "Cached workspaces" number input. Kept as a locator only so
+   *  a test can prove the row no longer renders. */
+  cachedWorkspacesInput(): Locator {
+    return this.dialog.getByRole("spinbutton", { name: "Cached workspaces" });
+  }
+
   /** Web server port input — `type="number"` so its ARIA role is
    *  `spinbutton`. */
   webServerPortInput(): Locator {
