@@ -149,7 +149,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+f`);
 
-  // Exactly one find bar should appear — the unified top one. The old
+  // Exactly one find widget should appear, floating over the preview. The old
   // "stacked bars" regression (#435 follow-up) would surface here as a
   // second input with the same placeholder.
   await expect(findInput).toHaveCount(1);
@@ -162,22 +162,22 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   // "needle" appears 3× in the fixture — once in the first paragraph,
   // once under Section A, and once under Section B. The counter starts
   // on the first match.
-  await expect(page.getByText("1 of 3")).toBeVisible();
+  await expect(page.getByText("1/3", { exact: true })).toBeVisible();
 
   // Enter advances to the next match.
   await findInput.press("Enter");
-  await expect(page.getByText("2 of 3")).toBeVisible();
+  await expect(page.getByText("2/3", { exact: true })).toBeVisible();
 
   await findInput.press("Enter");
-  await expect(page.getByText("3 of 3")).toBeVisible();
+  await expect(page.getByText("3/3", { exact: true })).toBeVisible();
 
   // Wrap-around: another Enter cycles back to the first match.
   await findInput.press("Enter");
-  await expect(page.getByText("1 of 3")).toBeVisible();
+  await expect(page.getByText("1/3", { exact: true })).toBeVisible();
 
   // Shift+Enter walks backwards.
   await findInput.press("Shift+Enter");
-  await expect(page.getByText("3 of 3")).toBeVisible();
+  await expect(page.getByText("3/3", { exact: true })).toBeVisible();
 
   // No-result query updates the counter to "No results" (the SearchBar
   // renders this string when matchInfo.total === 0 and there is a

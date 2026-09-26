@@ -37,6 +37,15 @@ export interface SearchBarProps {
    * would be no-ops.
    */
   visibleOptions?: readonly SearchOptionKey[];
+  /**
+   * `bar` (default) is a full-width strip in the layout flow, used as the
+   * query field of the Search in Files dialog. `floating` is the in-pane find
+   * widget: a compact overlay pinned to the top-right corner of the nearest
+   * positioned ancestor, laid over the content instead of pushing it down
+   * (VS Code's find widget). Pass `className="static"` to keep the widget look
+   * but place it in the flow, as the browser pane does.
+   */
+  variant?: "bar" | "floating";
   /** Extra class names for the root container */
   className?: string;
 }
@@ -85,6 +94,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
     onPrevious,
     onClose,
     visibleOptions = DEFAULT_VISIBLE_OPTIONS,
+    variant = "bar",
     className,
   },
   ref,
@@ -111,18 +121,28 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
     onOptionsChange({ ...options, regex: !options.regex });
   }, [options, onOptionsChange]);
 
+  const floating = variant === "floating";
+  const hasMatches = !!matchInfo && matchInfo.total > 0;
+
   return (
     <div
+      data-testid={floating ? "find-widget" : undefined}
       className={cn(
-        "flex shrink-0 items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5",
+        floating
+          ? "absolute top-1.5 right-4 z-20 flex w-80 max-w-[calc(100%-1.5rem)] items-center gap-0.5 rounded-md border border-border bg-popover py-1 pr-1 pl-2 text-popover-foreground shadow-md"
+          : "flex shrink-0 items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5",
         className,
       )}
     >
-      <Search className="size-3.5 shrink-0 text-muted-foreground" />
+      {!floating && <Search className="size-3.5 shrink-0 text-muted-foreground" />}
       <input
         ref={inputRef}
-        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        className={cn(
+          "min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground",
+          floating ? "text-[13px]" : "text-sm",
+        )}
         placeholder={placeholder}
+        aria-label={placeholder}
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => {
@@ -152,16 +172,33 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
           <Regex className="size-4" />
         </ToggleButton>
       )}
-      {matchInfo && query && (
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {matchInfo.total > 0 ? `${matchInfo.current} of ${matchInfo.total}` : "No results"}
+      {floating ? (
+        // Always shown, like VS Code: `0/0` before a query, `3/12` while
+        // matching, "No results" when a query matched nothing.
+        <span
+          data-testid="find-widget__count"
+          className={cn(
+            "shrink-0 px-1 text-xs tabular-nums",
+            query && !hasMatches ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {query && matchInfo && !hasMatches
+            ? "No results"
+            : `${hasMatches ? matchInfo.current : 0}/${hasMatches ? matchInfo.total : 0}`}
         </span>
+      ) : (
+        matchInfo &&
+        query && (
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {matchInfo.total > 0 ? `${matchInfo.current} of ${matchInfo.total}` : "No results"}
+          </span>
+        )
       )}
       {onPrevious && (
         <button
           type="button"
           onClick={onPrevious}
-          disabled={!matchInfo || matchInfo.total === 0}
+          disabled={!hasMatches}
           className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-30"
           title="Previous match (Shift+Enter)"
         >
@@ -172,13 +209,14 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
         <button
           type="button"
           onClick={onNext}
-          disabled={!matchInfo || matchInfo.total === 0}
+          disabled={!hasMatches}
           className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:opacity-30"
           title="Next match (Enter)"
         >
           <ChevronDown className="size-3.5" />
         </button>
       )}
+      {floating && onClose && <div aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />}
       {onClose && (
         <button
           type="button"

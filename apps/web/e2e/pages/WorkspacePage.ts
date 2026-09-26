@@ -711,6 +711,12 @@ export class WorkspacePage {
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
   }
 
+  /** A line of the visible `file` leaf's editor by its exact text. Specs pass
+   *  fixture text they wrote themselves, so matching on text is stable. */
+  fileLeafLine(text: string): Locator {
+    return this.fileLeafVisibilityMarker(true).first().getByText(text, { exact: true });
+  }
+
   /** The `diff` leaf body's visibility marker (`center-diff-leaf__visible-*`). */
   diffLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
     const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
@@ -818,6 +824,15 @@ export class WorkspacePage {
    *  currently-shown terminal leaf. Count === number of split panes. */
   terminalPanes(): Locator {
     return this.page.getByTestId(/^term-pane__/).filter({ visible: true });
+  }
+
+  /** The rendered screen of the nth visible terminal pane.
+   *
+   *  FRAGILITY: `.xterm-screen` is a class owned by xterm, which exposes no
+   *  testid hook on its own DOM. Centralised here so an xterm upgrade that
+   *  renames it flows through one place. */
+  terminalScreen(index = 0): Locator {
+    return this.terminalPanes().nth(index).locator(".xterm-screen");
   }
 
   /** Visible center TERMINAL tabs in the outer dockview strip — used to prove a
