@@ -230,6 +230,6 @@ test("the browser build paints the sidebar solid even with translucentSidebar on
   await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
   // The translucent sidebar needs the macOS desktop window's vibrancy layer,
   // so a plain browser tab keeps the page opaque and the sidebar solid.
-  expect(await wp.translucentSidebarActive()).toBe(false);
-  expect(await wp.sidebarBackgroundAlpha()).toBe(1);
+  await expect.poll(() => wp.translucentSidebarActive()).toBe(false);
+  await expect.poll(() => wp.sidebarBackgroundAlpha()).toBe(1);
 });
