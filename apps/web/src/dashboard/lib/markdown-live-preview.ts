@@ -107,7 +107,13 @@ function findFrontmatter(doc: Text): { from: number; to: number } | null {
 
 const frontmatterField = StateField.define<{ from: number; to: number } | null>({
   create: (state) => findFrontmatter(state.doc),
-  update: (value, tr) => (tr.docChanged ? findFrontmatter(tr.state.doc) : value),
+  update(value, tr) {
+    if (!tr.docChanged) return value;
+    // Only an edit within the scanned head of the document can change it.
+    const { doc } = tr.startState;
+    const headEnd = value ? value.to : doc.line(Math.min(doc.lines, FRONTMATTER_MAX_LINES)).to;
+    return tr.changes.touchesRange(0, headEnd) ? findFrontmatter(tr.state.doc) : value;
+  },
 });
 
 /** True for syntax nodes that lie inside the frontmatter block. */

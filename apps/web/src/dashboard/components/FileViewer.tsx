@@ -1246,7 +1246,7 @@ function resolveRelativePath(dir: string, relative: string): string | null {
     return null;
   }
   const parts = dir ? dir.split("/") : [];
-  for (const segment of decoded.split(/[\\/]/)) {
+  for (const segment of decoded.split("/")) {
     if (segment === "" || segment === ".") continue;
     if (segment === "..") {
       if (parts.length === 0) return null;
