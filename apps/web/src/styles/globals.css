@@ -55,6 +55,9 @@
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+  /* xterm's background (LIGHT_TERMINAL_THEME in lib/terminal-cache.ts). Keep
+     the two in sync: chrome floating over a terminal paints with this. */
+  --terminal-background: #ffffff;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -92,6 +95,8 @@
   scrollbar-color: oklch(0.32 0 0) transparent;
   --background: #1e1e1e;
   --foreground: oklch(0.922 0 0);
+  /* DARK_TERMINAL_THEME's background in lib/terminal-cache.ts. */
+  --terminal-background: #1e1e1e;
   --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.922 0 0);
   /* Popover/dropdown surfaces are elevated above the page, so they're a touch

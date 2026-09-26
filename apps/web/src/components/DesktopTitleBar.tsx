@@ -10,8 +10,12 @@ import { EditorPicker } from "./EditorPicker";
 // (buttons, dropdown triggers) so clicks aren't swallowed by the drag region.
 // This is Electron's recommended pattern and replaces the JS
 // `mousedown → startDragging` listener used during the Tauri era.
-const DRAG_STYLE: React.CSSProperties = { WebkitAppRegion: "drag" } as React.CSSProperties;
-const NO_DRAG_STYLE: React.CSSProperties = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
+export const DRAG_STYLE: React.CSSProperties = {
+  WebkitAppRegion: "drag",
+} as React.CSSProperties;
+export const NO_DRAG_STYLE: React.CSSProperties = {
+  WebkitAppRegion: "no-drag",
+} as React.CSSProperties;
 
 export interface PanelItem {
   id: string;
@@ -51,21 +55,80 @@ interface WorkspaceTitleBarProps {
   title?: string;
   /** Active workspace name to display prominently. */
   workspaceName?: string;
-  /** The workspace path for open-in / copy-path actions. */
-  workspacePath?: string;
-  /** Callback to copy the workspace path to clipboard. */
-  onCopyPath?: () => void;
   /** When provided alongside a `workspaceName`, the name renders as a button
    *  (with a chevron) that invokes this on click — opens the workspace picker,
    *  mirroring the mobile header's tap-to-switch affordance. When omitted, the
    *  name stays a non-interactive label. */
   onWorkspaceNameClick?: () => void;
   /** Toggle the right sidepanel (Explorer / Changes). When provided alongside a
-   *  `workspaceName`, a toggle button renders at the bar's right edge. */
+   *  `workspaceName`, an expand button renders at the bar's right edge while
+   *  the sidepanel is collapsed. While it is visible, the sidepanel's own
+   *  header hosts the collapse button (see `RightPanelHeaderActions`). */
   onToggleRightPanel?: () => void;
-  /** Whether the right sidepanel is currently visible (drives the toggle's
-   *  pressed state). */
+  /** Whether the right sidepanel is currently visible. */
   rightPanelVisible?: boolean;
+}
+
+/** Toggle for the right sidepanel. Rendered by the sidepanel header while the
+ *  panel is visible and by the workspace title bar while it is collapsed, so
+ *  exactly one copy is on screen at a time. */
+function RightPanelToggle({ onToggle, visible }: { onToggle: () => void; visible: boolean }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Toggle Explorer / Changes panel"
+          // `aria-pressed` still reflects panel state for a11y, but the
+          // icon stays muted whether open or closed (matches the sidebar
+          // toggle) so it doesn't read as a selected/active control.
+          aria-pressed={visible}
+          onClick={onToggle}
+          className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+        >
+          <PanelRight className="size-5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        Toggle Explorer / Changes{" "}
+        <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+          ⇧⌘E
+        </kbd>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+interface RightPanelHeaderActionsProps {
+  /** The workspace path for open-in / copy-path actions. */
+  workspacePath?: string;
+  /** Callback to copy the workspace path to clipboard. */
+  onCopyPath?: () => void;
+  /** Collapse the right sidepanel. When undefined, no toggle renders. */
+  onToggleRightPanel?: () => void;
+}
+
+/** Open-in-editor picker + collapse button, shown at the right edge of the
+ *  right sidepanel's header row (beside the Explorer / Changes tabs). */
+export function RightPanelHeaderActions({
+  workspacePath,
+  onCopyPath,
+  onToggleRightPanel,
+}: RightPanelHeaderActionsProps) {
+  // EditorPicker invokes native IPC (open in VS Code/Finder/etc.) — keep it
+  // desktop-only so it doesn't render a non-functional button in the web app.
+  const hasEditorPicker = isDesktop && !!workspacePath;
+  if (!hasEditorPicker && !onToggleRightPanel) return null;
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1 self-center"
+      style={NO_DRAG_STYLE}
+      data-testid="right-sidepanel__header-actions"
+    >
+      {hasEditorPicker && <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />}
+      {onToggleRightPanel && <RightPanelToggle onToggle={onToggleRightPanel} visible />}
+    </div>
+  );
 }
 
 /** Sidebar toggle + back/forward arrows. Rendered once by `AppShell` in a
@@ -170,15 +233,15 @@ export function SidebarTitleBar() {
   );
 }
 
-/** Draggable title bar over the workspace layout. Holds the workspace name
- *  (centered on the bar) and the open-in-editor / panel-switcher controls
- *  (right). The navigation cluster lives in `AppShell`'s stationary overlay, not
- *  here — see NavControlsProps. */
+/** Draggable title bar over the center (dockview) column. It stops at the
+ *  right sidepanel, whose own header row takes the rest of the title-bar
+ *  height. Holds the workspace name (centered on the bar) and, while the
+ *  right sidepanel is collapsed, its expand button (right). The navigation
+ *  cluster lives in `AppShell`'s stationary overlay, not here — see
+ *  NavControlsProps. */
 export function WorkspaceTitleBar({
   title,
   workspaceName,
-  workspacePath,
-  onCopyPath,
   onWorkspaceNameClick,
   onToggleRightPanel,
   rightPanelVisible,
@@ -193,10 +256,7 @@ export function WorkspaceTitleBar({
       .catch(() => {});
   }, [title]);
 
-  // EditorPicker invokes native IPC (open in VS Code/Finder/etc.) — keep it
-  // desktop-only so it doesn't render a non-functional button in the web app.
-  const hasEditorPicker = isDesktop && workspaceName && workspacePath;
-  const hasRightToggle = !!(workspaceName && onToggleRightPanel);
+  const hasExpandToggle = !!(workspaceName && onToggleRightPanel && !rightPanelVisible);
 
   return (
     <div
@@ -259,39 +319,12 @@ export function WorkspaceTitleBar({
           overlay (positioned siblings later in the DOM paint on top) so a
           long workspace name can never sit over these buttons and steal
           their clicks on a narrow bar. */}
-      {(hasEditorPicker || hasRightToggle) && (
+      {hasExpandToggle && (
         <div
           className="relative ml-auto flex shrink-0 items-center gap-1 pointer-events-auto"
           style={NO_DRAG_STYLE}
         >
-          {hasEditorPicker && (
-            <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />
-          )}
-
-          {hasRightToggle && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Toggle Explorer / Changes panel"
-                  // `aria-pressed` still reflects panel state for a11y, but the
-                  // icon stays muted whether open or closed (matches the sidebar
-                  // toggle) so it doesn't read as a selected/active control.
-                  aria-pressed={rightPanelVisible}
-                  onClick={onToggleRightPanel}
-                  className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-                >
-                  <PanelRight className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                Toggle Explorer / Changes{" "}
-                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                  ⇧⌘E
-                </kbd>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          <RightPanelToggle onToggle={onToggleRightPanel} visible={false} />
         </div>
       )}
     </div>

@@ -1010,6 +1010,32 @@ export class WorkspacePage {
       .nth(index);
   }
 
+  /** The split / close icon cluster (`term-pane-actions__<id>`) that floats over
+   *  the top-right of the nth visible pane's terminal. */
+  paneActions(index: number): Locator {
+    return this.paneHeader(index).getByTestId(/^term-pane-actions__/);
+  }
+
+  /** The computed background of the nth pane's icon cluster next to the
+   *  background xterm paints for that pane's terminal (xterm 6 sets the active
+   *  theme's background inline on `.xterm-scrollable-element`; the
+   *  `.xterm-viewport` under it keeps xterm.css's fixed #000). Both come out of
+   *  `getComputedStyle`, so they compare as plain strings.
+   *
+   *  FRAGILITY: `.xterm-scrollable-element` is a class owned by xterm, which
+   *  exposes no testid hook on its own DOM. Centralised here so an xterm
+   *  upgrade that renames it flows through one place. */
+  async paneActionsBackground(index: number): Promise<{ actions: string; terminal: string }> {
+    const actions = await this.paneActions(index).evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    const terminal = await this.terminalPanes()
+      .nth(index)
+      .locator(".xterm-scrollable-element")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    return { actions, terminal };
+  }
+
   /** Drag one pane's header onto another pane to reorder — dockview moves the
    *  dragged pane next to the target. Uses a manual pointer-move sequence
    *  (dockview drives its DnD off pointer events) with intermediate steps so the
@@ -1352,6 +1378,53 @@ export class WorkspacePage {
       });
       await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
     });
+  }
+
+  /** The workspace title bar over the center (dockview) column
+   *  (`WorkspaceTitleBar` in `DesktopTitleBar.tsx`). */
+  get workspaceTitleBar(): Locator {
+    return this.page.getByTestId("desktop-title-bar__workspace-surface");
+  }
+
+  /** The right sidepanel's header row (tabs + open-in-editor + collapse), level
+   *  with the workspace title bar. */
+  get rightPanelHeader(): Locator {
+    return this.page.getByTestId("right-sidepanel__header");
+  }
+
+  /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
+  get rightPanelToggleInHeader(): Locator {
+    return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** The right-sidepanel toggle hosted in the workspace title bar (expand).
+   *  Rendered only while the sidepanel is collapsed. */
+  get rightPanelToggleInTitleBar(): Locator {
+    return this.workspaceTitleBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** Collapse the right sidepanel with the button in its own header. */
+  async collapseRightPanelViaHeader(): Promise<void> {
+    await test.step("Collapse the right sidepanel from its header", async () => {
+      await this.rightPanelToggleInHeader.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "false");
+    });
+  }
+
+  /** Expand the collapsed right sidepanel with the button in the title bar. */
+  async expandRightPanelViaTitleBar(): Promise<void> {
+    await test.step("Expand the right sidepanel from the title bar", async () => {
+      await this.rightPanelToggleInTitleBar.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
+    });
+  }
+
+  /** Viewport bounding box of a locator. Throws when it has none (hidden), so
+   *  a geometric comparison can't pass vacuously. */
+  async boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no bounding box — not visible");
+    return box;
   }
 
   /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
@@ -2169,6 +2242,55 @@ export class WorkspacePage {
       }
       return 0;
     }, workspaceId);
+  }
+
+  /** Read the first `cols` cells of the top `rows` rows of a workspace
+   *  terminal's active xterm buffer, plus the cursor position. Each entry is
+   *  the cell's chars; the right half of a wide character (and an unwritten
+   *  cell) is the empty string. This is xterm's own column layout, so a test
+   *  can assert where text lands after a wide emoji regardless of renderer.
+   *  Same one-terminal-per-workspace assumption as `terminalCols`. Returns
+   *  null when the terminal isn't loaded yet. */
+  async readTerminalBufferCells(
+    workspaceId: string,
+    rows: number,
+    cols: number,
+  ): Promise<{ rows: string[][]; cursor: { x: number; y: number } } | null> {
+    return await this.page.evaluate(
+      ([id, rowCount, colCount]) => {
+        type Buffer = {
+          cursorX: number;
+          cursorY: number;
+          viewportY: number;
+          getLine(
+            y: number,
+          ): { getCell(x: number): { getChars(): string } | undefined } | undefined;
+        };
+        const cache = (
+          globalThis as unknown as {
+            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          }
+        ).__bandTerminalCache__;
+        if (!cache) return null;
+        for (const entry of cache.values()) {
+          if (entry.workspaceId !== id) continue;
+          const term = entry.getTerminal() as { buffer: { active: Buffer } } | null;
+          if (!term) return null;
+          const buffer = term.buffer.active;
+          const rows: string[][] = [];
+          for (let y = 0; y < rowCount; y++) {
+            const line = buffer.getLine(buffer.viewportY + y);
+            if (!line) return null;
+            const cells: string[] = [];
+            for (let x = 0; x < colCount; x++) cells.push(line.getCell(x)?.getChars() ?? "");
+            rows.push(cells);
+          }
+          return { rows, cursor: { x: buffer.cursorX, y: buffer.cursorY } };
+        }
+        return null;
+      },
+      [workspaceId, rows, cols] as const,
+    );
   }
 
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM

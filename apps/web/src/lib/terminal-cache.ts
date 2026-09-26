@@ -87,6 +87,8 @@ function toXtermSearchOptions(opts: SearchOptions): ISearchOptions {
   };
 }
 
+// The `background` values are mirrored as `--terminal-background` in
+// styles/globals.css (dark and light); change both together.
 const DARK_TERMINAL_THEME: ITheme = {
   background: "#1e1e1e",
   foreground: "#e8e8e8",
@@ -384,13 +386,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     import("@xterm/addon-web-links"),
     import("@xterm/addon-search"),
     import("@xterm/addon-webgl"),
-  ]).then(([xtermMod, fitMod, webLinksMod, searchMod, webglMod]) => {
+    import("@xterm/addon-unicode11"),
+  ]).then(([xtermMod, fitMod, webLinksMod, searchMod, webglMod, unicode11Mod]) => {
     if (destroyed) return;
     const { Terminal: XTerm } = xtermMod;
     const { FitAddon: XFitAddon } = fitMod;
     const { WebLinksAddon: XWebLinksAddon } = webLinksMod;
     const { SearchAddon: XSearchAddon } = searchMod;
     const { WebglAddon: XWebglAddon } = webglMod;
+    const { Unicode11Addon: XUnicode11Addon } = unicode11Mod;
 
     import("@xterm/xterm/css/xterm.css");
 
@@ -415,6 +419,14 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       attributes: true,
       attributeFilter: ["class"],
     });
+
+    // Unicode 11 width tables, so emoji like U+1F7E0 take two cells as they
+    // do in the PTY's own wcwidth. The xterm default (Unicode 6) counts them
+    // as one and the next character overlaps the emoji. The server's headless
+    // mirror uses the same version (`terminal-pool.ts`) so replayed screens
+    // keep the same cursor columns.
+    term.loadAddon(new XUnicode11Addon());
+    term.unicode.activeVersion = "11";
 
     const fit = new XFitAddon();
     term.loadAddon(fit);
