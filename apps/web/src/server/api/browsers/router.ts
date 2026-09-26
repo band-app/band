@@ -20,18 +20,25 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { BrowserProfileNotFoundError } from "../../errors";
 import {
   BROWSER_PROFILE_ID_PATTERN,
   browserProfileService,
 } from "../../services/browser-profile-service";
 import { browserService } from "../../services/browser-service";
 import { emit } from "../../services/watcher-service";
-import { rethrowProfileNotFound } from "../browser-profiles/router";
 import { publicProcedure, t } from "../trpc";
 
 // ---------------------------------------------------------------------------
 // Browsers (multi-tab browser management)
 // ---------------------------------------------------------------------------
+
+function rethrowProfileNotFound(err: unknown): never {
+  if (err instanceof BrowserProfileNotFoundError) {
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+  }
+  throw err;
+}
 
 export const browsersRouter = t.router({
   list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
@@ -51,17 +58,10 @@ export const browsersRouter = t.router({
     )
     .mutation(({ input }) => {
       let profileId: string | null;
-      if (input.profileId === undefined) {
-        profileId = browserProfileService.defaultForWorkspace(input.workspaceId);
-      } else {
-        profileId = input.profileId;
-        if (profileId !== null) {
-          try {
-            browserProfileService.requireProfile(profileId);
-          } catch (err) {
-            rethrowProfileNotFound(err);
-          }
-        }
+      try {
+        profileId = browserProfileService.resolveForNewTab(input.workspaceId, input.profileId);
+      } catch (err) {
+        rethrowProfileNotFound(err);
       }
       // `browserService.create` also registers the tab in the saved
       // dockview layout — see `chatService.create` for the same pattern.

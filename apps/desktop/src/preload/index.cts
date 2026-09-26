@@ -84,6 +84,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_chrome_profiles",
   "browser_chrome_import",
   "browser_profile_clear_data",
+  "browser_profile_prune",
   // Chrome-style cert / load error pages (issue #444). Painted
   // inside the WebContentsView; only the overridden-hosts catch-up
   // crosses the IPC boundary.

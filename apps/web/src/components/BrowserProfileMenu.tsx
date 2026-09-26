@@ -17,6 +17,7 @@ import {
 import { UserRound } from "lucide-react";
 import { useState } from "react";
 import type { BrowserProfileInfo } from "@/dashboard";
+import { isDesktop } from "../lib/is-desktop";
 import { ChromeImportDialog } from "./ChromeImportDialog";
 
 /** Radix radio items need a string value; Default is `null` elsewhere. */
@@ -68,13 +69,23 @@ export function BrowserProfileMenu({
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setImportOpen(true)}>
-            Import from Chrome…
-          </DropdownMenuItem>
+          {isDesktop ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+                Import from Chrome…
+              </DropdownMenuItem>
+            </>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-      <ChromeImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={onImported} />
+      {isDesktop ? (
+        <ChromeImportDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          onImported={onImported}
+        />
+      ) : null}
     </>
   );
 }

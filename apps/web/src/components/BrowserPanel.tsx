@@ -18,6 +18,10 @@ import { NotSecureBadge } from "./NotSecureBadge";
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
 const STORAGE_PREFIX = "band:browser-url:";
+// How long a pane waits for its tab record to exist (see the fetch effect
+// in `BrowserPaneComponent`): 10 tries, 150 ms apart.
+const TAB_RECORD_ATTEMPTS = 10;
+const TAB_RECORD_RETRY_MS = 150;
 
 // ---------------------------------------------------------------------------
 // Per-workspace URL persistence in localStorage
@@ -754,41 +758,51 @@ export function BrowserPaneComponent({
   // The server browser record is the source of truth for the profile, and
   // for the URL when there is no initialUrl param (a browser created via CLI
   // with --url, or a workspace revisit adds the panel without one).
+  //
+  // A new tab's pane mounts while its `browsers.create` is still in flight,
+  // so the record can be missing for a moment. Retry briefly before falling
+  // back to Default, or a new tab would open outside its project's profile.
   useEffect(() => {
     if (!browserId) return;
 
     let cancelled = false;
-    trpc.browsers.get
-      .query({ browserId })
-      .then((result) => {
-        if (cancelled) return;
-        setProfileId(result.browser?.profileId ?? null);
-        setProfileResolved(true);
-        if (initialUrl) return;
-        const ws = result.browser?.workspaceId;
-        if (ws && !workspaceIdRef.current) {
-          // Lazy workspace backfill — see comment on `workspaceId`
-          // state above.
-          setWorkspaceId(ws);
+    const load = async () => {
+      let browser: Awaited<ReturnType<typeof trpc.browsers.get.query>>["browser"] = null;
+      for (let attempt = 0; attempt < TAB_RECORD_ATTEMPTS && !cancelled; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, TAB_RECORD_RETRY_MS));
+        try {
+          browser = (await trpc.browsers.get.query({ browserId })).browser;
+        } catch {
+          // Server fetch failed — the user can still type a URL manually,
+          // and the tab opens in the Default profile.
+          break;
         }
-        const url = result.browser?.url;
-        if (!url || url === "" || url === BLANK_URL) return;
-        setCurrentUrl(url);
-        setInputUrl(url);
-        if (createdRef.current) {
-          // Webview exists — navigate it directly.
-          invoke("browser_navigate", { browserId, url }).catch(() => {});
-        } else {
-          // Webview not yet created — queue it so tryCreate flushes after
-          // browser_create completes (same mechanism as handleNavigate).
-          pendingNavRef.current = url;
-        }
-      })
-      .catch(() => {
-        // Server fetch failed — the user can still type a URL manually,
-        // and the tab opens in the Default profile.
-        if (!cancelled) setProfileResolved(true);
-      });
+        if (browser) break;
+      }
+      if (cancelled) return;
+      setProfileId(browser?.profileId ?? null);
+      setProfileResolved(true);
+      if (initialUrl || !browser) return;
+      const ws = browser.workspaceId;
+      if (ws && !workspaceIdRef.current) {
+        // Lazy workspace backfill — see comment on `workspaceId`
+        // state above.
+        setWorkspaceId(ws);
+      }
+      const url = browser.url;
+      if (!url || url === "" || url === BLANK_URL) return;
+      setCurrentUrl(url);
+      setInputUrl(url);
+      if (createdRef.current) {
+        // Webview exists — navigate it directly.
+        invoke("browser_navigate", { browserId, url }).catch(() => {});
+      } else {
+        // Webview not yet created — queue it so tryCreate flushes after
+        // browser_create completes (same mechanism as handleNavigate).
+        pendingNavRef.current = url;
+      }
+    };
+    void load();
     return () => {
       cancelled = true;
     };

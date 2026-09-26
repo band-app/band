@@ -31,10 +31,6 @@ export class BrowserProfileQueries {
     getDb().insert(browserProfiles).values(row).run();
   }
 
-  rename(id: string, name: string): void {
-    getDb().update(browserProfiles).set({ name }).where(eq(browserProfiles.id, id)).run();
-  }
-
   /** Delete a profile and every project default that points at it. */
   remove(id: string): void {
     const db = getDb();

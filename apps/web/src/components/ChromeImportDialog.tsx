@@ -114,8 +114,12 @@ export function ChromeImportDialog({ open, onOpenChange, onImported }: ChromeImp
               uses it only to decrypt the cookies.
             </li>
             <li>
-              The cookies stay on this Mac, in the new profile. They are not sent to the Band server
-              or anywhere else.
+              The cookies stay on this Mac, in the new profile. Band doesn't send them to its
+              server, and tabs in the profile can't be streamed to the web UI.
+            </li>
+            <li>
+              Anything done in a tab using this profile is signed in, including by coding agents
+              that drive Band browser tabs.
             </li>
             <li>Google sign-ins are not copied. Sign in to Google again in Band.</li>
           </ul>

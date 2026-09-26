@@ -38,6 +38,11 @@ export function clearBrowserProfileData(profileId: string): Promise<void> {
   return invoke("browser_profile_clear_data", { profileId });
 }
 
+/** Wipe every profile partition on this Mac whose id is not in `keep`. */
+export function pruneBrowserProfileData(keep: string[]): Promise<string[]> {
+  return invoke("browser_profile_prune", { keep });
+}
+
 /**
  * Electron wraps errors thrown in the main process as
  * "Error invoking remote method 'x': Error: <message>". Keep the message.

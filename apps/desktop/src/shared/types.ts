@@ -82,6 +82,11 @@ export interface BrowserProfileArg {
   profileId: string;
 }
 
+export interface BrowserProfilePruneArgs {
+  /** Profile ids the server still has. Every other profile partition is wiped. */
+  keep: string[];
+}
+
 /**
  * Forwarded verbatim to Electron's `webContents.findInPage(text, options)`.
  *

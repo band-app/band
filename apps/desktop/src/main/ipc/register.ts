@@ -11,6 +11,7 @@ import {
   clearProfileData,
   importChromeProfile,
   listChromeImportProfiles,
+  pruneProfileData,
 } from "../../browser/chrome-import/import.js";
 import type { BrowserViewManager } from "../../browser/view-manager.js";
 import { Channels } from "../../shared/ipc-channels.js";
@@ -24,6 +25,7 @@ import type {
   BrowserKeyArg,
   BrowserNavigateArgs,
   BrowserProfileArg,
+  BrowserProfilePruneArgs,
   BrowserStopFindInPageArgs,
   BrowserZoomArgs,
   CheckAppExistsArgs,
@@ -187,8 +189,13 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserChromeImport, (args: BrowserChromeImportArgs) =>
     importChromeProfile(args),
   );
+  const destroyProfileViews = (profileId: string) =>
+    opts.browserManager.destroyProfileViews(profileId);
   handle(Channels.browserProfileClearData, (args: BrowserProfileArg) =>
-    clearProfileData(args.profileId),
+    clearProfileData(args.profileId, destroyProfileViews),
+  );
+  handle(Channels.browserProfilePrune, (args: BrowserProfilePruneArgs) =>
+    pruneProfileData(Array.isArray(args?.keep) ? args.keep : [], destroyProfileViews),
   );
 
   return () => {

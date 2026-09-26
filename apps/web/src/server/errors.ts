@@ -61,3 +61,14 @@ export class BrowserProfileNotFoundError extends Error {
     this.name = "BrowserProfileNotFoundError";
   }
 }
+
+/**
+ * Thrown by `BrowserProfileService.create` when the requested id is taken.
+ * `api/browser-profiles/router.ts` maps it to 409 `CONFLICT`.
+ */
+export class BrowserProfileExistsError extends Error {
+  constructor(profileId: string) {
+    super(`Browser profile already exists: ${profileId}`);
+    this.name = "BrowserProfileExistsError";
+  }
+}

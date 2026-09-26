@@ -9,7 +9,12 @@
 
 import { join } from "node:path";
 import { createLogger } from "../../main/services/log.js";
-import { isValidProfileId, sessionForProfile } from "../profiles.js";
+import {
+  isValidProfileId,
+  listProfilePartitionsOnDisk,
+  retireProfile,
+  sessionForProfile,
+} from "../profiles.js";
 import { readChromeCookies } from "./chrome-cookies.js";
 import {
   type ChromeProfile,
@@ -104,10 +109,37 @@ export async function importChromeProfile(args: ChromeImportArgs): Promise<Chrom
   return summary;
 }
 
-/** Wipe a deleted profile's cookies, storage and cache from disk. */
-export async function clearProfileData(profileId: string): Promise<void> {
+/**
+ * Wipe a deleted profile's cookies, storage and cache from disk.
+ * `destroyViews` closes every view still running in the profile first, so
+ * no page writes storage back while it is cleared; the profile is retired
+ * so a respawn lands in Default instead.
+ */
+export async function clearProfileData(
+  profileId: string,
+  destroyViews: (profileId: string) => void,
+): Promise<void> {
   if (!isValidProfileId(profileId)) throw new Error("Invalid browser profile id");
+  retireProfile(profileId);
+  destroyViews(profileId);
   const sess = sessionForProfile(profileId);
   await sess.clearStorageData();
   await sess.clearCache();
+  await sess.cookies.flushStore();
+}
+
+/**
+ * Wipe every profile partition on disk that isn't in `keep` (the profiles
+ * the server knows). Catches profiles deleted while the desktop app wasn't
+ * the client, e.g. from Settings in a plain browser tab.
+ */
+export async function pruneProfileData(
+  keep: string[],
+  destroyViews: (profileId: string) => void,
+): Promise<string[]> {
+  const known = new Set(keep);
+  const stale = listProfilePartitionsOnDisk().filter((id) => !known.has(id));
+  for (const id of stale) await clearProfileData(id, destroyViews);
+  if (stale.length > 0) log.info({ count: stale.length }, "wiped deleted browser profiles");
+  return stale;
 }

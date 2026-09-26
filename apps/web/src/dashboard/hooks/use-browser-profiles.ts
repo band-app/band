@@ -17,6 +17,9 @@ export function useBrowserProfiles() {
   const { data, isFetched } = useQuery({
     queryKey: queryKeys.browserProfiles,
     queryFn: () => adapter.listBrowserProfiles?.() ?? Promise.resolve([]),
+    // Browser panes wait for this list before creating a view in a
+    // non-Default profile; don't hold them through three backoff retries.
+    retry: 1,
   });
   return {
     profiles: data ?? (EMPTY_PROFILES as BrowserProfileInfo[]),

@@ -287,7 +287,10 @@ export class SettingsPage {
   }
 
   /** Per-project default profile dropdown. `aria-label="Browser profile for
-   *  <project label>"` is set explicitly in `BrowserProfilesSettings.tsx`. */
+   *  <project label>"` is set explicitly in `BrowserProfilesSettings.tsx`.
+   *  Tests assert its shown value by option name ("Default" or a seeded
+   *  profile name), under the same carve-out as the theme names above:
+   *  "Default" is the fixed name of the built-in profile, not product copy. */
   projectBrowserProfileSelect(projectLabel: string): Locator {
     return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectLabel}` });
   }

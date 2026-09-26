@@ -8,7 +8,9 @@
  * partition, so tabs from before profiles existed keep their logins.
  */
 
-import { type Session, session } from "electron";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { app, type Session, session } from "electron";
 
 /** Partition of the built-in Default profile. */
 export const BROWSER_PARTITION = "persist:band-browser";
@@ -31,6 +33,40 @@ export function partitionForProfile(profileId: string | null | undefined): strin
   if (profileId === null || profileId === undefined) return BROWSER_PARTITION;
   if (!isValidProfileId(profileId)) throw new Error("Invalid browser profile id");
   return `${PROFILE_PARTITION_PREFIX}${profileId}`;
+}
+
+/**
+ * Profiles deleted in this app run. A view spawned for one of these falls
+ * back to Default, so a pane that hasn't noticed the deletion yet can't
+ * write cookies back into a partition that was just wiped.
+ */
+const retiredProfiles = new Set<string>();
+
+export function retireProfile(profileId: string): void {
+  retiredProfiles.add(profileId);
+}
+
+export function isRetiredProfile(profileId: string | null): boolean {
+  return profileId !== null && retiredProfiles.has(profileId);
+}
+
+/**
+ * Ids of the profile partitions on disk. Electron stores
+ * `persist:<name>` under `<sessionData>/Partitions/<name>`.
+ */
+export function listProfilePartitionsOnDisk(): string[] {
+  const dir = join(app.getPath("sessionData"), "Partitions");
+  const prefix = PROFILE_PARTITION_PREFIX.slice("persist:".length);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => name.slice(prefix.length))
+    .filter(isValidProfileId);
 }
 
 const bandActionHandler = () => new Response(null, { status: 204 });

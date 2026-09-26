@@ -19,6 +19,7 @@ import {
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
+import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
@@ -768,6 +769,7 @@ function AppShell() {
                         <Outlet />
                         <SharedDockviewLayout />
                         <BrowserHostBridge />
+                        <BrowserProfileSweeper />
                       </div>
                     </Panel>
                     <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />

@@ -59,7 +59,12 @@ import {
   buildLoadErrorPayload,
   isMainFrameFailure,
 } from "./load-error.js";
-import { BROWSER_PARTITION, partitionForProfile, sessionForProfile } from "./profiles.js";
+import {
+  BROWSER_PARTITION,
+  isRetiredProfile,
+  partitionForProfile,
+  sessionForProfile,
+} from "./profiles.js";
 import { decideWindowOpenAction } from "./window-open.js";
 
 const log = createLogger("view-manager");
@@ -295,6 +300,13 @@ export class BrowserViewManager {
    * to another profile is destroyed here and respawned by the caller.
    * `undefined` means the caller didn't say, and keeps the current view.
    */
+  /** Destroy every view running in `profileId` (the profile is being deleted). */
+  destroyProfileViews(profileId: string): void {
+    for (const [key, viewProfile] of [...this.profileByKey]) {
+      if (viewProfile === profileId) this.destroy({ browserId: key });
+    }
+  }
+
   private dropIfProfileChanged(key: string, profileId: string | null | undefined): void {
     if (profileId === undefined || !this.views.has(key)) return;
     if ((this.profileByKey.get(key) ?? null) === profileId) return;
@@ -965,7 +977,8 @@ export class BrowserViewManager {
    * `ensure()` (which leaves the view in the hidden window where the
    * compositor runs out of sight).
    */
-  private spawn(url: string, key: string, profileId: string | null): WebContentsView {
+  private spawn(url: string, key: string, requestedProfileId: string | null): WebContentsView {
+    const profileId = isRetiredProfile(requestedProfileId) ? null : requestedProfileId;
     const view = new WebContentsView({
       webPreferences: {
         contextIsolation: true,

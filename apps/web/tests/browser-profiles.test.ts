@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import WebSocket from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -88,6 +89,28 @@ async function createBrowser(
   return (await trpcData<{ browser: Browser }>(res)).browser;
 }
 
+async function setTabProfile(serverUrl: string, browserId: string, profileId: string | null) {
+  const res = await trpcMutate(serverUrl, "browsers.setProfile", { browserId, profileId });
+  expect(res.status).toBe(200);
+}
+
+/** Open the `/cdp` proxy socket for a tab and resolve with its close code. */
+function cdpCloseCode(serverUrl: string, bandTabId: string): Promise<number> {
+  const url = `${serverUrl.replace(/^http/, "ws")}/cdp?bandTabId=${encodeURIComponent(bandTabId)}`;
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, { headers: { Cookie: `band_token=${TOKEN}` } });
+    const timer = setTimeout(() => {
+      ws.terminate();
+      reject(new Error("CDP socket did not close"));
+    }, 5_000);
+    ws.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+    ws.on("error", () => {});
+  });
+}
+
 async function projectDefault(serverUrl: string, projectName: string): Promise<string | null> {
   const res = await trpcQuery(serverUrl, "browserProfiles.getProjectDefault", { projectName });
   expect(res.status).toBe(200);
@@ -134,6 +157,21 @@ describe("browser profiles — per-project default", () => {
   afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("rejects browserProfiles calls without the band_token cookie (401)", async () => {
+    const res = await fetch(`${server.url}/trpc/browserProfiles.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "x" }),
+    });
+    expect(res.status).toBe(401);
+    const setProfile = await fetch(`${server.url}/trpc/browsers.setProfile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browserId: "browser_x", profileId: null }),
+    });
+    expect(setProfile.status).toBe(401);
   });
 
   it("opens new tabs in the Default profile when the project has none", async () => {
@@ -208,10 +246,7 @@ describe("browser profiles — per-project default", () => {
   it("deleting a profile moves its project and its tabs back to Default", async () => {
     const doomed = await createProfile(server.url, "Doomed");
     const tab = await createBrowser(server.url, alphaMain);
-    await trpcMutate(server.url, "browsers.setProfile", {
-      browserId: tab.id,
-      profileId: doomed.id,
-    });
+    await setTabProfile(server.url, tab.id, doomed.id);
     expect(await projectDefault(server.url, "alpha")).toBe(doomed.id);
 
     const res = await trpcMutate(server.url, "browserProfiles.remove", { profileId: doomed.id });
@@ -237,6 +272,20 @@ describe("browser profiles — per-project default", () => {
       profileId: "profile_missing",
     });
     expect(unknownCreate.status).toBe(404);
+    const unknownTab = await trpcMutate(server.url, "browsers.setProfile", {
+      browserId: "browser_missing",
+      profileId: null,
+    });
+    expect(unknownTab.status).toBe(404);
+    const unknownDefault = await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
+      projectName: "alpha",
+      profileId: "profile_missing",
+    });
+    expect(unknownDefault.status).toBe(404);
+    const unknownRemove = await trpcMutate(server.url, "browserProfiles.remove", {
+      profileId: "profile_missing",
+    });
+    expect(unknownRemove.status).toBe(404);
 
     await createProfile(server.url, "Fixed id", "profile_fixed");
     const dup = await trpcMutate(server.url, "browserProfiles.create", {
@@ -248,10 +297,11 @@ describe("browser profiles — per-project default", () => {
 
   it("removing a project forgets its default profile", async () => {
     const profile = await createProfile(server.url, "Beta only");
-    await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
+    const setRes = await trpcMutate(server.url, "browserProfiles.setProjectDefault", {
       projectName: "beta",
       profileId: profile.id,
     });
+    expect(setRes.status).toBe(200);
     expect(await projectDefault(server.url, "beta")).toBe(profile.id);
 
     const res = await trpcMutate(server.url, "projects.remove", { name: "beta" });
@@ -262,6 +312,18 @@ describe("browser profiles — per-project default", () => {
       defaults: { projectName: string; profileId: string }[];
     }>(listRes);
     expect(defaults.map((d) => d.projectName)).not.toContain("beta");
+  });
+
+  it("never relays raw CDP for a tab in a browser profile", async () => {
+    // Raw CDP can read a session's cookies, so imported cookies would pass
+    // through this server. Default-profile tabs keep the relay; with no
+    // desktop connected they fail later, with 4001.
+    const profile = await createProfile(server.url, "Streamed?");
+    const profileTab = await createBrowser(server.url, alphaMain, { profileId: profile.id });
+    expect(await cdpCloseCode(server.url, profileTab.id)).toBe(4003);
+
+    const defaultTab = await createBrowser(server.url, alphaMain, { profileId: null });
+    expect(await cdpCloseCode(server.url, defaultTab.id)).toBe(4001);
   });
 
   it("rejects profile ids that could not be a partition name", async () => {

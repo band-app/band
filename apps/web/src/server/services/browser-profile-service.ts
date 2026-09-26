@@ -11,14 +11,13 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { toWorkspaceId } from "@/dashboard";
-import { BrowserProfileNotFoundError } from "../errors";
+import { BrowserProfileExistsError, BrowserProfileNotFoundError } from "../errors";
 import {
   BrowserProfileQueries,
   type BrowserProfileRow,
 } from "../infra/db/queries/browser-profiles";
-import { browserService } from "./browser-service";
-import { loadState } from "./state";
+import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { type BrowserService, browserService } from "./browser-service";
 
 const log = createLogger("browser-profile-service");
 
@@ -31,7 +30,11 @@ export type BrowserProfile = BrowserProfileRow;
 export const BROWSER_PROFILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export class BrowserProfileService {
-  constructor(private readonly queries: BrowserProfileQueries = new BrowserProfileQueries()) {}
+  constructor(
+    private readonly queries: BrowserProfileQueries = new BrowserProfileQueries(),
+    private readonly browsers: BrowserService = browserService,
+    private readonly workspaces: WorkspaceQueries = new WorkspaceQueries(),
+  ) {}
 
   list(): BrowserProfile[] {
     return this.queries.findAll();
@@ -41,7 +44,9 @@ export class BrowserProfileService {
     return this.queries.find(id);
   }
 
+  /** Throws `BrowserProfileExistsError` when `input.id` is taken. */
   create(input: { id?: string; name: string; source?: string | null }): BrowserProfile {
+    if (input.id && this.queries.find(input.id)) throw new BrowserProfileExistsError(input.id);
     const profile: BrowserProfile = {
       id: input.id ?? `profile_${crypto.randomUUID()}`,
       name: input.name,
@@ -53,12 +58,6 @@ export class BrowserProfileService {
     return profile;
   }
 
-  rename(id: string, name: string): BrowserProfile {
-    this.requireProfile(id);
-    this.queries.rename(id, name);
-    return this.requireProfile(id);
-  }
-
   /**
    * Delete a profile. Projects that defaulted to it fall back to Default,
    * and so do open tabs that used it.
@@ -66,7 +65,7 @@ export class BrowserProfileService {
   remove(id: string): void {
     this.requireProfile(id);
     this.queries.remove(id);
-    browserService.clearProfile(id);
+    this.browsers.clearProfile(id);
     log.info({ profileId: id }, "browser profile removed");
   }
 
@@ -97,10 +96,18 @@ export class BrowserProfileService {
     return this.queries.findAllProjectDefaults();
   }
 
-  /** The profile a new browser tab in `workspaceId` should open with. */
-  defaultForWorkspace(workspaceId: string): string | null {
-    const projectName = projectNameForWorkspace(workspaceId);
-    return projectName ? this.getProjectDefault(projectName) : null;
+  /**
+   * The profile a new browser tab in `workspaceId` opens with. `requested`
+   * is what the caller asked for: `undefined` means "the project's
+   * default", `null` means Default, and an id must exist.
+   */
+  resolveForNewTab(workspaceId: string, requested: string | null | undefined): string | null {
+    if (requested === undefined) {
+      const projectName = this.projectNameForWorkspace(workspaceId);
+      return projectName ? this.getProjectDefault(projectName) : null;
+    }
+    if (requested !== null) this.requireProfile(requested);
+    return requested;
   }
 
   /**
@@ -109,9 +116,9 @@ export class BrowserProfileService {
    */
   setTabProfile(browserId: string, profileId: string | null) {
     if (profileId !== null) this.requireProfile(profileId);
-    const tab = browserService.setProfile(browserId, profileId);
+    const tab = this.browsers.setProfile(browserId, profileId);
     if (!tab) return undefined;
-    const projectName = projectNameForWorkspace(tab.workspaceId);
+    const projectName = this.projectNameForWorkspace(tab.workspaceId);
     if (projectName) this.setProjectDefault(projectName, profileId);
     return tab;
   }
@@ -122,15 +129,10 @@ export class BrowserProfileService {
     if (!profile) throw new BrowserProfileNotFoundError(id);
     return profile;
   }
-}
 
-function projectNameForWorkspace(workspaceId: string): string | null {
-  for (const project of loadState().projects) {
-    for (const wt of project.worktrees) {
-      if (toWorkspaceId(project.name, wt.name) === workspaceId) return project.name;
-    }
+  private projectNameForWorkspace(workspaceId: string): string | null {
+    return this.workspaces.findIdentity(workspaceId)?.project ?? null;
   }
-  return null;
 }
 
 export const browserProfileService = new BrowserProfileService();

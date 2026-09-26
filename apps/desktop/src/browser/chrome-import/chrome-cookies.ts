@@ -20,7 +20,6 @@ import { createDecipheriv, createHash, pbkdf2Sync } from "node:crypto";
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 export type CookieSameSite = "unspecified" | "no_restriction" | "lax" | "strict";
 
@@ -170,6 +169,9 @@ export async function readChromeCookies(
   getPassword: () => Promise<string>,
   now: number = Date.now(),
 ): Promise<ChromeCookieReadResult> {
+  // Loaded here, not at module top: this module is imported at main-process
+  // boot, and a failure to load `node:sqlite` must only fail the import.
+  const { DatabaseSync } = await import("node:sqlite");
   const { dbPath, cleanup } = snapshotCookieDb(cookiesPath);
   let rows: CookieRow[];
   let dbVersion = 0;

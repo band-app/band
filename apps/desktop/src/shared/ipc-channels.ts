@@ -85,6 +85,9 @@ export const Channels = {
   browserChromeProfiles: "browser_chrome_profiles",
   browserChromeImport: "browser_chrome_import",
   browserProfileClearData: "browser_profile_clear_data",
+  // Wipe profile partitions the server no longer knows (deleted from a
+  // non-desktop client). Called once per app run by the renderer.
+  browserProfilePrune: "browser_profile_prune",
   // Chrome-style error pages for cert / load failures are rendered
   // INSIDE the WebContentsView via a `data:` URI (issue #444 — see
   // `browser/error-html.ts`). The user's button clicks become
