@@ -1,27 +1,17 @@
 /**
  * Dropdown rendered below the browser address-bar input.
  *
- * State lives in `useBrowserPaneControls` (so `BrowserPanelComponent`
- * and `BrowserPaneComponent` share the keyboard wiring); this
- * component is a dumb presentation layer that reads the autocomplete
- * state and emits a single `onSelect(url)` callback when the user
- * clicks (or hovers + keyboard-confirms) a row.
+ * State lives in `useBrowserPaneControls`; this component is a dumb
+ * presentation layer that reads the autocomplete state and emits a single
+ * `onSelect(url)` callback when the user clicks (or hovers +
+ * keyboard-confirms) a row.
  *
- * Layout — Chrome-omnibox-style overlay:
- *
- *   While the dropdown is open, `useBrowserPaneControls` registers a
- *   manual freeze hold (`useFreezeWhile(autocomplete.isOpen)`). That
- *   makes the parent `BrowserPanel` capture a JPEG snapshot of the
- *   live `WebContentsView`, paint it into the placeholder div, and
- *   hide the native view — same path the popover-on-overlay system
- *   uses. With the native view out of the picture, we can render
- *   this dropdown as a normal `position: absolute` element under
- *   the address bar and it sits cleanly on top of the snapshot.
- *
- *   Anchored to the parent address-bar row, which is `relative` in
- *   `BrowserPanel`. `top-full` drops us right below it; `left/right-0`
- *   spans the full row width; `mx-2` matches the input's horizontal
- *   inset.
+ * Layout — Chrome-omnibox-style overlay: a `position: absolute` element
+ * under the address bar that sits on top of the page. The page is a
+ * `<webview>` in the same DOM, so `z-20` is all it takes. Anchored to the
+ * parent address-bar row, which is `relative` in `BrowserPanel`.
+ * `top-full` drops us right below it; `left/right-0` spans the full row
+ * width; `mx-2` matches the input's horizontal inset.
  *
  * Uses `onMouseDown` rather than `onClick` for row selection because
  * the address-bar input's `onBlur` runs on click and would otherwise

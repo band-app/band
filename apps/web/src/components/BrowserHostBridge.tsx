@@ -9,17 +9,18 @@ import { trpc } from "../lib/trpc-client";
 //
 // This component runs once inside the desktop app's React tree. It connects
 // the server-side `browserHost` tRPC procedures to the desktop's
-// `BrowserViewManager` over IPC, so the web client can ask the desktop to
+// `BrowserGuestManager` over IPC, so the web client can ask the desktop to
 // materialise a tab even when no UI panel for it is mounted.
 //
 // Wire-up:
 //   1. Subscribe to `browserHost.ensureView` events (server → desktop).
-//   2. For each event, call `browser_ensure` IPC (create-or-return-existing
-//      WebContentsView), then `browser_get_cdp_target` to read the chromium
-//      target id, then `browserHost.targetReady` mutation (desktop → server).
-//   3. Listen to `browser-view-destroyed` events from BrowserViewManager
-//      (LRU eviction, explicit close, app quit) and forward them to the
-//      `browserHost.viewDestroyed` mutation so the server clears its
+//   2. For each event, call `browser_ensure` IPC (the tab's `<webview>` guest
+//      if a pane has mounted it, else an offscreen page), then
+//      `browser_get_cdp_target` to read the chromium target id, then
+//      `browserHost.targetReady` mutation (desktop → server).
+//   3. Listen to `browser-view-destroyed` events from BrowserGuestManager
+//      (a page's WebContents went away or was replaced) and forward them to
+//      the `browserHost.viewDestroyed` mutation so the server clears its
 //      bandTabId → cdpTargetId cache.
 //
 // On the web build this is a no-op.
@@ -27,7 +28,6 @@ import { trpc } from "../lib/trpc-client";
 
 interface BrowserViewDestroyedPayload {
   browser_id: string;
-  workspace_id: string;
 }
 
 export function BrowserHostBridge() {

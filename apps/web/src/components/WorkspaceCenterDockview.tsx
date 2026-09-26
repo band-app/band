@@ -94,6 +94,7 @@ import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
+import { listen as desktopListen } from "../lib/desktop-ipc";
 import {
   attachEdgeGroupDragVisibility,
   centralPanelPosition,
@@ -413,8 +414,12 @@ function reinjectParams(
       const comp = panel.contentComponent as LeafKind;
       if (comp === "chat") panel.params = { workspaceId, chatId: id };
       else if (comp === "term") panel.params = { workspaceId, terminalId: id };
-      else if (comp === "browser")
+      else if (comp === "browser") {
         panel.params = { workspaceId, browserId: id, initialUrl: urls.get(id) };
+        // Same as `addBrowserLeaf`; layouts saved before browser tabs were
+        // `<webview>`s carry no renderer.
+        panel.renderer = "always";
+      }
       // `"file:".length === 5` and `"diff:".length === 5` — strip the prefix
       // back into the filePath param. Line/column are transient (jump targets)
       // and intentionally not persisted.
@@ -2335,6 +2340,11 @@ function addBrowserLeaf(
     title: "New Tab",
     params: { workspaceId, browserId, ...(initialUrl ? { initialUrl } : {}) },
     position: position ?? centralPanelPosition(api),
+    // The page is a `<webview>`, and detaching it from the DOM (dockview's
+    // default `onlyWhenVisible` renderer does that for an unselected tab)
+    // destroys its guest and reloads the page. Keep the leaf mounted and let
+    // dockview hide it with `display: none` instead.
+    renderer: "always",
   } as AddPanelOptions);
 }
 
@@ -3160,6 +3170,35 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       }
     });
   }, [adapter, workspaceId]);
+
+  // Page popups (window.open, target="_blank", middle-click) reach us as a
+  // request for a new Band tab; the main process has already denied the OS
+  // window (issue #488). Only the workspace holding the source tab acts.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void desktopListen<{ browser_id: string; url: string }>("browser-open-window", (event) => {
+      const api = apiRef.current;
+      const source = api?.getPanel(event.payload.browser_id);
+      if (!api || !source) return;
+      const id = newBrowserId();
+      markBrowserFresh(id);
+      addBrowserLeaf(api, workspaceId, id, event.payload.url, {
+        referenceGroup: source.group.id,
+      });
+      trpc.browsers.create.mutate({ workspaceId, id, url: event.payload.url }).catch((err) => {
+        console.error("[WorkspaceCenterDockview] popup browser create failed:", err);
+      });
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [workspaceId]);
 
   // Bring a specific chat/terminal leaf forward when "Add to Chat/Terminal" targets it.
   useEffect(() => {

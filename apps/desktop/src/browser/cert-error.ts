@@ -57,7 +57,6 @@ export interface CertificateLike {
  */
 export interface BrowserCertErrorPayload {
   browser_id: string;
-  workspace_id: string;
   /** The URL the user (or a redirect chain) was trying to load. */
   url: string;
   /** Lowercased hostname extracted from `url`. The interstitial
@@ -150,11 +149,9 @@ export function describeCertError(errorCode: string): string {
 }
 
 /**
- * Build a renderer-facing payload from the raw arguments Chromium hands
- * the `certificate-error` event. Caller provides the LRU `key` so the
- * payload can be filtered to the right tab — both `browser_id` and
- * `workspace_id` are set to the same value to match the existing
- * dual-key convention in `view-manager.ts::wireEvents`.
+ * Build a payload from the raw arguments Chromium hands the
+ * `certificate-error` event. Caller provides the tab's `key` (its Band
+ * browser id) as `browser_id`.
  */
 export function buildCertErrorPayload(args: {
   key: string;
@@ -165,7 +162,6 @@ export function buildCertErrorPayload(args: {
   const host = hostFromUrl(args.url);
   return {
     browser_id: args.key,
-    workspace_id: args.key,
     url: args.url,
     host,
     error_code: args.errorCode,

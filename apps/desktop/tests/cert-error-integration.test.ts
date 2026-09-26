@@ -293,9 +293,6 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     assert.equal(payload.fingerprint, fingerprint);
     // Explanation is the self-signed one (we passed CERT_AUTHORITY_INVALID).
     assert.match(payload.error_description, /self-signed|unrecognised/i);
-    // Routing: both keys carry the same value (per the existing
-    // dual-key convention in view-manager.ts).
-    assert.equal(payload.browser_id, payload.workspace_id);
   });
 
   test("describeCertError surfaces a meaningful string for a real-network self-signed scenario", (t) => {

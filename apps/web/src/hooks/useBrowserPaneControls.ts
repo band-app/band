@@ -17,28 +17,23 @@
  *     Arrow keys steer the history autocomplete dropdown when it is
  *     open.
  *   - `handlePaneKeyDown` — opens the find bar on Cmd/Ctrl+F when DOM
- *     focus is somewhere inside the pane chrome.
- *   - `handleToggleDevTools` — wires the wrench button to the
- *     `browser_toggle_dev_tools` IPC.
+ *     focus is somewhere inside the pane, including the page (the key
+ *     arrives as a forwarded shortcut dispatched on the `<webview>`).
+ *   - `devToolsOpen` / `handleToggleDevTools` — whether the pane shows its
+ *     docked DevTools split; the pane wires the split to the main process.
  *   - `paneDataAttrs` — `data-band-browser-pane-*` attributes that
  *     `__bandReload` / `__bandZoom` walk up from `document.activeElement`
  *     to identify which tab to act on.
  *   - `autocomplete` — history-backed URL suggestions that show up
  *     while the address bar is focused with a non-empty value.
  *
- * No-op outside the Electron desktop shell.
+ * Only mounted in the Electron desktop shell.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFreezeWhile } from "../lib/browser-pane-freeze";
-import { invoke as desktopInvoke } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-desktop";
+import type { BrowserWebview } from "../lib/browser-webview";
 import { trpc } from "../lib/trpc-client";
-import {
-  type BrowserKeyName,
-  type UseBrowserFindInPageReturn,
-  useBrowserFindInPage,
-} from "./useBrowserFindInPage";
+import { type UseBrowserFindInPageReturn, useBrowserFindInPage } from "./useBrowserFindInPage";
 
 export interface AutocompleteEntry {
   id: number;
@@ -59,10 +54,10 @@ export interface AutocompleteState {
 }
 
 export interface UseBrowserPaneControlsArgs {
-  /** Opaque LRU key of the underlying WebContentsView. */
-  key: string;
-  /** Whether `key` is a multi-tab `browserId` or a legacy `workspaceId`. */
-  keyName: BrowserKeyName;
+  /** Band browser tab id. */
+  browserId: string;
+  /** The tab's page element, or null while the pane has none. */
+  webview: BrowserWebview | null;
   /** Workspace this pane belongs to. Drives history autocomplete scope. */
   workspaceId: string;
   /** Latest committed URL (for Escape restore). Ref so `setInputUrl`
@@ -85,7 +80,10 @@ export interface UseBrowserPaneControlsReturn {
   handleAddressBlur: () => void;
   handleAddressKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   handlePaneKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
-  handleToggleDevTools: () => Promise<void>;
+  /** Whether the docked DevTools split is open. */
+  devToolsOpen: boolean;
+  setDevToolsOpen: (open: boolean) => void;
+  handleToggleDevTools: () => void;
   autocomplete: AutocompleteState;
   /** Spread onto the pane's root `<div>` so the desktop menu's
    *  contextual Cmd+R / Cmd+= can locate this pane via
@@ -93,7 +91,6 @@ export interface UseBrowserPaneControlsReturn {
   paneDataAttrs: {
     "data-band-browser-pane": "";
     "data-band-browser-pane-key": string;
-    "data-band-browser-pane-keyname": BrowserKeyName;
   };
 }
 
@@ -109,23 +106,17 @@ const AUTOCOMPLETE_BLUR_CLOSE_MS = 100;
 export function useBrowserPaneControls(
   args: UseBrowserPaneControlsArgs,
 ): UseBrowserPaneControlsReturn {
-  const { key, keyName, workspaceId, currentUrlRef, setInputUrl, inputUrl, onNavigate } = args;
+  const { browserId, webview, workspaceId, currentUrlRef, setInputUrl, inputUrl, onNavigate } =
+    args;
 
-  const find = useBrowserFindInPage({ key, keyName });
+  const find = useBrowserFindInPage(webview);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
   const addressInputFocusedRef = useRef(false);
 
   // ------- Autocomplete state -------
   const [autocompleteItems, setAutocompleteItems] = useState<AutocompleteEntry[]>([]);
   const [autocompleteIsOpen, setAutocompleteIsOpen] = useState(false);
   const [autocompleteSelectedIndex, setAutocompleteSelectedIndex] = useState(0);
-
-  // Freeze the native browser panes while the autocomplete dropdown
-  // is open so the dropdown can render absolutely on top of the
-  // snapshot raster (Chrome-omnibox-style overlay) rather than
-  // displacing the page in the flex column. The autocomplete is a
-  // plain inline div — not a Radix portal — so the DOM watcher
-  // doesn't see it; we register an explicit freeze hold instead.
-  useFreezeWhile(autocompleteIsOpen);
 
   const closeAutocomplete = useCallback(() => {
     setAutocompleteIsOpen(false);
@@ -284,14 +275,7 @@ export function useBrowserPaneControls(
     [find],
   );
 
-  const handleToggleDevTools = useCallback(async () => {
-    if (!isDesktop) return;
-    try {
-      await desktopInvoke("browser_toggle_dev_tools", { [keyName]: key });
-    } catch (e) {
-      console.error("browser_toggle_dev_tools failed:", e);
-    }
-  }, [key, keyName]);
+  const handleToggleDevTools = useCallback(() => setDevToolsOpen((open) => !open), []);
 
   return {
     find,
@@ -300,6 +284,8 @@ export function useBrowserPaneControls(
     handleAddressBlur,
     handleAddressKeyDown,
     handlePaneKeyDown,
+    devToolsOpen,
+    setDevToolsOpen,
     handleToggleDevTools,
     autocomplete: {
       isOpen: autocompleteIsOpen,
@@ -310,8 +296,7 @@ export function useBrowserPaneControls(
     },
     paneDataAttrs: {
       "data-band-browser-pane": "",
-      "data-band-browser-pane-key": key,
-      "data-band-browser-pane-keyname": keyName,
+      "data-band-browser-pane-key": browserId,
     },
   };
 }

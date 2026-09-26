@@ -5,7 +5,7 @@ import { isDesktop } from "../lib/is-desktop";
 /**
  * Track which hostnames the user has accepted a TLS exception for
  * in this session (issue #444). The Chrome-style cert interstitial
- * itself is rendered INSIDE the WebContentsView via a `data:` URI
+ * itself is rendered INSIDE the tab's page via a `data:` URI
  * so cast viewers can see / proceed past it — see
  * `apps/desktop/src/browser/error-html.ts`. This module is only for
  * the surrounding dashboard chrome: it tells `BrowserPanel.tsx`
@@ -14,7 +14,7 @@ import { isDesktop } from "../lib/is-desktop";
  * Design — **module-scoped singleton store**:
  *
  * `useOverriddenHosts` is consumed by every browser pane
- * (`BrowserPanelComponent` AND `BrowserPaneComponent`), so a naive
+ * (`BrowserPaneComponent`), so a naive
  * `useEffect`/`useState` implementation would mount one IPC
  * subscription and one catch-up call per panel. With N tabs open,
  * boot fires N catch-up IPCs and registers N event listeners.

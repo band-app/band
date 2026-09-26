@@ -47,6 +47,7 @@
       "entry": [
         "src/main/index.ts",
         "src/preload/index.cts",
+        "src/preload/guest.cts",
         "tests/**/*.test.ts",
         "tests/**/*.test.mjs",
         "tests/loader.mjs",
