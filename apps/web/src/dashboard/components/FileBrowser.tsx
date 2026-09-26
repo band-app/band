@@ -536,6 +536,7 @@ function TreeNode({
   // current name so submitting the same name is treated as a cancel.
   const renameSiblings = (() => {
     const set = new Set<string>();
+    if (!isRenaming) return set;
     const cached = dirContents.get(parentPath);
     if (cached) {
       for (const e of cached) {
@@ -1219,6 +1220,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       }
       cache.clear();
       for (const [k, v] of remapped) cache.set(k, v);
+      setDirContents(new Map(cache));
 
       const expanded = new Set<string>();
       for (const key of getCachedExpanded(workspaceId)) {

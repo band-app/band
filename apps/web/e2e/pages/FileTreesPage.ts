@@ -251,12 +251,12 @@ export class FileTreesPage {
         .last()
         .boundingBox();
       if (!box || !lastRow) throw new Error("file tree has no bounding box");
-      // Drop halfway between the last row and the bottom of the tree, and
-      // refuse when the rows fill the tree: a drop on a row targets its folder.
-      const y = (lastRow.y + lastRow.height + box.y + box.height) / 2 - box.y;
+      // Refuse when the rows fill the tree: a drop on a row targets its folder.
       if (lastRow.y + lastRow.height >= box.y + box.height - 8) {
         throw new Error("no empty space below the rows to drop on");
       }
+      // Drop halfway between the last row and the bottom of the tree.
+      const y = (lastRow.y + lastRow.height + box.y + box.height) / 2 - box.y;
       await this.fileTreeRow(from).dragTo(this.treeRoot, {
         targetPosition: { x: box.width / 2, y },
       });

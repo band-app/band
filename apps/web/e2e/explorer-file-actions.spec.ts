@@ -145,23 +145,23 @@ test.describe("Explorer file actions", () => {
     // Drop onto a folder moves the file inside it (and expands the folder).
     await trees.dragRowOnto("dnd/src.txt", "dnd/target");
     await expect.poll(() => onDisk("dnd/target/src.txt")).toBe(true);
-    expect(onDisk("dnd/src.txt")).toBe(false);
+    await expect.poll(() => onDisk("dnd/src.txt")).toBe(false);
     await expect(trees.fileTreeRow("dnd/target/src.txt")).toBeVisible();
 
     // Holding Alt copies instead of moving.
     await trees.dragRowOnto("dnd/copyme.txt", "dnd/target", { copy: true });
     await expect.poll(() => onDisk("dnd/target/copyme.txt")).toBe(true);
-    expect(onDisk("dnd/copyme.txt")).toBe(true);
+    await expect.poll(() => onDisk("dnd/copyme.txt")).toBe(true);
 
     // Dropping on the empty area below the rows moves it to the root.
     await trees.dragRowToRoot("dnd/target/src.txt");
     await expect.poll(() => onDisk("src.txt")).toBe(true);
-    expect(onDisk("dnd/target/src.txt")).toBe(false);
+    await expect.poll(() => onDisk("dnd/target/src.txt")).toBe(false);
 
     // Moving onto an existing name fails and leaves the source in place.
     await trees.dragRowOnto("dnd/dup.txt", "dnd/clash");
     await expect(trees.errorBanner).toBeVisible();
-    expect(onDisk("dnd/dup.txt")).toBe(true);
+    await expect.poll(() => onDisk("dnd/dup.txt")).toBe(true);
     await expect(trees.fileTreeRow("dnd/dup.txt")).toBeVisible();
   });
 
@@ -173,14 +173,14 @@ test.describe("Explorer file actions", () => {
     await trees.runRowAction("clip/a.txt", "cut");
     await trees.runRowAction("clip/dest", "paste");
     await expect.poll(() => onDisk("clip/dest/a.txt")).toBe(true);
-    expect(onDisk("clip/a.txt")).toBe(false);
+    await expect.poll(() => onDisk("clip/a.txt")).toBe(false);
     await expect(trees.fileTreeRow("clip/dest/a.txt")).toBeVisible();
 
     // Copy + Paste on a file lands beside it with a "copy" suffix.
     await trees.runRowAction("clip/dest/a.txt", "copy");
     await trees.runRowAction("clip/dest/a.txt", "paste");
     await expect.poll(() => onDisk("clip/dest/a copy.txt")).toBe(true);
-    expect(onDisk("clip/dest/a.txt")).toBe(true);
+    await expect.poll(() => onDisk("clip/dest/a.txt")).toBe(true);
     await expect(trees.fileTreeRow("clip/dest/a copy.txt")).toBeVisible();
 
     // Escape cancels a pending cut, so Paste is no longer offered.
@@ -227,6 +227,7 @@ test.describe("Explorer file actions", () => {
     await trees.runRowAction("f2.txt", "delete");
     await trees.confirmDelete();
     await expect.poll(() => onDisk("f2.txt")).toBe(false);
+    await expect(trees.fileTreeRow("ren2")).toBeVisible();
     await expect(trees.fileTreeRow("f2.txt")).toHaveCount(0);
     await expect(workspace.fileTab("f2.txt")).toHaveCount(0);
   });
@@ -235,12 +236,15 @@ test.describe("Explorer file actions", () => {
     const { workspace, trees } = await openExplorer(page, "dirty");
     await trees.expandFileTreeFolder("dirty", "dirty/keep-open.txt");
     await trees.openFile("dirty/keep-open.txt");
-    await new FileViewerPage(page).replaceAll("unsaved edit");
+    await new FileViewerPage(page, workspace.cachedPanelEntries(workspaceId)).replaceAll(
+      "unsaved edit",
+    );
 
     await trees.runRowAction("dirty/keep-open.txt", "delete");
     await trees.confirmDelete();
     await expect.poll(() => onDisk("dirty/keep-open.txt")).toBe(false);
-    await expect(trees.fileTreeRow("dirty/keep-open.txt")).toHaveCount(0);
+    await expect(trees.fileTreeRow("dirty")).toBeVisible();
     await expect(workspace.fileTab("dirty/keep-open.txt")).toBeVisible();
+    await expect(trees.fileTreeRow("dirty/keep-open.txt")).toHaveCount(0);
   });
 });
