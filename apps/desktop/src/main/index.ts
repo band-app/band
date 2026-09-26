@@ -9,14 +9,13 @@
  *      in debug builds).
  *   3. Create the main BrowserWindow pointed at the web URL.
  *   4. Register IPC handlers (Phases 1-3 ported; menus are Phase 5).
- *   5. On quit: kill the web server tree, destroy all WebContentsViews,
+ *   5. On quit: kill the web server tree, close offscreen browser pages,
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
 import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
-import { sessionForProfile } from "../browser/profiles.js";
-import { BrowserViewManager } from "../browser/view-manager.js";
+import { BrowserGuestManager } from "../browser/guest-manager.js";
 import { Events } from "../shared/ipc-channels.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -29,6 +28,7 @@ import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
 import { isUpdaterEnabled, UpdateController } from "./updater.js";
+import { installWebviewSecurity } from "./webview-security.js";
 import { createMainWindow } from "./window.js";
 
 const log = createLogger("desktop");
@@ -36,10 +36,10 @@ const log = createLogger("desktop");
 interface AppState {
   mainWindow: BrowserWindow | null;
   managed: ManagedProcess;
-  browserManager: BrowserViewManager | null;
+  browserManager: BrowserGuestManager | null;
   /**
    * Session-scoped TLS exception store, shared between the
-   * `BrowserViewManager` (which records exceptions on user proceed)
+   * `BrowserGuestManager` (which records exceptions on user proceed)
    * and the process-wide `app.on("certificate-error")` override hook
    * installed below (which reads them back to decide whether to
    * call `callback(true)`). See `browser/cert-exceptions.ts`.
@@ -214,9 +214,9 @@ async function bootstrap(): Promise<void> {
   // every webContents on a fixed CDP port so the web UI's `/cdp` proxy
   // can attach. Must be set BEFORE app.whenReady(); afterwards chromium
   // has already finished initializing the debugger. Leaving the setting
-  // off saves the port and the per-tab "always-on compositor" cost (see
-  // BrowserViewManager.hide() — without the hidden window, hide()
-  // parks the renderer like the original code did).
+  // off saves the port, the hidden window for ensure-only pages, and the
+  // cost of keeping hidden browser panes painting (the renderer's paint
+  // retention in `BrowserPanel.tsx` keys off the same setting).
   // Port intentionally !== 9222 so it doesn't collide with a Chrome a
   // developer might have running. The renderer-side constant in
   // `apps/web/src/server/infra/browser-host/host-state.ts::DESKTOP_CDP_PORT` mirrors the
@@ -259,12 +259,7 @@ async function bootstrap(): Promise<void> {
 
   // Install the application menu (Edit/View/Settings + accelerators) before
   // creating the window so Cmd+, etc. are bound from the first frame.
-  // The Reload item resolves `state.browserManager` lazily because the
-  // manager is constructed later, after `createMainWindow`.
-  installAppMenu({
-    getBrowserManager: () => state.browserManager,
-    checkForUpdates: checkForUpdatesFromMenu,
-  });
+  installAppMenu({ checkForUpdates: checkForUpdatesFromMenu });
 
   // macOS dock icon. In a packaged build this comes from the .app's .icns
   // (Info.plist resolves CFBundleIconFile); in dev there's no bundle so we
@@ -290,22 +285,25 @@ async function bootstrap(): Promise<void> {
     log.error({ preloadPath, err: error.stack ?? error.message }, "preload-error");
   });
 
-  // Hidden BrowserWindow that hosts WebContentsViews ensure'd by the web
-  // bridge or hidden by the desktop UI — chromium needs a "visible" parent
-  // for child views to keep compositing, otherwise screencast and
+  // Hidden BrowserWindow that hosts the offscreen pages the CDP bridge
+  // ensures for tabs no pane has mounted. Chromium needs a "visible" parent
+  // for a view to keep compositing, otherwise screencast and
   // captureScreenshot both stall. See `hidden-browser-window.ts`. Skipped
-  // when the CDP screencast feature is off; BrowserViewManager falls back
-  // to the original setVisible(false)-on-hide model in that case.
+  // when the CDP screencast feature is off, the only time `ensure` runs.
   const hiddenBrowserWindow = cdpEnabled ? createHiddenBrowserWindow() : undefined;
 
-  state.browserManager = new BrowserViewManager({
+  state.browserManager = new BrowserGuestManager({
     mainWindow: state.mainWindow,
     hiddenWindow: hiddenBrowserWindow,
     certExceptions: state.certExceptions,
   });
+  // Browser tabs are <webview> guests of the dashboard window. Gate their
+  // attach in the same tick the window was created, before the renderer can
+  // mount one. See `webview-security.ts`.
+  installWebviewSecurity(state.mainWindow, state.browserManager);
 
   // NOTE on TLS overrides (issue #444): the trust decision is made
-  // in `BrowserViewManager.wireEvents` via the per-`webContents`
+  // in `BrowserGuestManager.wireEvents` via the per-`webContents`
   // `certificate-error` event, not here via
   // `session.setCertificateVerifyProc`. The verify proc is the
   // documented Electron API for cert overrides, but empirical
@@ -315,29 +313,26 @@ async function bootstrap(): Promise<void> {
   // subsequent reconnects within the same session Chromium reuses
   // its cached "deny" decision and never re-invokes the proc.
   // `certificate-error` does fire on those retries, so that's the
-  // hook the view manager uses for the override.
+  // hook the guest manager uses for the override.
 
   // No-op handler for `band-action://` so Chromium accepts the
   // navigation and doesn't fall back to the OS external-protocol
   // handler. The scheme is registered as privileged before
   // `app.whenReady()` above. The actual action dispatch (record
   // cert exception, loadURL the real URL, etc.) happens in the
-  // per-tab `did-start-navigation` listener in `view-manager.ts`,
+  // per-tab `did-start-navigation` listener in `guest-manager.ts`,
   // which fires synchronously when the user clicks an in-view
   // band-action link. By the time Chromium asks this handler for
   // a response we've already kicked off the real navigation in a
   // setImmediate, so we just return an empty no-content response
   // and Chromium quietly throws away the result.
   //
-  // Registered on `session.defaultSession` (the dashboard window) and on
-  // every browser-pane session. Each partition's `Session` is a separate
-  // object with its own protocol registry; without the registration,
-  // band-action navigations in tabs would pop the macOS "no application
-  // set to open this URL" dialog before our setImmediate fires. Browser
-  // profile sessions get it from `prepareBrowserSession` (`profiles.ts`)
-  // when their first view spawns; the Default profile's is prepared here.
+  // This registration covers `session.defaultSession` (the dashboard
+  // window). Each partition's `Session` has its own protocol registry, so
+  // the guest manager registers the same handler on every tab's session
+  // when its guest attaches (`prepareBrowserSession`), whichever partition
+  // (default or browser profile) it uses.
   session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
-  sessionForProfile(null);
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,

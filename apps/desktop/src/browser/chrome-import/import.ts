@@ -111,17 +111,17 @@ export async function importChromeProfile(args: ChromeImportArgs): Promise<Chrom
 
 /**
  * Wipe a deleted profile's cookies, storage and cache from disk.
- * `destroyViews` closes every view still running in the profile first, so
- * no page writes storage back while it is cleared; the profile is retired
- * so a respawn lands in Default instead.
+ * `stopPages` stops every page still running in the profile first, so no
+ * page writes storage back while it is cleared; the profile is retired so
+ * an offscreen respawn lands in Default instead.
  */
 export async function clearProfileData(
   profileId: string,
-  destroyViews: (profileId: string) => void,
+  stopPages: (profileId: string) => void,
 ): Promise<void> {
   if (!isValidProfileId(profileId)) throw new Error("Invalid browser profile id");
   retireProfile(profileId);
-  destroyViews(profileId);
+  stopPages(profileId);
   const sess = sessionForProfile(profileId);
   await sess.clearStorageData();
   await sess.clearCache();
@@ -135,11 +135,11 @@ export async function clearProfileData(
  */
 export async function pruneProfileData(
   keep: string[],
-  destroyViews: (profileId: string) => void,
+  stopPages: (profileId: string) => void,
 ): Promise<string[]> {
   const known = new Set(keep);
   const stale = listProfilePartitionsOnDisk().filter((id) => !known.has(id));
-  for (const id of stale) await clearProfileData(id, destroyViews);
+  for (const id of stale) await clearProfileData(id, stopPages);
   if (stale.length > 0) log.info({ count: stale.length }, "wiped deleted browser profiles");
   return stale;
 }

@@ -32,9 +32,10 @@ export class CdpUnreachableError extends Error {
  * single JPEG frame via `Page.captureScreenshot`. Used by
  * `/api/cdp/tabs/:bandTabId/snapshot`.
  *
- * `Page.captureScreenshot` works on tabs whose WebContentsView is hidden
- * (the screenshot path forces a rasterization on demand), so this is the
- * right primitive for thumbnails of background tabs.
+ * Background tabs stay painted while the CDP experiment is on (offscreen
+ * pages sit in the desktop's hidden window; hidden panes keep their page
+ * painting at opacity 0), so `Page.captureScreenshot` is the right
+ * primitive for their thumbnails too.
  *
  * On a stale cached cdpTargetId (the desktop destroyed the view but didn't
  * notify us yet), the ws.error handler clears the cache so the next call

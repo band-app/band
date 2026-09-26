@@ -325,6 +325,64 @@ html[data-translucent-sidebar] {
   zoom: var(--app-zoom, 1);
 }
 
+/*
+ * Browser tabs are Electron <webview>s, and a guest page renders at its
+ * host element's effective zoom: at 125% app zoom every page would be
+ * zoomed 125% on top of its own per-origin zoom. Undo the app zoom on the
+ * guest host so pages keep only the zoom the user set on the tab. The host
+ * is a flex item, so it still fills its box; only the page's CSS pixel scale
+ * changes.
+ */
+.band-browser-guest-host {
+  zoom: calc(1 / var(--app-zoom, 1));
+}
+
+/* Indeterminate loading bar under a browser pane's address bar. */
+@keyframes browser-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(200%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+/*
+ * Paint retention for the CDP screencast experiment. Chromium stops painting
+ * a <webview> guest inside a display:none, visibility:hidden or
+ * content-visibility:hidden subtree, which is how inactive dockview tabs and
+ * hidden workspaces are hidden, so a remote viewer of that tab gets no
+ * frames. A hidden browser pane that must keep painting carries
+ * `data-band-browser-paint-retained` (see `BrowserPanel.tsx`). Then:
+ *   - its workspace entry keeps `visibility: hidden` but drops the
+ *     `content-visibility` skip, which no descendant can override;
+ *   - its dockview overlay is laid out again (dockview writes an inline
+ *     `display: none`) but stays `visibility: hidden`;
+ *   - only the page host opts back into visibility, at opacity 0 and
+ *     without pointer events, so the page paints but nothing shows.
+ * The pane root is `inert` while hidden, so its page can't take focus.
+ */
+.band-workspace-entry:has([data-band-browser-paint-retained]) {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat the entry's inline content-visibility. */
+  content-visibility: visible !important;
+}
+
+.dv-render-overlay:has([data-band-browser-paint-retained]) {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat dockview's inline display: none. */
+  display: block !important;
+  /* biome-ignore lint/complexity/noImportantStyles: dockview writes an inline visibility on first attach. */
+  visibility: hidden !important;
+}
+
+[data-band-browser-paint-retained] .band-browser-guest-host {
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize tw-animate-css movement; opacity fades
      (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */

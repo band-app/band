@@ -55,55 +55,31 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "updater_download",
   "updater_restart",
   "updater_dismiss",
-  // Phase 3 — browser panels
-  "browser_create",
-  "browser_navigate",
-  "browser_go_back",
-  "browser_go_forward",
-  "browser_eval",
-  "browser_reload",
-  "browser_set_bounds",
-  "browser_hide",
-  "browser_show",
-  "browser_destroy",
-  "browser_hide_all_for_workspace",
-  "browser_show_all_for_workspace",
+  // Browser panes (<webview> guests; navigation, find and zoom need no IPC)
+  "browser_register_guest",
   // CDP screencast experiment bridge
   "browser_ensure",
   "browser_get_cdp_target",
-  // Find in page (Cmd+F / Ctrl+F overlay)
-  "browser_find_in_page",
-  "browser_stop_find_in_page",
-  // Capture-page (JPEG snapshot for the freeze-on-overlay mechanism)
-  "browser_capture_page",
-  // Pause / resume media on freeze
-  "browser_pause_media",
-  "browser_resume_media",
-  // Per-tab zoom (Cmd+= / Cmd+- / Actual Size)
-  "browser_zoom",
-  // Toggle Chromium DevTools for a browser tab
-  "browser_toggle_dev_tools",
+  // DevTools docked into the pane's second <webview>
+  "browser_open_dev_tools",
+  "browser_close_dev_tools",
+  // Chrome-style cert / load error pages (issue #444). Painted
+  // inside the guest; only the overridden-hosts catch-up
+  // crosses the IPC boundary.
+  "browser_get_overridden_hosts",
   // Browser profiles + Chrome cookie import
   "browser_chrome_profiles",
   "browser_chrome_import",
   "browser_profile_clear_data",
   "browser_profile_prune",
-  // Chrome-style cert / load error pages (issue #444). Painted
-  // inside the WebContentsView; only the overridden-hosts catch-up
-  // crosses the IPC boundary.
-  "browser_get_overridden_hosts",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-url-changed",
   "browser-title-changed",
   "browser-view-destroyed",
-  "browser-found-in-page",
-  "browser-find-shortcut",
-  "browser-new-tab-shortcut",
-  "browser-split-shortcut",
-  "browser-close-shortcut",
-  "browser-cycle-shortcut",
+  // Pane shortcuts typed inside a guest page, re-dispatched on its <webview>
+  "browser-guest-shortcut",
   "browser-host-overridden",
   // Issue #488: page-initiated window.open / target="_blank" /
   // middle-click — forwarded by the main process so the renderer

@@ -6,14 +6,17 @@
  * uses (`browserProfiles.*` tRPC); the desktop only needs the id. The
  * built-in Default profile (`null`) is the original `persist:band-browser`
  * partition, so tabs from before profiles existed keep their logins.
+ *
+ * A pane's `<webview>` picks its partition by attribute (the renderer
+ * mirrors `partitionForProfile` in `apps/web/src/lib/browser-webview.ts`),
+ * `guest-policy.ts` admits only these partitions, and the guest manager
+ * prepares each session when its first guest attaches.
  */
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { app, type Session, session } from "electron";
-
-/** Partition of the built-in Default profile. */
-export const BROWSER_PARTITION = "persist:band-browser";
+import { BROWSER_PARTITION } from "./guest-policy.js";
 
 const PROFILE_PARTITION_PREFIX = "persist:band-browser-profile-";
 
@@ -35,10 +38,15 @@ export function partitionForProfile(profileId: string | null | undefined): strin
   return `${PROFILE_PARTITION_PREFIX}${profileId}`;
 }
 
+/** The `Session` behind a profile's partition. */
+export function sessionForProfile(profileId: string | null | undefined): Session {
+  return session.fromPartition(partitionForProfile(profileId));
+}
+
 /**
- * Profiles deleted in this app run. A view spawned for one of these falls
- * back to Default, so a pane that hasn't noticed the deletion yet can't
- * write cookies back into a partition that was just wiped.
+ * Profiles deleted in this app run. An offscreen page spawned for one of
+ * these falls back to Default, so nothing writes cookies back into a
+ * partition that was just wiped.
  */
 const retiredProfiles = new Set<string>();
 
@@ -46,8 +54,8 @@ export function retireProfile(profileId: string): void {
   retiredProfiles.add(profileId);
 }
 
-export function isRetiredProfile(profileId: string | null): boolean {
-  return profileId !== null && retiredProfiles.has(profileId);
+export function isRetiredProfile(profileId: string | null | undefined): boolean {
+  return typeof profileId === "string" && retiredProfiles.has(profileId);
 }
 
 /**
@@ -67,28 +75,4 @@ export function listProfilePartitionsOnDisk(): string[] {
     .filter((name) => name.startsWith(prefix))
     .map((name) => name.slice(prefix.length))
     .filter(isValidProfileId);
-}
-
-const bandActionHandler = () => new Response(null, { status: 204 });
-const prepared = new WeakSet<Session>();
-
-/**
- * Per-session setup every browser-pane session needs. Each partition's
- * `Session` has its own protocol registry, so the no-op `band-action://`
- * handler (see `apps/desktop/src/main/index.ts`) is registered on each one;
- * without it an in-view error page's buttons would pop the macOS "no
- * application set to open this URL" dialog.
- */
-export function prepareBrowserSession(sess: Session): Session {
-  if (prepared.has(sess)) return sess;
-  prepared.add(sess);
-  if (!sess.protocol.isProtocolHandled("band-action")) {
-    sess.protocol.handle("band-action", bandActionHandler);
-  }
-  return sess;
-}
-
-/** The prepared `Session` for a profile. */
-export function sessionForProfile(profileId: string | null | undefined): Session {
-  return prepareBrowserSession(session.fromPartition(partitionForProfile(profileId)));
 }

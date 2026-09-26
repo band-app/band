@@ -30,7 +30,7 @@ import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
-import { getElectronBridge } from "../lib/desktop-ipc";
+import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
@@ -191,41 +191,39 @@ function TranslucentSidebarSync() {
   return null;
 }
 
+/** The page of the browser tab whose pane holds keyboard focus, if any. */
+function focusedBrowserWebview(): BrowserWebview | null {
+  const active = document.activeElement as HTMLElement | null;
+  const paneEl = active?.closest<HTMLElement>("[data-band-browser-pane]");
+  const browserId = paneEl?.dataset.bandBrowserPaneKey;
+  return browserId ? getBrowserWebview(browserId) : null;
+}
+
 /**
  * Exposes `window.__bandReload` for the desktop menu's Cmd+R handler.
  *
  * Routes the reload based on what's currently focused in the React DOM:
  *
- *   - Focus inside a browser pane (address bar, find bar, tab handle,
- *     etc., identified by the `data-band-browser-pane` attribute the
- *     `BrowserPanel` root sets): reload that browser tab via the
- *     `browser_reload` IPC instead of reloading the whole dashboard.
+ *   - Focus inside a browser pane (address bar, find bar, or the page
+ *     itself, whose `<webview>` is then the active element; the pane root
+ *     carries the `data-band-browser-pane` attribute): reload that tab
+ *     instead of reloading the whole dashboard.
  *   - Anywhere else: `location.reload()`, matching the previous
  *     default-menu behaviour.
- *
- * The webview-focused case (user is clicked inside a rendered web page)
- * is handled in the main process *before* this global is called — see
- * `menu.ts::reloadFocused`. By the time `__bandReload` runs, focus is
- * inside the main-window DOM.
  */
 function ReloadSync() {
   useEffect(() => {
     const globalKey = "__bandReload";
     const win = window as unknown as Record<string, unknown>;
     const handler = () => {
-      // Walk up from the focused element looking for a browser-pane root.
-      const active = document.activeElement as HTMLElement | null;
-      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
-      if (paneEl) {
-        const key = paneEl.dataset.bandBrowserPaneKey;
-        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
-        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = getElectronBridge();
-          if (bridge) {
-            void bridge.invoke("browser_reload", { [keyName]: key });
-            return;
-          }
+      const webview = focusedBrowserWebview();
+      if (webview) {
+        try {
+          webview.reload();
+        } catch {
+          // The page hasn't finished attaching yet; nothing to reload.
         }
+        return;
       }
       // No browser pane focused — preserve the historical "Cmd+R reloads
       // the dashboard" behaviour.
@@ -258,24 +256,13 @@ function ZoomSync() {
     // webContents.executeJavaScript("if(window.__bandZoom)window.__bandZoom('in')").
     //
     // Same routing shape as `__bandReload`: if focus is inside a browser
-    // pane's React chrome (address bar, find bar, etc.), zoom that
-    // tab's WebContentsView via IPC. Otherwise fall through to the
-    // dashboard-wide CSS zoom. The "focus inside the rendered web page"
-    // case is handled in the main process before this function is
-    // called — see `menu.ts::zoomFocused`.
+    // pane (its chrome or the page itself), zoom that tab's page.
+    // Otherwise fall through to the dashboard-wide CSS zoom.
     (window as unknown as Record<string, unknown>).__bandZoom = (action: string) => {
-      const active = document.activeElement as HTMLElement | null;
-      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
-      if (paneEl) {
-        const key = paneEl.dataset.bandBrowserPaneKey;
-        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
-        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = getElectronBridge();
-          if (bridge) {
-            void bridge.invoke("browser_zoom", { [keyName]: key, action });
-            return;
-          }
-        }
+      const webview = focusedBrowserWebview();
+      if (webview && (action === "in" || action === "out" || action === "reset")) {
+        zoomBrowserWebview(webview, action);
+        return;
       }
       if (action === "in") zoomIn();
       else if (action === "out") zoomOut();

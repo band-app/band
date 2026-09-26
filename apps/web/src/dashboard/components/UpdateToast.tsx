@@ -1,7 +1,6 @@
 import { Button, Spinner } from "@band-app/ui";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { useFreezeWhile } from "../../lib/browser-pane-freeze";
 import { openExternalUrl } from "../../lib/open-external-url";
 import type { UpdateRelease } from "../adapter";
 import { useAppUpdate } from "../hooks/use-app-update";
@@ -14,14 +13,6 @@ import { useAppUpdate } from "../hooks/use-app-update";
  */
 export function UpdateToast() {
   const { status, download, restart, retry, dismiss } = useAppUpdate();
-  // Native browser panes draw above the dashboard and would hide the toast.
-  // Freeze them for the short-lived steps of a check the user asked for and
-  // during a download. An offered or downloaded update can sit open for hours
-  // with its "Later" button, so it does not hold the panes frozen.
-  const state = status?.state;
-  useFreezeWhile(
-    state === "checking" || state === "up-to-date" || state === "error" || state === "downloading",
-  );
   if (!status) return null;
 
   let body: ReactNode;

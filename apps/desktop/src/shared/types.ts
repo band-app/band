@@ -9,65 +9,56 @@
  *   - **Invoke args** are camelCase. Tauri auto-converts the renderer's
  *     camelCase invoke payloads to Rust's snake_case at the FFI boundary;
  *     Electron has no such layer, so we accept the raw camelCase the
- *     renderer sends (`{ appName }`, `{ browserId }`, `{ workspaceId }`).
+ *     renderer sends (`{ appName }`, `{ browserId }`).
  *
  *   - **Event payloads** are snake_case. Tauri serialises Rust structs
- *     with snake_case fields (`browser_id`, `workspace_id`), and the
+ *     with snake_case fields (`browser_id`), and the
  *     existing renderer code destructures those names — so we keep that
  *     wire format on the Electron side too.
- *
- *   - The browser commands accept EITHER `browserId` (multi-tab mode in
- *     `BrowserPaneComponent`) OR `workspaceId` (legacy single-panel mode
- *     in `BrowserPanelComponent`). The handler picks whichever is present
- *     and uses it as the LRU key. The `*ForWorkspace` bulk commands
- *     ignore the id entirely.
  */
 
-// ---------- browser panels (camelCase invoke args) ----------
+// ---------- browser panes (camelCase invoke args) ----------
+//
+// Browser tabs are `<webview>` guests the renderer mounts itself, so
+// navigation, find-in-page and zoom run on the element in the renderer.
+// The main process only keeps what a renderer cannot do: map a Band tab id
+// to its guest (CDP target, DevTools docking), host ensure-only tabs for the
+// CDP bridge, and enforce the guest policy (`browser/guest-policy.ts`).
 
-/** Either id may be sent by the renderer; we use whichever is present. */
 export interface BrowserKeyArg {
-  browserId?: string;
-  workspaceId?: string;
-}
-
-export interface BrowserCreateArgs extends BrowserKeyArg {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  url: string;
-  /**
-   * Band browser profile whose session the view runs in. `null` is the
-   * Default profile. When it differs from an existing view's profile, the
-   * view is destroyed and respawned. Omitted keeps whatever view exists.
-   */
-  profileId?: string | null;
-}
-
-export interface BrowserNavigateArgs extends BrowserKeyArg {
-  url: string;
-}
-
-export interface BrowserBoundsArgs extends BrowserKeyArg {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface BrowserEvalArgs extends BrowserKeyArg {
-  js: string;
+  browserId: string;
 }
 
 /**
- * Create-or-return-existing without bounds. Used by the CDP screencast
- * bridge so the web/agent can ask the desktop to materialise a tab whose
- * dockview panel hasn't mounted yet.
+ * Tie a `<webview>` guest to its Band tab id. Sent by the pane on the
+ * webview's `did-attach`, and again whenever the guest is replaced (a
+ * reparented webview gets a fresh WebContents).
+ */
+export interface BrowserRegisterGuestArgs extends BrowserKeyArg {
+  webContentsId: number;
+}
+
+/**
+ * Reply to `browser_register_guest`. `adoptUrl` is set when an ensure-only
+ * offscreen page existed for this tab (the CDP bridge created it before any
+ * pane mounted); the pane navigates there so an agent's navigation is not
+ * lost when the user opens the tab.
+ */
+export interface BrowserRegisterGuestResult {
+  ok: boolean;
+  adoptUrl: string | null;
+}
+
+/**
+ * Create-or-return-existing without a pane. Used by the CDP screencast
+ * bridge so the web/agent can drive a tab whose pane hasn't mounted.
  */
 export interface BrowserEnsureArgs extends BrowserKeyArg {
   url: string;
-  /** Same as `BrowserCreateArgs.profileId`. */
+  /**
+   * Band browser profile whose session the offscreen page runs in. `null`
+   * or omitted is the Default profile.
+   */
   profileId?: string | null;
 }
 
@@ -88,41 +79,11 @@ export interface BrowserProfilePruneArgs {
 }
 
 /**
- * Forwarded verbatim to Electron's `webContents.findInPage(text, options)`.
- *
- *   - **First search** for a given query: omit `findNext` (or set false).
- *     Chromium runs the full match scan and emits a `found-in-page` event
- *     with `matches` set to the total count.
- *   - **Step to next/previous match**: set `findNext: true` and toggle
- *     `forward` to control direction. Chromium reuses the cached result
- *     set instead of rescanning, so the counter stays in sync.
- *
- * `matchCase` is the only option Chromium reliably honours today —
- * `wordStart` / `medialCapitalAsWordStart` are accepted for forward
- * compatibility but have no visible effect, and `regex` is not supported
- * at all. Callers should hide UI toggles for unsupported options
- * (`SearchBar`'s `visibleOptions` prop) rather than silently surface a
- * no-op control.
+ * Dock a tab's DevTools into a second `<webview>` the pane mounted below
+ * the page (`devToolsWebContentsId` is that webview's guest).
  */
-export interface BrowserFindInPageArgs extends BrowserKeyArg {
-  text: string;
-  options?: {
-    forward?: boolean;
-    findNext?: boolean;
-    matchCase?: boolean;
-    wordStart?: boolean;
-    medialCapitalAsWordStart?: boolean;
-  };
-}
-
-/**
- * Stop an active `findInPage` session. `action` controls what happens to
- * the page selection — defaults to `clearSelection` which removes both
- * the highlight and the selection so closing the find bar leaves the
- * page visually undisturbed.
- */
-export interface BrowserStopFindInPageArgs extends BrowserKeyArg {
-  action?: "clearSelection" | "keepSelection" | "activateSelection";
+export interface BrowserOpenDevToolsArgs extends BrowserKeyArg {
+  devToolsWebContentsId: number;
 }
 
 /**
@@ -135,154 +96,58 @@ export interface BrowserHostOverriddenPayload {
   host: string;
 }
 
-/**
- * Per-tab zoom adjustment.
- *
- *   - `"in"` / `"out"` step the existing `webContents.zoomFactor` by a
- *     fixed amount (currently 0.1, matching the dashboard's zoom step).
- *   - `"reset"` sets it back to 1.0 (100%).
- *
- * Clamped to [0.5, 2.0] to mirror the dashboard's range.
- */
-export interface BrowserZoomArgs extends BrowserKeyArg {
-  action: "in" | "out" | "reset";
-}
-
-/** Resolve the LRU key from whichever id the renderer included. */
-export function browserKey(args: BrowserKeyArg): string {
-  return args.browserId ?? args.workspaceId ?? "";
-}
-
-// ---------- browser panels (snake_case event payloads) ----------
+// ---------- browser panes (snake_case event payloads) ----------
 
 export interface BrowserUrlChangedPayload {
   url: string;
   browser_id: string;
-  workspace_id: string;
   loading: boolean;
 }
 
 export interface BrowserTitleChangedPayload {
   browser_id: string;
-  workspace_id: string;
   title: string;
 }
 
 /**
- * Emitted by `BrowserViewManager.destroy()` (LRU eviction, explicit
- * close, app quit). The renderer translates this into a
- * `browserHost.viewDestroyed` tRPC mutation so the server can clear its
+ * Emitted when a tab's page WebContents goes away: its `<webview>` was
+ * removed or replaced, or an ensure-only offscreen page was closed or
+ * adopted by a pane. `BrowserHostBridge` forwards it to the
+ * `browserHost.viewDestroyed` mutation so the server clears its
  * bandTabId → cdpTargetId cache.
  */
 export interface BrowserViewDestroyedPayload {
   browser_id: string;
-  workspace_id: string;
 }
 
 /**
- * One result tick from a `webContents.findInPage` request. Chromium
- * emits at least one event per request and may stream incremental
- * updates as it scans large pages — `final_update` flips to `true` on
- * the last event for the request, at which point `matches` is the
- * authoritative total. `active_match_ordinal` is 1-indexed (or 0 when
- * the query is empty / no match is selected).
+ * A pane-level shortcut pressed while keyboard focus is inside a guest page.
+ * The guest consumes its own keydowns, so the renderer never sees them; the
+ * main process swallows the key and forwards it, and the renderer re-dispatches
+ * it as a `keydown` on the tab's `<webview>` so the ordinary DOM handlers
+ * (find bar, new tab, close, split, cycle) run as if focus were in Band's UI.
  */
-export interface BrowserFoundInPagePayload {
+export interface BrowserGuestShortcutPayload {
   browser_id: string;
-  workspace_id: string;
-  request_id: number;
-  active_match_ordinal: number;
-  matches: number;
-  final_update: boolean;
+  key: string;
+  code: string;
+  shift: boolean;
+  control: boolean;
+  meta: boolean;
 }
 
 /**
- * Emitted when the user presses the find-in-page shortcut (Cmd+F on
- * macOS, Ctrl+F elsewhere) while keyboard focus is *inside* the
- * `WebContentsView` — i.e. the React DOM cannot see the keydown. The
- * renderer reacts the same way it does to its own keydown handler:
- * opens the find bar for the matching tab.
- */
-export interface BrowserFindShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-}
-
-/**
- * Emitted when the user presses Cmd+T / Ctrl+T while keyboard focus is
- * inside a `WebContentsView`. Carries the source tab's key so the
- * renderer can locate the right `DockviewBrowserContainer` and add a
- * new sibling tab into it.
- */
-export interface BrowserNewTabShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-}
-
-/**
- * Emitted when the user presses Cmd+D / Cmd+Shift+D while focus is
- * inside a `WebContentsView`. The renderer creates a new browser tab in
- * a new dockview group adjacent to the source group, using `direction`
- * to pick horizontal ("right") vs. vertical ("below") orientation —
- * matching the React handler's behaviour when focus is in the address
- * bar.
- */
-export interface BrowserSplitShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-  direction: "right" | "below";
-}
-
-/**
- * Emitted when the user presses Cmd+W while focus is inside a
- * `WebContentsView`. The renderer closes the source tab using the same
- * code path as the close-button click.
- */
-export interface BrowserCloseShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-}
-
-/**
- * Emitted when the user presses one of the cycle shortcuts (Cmd+[ /
- * Cmd+] / Cmd+Shift+[ / Cmd+Shift+] / Ctrl+(Shift)+Tab) while focus is
- * inside a `WebContentsView`. `target` decides whether to cycle the
- * tabs in the current group or to cycle between split groups;
- * `direction` is +1 for forward, -1 for backward.
- */
-export interface BrowserCycleShortcutPayload {
-  browser_id: string;
-  workspace_id: string;
-  target: "tabs" | "groups";
-  direction: 1 | -1;
-}
-
-/**
- * Emitted when a page inside a `WebContentsView` requests a new
- * window (`window.open(...)`, `target="_blank"`, middle / Cmd+click
- * on a link, etc — issue #488). The native OS window is always
- * denied; the renderer turns this event into a new Band browser tab
- * in the same workspace, opening it next to the source tab.
+ * Emitted when a page inside a tab requests a new window
+ * (`window.open(...)`, `target="_blank"`, middle / Cmd+click on a link,
+ * etc — issue #488). The native OS window is always denied; the renderer
+ * turns this event into a new Band browser tab next to the source tab.
  *
  * `disposition` is the raw Chromium hint about how the page asked
- * the window to be opened — passed through unchanged so future
- * renderer logic can distinguish e.g. "new-window" from "background-
- * tab". Today the renderer treats all of them identically: a new
- * Band tab focused for the user. The union mirrors the one Electron's
- * `webContents.setWindowOpenHandler` callback emits, so any future
- * `switch` on it remains exhaustive.
- *
- * Note on `workspace_id`: `BrowserViewManager` is workspace-agnostic
- * (one singleton per main window) and has no stored workspace id, so
- * — consistent with every other event in `view-manager.ts` — both
- * `browser_id` and `workspace_id` carry the same opaque LRU key. The
- * renderer scopes on `browser_id` via `api.getPanel(sourceId)`; the
- * duplicate is preserved for symmetry with the two-mode keying
- * convention documented at the top of `view-manager.ts`.
+ * the window to be opened, passed through unchanged. The union mirrors
+ * the one Electron's `webContents.setWindowOpenHandler` callback emits.
  */
 export interface BrowserOpenWindowPayload {
   browser_id: string;
-  workspace_id: string;
   url: string;
   disposition: "default" | "foreground-tab" | "background-tab" | "new-window" | "other";
 }

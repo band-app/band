@@ -1,11 +1,15 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useBrowserProfiles, useInvalidateBrowserProfiles } from "@/dashboard";
+import { useBrowserProfiles, useInvalidateBrowserProfiles, useSettingsQuery } from "@/dashboard";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
-import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { registerBrowserGuest } from "../lib/browser-guest-retention";
+import {
+  type BrowserWebview,
+  partitionForProfile,
+  registerBrowserWebview,
+} from "../lib/browser-webview";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
@@ -17,32 +21,13 @@ import { NotSecureBadge } from "./NotSecureBadge";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
-const STORAGE_PREFIX = "band:browser-url:";
 // How long a pane waits for its tab record to exist (see the fetch effect
 // in `BrowserPaneComponent`): 10 tries, 150 ms apart.
 const TAB_RECORD_ATTEMPTS = 10;
 const TAB_RECORD_RETRY_MS = 150;
 
 // ---------------------------------------------------------------------------
-// Per-workspace URL persistence in localStorage
-// ---------------------------------------------------------------------------
-
-function saveUrl(workspaceId: string, url: string) {
-  try {
-    localStorage.setItem(`${STORAGE_PREFIX}${workspaceId}`, url);
-  } catch {}
-}
-
-function loadUrl(workspaceId: string): string | null {
-  try {
-    return localStorage.getItem(`${STORAGE_PREFIX}${workspaceId}`);
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Favicon store — tracks per-browser favicon URLs emitted by the desktop shell.
+// Favicon store — tracks per-browser favicon URLs for the tab strip.
 // ---------------------------------------------------------------------------
 
 const faviconMap = new Map<string, string>();
@@ -68,600 +53,84 @@ export function useFavicon(browserId: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Browser pane params — used by DockviewBrowserContainer for multi-tab support.
+// Browser pane params
 // ---------------------------------------------------------------------------
 
 export interface BrowserPaneParams {
   workspaceId: string;
   browserId: string;
+  /** Whether the pane's workspace is the one on screen. */
   wsActive?: boolean;
   initialUrl?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Browser panel component – renders an address bar and a placeholder div.
-// A native Electron BrowserView is positioned over the placeholder area.
-// Each workspace gets its own persistent webview (hidden/shown on switch).
-// ---------------------------------------------------------------------------
-
-interface BrowserParams {
-  workspaceId: string;
-  wsActive?: boolean;
+interface RegisterGuestResult {
+  ok: boolean;
+  adoptUrl: string | null;
 }
 
-export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParams>) {
-  const workspaceId = params.workspaceId;
-
-  const [currentUrl, setCurrentUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
-  const [inputUrl, setInputUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
-  const [loading, setLoading] = useState(false);
-  const [created, setCreated] = useState(false);
-  const createdRef = useRef(false);
-  const placeholderRef = useRef<HTMLDivElement>(null);
-  const creatingRef = useRef(false);
-  const pendingNavRef = useRef<string | null>(null);
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
-  const currentUrlRef = useRef(currentUrl);
-  currentUrlRef.current = currentUrl;
-  // Freeze on overlay — captures a snapshot + hides the native view
-  // while any popover / dialog / dropdown is open. `snapshot` is
-  // the JPEG data URL to paint into the placeholder. Shared with
-  // `BrowserPaneComponent` via the `useBrowserPaneFreeze` hook.
-  const ipcKeyRef = useRef({ workspaceId });
-  ipcKeyRef.current = { workspaceId };
-  const { snapshot } = useBrowserPaneFreeze({
-    created,
-    visible: api.isActive && params.wsActive !== false,
-    ipcKeyRef,
-  });
-  // TLS interstitial + generic "site can't be reached" pages are
-  // painted INSIDE the WebContentsView via a data: URI (issue #444).
-  // The renderer just needs the set of hosts the user has overridden
-  // a cert error for, so the address bar can paint a "Not Secure"
-  // badge while the user is on those origins.
-  const { isOverriddenHost } = useOverriddenHosts();
-  // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
-  // — it's destructured back out below and read inside the
-  // `browser-url-changed` listener to skip clobbering an in-progress
-  // address-bar edit.
-
-  // ------- restore persisted URL when workspaceId becomes available -------
-  // useState initializers run on first mount when workspaceId may still be
-  // undefined (fromJSON restores panels with empty params). This effect
-  // syncs state from localStorage once the real workspaceId is injected.
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    const saved = loadUrl(workspaceId);
-    if (saved) {
-      setCurrentUrl(saved);
-      setInputUrl(saved);
-    }
-  }, [workspaceId]);
-
-  // ------- helpers -------
-
-  const getBounds = useCallback(() => {
-    const el = placeholderRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    // Inset by 1px on the left and right so the dockview group separators
-    // (1px lines between this pane and its horizontal neighbors) stay
-    // visible. The native WebContentsView is an OS-level layer that floats
-    // above the React DOM, so without these insets it draws on top of the
-    // separators on either side.
-    return {
-      x: rect.left + 1,
-      y: rect.top,
-      width: Math.max(0, rect.width - 2),
-      height: rect.height,
-    };
-  }, []);
-
-  const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
-    if (!isDesktop) return;
-    return desktopInvoke(cmd, args);
-  }, []);
-
-  // ------- create or show webview once placeholder has real dimensions -------
-  //
-  // The panel may be mounted while its tab is inactive (dockview renders
-  // hidden tabs with display:none).  A simple setTimeout would see 0×0
-  // bounds and give up.  Instead we use a ResizeObserver that fires as
-  // soon as the placeholder gets a non-zero size (i.e. the tab is shown).
-
-  useEffect(() => {
-    if (!isDesktop || created || creatingRef.current) return;
-    const el = placeholderRef.current;
-    if (!el) return;
-
-    let cancelled = false;
-
-    const tryCreate = async () => {
-      if (cancelled || createdRef.current || creatingRef.current) return;
-      const bounds = getBounds();
-      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
-
-      observer.disconnect();
-      creatingRef.current = true;
-      try {
-        await invoke("browser_create", {
-          workspaceId,
-          ...bounds,
-          url: loadUrl(workspaceId) || currentUrlRef.current || BLANK_URL,
-        });
-        createdRef.current = true;
-        setCreated(true);
-        // If a navigation was requested while we were creating, flush it now
-        const pending = pendingNavRef.current;
-        if (pending) {
-          pendingNavRef.current = null;
-          await invoke("browser_navigate", {
-            workspaceId: workspaceIdRef.current,
-            url: pending,
-          });
-        }
-      } catch (e) {
-        console.error("Failed to create browser webview:", e);
-      } finally {
-        creatingRef.current = false;
-      }
-    };
-
-    // Watch for the placeholder gaining real dimensions
-    const observer = new ResizeObserver(() => {
-      tryCreate();
-    });
-    observer.observe(el);
-
-    // Also try after a short tick in case the tab is already visible
-    const timer = setTimeout(tryCreate, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [created, getBounds, invoke, workspaceId]);
-
-  // ------- listen for URL changes from the Rust side -------
-  // Refs (`workspaceIdRef`, `addressInputFocusedRef`) are intentionally
-  // read via `.current` inside the listener — adding `.current` to the
-  // deps would force the listener to re-bind on every focus/blur or
-  // workspace switch.
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlistenUrl: (() => void) | undefined;
-    let unlistenTitle: (() => void) | undefined;
-
-    (async () => {
-      unlistenUrl = await desktopListen<{
-        url: string;
-        workspace_id: string;
-        loading: boolean;
-      }>("browser-url-changed", (event) => {
-        // Only update if the event is for our workspace
-        if (event.payload.workspace_id !== workspaceIdRef.current) return;
-        const url = event.payload.url;
-        setLoading(event.payload.loading);
-        // Don't sync about:blank to the address bar or localStorage
-        if (url === BLANK_URL) return;
-        setCurrentUrl(url);
-        // Preserve in-progress edits: while the user is typing in the
-        // address bar, the canonical URL still updates behind the scenes
-        // but the visible input value is left alone. See the matching
-        // logic in `BrowserPaneComponent` below.
-        if (!addressInputFocusedRef.current) {
-          setInputUrl(url);
-        }
-        saveUrl(workspaceIdRef.current, url);
-
-        // Record committed navigations into the per-workspace history.
-        // `loading=false` is the "load finished" signal; `did-start-
-        // navigation` (`loading=true`) intentionally does NOT record
-        // because the URL there can be wrong for redirect chains —
-        // we'd insert an intermediate hop and never resolve to the
-        // real destination's title. Server-side filtering rejects
-        // about:blank / chrome-extension / devtools / file URLs.
-        if (!event.payload.loading) {
-          let favicon: string | undefined;
-          try {
-            favicon = `${new URL(url).origin}/favicon.ico`;
-          } catch {
-            // not a valid URL — leave favicon undefined
-          }
-          trpc.history.record
-            .mutate({ workspaceId: workspaceIdRef.current, url, faviconUrl: favicon })
-            .catch(() => {});
-        }
-      });
-
-      // Backfill the title onto the most recent history row for this
-      // URL as soon as Chromium resolves it (typically 100-2000ms
-      // after the URL commit).
-      unlistenTitle = await desktopListen<{
-        workspace_id: string;
-        title: string;
-      }>("browser-title-changed", (event) => {
-        if (event.payload.workspace_id !== workspaceIdRef.current) return;
-        const url = currentUrlRef.current;
-        if (!url || url === BLANK_URL) return;
-        trpc.history.updateMeta
-          .mutate({
-            workspaceId: workspaceIdRef.current,
-            url,
-            title: event.payload.title,
-          })
-          .catch(() => {});
-      });
-    })();
-
-    return () => {
-      unlistenUrl?.();
-      unlistenTitle?.();
-    };
-  }, []);
-
-  // ------- visibility tracking (hide/show when tab switches) -------
-
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-
-    const handleVisibility = async (visible: boolean) => {
-      if (visible) {
-        await invoke("browser_show", { workspaceId });
-        const bounds = getBounds();
-        if (bounds && bounds.width > 0 && bounds.height > 0) {
-          await invoke("browser_set_bounds", { workspaceId, ...bounds });
-        }
-      } else {
-        await invoke("browser_hide", { workspaceId });
-      }
-    };
-
-    const d1 = api.onDidActiveChange((e) => {
-      handleVisibility(e.isActive);
-    });
-    const d2 = api.onDidVisibilityChange((e) => {
-      if (!e.isVisible) {
-        handleVisibility(false);
-      } else if (api.isActive) {
-        handleVisibility(true);
-      }
-    });
-
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
-  }, [api, created, getBounds, invoke, workspaceId]);
-
-  // ------- workspace-level visibility -------
-  // The native webview is an OS-level layer that floats on top of the DOM.
-  // When the workspace is hidden (wsActive=false) we must explicitly hide
-  // the webview — CSS display:none on the React tree has no effect on it.
-
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    const wsActive = params.wsActive !== false;
-
-    if (!wsActive) {
-      invoke("browser_hide", { workspaceId }).catch(() => {});
-    } else if (api.isActive) {
-      // Only re-show if the browser tab is the active tab in its group
-      invoke("browser_show", { workspaceId }).catch(() => {});
-      const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
-      }
-    }
-  }, [params.wsActive, api, created, getBounds, invoke, workspaceId]);
-
-  // ------- keep webview bounds in sync on resize -------
-
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    const el = placeholderRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(() => {
-      const bounds = getBounds();
-      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
-      invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
-    });
-    observer.observe(el);
-
-    return () => observer.disconnect();
-  }, [created, getBounds, invoke, workspaceId]);
-
-  // ------- destroy on unmount (workspace evicted from frontend cache) -------
-  // Workspace *switches* are handled by the wsActive effect (hide/show).
-  // Unmount only happens when the workspace view is fully evicted, so we
-  // destroy the native webview to free memory.
-
-  useEffect(() => {
-    return () => {
-      if (isDesktop) {
-        const wsId = workspaceIdRef.current;
-        desktopInvoke("browser_destroy", { workspaceId: wsId }).catch(() => {});
-      }
-    };
-  }, []);
-
-  // ------- navigation handlers -------
-
-  const handleNavigate = useCallback(
-    async (rawUrl: string) => {
-      let normalized = rawUrl.trim();
-
-      // Empty input — load a blank page and clear the address bar.
-      // The `browser-url-changed` listener filters out `about:blank`,
-      // so the input stays visibly empty rather than showing
-      // "about:blank" after the navigation lands.
-      if (!normalized) {
-        setCurrentUrl("");
-        setInputUrl("");
-        setLoading(false);
-        saveUrl(workspaceId, "");
-        if (createdRef.current) {
-          try {
-            await invoke("browser_navigate", { workspaceId, url: BLANK_URL });
-          } catch (e) {
-            console.error("browser_navigate failed:", e);
-          }
-        } else {
-          pendingNavRef.current = BLANK_URL;
-        }
-        return;
-      }
-
-      if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-        if (normalized.includes(".") && !normalized.includes(" ")) {
-          normalized = `https://${normalized}`;
-        } else {
-          normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
-        }
-      }
-
-      setCurrentUrl(normalized);
-      setInputUrl(normalized);
-      setLoading(true);
-      saveUrl(workspaceId, normalized);
-
-      if (createdRef.current) {
-        try {
-          await invoke("browser_navigate", { workspaceId, url: normalized });
-        } catch (e) {
-          console.error("browser_navigate failed:", e);
-        }
-      } else {
-        // Webview still being created — queue the navigation
-        pendingNavRef.current = normalized;
-      }
-    },
-    [invoke, workspaceId],
+/**
+ * Create a `<webview>` for a tab in its browser profile's partition. The main
+ * process admits it only in the default browser partition or a profile's,
+ * with an http(s) or about:blank `src`, and overwrites
+ * its security preferences (see `apps/desktop/src/main/webview-security.ts`),
+ * so nothing here has to be trusted. `allowpopups` lets page popups reach
+ * the main process, which always denies the OS window and opens a Band tab
+ * instead.
+ */
+function createWebview(src: string, partition: string): BrowserWebview {
+  const webview = document.createElement("webview") as BrowserWebview;
+  webview.setAttribute("partition", partition);
+  webview.setAttribute("allowpopups", "");
+  // Opaque page canvas: a page without its own background paints white, as
+  // in Chrome, instead of showing Band's theme through. Fullscreen requests
+  // (a video's fullscreen button) fill the pane rather than resize the
+  // window. Same guest preferences as orca's webviews.
+  webview.setAttribute(
+    "webpreferences",
+    "transparent=false,disableHtmlFullscreenWindowResize=true",
   );
+  webview.setAttribute("src", src);
+  webview.className = "absolute inset-0 flex border-0 bg-background";
+  return webview;
+}
 
-  const handleBack = useCallback(async () => {
-    try {
-      await invoke("browser_go_back", { workspaceId });
-    } catch (e) {
-      console.error("browser_go_back failed:", e);
-    }
-  }, [invoke, workspaceId]);
+function isLoadableUrl(url: string): boolean {
+  return url === BLANK_URL || /^https?:\/\//i.test(url);
+}
 
-  const handleForward = useCallback(async () => {
-    try {
-      await invoke("browser_go_forward", { workspaceId });
-    } catch (e) {
-      console.error("browser_go_forward failed:", e);
-    }
-  }, [invoke, workspaceId]);
-
-  const handleReload = useCallback(async () => {
-    try {
-      setLoading(true);
-      await invoke("browser_reload", { workspaceId });
-    } catch (e) {
-      console.error("browser_reload failed:", e);
-    }
-  }, [invoke, workspaceId]);
-
-  const handleStop = useCallback(async () => {
-    try {
-      // Stop loading by evaluating window.stop() in the webview
-      await invoke("browser_eval", { workspaceId, js: "window.stop()" });
-      setLoading(false);
-    } catch {
-      setLoading(false);
-    }
-  }, [invoke, workspaceId]);
-
-  // ------- pane chrome controls (find bar, DevTools, address-bar UX) -------
-  const {
-    find,
-    addressInputFocusedRef,
-    handleAddressFocus,
-    handleAddressBlur,
-    handleAddressKeyDown,
-    handlePaneKeyDown,
-    handleToggleDevTools,
-    autocomplete,
-    paneDataAttrs,
-  } = useBrowserPaneControls({
-    key: workspaceId,
-    keyName: "workspaceId",
-    workspaceId,
-    currentUrlRef,
-    setInputUrl,
-    inputUrl,
-    onNavigate: handleNavigate,
-  });
-
-  // Don't render until workspaceId is injected — during layout sync fromJSON
-  // recreates panels with empty params before injectParams runs a tick later.
-  if (!workspaceId) return null;
-
-  // ------- non-desktop fallback -------
-
-  if (!isDesktop) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        Browser panel is only available in the desktop app
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="flex h-full w-full flex-col"
-      onKeyDown={handlePaneKeyDown}
-      // Cmd+R / Cmd+= routing: the desktop menu's renderer-global
-      // handlers walk up from `document.activeElement` looking for
-      // these data attrs to decide whether to act on this tab or fall
-      // through to the app. Sourced from `useBrowserPaneControls` so
-      // both panel variants stay in sync.
-      {...paneDataAttrs}
-    >
-      {/* Keyframes for the loading bar (injected once, deduped by browser) */}
-      <style>{`@keyframes browser-bar-slide {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(200%); }
-  100% { transform: translateX(-100%); }
-}`}</style>
-      {/* Address bar */}
-      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          title="Back"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={handleForward}
-          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          title="Forward"
-        >
-          <ArrowRight className="size-4" />
-        </button>
-        {loading ? (
-          <button
-            type="button"
-            onClick={handleStop}
-            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="Stop"
-          >
-            <X className="size-4" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleReload}
-            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="Reload"
-          >
-            <RotateCw className="size-4" />
-          </button>
-        )}
-        {isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
-        <input
-          type="text"
-          value={inputUrl}
-          onChange={(e) => setInputUrl(e.target.value)}
-          onKeyDown={handleAddressKeyDown}
-          onFocus={handleAddressFocus}
-          onBlur={handleAddressBlur}
-          className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
-          placeholder="Enter URL or search..."
-          // Stable hook for `DockviewBrowserContainer` to focus the
-          // address bar via `[data-band-address-input]` — more durable
-          // than `input[type='text']`, which would also match the
-          // find-bar's search input.
-          data-band-address-input=""
-        />
-        <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
-        <button
-          type="button"
-          onClick={handleToggleDevTools}
-          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          title="Toggle DevTools"
-        >
-          <Wrench className="size-4" />
-        </button>
-        {/* Loading progress bar — indeterminate sliding indicator */}
-        {loading && (
-          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
-            <div
-              className="h-full w-2/5 rounded-full bg-blue-500"
-              style={{
-                animation: "browser-bar-slide 1.4s ease-in-out infinite",
-              }}
-            />
-          </div>
-        )}
-        {/* History autocomplete — absolutely positioned under the
-            address-bar row (which is `relative`). Opening it
-            registers a freeze hold via `useFreezeWhile` in
-            `useBrowserPaneControls`, so the WebContentsView is
-            replaced with a snapshot raster underneath and this
-            dropdown sits cleanly on top. Mirrors Chrome's omnibox. */}
-        <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
-      </div>
-
-      {/* Find-in-page bar (Cmd+F / Ctrl+F) — slots between the address bar
-       *  and the webview placeholder so it stacks naturally above the
-       *  native WebContentsView. */}
-      <BrowserFindBar find={find} />
-
-      {/* Placeholder – the native webview is positioned over this area.
-       *  Error pages (cert / "site can't be reached") are painted
-       *  INSIDE the WebContentsView via a data: URI — see
-       *  apps/desktop/src/browser/error-html.ts. The only error-
-       *  related UI the renderer still owns is the "Not Secure"
-       *  badge in the address bar above. */}
-      <div ref={placeholderRef} className="relative min-h-0 flex-1">
-        {snapshot ? (
-          // Frozen raster shown while any overlay is open. See
-          // `lib/browser-pane-freeze.ts`.
-          //
-          // `object-contain object-top` (not `object-cover`):
-          //   - When the tab has docked DevTools, `capturePage`
-          //     returns just the *page view*'s pixels — DevTools is a
-          //     sibling `WebContentsView` and isn't part of the
-          //     capture. The placeholder div, however, spans the
-          //     whole tab area (page + DevTools). With `object-cover`
-          //     the image would stretch to fill both, distorting the
-          //     page visibly. With `object-contain object-top` the
-          //     image scales preserving aspect ratio and pins to the
-          //     top edge, so the page sits exactly where it was and
-          //     the DevTools strip below stays empty (DevTools is
-          //     hidden by the same `browser_hide` call). Without
-          //     DevTools, aspects match the placeholder and `contain`
-          //     gives the same result as `cover`.
-          //   - Followup if it becomes annoying: also capture the
-          //     DevTools view and stack a second `<img>` below, so
-          //     the docked panel doesn't vanish either.
-          <img
-            src={snapshot}
-            alt=""
-            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
-            draggable={false}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
+/** Attach-time `src`: what `will-attach-webview` admits, else a blank page. */
+function initialSrc(url: string): string {
+  return isLoadableUrl(url) ? url : BLANK_URL;
 }
 
 // ---------------------------------------------------------------------------
-// BrowserPaneComponent — multi-tab variant keyed by browserId.
-// Used by DockviewBrowserContainer to render individual browser tabs.
+// BrowserPaneComponent — one browser tab (desktop only).
+//
+// The page is an Electron `<webview>` inside this pane's DOM, so Band's
+// menus, dialogs, tooltips and the find widget stack over it with plain CSS.
+//
+// Pitfalls this component is built around (same as orca's webview panes):
+//
+//   - Removing a `<webview>` from the DOM, or moving it to another parent,
+//     destroys its guest. The leaf therefore uses dockview's
+//     `renderer: "always"` so switching tabs toggles `display` instead of
+//     detaching the panel, and the element is created imperatively and never
+//     re-parented by React. A guest that is replaced anyway (a dockview group
+//     merge re-parents panels) re-registers with the main process and
+//     reloads the tab's last URL.
+//   - Chromium stops painting a guest inside a `display: none`,
+//     `visibility: hidden` or `content-visibility: hidden` subtree. That is
+//     fine for the user, but the CDP screencast of a hidden tab needs frames.
+//     With the CDP experiment on, a hidden pane marks itself
+//     `data-band-browser-paint-retained`, and `globals.css` keeps just its
+//     page painting at opacity 0 while its ancestors stay hidden.
+//   - A click inside the page never reaches this document, so Radix layers
+//     can't see an outside click; `lib/browser-webview-dom-bridge.ts`
+//     synthesises one when focus moves into a webview.
+//   - Keys typed inside the page never reach this document either. The main
+//     process forwards the pane shortcuts and `WorkspaceCenterDockview`
+//     re-dispatches them on the webview.
 // ---------------------------------------------------------------------------
 
 export function BrowserPaneComponent({
@@ -672,15 +141,11 @@ export function BrowserPaneComponent({
   api: IDockviewPanelProps<BrowserPaneParams>["api"];
 }) {
   const { browserId, initialUrl, workspaceId: workspaceIdParam } = params;
+  const wsActive = params.wsActive !== false;
 
   const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
-  const [created, setCreated] = useState(false);
-  const createdRef = useRef(false);
-  const placeholderRef = useRef<HTMLDivElement>(null);
-  const creatingRef = useRef(false);
-  const pendingNavRef = useRef<string | null>(null);
   const browserIdRef = useRef(browserId);
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
@@ -695,8 +160,9 @@ export function BrowserPaneComponent({
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
   // Browser profile (cookie jar) of this tab, from the server's tab record.
-  // `null` is the Default profile. The native view is only created once it
-  // is known, because a view can't change its session after creation.
+  // `null` is the Default profile. A guest's partition is fixed when it is
+  // created, so the page is only created once the profile is known, and is
+  // recreated when it changes.
   const [profileId, setProfileId] = useState<string | null>(null);
   const [profileResolved, setProfileResolved] = useState(false);
   const { profiles, isLoaded: profilesLoaded } = useBrowserProfiles();
@@ -710,48 +176,199 @@ export function BrowserPaneComponent({
   const profileReady = profileResolved && (profileId === null || profilesLoaded);
   const profileIdRef = useRef(effectiveProfileId);
   profileIdRef.current = effectiveProfileId;
-  // Profile the live native view was created with.
-  const viewProfileRef = useRef<string | null>(null);
-  // Freeze on overlay — see `useBrowserPaneFreeze` hook.
-  const ipcKeyRef = useRef({ browserId });
-  ipcKeyRef.current = { browserId };
-  const { snapshot } = useBrowserPaneFreeze({
-    created,
-    visible: api.isVisible && params.wsActive !== false,
-    ipcKeyRef,
-  });
-  // Error pages live INSIDE the WebContentsView (issue #444 +
-  // screencast follow-up); the renderer only tracks the host-override
-  // set for the "Not Secure" badge. Same hook + behaviour as
-  // `BrowserPanelComponent`.
   const { isOverriddenHost } = useOverriddenHosts();
-  // `addressInputFocusedRef` is destructured from
-  // `useBrowserPaneControls` below and read inside the
-  // `browser-url-changed` listener to skip clobbering an in-progress
-  // address-bar edit.
+  const { settings } = useSettingsQuery();
+  const cdpEnabled = (settings as { webBrowserCdpEnabled?: boolean }).webBrowserCdpEnabled ?? false;
 
-  // ------- helpers -------
+  // On screen = selected tab in its group AND the workspace is shown.
+  const [tabVisible, setTabVisible] = useState(api.isVisible);
+  useEffect(() => {
+    const d = api.onDidVisibilityChange((e) => setTabVisible(e.isVisible));
+    return () => d.dispose();
+  }, [api]);
+  const visible = tabVisible && wsActive;
 
-  const getBounds = useCallback(() => {
-    const el = placeholderRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    // Inset by 1px on the left and right so the dockview group separators
-    // (1px lines between this pane and its horizontal neighbors) stay
-    // visible. The native WebContentsView is an OS-level layer that floats
-    // above the React DOM, so without these insets it draws on top of the
-    // separators on either side.
-    return {
-      x: rect.left + 1,
-      y: rect.top,
-      width: Math.max(0, rect.width - 2),
-      height: rect.height,
-    };
+  // ------- guest lifecycle -------
+  // `wantGuest` turns on the first time the pane is on screen (a restored
+  // workspace with many tabs doesn't spin up every page at once) and off
+  // when the hidden-workspace budget evicts the page. The page is rebuilt
+  // at the last URL the next time the pane is shown.
+  const [wantGuest, setWantGuest] = useState(false);
+  useEffect(() => {
+    if (isDesktop && visible) setWantGuest(true);
+  }, [visible]);
+
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [webview, setWebview] = useState<BrowserWebview | null>(null);
+  const webviewRef = useRef<BrowserWebview | null>(null);
+  webviewRef.current = webview;
+  // Navigations requested before the guest can take `loadURL`.
+  const readyRef = useRef(false);
+  const pendingNavRef = useRef<string | null>(null);
+
+  const navigateWebview = useCallback((url: string) => {
+    const target = webviewRef.current;
+    if (!target) return;
+    // The main process only vets a guest's first `src` and the page's own
+    // navigations; a URL from the server record or the address bar could be
+    // anything (`file:`, `javascript:`), so the pane only loads web pages.
+    if (!isLoadableUrl(url)) {
+      console.warn("[BrowserPane] refusing to load", url);
+      return;
+    }
+    if (!readyRef.current) {
+      pendingNavRef.current = url;
+      return;
+    }
+    // loadURL rejects on aborted or failed loads; failures are reported
+    // through the guest's own events and error page, not here.
+    target.loadURL(url).catch(() => {});
   }, []);
 
-  const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!isDesktop || !wantGuest || !profileReady || !host) return;
+    const startUrl = currentUrlRef.current || BLANK_URL;
+    const wv = createWebview(initialSrc(startUrl), partitionForProfile(effectiveProfileId));
+    readyRef.current = false;
+    pendingNavRef.current = null;
+
+    let registeredId: number | null = null;
+    const register = () => {
+      // Tie the guest to this tab so the main process can key its events and
+      // resolve it for CDP and DevTools. Done on `dom-ready`, by which time
+      // the main process has certainly run its `did-attach-webview` policy
+      // for the guest (the element's own `did-attach` can race it). A guest
+      // replaced by a re-parent comes back with a new id and re-registers.
+      const webContentsId = wv.getWebContentsId();
+      if (webContentsId === registeredId) return;
+      registeredId = webContentsId;
+      desktopInvoke<RegisterGuestResult>("browser_register_guest", {
+        browserId: browserIdRef.current,
+        webContentsId,
+      })
+        .then((result) => {
+          if (!result.ok) {
+            // Refused (should not happen for our own guest). Let the next
+            // `dom-ready` try again rather than leave the tab unregistered.
+            registeredId = null;
+            console.error("[BrowserPane] browser_register_guest refused");
+            return;
+          }
+          // An agent may have been driving this tab offscreen (CDP bridge)
+          // before the pane mounted; continue from where it left off.
+          if (result.adoptUrl && result.adoptUrl !== currentUrlRef.current) {
+            navigateWebview(result.adoptUrl);
+          }
+        })
+        .catch((err) => {
+          registeredId = null;
+          console.error("[BrowserPane] browser_register_guest failed", err);
+        });
+    };
+    const onDomReady = () => {
+      register();
+      if (readyRef.current) return;
+      readyRef.current = true;
+      const pending = pendingNavRef.current;
+      pendingNavRef.current = null;
+      if (pending) wv.loadURL(pending).catch(() => {});
+    };
+    wv.addEventListener("dom-ready", onDomReady);
+    host.appendChild(wv);
+    const unregister = registerBrowserWebview(browserIdRef.current, wv);
+    setWebview(wv);
+
+    return () => {
+      unregister();
+      wv.removeEventListener("dom-ready", onDomReady);
+      // Removing the element destroys the guest; the main process drops its
+      // registration and tells the CDP bridge the target is gone.
+      wv.remove();
+      readyRef.current = false;
+      setWebview(null);
+    };
+  }, [wantGuest, profileReady, effectiveProfileId, navigateWebview]);
+
+  const handleProfileSelect = useCallback(
+    (next: string | null) => {
+      if (next === profileIdRef.current) return;
+      trpc.browsers.setProfile
+        .mutate({ browserId, profileId: next })
+        .then(() => {
+          // Recreates the page in the new profile at the current URL.
+          setProfileId(next);
+          // The project's default changed too; Settings shows it.
+          void invalidateProfiles();
+        })
+        .catch((e) => console.error("Failed to switch browser profile:", e));
+    },
+    [browserId, invalidateProfiles],
+  );
+
+  const handleProfileImported = useCallback(
+    (next: string) => {
+      // Refetch first so the new id is in `profiles` before the tab uses it.
+      void invalidateProfiles().then(() => handleProfileSelect(next));
+    },
+    [invalidateProfiles, handleProfileSelect],
+  );
+
+  // ------- hidden-workspace guest budget -------
+  // While the page exists, offer it to the budget in
+  // `browser-guest-retention.ts`. Evicting removes the webview; the effect
+  // above rebuilds it at the last URL when the workspace is shown again.
+  useEffect(() => {
+    if (!webview || !workspaceId) return;
+    const unregister = registerBrowserGuest(workspaceId, browserId, () => {
+      // Leave the budget now rather than on the next commit, so an evicted
+      // workspace stops counting as holding a live guest straight away.
+      unregister();
+      setWantGuest(false);
+    });
+    return unregister;
+  }, [webview, workspaceId, browserId]);
+
+  // ------- pane shortcuts typed inside the page -------
+  // The page consumes its own keydowns. The main process swallows the pane
+  // shortcuts (find, new tab, close, split, cycle) and forwards them; replay
+  // each one as a `keydown` on the webview, where it bubbles through this
+  // pane's `onKeyDown` and reaches the window listeners of
+  // `WorkspaceCenterDockview` exactly like a key typed in Band's own UI.
+  useEffect(() => {
     if (!isDesktop) return;
-    return desktopInvoke(cmd, args);
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void desktopListen<{
+      browser_id: string;
+      key: string;
+      code: string;
+      shift: boolean;
+      control: boolean;
+      meta: boolean;
+    }>("browser-guest-shortcut", (event) => {
+      const p = event.payload;
+      if (p.browser_id !== browserIdRef.current) return;
+      webviewRef.current?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: p.key,
+          code: p.code,
+          shiftKey: p.shift,
+          ctrlKey: p.control,
+          metaKey: p.meta,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+        }),
+      );
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // ------- fetch the tab record from the server -------
@@ -790,159 +407,20 @@ export function BrowserPaneComponent({
         setWorkspaceId(ws);
       }
       const url = browser.url;
-      if (!url || url === "" || url === BLANK_URL) return;
+      if (!url || url === BLANK_URL) return;
       setCurrentUrl(url);
       setInputUrl(url);
-      if (createdRef.current) {
-        // Webview exists — navigate it directly.
-        invoke("browser_navigate", { browserId, url }).catch(() => {});
-      } else {
-        // Webview not yet created — queue it so tryCreate flushes after
-        // browser_create completes (same mechanism as handleNavigate).
-        pendingNavRef.current = url;
-      }
+      // Before the guest exists the create effect picks the URL up from
+      // `currentUrlRef`; afterwards navigate it.
+      navigateWebview(url);
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [browserId, initialUrl, invoke]);
+  }, [browserId, initialUrl, navigateWebview]);
 
-  // ------- create or show webview once placeholder has real dimensions -------
-  // Only while the workspace is shown: the view may have been destroyed while
-  // hidden (the hidden-workspace guest budget, or the desktop's own view cap),
-  // and it is rebuilt from `currentUrlRef` when the workspace is next shown,
-  // not in the background.
-  const wsActive = params.wsActive !== false;
-  useEffect(() => {
-    if (!isDesktop || created || creatingRef.current || !wsActive || !profileReady) return;
-    const el = placeholderRef.current;
-    if (!el) return;
-
-    let cancelled = false;
-
-    const tryCreate = async () => {
-      if (cancelled || createdRef.current || creatingRef.current) return;
-      const bounds = getBounds();
-      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
-
-      observer.disconnect();
-      creatingRef.current = true;
-      try {
-        const viewProfile = profileIdRef.current;
-        await invoke("browser_create", {
-          browserId,
-          ...bounds,
-          url: currentUrlRef.current || BLANK_URL,
-          profileId: viewProfile,
-        });
-        viewProfileRef.current = viewProfile;
-        createdRef.current = true;
-        setCreated(true);
-        const pending = pendingNavRef.current;
-        if (pending) {
-          pendingNavRef.current = null;
-          await invoke("browser_navigate", {
-            browserId: browserIdRef.current,
-            url: pending,
-          });
-        }
-      } catch (e) {
-        console.error("Failed to create browser webview:", e);
-      } finally {
-        creatingRef.current = false;
-      }
-    };
-
-    const observer = new ResizeObserver(() => {
-      tryCreate();
-    });
-    observer.observe(el);
-    const timer = setTimeout(tryCreate, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [created, wsActive, profileReady, getBounds, invoke, browserId]);
-
-  // ------- profile switch -------
-  // A view's session is fixed when it is created, so when the tab's profile
-  // changes (picked in the menu, or its profile was deleted) the view is
-  // destroyed and the create effect above rebuilds it at the current URL.
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    if (viewProfileRef.current === effectiveProfileId) return;
-    createdRef.current = false;
-    setCreated(false);
-    desktopInvoke("browser_destroy", { browserId }).catch(() => {});
-  }, [created, effectiveProfileId, browserId]);
-
-  const handleProfileSelect = useCallback(
-    (next: string | null) => {
-      if (next === profileIdRef.current) return;
-      trpc.browsers.setProfile
-        .mutate({ browserId, profileId: next })
-        .then(() => {
-          setProfileId(next);
-          // The project's default changed too; Settings shows it.
-          void invalidateProfiles();
-        })
-        .catch((e) => console.error("Failed to switch browser profile:", e));
-    },
-    [browserId, invalidateProfiles],
-  );
-
-  const handleProfileImported = useCallback(
-    (next: string) => {
-      // Refetch first so the new id is in `profiles` before the tab uses it.
-      void invalidateProfiles().then(() => handleProfileSelect(next));
-    },
-    [invalidateProfiles, handleProfileSelect],
-  );
-
-  // ------- hidden-workspace guest budget -------
-  // While the native view exists, offer it to the budget in
-  // `browser-guest-retention.ts`. Evicting destroys the view; the create
-  // effect above rebuilds it at the last URL when the workspace is shown.
-  useEffect(() => {
-    if (!isDesktop || !created || !workspaceId) return;
-    const unregister = registerBrowserGuest(workspaceId, browserId, () => {
-      // Leave the budget now rather than on the next commit, so an evicted
-      // workspace stops counting as holding a live guest straight away.
-      unregister();
-      if (!createdRef.current) return;
-      createdRef.current = false;
-      setCreated(false);
-      desktopInvoke("browser_destroy", { browserId }).catch(() => {});
-    });
-    return unregister;
-  }, [created, workspaceId, browserId]);
-
-  // The desktop destroys views on its own too: `BrowserViewManager` caps live
-  // views and closes the oldest. A pane that stays mounted in a hidden
-  // workspace must notice, or it would show a blank rect on return.
-  useEffect(() => {
-    if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
-    let disposed = false;
-    (async () => {
-      const u = await desktopListen<{ browser_id: string }>("browser-view-destroyed", (event) => {
-        if (event.payload.browser_id !== browserIdRef.current) return;
-        createdRef.current = false;
-        setCreated(false);
-      });
-      if (disposed) u();
-      else unlisten = u;
-    })();
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
-
-  // ------- listen for URL / title changes from the Rust side -------
+  // ------- listen for URL / title changes from the main process -------
   // Persist URL to server (debounced) so it survives workspace switches.
   // Refs (`browserIdRef`, `currentUrlRef`, `addressInputFocusedRef`,
   // `urlPersistTimer`) are read via `.current` inside the listener —
@@ -1052,123 +530,10 @@ export function BrowserPaneComponent({
     };
   }, [api]);
 
-  // ------- visibility tracking (hide/show when tab switches) -------
-  // In dockview, `isActive` = globally focused (only one panel at a time),
-  // while `isVisible` = content area is on screen (multiple in a split).
-  // We show/hide based on *visibility*, not active focus, so split views
-  // keep both native webviews rendered simultaneously.
-  //
-  // Bounds-before-show ordering: setting bounds on a hidden view is a
-  // no-visible-effect update, so we apply the current placeholder rect
-  // *first* and then flip `setVisible(true)`. If we did it the other
-  // way around (show, then set-bounds), the chromium compositor would
-  // un-park at the view's last-known bounds — which is the source of
-  // the "renders small then expands" snap users reported when the
-  // outer Browser tab re-attached its DOM after a window resize or
-  // any other geometry change that happened while the tab was hidden.
-  // Same reasoning applies to the workspace-level effect below.
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-
-    // Log IPC failures instead of swallowing them. A failed
-    // `browser_show` / `browser_set_bounds` / `browser_hide` leaves
-    // the native WebContentsView in an indeterminate state (hidden
-    // when it should be shown, stale bounds, etc.) — surfacing the
-    // error makes the failure mode visible during debugging.
-    const logFail = (cmd: string) => (err: unknown) =>
-      console.error(`[BrowserPane] ${cmd} failed`, err);
-
-    // Fire `browser_set_bounds` and `browser_show` in submission
-    // order without awaiting between them. Both IPC handlers in the
-    // main process (`view-manager.ts::setBounds` and `::show`) are
-    // synchronous (`view.setBounds()` is sync Electron, `moveTo` +
-    // `setVisible` are sync), and Electron's `ipcRenderer.invoke`
-    // delivers messages FIFO per renderer, so the bounds update is
-    // observed by the main process before the show call.
-    //
-    // We tried wrapping these in a `.then(...)` chain to make the
-    // ordering explicit, but that introduced a worse race: on rapid
-    // tab switches (show → hide → ...) the `.then` callback could
-    // fire `browser_show` AFTER a subsequent `browser_hide` had
-    // already been queued, leaving the view visible when the user
-    // expected it hidden. The current `dispose()`-only cleanup
-    // can't abort an already-scheduled `then`. The fire-and-forget
-    // pattern below relies on the per-renderer FIFO instead.
-    const showWebview = () => {
-      const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
-      }
-      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
-    };
-
-    const hideWebview = () => {
-      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
-    };
-
-    const d = api.onDidVisibilityChange((e) => {
-      if (e.isVisible) {
-        showWebview();
-      } else {
-        hideWebview();
-      }
-    });
-
-    return () => {
-      d.dispose();
-    };
-  }, [api, created, getBounds, invoke, browserId]);
-
-  // ------- workspace-level visibility -------
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    const logFail = (cmd: string) => (err: unknown) =>
-      console.error(`[BrowserPane] ${cmd} failed`, err);
-
-    if (!wsActive) {
-      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
-    } else if (api.isVisible) {
-      // Bounds before show — same fire-and-forget pattern as the
-      // onDidVisibilityChange effect above. Relies on Electron's
-      // per-renderer FIFO IPC delivery; see the long comment there
-      // for why a `.then()` chain is worse than fire-and-forget.
-      const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
-      }
-      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
-    }
-  }, [wsActive, api, created, getBounds, invoke, browserId]);
-
-  // ------- keep webview bounds in sync on resize -------
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    const el = placeholderRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(() => {
-      const bounds = getBounds();
-      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
-      invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [created, getBounds, invoke, browserId]);
-
-  // ------- destroy on unmount -------
-  useEffect(() => {
-    return () => {
-      if (isDesktop) {
-        const bId = browserIdRef.current;
-        desktopInvoke("browser_destroy", { browserId: bId }).catch(() => {});
-      }
-    };
-  }, []);
-
   // ------- navigation handlers -------
 
   const handleNavigate = useCallback(
-    async (rawUrl: string) => {
+    (rawUrl: string) => {
       let normalized = rawUrl.trim();
 
       // Empty input — load a blank page and clear the address bar.
@@ -1178,15 +543,7 @@ export function BrowserPaneComponent({
         setCurrentUrl("");
         setInputUrl("");
         setLoading(false);
-        if (createdRef.current) {
-          try {
-            await invoke("browser_navigate", { browserId, url: BLANK_URL });
-          } catch (e) {
-            console.error("browser_navigate failed:", e);
-          }
-        } else {
-          pendingNavRef.current = BLANK_URL;
-        }
+        navigateWebview(BLANK_URL);
         return;
       }
 
@@ -1201,53 +558,39 @@ export function BrowserPaneComponent({
       setCurrentUrl(normalized);
       setInputUrl(normalized);
       setLoading(true);
-
-      if (createdRef.current) {
-        try {
-          await invoke("browser_navigate", { browserId, url: normalized });
-        } catch (e) {
-          console.error("browser_navigate failed:", e);
-        }
-      } else {
-        pendingNavRef.current = normalized;
-      }
+      navigateWebview(normalized);
     },
-    [invoke, browserId],
+    [navigateWebview],
   );
 
-  const handleBack = useCallback(async () => {
+  // The guest methods throw until it is attached and ready; the buttons are
+  // harmless no-ops before that.
+  const withReadyWebview = useCallback((fn: (wv: BrowserWebview) => void) => {
+    const target = webviewRef.current;
+    if (!target || !readyRef.current) return;
     try {
-      await invoke("browser_go_back", { browserId });
+      fn(target);
     } catch (e) {
-      console.error("browser_go_back failed:", e);
+      console.error("[BrowserPane] webview call failed:", e);
     }
-  }, [invoke, browserId]);
+  }, []);
 
-  const handleForward = useCallback(async () => {
-    try {
-      await invoke("browser_go_forward", { browserId });
-    } catch (e) {
-      console.error("browser_go_forward failed:", e);
-    }
-  }, [invoke, browserId]);
-
-  const handleReload = useCallback(async () => {
-    try {
-      setLoading(true);
-      await invoke("browser_reload", { browserId });
-    } catch (e) {
-      console.error("browser_reload failed:", e);
-    }
-  }, [invoke, browserId]);
-
-  const handleStop = useCallback(async () => {
-    try {
-      await invoke("browser_eval", { browserId, js: "window.stop()" });
-      setLoading(false);
-    } catch {
-      setLoading(false);
-    }
-  }, [invoke, browserId]);
+  const handleBack = useCallback(
+    () => withReadyWebview((wv) => wv.canGoBack() && wv.goBack()),
+    [withReadyWebview],
+  );
+  const handleForward = useCallback(
+    () => withReadyWebview((wv) => wv.canGoForward() && wv.goForward()),
+    [withReadyWebview],
+  );
+  const handleReload = useCallback(() => {
+    setLoading(true);
+    withReadyWebview((wv) => wv.reload());
+  }, [withReadyWebview]);
+  const handleStop = useCallback(() => {
+    setLoading(false);
+    withReadyWebview((wv) => wv.stop());
+  }, [withReadyWebview]);
 
   // ------- pane chrome controls (find bar, DevTools, address-bar UX) -------
   const {
@@ -1257,18 +600,66 @@ export function BrowserPaneComponent({
     handleAddressBlur,
     handleAddressKeyDown,
     handlePaneKeyDown,
+    devToolsOpen,
+    setDevToolsOpen,
     handleToggleDevTools,
     autocomplete,
     paneDataAttrs,
   } = useBrowserPaneControls({
-    key: browserId,
-    keyName: "browserId",
+    browserId,
+    webview,
     workspaceId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
     onNavigate: handleNavigate,
   });
+
+  // ------- docked DevTools -------
+  // DevTools render in a second `<webview>` under the page. Once that guest
+  // attaches, the main process points the page's DevTools at it.
+  const devToolsHostRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = devToolsHostRef.current;
+    if (!devToolsOpen || !webview || !host) return;
+    // Same partition as the page, so DevTools' own fetches (source maps)
+    // use the tab's profile.
+    const dt = createWebview(BLANK_URL, partitionForProfile(profileIdRef.current));
+    let opened = false;
+    // Wait for the host's own blank page to commit: DevTools opened before
+    // that are replaced by the host's initial `about:blank` navigation.
+    const onReady = () => {
+      dt.removeEventListener("dom-ready", onReady);
+      desktopInvoke<boolean>("browser_open_dev_tools", {
+        browserId: browserIdRef.current,
+        devToolsWebContentsId: dt.getWebContentsId(),
+      })
+        .then((ok) => {
+          opened = ok;
+          if (!ok) setDevToolsOpen(false);
+        })
+        .catch(() => setDevToolsOpen(false));
+    };
+    const onClosed = () => setDevToolsOpen(false);
+    dt.addEventListener("dom-ready", onReady);
+    webview.addEventListener("devtools-closed", onClosed);
+    host.appendChild(dt);
+    return () => {
+      dt.removeEventListener("dom-ready", onReady);
+      webview.removeEventListener("devtools-closed", onClosed);
+      if (opened) {
+        desktopInvoke("browser_close_dev_tools", { browserId: browserIdRef.current }).catch(
+          () => {},
+        );
+      }
+      dt.remove();
+    };
+  }, [devToolsOpen, webview, setDevToolsOpen]);
+
+  // A rebuilt page starts without DevTools.
+  useEffect(() => {
+    if (!webview) setDevToolsOpen(false);
+  }, [webview, setDevToolsOpen]);
 
   if (!browserId) return null;
 
@@ -1280,13 +671,17 @@ export function BrowserPaneComponent({
     );
   }
 
+  // Keep a hidden page painting for the CDP screencast; see the header.
+  const paintRetained = cdpEnabled && !visible && webview !== null;
+
   return (
-    <div className="flex h-full w-full flex-col" onKeyDown={handlePaneKeyDown} {...paneDataAttrs}>
-      <style>{`@keyframes browser-bar-slide {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(200%); }
-  100% { transform: translateX(-100%); }
-}`}</style>
+    <div
+      className="flex h-full w-full flex-col"
+      onKeyDown={handlePaneKeyDown}
+      inert={!visible}
+      {...paneDataAttrs}
+      {...(paintRetained ? { "data-band-browser-paint-retained": "" } : {})}
+    >
       <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
         <button
           type="button"
@@ -1333,10 +728,10 @@ export function BrowserPaneComponent({
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
-          // Stable hook for `DockviewBrowserContainer` to focus the
-          // address bar via `[data-band-address-input]` — more durable
-          // than `input[type='text']`, which would also match the
-          // find-bar's search input.
+          // Stable hook for `WorkspaceCenterDockview` to focus the address
+          // bar via `[data-band-address-input]` — more durable than
+          // `input[type='text']`, which would also match the find-bar's
+          // search input.
           data-band-address-input=""
         />
         <BrowserProfileMenu
@@ -1367,24 +762,26 @@ export function BrowserPaneComponent({
           </div>
         )}
         {/* History autocomplete — absolutely positioned under the
-            address-bar row (which is `relative`). See identical block
-            in `BrowserPanelComponent` for the freeze-hold rationale. */}
+            address-bar row (which is `relative`), on top of the page. */}
         <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
-      <BrowserFindBar find={find} />
-      {/* Placeholder – error pages live inside the WebContentsView via
-       *  a data: URI; see the identical block in `BrowserPanelComponent`. */}
-      <div ref={placeholderRef} className="relative min-h-0 flex-1">
-        {snapshot ? (
-          // `object-contain object-top` — see the identical block in
-          // `BrowserPanelComponent` for the DevTools-aware rationale.
-          <img
-            src={snapshot}
-            alt=""
-            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
-            draggable={false}
-          />
-        ) : null}
+      {/* Page and docked DevTools, with the find widget floating over the
+       *  page. Error pages (cert / "site can't be reached") are painted
+       *  inside the page itself via a data: URI; see
+       *  apps/desktop/src/browser/error-html.ts. `band-browser-guest-host`
+       *  undoes the app zoom so the page renders at its own zoom only; the
+       *  find widget sits outside it and keeps the app zoom. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="band-browser-guest-host flex min-h-0 flex-1 flex-col">
+          <div ref={hostRef} className="relative min-h-10 flex-1" />
+          {devToolsOpen ? (
+            <div
+              ref={devToolsHostRef}
+              className="relative min-h-40 shrink-0 basis-2/5 border-t border-border"
+            />
+          ) : null}
+        </div>
+        <BrowserFindBar find={find} />
       </div>
     </div>
   );

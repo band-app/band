@@ -80,10 +80,11 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
       // builds re-enable sandbox once we're confident the preload runs.
       sandbox: app.isPackaged,
       nodeIntegration: false,
-      // The Tauri shell sets dragDropEnabled=false on the window. The renderer
-      // implements its own drag/drop; we don't want files dropped onto the
-      // window chrome to navigate the webview.
-      webviewTag: false,
+      // Browser tabs are <webview> guests laid out in the DOM, so Band's
+      // menus, dialogs and tooltips stack over them with plain CSS. Every
+      // attach goes through `webview-security.ts`, which refuses unknown
+      // partitions and sources and strips Node and preload access.
+      webviewTag: true,
     },
   });
 
@@ -98,8 +99,8 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   // Preferences, so a stray zoom on the dashboard's origin (historically:
   // zooming a browser tab pointed at localhost:<port> back when tabs
   // shared the default session) would silently rescale the whole window
-  // on every boot, misaligning the native WebContentsView overlays.
-  // Force it back on every load; this also rewrites the persisted entry.
+  // on every boot. Force it back on every load; this also rewrites the
+  // persisted entry.
   win.webContents.on("did-finish-load", () => {
     win.webContents.setZoomLevel(0);
   });
