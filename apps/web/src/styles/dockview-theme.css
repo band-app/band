@@ -455,14 +455,18 @@
 
 /* Action cluster: top-RIGHT corner, nudged a touch in from the edge and down so
    the icons sit comfortably over the terminal's top-right rather than jammed
-   into the very corner. */
+   into the very corner. It floats over the terminal's top rows, so it paints the
+   terminal's own background to hide any output underneath the icons. */
 .dockview-terminal-split .term-pane-header__actions {
   position: absolute;
-  top: 4px;
-  right: 6px;
+  top: 2px;
+  right: 4px;
   display: flex;
   align-items: center;
   gap: 5px;
+  padding: 2px;
+  border-radius: 4px;
+  background: var(--terminal-background);
   opacity: 0;
   transition: opacity 100ms ease;
 }

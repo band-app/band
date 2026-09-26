@@ -1010,6 +1010,32 @@ export class WorkspacePage {
       .nth(index);
   }
 
+  /** The split / close icon cluster (`term-pane-actions__<id>`) that floats over
+   *  the top-right of the nth visible pane's terminal. */
+  paneActions(index: number): Locator {
+    return this.paneHeader(index).getByTestId(/^term-pane-actions__/);
+  }
+
+  /** The computed background of the nth pane's icon cluster next to the
+   *  background xterm paints for that pane's terminal (xterm 6 sets the active
+   *  theme's background inline on `.xterm-scrollable-element`; the
+   *  `.xterm-viewport` under it keeps xterm.css's fixed #000). Both come out of
+   *  `getComputedStyle`, so they compare as plain strings.
+   *
+   *  FRAGILITY: `.xterm-scrollable-element` is a class owned by xterm, which
+   *  exposes no testid hook on its own DOM. Centralised here so an xterm
+   *  upgrade that renames it flows through one place. */
+  async paneActionsBackground(index: number): Promise<{ actions: string; terminal: string }> {
+    const actions = await this.paneActions(index).evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    const terminal = await this.terminalPanes()
+      .nth(index)
+      .locator(".xterm-scrollable-element")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    return { actions, terminal };
+  }
+
   /** Drag one pane's header onto another pane to reorder — dockview moves the
    *  dragged pane next to the target. Uses a manual pointer-move sequence
    *  (dockview drives its DnD off pointer events) with intermediate steps so the
