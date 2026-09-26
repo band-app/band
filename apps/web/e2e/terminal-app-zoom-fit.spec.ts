@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { makeGitEnv } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -52,16 +53,7 @@ let workdir: string;
 
 function makeGitWorkdir(prefix: string, home: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@example.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@example.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
+  const env = makeGitEnv(home);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
   execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env });
   return dir;
