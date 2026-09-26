@@ -2,8 +2,7 @@
  * Tests for the agent → install-skills-dir dispatcher
  * (`packages/coding-agent/src/install-skills.ts`).
  *
- * Run with the package's standard `pnpm test` setup (node:test + the loader
- * that redirects optional adapter SDK imports to local mocks). We deliberately
+ * Run with the package's standard `pnpm test` setup (node:test). We deliberately
  * use a synthetic temp `home` so the assertions don't depend on the real
  * filesystem — and so the `CODEX_HOME` env override is exercised in a way
  * that doesn't pollute the developer's actual config.

@@ -1,443 +1,166 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BAND_SKILL_NAMES } from "../src/server/services/cli-skills-service";
-import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
-
-const PROJECT_ROOT = join(import.meta.dirname, "..");
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
-const DEFAULT_TOKEN = "slash-test-token";
-
 /**
- * Skills the server's `ensureSkillsInstalled` step
- * (apps/web/src/server/services/cli-skills.ts) lays down on every boot for any
- * HOME that has Claude Code in its codingAgents settings. We filter these out
- * of the slash-commands assertions so the tests remain focused on the skills
- * *they* seed.
+ * Slash commands and modes a chat offers (issue #648).
  *
- * Sourced from `BAND_SKILL_NAMES` (the canonical list in
- * `services/cli-skills.ts`) so adding a new shipped skill doesn't require
- * touching this filter too.
+ * Over ACP an agent announces its slash commands with an
+ * `available_commands_update` and its modes as a session config option.
+ * Band learns both from the boot-time probe (a scratch session per agent)
+ * and from every chat session, and hands them to the chat pane in the
+ * `session-state` event of `GET /api/chats/:id/events`:
+ *
+ *   - a chat with no session yet gets the probe's catalog (`cached`),
+ *   - a chat whose agent runs gets the live session's (`live`),
+ *   - a chat whose agent stopped gets them back from Band's log (`log`).
+ *
+ * `modes.list` (the Tasks page's new-task dialog) reads the same catalog.
+ *
+ * The coding agent is the scripted stub ACP agent, which announces the
+ * commands `echo` and `review` and the modes `default` and `plan`.
+ *
+ * (Before ACP, slash commands were Band's own `skills.list`, which read
+ * SKILL.md files from disk. That router is gone: the agent now reports
+ * its own commands, skills included.)
  */
-const AUTO_INSTALLED_SKILL_NAMES = new Set<string>(BAND_SKILL_NAMES);
 
-function withoutAutoInstalled<T extends { name: string }>(skills: T[]): T[] {
-  return skills.filter((s) => !AUTO_INSTALLED_SKILL_NAMES.has(s.name));
+import { rmSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ChatEvent, SessionState } from "../src/shared/chat-events";
+import {
+  collectEvents,
+  runTurn,
+  seedAcpHome,
+  startAcpServer,
+  TEST_TOKEN,
+  trpc,
+} from "./helpers/acp-chat";
+import type { ServerHandle } from "./helpers/server";
+
+const STUB_COMMANDS = [
+  { name: "echo", description: "Repeat the message back", input: { hint: "text to repeat" } },
+  { name: "review", description: "Review the pending changes" },
+];
+
+let servers: ServerHandle[] = [];
+/** Homes a test created itself (to restart a server on); removed after it. */
+let homes: string[] = [];
+afterEach(async () => {
+  await Promise.all(servers.map((s) => s.close()));
+  servers = [];
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
+});
+
+async function boot(home?: string): Promise<ServerHandle> {
+  const server = await startAcpServer({ home });
+  servers.push(server);
+  return server;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+let seq = 0;
+const newChatId = () => `slash-chat-${Date.now()}-${seq++}`;
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
+/** Subscribes to the chat and returns the `session-state` it opens with. */
+async function sessionState(url: string, chatId: string): Promise<SessionState> {
+  const events = await collectEvents(url, chatId, { until: (e) => e.type === "session-state" });
+  const state = events.find(
+    (e): e is Extract<ChatEvent, { type: "session-state" }> => e.type === "session-state",
+  );
+  if (!state) throw new Error("no session-state event");
+  return state.state;
 }
 
-function createTmpHome(): string {
-  const tmp = mkdtempSync(join(tmpdir(), "band-test-slash-"));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
+async function createChat(url: string): Promise<string> {
+  const chatId = newChatId();
+  await trpc(url, "chats.create", { workspaceId: "testproject-main", id: chatId });
+  return chatId;
 }
 
-function createDefaultState(tmpHome: string) {
-  const repoDir = join(tmpHome, "repo");
-  mkdirSync(repoDir, { recursive: true });
-  return {
-    projects: [
-      {
-        name: "testproject",
-        path: repoDir,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: repoDir }],
-      },
-    ],
-  };
-}
+describe("slash commands in the chat's session-state", () => {
+  it("a chat with no session offers the commands the boot probe learned", async () => {
+    const server = await boot();
+    const chatId = await createChat(server.url);
 
-function defaultSettings() {
-  return {
-    tokenSecret: DEFAULT_TOKEN,
-    codingAgents: [
-      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-    ],
-  };
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-/**
- * Seed skill directories in the temp HOME's ~/.claude/skills/ folder.
- */
-function seedSkills(tmpHome: string, skills: Array<{ dirName: string; skillMd: string }>): void {
-  const skillsDir = join(tmpHome, ".claude", "skills");
-  mkdirSync(skillsDir, { recursive: true });
-  for (const skill of skills) {
-    const skillDir = join(skillsDir, skill.dirName);
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), skill.skillMd);
-  }
-}
-
-/**
- * Seed project-level skill directories inside a workspace's .claude/skills/ folder.
- */
-function seedProjectSkills(
-  repoDir: string,
-  skills: Array<{ dirName: string; skillMd: string }>,
-): void {
-  const skillsDir = join(repoDir, ".claude", "skills");
-  mkdirSync(skillsDir, { recursive: true });
-  for (const skill of skills) {
-    const skillDir = join(skillsDir, skill.dirName);
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), skill.skillMd);
-  }
-}
-
-async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        FAKE_AGENT_SCENARIO: "",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// tRPC HTTP helpers
-// ---------------------------------------------------------------------------
-
-const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
-
-async function trpcQuery(
-  serverUrl: string,
-  procedure: string,
-  input?: unknown,
-  opts?: { headers?: Record<string, string> },
-) {
-  const url =
-    input !== undefined
-      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
-      : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: { ...defaultHeaders, ...opts?.headers } });
-}
-
-async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
-  return body.result.data;
-}
-
-// ---------------------------------------------------------------------------
-// skills.list — with seeded global skills
-// ---------------------------------------------------------------------------
-
-describe("skills.list — with seeded global skills", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-
-    seedSkills(tmpHome, [
-      {
-        dirName: "commit",
-        skillMd: [
-          "---",
-          "name: commit",
-          "description: Create a git commit with a message.",
-          "argument-hint: -m <message>",
-          "---",
-          "",
-          "# Commit Skill",
-          "",
-          "Creates a git commit.",
-        ].join("\n"),
-      },
-      {
-        dirName: "review-pr",
-        skillMd: [
-          "---",
-          "name: review-pr",
-          "description: Review a GitHub pull request.",
-          "argument-hint: <pr-url>",
-          "---",
-          "",
-          "# Review PR Skill",
-        ].join("\n"),
-      },
-      {
-        dirName: "no-description",
-        skillMd: ["---", "name: no-description", "---", "", "# No Description"].join("\n"),
-      },
-    ]);
-
-    server = await startServer({ tmpHome });
+    // The probe runs in the background after boot; poll until it lands.
+    await expect
+      .poll(async () => (await sessionState(server.url, chatId)).commands, { timeout: 15_000 })
+      .toEqual(STUB_COMMANDS);
+    const state = await sessionState(server.url, chatId);
+    expect(state.source).toBe("cached");
   });
 
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+  it("a chat whose agent runs offers the live session's commands", async () => {
+    const server = await boot();
+    const chatId = newChatId();
+    const events = await runTurn(server.url, chatId, "hello");
+
+    // The agent announced its commands on the session, and Band logged it.
+    const announced = events.find(
+      (e) => e.type === "update" && e.update.sessionUpdate === "available_commands_update",
+    );
+    expect(announced).toMatchObject({
+      update: { sessionUpdate: "available_commands_update", availableCommands: STUB_COMMANDS },
+    });
+
+    const state = await sessionState(server.url, chatId);
+    expect(state.source).toBe("live");
+    expect(state.commands).toEqual(STUB_COMMANDS);
   });
 
-  it("returns parsed skills from SKILL.md files", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "testproject-main",
-    });
-    expect(res.status).toBe(200);
+  it("after a restart, the chat's commands come back from Band's log", async () => {
+    const home = seedAcpHome();
+    homes.push(home);
+    const first = await boot(home);
+    const chatId = newChatId();
+    await runTurn(first.url, chatId, "hello");
+    await first.close();
+    servers = servers.filter((s) => s !== first);
 
-    const data = await trpcData<{
-      skills: Array<{ name: string; description: string; argumentHint?: string }>;
-    }>(res);
-
-    expect(data.skills).toBeInstanceOf(Array);
-    const seeded = withoutAutoInstalled(data.skills);
-    expect(seeded.length).toBe(2); // no-description skill is excluded
-
-    const commit = seeded.find((s) => s.name === "commit");
-    expect(commit).toBeDefined();
-    expect(commit!.description).toBe("Create a git commit with a message.");
-    expect(commit!.argumentHint).toBe("-m <message>");
-
-    const reviewPr = seeded.find((s) => s.name === "review-pr");
-    expect(reviewPr).toBeDefined();
-    expect(reviewPr!.description).toBe("Review a GitHub pull request.");
-    expect(reviewPr!.argumentHint).toBe("<pr-url>");
+    const second = await boot(home);
+    const state = await sessionState(second.url, chatId);
+    expect(state.source).toBe("log");
+    expect(state.commands).toEqual(STUB_COMMANDS);
   });
 
-  it("returns skills sorted alphabetically by name", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "testproject-main",
-    });
-    const data = await trpcData<{
-      skills: Array<{ name: string }>;
-    }>(res);
-
-    const names = withoutAutoInstalled(data.skills).map((s) => s.name);
-    expect(names).toEqual(["commit", "review-pr"]);
+  it("rejects the event stream without the band_token cookie (401)", async () => {
+    const server = await boot();
+    const res = await fetch(`${server.url}/api/chats/any/events`);
+    expect(res.status).toBe(401);
+    await res.body?.cancel();
   });
 });
 
-// ---------------------------------------------------------------------------
-// skills.list — no skills directory
-// ---------------------------------------------------------------------------
-
-describe("skills.list — no skills directory", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    // Do NOT seed any skills
-    server = await startServer({ tmpHome });
+describe("modes.list", () => {
+  it("returns the modes the agent offers, from the boot probe", async () => {
+    const server = await boot();
+    await expect
+      .poll(
+        async () =>
+          (
+            await trpc<{ modes: { id: string; name: string }[] }>(
+              server.url,
+              "modes.list",
+              { agentId: "claude-code" },
+              "query",
+            )
+          ).modes,
+        { timeout: 15_000 },
+      )
+      .toEqual([
+        { id: "default", name: "Default" },
+        { id: "plan", name: "Plan" },
+      ]);
   });
 
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns empty array (ignoring auto-installed band skills) when no skills are seeded", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "testproject-main",
-    });
-    expect(res.status).toBe(200);
-
-    const data = await trpcData<{
-      skills: Array<{ name: string; description: string; argumentHint?: string }>;
-    }>(res);
-
-    // ensureSkillsInstalled will have populated the four band-* skills here;
-    // for this test we only care that no *other* skills are present.
-    expect(withoutAutoInstalled(data.skills)).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// skills.list — project-level skills override global
-// ---------------------------------------------------------------------------
-
-describe("skills.list — project-level skills", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    const state = createDefaultState(tmpHome);
-    seedState(tmpHome, state);
-    seedSettings(tmpHome, defaultSettings());
-
-    // Seed a global skill
-    seedSkills(tmpHome, [
-      {
-        dirName: "deploy",
-        skillMd: ["---", "name: deploy", "description: Deploy to production (global).", "---"].join(
-          "\n",
-        ),
-      },
-    ]);
-
-    // Seed a project-level skill that overrides a global one
-    const repoDir = join(tmpHome, "repo");
-    seedProjectSkills(repoDir, [
-      {
-        dirName: "deploy",
-        skillMd: [
-          "---",
-          "name: deploy",
-          "description: Deploy to staging (project-level).",
-          "---",
-        ].join("\n"),
-      },
-      {
-        dirName: "lint",
-        skillMd: ["---", "name: lint", "description: Run project linter.", "---"].join("\n"),
-      },
-    ]);
-
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("project-level skill overrides global skill with same name", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "testproject-main",
-    });
-    expect(res.status).toBe(200);
-
-    const data = await trpcData<{
-      skills: Array<{ name: string; description: string }>;
-    }>(res);
-
-    const deploy = data.skills.find((s) => s.name === "deploy");
-    expect(deploy).toBeDefined();
-    expect(deploy!.description).toBe("Deploy to staging (project-level).");
-  });
-
-  it("includes both global and project-level skills", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "testproject-main",
-    });
-    const data = await trpcData<{
-      skills: Array<{ name: string }>;
-    }>(res);
-
-    const names = withoutAutoInstalled(data.skills).map((s) => s.name);
-    expect(names).toEqual(["deploy", "lint"]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// skills.list — unknown workspace
-// ---------------------------------------------------------------------------
-
-describe("skills.list — unknown workspace", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns empty array for non-existent workspace", async () => {
-    const res = await trpcQuery(server.url, "skills.list", {
-      workspaceId: "nonexistent-main",
-    });
-    expect(res.status).toBe(200);
-
-    const data = await trpcData<{
-      skills: Array<{ name: string }>;
-    }>(res);
-
-    expect(data.skills).toEqual([]);
+  it("rejects modes.list without the band_token cookie (401)", async () => {
+    const server = await boot();
+    const res = await fetch(
+      `${server.url}/trpc/modes.list?input=${encodeURIComponent(JSON.stringify({}))}`,
+    );
+    expect(res.status).toBe(401);
+    // A real token passes the same route.
+    const ok = await fetch(
+      `${server.url}/trpc/modes.list?input=${encodeURIComponent(JSON.stringify({}))}`,
+      { headers: { Cookie: `band_token=${TEST_TOKEN}` } },
+    );
+    expect(ok.status).toBe(200);
   });
 });

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { cliInvocation, resumeCliInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
@@ -30,7 +31,7 @@ import { clearQueuedMessages } from "./_utils/queued-message-store";
 // Capturing any of these at module load — `const t = submitTask;` at
 // the top of this file, or `const ws = workspaceService;` at the top of
 // `task-service.ts` — would silently get `undefined`.
-import { agentService } from "./agent-service";
+import { agentSessionService } from "./agent-session-service";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
@@ -311,12 +312,12 @@ export class WorkspaceService {
    *   - `"chat"` (default when absent) — submit the prompt to the workspace's
    *     default chat pane via `taskService.submitTask`.
    *   - `"terminal"` — resolve the chosen agent's interactive CLI invocation
-   *     (`adapter.cliInvocation(prompt)`) and spawn it in a fresh terminal
+   *     (`cliInvocation(type, prompt)`) and spawn it in a fresh terminal
    *     pane via `terminalService.spawn`. The pane id is returned alongside
    *     the worktree path so callers (the Rust CLI in particular) can wire
    *     follow-up commands directly to the new pane.
    *
-   *   When the resolved adapter doesn't expose a vendor CLI for terminal
+   *   When the resolved agent doesn't have a vendor CLI for terminal
    *   dispatch (e.g. cursor-cli today), the service logs a warning and
    *   falls back to `"chat"` so the create call still succeeds. The
    *   response then carries `via: "chat"` and no `terminalId`.
@@ -467,29 +468,21 @@ export class WorkspaceService {
 
     // Pre-resolve the terminal-pane CLI invocation while we're still on
     // the request thread so we can fall back to chat early when the
-    // chosen adapter doesn't support a one-shot terminal launch (e.g.
+    // chosen agent doesn't support a one-shot terminal launch (e.g.
     // cursor-cli today). Doing the resolution up front keeps the
     // fall-back synchronous from the caller's perspective — the
     // response carries the actual `via` we ended up dispatching with.
     let terminalCommand: string | undefined;
     if (via === "terminal" && input.prompt) {
       try {
-        const adapter = await agentService.createWorkspaceAgent(worktreePath, input.codingAgentId);
-        const invocation = adapter.cliInvocation?.(input.prompt);
-        // Release the short-lived adapter — we only needed cliInvocation,
-        // which is a pure-data read; no subprocess was spawned by the
-        // constructor, but the SDK objects (claude-code Query, etc.) hold
-        // an abort handle we should release for tidiness.
-        adapter.abort?.();
-        if (!invocation || invocation.unsupported) {
-          // The discriminated union guarantees `reason` is present
-          // whenever `unsupported` is true; fall back to a generic
-          // message only when the adapter doesn't expose `cliInvocation`
-          // at all.
-          const reason = invocation?.reason ?? "adapter does not expose cliInvocation";
+        const agentDef = settingsService.getAgentDefinition(input.codingAgentId);
+        const invocation = cliInvocation(agentDef.type, input.prompt, {
+          command: agentDef.command,
+        });
+        if (invocation.unsupported) {
           log.warn(
-            { workspaceId, agentId: input.codingAgentId, reason },
-            "via=terminal requested but adapter does not support it; falling back to chat",
+            { workspaceId, agentId: input.codingAgentId, reason: invocation.reason },
+            "via=terminal requested but agent does not support it; falling back to chat",
           );
           via = "chat";
         } else {
@@ -499,7 +492,7 @@ export class WorkspaceService {
       } catch (err) {
         // Log just `err.message` rather than the full Error object —
         // pino-style structured loggers serialise the entire object
-        // including stack traces that may carry adapter-config detail
+        // including stack traces that may carry agent-config detail
         // we don't want to leak.
         log.warn(
           {
@@ -569,8 +562,8 @@ export class WorkspaceService {
   /**
    * Continue a chat's coding-agent session in a terminal pane.
    *
-   * Resolves the chat's underlying session id + the adapter for whichever
-   * agent it ran, asks the adapter for the vendor CLI's *resume* invocation
+   * Resolves the chat's underlying session id + the definition of whichever
+   * agent it ran, resolves the vendor CLI's *resume* invocation
    * (`claude --resume <id>`, `codex resume <id>`, `opencode --session <id>`),
    * composes it into a shell-safe command, and spawns a fresh terminal pane
    * running it — so the user keeps working in the very session the web chat
@@ -600,14 +593,12 @@ export class WorkspaceService {
       return { ok: false, code: "NOT_FOUND", message: "Workspace not found" };
     }
 
-    const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, chat.agent);
-    const invocation = agent.resumeCliInvocation?.(chat.activeSessionId);
-    if (!invocation || invocation.unsupported) {
-      return {
-        ok: false,
-        code: "BAD_REQUEST",
-        message: invocation?.reason ?? "Agent does not support resuming in a terminal",
-      };
+    const agentDef = settingsService.getAgentDefinition(chat.agent);
+    const invocation = resumeCliInvocation(agentDef.type, chat.activeSessionId, {
+      command: agentDef.command,
+    });
+    if (invocation.unsupported) {
+      return { ok: false, code: "BAD_REQUEST", message: invocation.reason };
     }
 
     const command = formatShellCommand(invocation.command, invocation.args);
@@ -1156,47 +1147,13 @@ export class WorkspaceService {
       "Output ONLY the final commit message as plain text — no markdown fences, no preamble, no commentary, no tool-call summaries. Do not modify any files.",
     ].join("\n");
 
-    let agent: Awaited<ReturnType<typeof agentService.createWorkspaceAgent>>;
+    let lastTurnText: string;
     try {
-      agent = await agentService.createWorkspaceAgent(cwd, agentDef.id);
+      lastTurnText = await agentSessionService.oneShot(agentDef, cwd, prompt);
     } catch (e) {
       throw new Error(
-        `Failed to start coding agent "${agentDef.label}": ${
-          e instanceof Error ? e.message : String(e)
-        }`,
+        `Coding agent "${agentDef.label}" failed: ${e instanceof Error ? e.message : String(e)}`,
       );
-    }
-
-    // Track only text emitted by the *final* assistant turn — earlier
-    // text deltas are usually narration around tool calls ("Let me check
-    // the diff…") that we don't want in the commit message. Each
-    // tool-result event resets the buffer so only post-tool prose
-    // survives. No turn cap here — the agent stops on its own after the
-    // short git-status / diff / write-up flow this prompt drives.
-    let lastTurnText = "";
-    try {
-      for await (const event of agent.runSession(prompt, undefined)) {
-        if (event.type === "text-delta") {
-          lastTurnText += event.text;
-        } else if (event.type === "tool-result") {
-          lastTurnText = "";
-        } else if (event.type === "error") {
-          throw new Error(event.message);
-        }
-      }
-    } finally {
-      // Short-lived one-shot agent — always abort on exit to release
-      // the subprocess regardless of success or error. `abort` on a
-      // completed agent is documented as a no-op by the SDK adapters.
-      //
-      // Note: this agent was created with `createWorkspaceAgent`, not
-      // the pool's `getOrCreateAgent`, so it lives outside the pool and
-      // isn't registered for shutdown cleanup. That's intentional —
-      // generateCommitMessage is one-shot, has no persistent session a
-      // future request would reattach to, and exits before the user's
-      // next interaction. A future caller that fires this without
-      // awaiting it would leak the subprocess — keep this call awaited.
-      agent.abort?.();
     }
 
     const cleaned = lastTurnText.trim();
@@ -1245,11 +1202,11 @@ export class WorkspaceService {
     taskService.abortTask(chatId);
     clearQueuedMessages(chatId);
 
-    // Replace the agent in the pool with the new agent type
-    await agentService.replaceAgent(chatId, workspace.worktree.path, input.agentId);
-
-    // Update the chat pane's agent config
-    chatService.update(chatId, { agent: input.agentId });
+    // Stop the old agent's process. A session belongs to the agent that
+    // created it, so the chat starts a new one with the new agent.
+    agentSessionService.stop(chatId);
+    chatService.update(chatId, { agent: input.agentId, model: null, mode: null });
+    chatService.updateActiveSession(chatId, undefined);
 
     // Update workspace status with the new coding agent ID. The upsert
     // returns the final row state (project/branch/worktreePath + the
@@ -1260,8 +1217,8 @@ export class WorkspaceService {
     // This emit deliberately *supersedes* the abort event fired earlier
     // from inside `abortTask` (when a task was running). The earlier
     // event lacked the new `codingAgentId`; this one is authoritative.
-    // Do not eliminate as redundant — the abort emit happens before
-    // `replaceAgent` and carries the old agent id.
+    // Do not eliminate as redundant — the abort emit happens before the
+    // agent switch and carries the old agent id.
     const status = upsertWorkspaceStatus(input.workspaceId, {
       status: "waiting",
       codingAgentId: input.agentId,

@@ -3,34 +3,34 @@
  * chat task and asserting the UI clears.
  *
  * The backend cancel path is covered by the vitest integration test
- * `chat-events.test.ts > cancel / abort terminates the in-flight task`
- * (POST /trpc/tasks.abort → task-error event). This Playwright test
+ * `acp-chat.test.ts > stops a turn with session/cancel ...`
+ * (POST /trpc/tasks.abort → ACP `session/cancel` → a `cancelled` turn end). This Playwright test
  * covers the UI side: while a task is mid-stream and the Stop button
  * is showing, clicking it must:
  *
  *   1. Disappear the Stop button (status leaves "streaming").
- *   2. Disappear the thinking indicator.
+ *   2. Disappear the thinking indicator, and show the "stopped" notice.
  *   3. Leave any partial text rendered (user can see what the agent
  *      managed to say before they cancelled).
  *
  * Architecture:
  *
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home.
- *   - NO tRPC mocking. `tasks.abort` runs for real against the in-memory
- *     task map.
- *   - The fake-agent at `apps/web/tests/fake-agent.mjs` (stdio-protocol
- *     subprocess stub — the only allowed mock) emits a `text-delta`
- *     immediately, then sleeps 30 s. The sleep gives us time to click
- *     Stop while the task is still mid-stream (status === "streaming",
- *     i.e. the Stop button is visible).
+ *   - NO tRPC mocking. `tasks.abort` runs for real and sends ACP
+ *     `session/cancel` to the agent subprocess.
+ *   - The ACP stub agent at `apps/web/tests/fixtures/acp-stub-agent.mjs`
+ *     (stdio subprocess stub, the only allowed mock) streams a message
+ *     chunk immediately, then blocks until Band sends `session/cancel`.
+ *     That gives us time to click Stop while the task is still mid-stream
+ *     (status === "streaming", i.e. the Stop button is visible).
  *   - UI driven through `ChatPanePage`.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { fakeAgentPath } from "./helpers/fake-agent";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -46,8 +46,6 @@ const PROJECT = "cancelproj";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = fakeAgentPath();
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -75,42 +73,18 @@ test.beforeAll(async () => {
         id: "claude-code",
         type: "claude-code",
         label: "Claude Code",
-        command: FAKE_AGENT_PATH,
       },
     ],
   });
 
-  // Scenario: emit a short text-delta IMMEDIATELY so the client flips
-  // to status="streaming" and the Stop button renders, then sleep
-  // 30 s. That sleep window is what the test cancels into.
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "cancel-session" },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "partial reply " }] },
-      },
-      { _sleep_ms: 30_000 },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "never observed" }] },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "cancel-session",
-        duration_ms: 30_000,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
-
+  // Scenario: stream a short message chunk IMMEDIATELY so the client
+  // flips to status="streaming" and the Stop button renders, then block
+  // until `session/cancel`. That wait is what the test cancels into.
   server = await startServer({
     tmpHome,
-    env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    env: acpStubEnv(tmpHome, {
+      turns: [{ steps: [{ say: "partial reply " }, { waitForCancel: true }] }],
+    }),
   });
 });
 
@@ -131,13 +105,13 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     await chatPane.submit();
 
     // Wait until the agent has started streaming text — at that point
-    // status === "streaming" and the Stop button renders. The
-    // fake-agent's "partial reply " text-delta triggers this within
-    // a second; the subsequent 30 s sleep keeps the Stop button on
-    // screen until we click it.
+    // status === "streaming" and the Stop button renders. The stub's
+    // "partial reply " chunk triggers this within a second; its
+    // `waitForCancel` step keeps the Stop button on screen until we
+    // click it.
     await expect(chatPane.stopButton).toBeVisible();
-    // "partial reply" is the agent's streamed text (fake-agent
-    // text-delta), so scope to the assistant role. The page object's
+    // "partial reply" is the agent's streamed text (an ACP
+    // `agent_message_chunk`), so scope to the assistant role. The page object's
     // `assistantMessage`/`userMessage` locators are role-scoped on
     // `chat-pane__assistant-message` / `chat-pane__user-message` —
     // a future rendering change that places user text inside an
@@ -149,10 +123,10 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // `showThinking` branch both fire). We don't assert its absence
     // here — the Stop button visibility is the unambiguous signal.
 
-    // Click Stop. The hook's `cancel()` fires `tasks.abort` on the
-    // server; the subscription emits `task-error`; the reducer flips
-    // status to "error" → isStreaming = false → the Stop button
-    // unmounts and the thinking indicator unmounts.
+    // Click Stop. The hook's `cancel()` fires `tasks.abort`; the server
+    // sends `session/cancel`, the stub ends the turn with stopReason
+    // `cancelled`, and the stream's `turn-ended` flips the reducer to
+    // idle, so the Stop button and the thinking indicator unmount.
     await chatPane.clickStop();
 
     // Positive anchor: the prompt becomes interactive again once
@@ -161,6 +135,8 @@ test.describe("Chat cancel — Stop button aborts the task", () => {
     // a settled state — without the anchor the negatives could
     // pass vacuously against a still-mid-transition UI.
     await expect(chatPane.promptInput).toBeEnabled();
+    // The cancelled turn ends with an info-level "stopped" notice.
+    await expect(chatPane.notices).toHaveAttribute("data-level", "info");
     await expect(chatPane.stopButton).not.toBeVisible();
     await expect(chatPane.thinkingIndicator).not.toBeVisible();
     // The partial text the agent had already streamed remains in the

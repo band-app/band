@@ -28,7 +28,7 @@
  *   - Phase 7 (issue #318): `terminals/` (exposes `terminal`; the
  *     `terminalLayout` namespace was retired in issue #643 Phase 4).
  *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
- *     `editor.*`, `tunnel.*`, `prereqs.*`, `skills.*`, `modes.*`,
+ *     `editor.*`, `tunnel.*`, `prereqs.*`, `modes.*`,
  *     `models.*`, `statuses.*`, `status.*`.
  *   - Phase 8 (issue #319): the final inline sub-routers — `workspace.*`
  *     (singular: file ops, diff, search, git commands, agent switching),
@@ -59,7 +59,6 @@ import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
-import { skillsRouter } from "./skills/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
 import { systemRouter } from "./system/router";
 import { tasksRouter } from "./tasks/router";
@@ -89,7 +88,6 @@ export const appRouter = t.router({
   editor: editorRouter,
   tunnel: tunnelRouter,
   prereqs: prereqsRouter,
-  skills: skillsRouter,
   modes: modesRouter,
   models: modelsRouter,
   statuses: statusesRouter,

@@ -37,11 +37,32 @@ export class ChatPanePage {
   readonly sessionHistoryButton: Locator;
   /** "New session" item inside the session-history dropdown. */
   readonly newSessionMenuItem: Locator;
+  /** The "No sessions yet" empty state inside the session-history
+   *  dropdown. Targeted by testid, not by its English copy. */
+  readonly sessionHistoryEmpty: Locator;
+  /** The conversation's empty state, shown once the stream is connected
+   *  and the chat has no messages (a fresh chat, or after "New session"). */
+  readonly emptyConversation: Locator;
+  /** The pinned todo list above the prompt, fed by the agent's ACP
+   *  `plan` updates (Claude Code's TodoWrite arrives this way). */
+  readonly taskListWidget: Locator;
+  /** Inline notices in the transcript (a stopped turn, an agent error).
+   *  Each carries `data-level` (`info` / `warning` / `error`). */
+  readonly notices: Locator;
+  /** Permission cards (ACP `session/request_permission`), one per request.
+   *  Each carries `data-answered="true"` once the user picked an option. */
+  readonly permissionCards: Locator;
+  /** Elicitation forms (ACP form `elicitation/create`, e.g. Claude Code's
+   *  AskUserQuestion). Same `data-answered` attribute as the cards. */
+  readonly elicitationForms: Locator;
+  /** The model picker's trigger, built from the session's `model` config
+   *  option. */
+  readonly modelMenuButton: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
-  /** All tool-call container rows in the conversation (one per
-   *  `tool-input-available` event). Each carries a `data-status`
+  /** All tool-call container rows in the conversation (one per ACP
+   *  `tool_call`). Each carries a `data-status`
    *  attribute mirroring the StatusDot branch
    *  (`in-progress` / `complete` / `error`) — tests assert against
    *  that rather than the underlying Tailwind classes. */
@@ -82,6 +103,13 @@ export class ChatPanePage {
     // doctrine-preferred locator (role + name).
     this.sessionHistoryButton = page.getByRole("button", { name: "Session history" });
     this.newSessionMenuItem = page.getByRole("menuitem", { name: /New session/ });
+    this.sessionHistoryEmpty = page.getByTestId("chat-pane__session-history-empty");
+    this.emptyConversation = page.getByTestId("chat-pane__empty-state");
+    this.taskListWidget = page.getByTestId("task-list-widget__container");
+    this.notices = page.getByTestId("chat-pane__notice");
+    this.permissionCards = page.getByTestId("chat-pane__permission");
+    this.elicitationForms = page.getByTestId("chat-pane__elicitation");
+    this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -324,6 +352,59 @@ export class ChatPanePage {
     });
   }
 
+  /** A past session in the open session-history dropdown, by its summary
+   *  (the session's first prompt, which is test data). */
+  sessionHistoryItem(summary: string): Locator {
+    return this.page.getByRole("menuitem", { name: new RegExp(escapeRegExp(summary)) });
+  }
+
+  /** Pick a past session from the open session-history dropdown. */
+  async selectPastSession(summary: string): Promise<void> {
+    await test.step(`Select past session "${summary}"`, async () => {
+      await this.sessionHistoryItem(summary).click();
+    });
+  }
+
+  /** Answer the Nth permission card by clicking the option the agent
+   *  offered. Option names come from the agent (test data), so the button's
+   *  role name is the stable locator. */
+  async answerPermission(index: number, optionName: string): Promise<void> {
+    await test.step(`Answer permission #${index} with "${optionName}"`, async () => {
+      await this.permissionCards
+        .nth(index)
+        .getByRole("button", { name: optionName, exact: true })
+        .click();
+    });
+  }
+
+  /** Pick a choice in the Nth elicitation form by its title (agent-supplied
+   *  test data). */
+  async pickElicitationChoice(index: number, choiceTitle: string): Promise<void> {
+    await test.step(`Pick "${choiceTitle}" in elicitation #${index}`, async () => {
+      await this.elicitationForms
+        .nth(index)
+        .getByRole("button", { name: choiceTitle, exact: true })
+        .click();
+    });
+  }
+
+  /** Submit the Nth elicitation form. "Submit" is a constant label in
+   *  `elicitation-form.tsx`, so role + name is the locator. */
+  async submitElicitation(index: number): Promise<void> {
+    await test.step(`Submit elicitation #${index}`, async () => {
+      await this.elicitationForms.nth(index).getByRole("button", { name: "Submit" }).click();
+    });
+  }
+
+  /** Open the model picker and choose a model by its display name (from
+   *  the agent's `model` config option, i.e. test data). */
+  async selectModel(modelName: string): Promise<void> {
+    await test.step(`Select model "${modelName}"`, async () => {
+      await this.modelMenuButton.click();
+      await this.page.getByRole("menuitem", { name: modelName }).click();
+    });
+  }
+
   /** Type a single key in the focused prompt textarea. The prompt
    *  must already be focused — call `focusPrompt()` first. Used by the
    *  mention/slash-dropdown tests where `fill()` would replace the whole
@@ -480,4 +561,8 @@ export class ChatPanePage {
         ).__flickerSamples ?? [],
     );
   }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -1,26 +1,23 @@
 /**
  * POST /api/chats/:chatId/messages
  *
- * Submit a user message. Decoupled from observation — the new chat-events
- * stream (`GET /api/chats/:chatId/events`) is where the client sees the
- * server's response. This endpoint returns immediately with `200 { ok: true }`
- * once the task is in flight (or queued if the agent is busy).
+ * Submit a user message. Decoupled from observation: the client sees the
+ * turn on its chat event stream (`GET /api/chats/:chatId/events`). Returns
+ * `200 { ok: true, queued }` once the turn is in flight, or queued when one
+ * is already running for this chat (the subscriber gets `queue-updated`).
  *
- * Compared to the legacy `POST /api/tasks/:chatId/stream`:
- *   - No SSE stream in the response body. POST returns fast (no waiting on
- *     the agent's first byte).
- *   - 409 → queued. If a task is already running for this chat, the new
- *     message is pushed to the server-side queue and the response is 200.
- *     The client sees a `queue-updated` event on its subscription. No special
- *     error path on the client.
+ * Attached files are saved under `~/.band/uploads` first and reach the agent
+ * as ACP `resource_link` / `image` blocks (see `task-service`).
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { pushQueuedMessage } from "../server/services/_utils/queued-message-store";
+import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
+  type TaskAttachment,
   TaskConflictError,
   taskService,
   WorkspaceNotFoundError,
@@ -70,59 +67,32 @@ export async function handleChatSubmit(
     sendJson(res, 400, { error: "workspaceId and text are required" });
     return;
   }
+  if (sessionId !== undefined && !SESSION_ID_PATTERN.test(sessionId)) {
+    sendJson(res, 400, { error: "invalid sessionId" });
+    return;
+  }
 
-  // Lazy chat creation matches the legacy endpoint.
-  const existing = chatService.get(chatId);
-  if (!existing) {
+  if (!chatService.get(chatId)) {
     chatService.create(workspaceId, { id: chatId, name: "Chat", agent: codingAgentId });
   }
 
-  // Resolve sessionId. The new chat-events client doesn't pass `sessionId`
-  // in the submit body — under the event-log model the server is the
-  // authoritative owner of "which session is this chat on", persisted as
-  // `chat.activeSessionId`. Without this fallback, every send started a
-  // brand-new agent session, the previous turn's JSONL was abandoned, and
-  // the client saw "only one message in history" with no continuation of
-  // the prior conversation. The explicit body field still wins so a
-  // future client that wants to fork off an older session can do so.
-  const resumeSessionId = sessionId ?? chatService.get(chatId)?.activeSessionId;
-
-  // Upload any attached files first — needs to be sequential w.r.t. the
-  // submit so the agent prompt references valid paths.
-  //
-  // Capture the full `SavedFile` records (including the absolute on-disk
-  // path) and only collapse to the display shape when we hand them to
-  // submitTask. The disk path also rides along in the queued payload so
-  // a drained queued message can rebuild its agent prompt WITHOUT
-  // re-running `saveUploadedFilesDetailed` (the second call would
-  // silently skip every file — the URL is `/api/uploads/<storedName>`
-  // by then, not a `data:` URL, and the regex inside that helper
-  // requires the latter).
-  let agentPrompt: string | undefined;
-  let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
-  let savedFiles: Awaited<ReturnType<typeof saveUploadedFilesDetailed>> = [];
+  let attachments: TaskAttachment[] = [];
   if (files && files.length > 0) {
-    savedFiles = await saveUploadedFilesDetailed(files);
-    // Surface the count mismatch when `saveUploadedFilesDetailed`
-    // silently skips an entry (its data-URL regex requires the exact
-    // `data:<mime>;base64,...` shape, so a malformed input from a
-    // non-browser client — CLI, curl, third-party — would otherwise
-    // disappear into a 200 OK with no signal back to the caller).
-    if (savedFiles.length !== files.length) {
+    const saved = await saveUploadedFilesDetailed(files);
+    // `saveUploadedFilesDetailed` skips entries that aren't
+    // `data:<mime>;base64,...` URLs; say so rather than drop them silently.
+    if (saved.length !== files.length) {
       log.warn(
-        { chatId, submitted: files.length, saved: savedFiles.length },
+        { chatId, submitted: files.length, saved: saved.length },
         "chat-submit: some file uploads were dropped (malformed data URL?)",
       );
     }
-    if (savedFiles.length > 0) {
-      const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
-      agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${text}`;
-      displayFiles = savedFiles.map((s) => ({
-        mediaType: s.mediaType,
-        url: `/api/uploads/${s.storedName}`,
-        filename: s.originalName,
-      }));
-    }
+    attachments = saved.map((s) => ({
+      path: s.path,
+      mediaType: s.mediaType,
+      url: `/api/uploads/${s.storedName}`,
+      filename: s.originalName,
+    }));
   }
 
   try {
@@ -130,9 +100,8 @@ export async function handleChatSubmit(
       workspaceId,
       chatId,
       prompt: text,
-      sessionId: resumeSessionId,
-      agentPrompt,
-      displayFiles,
+      sessionId,
+      attachments,
       mode,
       model,
       codingAgentId,
@@ -141,23 +110,11 @@ export async function handleChatSubmit(
     sendJson(res, 200, { ok: true, queued: false });
   } catch (err) {
     if (err instanceof TaskConflictError) {
-      // Already running — queue instead. The subscriber sees a
-      // `queue-updated` event automatically via subscribeQueue.
-      // Carry the absolute disk path through so the drain path in
-      // task-service.ts can rebuild `I'm sharing these files…\n- <path>`
-      // without re-uploading (the URLs are already
-      // `/api/uploads/<storedName>` at this point, so re-running
-      // `saveUploadedFilesDetailed` would silently drop them).
+      // A turn is running; queue the message. The drain in task-service
+      // rebuilds the attachments from the saved paths.
       pushQueuedMessage(chatId, {
         text,
-        ...(savedFiles.length > 0 && {
-          files: savedFiles.map((s) => ({
-            mediaType: s.mediaType,
-            url: `/api/uploads/${s.storedName}`,
-            path: s.path,
-            filename: s.originalName,
-          })),
-        }),
+        ...(attachments.length > 0 && { files: attachments }),
       });
       log.info({ chatId, workspaceId }, "chat-submit: task busy, message queued");
       sendJson(res, 200, { ok: true, queued: true });

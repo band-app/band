@@ -80,7 +80,7 @@ test.beforeAll(async () => {
   git(repoPath, ["add", "."]);
   git(repoPath, ["commit", "-m", "init"]);
 
-  // Stub vendor CLI — the adapter's `cliInvocation` returns this path
+  // Stub vendor CLI — `cliInvocation` returns this path
   // as `command`, the terminal pool wraps it in shell quotes and writes
   // it to the PTY. Stub exits quickly; we're testing UI surface, not
   // session conversation.
@@ -104,9 +104,9 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
-    // Claude-Code adapter — its constructor stores `executablePath` and
-    // its `cliInvocation` echoes that back. Pointing it at our stub keeps
-    // the spawned process under our control without faking the SDK.
+    // The terminal launch (`cliInvocation`) runs the agent definition's
+    // `command`. Pointing it at our stub keeps the spawned process under
+    // our control.
     codingAgents: [
       {
         id: "claude-code",
@@ -116,10 +116,9 @@ test.beforeAll(async () => {
       },
     ],
   });
-  // Boot refresh fires for the seeded claude-code agent. The
-  // 10 s timeout in `ClaudeCodeAdapter.refreshModels()` catches the
-  // protocol-handshake failure against `stub-claude.sh`; the resulting
-  // "refresh failed" log line is expected and benign.
+  // The boot-time model refresh probes the agent over ACP. `startServer`
+  // points every ACP launch at the scripted stub agent, so that probe never
+  // touches `stub-claude.sh` (which only backs the terminal launch).
   server = await startServer({ tmpHome });
 });
 

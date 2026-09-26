@@ -31,11 +31,10 @@
 //     migrations (including the `drop_tasks_max_turns` migration that
 //     removed the chat-path's `max_turns` column) run against a fresh
 //     SQLite DB.
-//   • The Claude-Agent SDK subprocess boundary is stubbed with
-//     `fake-agent.mjs`, the project's shared protocol stub. A bare shell
-//     stub doesn't speak the Claude-Agent SDK protocol and hangs the
-//     subprocess on Linux CI; fake-agent emits a success scenario and
-//     exits cleanly. Same pattern as `workspace-create-via.test.ts`.
+//   • The coding agent is the scripted stub ACP agent
+//     (`fixtures/acp-stub-agent.mjs`), wired in by `startAcpServer`
+//     through `BAND_TEST_ACP_AGENT`. It answers every prompt with a short
+//     reply and ends the turn, so the task completes cleanly.
 //   • Tasks dispatch asynchronously after `tasks.submit` returns — we
 //     wait on the existing `tasks.list` query via the shared `waitFor`
 //     helper rather than a wall-clock sleep.
@@ -45,18 +44,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
+import { startAcpServer } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import {
-  createTmpHome,
-  type ServerHandle,
-  startServer,
-  trpcData,
-  trpcMutate,
-} from "./helpers/server";
+import { createTmpHome, type ServerHandle, trpcData, trpcMutate } from "./helpers/server";
 import { listTasksForWorkspace } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 
 const gitEnv = {
   ...process.env,
@@ -78,27 +70,6 @@ function createGitRepo(parentDir: string, name: string): string {
   git(repoPath, ["add", "."]);
   git(repoPath, ["commit", "-m", "init"]);
   return repoPath;
-}
-
-/**
- * Minimal scenario for `fake-agent.mjs`: announce a session, then report
- * a successful turn so `taskService.submitTask` records a completed task
- * and tears the agent down cleanly. Reused from
- * `workspace-create-via.test.ts` so the same scenario shape pins both
- * dispatch surfaces (chat-submit and workspaces.create) — drift here
- * would silently break the workspaces.create assertions.
- */
-function writeChatScenario(tmpHome: string, name: string): string {
-  const scenarioPath = join(tmpHome, name);
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "strip-test-session" },
-      { type: "result", subtype: "success", result: "Done" },
-    ]),
-    "utf-8",
-  );
-  return scenarioPath;
 }
 
 interface SubmitResponse {
@@ -131,7 +102,6 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-strip-tasks-");
     const repoPath = createGitRepo(tmpHome, "stripproj");
-    const scenarioPath = writeChatScenario(tmpHome, "scenario.json");
     seedState(tmpHome, {
       projects: [
         {
@@ -149,14 +119,10 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
           id: "claude-code",
           type: "claude-code",
           label: "Claude Code",
-          command: FAKE_AGENT_PATH,
         },
       ],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
-    });
+    server = await startAcpServer({ home: tmpHome });
   });
 
   afterAll(async () => {
@@ -167,7 +133,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
   it("submits successfully without a maxTurns field (baseline)", async () => {
     // Distinct chatId per assertion so the second submission can't 409 on
     // an in-flight task in the same chat pane (the chat pool enforces
-    // one running task per chatId; fake-agent finishes quickly enough but
+    // one running task per chatId; the stub agent finishes quickly enough but
     // we don't want to depend on that race for correctness).
     const res = await trpcMutate(
       server.url,
@@ -279,7 +245,6 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome("band-strip-wscreate-");
     const repoPath = createGitRepo(tmpHome, "wsproj");
-    const scenarioPath = writeChatScenario(tmpHome, "scenario.json");
     seedState(tmpHome, {
       projects: [
         {
@@ -297,14 +262,10 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
           id: "claude-code",
           type: "claude-code",
           label: "Claude Code",
-          command: FAKE_AGENT_PATH,
         },
       ],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
-    });
+    server = await startAcpServer({ home: tmpHome });
   });
 
   afterAll(async () => {

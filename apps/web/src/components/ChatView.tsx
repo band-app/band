@@ -1,6 +1,7 @@
-// useChat from @ai-sdk/react was removed as part of the chat-event-log
-// refactor (issue #478). The chat is now driven by `useChatSubscription`
-// reading the server's event log directly.
+// The chat pane (issue #648): renders one chat's ACP event log. Messages,
+// session settings and requests all come from `useChatSubscription`, which
+// folds the server's event stream through `transcriptReducer`.
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import {
   Badge,
   Button,
@@ -41,33 +42,35 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import {
   Bot,
+  Brain,
   ChevronDown,
   Clock,
   CodeXml,
-  GitBranch,
   GripHorizontal,
   Loader2,
   Plus,
   ScrollText,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
+import type { SessionState } from "../shared/chat-events";
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
 } from "./ai-elements/conversation";
+import { ElicitationForm } from "./ai-elements/elicitation-form";
 import { FileLinkWorkspaceProvider } from "./ai-elements/file-link-components";
 import { FileMentionSuggestions } from "./ai-elements/file-mention-suggestions";
-import { groupMessageParts } from "./ai-elements/group-parts";
 import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
+import { PermissionRequest } from "./ai-elements/permission-request";
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
 import {
   PromptInput,
@@ -78,45 +81,10 @@ import {
 } from "./ai-elements/prompt-input";
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
-import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-state";
-import type { ToolPart } from "./ai-elements/tool";
-import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
+import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
-
-const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
-  "input-available",
-  "input-streaming",
-  "approval-requested",
-  "approval-responded",
-]);
-
-const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
-
-function toolPartToItem(part: ToolPart): ToolCallItem {
-  const approval = "approval" in part ? (part.approval as { id?: string } | undefined) : undefined;
-  const toolName = getToolName(part);
-  const displayTitle = "title" in part && typeof part.title === "string" ? part.title : undefined;
-  return {
-    toolCallId: part.toolCallId,
-    toolName,
-    displayTitle,
-    input: part.input,
-    output: part.output,
-    errorText: part.errorText,
-    isError: ERROR_STATES.has(part.state),
-    isInProgress: IN_PROGRESS_STATES.has(part.state),
-    // Interactive tools (AskUserQuestion, ExitPlanMode) use toolCallId as
-    // the approval key since the canUseTool callback in the agent adapter
-    // manages the pending-input lifecycle directly (not through the AI SDK
-    // approval mechanism).
-    approvalId:
-      toolName === "AskUserQuestion" || toolName === "ExitPlanMode"
-        ? part.toolCallId
-        : approval?.id,
-  };
-}
 
 function ThinkingIndicator() {
   return (
@@ -150,7 +118,6 @@ function ConversationSkeleton() {
       aria-busy="true"
       aria-label="Loading messages"
     >
-      {/* User bubble — right-aligned, narrower */}
       <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
@@ -159,8 +126,6 @@ function ConversationSkeleton() {
           </div>
         </MessageContent>
       </Message>
-
-      {/* Assistant bubble — full width, several lines */}
       <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
@@ -168,25 +133,6 @@ function ConversationSkeleton() {
             <SkeletonBar widthClass="w-full" />
             <SkeletonBar widthClass="w-5/6" />
             <SkeletonBar widthClass="w-2/3" />
-          </div>
-        </MessageContent>
-      </Message>
-
-      {/* A second user/assistant pair for longer-feeling conversations */}
-      <Message from="user" data-testid={undefined}>
-        <MessageContent>
-          <div className="flex flex-col gap-2 py-1">
-            <SkeletonBar widthClass="w-40" className="bg-foreground/10" />
-          </div>
-        </MessageContent>
-      </Message>
-
-      <Message from="assistant" data-testid={undefined}>
-        <MessageContent>
-          <div className="flex flex-col gap-2 pt-1">
-            <SkeletonBar widthClass="w-2/3" />
-            <SkeletonBar widthClass="w-4/5" />
-            <SkeletonBar widthClass="w-1/2" />
           </div>
         </MessageContent>
       </Message>
@@ -216,50 +162,83 @@ interface AgentGroup {
   defaultModel?: string;
 }
 
-interface UsageData {
-  /** Provider that produced this snapshot. Drives legacy context-size math. */
-  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  reasoningOutputTokens?: number;
-  /** Provider-aware total context tokens (preferred over summing fields). */
-  contextTokens?: number;
-  /** Cumulative processed tokens for the session/thread when available. */
-  totalProcessedTokens?: number;
-  /** Authoritative model context window from the agent SDK. */
-  maxContextTokens?: number;
+interface Choice {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+type SelectOption = Extract<SessionConfigOption, { type: "select" }>;
+
+function selectChoices(option: SelectOption): Choice[] {
+  return option.options
+    .flatMap((o) => ("group" in o ? o.options : [o]))
+    .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
+}
+
+function findSelect(session: SessionState | null, category: "model" | "mode") {
+  return session?.configOptions.find(
+    (o): o is SelectOption => o.type === "select" && (o.category === category || o.id === category),
+  );
+}
+
+/**
+ * The model and mode pickers read ACP session config options (category
+ * `model` / `mode`). Agents without them expose the legacy model and mode
+ * state instead; `__legacy_model` / `__legacy_mode` tell the server to use
+ * `session/set_model` / `session/set_mode`.
+ */
+function sessionPickers(session: SessionState | null) {
+  const modelOption = findSelect(session, "model");
+  const modeOption = findSelect(session, "mode");
+  const models: Choice[] = modelOption
+    ? selectChoices(modelOption)
+    : (session?.models?.availableModels ?? []).map((m) => ({
+        id: m.modelId,
+        name: m.name,
+        description: m.description ?? undefined,
+      }));
+  const modes: Choice[] = modeOption
+    ? selectChoices(modeOption)
+    : (session?.modes?.availableModes ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description ?? undefined,
+      }));
+  return {
+    models,
+    model: modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId,
+    modelConfigId: modelOption?.id ?? "__legacy_model",
+    modes,
+    mode: modeOption ? String(modeOption.currentValue) : session?.modes?.currentModeId,
+    modeConfigId: modeOption?.id ?? "__legacy_mode",
+    // Everything else the agent lets the user choose (reasoning effort, …).
+    others: (session?.configOptions ?? []).filter(
+      (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
+    ),
+  };
 }
 
 interface ChatViewProps {
   workspaceId: string;
   chatId: string;
   workspaceName: string;
-  supportsSessionListing: boolean;
   initialSessionId?: string;
-  /** True once the parent's sessions.list query has resolved. */
-  sessionQueryDone?: boolean;
-  showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
   onNewSessionRef?: React.MutableRefObject<(() => void) | null>;
   /**
-   * Background-notify path: fired from the subscription's reducer state
-   * when the server resolves a session id on its own (first message in a
-   * brand-new chat). Parent should refresh tab-title cache only — must
-   * NOT remount this component, or the in-flight conversation gets torn
-   * down. Server already persisted `chat.activeSessionId` via
-   * task-service.session-start.
+   * Background-notify path: the chat attached to a session on its own
+   * (first message in a new chat). The parent refreshes its tab-title
+   * cache only; it must NOT remount this component.
    */
   onSessionDiscovered?: (sessionId: string) => void;
   /**
-   * User-initiated path: fired by "Select past session" and "New session"
-   * affordances. Parent should persist + remount this component so its
-   * subscription opens fresh against the new session's events.
+   * User-initiated path: "Select past session" and "New session". The
+   * parent persists the choice and remounts this component so its
+   * subscription opens against the new session.
    */
-  onSwitchSession?: (sessionId: string | undefined) => Promise<void> | void;
-  chatKey?: number;
+  onSwitchSession?: (sessionId: string | undefined, summary?: string) => Promise<void> | void;
   agentType?: string;
   codingAgentId?: string;
   /** Called when the user picks a model under a different coding agent. */
@@ -273,57 +252,34 @@ export function ChatView({
   workspaceId,
   chatId,
   workspaceName,
-  supportsSessionListing,
   initialSessionId,
-  sessionQueryDone: _sessionQueryDone = false,
-  showSessionList: _showSessionList,
   onShowSessionListChange,
   onStreamingChange,
   onNewSessionRef,
   onSessionDiscovered,
   onSwitchSession,
-  chatKey: _chatKey = 0,
   agentType,
   codingAgentId,
   onSwitchAgent,
   visible,
   wsActive,
 }: ChatViewProps) {
-  // True once the user explicitly clears the session via "New session". The
-  // parent's `initialSessionId` prop may stay stale for a tick or longer
-  // after `handleNewSession` fires; we ignore it for skeleton/empty-state
-  // decisions once cleared.
+  // True once the user clicks "New session": the still-open subscription
+  // keeps reporting the old session until the parent remounts us.
   const [initialSessionCleared, setInitialSessionCleared] = useState(false);
   const [contextMeterEnabled] = useExperimentalContextMeter();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const prevVisibleRef = useRef(visible);
   // Resolved StickToBottom scroll element, surfaced as state so the
-  // scroll-back IntersectionObserver effect re-runs once it's available
-  // (the ref is null until after the first commit — see the attach effect).
+  // scroll-back IntersectionObserver effect re-runs once it's available.
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
-  // Attach a stable `data-testid` to the StickToBottom scroll element so
-  // integration tests can locate the scroller without walking up the DOM
-  // from a child (which would couple the test to the use-stick-to-bottom
-  // library's internal markup). The JSX-prop path normally used to
-  // attach `data-testid` to owned elements is unreachable here —
-  // `use-stick-to-bottom` renders the scroll container internally and
-  // exposes no attribute-forwarding prop — so we set it once via the
-  // same `contextRef` we use for programmatic scrolling. The imperative
-  // attach is intentional; if `use-stick-to-bottom` adds a
-  // `scrollerProps` (or similar) prop in a future release, switch back
-  // to the JSX form.
-  //
-  // `use-stick-to-bottom`'s `useImperativeHandle` populates the
-  // context AFTER the first commit, so the very first effect firing
-  // sees `scrollRef.current === null`. We retry on the next animation
-  // frame; the idempotent guard keeps subsequent re-renders cheap.
+  // Attach a stable `data-testid` to the StickToBottom scroll element.
+  // `use-stick-to-bottom` renders the scroller itself with no attribute
+  // pass-through, and populates its ref after the first commit, so retry
+  // for a few frames.
   useEffect(() => {
-    // Cap the retry loop at 10 frames (~167 ms at 60 Hz) so a
-    // bug that prevents the scroll ref from ever resolving doesn't
-    // leave us scheduling a spinning rAF until unmount. In practice
-    // the ref is populated on the first or second frame.
     let raf = 0;
     let attempts = 0;
     const attach = () => {
@@ -334,12 +290,7 @@ export function ChatView({
         setScrollEl(el);
         return;
       }
-      if (attempts >= 10) {
-        console.warn(
-          "[ChatView] StickToBottom scrollRef did not resolve within 10 frames; chat-pane__scroller testid not attached",
-        );
-        return;
-      }
+      if (attempts >= 10) return;
       raf = requestAnimationFrame(attach);
     };
     attach();
@@ -348,204 +299,113 @@ export function ChatView({
     };
   }, []);
 
-  // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
-  // The scroll container may have had zero height while hidden, so StickToBottom
-  // couldn't track position. We force-scroll after layout settles.
+  // Scroll to bottom when the panel becomes visible again: while hidden the
+  // container had no height, so StickToBottom couldn't track position.
   useEffect(() => {
     const wasHidden = prevVisibleRef.current === false;
     prevVisibleRef.current = visible;
     if (!wasHidden || !visible) return;
-
     const scrollToEnd = () => {
-      // Try the StickToBottom API first
       stickyContextRef.current?.scrollToBottom?.("instant");
-      // Also force the raw scroll element as a fallback
       const el = stickyContextRef.current?.scrollRef?.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      }
+      if (el) el.scrollTop = el.scrollHeight;
     };
-
-    // Run after layout settles — rAF alone isn't enough because dockview
-    // may still be resizing the container after the tab switch.
     requestAnimationFrame(() => {
       scrollToEnd();
-      // Second pass catches late layout shifts
       setTimeout(scrollToEnd, 50);
     });
   }, [visible]);
 
-  const [skills, setSkills] = useState<
-    { name: string; description: string; argumentHint?: string }[]
-  >([]);
-  useEffect(() => {
-    trpc.skills.list
-      .query({ workspaceId, chatId })
-      .then((data) => setSkills(data.skills))
-      .catch(() => setSkills([]));
-  }, [workspaceId, chatId]);
-
-  const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
-  const [selectedMode, setSelectedMode] = useState<string | undefined>();
-  const handleModeSelect = useCallback(
-    (mode: string | undefined) => {
-      setSelectedMode(mode);
-      trpc.chats.update
-        .mutate({ chatId, mode: mode ?? "" })
-        // Since issue #520, `chats.update` returns 404 (not the previous
-        // silent 200) when `chatId` no longer resolves — e.g. the user
-        // deleted this chat in another tab between the local state
-        // update and this fire-and-forget mutation. The 404 surfaces as
-        // a TRPCClientError here; absorbing it keeps the UI from
-        // surfacing a stale-chat error toast when the component is
-        // already on its way out.
-        .catch((err) => console.error("[ChatView] error persisting mode:", err));
-    },
-    [chatId],
-  );
-  useEffect(() => {
-    trpc.modes.list
-      .query({ agentId: codingAgentId || undefined })
-      .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
-      .catch(() => setModes([]));
-    // Hydrate persisted mode from the chat record. The active-task mode
-    // hint used to live here too; under the event-log model the running
-    // task's mode arrives via the `task-started` event the subscription
-    // delivers — the reducer doesn't expose it on `state` yet because the
-    // mode-dropdown UI doesn't need it for any current code path. If the
-    // dropdown needs to reflect mid-stream mode changes, surface it from
-    // the reducer rather than re-introducing a side-channel probe.
-    trpc.chats.get
-      .query({ chatId })
-      .then((data) => {
-        const persisted = data.chat?.mode;
-        if (typeof persisted === "string" && persisted) {
-          setSelectedMode(persisted);
-        }
-      })
-      .catch(() => {});
-  }, [chatId, codingAgentId]);
-
-  // Listen for Shift+Tab mode toggle dispatched from the workspace layout
-  useEffect(() => {
-    const handler = () => {
-      if (modes.length < 2) return;
-      const currentIndex = modes.findIndex((m) => m.id === selectedMode);
-      const nextIndex = currentIndex === -1 ? 1 : (currentIndex + 1) % modes.length;
-      handleModeSelect(modes[nextIndex].id);
-    };
-    window.addEventListener("band:toggle-mode", handler);
-    return () => window.removeEventListener("band:toggle-mode", handler);
-  }, [modes, selectedMode, handleModeSelect]);
-
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
-  // Default model from agent settings (per agent type)
-  const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
-  // Explicit user override from the model dropdown
-  const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
-  // Effective model: user override takes precedence, then agent default
-  const selectedModel = userModelOverride ?? agentDefaultModel;
-  // Resolved ModelInfo for the active selection — flows the SDK-reported
-  // contextWindow into the meter so it doesn't have to guess from the id.
-  const selectedModelInfo = useMemo(
-    () => models.find((m) => m.id === selectedModel),
-    [models, selectedModel],
-  );
-
-  // (Legacy effect that dropped `maxContextTokens` from `usage` on model
-  // switch lived here. Under the event-log model `usage` is owned by the
-  // subscription reducer and the ContextMeter component handles the
-  // model-switch fallback locally by treating `maxContextTokens` as a
-  // hint, not a contract — see `ContextMeter` and `MODEL_CONTEXT_WINDOWS`
-  // below.)
-
-  useEffect(() => {
-    const modelsP = trpc.models.listAll
-      .query()
-      .then((data) => {
-        setAgentGroups(data.agents as AgentGroup[]);
-        // Derive current agent's models from the groups
-        const currentGroup = (data.agents as AgentGroup[]).find((g) => g.agentId === codingAgentId);
-        if (currentGroup) {
-          setModels(currentGroup.models);
-          setAgentDefaultModel(currentGroup.defaultModel || undefined);
-        } else if ((data.agents as AgentGroup[]).length > 0) {
-          const first = (data.agents as AgentGroup[])[0];
-          setModels(first.models);
-          setAgentDefaultModel(first.defaultModel || undefined);
-        }
-      })
-      .catch(() => setAgentGroups([]));
-
-    // Hydrate persisted model override from the chat record
-    const chatP = trpc.chats.get
-      .query({ chatId })
-      .then((data) => {
-        const persisted = data.chat?.model;
-        if (typeof persisted === "string" && persisted) {
-          setUserModelOverride(persisted);
-        }
-      })
-      .catch(() => {});
-
-    void Promise.all([modelsP, chatP]);
-  }, [codingAgentId, chatId]);
-
-  const handleModelSelect = useCallback(
-    (model: string | undefined) => {
-      setUserModelOverride(model);
-      trpc.chats.update
-        .mutate({ chatId, model: model ?? "" })
-        // See `handleModeSelect` above — `chats.update` now 404s on a
-        // stale chatId since #520. Absorbing the error keeps the
-        // fire-and-forget UX intact.
-        .catch((err) => console.error("[ChatView] error persisting model:", err));
-    },
-    [chatId],
-  );
-
-  // -----------------------------------------------------------------------
-  // The new event-log subscription. One hook replaces:
-  //   • useChat from @ai-sdk/react
-  //   • TaskChatTransport
-  //   • sessionIdRef + lastEventIdRef + firstEventIdRef + firstMessageIndexRef
-  //   • connectAbortRef + statusRef
-  //   • loadMessages + connectToRunningStream + the 5-step backoff retry
-  //   • the focus/online listener
-  //   • the wsActive deactivate/reactivate effect
-  //   • the trpc.queue.stream subscription
-  //   • optimistic queuedMessages state
-  //   • the tasks.get pre-flight in handleSubmit
-  //
-  // Server is the single writer. The hook reads the event log and folds
-  // it through `chatEventReducer`. See `docs/experiments/chat-event-log.md`.
-  // -----------------------------------------------------------------------
   const subscription = useChatSubscription({
     workspaceId,
     chatId,
-    mode: selectedMode,
-    model: userModelOverride ?? agentDefaultModel,
     codingAgentId,
-    // Mirrors the legacy wsActive lifecycle — release the connection
-    // slot while the pane is not the active dockview tab; reopen on
-    // reactivation (visibility / wsActive transitions). The hook also
-    // factors in `document.visibilityState` internally.
+    // Release the connection while the pane isn't the active tab.
     enabled: wsActive !== false,
   });
-  const { messages, status, sessionId, queuedMessages, usage, send, cancel, loadOlder } =
-    subscription;
-
+  const {
+    messages,
+    status,
+    sessionId,
+    queue,
+    session,
+    plan,
+    send,
+    cancel,
+    loadOlder,
+    answerPermission,
+    answerElicitation,
+    setConfigOption,
+  } = subscription;
   const isStreaming = status === "submitting" || status === "streaming";
 
-  // Forward subscription-discovered session ids to the parent for tab-title
-  // cache refresh. Uses the background path (`onSessionDiscovered`) — the
-  // user-initiated path (`onSwitchSession`) is reserved for explicit "select
-  // session" / "new session" actions and includes a remount.
-  //
-  // Seeded with `initialSessionId` so we don't re-fire for the value the
-  // parent already gave us (which would happen on every remount after a
-  // session switch).
+  // Session settings from the ACP session (or the agent catalog before the
+  // chat has one).
+  const pickers = useMemo(() => sessionPickers(session), [session]);
+  const skills = useMemo(
+    () =>
+      (session?.commands ?? []).map((c) => ({
+        name: c.name,
+        description: c.description,
+        argumentHint: c.input && "hint" in c.input ? c.input.hint : undefined,
+      })),
+    [session?.commands],
+  );
+
+  const handleConfig = useCallback(
+    (configId: string, value: string) => {
+      setConfigOption(configId, value).catch((err) =>
+        console.error("[ChatView] error setting session option:", err),
+      );
+    },
+    [setConfigOption],
+  );
+  const handleModelSelect = useCallback(
+    (model: string | undefined) => {
+      if (model) handleConfig(pickers.modelConfigId, model);
+    },
+    [handleConfig, pickers.modelConfigId],
+  );
+  const handleModeSelect = useCallback(
+    (mode: string | undefined) => {
+      if (mode) handleConfig(pickers.modeConfigId, mode);
+    },
+    [handleConfig, pickers.modeConfigId],
+  );
+
+  // Shift+Tab cycles modes (dispatched from the workspace layout too).
+  useEffect(() => {
+    const handler = () => {
+      const { modes, mode } = pickers;
+      if (modes.length < 2) return;
+      const current = modes.findIndex((m) => m.id === mode);
+      handleModeSelect(modes[(current + 1) % modes.length].id);
+    };
+    window.addEventListener("band:toggle-mode", handler);
+    return () => window.removeEventListener("band:toggle-mode", handler);
+  }, [pickers, handleModeSelect]);
+
+  // Other agents' cached models, for switching agent from the model menu.
+  const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
+  useEffect(() => {
+    trpc.models.listAll
+      .query()
+      .then((data) => setAgentGroups(data.agents as AgentGroup[]))
+      .catch(() => setAgentGroups([]));
+  }, []);
+  const menuGroups = useMemo(
+    () =>
+      agentGroups.map((g) =>
+        g.agentId === codingAgentId && pickers.models.length > 0
+          ? { ...g, models: pickers.models }
+          : g,
+      ),
+    [agentGroups, codingAgentId, pickers.models],
+  );
+
+  // Forward a session the chat attached to on its own to the parent, for
+  // the tab title. Seeded with `initialSessionId` so a remount doesn't
+  // re-fire for the session the parent already knows.
   const lastNotifiedSessionRef = useRef<string | undefined>(initialSessionId);
   useEffect(() => {
     if (sessionId && lastNotifiedSessionRef.current !== sessionId) {
@@ -554,49 +414,20 @@ export function ChatView({
     }
   }, [sessionId, onSessionDiscovered]);
 
-  // Mirror legacy state shape for the queued-message render block + drag-drop.
-  // `subscription.queuedMessages` is the server-pushed authoritative list,
-  // but dnd-kit needs the local order to update immediately on drop
-  // (otherwise items snap back). `optimisticQueue`, when non-null,
-  // overrides the subscription's view until the next `queue-updated` event
-  // lands — at which point we clear it and the server is authoritative again.
+  // Queue view with drag-reorder. `optimisticQueue` holds the local order
+  // until the server's next `queue-updated` confirms it.
   type QueuedMessageView = { id: string; text: string; files?: QueuedFilePart[] };
   const [optimisticQueue, setOptimisticQueue] = useState<QueuedMessageView[] | null>(null);
-  // Clear optimistic state on every subscription update — the server is
-  // now the source of truth. If the user did rapid actions, the subscription
-  // catches up within ms; the small reconciliation flicker is acceptable.
-  //
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queuedMessages`
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queue`
   useEffect(() => {
     setOptimisticQueue(null);
-  }, [queuedMessages]);
-  const queuedMessagesView: QueuedMessageView[] = optimisticQueue ?? queuedMessages;
+  }, [queue]);
+  const queuedMessagesView: QueuedMessageView[] = optimisticQueue ?? queue;
 
-  // The current session this view is on.
-  //
-  // Once the user clicks "New session", `initialSessionCleared` is set to
-  // `true` and we MUST treat the chat as session-less regardless of what
-  // the subscription's `sessionId` reports. Without this, the still-open
-  // (pre-remount) subscription's `sessionId` keeps the chat looking like
-  // it's on the old session — the "session history" tab title stays, and
-  // the skeleton stays mounted via the `!!currentSessionId` branch of the
-  // skeleton condition below.
-  //
-  // Otherwise, the subscription's `sessionId` is authoritative once a
-  // `session-resolved` event has arrived; before that, fall back to
-  // `initialSessionId` (the parent's cached value from `chats.get`).
   const currentSessionId = initialSessionCleared ? undefined : (sessionId ?? initialSessionId);
 
-  // Drop the SDK-reported `maxContextTokens` already covered by the hook
-  // via reducer state — handled below where `usage` is consumed.
-
-  // Scroll-back pagination (issue #572). The cold subscribe replays only the
-  // recent window and reports `hasOlder` + `oldestOffset` via `history-meta`;
-  // `loadOlder()` fetches + prepends the previous page on demand. The top
-  // sentinel below wires an IntersectionObserver to it.
   const hasMore = subscription.hasOlder;
-  const loadingHistory =
-    !isStreaming && messages.length === 0 && !!initialSessionId && !subscription.isConnected;
+  const loadingHistory = !isStreaming && messages.length === 0 && !subscription.isConnected;
   const loadingOlder = subscription.loadingOlder;
 
   const handleStop = useCallback(() => {
@@ -608,22 +439,17 @@ export function ChatView({
   }, [isStreaming, onStreamingChange]);
 
   const handleEscape = useCallback(() => {
-    if (isStreaming) {
-      handleStop();
-    }
+    if (isStreaming) handleStop();
   }, [isStreaming, handleStop]);
 
-  // Session switching — handled by the parent (`ChatPane.onSwitchSession`)
-  // which persists to the server and bumps `paneKey` to remount this
-  // component with a clean reducer state. The new subscription opens
-  // against the new session's events.
+  // Session switching is handled by the parent, which persists the choice
+  // and remounts this component with a fresh subscription.
   const handleSelectSession = useCallback(
-    async (sessionId: string) => {
-      // Clear the server-side queue: queued messages were enqueued against
-      // the previous session; carrying them over isn't well-defined.
+    async (nextSessionId: string, summary?: string) => {
+      // Queued messages belong to the session they were queued against.
       trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
       onShowSessionListChange(false);
-      await onSwitchSession?.(sessionId);
+      await onSwitchSession?.(nextSessionId, summary);
     },
     [onSwitchSession, onShowSessionListChange, workspaceId, chatId],
   );
@@ -636,18 +462,13 @@ export function ChatView({
   }, [onSwitchSession, onShowSessionListChange, workspaceId, chatId]);
 
   useEffect(() => {
-    if (onNewSessionRef) {
-      onNewSessionRef.current = handleNewSession;
-    }
+    if (onNewSessionRef) onNewSessionRef.current = handleNewSession;
     return () => {
-      if (onNewSessionRef) {
-        onNewSessionRef.current = null;
-      }
+      if (onNewSessionRef) onNewSessionRef.current = null;
     };
   }, [onNewSessionRef, handleNewSession]);
 
-  // Global keyboard shortcut: Cmd/Ctrl+Shift+N → start new session.
-  // Only the visible chat pane in the active workspace responds.
+  // Cmd/Ctrl+Shift+N starts a new session in the visible chat pane.
   useEffect(() => {
     if (!visible || !wsActive) return;
     const onNewChat = () => handleNewSession();
@@ -658,13 +479,7 @@ export function ChatView({
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
-      // No pre-flight, no optimistic state, no `isStreaming` branch. The
-      // server queues server-side if a task is already running; the
-      // resulting `queue-updated` event lands on the subscription within
-      // ms. The legacy `handleSubmit` had four conditional branches
-      // (queue if streaming locally, probe tasks.get and queue if running
-      // remotely, send otherwise, fall through to send if probe failed) —
-      // all of them collapse into this one call.
+      // The server queues the message when a turn is already running.
       try {
         await send(message.text, message.files);
       } catch (err) {
@@ -676,27 +491,23 @@ export function ChatView({
 
   const handleCancelQueued = useCallback(
     (id: string) => {
-      // Optimistic update — subscription's queue-updated event clears
-      // optimisticQueue and replaces with server state.
-      setOptimisticQueue((current) => (current ?? queuedMessages).filter((m) => m.id !== id));
+      setOptimisticQueue((current) => (current ?? queue).filter((m) => m.id !== id));
       trpc.queue.remove.mutate({ workspaceId, chatId, id }).catch(() => {});
     },
-    [queuedMessages, workspaceId, chatId],
+    [queue, workspaceId, chatId],
   );
 
   const handleEditQueued = useCallback(
     (id: string, text: string) => {
       setOptimisticQueue((current) =>
-        (current ?? queuedMessages).map((m) => (m.id === id ? { ...m, text } : m)),
+        (current ?? queue).map((m) => (m.id === id ? { ...m, text } : m)),
       );
       trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
     },
-    [queuedMessages, workspaceId, chatId],
+    [queue, workspaceId, chatId],
   );
 
-  // Pointer sensor with a small activation distance so a click on the
-  // drag handle (or anywhere) doesn't accidentally start a drag —
-  // the user has to actually move a few pixels first.
+  // A small activation distance so a click doesn't start a drag.
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
@@ -705,15 +516,12 @@ export function ChatView({
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const base = optimisticQueue ?? queuedMessages;
+      const base = optimisticQueue ?? queue;
       const oldIdx = base.findIndex((m) => m.id === active.id);
       const newIdx = base.findIndex((m) => m.id === over.id);
       if (oldIdx === -1 || newIdx === -1) return;
       const reordered = arrayMove(base, oldIdx, newIdx);
       setOptimisticQueue(reordered);
-      // Persist the new order. queue.set replaces the whole queue;
-      // the subscription broadcasts the same shape back which clears the
-      // optimistic state.
       trpc.queue.set
         .mutate({
           workspaceId,
@@ -726,80 +534,27 @@ export function ChatView({
         })
         .catch(() => {});
     },
-    [optimisticQueue, queuedMessages, workspaceId, chatId],
+    [optimisticQueue, queue, workspaceId, chatId],
   );
 
-  const taskMap: TaskMap = useMemo(() => {
-    let map: TaskMap = new Map();
-    for (const msg of messages) {
-      for (const part of msg.parts) {
-        if (!isToolUIPart(part)) continue;
-        const toolPart = part as ToolPart;
-        const name = getToolName(toolPart);
-        if (!isTaskTool(name)) continue;
-        const item = toolPartToItem(toolPart);
-        map = applyTaskToolCall(map, item);
-      }
-    }
-    return map;
-  }, [messages]);
+  // Stable identity for the virtualizer's `getItemKey`.
+  const getMessageKey = useCallback((message: ChatMessage) => message.id, []);
 
-  // Stable identity for the virtualizer's `getItemKey` — without this,
-  // every `ChatView` render creates a fresh arrow function whose
-  // identity flips the `useVirtualizer` memoization keys, causing
-  // `getMeasurements()` to re-walk the full message count per render.
-  // At a fast-streaming agent (~30 text-delta events/s × N messages
-  // each), the saved per-second work scales linearly with conversation
-  // length.
-  const getMessageKey = useCallback((message: UIMessage) => message.id, []);
-
-  // Stabilise the `renderItem` closure across the streaming HOT PATH.
-  // `messages` is read through a ref because it's a fresh array on every
-  // text-delta (~30/sec); depending on it directly would change the
-  // callback identity 30×/sec and bust every windowed row's memo.
-  //
-  // `isStreaming` IS a real dependency, by contrast. It's a boolean that
-  // stays constant during streaming (so the hot path is unaffected) and
-  // flips only at task start/end. `VirtualRow` is `memo`-ized, so when a
-  // task ends WITHOUT a `messages` change — the reconnect-after-missed-
-  // `task-completed` case, where `subscription-opened{taskRunning:false}`
-  // updates only `status`/`taskRunning` and leaves the `messages`
-  // reference intact — the trailing row's `item` reference doesn't change.
-  // Reading `isStreaming` through a ref would then never re-run
-  // `renderItem`, so the "Thinking…" indicator on the last assistant
-  // message would spin forever. Making it a dep flips this callback's
-  // identity on the transition, busting the windowed rows' memo exactly
-  // once so the indicator clears. (Pairs with the reducer's authoritative
-  // `subscription-opened` clear: that fixes the state; this lets the
-  // per-message indicator observe it.)
+  // `messages` changes on every streamed chunk; read it through a ref so the
+  // row renderer keeps its identity and windowed rows keep their memo.
+  // `isStreaming` stays a real dependency: it flips only at turn start and
+  // end, and the last row's thinking indicator must see that flip.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const actionsRef = useRef({ answerPermission, answerElicitation });
+  actionsRef.current = { answerPermission, answerElicitation };
 
-  // Entrance-animation bookkeeping for the virtualized list. Rows remount on
-  // scroll, so "is this message NEW?" must be tracked per conversation mount:
-  // `seenMessageIdsRef` holds every id ever rendered (null until the first
-  // renderItem pass marks the initially-loaded history as seen, so history
-  // never animates); `enteringIdsRef` holds ids currently inside their
-  // entrance window so streaming re-renders (~30/sec) keep the class stable
-  // instead of toggling it off mid-animation.
+  // Entrance animation only for messages appended at the end after the
+  // first render; loaded history and prepended pages render instantly.
   const seenMessageIdsRef = useRef<Set<string> | null>(null);
   const enteringIdsRef = useRef<Set<string>>(new Set());
 
-  // ---------------------------------------------------------------------
-  // Scroll-back pagination — top sentinel observer.
-  //
-  // Prepending older messages grows content ABOVE the viewport. The actual
-  // scroll-anchoring (keeping the previously-top row pinned as the inserted
-  // rows measure their variable heights) lives in `VirtualizedMessageList`,
-  // where the virtualizer's native `scrollToIndex` can integrate with its own
-  // dynamic-measurement model. Here we only detect "user reached the top" and
-  // kick off the fetch. The other scroll writers don't fight us:
-  //   • `use-stick-to-bottom` only auto-scrolls when `isAtBottom`; load-older
-  //     fires at the TOP, so it never yanks to bottom.
-  //   • The first-paint reveal gate arms once per mount; pagination is later.
-  //   • The loading indicator is an absolute overlay, so toggling
-  //     `loadingOlder` doesn't shift content.
-  // ---------------------------------------------------------------------
+  // Scroll-back pagination: fetch older turns when the top sentinel shows.
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel || !scrollEl || !hasMore || loadingHistory) return;
@@ -809,29 +564,82 @@ export function ChatView({
           if (entry.isIntersecting) void loadOlder();
         }
       },
-      // Pre-fetch slightly before the sentinel is fully on-screen so the older
-      // page is usually ready by the time the user reaches the very top.
       { root: scrollEl, rootMargin: "150px 0px 0px 0px" },
     );
     io.observe(sentinel);
     return () => io.disconnect();
   }, [scrollEl, hasMore, loadingHistory, loadOlder]);
 
+  const renderEntry = useCallback((entry: Entry) => {
+    switch (entry.kind) {
+      case "text":
+        return entry.text.trim() ? (
+          <MessageResponse key={entry.id}>{entry.text}</MessageResponse>
+        ) : null;
+      case "thought":
+        return (
+          <details key={entry.id} className="group/thought text-muted-foreground">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs">
+              <Brain className="size-3.5" />
+              Thinking
+            </summary>
+            <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/50 pl-3 text-xs">
+              {entry.text}
+            </div>
+          </details>
+        );
+      case "tool":
+        return <ToolCall key={entry.id} entry={entry} />;
+      case "permission":
+        return (
+          <PermissionRequest
+            key={entry.id}
+            entry={entry}
+            onAnswer={(optionId) => actionsRef.current.answerPermission(entry.id, optionId)}
+          />
+        );
+      case "elicitation":
+        return (
+          <ElicitationForm
+            key={entry.id}
+            entry={entry}
+            onAnswer={(action, content) =>
+              actionsRef.current.answerElicitation(entry.id, action, content)
+            }
+          />
+        );
+      case "file":
+        return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
+      case "notice":
+        return (
+          <div
+            key={entry.id}
+            data-testid="chat-pane__notice"
+            data-level={entry.level}
+            className={cn(
+              "text-sm",
+              entry.level === "error" && "text-destructive",
+              entry.level === "warning" && "text-amber-600 dark:text-amber-400",
+              entry.level === "info" && "text-muted-foreground",
+            )}
+          >
+            {entry.text}
+          </div>
+        );
+    }
+  }, []);
+
   const renderMessageItem = useCallback(
-    (message: UIMessage, messageIndex: number) => {
+    (message: ChatMessage, messageIndex: number) => {
       const currentMessages = messagesRef.current;
       const isLastMessage = messageIndex === currentMessages.length - 1;
 
       const seen = seenMessageIdsRef.current;
       let entering = false;
       if (seen === null) {
-        // First renderItem pass for this conversation: mark the whole loaded
-        // history as seen without animating.
         seenMessageIdsRef.current = new Set(currentMessages.map((m) => m.id));
       } else if (!seen.has(message.id)) {
         seen.add(message.id);
-        // Only messages appended at the END animate. Pagination prepends land
-        // at low indices and must render instantly (they are also "unseen").
         if (messageIndex >= currentMessages.length - 2) {
           entering = true;
           enteringIdsRef.current.add(message.id);
@@ -840,138 +648,58 @@ export function ChatView({
       } else if (enteringIdsRef.current.has(message.id)) {
         entering = true;
       }
-      const isLastAssistant = message.role === "assistant" && isLastMessage;
-      const hasPendingInteractiveTool =
-        isLastAssistant &&
-        message.parts.some((p) => {
-          if (!isToolUIPart(p) || !IN_PROGRESS_STATES.has(p.state)) return false;
-          // Hoist `getToolName(p)` so the second check doesn't re-invoke
-          // it for every tool part on every render (~30 renders/sec
-          // during streaming).
-          const name = getToolName(p);
-          return name === "AskUserQuestion" || name === "ExitPlanMode";
-        });
-      const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
 
-      // Compute the grouped segments ONCE per render — `groupMessageParts`
-      // allocates a fresh array, and the previous version called it twice
-      // per assistant render (once for the emptiness guard, once for the
-      // map). With N assistant messages and ~30 deltas/sec that's 60N
-      // redundant allocations/sec; one call cuts it in half.
-      const segments = groupMessageParts(message.parts);
-
-      if (message.role !== "assistant") {
-        // User messages render normally
-        if (segments.length === 0) return null;
+      if (message.role === "user") {
         return (
-          <Message from="user" className={entering ? "chat-message-enter" : undefined}>
+          <Message
+            from="user"
+            className={cn(entering && "chat-message-enter", message.pending && "opacity-80")}
+          >
             <MessageContent>
-              {segments.map((segment) => {
-                if (
-                  segment.type === "text" &&
-                  segment.part.type === "text" &&
-                  segment.part.text.trim()
-                ) {
-                  return (
-                    <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                      {segment.part.text}
-                    </MessageResponse>
-                  );
-                }
-                if (segment.type === "file") {
-                  return (
-                    <MessageFilePart
-                      key={`${message.id}-file-${segment.partIndex}`}
-                      part={segment.part}
-                    />
-                  );
-                }
-                return null;
-              })}
+              {message.files?.map((file) => (
+                <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
+              ))}
+              {message.text.trim() && <MessageResponse>{message.text}</MessageResponse>}
             </MessageContent>
           </Message>
         );
       }
 
-      // Assistant message — under the chat-events model every queued
-      // turn becomes its own user-role message, so we never need to
-      // split an assistant message at `data-prompt` boundaries.
-      if (segments.length === 0 && !showThinking) return null;
+      // The agent waiting on the user isn't "thinking".
+      const waiting = message.entries.some(
+        (e) => (e.kind === "permission" || e.kind === "elicitation") && !e.answer,
+      );
+      const showThinking = isLastMessage && isStreaming && !waiting;
+      if (message.entries.length === 0 && !showThinking) return null;
       return (
         <Message from="assistant" className={entering ? "chat-message-enter" : undefined}>
           <MessageContent>
-            {segments.map((segment) => {
-              if (segment.type === "text") {
-                const { part, partIndex } = segment;
-                if (part.type === "text" && part.text.trim()) {
-                  return (
-                    <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                      {part.text}
-                    </MessageResponse>
-                  );
-                }
-                return null;
-              }
-              if (segment.type === "file") {
-                return (
-                  <MessageFilePart
-                    key={`${message.id}-file-${segment.partIndex}`}
-                    part={segment.part}
-                  />
-                );
-              }
-              const item = toolPartToItem(segment.part);
-              if (isTaskTool(item.toolName)) return null;
-              return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
-            })}
+            {message.entries.map(renderEntry)}
             {showThinking && <ThinkingIndicator />}
           </MessageContent>
         </Message>
       );
     },
-    [isStreaming],
+    [isStreaming, renderEntry],
   );
 
   const getLastUserMessage = useCallback((): string | undefined => {
-    // Under the chat-events model, queued/drained user messages emit their
-    // own user-role messages — no need to scan assistant parts for
-    // `data-prompt` markers (that legacy AI-SDK chunk type is gone).
-    // Read through `messagesRef` (kept in sync above) so the callback
-    // identity is stable across re-renders — `getLastUserMessage` is
-    // a cold-path keyboard-shortcut handler, and re-creating it on
-    // every streaming delta was wasted work.
-    const currentMessages = messagesRef.current;
-    for (let i = currentMessages.length - 1; i >= 0; i--) {
-      if (currentMessages[i].role !== "user") continue;
-      const text = currentMessages[i].parts
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join("\n")
-        .trim();
-      if (text) return text;
+    const current = messagesRef.current;
+    for (let i = current.length - 1; i >= 0; i--) {
+      const m = current[i];
+      if (m.role === "user" && m.text.trim()) return m.text.trim();
     }
     return undefined;
   }, []);
 
   return (
     // Scope every `band-file:` link clicked inside this chat to *this*
-    // workspace — `dispatchOpenFile` reads the id from context, so a
-    // dockview that has both workspace A and workspace B alive at once
-    // (every visited workspace stays mounted) routes each click to the
-    // chat's owning workspace rather than racing every mounted layout
-    // against the active tab. Without
-    // this, a click in workspace A's chat would open the file in
-    // whichever workspace happens to be active when the listener fires
-    // (issue #539).
+    // workspace (issue #539).
     <FileLinkWorkspaceProvider workspaceId={workspaceId}>
       <div className="flex min-h-0 flex-1 flex-col">
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
-          {/* Older-messages loading indicator — ABSOLUTELY positioned so it
-              never contributes to scroll height. A skeleton in the scroll flow
-              would shift content above the viewport the instant `loadingOlder`
-              flips true (before the prepend even lands), fighting the scroll
-              anchor and producing exactly the visible jump #572 set out to
-              eliminate. An overlay spinner stays out of the layout entirely. */}
+          {/* Absolutely positioned so it never shifts content while an older
+              page loads (issue #572). */}
           {loadingOlder && (
             <output
               className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center"
@@ -986,35 +714,18 @@ export function ChatView({
             </output>
           )}
           <ConversationContent>
-            {/* Sentinel for scroll-back pagination */}
             {hasMore && !loadingHistory && (
               <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
             )}
 
-            {/*
-            Skeleton / empty-state decision (issue #478, simplified):
-            The ONLY signal that determines "we're still loading vs. done
-            loading" is whether the EventSource is connected. Everything
-            else (initialSessionId, initialSessionCleared, currentSessionId,
-            sessionQueryDone) ends up racy across the
-            setInitialSessionId / setPaneKey batched updates fired by
-            `New session` and `Select session`, and the skeleton would
-            get stuck whenever those races resolved in the wrong order.
-
-            - Not connected yet → skeleton (we don't know what's coming).
-            - Connected + no messages → empty state (server told us
-              nothing's there, or we just cleared the session).
-            - Connected + messages → render them.
-
-            JSONL replay events arrive over the same SSE response that
-            flips `isConnected` to true, so the gap between "connected
-            with empty messages" and "messages populate" is sub-frame in
-            practice — empty-state flash is imperceptible.
-          */}
+            {/* Not connected yet → skeleton. Connected with nothing → empty
+                state. The replay arrives on the same response that flips
+                `isConnected`, so the gap is sub-frame. */}
             {messages.length === 0 && !subscription.isConnected && <ConversationSkeleton />}
 
             {messages.length === 0 && subscription.isConnected && (
               <ConversationEmptyState
+                data-testid="chat-pane__empty-state"
                 icon={
                   agentType ? (
                     <AgentIcon type={agentType} className="size-8" />
@@ -1035,12 +746,7 @@ export function ChatView({
               />
             )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
-              // No `chat-pane__assistant-message` testid on the
-              // standalone thinking bubble — locators that target
-              // assistant message bubbles should never pick up the
-              // intermediate "agent is thinking" placeholder. The
-              // dedicated `chat-pane__thinking-indicator` testid on
-              // `ThinkingIndicator` is what tests use for this state.
+              // No assistant-message testid on the standalone placeholder.
               <Message from="assistant" data-testid={undefined}>
                 <MessageContent>
                   <ThinkingIndicator />
@@ -1075,7 +781,7 @@ export function ChatView({
         </Conversation>
 
         <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
-          <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
+          <TaskListWidget plan={plan} workspaceId={workspaceId} />
           <PromptInput
             onSubmit={handleSubmit}
             draftKey={workspaceId}
@@ -1090,52 +796,61 @@ export function ChatView({
               placeholder="Type a message..."
               onEscape={handleEscape}
               onPreviousMessage={getLastUserMessage}
-              // Shift+Tab toggles Edit/Plan mode, but only while the chat
-              // input has focus — the same band:toggle-mode listener picks
-              // up palette invocations as well.
               onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
             />
             <PromptInputActions>
               <div className="flex items-center gap-0.5">
                 <PromptInputAttach />
-                {supportsSessionListing && (
-                  <SessionHistoryMenu
-                    workspaceId={workspaceId}
-                    chatId={chatId}
-                    activeSessionId={currentSessionId}
-                    onSelectSession={handleSelectSession}
-                    onNewSession={handleNewSession}
-                  />
-                )}
+                <SessionHistoryMenu
+                  workspaceId={workspaceId}
+                  chatId={chatId}
+                  activeSessionId={currentSessionId}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                />
                 {contextMeterEnabled && (
-                  <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
+                  <ContextMeter usage={session?.usage ?? null} costUsd={session?.costUsd ?? null} />
                 )}
-                {(agentGroups.length > 0 || models.length > 0) && (
+                {(menuGroups.length > 0 || pickers.models.length > 0) && (
                   <AgentModelMenu
-                    agentGroups={agentGroups}
+                    agentGroups={
+                      menuGroups.length > 0
+                        ? menuGroups
+                        : [
+                            {
+                              agentId: codingAgentId ?? "",
+                              agentType: agentType ?? "",
+                              agentLabel: "",
+                              models: pickers.models,
+                            },
+                          ]
+                    }
                     currentAgentId={codingAgentId}
                     currentAgentType={agentType}
-                    selectedModel={selectedModel}
+                    selectedModel={pickers.model}
                     onSelectModel={handleModelSelect}
                     onSwitchAgent={onSwitchAgent}
                     disabled={isStreaming}
                   />
                 )}
-                {modes.length > 0 && (
-                  <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
+                {pickers.modes.length > 0 && (
+                  <ModeMenu
+                    modes={pickers.modes}
+                    selected={pickers.mode}
+                    onSelect={handleModeSelect}
+                  />
                 )}
+                {pickers.others.map((option) => (
+                  <ConfigOptionMenu
+                    key={option.id}
+                    option={option}
+                    onSelect={(value) => handleConfig(option.id, value)}
+                  />
+                ))}
               </div>
-              {/* PromptInputSubmit was built against the AI SDK's ChatStatus
-                union (`"ready" | "submitted" | "streaming" | "error"`).
-                Our reducer's ChatStatus is the same shape under different
-                names; map at the boundary. */}
               <PromptInputSubmit
                 status={
-                  status === "submitting"
-                    ? "submitted"
-                    : status === "idle" || status === "completed"
-                      ? "ready"
-                      : status
+                  status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
                 }
                 onStop={handleStop}
               />
@@ -1144,6 +859,51 @@ export function ChatView({
         </div>
       </div>
     </FileLinkWorkspaceProvider>
+  );
+}
+
+/** A select-type session config option other than model and mode, such as
+ *  reasoning effort. */
+function ConfigOptionMenu({
+  option,
+  onSelect,
+}: {
+  option: SelectOption;
+  onSelect: (value: string) => void;
+}) {
+  const choices = selectChoices(option);
+  const current = choices.find((c) => c.id === option.currentValue);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid={`chat-pane__config-option--${option.id}`}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <SlidersHorizontal className="size-3" />
+          {current?.name ?? option.name}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[160px]">
+        <DropdownMenuLabel>{option.name}</DropdownMenuLabel>
+        {choices.map((choice) => (
+          <DropdownMenuItem
+            key={choice.id}
+            onClick={() => onSelect(choice.id)}
+            className={cn(
+              "flex flex-col items-start gap-0.5",
+              choice.id === option.currentValue && "bg-accent",
+            )}
+          >
+            <span className="text-sm font-medium">{choice.name}</span>
+            {choice.description && (
+              <span className="text-xs text-muted-foreground">{choice.description}</span>
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1236,6 +996,7 @@ function AgentModelMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          data-testid="chat-pane__model-menu"
           disabled={disabled}
           className={cn(
             "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
@@ -1337,55 +1098,6 @@ function relativeTime(ms: number): string {
   return `${months}mo ago`;
 }
 
-// Approximate context window per model. Fallback for the chat context meter
-// when an adapter doesn't report `maxContextTokens` live and the picker
-// doesn't supply a `contextWindow` on the ModelInfo. Claude Code adapter
-// always passes the SDK's `getContextUsage().maxTokens`, so this map is
-// fallback-only for Claude; Codex/Gemini/Cursor SDKs don't expose a context
-// window field, so they rely on this map directly.
-//
-// Order matters: `getContextWindow` walks entries with the longest key first
-// so "claude-opus-4-7[1m]" matches before "claude-opus-4-7".
-const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // Claude — Opus 4.x ships a 200k default and a separate [1m] long-context
-  // tier. Sonnet 4.6 is 1M GA at standard pricing (the [1m] suffix is a
-  // legacy alias). Haiku 4.5 stays at 200k.
-  "claude-opus-4-7[1m]": 1_000_000,
-  "claude-opus-4-6[1m]": 1_000_000,
-  "claude-opus-4-7": 200_000,
-  "claude-opus-4-6": 200_000,
-  "claude-sonnet-4-6[1m]": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5": 200_000,
-  // OpenAI — GPT-5 family runs at 400k inside Codex CLI (the Responses API
-  // tier is 1M but Band shells out to the codex binary which caps at 400k).
-  "gpt-5": 400_000,
-  "gpt-4.1": 1_000_000,
-  "gpt-4o": 128_000,
-  // Gemini 2.5 Pro and Flash are both 1M (~1,048,576).
-  "gemini-2.5-pro": 1_000_000,
-  "gemini-2.5-flash": 1_000_000,
-};
-
-// Pre-sorted entries by descending key length so the prefix-match
-// branch in `getContextWindow` doesn't re-sort on every call. The
-// `MODEL_CONTEXT_WINDOWS` map is module-level and immutable so the
-// sort is correct at module init time.
-const SORTED_MODEL_CONTEXT_ENTRIES: ReadonlyArray<[string, number]> = Object.entries(
-  MODEL_CONTEXT_WINDOWS,
-).sort(([a], [b]) => b.length - a.length);
-
-function getContextWindow(model: string | undefined): number {
-  if (!model) return 200_000;
-  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
-  // Prefix match — sort by descending key length so longer/more specific
-  // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
-  for (const [key, value] of SORTED_MODEL_CONTEXT_ENTRIES) {
-    if (model.startsWith(key)) return value;
-  }
-  return 200_000;
-}
-
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
@@ -1421,50 +1133,32 @@ function ModelLine({ model }: { model: ModelInfo }) {
 const DONUT_RADIUS = 9;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 
+/**
+ * Context-window pressure from the agent's ACP `usage_update` (tokens in
+ * context out of the window size), plus the session's cost: the agent's
+ * own figure, or Band's estimate from token counts for agents that report
+ * none.
+ */
 function ContextMeter({
   usage,
-  model,
-  modelInfo,
+  costUsd,
 }: {
-  usage: UsageData | undefined;
-  model: string | undefined;
-  modelInfo?: ModelInfo;
+  usage: SessionState["usage"];
+  costUsd: number | null;
 }) {
-  // Adapters compute context size with provider-aware semantics and pass it
-  // through `contextTokens`. Only fall back to summation for legacy snapshots
-  // that predate that field. Provider semantics differ:
-  //   • Claude: `inputTokens` is the *uncached* portion → must add cache.
-  //   • Codex/OpenAI: `inputTokens` is the full prompt (already includes
-  //     cached) → adding `cacheReadTokens` would double-count.
-  // `legacyContextSize` uses the `provider` discriminator (with a
-  // cacheCreationTokens-presence fallback for old snapshots).
-  const contextSize = usage ? (usage.contextTokens ?? legacyContextSize(usage)) : 0;
-  // Window denominator priority:
-  //   1. SDK-reported `maxContextTokens` (Claude only, auto-compact-aware)
-  //   2. `modelInfo.contextWindow` from the adapter's listModels()
-  //   3. Static MODEL_CONTEXT_WINDOWS map keyed by id prefix
-  const window = usage?.maxContextTokens ?? modelInfo?.contextWindow ?? getContextWindow(model);
-  const pct = Math.min(100, (contextSize / window) * 100);
+  const pct = usage && usage.size > 0 ? Math.min(100, (usage.used / usage.size) * 100) : 0;
   const pctRounded = Math.round(pct);
   const danger = pct >= 85;
   const warn = !danger && pct >= 65;
-  // Monochrome gray progression — the donut sits among other muted-foreground
-  // affordances in PromptInputActions, so it should read as a quiet status
-  // glyph rather than a colored alert. Higher usage = darker shade.
+  // Monochrome: the donut is a quiet status glyph among the other muted
+  // affordances. Higher usage = darker shade.
   const progressColor = danger
     ? "stroke-foreground"
     : warn
       ? "stroke-muted-foreground"
       : "stroke-muted-foreground/60";
-  // Empty arc would render as a full ring at strokeDashoffset = circumference,
-  // so dot-treat the 0% case explicitly to match a "nothing yet" affordance.
   const dashOffset = pct <= 0 ? DONUT_CIRCUMFERENCE : DONUT_CIRCUMFERENCE * (1 - pct / 100);
-
-  // Popover (controlled) instead of Tooltip so the breakdown is reachable on
-  // touch devices where hover doesn't fire reliably. On desktop we still want
-  // the lightweight hover-to-peek feel, so `onPointerEnter`/`onPointerLeave`
-  // open/close the popover when the input is a mouse. Touch and pen taps fall
-  // through to Popover's built-in click toggle.
+  // Controlled popover: hover-to-peek with a mouse, tap on touch devices.
   const [open, setOpen] = useState(false);
 
   return (
@@ -1472,9 +1166,12 @@ function ContextMeter({
       <PopoverTrigger asChild>
         <button
           type="button"
-          // Match `SessionHistoryMenu`'s button shell so the donut sits
-          // visually on the same row of affordances inside PromptInputActions.
-          aria-label={`Context window: ${pctRounded}% of ${formatTokens(window)}`}
+          data-testid="chat-pane__context-meter"
+          aria-label={
+            usage
+              ? `Context window: ${pctRounded}% of ${formatTokens(usage.size)}`
+              : "Context window: no usage yet"
+          }
           className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onPointerEnter={(e) => {
             if (e.pointerType === "mouse") setOpen(true);
@@ -1507,9 +1204,6 @@ function ContextMeter({
         </button>
       </PopoverTrigger>
       <PopoverContent
-        // Keep the popover open while the mouse is over its content (otherwise
-        // hovering off the trigger into the popover would close it before the
-        // user can read it). Touch users dismiss via tap-outside / Escape.
         onPointerEnter={(e) => {
           if (e.pointerType === "mouse") setOpen(true);
         }}
@@ -1522,60 +1216,23 @@ function ContextMeter({
       >
         <div className="space-y-0.5 text-xs">
           {usage ? (
-            <>
-              <div>Input: {usage.inputTokens.toLocaleString()}</div>
-              <div>Output: {usage.outputTokens.toLocaleString()}</div>
-              {usage.cacheReadTokens !== undefined && (
-                <div>Cache read: {usage.cacheReadTokens.toLocaleString()}</div>
-              )}
-              {usage.cacheCreationTokens !== undefined && (
-                <div>Cache write: {usage.cacheCreationTokens.toLocaleString()}</div>
-              )}
-              {usage.reasoningOutputTokens !== undefined && (
-                <div>Reasoning output: {usage.reasoningOutputTokens.toLocaleString()}</div>
-              )}
-              {usage.totalProcessedTokens !== undefined &&
-                usage.totalProcessedTokens > contextSize && (
-                  <div>Total processed: {usage.totalProcessedTokens.toLocaleString()}</div>
-                )}
-              <div className="mt-1 border-t pt-1">
-                Context: {contextSize.toLocaleString()} / {window.toLocaleString()} ({pctRounded}%)
-              </div>
-            </>
+            <div>
+              Context: {usage.used.toLocaleString()} / {usage.size.toLocaleString()} ({pctRounded}%)
+            </div>
           ) : (
-            <div>Context window: {window.toLocaleString()} tokens</div>
+            <div>No usage reported yet</div>
           )}
+          {costUsd !== null && <div>Cost: ${costUsd.toFixed(costUsd < 1 ? 3 : 2)}</div>}
         </div>
       </PopoverContent>
     </Popover>
   );
 }
 
-/**
- * Backward-compat fallback for usage snapshots that lack `contextTokens`.
- * Uses `provider` when set; falls back to `cacheCreationTokens` presence as
- * a Claude detector for snapshots persisted before the provider field
- * existed. Claude `inputTokens` excludes cached content (must add cache
- * fields); other providers report the full prompt.
- */
-function legacyContextSize(usage: UsageData): number {
-  const isClaude = usage.provider === "claude" || usage.cacheCreationTokens !== undefined;
-  if (isClaude) {
-    return (
-      usage.inputTokens +
-      (usage.cacheReadTokens ?? 0) +
-      (usage.cacheCreationTokens ?? 0) +
-      (usage.reasoningOutputTokens ?? 0)
-    );
-  }
-  return usage.inputTokens + (usage.reasoningOutputTokens ?? 0);
-}
-
 interface SessionHistoryItem {
   sessionId: string;
   summary: string;
   lastModified: number;
-  gitBranch?: string;
 }
 
 function SessionHistoryMenu({
@@ -1588,7 +1245,7 @@ function SessionHistoryMenu({
   workspaceId: string;
   chatId: string;
   activeSessionId?: string;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, summary: string) => void;
   onNewSession: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1646,7 +1303,12 @@ function SessionHistoryMenu({
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
         ) : sessions.length === 0 ? (
-          <div className="px-3 py-4 text-center text-sm text-muted-foreground">No sessions yet</div>
+          <div
+            data-testid="chat-pane__session-history-empty"
+            className="px-3 py-4 text-center text-sm text-muted-foreground"
+          >
+            No sessions yet
+          </div>
         ) : (
           <div className="max-h-64 overflow-y-auto">
             {sessions.map((session) => {
@@ -1654,22 +1316,13 @@ function SessionHistoryMenu({
               return (
                 <DropdownMenuItem
                   key={session.sessionId}
-                  onSelect={() => onSelectSession(session.sessionId)}
+                  onSelect={() => onSelectSession(session.sessionId, session.summary)}
                   className={cn("flex flex-col items-start gap-0.5", isActive && "bg-accent")}
                 >
                   <span className="line-clamp-1 text-sm font-medium">{session.summary}</span>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{relativeTime(session.lastModified)}</span>
-                    {session.gitBranch && (
-                      <>
-                        <span className="text-border">·</span>
-                        <span className="inline-flex items-center gap-1">
-                          <GitBranch className="size-2.5" />
-                          {session.gitBranch}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {session.lastModified ? relativeTime(session.lastModified) : ""}
+                  </span>
                 </DropdownMenuItem>
               );
             })}

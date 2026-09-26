@@ -1,7 +1,10 @@
-import type { CodingAgent, SessionUsageSnapshot } from "@band-app/coding-agent";
+import {
+  getUsageReader,
+  type SessionUsageSnapshot,
+  type UsageReader,
+} from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@/dashboard";
-import { createWorkspaceAgent } from "../agents/agent-pool";
 import { ProjectQueries } from "../db/queries/projects";
 import { SettingsQueries } from "../db/queries/settings";
 import { UsageEventQueries } from "../db/queries/usage-events";
@@ -25,7 +28,7 @@ function hourStartUtc(epochMs: number): number {
 }
 
 /**
- * Bucket the adapter's per-turn snapshot into one row per (hour-start,
+ * Bucket the usage reader's per-turn snapshot into one row per (hour-start,
  * model). Sums every metric column inside the bucket.
  *
  * The `externalKey` encodes the bucket coordinates verbatim
@@ -92,9 +95,9 @@ const log = createLogger("usage-scanner");
  * Reports usage scanner (issue #425).
  *
  * Per-tick: iterate every Band workspace × every installed coding agent.
- * For each pair, ask the adapter `listSessions(workspaceDir)` for the
- * sessions tied to that cwd, filter by `lastModified > watermark`, and
- * call `agent.getSessionUsage(sessionId, workspaceDir)` for the ones
+ * For each pair, ask the agent's usage reader `listSessions(workspaceDir)`
+ * for the sessions tied to that cwd, filter by `lastModified > watermark`,
+ * and call `reader.getSessionUsage(sessionId, workspaceDir)` for the ones
  * that have changed. The returned per-turn snapshot is **bucketed by
  * (hour, model)** and one row per bucket is upserted into
  * `usage_events`, keyed by
@@ -117,8 +120,9 @@ const log = createLogger("usage-scanner");
  *
  * Two design choices worth noting:
  *
- *   • **Adapter ownership.** Each adapter knows its provider's on-disk
- *     format and handles its own ratecard fallback (`pricing.ts`). This
+ *   • **Reader ownership.** Each usage reader in `@band-app/coding-agent`
+ *     knows its provider's on-disk format and handles its own ratecard
+ *     fallback (`pricing.ts`). This
  *     module is provider-agnostic — it sequences workspaces × agents,
  *     buckets the returned turns, and writes the resulting rows.
  *
@@ -149,11 +153,17 @@ export interface UsageScannerDeps {
     project: string;
     worktreePath: string;
   }>;
-  /** Override for tests — defaults to enumerating settings.codingAgents
-   *  and instantiating a workspace-rooted adapter for each one. */
-  listAgents?: () => Array<{ agentId: string; agentType: string }>;
-  /** Override for tests — defaults to the real agent pool. */
-  createWorkspaceAgent?: (worktreePath: string, agentId: string) => Promise<CodingAgent>;
+  /** Override for tests — defaults to enumerating settings.codingAgents.
+   *  `command` is the definition's configured binary, if any. */
+  listAgents?: () => Array<{ agentId: string; agentType: string; command?: string }>;
+  /** Override for tests — defaults to `getUsageReader` from
+   *  `@band-app/coding-agent`. Returns `undefined` for agents with no
+   *  on-disk usage data. */
+  getUsageReader?: (agent: {
+    agentId: string;
+    agentType: string;
+    command?: string;
+  }) => UsageReader | undefined;
   /** Wall-clock — overridable for tests. */
   now?: () => number;
   /** Per-(workspace, agent) cap on sessions processed each tick.
@@ -253,7 +263,7 @@ export class UsageScannerService {
   private readonly scanState: UsageScanStateQueries;
   private readonly listWorkspaces: NonNullable<UsageScannerDeps["listWorkspaces"]>;
   private readonly listAgents: NonNullable<UsageScannerDeps["listAgents"]>;
-  private readonly createWorkspaceAgent: NonNullable<UsageScannerDeps["createWorkspaceAgent"]>;
+  private readonly getUsageReader: NonNullable<UsageScannerDeps["getUsageReader"]>;
   private readonly now: () => number;
   private readonly maxSessionsPerTick: number;
   private readonly isPollingEnabled: () => boolean;
@@ -263,7 +273,7 @@ export class UsageScannerService {
     this.scanState = deps.scanState;
     this.listWorkspaces = deps.listWorkspaces ?? defaultListWorkspaces;
     this.listAgents = deps.listAgents ?? defaultListAgents;
-    this.createWorkspaceAgent = deps.createWorkspaceAgent ?? createWorkspaceAgent;
+    this.getUsageReader = deps.getUsageReader ?? defaultGetUsageReader;
     this.now = deps.now ?? Date.now;
     this.maxSessionsPerTick = deps.maxSessionsPerTick ?? MAX_SESSIONS_PER_TICK;
     this.isPollingEnabled = deps.isPollingEnabled ?? defaultIsPollingEnabled;
@@ -334,15 +344,15 @@ export class UsageScannerService {
    *      a multi-second sync-parse burst.
    *
    *   3. For each session in the slice: yield to the event loop, ask
-   *      the adapter for its usage snapshot, bucket the turns by
+   *      the usage reader for its snapshot, bucket the turns by
    *      (hour, model), and **upsert all of that session's buckets in
    *      one SQLite transaction**. One fsync per session instead of
    *      one per bucket.
    *
    * Defends against:
-   *   • Adapter without `listSessions` or `getSessionUsage` (skip).
-   *   • Agent definition pointing at a missing binary (instantiation
-   *     throws — caught, watermark untouched, retried next tick).
+   *   • Agent type with no usage reader (skip).
+   *   • Reader lookup or `listSessions` throwing, e.g. a missing
+   *     `opencode` binary (caught, watermark untouched, retried next tick).
    *   • A session listed but missing on disk (getSessionUsage returns
    *     null — we just skip without advancing).
    *
@@ -352,25 +362,25 @@ export class UsageScannerService {
    */
   private async scanPair(
     ws: { workspaceId: string; project: string; worktreePath: string },
-    a: { agentId: string; agentType: string },
+    a: { agentId: string; agentType: string; command?: string },
   ): Promise<number> {
-    let agent: CodingAgent;
+    let reader: UsageReader | undefined;
     try {
-      agent = await this.createWorkspaceAgent(ws.worktreePath, a.agentId);
+      reader = this.getUsageReader(a);
     } catch (err) {
-      // Missing binary, broken config — log debug and bail; next tick
-      // will retry. We don't punish all workspaces for one bad agent.
-      log.debug({ err, agentId: a.agentId }, "failed to instantiate agent for scan");
+      // Broken config — log debug and bail; next tick will retry. We
+      // don't punish all workspaces for one bad agent.
+      log.debug({ err, agentId: a.agentId }, "failed to resolve usage reader for scan");
       return 0;
     }
 
-    if (!agent.listSessions || !agent.getSessionUsage) return 0;
+    if (!reader) return 0;
 
     const watermark = this.scanState.get(ws.workspaceId, a.agentType) ?? EPOCH_SENTINEL;
 
-    let sessions: Awaited<ReturnType<NonNullable<CodingAgent["listSessions"]>>>;
+    let sessions: Awaited<ReturnType<UsageReader["listSessions"]>>;
     try {
-      sessions = await agent.listSessions(ws.worktreePath);
+      sessions = await reader.listSessions(ws.worktreePath);
     } catch (err) {
       log.debug(
         { err, agentId: a.agentId, worktreePath: ws.worktreePath },
@@ -394,9 +404,9 @@ export class UsageScannerService {
       // agent SSE) a chance to run between sync-blocking parses.
       await yieldToEventLoop();
 
-      let snap: Awaited<ReturnType<NonNullable<CodingAgent["getSessionUsage"]>>>;
+      let snap: Awaited<ReturnType<UsageReader["getSessionUsage"]>>;
       try {
-        snap = await agent.getSessionUsage(s.sessionId, ws.worktreePath);
+        snap = await reader.getSessionUsage(s.sessionId, ws.worktreePath);
       } catch (err) {
         log.debug(
           { err, sessionId: s.sessionId, agentType: a.agentType },
@@ -420,7 +430,7 @@ export class UsageScannerService {
       // class-level doc and `aggregateTurnsByHourAndModel` for the
       // bucket key rationale. Each tick re-aggregates the whole
       // session and `upsertBatch` REPLACES the bucket totals — that's
-      // correct because the adapter's `getSessionUsage` returns the
+      // correct because the reader's `getSessionUsage` returns the
       // canonical totals every time, not deltas.
       const buckets = aggregateTurnsByHourAndModel(snap, a.agentType);
       const records = buckets.map((bucket) => ({
@@ -500,7 +510,20 @@ function defaultListWorkspaces(): ReturnType<NonNullable<UsageScannerDeps["listW
 function defaultListAgents(): ReturnType<NonNullable<UsageScannerDeps["listAgents"]>> {
   const settings = new SettingsQueries().load();
   const codingAgents = settings.codingAgents ?? [];
-  return codingAgents.map((def) => ({ agentId: def.id, agentType: def.type }));
+  return codingAgents.map((def) => ({
+    agentId: def.id,
+    agentType: def.type,
+    command: def.command,
+  }));
+}
+
+/** Default reader lookup — the per-agent-type readers from
+ *  `@band-app/coding-agent`, with the definition's configured binary. */
+function defaultGetUsageReader(agent: {
+  agentType: string;
+  command?: string;
+}): UsageReader | undefined {
+  return getUsageReader(agent.agentType, { command: agent.command });
 }
 
 /**

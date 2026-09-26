@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { cliHeadlessInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
@@ -8,7 +9,7 @@ import {
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
-// FRAGILE: `agentService`, `terminalService`, and `workspaceService` are
+// FRAGILE: `terminalService` and `workspaceService` are
 // imported at module load but referenced ONLY inside function bodies
 // (`spawnCronTerminal` and friends). `workspace-service` already imports
 // `cronjobService` from this file, so the two form an ESM cycle — the same
@@ -18,8 +19,8 @@ import {
 // dereference at call time. The `via` enum below is deliberately NOT imported
 // from `workspace-service` for exactly this reason — see `cronjobVia`.
 import { formatShellCommand } from "./_utils/format-shell-command";
-import { agentService } from "./agent-service";
 import { BAND_CRON_ID_LABEL, type ChatSession, chatService } from "./chat-service";
+import { settingsService } from "./settings-service";
 import { loadState } from "./state";
 import { TaskConflictError, taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
@@ -519,7 +520,7 @@ export class CronjobService {
    * `WorkspaceService.create` (#551), but adapted for a recurring cron in two
    * important ways:
    *
-   *   - **Headless, not interactive.** We use `adapter.cliHeadlessInvocation`
+   *   - **Headless, not interactive.** We use `cliHeadlessInvocation`
    *     (`claude -p`, `codex exec`, …), NOT the interactive `cliInvocation`
    *     that workspace-create uses. The interactive REPL never exits on its
    *     own, so the pane would stay parked after the turn — the shell's `exit`
@@ -592,23 +593,15 @@ export class CronjobService {
 
       // Resolve the agent's HEADLESS CLI invocation on the request thread so we
       // can fall back to chat synchronously when it's unsupported (e.g.
-      // cursor-cli). No `codingAgentId` on the cron row — use the workspace's
-      // default agent. `createWorkspaceAgent` deliberately does NOT register in
-      // the chat agent pool (see its doc in `infra/agents/agent-pool.ts`) — it
-      // just constructs a standalone adapter — so this create-then-`abort`
-      // leaves no pool slot behind, the same one-shot pattern
-      // `workspaceService.generateCommitMessage` uses.
-      const adapter = await agentService.createWorkspaceAgent(workspace.worktree.path);
-      const invocation = adapter.cliHeadlessInvocation?.(job.prompt);
-      // Release the short-lived adapter. `cliHeadlessInvocation` returns pure
-      // data and starts no session/subprocess, so this `abort` is a safe no-op
-      // for every current adapter; it's kept as a belt-and-braces release in
-      // case a future adapter allocates a handle on construction.
-      adapter.abort?.();
-      if (!invocation || invocation.unsupported) {
-        const reason = invocation?.reason ?? "adapter does not expose cliHeadlessInvocation";
+      // cursor-cli). No `codingAgentId` on the cron row — use the default
+      // agent definition.
+      const agentDef = settingsService.getAgentDefinition();
+      const invocation = cliHeadlessInvocation(agentDef.type, job.prompt, {
+        command: agentDef.command,
+      });
+      if (invocation.unsupported) {
         log.warn(
-          { jobId: job.id, workspaceId, reason },
+          { jobId: job.id, workspaceId, reason: invocation.reason },
           "via=terminal requested but agent has no headless CLI; falling back to chat",
         );
         return { terminalId: null };

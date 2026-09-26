@@ -30,16 +30,17 @@
  *      seeded message is visible (the conversation parked at the end).
  *
  * Architecture mirrors `chat-virtualization.spec.ts`: REAL production
- * `dist/start-server.mjs` against a fresh tmp home, NO tRPC mocking, the
- * chat-events SSE stream replays a seeded session JSONL through the real
- * Claude Code adapter, and the UI is driven through `ChatPanePage`.
+ * `dist/start-server.mjs` against a fresh tmp home, NO tRPC mocking, a
+ * session seeded in the ACP stub agent's store is imported with
+ * `session/load` and replayed by the chat-events SSE stream, and the UI is
+ * driven through `ChatPanePage`.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { fakeAgentPath } from "./helpers/fake-agent";
+import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -65,8 +66,6 @@ const TURNS = 300;
 // Wide viewport so useIsDesktop() reports true and the shared dockview
 // renders the chat pane in its desktop layout.
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = fakeAgentPath();
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -96,24 +95,18 @@ test.beforeAll(async () => {
         id: "claude-code",
         type: "claude-code",
         label: "Claude Code",
-        // Never spawned in this test (we only replay history), but the
-        // agent config must validate.
-        command: FAKE_AGENT_PATH,
       },
     ],
   });
 
-  // Seed the session JSONL on disk in the Claude Code SDK's expected
-  // layout: `<HOME>/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`.
-  const encodedRepoDir = repoDir.replace(/[^a-zA-Z0-9]/g, "-");
-  const projectDir = join(tmpHome, ".claude", "projects", encodedRepoDir);
-  mkdirSync(projectDir, { recursive: true });
-  writeFileSync(join(projectDir, `${SESSION_ID}.jsonl`), buildLongSessionJsonl(SESSION_ID, TURNS));
+  // Seed the session in the stub agent's own store, as if an earlier agent
+  // process had recorded it. Band has never seen it, so pointing the chat
+  // at it makes the server `session/load` it: the stub replays every turn
+  // as `user_message_chunk` + `agent_message_chunk` updates, which Band
+  // writes to its event log.
+  seedStubSession(tmpHome, { sessionId: SESSION_ID, cwd: repoDir, turns: buildTurns(TURNS) });
 
-  server = await startServer({
-    tmpHome,
-    env: { FAKE_AGENT_SCENARIO: "" },
-  });
+  server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 
   // Pre-create the chat with a deterministic id and point it at the
   // seeded session, hitting the real tRPC surface so the dashboard's
@@ -204,60 +197,13 @@ test.describe("Chat first-load flicker", () => {
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors chat-virtualization.spec.ts — each spec owns its own
-// deterministic JSONL builder so they stay independently readable).
+// deterministic turn builder so they stay independently readable).
 // ---------------------------------------------------------------------------
 
-/** Build a Claude Code session JSONL with `turns` user→assistant pairs.
- *  Assistant replies vary in length (some multi-line) so windowed rows
- *  have genuinely different measured heights — that height variance is
- *  what drives the estimate-vs-measured overlap the fix suppresses. */
-function buildLongSessionJsonl(sessionId: string, turns: number): string {
-  const lines: string[] = [];
-  let parentUuid: string | null = null;
-  for (let i = 0; i < turns; i++) {
-    const userUuid = uuid(i * 2 + 1);
-    const assistantUuid = uuid(i * 2 + 2);
-    const ts = new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2)).toISOString();
-    lines.push(
-      JSON.stringify({
-        type: "user",
-        uuid: userUuid,
-        parentUuid,
-        sessionId,
-        isSidechain: false,
-        userType: "external",
-        message: { role: "user", content: [{ type: "text", text: userText(i) }] },
-        timestamp: ts,
-      }),
-    );
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        uuid: assistantUuid,
-        parentUuid: userUuid,
-        sessionId,
-        isSidechain: false,
-        message: { role: "assistant", content: [{ type: "text", text: assistantText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2 + 1)).toISOString(),
-      }),
-    );
-    parentUuid = assistantUuid;
-  }
-  lines.push(
-    JSON.stringify({
-      type: "last-prompt",
-      sessionId,
-      lastPrompt: userText(turns - 1),
-      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, turns * 2)).toISOString(),
-      uuid: uuid(turns * 2 + 1),
-      parentUuid: null,
-    }),
-  );
-  return `${lines.join("\n")}\n`;
-}
-
-function uuid(n: number): string {
-  return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
+/** `turns` user→assistant pairs, each carrying index-bearing text so the
+ *  test can address a specific message without matching the wrong row. */
+function buildTurns(turns: number): SeededTurn[] {
+  return Array.from({ length: turns }, (_, i) => ({ user: userText(i), agent: assistantText(i) }));
 }
 
 function userText(turn: number): string {

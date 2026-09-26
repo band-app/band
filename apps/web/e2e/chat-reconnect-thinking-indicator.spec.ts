@@ -2,47 +2,45 @@
  * Regression: the chat "Thinking…" indicator spinning forever after the
  * agent has finished, until a full page reload.
  *
- * Failure mechanism (see the reducer's `subscription-opened` case):
- *   1. A task is running → the client reducer holds `taskRunning: true`,
+ * Failure mechanism (see the reducer's `subscription-opened` case in
+ * `components/chat/transcript.ts`):
+ *   1. A turn is running → the client reducer holds `taskRunning: true`,
  *      status `streaming`, so the thinking indicator + Stop button render.
- *   2. The `task-completed` broadcast is LIVE-ONLY — never written to the
- *      JSONL transcript and evicted from the in-memory session buffer on
- *      server restart (or past MAX_BUFFER_SIZE). So if the completion fires
- *      while the client is detached — or the server restarts mid-task — the
- *      client never receives it.
+ *   2. The turn's `turn-ended` never reaches the client: the server
+ *      restarts mid-turn, killing the ACP agent subprocess before the turn
+ *      can end, so nothing ever writes a `turn-ended` for it.
  *   3. On reconnect the server's `subscription-opened` correctly reports
- *      `taskRunning: false`, but the pre-fix reducer only ever upgraded
- *      false→true. The client kept `taskRunning: true` → status stayed
- *      `streaming` → the indicator spun forever.
+ *      `taskRunning: false`. A reducer that only ever upgraded
+ *      false→true would keep `taskRunning: true` → status stays
+ *      `streaming` → the indicator spins forever.
  *
  * This test reproduces (2)+(3) deterministically by RESTARTING the real
- * server on the same port while a task is mid-stream: the restart wipes the
- * in-memory buffer (so the completion is genuinely lost) and the client's
+ * server on the same port while a turn is mid-stream. The client's
  * `EventSource` auto-reconnects to the same URL and receives a fresh
  * `subscription-opened{taskRunning:false}`.
  *
- * Under the fix the reducer trusts that authoritative `false` (no optimistic
- * send is pending) and settles status to a terminal state — clearing the
+ * The reducer trusts that authoritative `false` (no optimistic send is
+ * pending) and settles status to a terminal state — clearing the
  * indicator and the Stop button and returning the composer to the send
- * state. On the buggy code this test times out waiting for the indicator to
- * disappear.
+ * state. On a regressed reducer this test times out waiting for the
+ * indicator to disappear.
  *
  * Architecture (matches `chat-cancel.spec.ts`):
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home,
  *     pinned to a fixed port so the restart rebinds the same address.
  *   - NO tRPC mocking, no `page.route()` on our own routes.
- *   - The stdio fake-agent (`apps/web/tests/fake-agent.mjs`) replays a
- *     scenario: emit a `text-delta` immediately (→ status `streaming`,
- *     indicator + Stop visible), then sleep 30 s so the task is still
- *     "running" when we kill the server.
+ *   - The ACP stub agent (`apps/web/tests/fixtures/acp-stub-agent.mjs`)
+ *     streams one message chunk immediately (→ status `streaming`,
+ *     indicator + Stop visible), then blocks until cancelled, so the turn
+ *     is still running when we kill the server.
  *   - UI driven through `ChatPanePage`.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { fakeAgentPath } from "./helpers/fake-agent";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -60,11 +58,9 @@ const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const FAKE_AGENT_PATH = fakeAgentPath();
-
 let server: ServerHandle;
 let tmpHome: string;
-let scenarioPath: string;
+let stubEnv: Record<string, string>;
 let port: number;
 
 test.beforeAll(async () => {
@@ -90,44 +86,26 @@ test.beforeAll(async () => {
         id: "claude-code",
         type: "claude-code",
         label: "Claude Code",
-        command: FAKE_AGENT_PATH,
       },
     ],
   });
 
-  // Emit a short text-delta IMMEDIATELY so the client flips to
-  // status="streaming" (indicator + Stop button render), then sleep 30 s.
-  // The task is still "running" server-side when we kill it — the restart
-  // is what models the lost completion.
-  scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "reconnect-session" },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "partial reply " }] },
-      },
-      { _sleep_ms: 30_000 },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "never observed" }] },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "reconnect-session",
-        duration_ms: 30_000,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
+  // Stream a short message chunk IMMEDIATELY so the client flips to
+  // status="streaming" (indicator + Stop button render), then block. The
+  // turn is still running server-side when we kill the server; the
+  // restart is what models the lost completion. The post-restart message
+  // gets a slow turn so its optimistic indicator stays observable.
+  stubEnv = acpStubEnv(tmpHome, {
+    turns: [
+      { match: "work for me", steps: [{ say: "partial reply " }, { waitForCancel: true }] },
+      { steps: [{ sleep: 30_000 }, { say: "never observed" }] },
+    ],
+  });
 
   // Pin the port so the post-restart server rebinds the same address and
   // the client's EventSource reconnects to it.
   port = await getRandomPort();
-  server = await startServer({ tmpHome, port, env: { FAKE_AGENT_SCENARIO: scenarioPath } });
+  server = await startServer({ tmpHome, port, env: stubEnv });
 });
 
 test.afterAll(async () => {
@@ -136,7 +114,7 @@ test.afterAll(async () => {
 });
 
 test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
-  test("a lost task-completed (server restart mid-task) clears the indicator on reconnect", async ({
+  test("a lost turn-ended (server restart mid-turn) clears the indicator on reconnect", async ({
     page,
   }) => {
     // The restart + reconnect + a second streaming task can exceed the
@@ -157,13 +135,12 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
     await expect(chatPane.assistantMessage("partial reply")).toBeVisible();
     await expect(chatPane.thinkingIndicator).toBeVisible();
 
-    // Restart the real server on the SAME port. This wipes the in-memory
-    // session buffer (and kills the mid-sleep fake-agent), so the eventual
-    // task-completed is gone for good — the client never sees it. The
+    // Restart the real server on the SAME port. This kills the blocked
+    // stub agent mid-turn, so no `turn-ended` ever reaches the client. The
     // EventSource auto-reconnects and gets subscription-opened{taskRunning:false}.
     await server.close();
     try {
-      server = await startServer({ tmpHome, port, env: { FAKE_AGENT_SCENARIO: scenarioPath } });
+      server = await startServer({ tmpHome, port, env: stubEnv });
     } catch (err) {
       // If the re-bind fails (e.g. the OS hasn't released the port yet),
       // `server` would otherwise still hold the already-closed `beforeAll`
@@ -201,7 +178,7 @@ test.describe("Chat reconnect — stuck thinking indicator recovers", () => {
     //     `taskRunning` were still stuck true (the bug), the message would be
     //     QUEUED instead — it would land in the queue list, not as a
     //     `chat-pane__user-message` bubble.
-    //   - The thinking indicator returns: the optimistic `task-started` flips
+    //   - The thinking indicator returns: the optimistic `local-send` flips
     //     status back to `submitting` (a streaming-equivalent), so the
     //     standalone indicator re-renders for the new trailing user message.
     await chatPane.typeMessage("second message");

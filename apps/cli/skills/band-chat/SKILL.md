@@ -70,7 +70,9 @@ Replaces the removed `tasks` subcommand. Use the positional `chat_id` to target 
 band chats watch [chat_id]
 ```
 
-Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task.
+Connects to the chat's event stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. The stream replays recent history first, then follows the chat live, and ends when a turn ends with no queued message behind it.
+
+Each line has a `type`. The agent's output arrives as `update` events carrying an Agent Client Protocol `session/update` unchanged in `.update` (`sessionUpdate` is `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `usage_update`, …). Band adds `prompt` (what was sent), `turn-started`, `turn-ended` (`stopReason`, or `error`), `permission` / `elicitation` (the agent waits on the user) and `request-resolved`.
 
 ### Stop a running chat pane
 
@@ -172,11 +174,10 @@ band chats create \
 # No chat_id: stream the cwd workspace's first chat pane.
 band chats watch
 
-# Pipe through jq for live filtering — for example, only text deltas:
-band chats watch | jq -r 'select(.type == "text-delta") | .delta'
+# Pipe through jq for live filtering — for example, only the agent's text:
+band chats watch | jq -rj 'select(.type == "update" and .update.sessionUpdate == "agent_message_chunk") | .update.content.text'
 
-# Exits immediately with no output if the chat has no running task,
-# so it's safe to invoke speculatively after `band chats send`.
+# Ends when the turn ends, so it works right after `band chats send`.
 band chats send --message "Summarize the diff"
 band chats watch
 ```

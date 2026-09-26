@@ -33,6 +33,9 @@
     "postinstall": "node -e \"process.platform!=='win32'&&require('child_process').execSync('chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true',{stdio:'ignore'})\""
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.81.2",
+    "@agentclientprotocol/codex-acp": "1.13.1",
+    "@agentclientprotocol/sdk": "1.5.0",
     "@vscode/ripgrep": "^1.18.0",
     "@xterm/addon-search": "0.17.0-beta.291",
     "@xterm/addon-serialize": "0.15.0-beta.291",
@@ -103,7 +106,6 @@
     "@xterm/addon-fit": "0.12.0-beta.291",
     "@xterm/addon-web-links": "0.13.0-beta.291",
     "@xterm/xterm": "6.1.0-beta.291",
-    "ai": "^6.0.105",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "croner": "^10.0.1",

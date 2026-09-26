@@ -1,2097 +1,684 @@
 /**
- * Integration tests for the new chat-events stream.
+ * The chat event stream and the submit endpoint, end to end (issue #648):
  *
- *   • `GET /api/chats/:chatId/events`     — unified subscription (replay + live)
- *   • `POST /api/chats/:chatId/messages`  — submit, no SSE body
+ *   GET  /api/chats/:chatId/events    SSE: `id: <eventId>`, `event: <type>`,
+ *                                     `data: <ChatEvent JSON>` frames
+ *   POST /api/chats/:chatId/messages  submit a message (starts or queues a turn)
  *
- * The scenarios cover the seven races we kept patching against in the
- * legacy `/api/tasks/:chatId/stream` endpoints (see
- * `docs/experiments/chat-event-log.md`). The new model eliminates them
- * structurally — these tests guard against regression as we delete the
- * legacy code.
+ * Boots the real server bundle with every coding agent pointed at the
+ * scripted stub ACP agent (`startAcpServer`), so a turn runs over the real
+ * Agent Client Protocol. Assertions read the stream, tRPC and the stub's
+ * request log (what Band sent the agent). The wire schema is
+ * `src/shared/chat-events.ts`.
  *
- * Black-box: the real production server boots in a child process, no mocks
- * except the `fake-agent.mjs` adapter that replays a JSON scenario file.
+ * `acp-chat.test.ts` covers the ACP-specific paths (permissions,
+ * elicitations, config options, session load / resume, agent failures).
+ * This file covers the stream and submit contracts: subscribe snapshots,
+ * framing, the turn's event sequence, gap-fill reconnects, concurrent
+ * subscribers, stream close, the queue, attachments, cancel, session
+ * switching, auth and input validation. History windows and paging are in
+ * `chat-history.test.ts`.
  */
 
-import { spawn } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ChatEvent, ChatEventPayload, ChatEventType } from "../src/shared/chat-events";
-import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import type { ChatEvent } from "../src/shared/chat-events";
+import {
+  agentText,
+  collectEvents,
+  maxId,
+  openStream,
+  runTurn,
+  sendMessage,
+  startAcpServer,
+  stubRequests,
+  TEST_TOKEN,
+  trpc,
+  turnEnded,
+  WORKSPACE_ID,
+} from "./helpers/acp-chat";
+import type { ServerHandle } from "./helpers/server";
+import { listTasksForWorkspace } from "./helpers/tasks";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
-const DEFAULT_TOKEN = "chat-events-test-token";
+const authHeaders = { Cookie: `band_token=${TEST_TOKEN}` };
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
+// One server for the whole file; each test uses its own chat. The stub
+// picks a turn by the prompt's first word.
+let server: ServerHandle;
 
-function createTmpHome(): string {
-  const tmp = mkdtempSync(join(tmpdir(), "band-chat-events-test-"));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function writeScenario(tmpHome: string, events: object[]): string {
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(scenarioPath, JSON.stringify(events));
-  return scenarioPath;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-function createDefaultState(tmpHome: string) {
-  const repoDir = join(tmpHome, "repo");
-  mkdirSync(repoDir, { recursive: true });
-  return {
-    projects: [
+beforeAll(async () => {
+  server = await startAcpServer({
+    turns: [
+      { match: "^slow", steps: [{ sleep: 400 }, { say: "slow done" }] },
+      { match: "^wait", steps: [{ say: "Working." }, { waitForCancel: true }] },
+      { match: "^chunky", steps: [{ say: "one two three four", chunks: 4 }] },
       {
-        name: "testproject",
-        path: repoDir,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: repoDir }],
+        match: "^ask",
+        steps: [
+          {
+            permission: {
+              toolCall: { toolCallId: "edit-1", title: "Edit README.md", kind: "edit" },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+            after: { allow: [{ say: "Edited." }] },
+          },
+        ],
       },
     ],
-  };
-}
-
-function defaultSettings() {
-  return {
-    tokenSecret: DEFAULT_TOKEN,
-    codingAgents: [
-      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-    ],
-  };
-}
-
-async function startServer(
-  opts: { tmpHome?: string; scenarioPath?: string; extraEnv?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        FAKE_AGENT_SCENARIO: opts.scenarioPath || "",
-        ...(opts.extraEnv ?? {}),
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
   });
-}
+}, 30_000);
 
-const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
+afterAll(async () => {
+  await server?.close();
+});
 
-function newChatId(prefix = "chat-events"): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+let seq = 0;
+const newChatId = (tag = "chat") => `events-${tag}-${Date.now()}-${seq++}`;
 
-async function submitMessage(
-  url: string,
-  chatId: string,
-  body: {
-    workspaceId: string;
-    text: string;
-    files?: { mediaType: string; url: string; filename?: string }[];
-  },
-): Promise<Response> {
-  return fetch(`${url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: JSON.stringify(body),
-  });
-}
+const logged = (events: ChatEvent[]) => events.filter((e) => e.eventId > 0);
 
-async function abortTask(
-  url: string,
-  body: { workspaceId: string; chatId: string },
-): Promise<Response> {
-  return fetch(`${url}/trpc/tasks.abort`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: JSON.stringify(body),
-  });
-}
-
-async function setActiveSession(
-  url: string,
-  body: { workspaceId: string; chatId: string; sessionId?: string },
-): Promise<Response> {
-  return fetch(`${url}/trpc/chats.setActiveSession`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: JSON.stringify(body),
-  });
-}
-
-async function createChat(
-  url: string,
-  body: { workspaceId: string; id: string; agent?: string },
-): Promise<Response> {
-  return fetch(`${url}/trpc/chats.create`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: JSON.stringify(body),
-  });
-}
-
-interface ParsedEvent {
-  id: number;
-  type: string;
+interface Frame {
+  id: string;
+  event: string;
   data: ChatEvent;
 }
 
 /**
- * Open the chat-events stream and collect events until a predicate matches
- * (or a max-event budget is reached). Returns the collected events and
- * disposes the underlying connection.
+ * Reads raw SSE frames until the server ends the stream or `timeoutMs`
+ * passes. `ended` says which happened.
  */
-async function collectEvents(
-  url: string,
+async function readFrames(
   chatId: string,
   opts: {
-    lastEventId?: number;
-    workspaceId?: string;
-    until: (evt: ParsedEvent, all: ParsedEvent[]) => boolean;
-    /** Side-effect hook fired for every parsed event before the `until` check.
-     * Lets a test react to a mid-stream event (e.g. answer a pending tool
-     * approval) without tearing down the live subscription. */
-    onEvent?: (evt: ParsedEvent) => void;
-    maxEvents?: number;
-    timeoutMs?: number;
+    headers?: Record<string, string>;
+    query?: string;
+    timeoutMs: number;
+    onFrame?: (frame: Frame) => void;
   },
-): Promise<ParsedEvent[]> {
+): Promise<{ frames: Frame[]; ended: boolean }> {
   const ac = new AbortController();
-  const params = new URLSearchParams();
-  if (opts.lastEventId != null) params.set("lastEventId", String(opts.lastEventId));
-  if (opts.workspaceId) params.set("workspaceId", opts.workspaceId);
-  const fullUrl =
-    `${url}/api/chats/${encodeURIComponent(chatId)}/events` +
-    (params.toString() ? `?${params.toString()}` : "");
-
-  const headers: Record<string, string> = { ...defaultHeaders };
-  if (opts.lastEventId != null) headers["Last-Event-ID"] = String(opts.lastEventId);
-
-  const response = await fetch(fullUrl, { headers, signal: ac.signal });
-  if (response.status !== 200) {
-    throw new Error(`Expected 200, got ${response.status}: ${await response.text()}`);
-  }
-  if (!response.body) throw new Error("no body");
-
-  const reader = response.body.getReader();
+  const res = await fetch(
+    `${server.url}/api/chats/${encodeURIComponent(chatId)}/events${opts.query ?? ""}`,
+    { headers: { ...authHeaders, ...opts.headers }, signal: ac.signal },
+  );
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toBe("text/event-stream");
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
-  const events: ParsedEvent[] = [];
+  const frames: Frame[] = [];
   let buf = "";
-  const max = opts.maxEvents ?? 500;
-  const timeoutMs = opts.timeoutMs ?? 10_000;
-  const timeout = setTimeout(() => ac.abort(), timeoutMs);
-
-  let currentId: number | undefined;
-  let currentType: string | undefined;
-
+  let ended = false;
+  const timer = setTimeout(() => ac.abort(), opts.timeoutMs);
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        ended = true;
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
-
-      while (true) {
-        const nl = buf.indexOf("\n");
-        if (nl === -1) break;
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (line.startsWith("id: ")) {
-          currentId = Number.parseInt(line.slice(4).trim(), 10);
-        } else if (line.startsWith("event: ")) {
-          currentType = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          const raw = line.slice(6).trim();
-          if (raw) {
-            try {
-              const data = JSON.parse(raw) as ChatEvent;
-              const evt: ParsedEvent = {
-                id: currentId ?? data.eventId,
-                type: currentType ?? data.type,
-                data,
-              };
-              events.push(evt);
-              currentId = undefined;
-              currentType = undefined;
-              opts.onEvent?.(evt);
-              if (opts.until(evt, events) || events.length >= max) {
-                clearTimeout(timeout);
-                ac.abort();
-                return events;
-              }
-            } catch {
-              // ignore parse failures
-            }
-          }
+      let sep = buf.indexOf("\n\n");
+      while (sep !== -1) {
+        const block = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        sep = buf.indexOf("\n\n");
+        const field = (name: string) =>
+          block
+            .split("\n")
+            .find((l) => l.startsWith(`${name}: `))
+            ?.slice(name.length + 2);
+        const data = field("data");
+        if (data) {
+          const frame = {
+            id: field("id") ?? "",
+            event: field("event") ?? "",
+            data: JSON.parse(data),
+          };
+          frames.push(frame);
+          opts.onFrame?.(frame);
         }
       }
     }
   } catch (err) {
-    if ((err as Error).name === "AbortError") return events;
-    throw err;
+    if (!ac.signal.aborted) throw err;
   } finally {
-    clearTimeout(timeout);
-    try {
-      reader.releaseLock();
-    } catch {
-      // already released
-    }
+    clearTimeout(timer);
+    ac.abort();
   }
-  return events;
+  return { frames, ended };
 }
 
-// ---------------------------------------------------------------------------
-// Scenarios
-// ---------------------------------------------------------------------------
-
-function quickScenario(sessionId = "events-quick") {
-  return [
-    { type: "system", subtype: "init", session_id: sessionId },
-    {
-      type: "assistant",
-      message: { content: [{ type: "text", text: "Hello, world." }] },
-    },
-    {
-      type: "result",
-      subtype: "success",
-      session_id: sessionId,
-      duration_ms: 50,
-      num_turns: 1,
-      total_cost_usd: 0.01,
-    },
-  ];
-}
-
-function longScenario(sessionId = "events-long") {
-  return [
-    { type: "system", subtype: "init", session_id: sessionId },
-    {
-      type: "assistant",
-      message: { content: [{ type: "text", text: "first chunk " }] },
-    },
-    { _sleep_ms: 800 },
-    {
-      type: "assistant",
-      message: { content: [{ type: "text", text: "second chunk" }] },
-    },
-    {
-      type: "result",
-      subtype: "success",
-      session_id: sessionId,
-      duration_ms: 800,
-      num_turns: 1,
-      total_cost_usd: 0.01,
-    },
-  ];
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe("chat-events — submit + observe via subscription", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+/**
+ * Starts {@link readFrames} and waits until a frame of type `readyOn` has
+ * arrived, so a message sent afterwards is seen live.
+ */
+async function openFrames(
+  chatId: string,
+  opts: Parameters<typeof readFrames>[1],
+  readyOn = "subscription-opened",
+): Promise<{ result: ReturnType<typeof readFrames> }> {
+  let ready!: () => void;
+  const isReady = new Promise<void>((resolve) => {
+    ready = resolve;
   });
+  const result = readFrames(chatId, {
+    ...opts,
+    onFrame: (f) => {
+      if (f.data.type === readyOn) ready();
+    },
+  });
+  await Promise.race([isReady, result]);
+  return { result };
+}
 
-  it("subscription opens immediately for a fresh chat (no 204)", async () => {
-    const chatId = newChatId();
+// ---------------------------------------------------------------------------
+
+describe("subscribe", () => {
+  it("opens immediately for a fresh chat with the snapshot events", async () => {
+    const chatId = newChatId("fresh");
     const events = await collectEvents(server.url, chatId, {
-      until: (e) => e.type === "subscription-opened",
+      until: (e) => e.type === "history-meta",
       timeoutMs: 5_000,
     });
-    expect(events.length).toBeGreaterThan(0);
-    const first = events[0];
-    expect(first.type).toBe("subscription-opened");
-    const data = first.data as Extract<ChatEventPayload, { type: "subscription-opened" }> & {
-      eventId: number;
-    };
-    expect(data.taskRunning).toBe(false);
-    expect(data.sessionId).toBeUndefined();
+    expect(events.map((e) => e.type)).toEqual([
+      "subscription-opened",
+      "queue-updated",
+      "session-state",
+      "history-meta",
+    ]);
+    expect(events[0]).toMatchObject({ taskRunning: false, revision: 0, reset: false });
+    expect(events[0].type === "subscription-opened" && events[0].sessionId).toBeUndefined();
+    // Always sent, even when empty, so a reconnecting client drops a stale
+    // queue (the queue drained while it was away).
+    expect(events[1]).toMatchObject({ type: "queue-updated", messages: [] });
+    // A chat with no session gets the default agent's catalog.
+    expect(events[2]).toMatchObject({ type: "session-state", state: { source: "cached" } });
+    expect(events[3]).toMatchObject({ hasOlder: false, oldestEventId: 0 });
+    // Synthetic events never move the client's cursor.
+    expect(events.every((e) => e.eventId < 0)).toBe(true);
   });
 
-  /**
-   * Regression for "queue UI shows stale items after returning to the
-   * workspace": the user queued 1..6 in workspace A, switched away while
-   * processing, came back to A and saw 3..6 still listed as "Queued"
-   * even though all six had been drained.
-   *
-   * Root cause: the chat-events handler only emitted `queue-updated` on
-   * subscribe when the queue was non-empty. The user's client had
-   * disconnected (workspace switch closes the EventSource), the drains
-   * happened while disconnected, and on reconnect the empty queue never
-   * produced an event — so the reducer kept the pre-disconnect queue.
-   *
-   * Fix: always emit the current queue state on subscribe.
-   */
-  it("subscribe always emits an initial queue-updated event, even when empty", async () => {
-    const chatId = newChatId();
-    const events = await collectEvents(server.url, chatId, {
-      // subscription-opened comes first, queue-updated is the next
-      // synthetic emit.
-      until: (_e, all) => all.some((x) => x.type === "queue-updated"),
-      timeoutMs: 5_000,
-    });
-
-    const queueUpdated = events.find((e) => e.type === "queue-updated");
-    expect(queueUpdated).toBeDefined();
-    const data = queueUpdated!.data as Extract<ChatEventPayload, { type: "queue-updated" }> & {
-      eventId: number;
-    };
-    expect(data.messages).toEqual([]);
-  });
-
-  it("submit then observe — emits the expected event sequence", async () => {
-    const chatId = newChatId();
-
-    // Open subscription FIRST so we capture every event (no replay needed).
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed" || e.type === "task-error",
-      timeoutMs: 15_000,
-    });
-
-    // Submit.
-    const submitRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "hello",
-    });
-    expect(submitRes.status).toBe(200);
-    const submitBody = await submitRes.json();
-    expect(submitBody).toEqual({ ok: true, queued: false });
-
-    const events = await subscriptionPromise;
-    const types = events.map((e) => e.type as ChatEventType);
-
-    expect(types).toContain("subscription-opened");
-    expect(types).toContain("user-message");
-    expect(types).toContain("task-started");
-    expect(types).toContain("session-resolved");
-    expect(types).toContain("text-start");
-    expect(types).toContain("text-delta");
-    expect(types).toContain("task-completed");
-  });
-
-  it("reconnect with non-zero Last-Event-ID receives only suffix events", async () => {
-    const chatId = newChatId();
-
-    // First subscription — submit and capture all events.
-    const fullPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    const submitRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first turn",
-    });
-    expect(submitRes.status).toBe(200);
-    const fullEvents = await fullPromise;
-    expect(fullEvents.length).toBeGreaterThan(3);
-
-    // Pick a mid-stream eventId. Filter to positive ids (real buffer ids).
-    const positiveIds = fullEvents.map((e) => e.id).filter((id) => id > 0);
-    expect(positiveIds.length).toBeGreaterThan(2);
-    const cursor = positiveIds[Math.floor(positiveIds.length / 2)];
-
-    // Second subscription — request only events past `cursor`.
-    const replayEvents = await collectEvents(server.url, chatId, {
-      lastEventId: cursor,
-      until: (_e, all) => all.length >= 5,
-      timeoutMs: 5_000,
-    });
-
-    // First event is always `subscription-opened` (synthetic, negative id).
-    expect(replayEvents[0].type).toBe("subscription-opened");
-    // No positive-id event we receive should be <= cursor.
-    for (const evt of replayEvents) {
-      if (evt.id > 0) {
-        expect(evt.id).toBeGreaterThan(cursor);
-      }
+  it("frames each event with its id and type on the SSE lines", async () => {
+    const chatId = newChatId("frames");
+    await runTurn(server.url, chatId, "hello frames");
+    const { frames } = await readFrames(chatId, { timeoutMs: 1_000 });
+    expect(frames.length).toBeGreaterThan(5);
+    for (const f of frames) {
+      // Logged events carry their id; synthetic ones (negative ids) have no
+      // `id:` line, so they never move the browser's Last-Event-ID.
+      expect(f.id).toBe(f.data.eventId > 0 ? String(f.data.eventId) : "");
+      expect(f.event).toBe(f.data.type);
     }
+    expect(frames.some((f) => f.id === "")).toBe(true);
   });
 });
 
-describe("chat-events — interactive tool broadcast is owned by onUserInputNeeded (#585)", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
+describe("a turn", () => {
+  it("submit then observe: the logged sequence of a first turn", async () => {
+    const chatId = newChatId("sequence");
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
+    const submit = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "hello" }),
+    });
+    expect(submit.status).toBe(200);
+    expect(await submit.json()).toEqual({ ok: true, queued: false });
+    const events = await done;
 
-  // Stable ids so the test can answer the pending input by a known approvalId.
-  // The adapter passes the SDK's `tool_use_id` straight through as the
-  // approvalId, so the value we inject into the `can_use_tool` control_request
-  // is exactly what `chat.answer` expects.
-  const SESSION = "events-interactive";
-  const TOOL_USE_ID = "askq-tool-1";
-  const QUESTION = "Pick a side";
+    const kinds = logged(events).map((e) =>
+      e.type === "update" ? `update:${e.update.sessionUpdate}` : e.type,
+    );
+    expect(kinds).toEqual([
+      "session-attached",
+      "update:available_commands_update",
+      "prompt",
+      "turn-started",
+      "update:agent_message_chunk",
+      "turn-ended",
+    ]);
+    // Logged ids only grow.
+    const ids = logged(events).map((e) => e.eventId);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+    expect(events.find((e) => e.type === "prompt")).toMatchObject({ text: "hello" });
+    expect(events.at(-1)).toMatchObject({ type: "turn-ended", stopReason: "end_turn" });
 
-  // Scenario: the assistant calls the interactive `AskUserQuestion` tool, then
-  // the agent process drives the SDK's permission round-trip via a
-  // `can_use_tool` control_request. That makes the adapter invoke
-  // `onUserInputNeeded`, which broadcasts the single enriched
-  // `tool-input-available`. The task parks on `_wait_for_stdin` until the SDK
-  // writes back its control_response (which it does once `chat.answer`
-  // resolves the pending input), then completes.
-  function interactiveScenario() {
-    const input = { questions: [{ question: QUESTION, options: ["A", "B"] }] };
-    return [
-      { type: "system", subtype: "init", session_id: SESSION },
-      {
-        type: "assistant",
-        message: {
-          content: [
-            { type: "text", text: "Let me check with you." },
-            { type: "tool_use", id: TOOL_USE_ID, name: "AskUserQuestion", input },
-          ],
-        },
-      },
-      {
-        type: "control_request",
-        request_id: "askq-req-1",
-        request: {
-          subtype: "can_use_tool",
-          tool_name: "AskUserQuestion",
-          input,
-          tool_use_id: TOOL_USE_ID,
-        },
-      },
-      { _wait_for_stdin: true },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: SESSION,
-        duration_ms: 10,
-        num_turns: 1,
-        total_cost_usd: 0.01,
-      },
-    ];
-  }
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, interactiveScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    // The chat row now points at the agent's session.
+    const attached = events.find((e) => e.type === "session-attached");
+    const { chat } = await trpc<{ chat: { activeSessionId?: string; status: string } }>(
+      server.url,
+      "chats.get",
+      { chatId },
+      "query",
+    );
+    expect(chat.activeSessionId).toBe(
+      attached?.type === "session-attached" ? attached.sessionId : "missing",
+    );
   });
 
-  // Resolve the agent's pending input. Retries because the generic-broadcast
-  // regression would surface a tool-input-available *before* the adapter
-  // registers the pending input, so a single early call could 404.
-  async function answerPending(): Promise<void> {
-    for (let i = 0; i < 50; i++) {
-      const res = await fetch(`${server.url}/trpc/chat.answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...defaultHeaders },
-        body: JSON.stringify({ approvalId: TOOL_USE_ID, answers: { [QUESTION]: "A" } }),
-      });
-      if (res.status === 200) return;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error("chat.answer never resolved a pending input");
-  }
+  it("the prompt event carries what the user typed; the agent also gets the file-sharing hint on the first turn only", async () => {
+    const chatId = newChatId("hint");
+    const first = await runTurn(server.url, chatId, "first message");
+    const second = await runTurn(server.url, chatId, "second message", maxId(first));
+    expect(first.find((e) => e.type === "prompt")).toMatchObject({ text: "first message" });
+    expect(second.find((e) => e.type === "prompt")).toMatchObject({ text: "second message" });
 
-  it("emits exactly one tool-input-available for an interactive tool (no generic duplicate)", async () => {
-    const chatId = newChatId();
+    const sent = stubRequests(server.home, "session/prompt")
+      .map((r) => r.params.prompt as { type: string; text?: string }[])
+      .filter((blocks) => ["first message", "second message"].includes(blocks[0].text ?? ""));
+    expect(sent).toHaveLength(2);
+    expect(sent[0][0]).toEqual({ type: "text", text: "first message" });
+    expect(sent[0].at(-1)?.text).toMatch(
+      /^\[File sharing: to send a file to the user, write or copy it to .*\/shared\//,
+    );
+    expect(sent[1]).toEqual([{ type: "text", text: "second message" }]);
+  });
 
-    // Open the subscription first so the whole stream is observed on one live
-    // connection — the only way to prove *exactly* one broadcast (a count of
-    // the first match alone could not distinguish one from two).
-    let answered = false;
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      workspaceId: "testproject-main",
+  it("sequential submits continue the same agent session", async () => {
+    const chatId = newChatId("resume");
+    const first = await runTurn(server.url, chatId, "turn one");
+    const second = await runTurn(server.url, chatId, "turn two", maxId(first));
+
+    const attached = first.find((e) => e.type === "session-attached");
+    const sessionId = attached?.type === "session-attached" ? attached.sessionId : "";
+    // The second turn reuses the attached session: no new attach.
+    expect(second.some((e) => e.type === "session-attached")).toBe(false);
+    expect(agentText(second)).toBe('Heard "turn two" on stub-small.');
+    const prompts = stubRequests(server.home, "session/prompt").filter((r) =>
+      ["turn one", "turn two"].includes((r.params.prompt as { text?: string }[])[0].text ?? ""),
+    );
+    expect(prompts.map((r) => r.params.sessionId)).toEqual([sessionId, sessionId]);
+  });
+
+  it("the stream closes after turn-ended when the chat goes idle", async () => {
+    const chatId = newChatId("close");
+    const { result: reading } = await openFrames(chatId, { timeoutMs: 10_000 });
+    await sendMessage(server.url, chatId, "hello close");
+    const { frames, ended } = await reading;
+    expect(ended).toBe(true);
+    expect(frames.at(-1)?.data).toMatchObject({ type: "turn-ended", stopReason: "end_turn" });
+
+    // A stream opened on the idle chat stays open past its snapshot events
+    // and until the next turn ends.
+    const cursor = Math.max(...frames.map((f) => f.data.eventId));
+    const { result: next } = await openFrames(
+      chatId,
+      { query: `?lastEventId=${cursor}`, timeoutMs: 10_000 },
+      "session-state",
+    );
+    await sendMessage(server.url, chatId, "hello again");
+    const again = await next;
+    expect(again.ended).toBe(true);
+    const kinds = again.frames.map((f) => f.data.type);
+    expect(kinds.slice(0, 3)).toEqual(["subscription-opened", "queue-updated", "session-state"]);
+    expect(kinds.filter((k) => k === "prompt")).toHaveLength(1);
+    expect(kinds.at(-1)).toBe("turn-ended");
+  });
+});
+
+describe("reconnect", () => {
+  it("Last-Event-ID gap-fill sends only what came after the cursor", async () => {
+    const chatId = newChatId("gapfill");
+    const full = await runTurn(server.url, chatId, "chunky reply");
+    const fullLogged = logged(full);
+    // Resume from the middle of the reply's chunks.
+    const chunks = fullLogged.filter(
+      (e) => e.type === "update" && e.update.sessionUpdate === "agent_message_chunk",
+    );
+    expect(chunks).toHaveLength(4);
+    const cursor = chunks[1].eventId;
+
+    const { frames } = await readFrames(chatId, {
+      headers: { "Last-Event-ID": String(cursor) },
+      timeoutMs: 1_000,
+    });
+    const replay = frames.map((f) => f.data);
+    expect(replay[0]).toMatchObject({ type: "subscription-opened", reset: false });
+    const replayLogged = logged(replay);
+    expect(replayLogged.every((e) => e.eventId > cursor)).toBe(true);
+    // The two chunks after the cursor come back merged, then the turn end.
+    expect(agentText(replayLogged)).toBe(agentText(chunks.slice(2)));
+    expect(replayLogged.at(-1)).toMatchObject({ type: "turn-ended" });
+    // No history-meta on a gap-fill: the client keeps what it has.
+    expect(replay.some((e) => e.type === "history-meta")).toBe(false);
+  });
+
+  it("a cold subscribe then a reconnect at its last id re-sends nothing", async () => {
+    const chatId = newChatId("nodup");
+    await runTurn(server.url, chatId, "hello nodup");
+    const cold = await collectEvents(server.url, chatId, {
+      until: (e) => e.type === "history-meta",
+    });
+    // The cold replay carries the logged (positive) ids.
+    expect(logged(cold).length).toBeGreaterThan(0);
+    const opened = cold[0];
+    const revision = opened.type === "subscription-opened" ? opened.revision : -1;
+
+    const { frames } = await readFrames(chatId, {
+      query: `?lastEventId=${maxId(cold)}&revision=${revision}`,
+      timeoutMs: 1_000,
+    });
+    // Positive anchor: the snapshot events arrived.
+    expect(frames.map((f) => f.data.type)).toEqual([
+      "subscription-opened",
+      "queue-updated",
+      "session-state",
+    ]);
+    expect(logged(frames.map((f) => f.data))).toEqual([]);
+  });
+
+  it("two concurrent subscribers receive the same logged events", async () => {
+    const chatId = newChatId("concurrent");
+    const a = await openStream(server.url, chatId, { until: turnEnded });
+    const b = await openStream(server.url, chatId, { until: turnEnded });
+    await sendMessage(server.url, chatId, "chunky for two");
+    const [eventsA, eventsB] = await Promise.all([a.events, b.events]);
+    expect(logged(eventsA).length).toBeGreaterThan(4);
+    expect(logged(eventsA)).toEqual(logged(eventsB));
+  });
+
+  it("a permission request is logged once, live and on replay", async () => {
+    const chatId = newChatId("permission");
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
+      until: turnEnded,
       onEvent: (e) => {
-        if (!answered && e.type === "tool-input-available") {
-          answered = true;
-          void answerPending();
+        if (e.type === "permission") {
+          answers.push(
+            trpc(server.url, "chat.answer", {
+              chatId,
+              requestId: e.requestId,
+              optionId: "allow",
+            }),
+          );
         }
       },
-      until: (e) => e.type === "task-completed" || e.type === "task-error",
-      timeoutMs: 15_000,
     });
+    await sendMessage(server.url, chatId, "ask first");
+    const live = await done;
+    await Promise.all(answers);
+    expect(live.filter((e) => e.type === "permission")).toHaveLength(1);
+    expect(agentText(live)).toBe("Edited.");
 
-    const submitRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "need your input",
-    });
-    expect(submitRes.status).toBe(200);
-
-    const events = await subscriptionPromise;
-
-    // The generic tool-use broadcast must be suppressed for interactive tools
-    // (adapter stamps `interactive`), leaving only onUserInputNeeded's enriched
-    // broadcast. If the flag were dropped/misset there would be two.
-    const toolInputs = events.filter(
-      (e) =>
-        e.type === "tool-input-available" &&
-        (e.data as { toolCallId?: string }).toolCallId === TOOL_USE_ID,
-    );
-    expect(toolInputs).toHaveLength(1);
-    expect(events.some((e) => e.type === "task-completed")).toBe(true);
-  });
-});
-
-describe("chat-events — queue-when-busy flow", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, longScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("submitting while a task is running queues and emits queue-updated", async () => {
-    const chatId = newChatId();
-
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      // Wait for a queue-updated carrying our second submit. The
-      // subscription also emits an initial queue-updated with messages:[]
-      // on subscribe (resync guard); we want the one fired by the actual
-      // server-side queue push.
-      until: (_e, all) =>
-        all.some((x) => {
-          if (x.type !== "queue-updated") return false;
-          const d = x.data as Extract<ChatEventPayload, { type: "queue-updated" }> & {
-            eventId: number;
-          };
-          return d.messages.some((m) => m.text === "second");
-        }),
-      maxEvents: 50,
-      timeoutMs: 15_000,
-    });
-
-    // First submit — kicks off a long task.
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first",
-    });
-
-    // Give the task a beat to register before submitting the second one,
-    // so the conflict path fires server-side.
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Second submit — should land in the queue, not error.
-    const secondRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "second",
-    });
-    expect(secondRes.status).toBe(200);
-    const body = await secondRes.json();
-    expect(body).toEqual({ ok: true, queued: true });
-
-    const events = await subscriptionPromise;
-    const queueUpdates = events.filter((e) => e.type === "queue-updated");
-    expect(queueUpdates.length).toBeGreaterThan(0);
-    const queued = queueUpdates[queueUpdates.length - 1].data as Extract<
-      ChatEventPayload,
-      { type: "queue-updated" }
-    > & { eventId: number };
-    expect(queued.messages.map((m) => m.text)).toContain("second");
-  });
-});
-
-describe("chat-events — concurrent subscribers see identical event sequences", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("two clients receive the same event sequence", async () => {
-    const chatId = newChatId();
-    const aPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    const bPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "concurrent",
-    });
-
-    const [a, b] = await Promise.all([aPromise, bPromise]);
-
-    // Filter to real (positive-id) events — synthetic ids may differ between
-    // subscribers (each has its own counter starting at -1).
-    const aReal = a.filter((e) => e.id > 0).map((e) => `${e.id}:${e.type}`);
-    const bReal = b.filter((e) => e.id > 0).map((e) => `${e.id}:${e.type}`);
-
-    expect(aReal).toEqual(bReal);
-    expect(aReal.length).toBeGreaterThan(0);
-  });
-});
-
-describe("chat-events — cold subscribe replays history from chats.activeSessionId", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario("cold-subscribe-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("subscribing to a chat after task completion replays the prior session's events", async () => {
-    const chatId = newChatId("cold");
-
-    // Phase 1: run a task to completion so the chat row has activeSessionId
-    // and JSONL has the session events. Close the subscription cleanly.
-    const initialPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first message",
-    });
-    await initialPromise;
-
-    // Phase 2: cold-subscribe with no Last-Event-ID. Before the fix this
-    // returned an empty replay (resolvedSessionId was undefined because
-    // no in-memory task remained). The fix falls back to chat.activeSessionId
-    // — JSONL replay should now surface the prior session's events.
     const replay = await collectEvents(server.url, chatId, {
-      until: (_e, all) => all.some((x) => x.type === "user-message"),
-      timeoutMs: 5_000,
+      until: (e) => e.type === "history-meta",
     });
+    const kinds = logged(replay).map((e) => e.type);
+    expect(kinds.filter((k) => k === "permission")).toHaveLength(1);
+    expect(kinds.indexOf("request-resolved")).toBeGreaterThan(kinds.indexOf("permission"));
+  });
+});
 
-    const types = replay.map((e) => e.type as ChatEventType);
-    expect(types).toContain("user-message");
-    // Initial subscription-opened carries the persisted sessionId.
-    const subOpened = replay.find((e) => e.type === "subscription-opened");
-    const subData = subOpened?.data as Extract<
-      ChatEventPayload,
-      { type: "subscription-opened" }
-    > & { eventId: number };
-    expect(subData.sessionId).toBeTruthy();
-  }, 25_000);
-
-  // Regression for "picking a session from history, sending a follow-up,
-  // refreshing, and seeing only the last message" is covered by the
-  // change to `replayPast` in `apps/web/src/api/chat-events.ts`: on cold
-  // subscribe (`afterEventId === undefined`) JSONL is prioritised over
-  // the in-memory buffer. A black-box test of the multi-turn JSONL path
-  // is hard to write here because the fake-agent + SDK JSONL writing is
-  // not deterministic enough to seed multiple turns at a known path
-  // ahead of a submit. The existing "subscribing to a chat after task
-  // completion …" test above exercises the same code path with one turn.
-
-  /**
-   * Regression: on a NEW session, `task-service` appends a
-   * `\n\n[File sharing: …]` hint to the prompt sent to the agent. The
-   * agent writes this full prompt to its JSONL transcript, hint and
-   * all. The live `user-message` broadcast already strips the hint
-   * (uses `task.prompt`, not `task.agentPrompt`), but JSONL replay
-   * reads what's on disk — without `stripFileSharingHint` in
-   * `chat-events.ts::jsonlMessageToEvents`, the replayed user bubble
-   * would carry the suffix visibly. This test submits a fresh-session
-   * message, cold-subscribes, and asserts the replayed text is clean.
-   */
-  it("JSONL replay strips the [File sharing: …] hint from the user-message text", async () => {
-    const chatId = newChatId("hint-strip");
-
-    // Phase 1: submit on a brand-new session so task-service appends the
-    // hint to the agent prompt (the hint is only appended when there's
-    // no incoming sessionId — see `task-service.ts::fileSharingHint`).
-    const initialPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
+describe("queue", () => {
+  it("a message sent during a turn is queued, then runs as its own clean turn", async () => {
+    const chatId = newChatId("queue");
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 2,
     });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "tell me about this repo",
+    expect(await sendMessage(server.url, chatId, "slow first")).toEqual({
+      ok: true,
+      queued: false,
     });
-    await initialPromise;
-
-    // Phase 2: cold-subscribe — JSONL backfill emits the user-message
-    // from disk. The text must match what the user actually typed,
-    // not `…\n\n[File sharing: …]` from the agent prompt.
-    //
-    // The describe block shares a tmpHome across tests, and the
-    // fake-agent's scenario hardcodes `cold-subscribe-session` as the
-    // session id — so the JSONL on disk accumulates user-messages
-    // across tests. We don't care which user-messages are in the
-    // replay; we care that NONE of them carry the hint suffix and
-    // that the one we just sent shows up clean.
-    const replay = await collectEvents(server.url, chatId, {
-      until: (_e, all) =>
-        all.some(
-          (x) =>
-            x.type === "user-message" &&
-            (x.data as Extract<ChatEventPayload, { type: "user-message" }> & { eventId: number })
-              .text === "tell me about this repo",
-        ),
-      timeoutMs: 5_000,
+    expect(await sendMessage(server.url, chatId, "queued second")).toEqual({
+      ok: true,
+      queued: true,
     });
+    const events = await done;
 
-    const userMessages = replay.filter((e) => e.type === "user-message");
-    expect(userMessages.length).toBeGreaterThan(0);
-    for (const evt of userMessages) {
-      const data = evt.data as Extract<ChatEventPayload, { type: "user-message" }> & {
-        eventId: number;
-      };
-      // Every replayed user-message must be hint-free.
-      expect(data.text).not.toMatch(/\[File sharing:/);
-    }
-    // And the one we just submitted shows up exactly as typed.
-    const justSent = userMessages.find(
-      (e) =>
-        (e.data as Extract<ChatEventPayload, { type: "user-message" }> & { eventId: number })
-          .text === "tell me about this repo",
+    const queues = events
+      .filter((e) => e.type === "queue-updated")
+      .map((e) => (e.type === "queue-updated" ? e.messages.map((m) => m.text) : []));
+    // Initial snapshot, the queued message, then drained.
+    expect(queues).toEqual([[], ["queued second"], []]);
+
+    // Two turns, each prompt → turn-started → reply → turn-ended, in order.
+    const turnKinds = logged(events)
+      .filter((e) => ["prompt", "turn-started", "turn-ended"].includes(e.type))
+      .map((e) => (e.type === "prompt" ? `prompt:${e.text}` : e.type));
+    expect(turnKinds).toEqual([
+      "prompt:slow first",
+      "turn-started",
+      "turn-ended",
+      "prompt:queued second",
+      "turn-started",
+      "turn-ended",
+    ]);
+    expect(agentText(events)).toBe('slow doneHeard "queued second" on stub-small.');
+  });
+
+  it("a drained queued message keeps its image attachment", async () => {
+    const chatId = newChatId("queue-files");
+    const pixel = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
     );
-    expect(justSent).toBeDefined();
-  }, 25_000);
-});
+    const uploadDir = join(server.home, ".band", "uploads");
+    const before = new Set(existsSync(uploadDir) ? readdirSync(uploadDir) : []);
 
-describe("chat-events — back-to-back submissions render as two clean turns (Option A)", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    // Long scenario for the first task so the second submit lands while
-    // the first is still running and gets queued server-side. The drain
-    // path is what we're exercising.
-    const scenario = writeScenario(tmpHome, longScenario("events-back-to-back"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("queue drain emits user-message + task-started for the second turn (no data-prompt leakage)", async () => {
-    const chatId = newChatId("backtoback");
-
-    // Stop after we see TWO `task-completed` events — that's the marker that
-    // both turns finished (first task + drained second task).
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      until: (_e, all) => all.filter((x) => x.type === "task-completed").length >= 2,
-      maxEvents: 200,
-      timeoutMs: 30_000,
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 2,
     });
-
-    // First submit — starts the long task.
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first turn",
-    });
-    // Give the task a beat to register so the second submit lands while
-    // the first is in flight (and ends up on the queue).
-    await new Promise((r) => setTimeout(r, 100));
-
-    const secondRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "second turn",
-    });
-    expect(secondRes.status).toBe(200);
-    const secondBody = await secondRes.json();
-    expect(secondBody).toEqual({ ok: true, queued: true });
-
-    const events = await subscriptionPromise;
-
-    // Option A wire shape: two complete turns, each with its own
-    // user-message → task-started → ... → task-completed sequence.
-    const types = events.map((e) => e.type as ChatEventType);
-
-    // No `data-prompt` (or any non-ChatEvent type) should leak onto the
-    // new wire — the translator drops it.
-    expect(types).not.toContain("data-prompt");
-
-    const userMessageIdxs = types
-      .map((t, i) => (t === "user-message" ? i : -1))
-      .filter((i) => i >= 0);
-    const taskStartedIdxs = types
-      .map((t, i) => (t === "task-started" ? i : -1))
-      .filter((i) => i >= 0);
-    const taskCompletedIdxs = types
-      .map((t, i) => (t === "task-completed" ? i : -1))
-      .filter((i) => i >= 0);
-
-    // Two of each.
-    expect(userMessageIdxs.length).toBe(2);
-    expect(taskStartedIdxs.length).toBe(2);
-    expect(taskCompletedIdxs.length).toBe(2);
-
-    // Per-turn ordering: user-message[0] < task-started[0] < task-completed[0] < user-message[1] < task-started[1] < task-completed[1]
-    expect(userMessageIdxs[0]).toBeLessThan(taskStartedIdxs[0]);
-    expect(taskStartedIdxs[0]).toBeLessThan(taskCompletedIdxs[0]);
-    expect(taskCompletedIdxs[0]).toBeLessThan(userMessageIdxs[1]);
-    expect(userMessageIdxs[1]).toBeLessThan(taskStartedIdxs[1]);
-    expect(taskStartedIdxs[1]).toBeLessThan(taskCompletedIdxs[1]);
-
-    // The two user messages have the expected text content.
-    const userMessageEvents = events.filter((e) => e.type === "user-message");
-    const userTexts = userMessageEvents.map(
-      (e) =>
-        (e.data as Extract<ChatEventPayload, { type: "user-message" }> & { eventId: number }).text,
-    );
-    expect(userTexts).toEqual(["first turn", "second turn"]);
-  }, 35_000);
-});
-
-describe("chat-events — task completion closes the stream cleanly", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("subscriber observes task-completed and stream closes (no hang)", async () => {
-    const chatId = newChatId();
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      // The until predicate is "see task-completed" — but the server should
-      // also close the stream right after, which our reader notices via
-      // stream end. Pass a generous timeout; if the stream hangs, the test
-      // would time out instead of completing fast.
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 10_000,
-    });
-
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "go",
-    });
-
-    const events = await subscriptionPromise;
-    const last = events[events.length - 1];
-    expect(last.type).toBe("task-completed");
-  });
-});
-
-describe("chat-events — sequential submits resume the previous session", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario("sequential-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  /**
-   * Regression for the "second message creates its own session — no reply
-   * rendered" bug:
-   *
-   *   1. Each session has its own per-buffer eventId counter starting at 1
-   *      (`apps/web/src/server/services/task-service.ts` -> `broadcast`).
-   *   2. Before the fix, every `POST /api/chats/:chatId/messages` submitted
-   *      with no `sessionId` started a brand-new agent session.
-   *   3. So turn 2's events lived in session-B with eventIds 1, 2, 3, …,
-   *      while the client's `Last-Event-ID` was 7-ish from turn 1.
-   *   4. The server's gap-fill replay + live-tail filter both drop events
-   *      with `eventId <= lastEventId`, so the client never received turn
-   *      2's `text-delta`s — visible as "I see the indicator, it goes away,
-   *      no reply rendered" in the UI.
-   *
-   * Fix: `apps/web/src/api/chat-submit.ts` falls back to
-   * `chat.activeSessionId` when the body has no `sessionId`. Turn 2 then
-   * resumes session-A, its events keep the monotonic counter going, and
-   * the lastEventId filter behaves.
-   */
-  it("a second submit after task-completed continues the same session and surfaces a reply", async () => {
-    const chatId = newChatId("seq");
-
-    // Turn 1 — start subscription FIRST, then submit, then collect.
-    const turn1Promise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first",
-    });
-    const turn1Events = await turn1Promise;
-
-    // Verify turn 1 produced the expected full sequence.
-    const turn1Types = turn1Events.map((e) => e.type);
-    expect(turn1Types).toContain("text-delta");
-    expect(turn1Types).toContain("task-completed");
-
-    const turn1SessionResolved = turn1Events.find((e) => e.type === "session-resolved");
-    expect(turn1SessionResolved).toBeDefined();
-    const turn1SessionId = (
-      turn1SessionResolved!.data as Extract<ChatEventPayload, { type: "session-resolved" }> & {
-        eventId: number;
-      }
-    ).sessionId;
-
-    // Last positive (real) event id from turn 1 — the client uses this as
-    // the reconnect cursor.
-    const lastEventId = Math.max(...turn1Events.filter((e) => e.id > 0).map((e) => e.id));
-    expect(lastEventId).toBeGreaterThan(0);
-
-    // Turn 2 — fresh subscription with Last-Event-ID set to turn 1's max,
-    // mirroring how the client behaves after the server closes the stream
-    // on task-completed and the user submits again.
-    const turn2Promise = collectEvents(server.url, chatId, {
-      lastEventId,
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "second",
-    });
-    const turn2Events = await turn2Promise;
-
-    const turn2Types = turn2Events.map((e) => e.type);
-    // The whole point: turn 2 produced text content that reached the client.
-    expect(turn2Types).toContain("user-message");
-    expect(turn2Types).toContain("task-started");
-    expect(turn2Types).toContain("text-delta");
-    expect(turn2Types).toContain("task-completed");
-
-    // All turn-2 buffer events (positive ids) must have ids strictly
-    // greater than turn 1's lastEventId — that's exactly what the
-    // chat-submit `sessionId` fallback guarantees by keeping the same
-    // session buffer's counter ticking. Without the fix they'd be 1, 2, …
-    // and be filtered out as "already replayed".
-    for (const evt of turn2Events) {
-      if (evt.id > 0) {
-        expect(evt.id).toBeGreaterThan(lastEventId);
-      }
-    }
-
-    // And the second user message text is the one we actually sent.
-    const turn2UserMessages = turn2Events.filter((e) => e.type === "user-message");
-    expect(turn2UserMessages.length).toBeGreaterThan(0);
+    await sendMessage(server.url, chatId, "slow start");
     expect(
-      (
-        turn2UserMessages[0].data as Extract<ChatEventPayload, { type: "user-message" }> & {
-          eventId: number;
-        }
-      ).text,
-    ).toBe("second");
+      await sendMessage(server.url, chatId, "look at this pixel", {
+        files: [
+          {
+            mediaType: "image/png",
+            url: `data:image/png;base64,${pixel.toString("base64")}`,
+            filename: "queued-pixel.png",
+          },
+        ],
+      }),
+    ).toMatchObject({ queued: true });
+    const events = await done;
 
-    // Sanity: chat.activeSessionId-driven continuation means session-resolved
-    // (if emitted) reports the same session both times.
-    const turn2SessionResolved = turn2Events.find((e) => e.type === "session-resolved");
-    if (turn2SessionResolved) {
-      const turn2SessionId = (
-        turn2SessionResolved.data as Extract<ChatEventPayload, { type: "session-resolved" }> & {
-          eventId: number;
-        }
-      ).sessionId;
-      expect(turn2SessionId).toBe(turn1SessionId);
-    }
-  }, 30_000);
-});
+    const drained = events.filter((e) => e.type === "prompt").at(-1);
+    expect(drained?.type === "prompt" && drained.text).toBe("look at this pixel");
+    const files = drained?.type === "prompt" ? drained.files : undefined;
+    expect(files).toEqual([
+      {
+        mediaType: "image/png",
+        url: expect.stringMatching(/^\/api\/uploads\/.*queued-pixel\.png$/),
+        filename: "queued-pixel.png",
+      },
+    ]);
 
-describe("chat-events — session switching respects chat.activeSessionId", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
+    // Saved once, bytes intact (the drain doesn't re-upload).
+    const added = readdirSync(uploadDir).filter((f) => !before.has(f));
+    expect(added).toHaveLength(1);
+    expect(Buffer.compare(readFileSync(join(uploadDir, added[0])), pixel)).toBe(0);
 
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario("stale-task-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  /**
-   * Regression for the session-switch bug found post-refactor: after a
-   * task completes its `task.sessionId` lingered in the `tasks` Map. The
-   * subscription handler used `task?.sessionId ?? chat?.activeSessionId`,
-   * which silently overrode the user's selection. Fixed by gating on
-   * `task?.status === "running"` — see `apps/web/src/api/chat-events.ts`.
-   *
-   * Scenario:
-   *   1. Submit a message → task runs against "stale-task-session" and
-   *      completes (task lingers in memory with status="completed").
-   *   2. Switch the chat to a different session via setActiveSession.
-   *   3. Open a fresh subscription — `subscription-opened.sessionId` MUST
-   *      be the new session, not the completed task's session.
-   */
-  it("a completed task's sessionId does NOT override chat.activeSessionId on cold subscribe", async () => {
-    const chatId = newChatId("switch");
-
-    // Phase 1: run a task to completion.
-    const taskPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
+    // The agent (which accepts images) got the picture itself.
+    const sent = stubRequests(server.home, "session/prompt").find(
+      (r) => (r.params.prompt as { text?: string }[])[0].text === "look at this pixel",
+    );
+    const blocks = sent?.params.prompt as { type: string; mimeType?: string; data?: string }[];
+    expect(blocks.find((b) => b.type === "image")).toMatchObject({
+      type: "image",
+      mimeType: "image/png",
+      data: pixel.toString("base64"),
     });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first task",
-    });
-    await taskPromise;
-
-    // Phase 2: switch to a different session.
-    const otherSessionId = "00000000-0000-0000-0000-aaaaaaaaaaaa";
-    const switchRes = await setActiveSession(server.url, {
-      workspaceId: "testproject-main",
-      chatId,
-      sessionId: otherSessionId,
-    });
-    expect(switchRes.status).toBe(200);
-
-    // Phase 3: cold subscribe. The handler must resolve sessionId from
-    // chat.activeSessionId (the freshly-set otherSessionId), NOT from
-    // the lingering completed task's `stale-task-session`.
-    const events = await collectEvents(server.url, chatId, {
-      until: (e) => e.type === "subscription-opened",
-      timeoutMs: 5_000,
-    });
-    const subOpened = events.find((e) => e.type === "subscription-opened");
-    expect(subOpened).toBeDefined();
-    const data = subOpened!.data as Extract<ChatEventPayload, { type: "subscription-opened" }> & {
-      eventId: number;
-    };
-    expect(data.sessionId).toBe(otherSessionId);
-    expect(data.taskRunning).toBe(false);
-  });
-
-  /**
-   * Regression for the "New session" UX: clicking "New session" calls
-   * setActiveSession with `sessionId: undefined`, which must produce a
-   * subscription with no replay. The earlier bug was twofold:
-   *   - `ensureActiveSessionSummary` re-promoted the latest on-disk
-   *     session via `getLatestSession`, clobbering the cleared state.
-   *   - The subscription would then surface the prior session's events.
-   *
-   * Under the event-log model the cleared row stays cleared, and the
-   * subscription opens "empty" until the user submits the first message
-   * of the new session.
-   */
-  it("clearing activeSessionId yields an empty subscription (no replay, no session)", async () => {
-    const chatId = newChatId("newsession");
-
-    // Phase 1: run a task to completion so the chat has an activeSessionId
-    // and the JSONL is on disk (would be replayed if the clear failed).
-    const taskPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first task",
-    });
-    await taskPromise;
-
-    // Phase 2: clear activeSessionId (the "New session" UX path).
-    const clearRes = await setActiveSession(server.url, {
-      workspaceId: "testproject-main",
-      chatId,
-      // sessionId omitted ⇒ undefined ⇒ clears chat.activeSessionId.
-    });
-    expect(clearRes.status).toBe(200);
-
-    // Phase 3: cold subscribe — no sessionId, no replay events.
-    // Collect for a short window to catch any unintended replay.
-    const events = await collectEvents(server.url, chatId, {
-      until: (_e, all) => all.length >= 3,
-      timeoutMs: 1_500,
-    });
-
-    const subOpened = events.find((e) => e.type === "subscription-opened");
-    expect(subOpened).toBeDefined();
-    const data = subOpened!.data as Extract<ChatEventPayload, { type: "subscription-opened" }> & {
-      eventId: number;
-    };
-    expect(data.sessionId).toBeUndefined();
-    expect(data.taskRunning).toBe(false);
-
-    // No prior-session content events should follow subscription-opened.
-    // The fix guarantees JSONL backfill is gated on a resolved sessionId.
-    const contentTypes: ChatEventType[] = [
-      "user-message",
-      "text-start",
-      "text-delta",
-      "text-end",
-      "tool-input-available",
-      "tool-output-available",
-    ];
-    const leaked = events.filter((e) => contentTypes.includes(e.type as ChatEventType));
-    expect(leaked).toEqual([]);
   });
 });
 
-// ---------------------------------------------------------------------------
-// File attachment integration test
-//
-// Verifies the end-to-end path for a user sending a message with file
-// attachments — the same wire the chat UI's `useChatSubscription.send`
-// drives:
-//
-//   1. `POST /api/chats/:chatId/messages` body carries `files` as data
-//      URLs (base64).
-//   2. Server persists each file to `<HOME>/.band/uploads/<storedName>`
-//      with the original bytes intact.
-//   3. The `user-message` event on the live subscription surfaces the
-//      files with stable `/api/uploads/<storedName>` URLs (NOT the bulky
-//      data URLs) so reloading the chat from disk renders the user
-//      bubble with its images.
-//
-// Doctrine-compliant: real server, real disk, no mocking of our own
-// routes. The fake-agent emits the same `quickScenario` it would for a
-// text-only message; the file path is purely server-side.
-// ---------------------------------------------------------------------------
-
-describe("chat-events — file attachment uploads end-to-end", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario("files-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("submits a file as a base64 data URL → saved to disk + user-message carries /api/uploads URL", async () => {
-    const chatId = newChatId("files");
-
-    // 5-byte PNG-ish payload (real PNG signature is fine to keep on disk).
-    // We assert byte-for-byte equality on what arrived at /uploads/.
-    const pixelBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0a]);
-    const base64 = pixelBytes.toString("base64");
-
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "user-message",
-      timeoutMs: 15_000,
-    });
-
-    const submitRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "look at this",
+describe("attachments", () => {
+  it("saves an uploaded file to disk and shows it on the prompt by its /api/uploads URL", async () => {
+    const chatId = newChatId("upload");
+    const { events: done } = await openStream(server.url, chatId, { until: turnEnded });
+    await sendMessage(server.url, chatId, "read my notes", {
       files: [
         {
-          mediaType: "image/png",
-          url: `data:image/png;base64,${base64}`,
-          filename: "pixel.png",
+          mediaType: "text/plain",
+          url: `data:text/plain;base64,${Buffer.from("my notes").toString("base64")}`,
+          filename: "notes.txt",
         },
       ],
     });
-    expect(submitRes.status).toBe(200);
-    expect(await submitRes.json()).toEqual({ ok: true, queued: false });
+    const events = await done;
+    const prompt = events.find((e) => e.type === "prompt");
+    const file = prompt?.type === "prompt" ? prompt.files?.[0] : undefined;
+    expect(file).toMatchObject({ mediaType: "text/plain", filename: "notes.txt" });
+    expect(file?.url).toMatch(/^\/api\/uploads\//);
 
-    // (1) File landed on disk under <HOME>/.band/uploads/ with intact bytes.
-    const uploadDir = join(server.home, ".band", "uploads");
-    expect(existsSync(uploadDir)).toBe(true);
-    const uploadedFiles = readdirSync(uploadDir);
-    expect(uploadedFiles.length).toBe(1);
-    expect(uploadedFiles[0]).toMatch(/^\d+-0-pixel\.png$/);
-    const savedBytes = readFileSync(join(uploadDir, uploadedFiles[0]));
-    expect(Buffer.compare(savedBytes, pixelBytes)).toBe(0);
-
-    // (2) The `user-message` event over the subscription stripped the
-    // bulky data URL and surfaced a stable /api/uploads/ reference.
-    const events = await subscriptionPromise;
-    const userMsg = events.find((e) => e.type === "user-message");
-    expect(userMsg).toBeDefined();
-    const data = userMsg!.data as Extract<ChatEventPayload, { type: "user-message" }> & {
-      eventId: number;
-    };
-    expect(data.text).toBe("look at this");
-    expect(data.files).toBeDefined();
-    expect(data.files).toHaveLength(1);
-    const file = data.files![0];
-    expect(file.mediaType).toBe("image/png");
-    expect(file.filename).toBe("pixel.png");
-    expect(file.url).toMatch(/^\/api\/uploads\/\d+-0-pixel\.png$/);
-    // Crucially: the wire URL is NOT the bulky base64 data URL.
-    expect(file.url.startsWith("data:")).toBe(false);
-  }, 20_000);
+    // The URL serves the bytes that were uploaded.
+    const res = await fetch(`${server.url}${file?.url}`, { headers: authHeaders });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("my notes");
+  });
 });
 
-// ---------------------------------------------------------------------------
-// Queue drain preserves file attachments
-//
-// Regression for the silently-dropped-image bug:
-//   - User submits message #1 (long task). It starts running.
-//   - User submits message #2 carrying an image attachment. The submit
-//     returns `{ queued: true }` because the chat is busy.
-//   - Task #1 completes.
-//   - The drained queued turn used to call `saveUploadedFilesDetailed`
-//     again at drain time. But by then the queued payload's url had
-//     already been transformed from a `data:` URL into
-//     `/api/uploads/<storedName>` — the helper's data-URL regex no
-//     longer matched, so EVERY file was silently dropped. The result:
-//     no `files` on the user-message event, no `I'm sharing these
-//     files…` preamble for the agent, image gone.
-//
-// The fix carries the on-disk `path` through the queue payload and
-// reconstructs the agent prompt + display files directly from queued
-// metadata, without a second save. This test pins both halves:
-//   - The user-message event for the drained turn carries `files` with
-//     the right mediaType and a stable `/api/uploads/` URL.
-//   - The agent received the `I'm sharing these files with you:\n- <path>`
-//     preamble verbatim (verified by reading the stdin log dumped by
-//     the fake-agent — see `FAKE_AGENT_STDIN_LOG` in fake-agent.mjs).
-// ---------------------------------------------------------------------------
-
-describe("chat-events — queue drain preserves file attachments", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  let stdinLogPath: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    // longScenario sleeps mid-stream so the second submit lands while
-    // the first task is still running and gets queued server-side. The
-    // drain is the path we're exercising.
-    const scenario = writeScenario(tmpHome, longScenario("queue-files-session"));
-    stdinLogPath = join(tmpHome, "fake-agent-stdin.log");
-    server = await startServer({
-      tmpHome,
-      scenarioPath: scenario,
-      extraEnv: { FAKE_AGENT_STDIN_LOG: stdinLogPath },
-    });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("drained queued message keeps its image attachment + agent receives the file-sharing preamble", async () => {
-    const chatId = newChatId("queue-files");
-
-    // Subscribe FIRST so we observe both turns. Stop after two
-    // `task-completed` events — first task + drained second task.
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      until: (_e, all) => all.filter((x) => x.type === "task-completed").length >= 2,
-      maxEvents: 200,
-      timeoutMs: 30_000,
-    });
-
-    // Turn 1 — text-only, kicks off the long task.
-    const firstRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "first turn",
-    });
-    expect(firstRes.status).toBe(200);
-    expect(await firstRes.json()).toEqual({ ok: true, queued: false });
-
-    // Wait for the first task to be actually running before submitting
-    // the second message — otherwise the conflict path doesn't fire and
-    // the second turn runs immediately instead of being queued. A hard
-    // sleep would race on fast CI machines (task completes < sleep
-    // duration) or slow ones (sleep ends before task starts); polling
-    // for `task-started` makes the assertion order-of-events stable.
-    // Same pattern the cancel/abort test uses.
-    await new Promise<void>((resolveStart, rejectStart) => {
-      const start = Date.now();
-      const poll = async () => {
-        try {
-          const probe = await collectEvents(server.url, chatId, {
-            until: (e) => e.type === "task-started",
-            timeoutMs: 5_000,
-          });
-          if (probe.some((e) => e.type === "task-started")) return resolveStart();
-        } catch {
-          // probe stream may close early; that's fine, we'll re-poll
-        }
-        if (Date.now() - start > 5_000) {
-          rejectStart(new Error("task-started never arrived for first turn"));
-        } else {
-          setTimeout(poll, 50);
-        }
-      };
-      poll();
-    });
-
-    // Turn 2 — same 1×1 PNG signature the existing file-upload test
-    // uses, encoded as a data URL the way the chat UI submits images
-    // pasted from the clipboard.
-    const pixelBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0a]);
-    const dataUrl = `data:image/png;base64,${pixelBytes.toString("base64")}`;
-    const queuedText = "what about this image?";
-
-    const secondRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: queuedText,
-      files: [{ mediaType: "image/png", url: dataUrl, filename: "queued-pixel.png" }],
-    });
-    // Confirm we actually hit the queue path; if this returns
-    // `queued: false`, the rest of the test would pass trivially without
-    // exercising the drain — that's the bug we're guarding against.
-    expect(secondRes.status).toBe(200);
-    expect(await secondRes.json()).toEqual({ ok: true, queued: true });
-
-    // The submit handler persists the file under <HOME>/.band/uploads/
-    // BEFORE pushing the queued payload. By the time the second submit
-    // returns 200 the bytes must already be on disk.
-    const uploadDir = join(server.home, ".band", "uploads");
-    expect(existsSync(uploadDir)).toBe(true);
-    const uploadedFiles = readdirSync(uploadDir);
-    expect(uploadedFiles.length).toBe(1);
-    expect(uploadedFiles[0]).toMatch(/^\d+-0-queued-pixel\.png$/);
-    const savedAbsPath = join(uploadDir, uploadedFiles[0]);
-    expect(Buffer.compare(readFileSync(savedAbsPath), pixelBytes)).toBe(0);
-
-    const events = await subscriptionPromise;
-
-    // Two complete turns, each with its own user-message → task-completed
-    // sequence. The DRAINED turn (#1 in 0-indexed order, the second
-    // user-message overall) is the one we care about.
-    const userMessages = events.filter((e) => e.type === "user-message");
-    expect(userMessages.length).toBe(2);
-
-    const drainedUserMsg = userMessages[1];
-    const drainedData = drainedUserMsg.data as Extract<
-      ChatEventPayload,
-      { type: "user-message" }
-    > & { eventId: number };
-
-    // The drained user bubble surfaces the queued text — not the
-    // `I'm sharing these files…\n\n<text>` agent prompt (that's the
-    // augmented prompt sent to the model, not the displayed text).
-    expect(drainedData.text).toBe(queuedText);
-
-    // And the file metadata is preserved end-to-end. Pre-fix the wire
-    // shape had NO `files` field at all (saveUploadedFilesDetailed had
-    // silently dropped everything because the URL was no longer a
-    // data: URL), so this is the smoking-gun assertion.
-    expect(drainedData.files).toBeDefined();
-    expect(drainedData.files).toHaveLength(1);
-    const drainedFile = drainedData.files![0];
-    expect(drainedFile.mediaType).toBe("image/png");
-    expect(drainedFile.filename).toBe("queued-pixel.png");
-    expect(drainedFile.url).toMatch(/^\/api\/uploads\/\d+-0-queued-pixel\.png$/);
-    // The URL on the wire must be the stable upload URL, not the
-    // bulky base64 data URL (which would persist into JSONL forever
-    // if it leaked through here).
-    expect(drainedFile.url.startsWith("data:")).toBe(false);
-
-    // Bytes on disk are unchanged — no double-save, no truncation. (Pre-fix
-    // the drain re-ran `saveUploadedFilesDetailed`, which would have
-    // produced a SECOND file on disk if the regex had actually matched.)
-    expect(readdirSync(uploadDir).length).toBe(1);
-
-    // And the agent actually received the file-sharing preamble. The
-    // fake-agent dumps every parsed stdin message (and its argv) to
-    // FAKE_AGENT_STDIN_LOG; grep for the marker phrase, the absolute
-    // disk path, AND the queued text. All three together pin that the
-    // agent saw `I'm sharing these files with you:\n- <path>\n\n<text>`.
-    //
-    // We assert on the three fragments rather than the exact composed
-    // string because the SDK's serialization is JSON (newlines become
-    // `\n` escapes); argv would keep them raw. Splitting the assertion
-    // tolerates either transport while still pinning the same fact.
-    expect(existsSync(stdinLogPath)).toBe(true);
-    const stdinLog = readFileSync(stdinLogPath, "utf-8");
-    expect(stdinLog).toContain("I'm sharing these files with you:");
-    expect(stdinLog).toContain(savedAbsPath);
-    expect(stdinLog).toContain(queuedText);
-    // Sanity: the first-turn prompt MUST NOT have leaked a stale
-    // `[File sharing:` hint into the SECOND turn's user content (that
-    // hint is only meant for new sessions; the drain is a resume).
-    // We don't assert the absence globally because the first turn
-    // (also a new session) is legitimately allowed to carry it.
-  }, 40_000);
-});
-
-// ---------------------------------------------------------------------------
-// Cancel / abort integration test
-//
-// Verifies the path the chat UI's Stop button drives:
-//
-//   1. Submit a message → task starts, agent emits text incrementally.
-//   2. While the task is mid-stream, hit `POST /trpc/tasks.abort`.
-//   3. The subscription receives a `task-error` event and the task is
-//      no longer marked as running on the server.
-//
-// Without this end-to-end coverage, the Stop button's exact wire shape
-// (and whether the server emits the right close-the-spinner event)
-// would only be visible on manual testing.
-// ---------------------------------------------------------------------------
-
-describe("chat-events — cancel / abort terminates the in-flight task", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    // Long scenario gives us time to abort before the result event fires.
-    const scenario = writeScenario(tmpHome, longScenario("abort-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("POST /trpc/tasks.abort kills the task and emits task-error to subscribers", async () => {
+describe("cancel", () => {
+  it("tasks.abort ends the running turn as cancelled and fails the task", async () => {
     const chatId = newChatId("abort");
-
-    // Subscribe FIRST so we observe the full lifecycle, then submit.
-    const subscriptionPromise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-error" || e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-
-    await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "slow query, please cancel me",
-    });
-
-    // Wait for the task to actually be in flight before aborting,
-    // otherwise the abort races with task creation and the server has
-    // no running task to cancel. The `task-started` event is the
-    // unambiguous "I'm running now" signal.
-    await new Promise<void>((resolve, reject) => {
-      const start = Date.now();
-      const poll = async () => {
-        try {
-          const probe = await collectEvents(server.url, chatId, {
-            until: (e) => e.type === "task-started",
-            timeoutMs: 5_000,
-          });
-          if (probe.some((e) => e.type === "task-started")) return resolve();
-        } catch {
-          // probe stream may close early; that's fine, we'll re-poll
+    const answers: Promise<unknown>[] = [];
+    const { events: done } = await openStream(server.url, chatId, {
+      until: turnEnded,
+      onEvent: (e) => {
+        // Abort once the agent is inside the turn.
+        if (e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
+          answers.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
         }
-        if (Date.now() - start > 5_000) reject(new Error("task-started never arrived"));
-        else setTimeout(poll, 50);
-      };
-      poll();
+      },
     });
+    await sendMessage(server.url, chatId, "wait for me");
+    const events = await done;
+    await Promise.all(answers);
 
-    const abortRes = await abortTask(server.url, {
-      workspaceId: "testproject-main",
-      chatId,
-    });
-    expect(abortRes.status).toBe(200);
-
-    const events = await subscriptionPromise;
-    const terminal = events.find((e) => e.type === "task-error" || e.type === "task-completed");
-    expect(terminal).toBeDefined();
-    // Aborting should produce a `task-error`, NOT a `task-completed`.
-    // A spurious task-completed here would hide cancel bugs (the spinner
-    // would clear but for the wrong reason).
-    expect(terminal!.type).toBe("task-error");
-
-    // The task is no longer running on the server side. We probe via a
-    // fresh subscription's `subscription-opened` payload, which carries
-    // a `taskRunning` flag derived from the server's task map.
-    const probe = await collectEvents(server.url, chatId, {
-      until: (e) => e.type === "subscription-opened",
-      timeoutMs: 3_000,
-    });
-    const opened = probe.find((e) => e.type === "subscription-opened");
-    expect(opened).toBeDefined();
-    const openedData = opened!.data as Extract<
-      ChatEventPayload,
-      { type: "subscription-opened" }
-    > & { eventId: number };
-    expect(openedData.taskRunning).toBe(false);
-  }, 30_000);
-});
-
-// ---------------------------------------------------------------------------
-// Robustness: subscription survives a workspaceId we can't resolve
-//
-// Edge case identified in the audit: if a user has a stale browser tab
-// open and the workspace gets deleted underneath them, the SSE
-// subscription endpoint still has to return a 200 stream that the
-// client can read — NOT a 500 and NOT a hang. The JSONL backfill path
-// uses `resolveWorkspace(chatWorkspaceId)` and silently falls through
-// when the workspace is gone; this test pins that behaviour.
-// ---------------------------------------------------------------------------
-
-describe("chat-events — workspace not resolvable", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    expect(agentText(events)).toBe("Working.");
+    const ended = events.at(-1);
+    expect(ended).toMatchObject({ type: "turn-ended", stopReason: "cancelled" });
+    const taskId = ended?.type === "turn-ended" ? ended.taskId : "";
+    const tasks = await listTasksForWorkspace(server.url, WORKSPACE_ID, TEST_TOKEN);
+    expect(tasks.find((t) => t.id === taskId)?.status).toBe("failed");
   });
 
-  it("cold subscribe with a workspaceId that doesn't exist still returns 200 + an open stream", async () => {
-    const chatId = newChatId("orphan-ws");
-    // Pass `workspaceId` explicitly in the URL so the server's JSONL
-    // backfill code path is exercised — it has a `chatWorkspaceId` and
-    // tries to resolve it, then must fail GRACEFULLY (not 500).
+  // Known bug (issue #648 review): a Stop that lands while the agent is
+  // still starting is dropped. `agentSessionService.cancel` returns early
+  // when the chat has no process / session yet, `abortTask` still reports
+  // success, and the turn then runs to completion (here: forever, since
+  // this turn waits for a cancel). Fails until the service remembers the
+  // cancel and applies it once the session is attached.
+  it("tasks.abort sent while the agent is still starting cancels the turn", async () => {
+    const chatId = newChatId("abort-early");
+    const { events: done } = await openStream(server.url, chatId, {
+      until: turnEnded,
+      timeoutMs: 8_000,
+    });
+    await sendMessage(server.url, chatId, "wait for me early");
+    // Straight after the submit returns: the agent process is not up yet.
+    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    const events = await done;
+    expect(events.at(-1)).toMatchObject({ type: "turn-ended", stopReason: "cancelled" });
+  });
+});
+
+describe("session switching", () => {
+  it("a cold subscribe follows chat.activeSessionId, not the last task's session", async () => {
+    const chatId = newChatId("switch");
+    const turn = await runTurn(server.url, chatId, "first task");
+    const attached = turn.find((e) => e.type === "session-attached");
+    const oldSession = attached?.type === "session-attached" ? attached.sessionId : "";
+
+    const otherSessionId = "session-picked-from-history";
+    await trpc(server.url, "chats.setActiveSession", {
+      workspaceId: WORKSPACE_ID,
+      chatId,
+      sessionId: otherSessionId,
+    });
+
     const events = await collectEvents(server.url, chatId, {
-      workspaceId: "this-workspace-does-not-exist-main",
-      until: (e) => e.type === "subscription-opened",
+      until: (e) => e.type === "history-meta",
+    });
+    expect(events[0]).toMatchObject({
+      type: "subscription-opened",
+      sessionId: otherSessionId,
+      taskRunning: false,
+    });
+    expect(oldSession).not.toBe(otherSessionId);
+    // Nothing from the previous session is replayed.
+    expect(events.some((e) => e.type === "prompt")).toBe(false);
+  });
+
+  it("clearing activeSessionId (New session) yields an empty subscription", async () => {
+    const chatId = newChatId("newsession");
+    await runTurn(server.url, chatId, "first task");
+    await trpc(server.url, "chats.setActiveSession", { workspaceId: WORKSPACE_ID, chatId });
+
+    const events = await collectEvents(server.url, chatId, {
+      until: (e) => e.type === "history-meta",
+    });
+    expect(events[0]).toMatchObject({ type: "subscription-opened", revision: 0 });
+    expect(events[0].type === "subscription-opened" && events[0].sessionId).toBeUndefined();
+    expect(logged(events)).toEqual([]);
+
+    // The next message starts a fresh session.
+    const next = await runTurn(server.url, chatId, "new beginning");
+    expect(next.find((e) => e.type === "session-attached")).toMatchObject({ how: "new" });
+  });
+});
+
+describe("error paths", () => {
+  it("submitting to a workspace that doesn't exist returns 404; the chat's stream still opens", async () => {
+    const chatId = newChatId("orphan-ws");
+    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ workspaceId: "no-such-workspace-main", text: "hello" }),
+    });
+    expect(res.status).toBe(404);
+
+    const events = await collectEvents(server.url, chatId, {
+      until: (e) => e.type === "history-meta",
       timeoutMs: 5_000,
     });
-    const opened = events.find((e) => e.type === "subscription-opened");
-    expect(opened).toBeDefined();
-    const data = opened!.data as Extract<ChatEventPayload, { type: "subscription-opened" }> & {
-      eventId: number;
-    };
-    // No session (the chat row is freshly-lazily-created on first
-    // submit and we haven't submitted yet), no task running. The
-    // stream opens cleanly and waits for live events. The replay
-    // phase's JSONL backfill is a silent no-op because the workspace
-    // can't be resolved.
-    expect(data.taskRunning).toBe(false);
-    expect(data.sessionId).toBeUndefined();
-  }, 10_000);
-});
-
-// ---------------------------------------------------------------------------
-// Error paths required by the doctrine ("every endpoint test file includes at
-// least one negative case: missing auth, malformed input, non-existent
-// resource"). Non-existent resource is covered by the workspace-not-resolvable
-// suite above; these tests pin the missing-auth and malformed-input contracts.
-// ---------------------------------------------------------------------------
-
-describe("chat-events — auth + input-validation contracts", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario());
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    expect(events[0]).toMatchObject({ type: "subscription-opened", taskRunning: false });
   });
 
-  it("GET /api/chats/:chatId/events without band_token cookie is rejected by middleware", async () => {
-    const chatId = newChatId("auth");
-    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/events`, {
-      // Intentionally NO `Cookie: band_token=...` header.
-    });
-    // The auth middleware in `start-server.ts::handleAuth` responds with
-    // 401 (cookie missing or wrong) BEFORE any handler runs.
+  it("GET /api/chats/:chatId/events without band_token cookie is rejected (401)", async () => {
+    const res = await fetch(`${server.url}/api/chats/${newChatId("auth")}/events`);
     expect(res.status).toBe(401);
   });
 
-  it("POST /api/chats/:chatId/messages without band_token cookie is rejected", async () => {
-    const chatId = newChatId("auth");
-    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+  it("POST /api/chats/:chatId/messages without band_token cookie is rejected (401)", async () => {
+    const res = await fetch(`${server.url}/api/chats/${newChatId("auth")}/messages`, {
       method: "POST",
-      // Intentionally NO auth cookie. `Content-Type` is set so the
-      // handler is reached past Content-Type negotiation; only auth
-      // gates this.
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: "testproject-main", text: "anything" }),
+      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "anything" }),
     });
     expect(res.status).toBe(401);
   });
 
   it("POST /api/chats/:chatId/messages with missing workspaceId returns 400", async () => {
-    const chatId = newChatId("badbody");
-    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+    const res = await fetch(`${server.url}/api/chats/${newChatId("bad")}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ text: "no workspace id" }),
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toEqual({ error: "workspaceId and text are required" });
+    expect(await res.json()).toEqual({ error: "workspaceId and text are required" });
   });
 
-  it("POST /api/chats/:chatId/messages with empty text returns 400", async () => {
-    const chatId = newChatId("badbody");
-    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+  it("POST /api/chats/:chatId/messages with blank text returns 400", async () => {
+    const res = await fetch(`${server.url}/api/chats/${newChatId("bad")}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...defaultHeaders },
-      body: JSON.stringify({ workspaceId: "testproject-main", text: "   " }),
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({ workspaceId: WORKSPACE_ID, text: "   " }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "workspaceId and text are required" });
   });
 
-  it("POST /api/chats/:chatId/messages with non-JSON body returns 400", async () => {
-    const chatId = newChatId("badbody");
-    const res = await fetch(`${server.url}/api/chats/${encodeURIComponent(chatId)}/messages`, {
+  it("POST /api/chats/:chatId/messages with a non-JSON body returns 400", async () => {
+    const res = await fetch(`${server.url}/api/chats/${newChatId("bad")}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: "this is not json",
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toEqual({ error: "Invalid JSON body" });
+    expect(await res.json()).toEqual({ error: "Invalid JSON body" });
   });
 });
-
-// ---------------------------------------------------------------------------
-// Regression coverage for the workspace-switch duplication fix in
-// `apps/web/src/api/chat-events.ts` (the two code paths reviewed under
-// PR #562's Testing [1] blocker).
-// ---------------------------------------------------------------------------
-
-describe("chat-events — cold subscribe + reconnect: no duplication on the workspace-switch path", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    const scenario = writeScenario(tmpHome, quickScenario("noreplay-session"));
-    server = await startServer({ tmpHome, scenarioPath: scenario });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  /**
-   * Covers the `bufferCoversStart` branch of cold subscribe: when an
-   * in-memory buffer exists from event id 1, the server emits the
-   * BUFFER (real positive eventIds), not JSONL synthetic negative ids.
-   * Then verifies cursor preservation: a reconnect with the highest
-   * buffer eventId emits no further content events.
-   *
-   * Together these two assertions cover the workspace-switch
-   * duplication regression on the buffer-populated path — the exact
-   * scenario reproduced live in PR #562 where typing "hey", switching
-   * away, and switching back duplicated the conversation. The
-   * complementary `buf === undefined` + JSONL-on-disk hot-reconnect
-   * branch is exercised end-to-end by
-   * `apps/web/e2e/chat-virtualization.spec.ts`, which seeds the JSONL
-   * directly and drives the full switch-back through Playwright.
-   */
-  it("cold subscribe uses buffer (real positive ids), and reconnect with that cursor sees no re-emission", async () => {
-    const chatId = newChatId("noreplay");
-
-    // Phase 1: run a real task so the in-memory buffer for the session
-    // is populated with events starting at eventId 1. Subscribe BEFORE
-    // submit so the task's full lifecycle (user-message → task-started
-    // → text-* → task-completed) is captured.
-    const turn1Promise = collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 15_000,
-    });
-    const submitRes = await submitMessage(server.url, chatId, {
-      workspaceId: "testproject-main",
-      text: "hello",
-    });
-    expect(submitRes.status).toBe(200);
-    const turn1 = await turn1Promise;
-
-    expect(turn1.some((e) => e.type === "task-completed")).toBe(true);
-    expect(turn1.some((e) => e.type === "user-message" && e.id > 0)).toBe(true);
-
-    // Phase 2: cold-subscribe to the same chat AGAIN (no Last-Event-ID).
-    // This is the path a fresh tab / cached-workspace cold subscribe
-    // takes — the buffer for the session is now populated with real
-    // events 1..N. The fix's `bufferCoversStart` branch emits the
-    // buffer (positive ids); the previous JSONL-preferred path
-    // emitted synthetic negative ids and stranded the client's cursor
-    // at 0.
-    const cold = await collectEvents(server.url, chatId, {
-      until: (e) => e.type === "task-completed",
-      timeoutMs: 5_000,
-    });
-
-    const contentEventTypes = new Set<ChatEventType>([
-      "user-message",
-      "text-start",
-      "text-delta",
-      "text-end",
-      "tool-input-available",
-      "tool-output-available",
-      "task-started",
-      "task-completed",
-    ]);
-    const contentEvents = cold.filter((e) => contentEventTypes.has(e.type as ChatEventType));
-    expect(contentEvents.length).toBeGreaterThan(0);
-    for (const evt of contentEvents) {
-      // Buffer-emitted events carry their real, positive task-service
-      // eventId. JSONL-backfill events would be negative synthetics.
-      expect(evt.id).toBeGreaterThan(0);
-    }
-    // The client's cursor after dispatching these would be max(ids).
-    const cursor = Math.max(...contentEvents.map((e) => e.id));
-    expect(cursor).toBeGreaterThan(0);
-
-    // Phase 3: reconnect with the cursor from phase 2 — the exact
-    // value the client's `lastEventId` would hold after a buffer-
-    // backed cold subscribe. The server must NOT re-emit any of the
-    // events the client already has; the `evt.eventId <= afterEventId`
-    // filter in the buffer-replay branch drops everything in range.
-    const reconnect = await collectEvents(server.url, chatId, {
-      lastEventId: cursor,
-      // Stop the moment a forbidden content event arrives so a
-      // regression fails fast instead of timing out.
-      until: (evt) => contentEventTypes.has(evt.type as ChatEventType) && evt.id > 0,
-      maxEvents: 20,
-      timeoutMs: 2_500,
-    });
-    // No content event with id > 0 should appear at all on the
-    // reconnect — the previous run already covered every buffered
-    // event up to `cursor`. Explicit `expect(...).toBe(0)` so a silent
-    // timeout (zero events collected within the window) is asserted
-    // as success against the SAME predicate rather than implicitly
-    // passing because the for-loop body never executed.
-    const reEmittedContent = reconnect.filter(
-      (e) => contentEventTypes.has(e.type as ChatEventType) && e.id > 0,
-    );
-    expect(reEmittedContent.length).toBe(0);
-    // Sanity: the stream did open and emit its initial bookkeeping —
-    // this is the positive anchor that proves the timeout is "no
-    // re-emission proven" rather than "the connection never
-    // established".
-    expect(reconnect[0]?.type).toBe("subscription-opened");
-  }, 25_000);
-});
-
-/* Note on the second case the PR #562 review requested — the
- * `buf === undefined` + JSONL-on-disk hot-reconnect scenario — that we
- * intentionally do NOT add here:
- *
- *   The vitest harness uses the `fake-agent.mjs` stub binary which
- *   speaks the Claude Agent SDK stdio protocol but does NOT write a
- *   transcript to `~/.claude/projects/<encoded>/<sessionId>.jsonl`.
- *   And every attempt to seed that JSONL directly (matching the format
- *   the working `apps/web/e2e/chat-virtualization.spec.ts` uses) ends
- *   with the SDK's `getSessionMessages` returning an empty array in
- *   this harness, even though the identical seed works under
- *   Playwright. That difference appears to come from the Playwright
- *   harness booting a real production bundle while vitest boots tsx
- *   source — but the SDK is closed-source and minified, so confirming
- *   that is beyond the bounds of this PR.
- *
- *   The user-observable scenario the second case would cover (typing
- *   into a chat, switching away and back, never seeing the
- *   conversation double) is exercised end-to-end by the live-app
- *   reproduction documented in PR #562's description: switching
- *   between two real workspaces 5× while observing both reducer state
- *   and SSE traffic, before and after the fix. That reproduction is
- *   the proof the fix works; the test above pins the buffer/cursor
- *   half of the implementation as the part we can guard
- *   deterministically in the vitest harness today.
- */
-
-// ---------------------------------------------------------------------------
-// Windowed cold subscribe + history-meta (#572)
-// ---------------------------------------------------------------------------
-
-describe("chat-events — windowed cold subscribe + history-meta (#572)", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  let repoDir: string;
-
-  beforeAll(async () => {
-    // Realpath the home so the worktree path persisted in the DB matches the
-    // symlink-resolved path the agent SDK encodes the session project dir from
-    // (macOS `/var` → `/private/var`). Without this, the seeded JSONL lands in a
-    // dir the SDK never reads and `getSessionMessages` comes back empty — the
-    // shared `tests/helpers/server.ts::createTmpHome` realpaths for this reason.
-    tmpHome = realpathSync(createTmpHome());
-    repoDir = join(tmpHome, "repo");
-    mkdirSync(repoDir, { recursive: true });
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: "testproject",
-          path: repoDir,
-          defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoDir }],
-        },
-      ],
-    });
-    seedSettings(tmpHome, defaultSettings());
-    server = await startServer({ tmpHome });
-  }, 30_000);
-
-  afterAll(async () => {
-    if (server) await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  async function seedSessionChat(sessionId: string, turns: number, chatId: string): Promise<void> {
-    // `tmpHome`/`repoDir` are already symlink-resolved (see beforeAll), so the
-    // encoded project dir matches what the SDK looks up.
-    const encoded = repoDir.replace(/[^a-zA-Z0-9]/g, "-");
-    const projectDir = join(tmpHome, ".claude", "projects", encoded);
-    mkdirSync(projectDir, { recursive: true });
-    writeFileSync(join(projectDir, `${sessionId}.jsonl`), buildLongSessionJsonl(sessionId, turns));
-    await createChat(server.url, {
-      workspaceId: "testproject-main",
-      id: chatId,
-      agent: "claude-code",
-    });
-    await setActiveSession(server.url, {
-      workspaceId: "testproject-main",
-      chatId,
-      sessionId,
-    });
-  }
-
-  function historyMetaOf(events: ParsedEvent[]): { hasOlder: boolean; oldestOffset: number } {
-    const evt = events.find((e) => e.type === "history-meta");
-    if (!evt) throw new Error("no history-meta frame in replay");
-    return evt.data as unknown as { hasOlder: boolean; oldestOffset: number };
-  }
-
-  function userTextsOf(events: ParsedEvent[]): string[] {
-    return events
-      .filter((e) => e.type === "user-message")
-      .map((e) => (e.data as unknown as { text: string }).text);
-  }
-
-  it("cold subscribe to a long session replays only the recent window and reports hasOlder", async () => {
-    const chatId = newChatId("windowed-long");
-    // 60 turns = 120 messages; cold window is 50 → firstOffset 70, hasOlder true.
-    // Session id must be UUID-shaped — the agent SDK only resolves UUID-named
-    // session files on disk.
-    await seedSessionChat("44444444-5555-6666-7777-888888888888", 60, chatId);
-
-    const replay = await collectEvents(server.url, chatId, {
-      workspaceId: "testproject-main",
-      until: (e) => e.type === "history-meta",
-      timeoutMs: 10_000,
-    });
-
-    const meta = historyMetaOf(replay);
-    expect(meta.hasOlder).toBe(true);
-    expect(meta.oldestOffset).toBe(70);
-
-    // Only the last 50 messages (turns 35..59) replayed — older ones are paged
-    // in on demand via /history, not on cold subscribe.
-    const texts = userTextsOf(replay);
-    expect(texts).toContain(jsonlUserText(59));
-    expect(texts).toContain(jsonlUserText(35));
-    expect(texts).not.toContain(jsonlUserText(34));
-    expect(texts).not.toContain(jsonlUserText(0));
-  }, 25_000);
-
-  it("cold subscribe to a short session replays everything and reports hasOlder:false", async () => {
-    const chatId = newChatId("windowed-short");
-    // 5 turns = 10 messages, well under the 50-message window.
-    await seedSessionChat("55555555-6666-7777-8888-999999999999", 5, chatId);
-
-    const replay = await collectEvents(server.url, chatId, {
-      workspaceId: "testproject-main",
-      until: (e) => e.type === "history-meta",
-      timeoutMs: 10_000,
-    });
-
-    const meta = historyMetaOf(replay);
-    expect(meta.hasOlder).toBe(false);
-    expect(meta.oldestOffset).toBe(0);
-
-    const texts = userTextsOf(replay);
-    expect(texts).toContain(jsonlUserText(0));
-    expect(texts).toContain(jsonlUserText(4));
-  }, 25_000);
-});
-
-function buildLongSessionJsonl(sessionId: string, turns: number): string {
-  const lines: string[] = [];
-  let parentUuid: string | null = null;
-  for (let i = 0; i < turns; i++) {
-    lines.push(
-      JSON.stringify({
-        type: "user",
-        uuid: jsonlUuid(i * 2 + 1),
-        parentUuid,
-        sessionId,
-        isSidechain: false,
-        userType: "external",
-        message: { role: "user", content: [{ type: "text", text: jsonlUserText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2)).toISOString(),
-      }),
-    );
-    lines.push(
-      JSON.stringify({
-        type: "assistant",
-        uuid: jsonlUuid(i * 2 + 2),
-        parentUuid: jsonlUuid(i * 2 + 1),
-        sessionId,
-        isSidechain: false,
-        message: { role: "assistant", content: [{ type: "text", text: jsonlAssistantText(i) }] },
-        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i * 2 + 1)).toISOString(),
-      }),
-    );
-    parentUuid = jsonlUuid(i * 2 + 2);
-  }
-  lines.push(
-    JSON.stringify({
-      type: "last-prompt",
-      sessionId,
-      lastPrompt: jsonlUserText(turns - 1),
-      timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, turns * 2)).toISOString(),
-      uuid: jsonlUuid(turns * 2 + 1),
-      parentUuid: null,
-    }),
-  );
-  return `${lines.join("\n")}\n`;
-}
-
-function jsonlUuid(n: number): string {
-  return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
-}
-
-function jsonlUserText(turn: number): string {
-  return `cold-prompt-${turn}-marker`;
-}
-
-function jsonlAssistantText(turn: number): string {
-  return `cold-reply-${turn}-marker`;
-}

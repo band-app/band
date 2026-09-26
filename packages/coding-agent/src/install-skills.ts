@@ -1,48 +1,54 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Default executable names (looked up via PATH) for each coding agent. */
+export const CLAUDE_CODE_DEFAULT_BINARY = "claude";
+export const CODEX_DEFAULT_BINARY = "codex";
+export const GEMINI_CLI_DEFAULT_BINARY = "gemini";
+export const OPENCODE_DEFAULT_BINARY = "opencode";
+
 /**
  * Resolve the *highest-priority global* skills directory for a coding-agent
  * `type` — i.e. where new SKILL.md files should be installed so the agent
  * picks them up with maximum precedence (over lower-tier global fallbacks
  * but still below project-level skills).
  *
- * The actual path is owned by each agent's adapter file
- * (`adapters/<agent>.ts::get<Agent>InstallSkillsDir`) so the filesystem
- * convention lives next to the discovery logic that already reads from it.
- * This dispatcher uses dynamic imports — same pattern as `factory.ts` —
- * so callers don't pay the cost of loading every adapter (and its SDK
- * dependencies) just to look up a single path.
+ *   - `claude-code` → `~/.claude/skills` (personal scope, see
+ *     https://code.claude.com/docs/en/skills).
+ *   - `codex` → `$CODEX_HOME/skills` (default `~/.codex/skills`; the
+ *     `.system/` subfolder is reserved for OpenAI-shipped skills). Reads
+ *     `CODEX_HOME` at call time so test overrides take effect. See
+ *     https://developers.openai.com/codex/skills.
+ *   - `gemini-cli` → `~/.gemini/skills` (not affected by workspace trust).
+ *     See https://geminicli.com/docs/cli/skills/.
+ *   - `opencode` → `~/.config/opencode/skills`, the highest-priority
+ *     *global* entry in OpenCode's resolution order, so we don't pollute
+ *     `~/.claude/skills/`. See https://opencode.ai/docs/skills/.
  *
- * Returns `null` for agent types that have no documented global skills
- * directory (e.g. `cursor-cli`).
+ * Async for call-site compatibility with the earlier adapter-backed
+ * dispatcher. Returns `null` for agent types that have no documented global
+ * skills directory (e.g. `cursor-cli`).
  */
 export async function getInstallSkillsDir(
   type: string,
   home: string = homedir(),
 ): Promise<string | null> {
   switch (type) {
-    case "claude-code": {
-      const { getClaudeCodeInstallSkillsDir } = await import("./adapters/claude-code.js");
-      return getClaudeCodeInstallSkillsDir(home);
-    }
-    case "codex": {
-      const { getCodexInstallSkillsDir } = await import("./adapters/codex.js");
-      return getCodexInstallSkillsDir(home);
-    }
-    case "gemini-cli": {
-      const { getGeminiCliInstallSkillsDir } = await import("./adapters/gemini-cli.js");
-      return getGeminiCliInstallSkillsDir(home);
-    }
-    case "opencode": {
-      const { getOpenCodeInstallSkillsDir } = await import("./adapters/opencode.js");
-      return getOpenCodeInstallSkillsDir(home);
-    }
+    case "claude-code":
+      return join(home, ".claude", "skills");
+    case "codex":
+      // `||` (not `??`) so an empty-string `$CODEX_HOME=` falls back to
+      // `~/.codex` instead of returning `"/skills"`.
+      return join(process.env.CODEX_HOME || join(home, ".codex"), "skills");
+    case "gemini-cli":
+      return join(home, ".gemini", "skills");
+    case "opencode":
+      return join(home, ".config", "opencode", "skills");
     default:
       // `cursor-cli` and any future unknown type → caller treats as "no
       // destination" and skips. Do not throw: the install path runs on
       // every server boot and we don't want a new agent type to crash
-      // setup before its adapter is wired up.
+      // setup before it is wired up here.
       return null;
   }
 }
@@ -61,22 +67,14 @@ export async function getInstallSkillsDir(
  */
 export async function getDefaultAgentBinary(type: string): Promise<string | null> {
   switch (type) {
-    case "claude-code": {
-      const { CLAUDE_CODE_DEFAULT_BINARY } = await import("./adapters/claude-code.js");
+    case "claude-code":
       return CLAUDE_CODE_DEFAULT_BINARY;
-    }
-    case "codex": {
-      const { CODEX_DEFAULT_BINARY } = await import("./adapters/codex.js");
+    case "codex":
       return CODEX_DEFAULT_BINARY;
-    }
-    case "gemini-cli": {
-      const { GEMINI_CLI_DEFAULT_BINARY } = await import("./adapters/gemini-cli.js");
+    case "gemini-cli":
       return GEMINI_CLI_DEFAULT_BINARY;
-    }
-    case "opencode": {
-      const { OPENCODE_DEFAULT_BINARY } = await import("./adapters/opencode.js");
+    case "opencode":
       return OPENCODE_DEFAULT_BINARY;
-    }
     default:
       return null;
   }
@@ -96,9 +94,8 @@ export async function getDefaultAgentBinary(type: string): Promise<string | null
  *      boot. Idempotency simplifies to "is the symlink already correct?".
  *   3. The destination follows the tool-agnostic convention already
  *      documented by OpenCode and Gemini CLI as their lowest-priority
- *      shared skills root (see the adapter doc-comments). Other agents
- *      that adopt the convention later don't need adapter changes — only
- *      a new entry in `SUPPORTED_AGENT_TYPES`.
+ *      shared skills root. Other agents that adopt the convention later
+ *      only need a new entry in `SUPPORTED_AGENT_TYPES`.
  */
 export function getSharedSkillsDir(home: string = homedir()): string {
   return join(home, ".agents", "skills");
@@ -106,8 +103,7 @@ export function getSharedSkillsDir(home: string = homedir()): string {
 
 /**
  * Agent types Band knows how to link into. Each entry must have an
- * `install-skills-dir` documented by its adapter (`getInstallSkillsDir`
- * returns a non-null path) — otherwise there's nowhere to put the
+ * install-skills dir (`getInstallSkillsDir` returns a non-null path) — otherwise there's nowhere to put the
  * symlink. `cursor-cli` is deliberately omitted because the Cursor CLI
  * has no documented user-scope skills directory at the time of writing.
  *

@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { stopTerminalDaemon } from "../../tests/helpers/terminal-daemon";
+import { ACP_STUB_AGENT_PATH } from "./acp-stub";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
@@ -149,6 +150,12 @@ export async function startServer(
         HOME: home,
         PORT: String(port),
         NODE_ENV: "production",
+        // Every coding agent runs as an ACP subprocess (issue #648). Point
+        // them all at the scripted stub so no spec starts a real `claude` /
+        // `codex` adapter: the boot-time model refresh probes every
+        // configured agent, chat or not. Specs that script replies pass
+        // `acpStubEnv()` from `./acp-stub` in `opts.env`.
+        BAND_TEST_ACP_AGENT: ACP_STUB_AGENT_PATH,
         ...opts.env,
       },
       stdio: ["pipe", "pipe", "pipe"],

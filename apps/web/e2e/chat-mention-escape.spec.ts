@@ -13,14 +13,15 @@
  * also killed the running task — extremely surprising behaviour.
  *
  * Architecture: same shape as `chat-cancel.spec.ts` — real
- * `dist/start-server.mjs`, fake-agent stdio scenario with a 30 s sleep
- * so the Stop button stays visible the entire test, no tRPC mocking.
+ * `dist/start-server.mjs`, the ACP stub agent streams one chunk and then
+ * waits for `session/cancel`, so the Stop button stays visible the entire
+ * test unless something cancels the turn. No tRPC mocking.
  *
  * The `@`-mention dropdown is the chosen surface because its data path
  * (`workspace.searchFiles` → `git ls-files`) needs only a real git
  * repo + one committed file in the worktree. The slash-command
- * dropdown requires the bound coding-agent to implement `listSkills()`,
- * which the fake-agent does not — but the fix applied to both Esc
+ * dropdown is fed by the agent's ACP `available_commands_update`; the
+ * fix applied to both Esc
  * handlers is identical (`stopPropagation()` in the capture-phase
  * document listener), so this single spec is sufficient regression
  * coverage for both call sites.
@@ -31,6 +32,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -46,8 +48,6 @@ const PROJECT = "mentionproj";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -104,43 +104,19 @@ test.beforeAll(async () => {
         id: "claude-code",
         type: "claude-code",
         label: "Claude Code",
-        command: FAKE_AGENT_PATH,
       },
     ],
   });
 
-  // Same fake-agent scenario as `chat-cancel.spec.ts`: emit one
-  // `text-delta` IMMEDIATELY so status flips to "streaming" (Stop
-  // button visible), then sleep 30 s. The sleep window is where the
+  // Same stub scenario as `chat-cancel.spec.ts`: stream one message
+  // chunk IMMEDIATELY so status flips to "streaming" (Stop button
+  // visible), then block until `session/cancel`. That wait is where the
   // test opens and dismisses the dropdown.
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "mention-escape-session" },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "partial reply " }] },
-      },
-      { _sleep_ms: 30_000 },
-      {
-        type: "assistant",
-        message: { content: [{ type: "text", text: "never observed" }] },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "mention-escape-session",
-        duration_ms: 30_000,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
-
   server = await startServer({
     tmpHome,
-    env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    env: acpStubEnv(tmpHome, {
+      turns: [{ steps: [{ say: "partial reply " }, { waitForCancel: true }] }],
+    }),
   });
 });
 

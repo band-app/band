@@ -1,8 +1,8 @@
 // Integration tests for `UsageScannerService` (issue #425).
 //
 // Exercises the scanner orchestration against a real SQLite database
-// (via the production migrations + `UsageEventQueries`). The adapter
-// surface (`agent.listSessions` + `agent.getSessionUsage`) is the
+// (via the production migrations + `UsageEventQueries`). The usage
+// reader (`reader.listSessions` + `reader.getSessionUsage`) is the
 // scanner's out-of-process boundary, so the test provides stub
 // implementations via the constructor's DI seam. The DB itself is the
 // real production schema; the row shape, the `external_key`
@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { CodingAgent, SessionListItem, SessionUsageSnapshot } from "@band-app/coding-agent";
+import type { SessionUsageSnapshot, UsageReader, UsageSessionItem } from "@band-app/coding-agent";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -99,27 +99,25 @@ function watermark(bandHomeDir: string, workspaceId: string, agentType: string):
 }
 
 // ---------------------------------------------------------------------------
-// Stub adapter — a real `CodingAgent` shape with only the methods the
-// scanner uses. Each test instantiates a fresh one with the sessions /
-// usage maps it wants the scanner to see.
+// Stub usage reader — the `UsageReader` shape the scanner consumes. Each
+// test instantiates a fresh one with the sessions / usage maps it wants the
+// scanner to see.
 // ---------------------------------------------------------------------------
 
-interface StubAdapterOptions {
-  sessions: SessionListItem[];
+interface StubReaderOptions {
+  sessions: UsageSessionItem[];
   /** sessionId → snapshot. Missing entries are returned as `null` (the
    *  scanner skips them silently). */
   usageBySession: Record<string, SessionUsageSnapshot>;
 }
 
-function makeStubAdapter(opts: StubAdapterOptions): CodingAgent {
+type StubReader = UsageReader & {
+  __calls: { listSessions: number; getSessionUsage: string[] };
+};
+
+function makeStubReader(opts: StubReaderOptions): StubReader {
   const calls = { listSessions: 0, getSessionUsage: [] as string[] };
-  const agent: CodingAgent & { __calls: typeof calls } = {
-    name: "Stub",
-    supportedFeatures: { costTracking: true, sessionListing: true },
-    // eslint-disable-next-line require-yield
-    async *runSession() {
-      // Not used by the scanner.
-    },
+  return {
     async listSessions() {
       calls.listSessions++;
       return opts.sessions;
@@ -130,7 +128,6 @@ function makeStubAdapter(opts: StubAdapterOptions): CodingAgent {
     },
     __calls: calls,
   };
-  return agent;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,17 +203,14 @@ describe("UsageScannerService (issue #425)", () => {
         },
       ],
     };
-    const sessions: SessionListItem[] = [
-      { sessionId, summary: "demo", lastModified: HOUR_A + 60_000 },
-    ];
+    const sessions: UsageSessionItem[] = [{ sessionId, lastModified: HOUR_A + 60_000 }];
 
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () =>
-        makeStubAdapter({ sessions, usageBySession: { [sessionId]: baseSnap } }),
+      getUsageReader: () => makeStubReader({ sessions, usageBySession: { [sessionId]: baseSnap } }),
     });
 
     await scanner.tick();
@@ -255,16 +249,14 @@ describe("UsageScannerService (issue #425)", () => {
         },
       ],
     };
-    const grownSessions: SessionListItem[] = [
-      { sessionId, summary: "demo", lastModified: HOUR_A + 120_000 },
-    ];
+    const grownSessions: UsageSessionItem[] = [{ sessionId, lastModified: HOUR_A + 120_000 }];
     const grownScanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () =>
-        makeStubAdapter({
+      getUsageReader: () =>
+        makeStubReader({
           sessions: grownSessions,
           usageBySession: { [sessionId]: grownSnap },
         }),
@@ -311,9 +303,9 @@ describe("UsageScannerService (issue #425)", () => {
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () =>
-        makeStubAdapter({
-          sessions: [{ sessionId, summary: "", lastModified: HOUR_B + 60_000 }],
+      getUsageReader: () =>
+        makeStubReader({
+          sessions: [{ sessionId, lastModified: HOUR_B + 60_000 }],
           usageBySession: { [sessionId]: snap },
         }),
     });
@@ -370,9 +362,9 @@ describe("UsageScannerService (issue #425)", () => {
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "codex-default", agentType: "codex" }],
-      createWorkspaceAgent: async () =>
-        makeStubAdapter({
-          sessions: [{ sessionId, summary: "", lastModified: HOUR_A + 120_000 }],
+      getUsageReader: () =>
+        makeStubReader({
+          sessions: [{ sessionId, lastModified: HOUR_A + 120_000 }],
           usageBySession: { [sessionId]: snap },
         }),
     });
@@ -400,7 +392,7 @@ describe("UsageScannerService (issue #425)", () => {
     // session in the chunk, and the next tick picks up the remaining
     // three until everything is captured. The sort+chunk+watermark
     // dance proves no session is ever skipped.
-    const sessions: SessionListItem[] = [];
+    const sessions: UsageSessionItem[] = [];
     const usageBySession: Record<string, SessionUsageSnapshot> = {};
     // Five sessions, one per hour, oldest first. Out-of-order on the
     // input array to prove the scanner sorts before slicing.
@@ -413,7 +405,7 @@ describe("UsageScannerService (issue #425)", () => {
       { id: "ses_2", hour: baseHour + 2 * HOUR_MS, cost: 0.02 },
     ];
     for (const m of sessionMeta) {
-      sessions.push({ sessionId: m.id, summary: "", lastModified: m.hour + 1_000 });
+      sessions.push({ sessionId: m.id, lastModified: m.hour + 1_000 });
       usageBySession[m.id] = {
         sessionId: m.id,
         modelFallback: "claude-sonnet-4-6",
@@ -436,7 +428,7 @@ describe("UsageScannerService (issue #425)", () => {
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () => makeStubAdapter({ sessions, usageBySession }),
+      getUsageReader: () => makeStubReader({ sessions, usageBySession }),
       maxSessionsPerTick: 2,
     });
 
@@ -496,16 +488,16 @@ describe("UsageScannerService (issue #425)", () => {
         { workspaceId: "other-main", project: "other", worktreePath: "/tmp/other-main" },
       ],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async (worktreePath) => {
-        if (worktreePath === "/tmp/band-feat") {
-          return makeStubAdapter({
-            sessions: [{ sessionId: sessionA, summary: "", lastModified: HOUR_A + 1_000 }],
-            usageBySession: { [sessionA]: snap },
-          });
-        }
-        // Other workspace has zero sessions on disk.
-        return makeStubAdapter({ sessions: [], usageBySession: {} });
-      },
+      getUsageReader: () => ({
+        async listSessions(dir) {
+          // Other workspace has zero sessions on disk.
+          if (dir !== "/tmp/band-feat") return [];
+          return [{ sessionId: sessionA, lastModified: HOUR_A + 1_000 }];
+        },
+        async getSessionUsage(id) {
+          return id === sessionA ? snap : null;
+        },
+      }),
     });
 
     await scanner.tick();
@@ -521,25 +513,15 @@ describe("UsageScannerService (issue #425)", () => {
     expect(watermark(tmpHome, "band-feat", "claude-code")).toBe(HOUR_A + 1_000);
   });
 
-  it("skips adapters without getSessionUsage", async () => {
-    // Returns an adapter missing the optional getSessionUsage method —
-    // the scanner detects the absence and bails before any work.
-    const minimalAgent: CodingAgent = {
-      name: "Minimal",
-      supportedFeatures: { costTracking: false, sessionListing: true },
-      // eslint-disable-next-line require-yield
-      async *runSession() {},
-      async listSessions() {
-        return [{ sessionId: "should-not-read", summary: "", lastModified: 1_700_000_000_000 }];
-      },
-    };
-
+  it("skips agents without a usage reader", async () => {
+    // Agent types whose provider keeps no on-disk usage (gemini-cli,
+    // cursor-cli) resolve to no reader — the scanner bails before any work.
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "minimal", agentType: "minimal" }],
-      createWorkspaceAgent: async () => minimalAgent,
+      getUsageReader: () => undefined,
     });
 
     await scanner.tick();
@@ -547,7 +529,7 @@ describe("UsageScannerService (issue #425)", () => {
     expect(watermark(tmpHome, workspaceId, "minimal")).toBe(0);
   });
 
-  it("tolerates createWorkspaceAgent throwing without aborting other pairs", async () => {
+  it("tolerates a failing reader without aborting other pairs", async () => {
     const sessionId = "ses_ok";
     const snap: SessionUsageSnapshot = {
       sessionId,
@@ -573,10 +555,15 @@ describe("UsageScannerService (issue #425)", () => {
         { agentId: "broken", agentType: "codex" },
         { agentId: "ok", agentType: "claude-code" },
       ],
-      createWorkspaceAgent: async (_dir, agentId) => {
-        if (agentId === "broken") throw new Error("ENOENT: codex binary not on PATH");
-        return makeStubAdapter({
-          sessions: [{ sessionId, summary: "", lastModified: HOUR_A + 1_000 }],
+      getUsageReader: ({ agentId }) => {
+        if (agentId === "broken") {
+          return {
+            listSessions: () => Promise.reject(new Error("ENOENT: codex binary not on PATH")),
+            getSessionUsage: () => Promise.resolve(null),
+          };
+        }
+        return makeStubReader({
+          sessions: [{ sessionId, lastModified: HOUR_A + 1_000 }],
           usageBySession: { [sessionId]: snap },
         });
       },
@@ -592,9 +579,9 @@ describe("UsageScannerService (issue #425)", () => {
   it("short-circuits when polling is disabled — no listSessions, no rows", async () => {
     // The dashboard's "Poll for usage data" toggle is wired through
     // `isPollingEnabled`. When disabled, `tick()` must return without
-    // touching any of the adapter methods — the whole point is to
+    // touching any of the reader methods — the whole point is to
     // claw back CPU + subprocess churn. We assert via call counters
-    // on the stub adapter that `listSessions` was never invoked.
+    // on the stub reader that `listSessions` was never invoked.
     const sessionId = "ses_disabled";
     const snap: SessionUsageSnapshot = {
       sessionId,
@@ -611,19 +598,19 @@ describe("UsageScannerService (issue #425)", () => {
         },
       ],
     };
-    const stub = makeStubAdapter({
-      sessions: [{ sessionId, summary: "", lastModified: HOUR_A + 1_000 }],
+    const stub = makeStubReader({
+      sessions: [{ sessionId, lastModified: HOUR_A + 1_000 }],
       usageBySession: { [sessionId]: snap },
     });
     // Surface the call counters for assertion below.
-    const calls = (stub as CodingAgent & { __calls: { listSessions: number } }).__calls;
+    const calls = stub.__calls;
 
     const scanner = new UsageScannerService({
       usageEvents: new UsageEventQueries(),
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () => stub,
+      getUsageReader: () => stub,
       isPollingEnabled: () => false,
     });
 
@@ -664,9 +651,9 @@ describe("UsageScannerService (issue #425)", () => {
       scanState: new UsageScanStateQueries(),
       listWorkspaces: () => [{ workspaceId, project, worktreePath }],
       listAgents: () => [{ agentId: "claude-code-default", agentType: "claude-code" }],
-      createWorkspaceAgent: async () =>
-        makeStubAdapter({
-          sessions: [{ sessionId, summary: "", lastModified: HOUR_A + 1_000 }],
+      getUsageReader: () =>
+        makeStubReader({
+          sessions: [{ sessionId, lastModified: HOUR_A + 1_000 }],
           usageBySession: { [sessionId]: snap },
         }),
       isPollingEnabled: () => pollingEnabled,

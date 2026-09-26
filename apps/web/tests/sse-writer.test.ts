@@ -92,16 +92,19 @@ describe("sse-writer", () => {
 
     const evt: ChatEvent = {
       eventId: 42,
-      type: "text-delta",
-      id: "abc",
-      delta: "hello",
+      type: "update",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "abc",
+        content: { type: "text", text: "hello" },
+      },
     };
     w.write(evt);
 
     // Three writes per event: id, event, data with double newline.
     expect(recorded.chunks).toEqual([
       "id: 42\n",
-      "event: text-delta\n",
+      "event: update\n",
       `data: ${JSON.stringify(evt)}\n\n`,
     ]);
   });
@@ -110,12 +113,22 @@ describe("sse-writer", () => {
     const { res, recorded } = makeStubResponse();
     const w = openSseStream(res);
 
-    w.write({ eventId: 1, type: "subscription-opened", sessionId: "s", taskRunning: true });
-    w.write({ eventId: 2, type: "user-message", text: "hi" });
-    w.write({ eventId: 3, type: "task-completed", taskId: "t-1" });
+    w.write({ eventId: 1, type: "prompt", taskId: "t-1", text: "hi" });
+    w.write({ eventId: 2, type: "turn-started", taskId: "t-1" });
+    w.write({ eventId: 3, type: "turn-ended", taskId: "t-1", stopReason: "end_turn" });
 
     const ids = recorded.chunks.filter((c) => c.startsWith("id: ")).map((c) => c.trim());
     expect(ids).toEqual(["id: 1", "id: 2", "id: 3"]);
+  });
+
+  it("writes no id line for synthetic events, so they never move the client's cursor", () => {
+    const { res, recorded } = makeStubResponse();
+    const w = openSseStream(res);
+
+    const evt: ChatEvent = { eventId: -1, type: "queue-updated", messages: [] };
+    w.write(evt);
+
+    expect(recorded.chunks).toEqual(["event: queue-updated\n", `data: ${JSON.stringify(evt)}\n\n`]);
   });
 
   it("writes comments as ': ...' lines (used for heartbeats)", () => {
@@ -144,7 +157,7 @@ describe("sse-writer", () => {
     const w = openSseStream(res);
 
     w.close();
-    w.write({ eventId: 1, type: "user-message", text: "ignored" });
+    w.write({ eventId: 1, type: "prompt", taskId: "t-1", text: "ignored" });
     w.comment("ignored");
     expect(recorded.chunks).toEqual([]);
   });
@@ -158,7 +171,7 @@ describe("sse-writer", () => {
     expect(w.closed).toBe(true);
 
     // Subsequent writes are no-ops.
-    w.write({ eventId: 1, type: "user-message", text: "no" });
+    w.write({ eventId: 1, type: "prompt", taskId: "t-1", text: "no" });
     expect(recorded.chunks).toEqual([]);
   });
 });

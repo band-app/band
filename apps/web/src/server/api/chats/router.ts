@@ -17,16 +17,14 @@
  * shape as the pre-migration legacy procedures.
  */
 
-import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { agentService } from "../../services/agent-service";
+import { sessionIdSchema } from "../../services/_utils/session-id";
+import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import { TaskConflictError, taskService } from "../../services/task-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
-
-const log = createLogger("chats-router");
 
 // ---------------------------------------------------------------------------
 // Chats (multi-pane chat management)
@@ -70,36 +68,48 @@ export const chatsRouter = t.router({
       }
     }),
 
-  get: publicProcedure.input(z.object({ chatId: z.string() })).query(async ({ input }) => {
-    const chat = chatService.get(input.chatId);
-    if (!chat) return { chat: null };
-
-    const workspace = workspaceService.resolve(chat.workspaceId);
-
-    // Lazy-resolve case: row has no cached summary yet (post-migration, or
-    // a fresh chat with no activeSessionId). Block once on the first read
-    // so the client can render a meaningful tab title without waiting for
-    // a separate sessions.list. Subsequent reads are pure SQLite.
-    if (workspace && (!chat.activeSessionId || chat.activeSessionSummary === undefined)) {
-      const resolved = await chatService.ensureActiveSessionSummary(
-        input.chatId,
-        workspace.worktree.path,
-      );
-      if (resolved) {
-        return { chat: resolved };
-      }
-    }
-
-    // Hot path: cached values returned immediately. Kick off a
-    // background refresh so the next read picks up any drift (e.g. the
-    // user renamed the session via /rename). Errors are swallowed; the
-    // refresh will be retried on the next request.
-    if (workspace) {
-      chatService.scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
-    }
-
-    return { chat };
+  get: publicProcedure.input(z.object({ chatId: z.string() })).query(({ input }) => {
+    return { chat: chatService.ensureActiveSessionSummary(input.chatId) ?? null };
   }),
+
+  /**
+   * Session settings for the chat's pickers: model, mode and other config
+   * options, slash commands, context usage (issue #648). The chat event
+   * stream sends the same snapshot on subscribe; this read is for callers
+   * without a stream open (the CLI).
+   */
+  sessionState: publicProcedure
+    .input(z.object({ chatId: z.string() }))
+    .query(({ input }) => ({ state: agentSessionService.getSessionState(input.chatId) })),
+
+  /**
+   * Changes one ACP session config option (model, mode, reasoning effort,
+   * …) on the chat's live session, and saves model / mode on the chat row
+   * so the next session starts with them. `__legacy_model` /
+   * `__legacy_mode` address agents that expose models and modes without
+   * config options (Gemini CLI, Cursor CLI).
+   */
+  setConfigOption: publicProcedure
+    .input(z.object({ chatId: z.string(), configId: z.string(), value: z.string() }))
+    .mutation(async ({ input }) => {
+      try {
+        return {
+          state: await agentSessionService.setConfigOption(
+            input.chatId,
+            input.configId,
+            input.value,
+          ),
+        };
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
 
   /**
    * Update one or more fields on an existing chat pane.
@@ -176,16 +186,16 @@ export const chatsRouter = t.router({
         // Cap the length: this id is persisted as `activeSessionId` and later
         // flows into the resume command line (`continueInTerminal` →
         // `formatShellCommand` → PTY). Real provider ids are well under this.
-        sessionId: z.string().max(512).optional(),
+        sessionId: sessionIdSchema.optional(),
+        summary: z.string().max(1000).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(({ input }) => {
       // Lazily ensure the server-side chat record exists. The client
       // generates chatIds locally, so setActiveSession may be called
       // before the first message is sent (which normally creates the record).
-      let chat = chatService.get(input.chatId);
-      if (!chat) {
-        chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+      if (!chatService.get(input.chatId)) {
+        chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
       }
 
       if (!input.sessionId) {
@@ -193,31 +203,10 @@ export const chatsRouter = t.router({
         return { ok: true };
       }
 
-      // Resolve the summary inline so the persisted row carries a usable
-      // tab title from the moment the client switches sessions. If
-      // getSessionInfo fails or returns undefined (the JSONL doesn't exist
-      // yet for a freshly-created session), persist NULL — the next
-      // chats.get's background refresh will catch up.
-      const workspace = workspaceService.resolve(input.workspaceId);
-      let summary: string | undefined;
-      let lastModified: number | undefined;
-      if (workspace) {
-        try {
-          const agent = await agentService.getOrCreateAgent(
-            input.chatId,
-            workspace.worktree.path,
-            chat.agent,
-          );
-          const info = await agent.getSessionInfo?.(input.sessionId, workspace.worktree.path);
-          summary = info?.summary;
-          lastModified = info?.lastModified;
-        } catch (err) {
-          log.warn(
-            { chatId: input.chatId, sessionId: input.sessionId, err },
-            "setActiveSession: getSessionInfo failed",
-          );
-        }
-      }
+      // Title: the caller's (from the agent's session list), else the
+      // session's first prompt in Band's log.
+      const summary = input.summary ?? agentSessionService.sessionTitle(input.sessionId);
+      const lastModified = Date.now();
 
       chatService.updateActiveSession(input.chatId, {
         activeSessionId: input.sessionId,
@@ -233,7 +222,7 @@ export const chatsRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string(),
         message: z.string(),
-        sessionId: z.string().max(512).optional(),
+        sessionId: sessionIdSchema.optional(),
       }),
     )
     .mutation(({ input }) => {

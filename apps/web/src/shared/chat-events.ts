@@ -1,55 +1,71 @@
 /**
  * Wire schema for the chat event log.
  *
- * The unified `/api/chats/:chatId/events` SSE stream emits these as
- * `event: <type>` + `data: <JSON>` lines. The native SSE `id:` field
- * carries each event's monotonic id so the browser's EventSource auto-
- * populates `Last-Event-ID` on reconnect — no manual cursor on the
- * client.
+ * Every chat runs one coding agent over the Agent Client Protocol (ACP).
+ * The server records what the agent sends (`session/update` notifications,
+ * permission and elicitation requests) and what Band sends it (prompts),
+ * and streams that log to the browser over
+ * `GET /api/chats/:chatId/events` as `event: <type>` + `data: <JSON>` SSE
+ * frames. ACP's own schema types are the vocabulary: an `update` event
+ * carries the agent's `SessionUpdate` unchanged, so there is no Band copy
+ * of message chunks, tool calls or plans to keep in sync with the protocol.
  *
- * Lives under `apps/web/src/shared/` because both halves of the app
- * (server tier + browser-side components) need the same definitions,
- * and `apps/web/src/lib/` is reserved for browser-only utilities per
- * the 3-tier architecture rules (`docs/web-architecture.md`). Moved out
- * of `lib/` in issue #535, follow-up 4.
+ * The native SSE `id:` field carries each event's id, which for logged
+ * events is the row id in the `chat_events` table. Ids only grow, so the
+ * browser's `Last-Event-ID` is a gap-fill cursor. Synthetic events the
+ * server makes up per subscription (`subscription-opened`,
+ * `queue-updated`, `session-state`, `history-meta`) carry negative ids and
+ * never move the cursor.
  *
- * Source of truth shared by:
- *   • `apps/web/src/api/chat-events.ts`            — emits these events
- *   • `apps/web/src/api/chat-submit.ts`            — round-trip target
- *   • `apps/web/src/server/services/task-service.ts` — broadcasts them
- *   • `apps/web/src/components/chat/*`             — consumes them
- *   • `apps/web/tests/chat-events.test.ts`         — integration tests
+ * Lives under `apps/web/src/shared/` because both the server tier and the
+ * browser components import it.
  */
 
+import type {
+  AvailableCommand,
+  CreateElicitationRequest,
+  RequestPermissionRequest,
+  SessionConfigOption,
+  SessionModeState,
+  SessionUpdate,
+  StopReason,
+  UsageUpdate,
+} from "@agentclientprotocol/sdk";
+
+export type {
+  AvailableCommand,
+  CreateElicitationRequest,
+  RequestPermissionRequest,
+  SessionConfigOption,
+  SessionModeState,
+  SessionUpdate,
+  StopReason,
+};
+
 /**
- * Number of messages in one chat-history page. Single source of truth shared by
- * the three sites that must agree for scroll-back pagination to line up:
- *   • cold-subscribe replay window (`chat-events.ts`),
- *   • the older-page endpoint's default page size (`chat-history.ts`),
- *   • the client's `loadOlder` request size (`use-chat-subscription.ts`).
+ * Number of turns in one chat-history page. A turn starts at a prompt Band
+ * sent, or at a user message the agent replayed through `session/load`.
+ * Shared by the cold-subscribe replay window (`chat-events.ts`), the
+ * older-page endpoint (`chat-history.ts`) and the client's `loadOlder`, so
+ * the three agree on page boundaries.
  */
-export const HISTORY_PAGE_SIZE = 50;
+export const HISTORY_PAGE_SIZE = 20;
 
 // ---------------------------------------------------------------------------
 // Common shapes
 // ---------------------------------------------------------------------------
 
+/** Model state from the unstable `session/set_model` API, returned by
+ *  agents that have no `model` config option (Gemini CLI). */
+export interface LegacyModelState {
+  currentModelId: string;
+  availableModels: { modelId: string; name: string; description?: string | null }[];
+}
+
 export interface ChatEventFile {
   mediaType: string;
   url: string;
   filename?: string;
-}
-
-export interface ChatEventUsage {
-  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  reasoningOutputTokens?: number;
-  contextTokens?: number;
-  totalProcessedTokens?: number;
-  maxContextTokens?: number;
 }
 
 export interface QueuedChatMessage {
@@ -58,114 +74,131 @@ export interface QueuedChatMessage {
   files?: ChatEventFile[];
 }
 
+/**
+ * Token usage for one finished turn, from `PromptResponse.usage` (or
+ * Gemini's `_meta.quota`). `costUsd` is the session's cumulative cost:
+ * the agent's own figure from `usage_update.cost` when it reports one,
+ * otherwise computed by Band from these tokens and `MODEL_PRICING`.
+ */
+export interface TurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens?: number;
+  cachedWriteTokens?: number;
+  thoughtTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  model?: string;
+}
+
+/**
+ * Session settings and capabilities a chat can offer before any turn
+ * streams: the model and mode pickers, slash commands, the context meter.
+ *
+ * Sent as a synthetic `session-state` event on every subscribe, because the
+ * `config_option_update` / `available_commands_update` / `usage_update`
+ * events that carry the same data can sit outside the replayed window.
+ * After that the client applies those updates itself.
+ */
+export interface SessionState {
+  /** `live` when an agent process holds the session, `log` when read back
+   *  from Band's event log, `cached` when taken from the agent catalog
+   *  before the chat has a session. */
+  source: "live" | "log" | "cached";
+  configOptions: SessionConfigOption[];
+  /** Legacy mode state, for agents that expose modes without a `mode`
+   *  config option (Gemini CLI, Cursor CLI). */
+  modes: SessionModeState | null;
+  /** Legacy model state (`session/set_model`), for agents without a
+   *  `model` config option (Gemini CLI). */
+  models: LegacyModelState | null;
+  commands: AvailableCommand[];
+  usage: UsageUpdate | null;
+  /** Cumulative session cost in USD: `usage.cost` when the agent reports
+   *  one, else Band's estimate from the last turn's tokens. */
+  costUsd: number | null;
+  title: string | null;
+}
+
 // ---------------------------------------------------------------------------
-// Event payloads
+// Logged events. Persisted in `chat_events` and replayed on reconnect.
 // ---------------------------------------------------------------------------
 
-/** A user-submitted prompt. Emitted by the task runner once the task starts so
- *  every subscriber (including the submitter) sees the same canonical record. */
-export interface UserMessageEvent {
-  type: "user-message";
-  /** The text the user actually typed (no agent-prompt augmentation). */
+/** One ACP `session/update`, forwarded unchanged. */
+export interface UpdateEvent {
+  type: "update";
+  update: SessionUpdate;
+}
+
+/** A prompt Band sent to the agent. `text` is what the user typed, without
+ *  the attachment and file-sharing context Band adds to the ACP blocks. */
+export interface PromptEvent {
+  type: "prompt";
+  taskId: string;
   text: string;
   files?: ChatEventFile[];
 }
 
-/** Lifecycle marker emitted when a task transitions to "running" server-side. */
-export interface TaskStartedEvent {
-  type: "task-started";
+/** A prompt turn started (`session/prompt` sent). */
+export interface TurnStartedEvent {
+  type: "turn-started";
   taskId: string;
-  agentType?: string;
-  model?: string;
-  mode?: string;
 }
 
-/** Lifecycle marker emitted when a task completes successfully. */
-export interface TaskCompletedEvent {
-  type: "task-completed";
+/** A prompt turn ended. `stopReason` is the agent's; `error` is set when
+ *  the request failed or the agent process exited mid-turn. */
+export interface TurnEndedEvent {
+  type: "turn-ended";
   taskId: string;
+  stopReason?: StopReason;
+  error?: string;
   durationMs?: number;
-  numTurns?: number;
-  costUsd?: number;
+  usage?: TurnUsage;
 }
 
-/** Lifecycle marker emitted when a task fails or is aborted. */
-export interface TaskErrorEvent {
-  type: "task-error";
-  taskId: string;
-  message: string;
+/** The agent asked `session/request_permission`. Answered by
+ *  `chat.answer({ requestId, optionId })`. */
+export interface PermissionEvent {
+  type: "permission";
+  requestId: string;
+  request: RequestPermissionRequest;
 }
 
-/** The agent reported (or resolved) its session id. */
-export interface SessionResolvedEvent {
-  type: "session-resolved";
+/** The agent asked `elicitation/create` in form mode (Claude Code's
+ *  `AskUserQuestion`). Answered by `chat.answerElicitation`. */
+export interface ElicitationEvent {
+  type: "elicitation";
+  requestId: string;
+  request: CreateElicitationRequest;
+}
+
+/** A permission or elicitation request got its answer. `answer` is the
+ *  picked option id, an elicitation action (`accept` / `decline`), or
+ *  `cancelled` when the turn stopped first. */
+export interface RequestResolvedEvent {
+  type: "request-resolved";
+  requestId: string;
+  answer: string;
+}
+
+/** The chat attached to an agent session (`session/new`, `session/load` or
+ *  `session/resume`), with the settings the agent answered with. Logged so
+ *  the pickers can be rebuilt from the log while no agent runs. */
+export interface SessionAttachedEvent {
+  type: "session-attached";
   sessionId: string;
+  how: "new" | "load" | "resume";
+  /** The log revision this session writes from now on. A client adopts it,
+   *  so its next reconnect gap-fills rather than resets. */
+  revision: number;
+  agentName?: string;
+  configOptions: SessionConfigOption[];
+  modes: SessionModeState | null;
+  models: LegacyModelState | null;
 }
 
-/** Begin a streaming text part within the current assistant message. */
-export interface TextStartEvent {
-  type: "text-start";
-  id: string;
-}
-
-/** Append text to the current streaming part. */
-export interface TextDeltaEvent {
-  type: "text-delta";
-  id: string;
-  delta: string;
-}
-
-/** Close the current streaming text part. */
-export interface TextEndEvent {
-  type: "text-end";
-  id: string;
-}
-
-/** A tool call's input is available (and possibly still streaming). */
-export interface ToolInputAvailableEvent {
-  type: "tool-input-available";
-  toolCallId: string;
-  toolName: string;
-  input: unknown;
-  displayTitle?: string;
-  /** For interactive tools (AskUserQuestion, ExitPlanMode). */
-  approvalId?: string;
-}
-
-/** A tool call has produced an output. */
-export interface ToolOutputAvailableEvent {
-  type: "tool-output-available";
-  toolCallId: string;
-  output: string;
-  isError?: boolean;
-}
-
-/** Token usage snapshot for the current assistant turn. */
-export interface UsageEvent {
-  type: "usage";
-  data: ChatEventUsage;
-}
-
-/** Final-result metadata from the agent (after task-completed). */
-export interface ResultEvent {
-  type: "result";
-  sessionId?: string;
-  durationMs?: number;
-  numTurns?: number;
-  costUsd?: number;
-}
-
-/** Generic agent or runtime error. Distinct from `task-error` (lifecycle). */
-export interface ErrorEvent {
-  type: "error";
-  message: string;
-}
-
-/** An assistant-produced file the user can render inline (image, download
- *  link, …). Emitted by `task-service` either when the agent emits a
- *  `file` event explicitly or when a tool call drops a new file into the
- *  workspace shared dir. The client attaches it as a `file` part on the
- *  current assistant message — never a stand-alone bubble. */
+/** A file the agent wrote into the workspace's shared directory, rendered
+ *  as a download card. */
 export interface FileEvent {
   type: "file";
   mediaType: string;
@@ -173,108 +206,93 @@ export interface FileEvent {
   filename?: string;
 }
 
-/** Server pushes the full queue every time it changes. Idempotent — clients
- *  replace their local view wholesale (no need to track per-event mutations). */
+/** Something Band itself wants to tell the user, such as an agent that
+ *  failed to start or a session that could not be reopened. */
+export interface NoticeEvent {
+  type: "notice";
+  level: "info" | "warning" | "error";
+  text: string;
+}
+
+export type LoggedChatEvent =
+  | UpdateEvent
+  | PromptEvent
+  | TurnStartedEvent
+  | TurnEndedEvent
+  | PermissionEvent
+  | ElicitationEvent
+  | RequestResolvedEvent
+  | SessionAttachedEvent
+  | FileEvent
+  | NoticeEvent;
+
+// ---------------------------------------------------------------------------
+// Synthetic events. Made up per subscription, never persisted.
+// ---------------------------------------------------------------------------
+
+/** First event on every subscription. `revision` identifies the log the
+ *  replay comes from; a client holding a different revision must drop its
+ *  state (`reset: true`) because the log was rebuilt by `session/load`. */
+export interface SubscriptionOpenedEvent {
+  type: "subscription-opened";
+  sessionId?: string;
+  revision: number;
+  taskRunning: boolean;
+  reset: boolean;
+}
+
+/** The server's queue of messages waiting for the running turn. Sent whole
+ *  on every change. */
 export interface QueueUpdatedEvent {
   type: "queue-updated";
   messages: QueuedChatMessage[];
 }
 
-/** Heartbeat-equivalent: emitted at subscription open even if there's nothing
- *  to replay, so the client knows the stream is alive and the session is
- *  resolved. */
-export interface SubscriptionOpenedEvent {
-  type: "subscription-opened";
-  sessionId?: string;
-  taskRunning: boolean;
+/** Current session settings. See {@link SessionState}. */
+export interface SessionStateEvent {
+  type: "session-state";
+  state: SessionState;
 }
 
-/**
- * Windowed-history marker. Emitted once per cold subscribe, right after the
- * recent-window JSONL replay, so the client knows whether older pages exist on
- * disk and the offset cursor to fetch them from.
- *
- *   • `hasOlder` — true when the session has messages BEFORE the replayed
- *     window. Drives the scroll-back sentinel + IntersectionObserver in
- *     `ChatView`.
- *   • `oldestOffset` — absolute index (into the agent's filtered message list)
- *     of the FIRST message the client currently holds. The older-page endpoint
- *     (`GET /api/chats/:id/history?before=<oldestOffset>`) returns the page
- *     immediately preceding it.
- *
- * Only the cold-subscribe JSONL path emits a meaningful `hasOlder: true`; every
- * other replay path (buffer-covers-start, hot reconnect) emits
- * `hasOlder: false` so the client always receives a definitive signal rather
- * than inferring "no older history" from the absence of an event.
- */
+/** Sent after a cold replay: whether older turns exist, and the event id
+ *  to pass as `before` to `GET /api/chats/:id/history` to fetch them. */
 export interface HistoryMetaEvent {
   type: "history-meta";
   hasOlder: boolean;
-  oldestOffset: number;
+  oldestEventId: number;
 }
 
-// ---------------------------------------------------------------------------
-// Discriminated union
-// ---------------------------------------------------------------------------
-
-export type ChatEventPayload =
-  | UserMessageEvent
-  | TaskStartedEvent
-  | TaskCompletedEvent
-  | TaskErrorEvent
-  | SessionResolvedEvent
-  | TextStartEvent
-  | TextDeltaEvent
-  | TextEndEvent
-  | ToolInputAvailableEvent
-  | ToolOutputAvailableEvent
-  | UsageEvent
-  | ResultEvent
-  | ErrorEvent
-  | FileEvent
-  | QueueUpdatedEvent
+export type SyntheticChatEvent =
   | SubscriptionOpenedEvent
+  | QueueUpdatedEvent
+  | SessionStateEvent
   | HistoryMetaEvent;
 
-/** A ChatEventPayload tagged with its monotonic event id. The `eventId` lives
- *  on the SSE `id:` line; it's surfaced in the JSON payload too as a
- *  convenience so consumers that don't speak native SSE (curl, tests) can read
- *  it without parsing the framing. */
+export type ChatEventPayload = LoggedChatEvent | SyntheticChatEvent;
+
+/** A payload tagged with its event id (also on the SSE `id:` line). */
 export type ChatEvent = ChatEventPayload & { eventId: number };
 
 export type ChatEventType = ChatEventPayload["type"];
 
-/** Map of event type → its payload shape. Useful for type-safe handlers. */
-export type ChatEventByType = {
-  [K in ChatEventType]: Extract<ChatEventPayload, { type: K }>;
-};
-
 /**
- * Enumeration of every ChatEvent type. The client's `EventSource` uses
- * `addEventListener(type, ...)` per type because we frame events as
- * `event: <type>` lines — the default `message` event doesn't fire when
- * `event:` is set, so a wildcard listener wouldn't catch anything.
- *
- * Keep in sync with `ChatEventPayload`. The exhaustiveness of
- * `chatEventReducer`'s switch statement guards the server-side mapping;
- * this array guards the client-side dispatch.
+ * Every event type. The client's `EventSource` listens per type, because
+ * frames carry `event: <type>` and the default `message` event never fires
+ * for named events.
  */
 export const CHAT_EVENT_TYPES: ReadonlyArray<ChatEventType> = [
-  "user-message",
-  "task-started",
-  "task-completed",
-  "task-error",
-  "session-resolved",
-  "text-start",
-  "text-delta",
-  "text-end",
-  "tool-input-available",
-  "tool-output-available",
-  "usage",
-  "result",
-  "error",
+  "update",
+  "prompt",
+  "turn-started",
+  "turn-ended",
+  "permission",
+  "elicitation",
+  "request-resolved",
+  "session-attached",
   "file",
-  "queue-updated",
+  "notice",
   "subscription-opened",
+  "queue-updated",
+  "session-state",
   "history-meta",
 ] as const;

@@ -1,67 +1,45 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import { jsonlMessageToEvents } from "../server/services/_utils/jsonl-message-to-events";
 import {
   getQueuedMessages,
   subscribeQueue,
   toWireQueuedMessages,
 } from "../server/services/_utils/queued-message-store";
 import { openSseStream, type SseWriter } from "../server/services/_utils/sse-writer";
-import { agentService } from "../server/services/agent-service";
+import { agentSessionService } from "../server/services/agent-session-service";
 import { chatService } from "../server/services/chat-service";
-import { type StreamChunk, taskService } from "../server/services/task-service";
-import { workspaceService } from "../server/services/workspace-service";
-import {
-  type ChatEvent,
-  type ChatEventPayload,
-  type ChatEventUsage,
-  HISTORY_PAGE_SIZE,
-  type ToolInputAvailableEvent,
-} from "../shared/chat-events";
+import { taskService } from "../server/services/task-service";
+import { type ChatEvent, HISTORY_PAGE_SIZE } from "../shared/chat-events";
 
 const log = createLogger("chat-events");
 
-/**
- * Number of most-recent messages replayed on a cold subscribe. The client
- * fetches older pages on demand via `GET /api/chats/:id/history` when the user
- * scrolls to the top (issue #572). Shares `HISTORY_PAGE_SIZE` with the history
- * endpoint and the client so the windows line up.
- */
-const COLD_REPLAY_LIMIT = HISTORY_PAGE_SIZE;
+function parseIntOrUndefined(value: string | string[] | null | undefined): number | undefined {
+  if (value == null) return undefined;
+  const n = Number.parseInt(String(value), 10);
+  return Number.isFinite(n) ? n : undefined;
+}
 
 /**
- * Unified chat event log endpoint.
+ * Chat event stream.
  *
- * `GET /api/chats/:chatId/events`
+ * `GET /api/chats/:chatId/events?lastEventId=<id>&revision=<n>`
  *
- * Single subscription replacing the legacy
- * `loadMessages → connectToRunningStream → reconnectToStream` dance on the
- * client. Behaviour:
+ *   1. `subscription-opened` with the chat's session, the log revision the
+ *      replay comes from and whether a turn runs. `reset: true` tells a
+ *      client that holds a different revision to drop its state, because
+ *      the log was rebuilt by `session/load` (issue #648).
+ *   2. `queue-updated` and `session-state` snapshots.
+ *   3. Replay from Band's event log: everything after the cursor on a
+ *      reconnect, the last `HISTORY_PAGE_SIZE` turns on a cold subscribe
+ *      (followed by `history-meta`). A session Band has no log for is
+ *      loaded from the agent (`session/load`) into the log first, then
+ *      replayed through the same window.
+ *   4. Live tail until the client disconnects, or a turn ends with nothing
+ *      running or queued after it.
  *
- *   1. **Subscription open.** Emit a `subscription-opened` event with current
- *      session id + task-running flag. The client uses this as the "first
- *      paint" signal — indicator can show immediately even before a single
- *      content event has arrived.
- *
- *   2. **Replay.** Translate buffered events past `Last-Event-ID` into
- *      `ChatEvent` payloads and emit them. If the buffer doesn't cover the
- *      requested range and the session has JSONL on disk, page in JSONL
- *      with synthetic event ids that sort before the buffer's first event.
- *
- *   3. **Live tail.** Subscribe to `task-service` broadcasts + queued-message
- *      updates; translate each to `ChatEvent` and emit live.
- *
- *   4. **Close.** When the task transitions to completed/error AND the
- *      queue is empty, close the stream so the client can release the
- *      connection. The client re-opens on next interaction.
- *
- * Differences from the legacy `task-stream.ts` GET handler:
- *
- *   - No 204 path. Even idle chats return 200 with an empty replay + a
- *     `subscription-opened` event.
- *   - Native SSE `id:` framing for `Last-Event-ID`, not embedded payload.
- *   - One closed `ChatEvent` schema, no `INTERNAL_CHUNK_TYPES` filtering.
- *   - Queue mutations are part of the stream (`queue-updated` events).
+ * The cursor comes from the `Last-Event-ID` header (EventSource sets it on
+ * its own reconnects) or the `lastEventId` query param. Logged events carry
+ * their row id; synthetic ones carry negative ids and never move it.
  */
 export async function handleChatEvents(
   req: IncomingMessage,
@@ -69,190 +47,148 @@ export async function handleChatEvents(
   chatId: string,
 ): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
-  // EventSource sends Last-Event-ID as an HTTP header on reconnect. Fall
-  // back to a query param so test harnesses + curl can simulate easily.
-  //
-  // The distinction between `undefined` (no cursor at all) and `0` (client
-  // has a cursor but it's at the boundary) matters: cold subscribe with
-  // no cursor → full JSONL replay; reconnect with cursor=0 → trust the
-  // client has already seen JSONL and skip the replay. Without that the
-  // client re-renders the entire conversation on every workspace switch.
-  const lastEventIdHeader = req.headers["last-event-id"];
-  const lastEventIdParam = url.searchParams.get("lastEventId");
-  const parsedHeader =
-    lastEventIdHeader != null ? Number.parseInt(String(lastEventIdHeader), 10) : NaN;
-  const parsedParam = lastEventIdParam != null ? Number.parseInt(lastEventIdParam, 10) : NaN;
-  const lastEventId: number | undefined = Number.isFinite(parsedHeader)
-    ? parsedHeader
-    : Number.isFinite(parsedParam)
-      ? parsedParam
-      : undefined;
+  const cursor =
+    parseIntOrUndefined(req.headers["last-event-id"]) ??
+    parseIntOrUndefined(url.searchParams.get("lastEventId"));
+  const clientRevision = parseIntOrUndefined(url.searchParams.get("revision"));
 
-  // Workspace id can be passed as a query param for the JSONL backfill
-  // case (cold subscribe to a chat that has no active task yet).
-  const explicitWorkspaceId = url.searchParams.get("workspaceId") ?? undefined;
-
-  // Validate chat exists.
-  const chat = chatService.get(chatId);
-  // We tolerate missing chats — they're created lazily on first message.
-
-  // Open the SSE stream. After this point every error must go on the stream
-  // (we've already sent headers).
   const writer = openSseStream(res);
+  let syntheticId = -1;
 
-  // Counter local to *this subscription* — only used for events the server
-  // synthesises (subscription-opened, queue-updated, JSONL backfill). Real
-  // task events keep their `task-service`-assigned buffer eventIds.
-  // Synthetic ids are negative so they sort before any real buffer ids.
-  let nextSyntheticId = -1;
+  const chat = chatService.get(chatId);
+  const sessionId = chat?.activeSessionId;
+  const revision = sessionId ? agentSessionService.logRevision(sessionId) : 0;
+  // A client that already holds events of another revision starts over.
+  const reset = cursor !== undefined && clientRevision !== undefined && clientRevision !== revision;
+  const cold = cursor === undefined || reset;
 
-  const task = taskService.getTask(chatId);
-  // Resolve the session to replay from:
-  //   1. The in-memory task's sessionId — ONLY when the task is currently
-  //      running. For a *completed* task that hasn't been evicted from
-  //      the `tasks` map, the session it ran against may differ from
-  //      the chat row's current `activeSessionId` (e.g. the user just
-  //      clicked "Select past session" or "New session"). In that case
-  //      `chat.activeSessionId` is the fresher signal.
-  //   2. Else the chat row's persisted `activeSessionId`. Covers
-  //      reopening a workspace whose previous task has completed AND
-  //      covers the session-switch case above.
-  // Without (2), the server replays nothing for a "cold" chat that has
-  // history on disk, and the client sits on the skeleton forever because
-  // `messages.length === 0` AND `initialSessionId` is set. See issue #478.
-  const resolvedSessionId = task?.status === "running" ? task.sessionId : chat?.activeSessionId;
-
-  // Initial subscription-opened event.
-  emit(writer, {
+  writer.write({
     type: "subscription-opened",
-    sessionId: resolvedSessionId,
-    taskRunning: task?.status === "running",
-    eventId: nextSyntheticId--,
+    sessionId,
+    revision,
+    taskRunning: taskService.getTask(chatId)?.status === "running",
+    reset,
+    eventId: syntheticId--,
   });
-
-  // Initial queue snapshot — ALWAYS emit, even when empty. A client that
-  // disconnected (workspace switch, tab hidden, network blip) with a
-  // non-empty reducer queue would otherwise keep displaying those stale
-  // entries when the subscription reopens: every drain happened while the
-  // EventSource was closed, so the reducer never saw the `queue-updated`
-  // events that cleared them. The server is authoritative; resync on
-  // every subscribe regardless of whether the queue is empty or not.
-  emit(writer, {
+  writer.write({
     type: "queue-updated",
     messages: toWireQueuedMessages(getQueuedMessages(chatId)),
-    eventId: nextSyntheticId--,
+    eventId: syntheticId--,
   });
 
-  // Initial usage snapshot, if any.
-  if (resolvedSessionId) {
-    const usage = taskService.getSessionUsage(resolvedSessionId);
-    if (usage) {
-      emit(writer, { type: "usage", data: usage, eventId: nextSyntheticId-- });
-    }
-  }
-
-  // Register the live-tail subscribers BEFORE replayPast so that
-  // task-service broadcasts arriving during replay (the most important
-  // case: a fast agent crash that fires `task-error` while we're still
-  // reading JSONL) land in our queue instead of being dropped because no
-  // listener was registered. We dedup against `lastEmittedId` (running
-  // max), updated inside the writer wrapper, so events that replayPast
-  // also emitted aren't double-sent.
+  // Register the live listeners before replaying, so nothing broadcast
+  // during the replay is lost. `lastSent` dedups logged events the replay
+  // already sent.
   const queue: ChatEvent[] = [];
   let notify: (() => void) | null = null;
-  let lastEmittedId = lastEventId ?? Number.NEGATIVE_INFINITY;
-
-  const trackedWriter: SseWriter = {
-    get closed() {
-      return writer.closed;
-    },
-    write(evt) {
-      writer.write(evt);
-      if (evt.eventId > lastEmittedId) lastEmittedId = evt.eventId;
-    },
-    comment(text) {
-      writer.comment(text);
-    },
-    close() {
-      writer.close();
-    },
+  let lastSent = cold ? 0 : (cursor ?? 0);
+  const send = (w: SseWriter, event: ChatEvent) => {
+    if (event.eventId > 0) {
+      if (event.eventId <= lastSent) return;
+      lastSent = event.eventId;
+    }
+    w.write(event);
   };
 
-  const unsubscribeTask = taskService.subscribe(chatId, (chunk: StreamChunk) => {
-    const eid = chunk.eventId;
-    if (eid != null && eid <= lastEmittedId) {
-      return; // already replayed/emitted
-    }
-    const payload = chunkToChatEvent(chunk, resolvedSessionId);
-    if (!payload) return;
-    queue.push({ ...payload, eventId: eid ?? nextSyntheticId-- } as ChatEvent);
+  const unsubscribeEvents = agentSessionService.subscribe(chatId, (event) => {
+    queue.push(event);
     notify?.();
   });
-
   const unsubscribeQueue = subscribeQueue((qChatId, messages) => {
     if (qChatId !== chatId) return;
     queue.push({
       type: "queue-updated",
       messages: toWireQueuedMessages(messages),
-      eventId: nextSyntheticId--,
+      eventId: syntheticId--,
     });
     notify?.();
   });
-
-  const onClose = () => {
-    notify?.();
-  };
+  const onClose = () => notify?.();
   res.on("close", onClose);
 
-  // Replay phase. `afterEventId === undefined` triggers a cold subscribe
-  // (full JSONL replay). Any provided value — including 0 — is treated as
-  // a hot reconnect: the client tells us "I already have history up to N,
-  // just give me events past N". The previous `lastEventId > 0` check
-  // mapped 0 → undefined and forced JSONL re-replay on every reconnect
-  // for sessions that never produced a live buffer event.
-  await replayPast({
-    writer: trackedWriter,
-    chatId,
-    sessionId: resolvedSessionId,
-    afterEventId: lastEventId,
-    chatWorkspaceId: chat?.workspaceId ?? explicitWorkspaceId,
-    agentTypeHint: chat?.agent,
-  }).catch((err) => {
-    log.warn({ chatId, err }, "replay phase failed; continuing to live tail");
-  });
-
-  // If no task is running and the queue is empty, we still keep the stream
-  // open — the client expects the subscription to survive idle periods so
-  // it can pick up the next user submission's events live. Close on
-  // request abort.
-
   try {
+    writer.write({
+      type: "session-state",
+      state: agentSessionService.getSessionState(chatId),
+      eventId: syntheticId--,
+    });
+
+    const sendWindow = (rev: number) => {
+      if (!sessionId || rev === 0) {
+        writer.write({
+          type: "history-meta",
+          hasOlder: false,
+          oldestEventId: 0,
+          eventId: syntheticId--,
+        });
+        return;
+      }
+      const page = agentSessionService.replayTurns(sessionId, rev, HISTORY_PAGE_SIZE);
+      for (const event of page.events) send(writer, event);
+      writer.write({
+        type: "history-meta",
+        hasOlder: page.hasOlder,
+        oldestEventId: page.oldestEventId,
+        eventId: syntheticId--,
+      });
+    };
+
+    if (sessionId && revision > 0) {
+      if (cold) {
+        sendWindow(revision);
+      } else {
+        for (const event of agentSessionService.replayAfter(sessionId, revision, cursor ?? 0)) {
+          send(writer, event);
+        }
+      }
+    } else if (cold && sessionId) {
+      // Band never recorded this session (it was picked from the agent's
+      // history): ask the agent to replay it into the log, then send the
+      // same windowed replay as for any logged session. The replay also
+      // reached the live listener while it was written; those rows are in
+      // the window or in older pages, so drop them from the live queue.
+      try {
+        await agentSessionService.ensureSession(chatId, "view");
+      } catch (err) {
+        log.warn({ chatId, sessionId, err }, "could not load session history");
+        agentSessionService.broadcastTransient(chatId, {
+          type: "notice",
+          level: "warning",
+          text: `This session's history couldn't be loaded: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (queue[i].eventId > 0) queue.splice(i, 1);
+      }
+      const loaded = agentSessionService.logRevision(sessionId);
+      if (loaded !== revision) {
+        writer.write({
+          type: "subscription-opened",
+          sessionId,
+          revision: loaded,
+          taskRunning: taskService.getTask(chatId)?.status === "running",
+          reset: false,
+          eventId: syntheticId--,
+        });
+      }
+      sendWindow(loaded);
+    } else if (cold) {
+      sendWindow(0);
+    }
+
     while (!res.destroyed && !writer.closed) {
       while (queue.length > 0) {
-        const evt = queue.shift()!;
-        // Final dedup safety net: replayPast may have emitted this event
-        // after the subscribe handler's check but before we got here.
-        // The `eventId >= 0` guard intentionally skips dedup for synthetic
-        // negative-id events. The invariant that makes this safe: negative
-        // ids are only ever assigned by THIS file (here via `nextSyntheticId--`
-        // and inside replayPast for the cold JSONL path). They are never
-        // re-emitted by the live subscriber and never collide between
-        // replay+live because the subscriber's pre-existing `nextSyntheticId`
-        // closure keeps decrementing past whatever replay used. Without the
-        // guard a freshly-pushed `queue-updated` with eventId=-3 would be
-        // dropped just because lastEmittedId is at e.g. 12 from real events.
-        if (evt.eventId <= lastEmittedId && evt.eventId >= 0) continue;
-        emit(trackedWriter, evt);
-
-        // Close the stream once the active task settles and there are no
-        // queued messages to drain. The client reopens on its next user
-        // interaction (or visibility change).
-        if (evt.type === "task-completed" || evt.type === "task-error") {
-          const hasQueued = getQueuedMessages(chatId).length > 0;
-          const stillRunning = taskService.getTask(chatId)?.status === "running";
-          if (!hasQueued && !stillRunning) {
-            return;
-          }
+        const event = queue.shift()!;
+        send(writer, event);
+        // A turn ended with nothing queued behind it: close, so a watcher
+        // (`band chats watch`) ends with the turn. The browser reopens a
+        // closed stream on its own, with its cursor.
+        if (
+          event.type === "turn-ended" &&
+          taskService.getTask(chatId)?.status !== "running" &&
+          getQueuedMessages(chatId).length === 0
+        ) {
+          return;
         }
       }
       await new Promise<void>((r) => {
@@ -260,426 +196,12 @@ export async function handleChatEvents(
       });
       notify = null;
     }
+  } catch (err) {
+    log.warn({ chatId, err }, "chat event stream failed");
   } finally {
-    unsubscribeTask();
+    unsubscribeEvents();
     unsubscribeQueue();
     res.off("close", onClose);
     writer.close();
-  }
-}
-
-function emit(writer: SseWriter, event: ChatEvent | (ChatEventPayload & { eventId: number })) {
-  writer.write(event as ChatEvent);
-}
-
-/**
- * Replay buffered events from after `afterEventId`, optionally backfilling
- * from JSONL when the buffer doesn't cover the range. Emits events directly
- * to the writer.
- */
-async function replayPast(opts: {
-  writer: SseWriter;
-  chatId: string;
-  sessionId: string | undefined;
-  afterEventId: number | undefined;
-  chatWorkspaceId: string | undefined;
-  agentTypeHint: string | undefined;
-}): Promise<void> {
-  const { writer, chatId, sessionId, afterEventId, chatWorkspaceId, agentTypeHint } = opts;
-  if (!sessionId) {
-    // No session yet — nothing to replay. Backfilling from JSONL requires
-    // the agent + workspace; without sessionId we don't know which
-    // session's transcript to read.
-    return;
-  }
-
-  const buf = taskService.getSessionBuffer(sessionId);
-
-  // Two distinct replay paths:
-  //
-  //   • Hot reconnect (`afterEventId` set) — gap-fill from the in-memory
-  //     buffer. The client already saw everything up to the cursor; we
-  //     only need to send what came after. JSONL fallback handles the
-  //     rare case where the buffer has rotated past the cursor.
-  //
-  //   • Cold subscribe (`afterEventId` undefined) — replay the FULL
-  //     session history. JSONL is authoritative here: the agent flushes
-  //     every turn's user-message, tool calls and assistant text to it
-  //     incrementally, so it covers prior turns the in-memory buffer
-  //     may have lost (server restarts, session-switch, …). The buffer
-  //     overlaps with JSONL on the latest turn, so when JSONL has any
-  //     content we trust it as the source of truth and skip the buffer
-  //     replay to avoid duplicating events. Without this split, picking
-  //     a session from history and submitting a message ended up with
-  //     only the last turn visible after a page refresh — the buffer
-  //     had the new turn and the older JSONL history was elided.
-  if (afterEventId === undefined) {
-    // Cold subscribe — replay full session history.
-    //
-    // PREFERENCE ORDER:
-    //   1. In-memory buffer when it covers the session from event 1.
-    //      Buffer events carry their real `eventId`s, so after this
-    //      cold subscribe the client's `state.lastEventId` lines up
-    //      with the buffer's natural numbering. Any reconnect then
-    //      arrives with a cursor at the buffer's tail, and the
-    //      `evt.eventId <= afterEventId` filter on the buffer-replay
-    //      path naturally drops every event the client already has —
-    //      no duplication on workspace switch.
-    //
-    //      Compare this to the JSONL path below: JSONL events carry
-    //      *synthetic* negative ids (so they sort below live buffer
-    //      ids on this single subscription), but those negative ids
-    //      never move the client's `Math.max(state.lastEventId ?? 0,
-    //      eventId)` cursor above 0. The next reconnect then sends
-    //      `lastEventId=0`, and the server's buffer replay re-emits
-    //      every event from id 1 onward — producing the
-    //      "switch-back-doubles-the-conversation" bug.
-    //   2. JSONL backfill for sessions whose buffer is missing or
-    //      partial (server restart, rotation past the start).
-    //   3. Buffer-as-fallback for the rare case JSONL fails *and* the
-    //      buffer is partial — emits what we can.
-    // Use `?? Number.POSITIVE_INFINITY` (not `?? 0`) for the
-    // missing-eventId fallback so a malformed buffer entry with no
-    // eventId does NOT spoof `bufferCoversStart`. If we let it
-    // become 0 the buffer path would emit events with `eventId: 0`
-    // and the client's cursor would land at 0 — re-introducing the
-    // exact bug this branch was added to fix.
-    const bufferFirstId =
-      buf && buf.events.length > 0
-        ? (buf.events[0].eventId ?? Number.POSITIVE_INFINITY)
-        : Number.POSITIVE_INFINITY;
-    const bufferCoversStart = buf !== undefined && bufferFirstId > 0 && bufferFirstId <= 1;
-
-    if (bufferCoversStart && buf) {
-      for (const c of buf.events) {
-        const payload = chunkToChatEvent(c as StreamChunk, sessionId);
-        if (!payload) continue;
-        writer.write({ ...payload, eventId: c.eventId ?? 0 } as ChatEvent);
-      }
-      // Buffer holds the session from event 1 — nothing older on disk beyond
-      // what we just replayed.
-      writer.write({ type: "history-meta", hasOlder: false, oldestOffset: 0, eventId: -999_999 });
-      return;
-    }
-
-    let jsonlEmittedAny = false;
-    let historyHasOlder = false;
-    let historyOldestOffset = 0;
-    if (chatWorkspaceId) {
-      try {
-        const workspace = workspaceService.resolve(chatWorkspaceId);
-        if (workspace) {
-          const agent = await agentService.getOrCreateAgent(
-            chatId,
-            workspace.worktree.path,
-            agentTypeHint,
-          );
-          if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-            // Windowed cold subscribe (issue #572): replay only the most
-            // recent `COLD_REPLAY_LIMIT` messages instead of the full JSONL.
-            // `hasMore` / `firstOffset` drive the client's scroll-back
-            // pagination — surfaced below via a `history-meta` event.
-            const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {
-              tail: COLD_REPLAY_LIMIT,
-            });
-            const messages = result.messages;
-            historyHasOlder = result.hasMore;
-            historyOldestOffset = result.firstOffset;
-            // Synthetic ids sort below any live buffer ids (-1000-N..-1000),
-            // so subsequent live events the client receives keep their
-            // monotonic order. They DO leave `state.lastEventId` at 0 on
-            // the client — that's why the buffer-covers-start branch
-            // above prefers the buffer when it can; this path is reached
-            // only when no buffer exists at all (server restart, fresh
-            // process) and a 0 cursor is harmless because the matching
-            // buffer-replay branch is empty.
-            let syntheticId = -1000 - messages.length;
-            for (const msg of messages) {
-              const events = jsonlMessageToEvents(msg, syntheticId);
-              for (const evt of events) {
-                writer.write(evt);
-                jsonlEmittedAny = true;
-              }
-              syntheticId += Math.max(events.length, 1);
-            }
-          }
-        }
-      } catch (err) {
-        log.warn({ chatId, sessionId, err }, "JSONL backfill failed; falling through to buffer");
-      }
-    }
-    // Buffer fallback — only when JSONL was unusable (agent doesn't
-    // support session listing, workspace unresolvable, or read failed).
-    // Otherwise the buffer overlaps with what we just emitted.
-    if (!jsonlEmittedAny && buf) {
-      for (const c of buf.events) {
-        const payload = chunkToChatEvent(c as StreamChunk, sessionId);
-        if (!payload) continue;
-        writer.write({ ...payload, eventId: c.eventId ?? 0 } as ChatEvent);
-      }
-    }
-    // Always emit a definitive history marker on cold subscribe so the client
-    // never has to infer "no older history" from the absence of an event. The
-    // id is the most-negative in this batch so it sorts before every replayed
-    // event; the reducer reads only `hasOlder`/`oldestOffset` off it.
-    writer.write({
-      type: "history-meta",
-      hasOlder: historyHasOlder,
-      oldestOffset: historyOldestOffset,
-      eventId: -999_999,
-    });
-    return;
-  }
-
-  // Hot reconnect path — gap-fill from buffer past the cursor. JSONL is
-  // only re-fetched when the in-memory buffer EXISTS but doesn't cover
-  // the cursor:
-  //
-  //   • `buf === undefined` — the in-memory buffer is GONE (no task has
-  //     ever run for this session in this server process, the buffer
-  //     was evicted, or the server was restarted). The client carries
-  //     a cursor it set during an earlier subscription, which means it
-  //     already has the JSONL history in its reducer — DO NOT backfill.
-  //     The previous behaviour was to re-emit the entire transcript
-  //     here, and that's what made every workspace switch re-render
-  //     every cached chat: the JSONL-backfill path generates fresh
-  //     synthetic eventIds, which the client's reducer treats as new
-  //     events, rebuilds the `messages` array, and busts every memo
-  //     downstream — Streamdown re-tokenises every code block on the
-  //     switch back to a cached workspace. The cold-subscribe branch
-  //     above (afterEventId === undefined) still backfills JSONL on a
-  //     fresh page load, which is the only scenario where the client
-  //     doesn't already have history.
-  //   • `buf.events.length === 0` — buffer exists but has no events
-  //     since the cursor. Client is fully caught up; no JSONL needed.
-  //     (Avoids re-pushing the conversation on every workspace switch
-  //     / visibility toggle.)
-  //   • `buf.events.length > 0 && cursor + 1 < buf.events[0].eventId` —
-  //     buffer rotated past the cursor (MAX_BUFFER_SIZE eviction).
-  //     Backfill the missing range from JSONL.
-  // `?? Number.POSITIVE_INFINITY` (not `?? 0`) for the missing-eventId
-  // fallback — matches the cold-path rationale above. A malformed
-  // buffer entry with no eventId must NOT collapse `bufferFirstId` to
-  // 0, which would silently skip the gap-fill JSONL fetch
-  // (`afterEventId + 1 < 0` is impossible for any non-negative
-  // cursor).
-  const bufferFirstId =
-    buf && buf.events.length > 0
-      ? (buf.events[0].eventId ?? Number.POSITIVE_INFINITY)
-      : Number.POSITIVE_INFINITY;
-  const needJsonl = !!buf && buf.events.length > 0 && afterEventId + 1 < bufferFirstId;
-
-  if (needJsonl && chatWorkspaceId) {
-    try {
-      const workspace = workspaceService.resolve(chatWorkspaceId);
-      if (workspace) {
-        const agent = await agentService.getOrCreateAgent(
-          chatId,
-          workspace.worktree.path,
-          agentTypeHint,
-        );
-        if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-          // Bound the read to the gap being filled, not the whole transcript
-          // (PERF-4). The gap `(afterEventId, bufferFirstId)` is at the TAIL of
-          // the JSONL (the messages just before the buffer's oldest event), and
-          // holds at most `bufferFirstId - afterEventId` events — so a tail of
-          // that many messages is a safe upper bound that always covers the gap
-          // (messages ≤ events) without a hole, while collapsing the common
-          // small-gap reconnect to a tiny read. `bufferFirstId` is finite here
-          // (`needJsonl` requires `buf.events.length > 0`); guard the malformed
-          // no-eventId case by falling back to the standard window.
-          const gapTail = Number.isFinite(bufferFirstId)
-            ? Math.max(0, bufferFirstId - afterEventId)
-            : COLD_REPLAY_LIMIT;
-          const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {
-            tail: gapTail,
-          });
-          const messages = result.messages;
-          // Synthetic ids must sit strictly in the gap `(afterEventId,
-          // bufferFirstId)` so they (a) survive the `<= afterEventId` filter
-          // below and (b) sort before live buffer ids. The naive
-          // `bufferFirstId - messages.length` start fails for sessions whose
-          // JSONL length exceeds the gap: every id ends up ≤ afterEventId
-          // and the whole backfill gets silently dropped. Picking
-          // `afterEventId + 1` as the lower bound guarantees no event is
-          // skipped by the filter even when `messages.length` is large.
-          // (Hot-reconnect doesn't usually backfill a huge transcript —
-          // JSONL is only fetched when the in-memory buffer has rotated
-          // past the cursor — so we don't worry about the per-event step
-          // crossing into bufferFirstId; the client-side dedup catches the
-          // rare overlap.)
-          let syntheticId =
-            bufferFirstId === Number.POSITIVE_INFINITY
-              ? afterEventId + 1
-              : Math.max(afterEventId + 1, bufferFirstId - messages.length);
-          for (const msg of messages) {
-            const events = jsonlMessageToEvents(msg, syntheticId);
-            for (const evt of events) {
-              if (evt.eventId <= afterEventId) continue;
-              writer.write(evt);
-            }
-            syntheticId += Math.max(events.length, 1);
-          }
-        }
-      }
-    } catch (err) {
-      log.warn({ chatId, sessionId, err }, "JSONL backfill failed; falling through to buffer");
-    }
-  }
-
-  if (buf) {
-    // Intentional: we replay EVERY buffer event past the cursor regardless
-    // of which task produced it. Auto-queued sends reuse `sessionId`
-    // (see `task-service.ts::submitTask` after `shiftQueuedMessage`), so the
-    // buffer can hold events from multiple sequential tasks under one
-    // session. A client reconnecting mid-session with a stale cursor needs
-    // those prior-task tail events to reconstruct its state — they are NOT
-    // duplicates from its perspective, just events it hasn't seen yet.
-    //
-    // The old `task-stream.ts` Phase-2b filtered to `eventId >= task.firstEventId`,
-    // which was correct under a "one task per stream" model but wrong here:
-    // a client with cursor=N reconnecting after task A finished and task B
-    // started would have lost A's last events. Client-side dedup
-    // (`event.eventId <= state.lastEventId → skip`) is the right place for
-    // ordering safety; the server simply ships everything past the cursor.
-    const events = taskService.getSessionEventsAfter(sessionId, afterEventId);
-    for (const row of events) {
-      const chunk = row.chunk as StreamChunk;
-      const payload = chunkToChatEvent(chunk, sessionId);
-      if (!payload) continue;
-      writer.write({ ...payload, eventId: row.id ?? chunk.eventId ?? 0 } as ChatEvent);
-    }
-  }
-}
-
-// JSONL-message → ChatEvent translation lives in
-// `server/services/_utils/jsonl-message-to-events.ts` so a unit test
-// can exercise it without coupling the test to the agent SDK's
-// on-disk JSONL format. See that file for the full contract.
-
-/**
- * Translate a task-service broadcast chunk into a ChatEvent payload.
- * Returns `undefined` for chunks that don't surface to the chat-event stream
- * (e.g. `finish`, `finish-step` — replaced by `task-completed`).
- */
-function chunkToChatEvent(
-  chunk: StreamChunk,
-  _sessionId: string | undefined,
-): ChatEventPayload | undefined {
-  const c = chunk as unknown as Record<string, unknown> & { type: string };
-  switch (c.type) {
-    case "user-message":
-      return {
-        type: "user-message",
-        text: String(c.text ?? ""),
-        files: c.files as ChatEventPayload extends { type: "user-message" }
-          ? Extract<ChatEventPayload, { type: "user-message" }>["files"]
-          : undefined,
-      };
-
-    case "task-started":
-      return {
-        type: "task-started",
-        taskId: String(c.taskId ?? ""),
-        agentType: typeof c.agentType === "string" ? c.agentType : undefined,
-        model: typeof c.model === "string" ? c.model : undefined,
-        mode: typeof c.mode === "string" ? c.mode : undefined,
-      };
-
-    case "task-completed":
-      return {
-        type: "task-completed",
-        taskId: String(c.taskId ?? ""),
-        durationMs: typeof c.durationMs === "number" ? c.durationMs : undefined,
-        numTurns: typeof c.numTurns === "number" ? c.numTurns : undefined,
-        costUsd: typeof c.costUsd === "number" ? c.costUsd : undefined,
-      };
-
-    case "task-error":
-      return {
-        type: "task-error",
-        taskId: String(c.taskId ?? ""),
-        message: String(c.message ?? "Unknown error"),
-      };
-
-    case "data-session": {
-      const data = c.data as { sessionId?: string } | undefined;
-      if (!data?.sessionId) return undefined;
-      return { type: "session-resolved", sessionId: data.sessionId };
-    }
-
-    case "data-usage": {
-      const data = c.data as ChatEventUsage | undefined;
-      if (!data) return undefined;
-      return { type: "usage", data };
-    }
-
-    case "data-result": {
-      const data = c.data as
-        | { sessionId?: string; durationMs?: number; numTurns?: number; costUsd?: number }
-        | undefined;
-      if (!data) return undefined;
-      return {
-        type: "result",
-        sessionId: data.sessionId,
-        durationMs: data.durationMs,
-        numTurns: data.numTurns,
-        costUsd: data.costUsd,
-      };
-    }
-
-    case "text-start":
-      return { type: "text-start", id: String(c.id ?? "") };
-
-    case "text-delta":
-      return { type: "text-delta", id: String(c.id ?? ""), delta: String(c.delta ?? "") };
-
-    case "text-end":
-      return { type: "text-end", id: String(c.id ?? "") };
-
-    case "tool-input-available":
-      return {
-        type: "tool-input-available",
-        toolCallId: String(c.toolCallId ?? ""),
-        toolName: String(c.toolName ?? ""),
-        input: c.input,
-        displayTitle: typeof c.title === "string" ? c.title : undefined,
-        approvalId:
-          c.approval && typeof (c.approval as { id?: string }).id === "string"
-            ? (c.approval as { id: string }).id
-            : undefined,
-      } satisfies ToolInputAvailableEvent;
-
-    case "tool-output-available":
-      return {
-        type: "tool-output-available",
-        toolCallId: String(c.toolCallId ?? ""),
-        output: String(c.output ?? ""),
-        isError: c.state === "output-error" || c.isError === true,
-      };
-
-    case "error":
-      return { type: "error", message: String(c.errorText ?? c.message ?? "Unknown error") };
-
-    case "file":
-      // Agent-produced file (image, download, etc.) — either emitted
-      // directly by the agent or scanned from the workspace's shared dir
-      // after a tool call. The client attaches it as a `file` part on the
-      // current assistant message.
-      return {
-        type: "file",
-        mediaType: String(c.mediaType ?? "application/octet-stream"),
-        url: String(c.url ?? ""),
-        ...(typeof c.filename === "string" ? { filename: c.filename } : {}),
-      };
-
-    // `finish` and `finish-step` are AI-SDK protocol terminators — replaced
-    // by `task-completed` / `task-error` in the new stream.
-    case "finish":
-    case "finish-step":
-      return undefined;
-
-    default:
-      return undefined;
   }
 }

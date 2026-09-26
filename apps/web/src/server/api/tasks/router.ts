@@ -3,10 +3,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../../errors";
+import { sessionIdSchema } from "../../services/_utils/session-id";
 import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
-import { TaskConflictError, taskService } from "../../services/task-service";
+import { type TaskAttachment, TaskConflictError, taskService } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 interface SubmitResult {
@@ -53,7 +54,7 @@ export const tasksRouter = t.router({
           project: z.string().optional(),
           workspaceId: z.string().optional(),
           status: z.enum(["running", "completed", "failed"]).optional(),
-          sessionId: z.string().optional(),
+          sessionId: sessionIdSchema.optional(),
           chatId: z.string().optional(),
         })
         .optional(),
@@ -81,7 +82,7 @@ export const tasksRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string().optional(),
         prompt: z.string(),
-        sessionId: z.string().optional(),
+        sessionId: sessionIdSchema.optional(),
         mode: z.string().optional(),
         model: z.string().optional(),
         codingAgentId: z.string().optional(),
@@ -122,40 +123,26 @@ export const tasksRouter = t.router({
         chatId = chatService.getOrCreateDefault(input.workspaceId).id;
       }
 
-      // Persist any uploaded files first and capture the full SavedFile
-      // records so we can build BOTH the agent prompt (which references
-      // absolute on-disk paths) AND the displayFiles array (which carries
-      // the stable `/api/uploads/<storedName>` URL + media type for the
-      // user-bubble rendering and JSONL replay). This mirrors the legacy
-      // `chat-submit.ts` flow — without `displayFiles`, the user bubble
-      // would be text-only on any page refresh and the JSONL replay path
-      // would have no `file` parts. See chat-submit.ts:106-126 for the
-      // canonical shape.
-      let agentPrompt: string | undefined;
-      let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
+      // Persist any uploaded files first; the agent gets them as ACP
+      // resource links (see `task-service`), the chat shows them from the
+      // `/api/uploads/<storedName>` URL.
+      let attachments: TaskAttachment[] = [];
       if (input.files && input.files.length > 0) {
         const savedFiles = await saveUploadedFilesDetailed(input.files);
-        // Surface the count mismatch when `saveUploadedFilesDetailed`
-        // silently skips an entry (its data-URL regex requires the exact
-        // `data:<mime>;base64,...` shape, so a malformed payload from a
-        // non-browser client — CLI, curl, third-party — would otherwise
-        // disappear into a 200 OK with no signal back to the caller).
-        // Mirrors the warning in `chat-submit.ts:112-117`.
+        // `saveUploadedFilesDetailed` skips malformed data URLs; say so
+        // rather than drop them silently.
         if (savedFiles.length !== input.files.length) {
           log.warn(
             { chatId, submitted: input.files.length, saved: savedFiles.length },
             "tasks.submit: some file uploads were dropped (malformed data URL?)",
           );
         }
-        if (savedFiles.length > 0) {
-          const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
-          agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${input.prompt}`;
-          displayFiles = savedFiles.map((s) => ({
-            mediaType: s.mediaType,
-            url: `/api/uploads/${s.storedName}`,
-            filename: s.originalName,
-          }));
-        }
+        attachments = savedFiles.map((s) => ({
+          path: s.path,
+          mediaType: s.mediaType,
+          url: `/api/uploads/${s.storedName}`,
+          filename: s.originalName,
+        }));
       }
 
       try {
@@ -164,8 +151,7 @@ export const tasksRouter = t.router({
           chatId,
           prompt: input.prompt,
           sessionId: input.sessionId,
-          agentPrompt,
-          displayFiles,
+          attachments,
           mode: input.mode,
           model: input.model,
           codingAgentId: input.codingAgentId,

@@ -1,484 +1,204 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+/**
+ * The chat row's persisted `activeSessionSummary` (issues #344, #648).
+ *
+ * The title the chat pane shows for its session is cached on the chat row,
+ * so `chats.get` is a SQLite read. Under ACP it comes from:
+ *
+ *   • the first prompt of the session, set when the first turn starts;
+ *   • the agent's own title, when it sends a `session_info_update`;
+ *   • `chats.setActiveSession`: the caller's summary (from the agent's
+ *     session list), else the session's first prompt in Band's log.
+ *
+ * Also pinned: a chat with no active session is never given one on read
+ * (issue #478: the "New session" UX clears it and it must stay cleared).
+ *
+ * Real server bundle, stub ACP agent (`startAcpServer`), tRPC over HTTP.
+ */
 
-// Integration tests for issue #344 — persisted activeSessionSummary on the
-// chat record + lazy-loading of sessions.list.
-//
-// These tests assert the full server contract through the tRPC HTTP surface:
-//
-//   • chats.get with a persisted summary returns the cached value without
-//     touching ~/.claude/projects/ (the JSONL file gets renamed mid-test
-//     and the persisted summary still wins).
-//
-//   • chats.get's background refresh closes the gap when the JSONL has
-//     drifted (e.g. simulating /rename) — the next read returns the fresh
-//     summary.
-//
-//   • The fallback path (no persisted activeSessionId) selects the latest
-//     session via mtime + a single getSessionInfo, then persists it on the
-//     chat row so subsequent reads stay on the SQLite-only hot path.
-//
-//   • chats.setActiveSession resolves the summary inline so the next
-//     chats.get carries the fresh title without waiting for a background
-//     cycle.
-//
-//   • sessions.list is NOT called as part of chats.get on the hot path —
-//     consumers (the chat pane) only invoke it when the user opens the
-//     history dropdown.
+import { rmSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  maxId,
+  runTurn,
+  type StubTurn,
+  seedAcpHome,
+  startAcpServer,
+  trpc,
+  WORKSPACE_ID,
+} from "./helpers/acp-chat";
+import type { ServerHandle } from "./helpers/server";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
-const DEFAULT_TOKEN = "persisted-summary-test-token";
-
-// ---------------------------------------------------------------------------
-// Server harness
-// ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-persisted-summary-")));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: opts.tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-        FAKE_AGENT_SCENARIO: "",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: opts.tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// tRPC HTTP helpers
-// ---------------------------------------------------------------------------
-
-const defaultHeaders = {
-  Cookie: `band_token=${DEFAULT_TOKEN}`,
-  "Content-Type": "application/json",
-};
-
-async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
-  const url =
-    input !== undefined
-      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
-      : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: defaultHeaders });
-}
-
-async function trpcMutation(serverUrl: string, procedure: string, input: unknown) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: defaultHeaders,
-    body: JSON.stringify(input),
-  });
-}
-
-async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
-  return body.result.data;
-}
-
-// ---------------------------------------------------------------------------
-// Session JSONL fixture
-// ---------------------------------------------------------------------------
-
-function encodeProjectPath(dir: string): string {
-  return dir.replace(/[^a-zA-Z0-9]/g, "-");
-}
-
-function projectsDir(tmpHome: string, workspacePath: string): string {
-  return join(tmpHome, ".claude", "projects", encodeProjectPath(workspacePath));
-}
-
-interface SessionFixtureOptions {
-  sessionId: string;
-  /** First (and only) user prompt in the session. Doubles as the firstPrompt. */
-  firstPrompt: string;
-  /** Final last-prompt record — surfaced as the session summary. */
-  lastPrompt: string;
-  cwd: string;
-  /** Optional ISO timestamp prefix; otherwise a deterministic 2026 date is used. */
-  timestamp?: string;
-  /** Optional override mtime (ms epoch) for the JSONL file. */
-  mtimeMs?: number;
-  /** Optional /rename customTitle value. */
-  customTitle?: string;
-}
-
-function buildSessionJsonl(opts: SessionFixtureOptions): string {
-  const ts = opts.timestamp ?? "2026-04-01T08:00:00.000Z";
-  const userUuid = `00000000-0000-0000-0000-${opts.sessionId.slice(-12)}`;
-  const records: Array<Record<string, unknown>> = [
-    {
-      type: "summary",
-      summary: "Session summary",
-      leafUuid: userUuid,
-    },
-    {
-      type: "user",
-      uuid: userUuid,
-      parentUuid: null,
-      sessionId: opts.sessionId,
-      cwd: opts.cwd,
-      isSidechain: false,
-      userType: "external",
-      message: { role: "user", content: [{ type: "text", text: opts.firstPrompt }] },
-      timestamp: ts,
-    },
-    {
-      type: "last-prompt",
-      sessionId: opts.sessionId,
-      lastPrompt: opts.lastPrompt,
-      timestamp: ts,
-      uuid: `99999999-9999-9999-9999-${opts.sessionId.slice(-12)}`,
-      parentUuid: null,
-    },
-  ];
-  if (opts.customTitle) {
-    records.unshift({ type: "customTitle", customTitle: opts.customTitle });
-  }
-  return `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
-}
-
-function seedSessionFile(
-  tmpHome: string,
-  workspacePath: string,
-  opts: SessionFixtureOptions,
-): void {
-  const dir = projectsDir(tmpHome, workspacePath);
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${opts.sessionId}.jsonl`);
-  writeFileSync(file, buildSessionJsonl(opts));
-  if (opts.mtimeMs !== undefined) {
-    const time = opts.mtimeMs / 1000;
-    utimesSync(file, time, time);
-  }
-}
-
-function rewriteSessionLastPrompt(
-  tmpHome: string,
-  workspacePath: string,
-  opts: SessionFixtureOptions,
-): void {
-  const file = join(projectsDir(tmpHome, workspacePath), `${opts.sessionId}.jsonl`);
-  writeFileSync(file, buildSessionJsonl(opts));
-}
-
-// ---------------------------------------------------------------------------
-// Helpers around the chats.* tRPC surface
-// ---------------------------------------------------------------------------
-
-interface ChatRecord {
+interface ChatRow {
   id: string;
-  workspaceId: string;
-  agent: string;
   activeSessionId?: string | null;
   activeSessionSummary?: string | null;
   activeSessionLastModified?: number | null;
 }
 
-async function getChat(serverUrl: string, chatId: string): Promise<ChatRecord | null> {
-  const res = await trpcQuery(serverUrl, "chats.get", { chatId });
-  expect(res.status).toBe(200);
-  const data = await trpcData<{ chat: ChatRecord | null }>(res);
-  return data.chat;
+let servers: ServerHandle[] = [];
+/** Homes a test created itself (to restart a server on); removed after it. */
+let homes: string[] = [];
+afterEach(async () => {
+  await Promise.all(servers.map((s) => s.close()));
+  servers = [];
+  for (const home of homes) rmSync(home, { recursive: true, force: true });
+  homes = [];
+});
+
+async function boot(opts: { home?: string; turns?: StubTurn[] } = {}): Promise<ServerHandle> {
+  const server = await startAcpServer(opts);
+  servers.push(server);
+  return server;
 }
 
-async function setActiveSession(
-  serverUrl: string,
-  workspaceId: string,
-  chatId: string,
-  sessionId: string | undefined,
-): Promise<void> {
-  const res = await trpcMutation(serverUrl, "chats.setActiveSession", {
-    workspaceId,
-    chatId,
-    sessionId,
-  });
-  expect(res.status).toBe(200);
+let seq = 0;
+const newChatId = () => `summary-chat-${Date.now()}-${seq++}`;
+
+async function getChat(url: string, chatId: string): Promise<ChatRow | null> {
+  return (await trpc<{ chat: ChatRow | null }>(url, "chats.get", { chatId }, "query")).chat;
 }
-
-async function pollUntil<T>(
-  fn: () => Promise<T>,
-  predicate: (value: T) => boolean,
-  options: { timeoutMs?: number; intervalMs?: number } = {},
-): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? 5000;
-  const intervalMs = options.intervalMs ?? 50;
-  const deadline = Date.now() + timeoutMs;
-  let last: T | undefined;
-  while (Date.now() < deadline) {
-    last = await fn();
-    if (predicate(last)) return last;
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  throw new Error(`pollUntil timed out after ${timeoutMs}ms; last value: ${JSON.stringify(last)}`);
-}
-
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
-
-const SESSION_A = "aaaaaaaa-bbbb-cccc-dddd-000000000001";
-const SESSION_B = "aaaaaaaa-bbbb-cccc-dddd-000000000002";
-const SESSION_C = "aaaaaaaa-bbbb-cccc-dddd-000000000003";
 
 describe("chats.get — persisted activeSessionSummary", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  let repoDir: string;
-  const workspaceId = "summaryproject-main";
+  it("is the session's first prompt, and later turns don't change it", async () => {
+    const server = await boot();
+    const chatId = newChatId();
 
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    repoDir = join(tmpHome, "repo");
-    mkdirSync(repoDir, { recursive: true });
+    const first = await runTurn(server.url, chatId, "fix the login bug");
+    const attached = first.find((e) => e.type === "session-attached");
+    const sessionId = attached?.type === "session-attached" ? attached.sessionId : "";
+    let chat = await getChat(server.url, chatId);
+    // The chat row carries the agent's own session id.
+    expect(chat?.activeSessionId).toBe(sessionId);
+    expect(chat?.activeSessionSummary).toBe("fix the login bug");
+    expect(typeof chat?.activeSessionLastModified).toBe("number");
 
-    seedState(tmpHome, {
-      projects: [
+    await runTurn(server.url, chatId, "now add a test", maxId(first));
+    chat = await getChat(server.url, chatId);
+    expect(chat?.activeSessionId).toBe(sessionId);
+    expect(chat?.activeSessionSummary).toBe("fix the login bug");
+  });
+
+  it("follows the title the agent gives the session (session_info_update)", async () => {
+    const server = await boot({
+      turns: [
         {
-          name: "summaryproject",
-          path: repoDir,
-          defaultBranch: "main",
-          worktrees: [{ branch: "main", path: repoDir }],
+          steps: [
+            { say: "On it." },
+            { update: { sessionUpdate: "session_info_update", title: "Login fix" } },
+          ],
         },
       ],
     });
-    seedSettings(tmpHome, {
-      tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
-    });
-
-    // Three sessions with strictly-ordered mtimes so getLatestSession is
-    // deterministic.
-    seedSessionFile(tmpHome, repoDir, {
-      sessionId: SESSION_A,
-      firstPrompt: "first session: explore",
-      lastPrompt: "explore the codebase",
-      cwd: repoDir,
-      mtimeMs: Date.UTC(2026, 3, 1, 8, 0, 0),
-    });
-    seedSessionFile(tmpHome, repoDir, {
-      sessionId: SESSION_B,
-      firstPrompt: "second session: refactor",
-      lastPrompt: "refactor the API client",
-      cwd: repoDir,
-      mtimeMs: Date.UTC(2026, 3, 2, 8, 0, 0),
-    });
-    seedSessionFile(tmpHome, repoDir, {
-      sessionId: SESSION_C,
-      firstPrompt: "third session: latest work",
-      lastPrompt: "latest work in progress",
-      cwd: repoDir,
-      mtimeMs: Date.UTC(2026, 3, 3, 8, 0, 0),
-    });
-
-    server = await startServer({ tmpHome });
-  }, 30_000);
-
-  afterAll(async () => {
-    await server?.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("setActiveSession resolves and persists the summary inline", async () => {
-    const chatId = `chat_${Date.now()}_set`;
-
-    await setActiveSession(server.url, workspaceId, chatId, SESSION_A);
+    const chatId = newChatId();
+    await runTurn(server.url, chatId, "fix the login bug");
 
     const chat = await getChat(server.url, chatId);
-    expect(chat).not.toBeNull();
-    expect(chat?.activeSessionId).toBe(SESSION_A);
-    // The summary chain prefers the last-prompt record once present —
-    // matches the listSessions output for behaviour parity.
-    expect(chat?.activeSessionSummary).toBe("explore the codebase");
-    expect(typeof chat?.activeSessionLastModified).toBe("number");
-  });
-
-  it("chats.get with a persisted summary returns the cached value even when the JSONL is gone", async () => {
-    const chatId = `chat_${Date.now()}_cached`;
-    await setActiveSession(server.url, workspaceId, chatId, SESSION_A);
-
-    // Confirm cached.
-    const before = await getChat(server.url, chatId);
-    expect(before?.activeSessionSummary).toBe("explore the codebase");
-
-    // Move the JSONL out of the way — the next chats.get should still
-    // return the cached summary because it's a SQLite read. (The
-    // background refresh sees `undefined` from getSessionInfo and leaves
-    // the cached values intact.)
-    const file = join(projectsDir(tmpHome, repoDir), `${SESSION_A}.jsonl`);
-    const moved = `${file}.bak`;
-    const fs = await import("node:fs/promises");
-    await fs.rename(file, moved);
-    try {
-      const after = await getChat(server.url, chatId);
-      expect(after?.activeSessionSummary).toBe("explore the codebase");
-      expect(after?.activeSessionId).toBe(SESSION_A);
-    } finally {
-      await fs.rename(moved, file);
-    }
-  });
-
-  it("background refresh picks up a renamed session on the next chats.get", async () => {
-    const chatId = `chat_${Date.now()}_rename`;
-    await setActiveSession(server.url, workspaceId, chatId, SESSION_B);
-    const before = await getChat(server.url, chatId);
-    expect(before?.activeSessionSummary).toBe("refactor the API client");
-
-    // Simulate a /rename by writing a customTitle into the JSONL —
-    // mapSessionInfo's priority chain picks customTitle first.
-    rewriteSessionLastPrompt(tmpHome, repoDir, {
-      sessionId: SESSION_B,
-      firstPrompt: "second session: refactor",
-      lastPrompt: "refactor the API client",
-      customTitle: "Renamed: API refactor",
-      cwd: repoDir,
-    });
-
-    // The first chats.get after the rewrite still serves the cached
-    // value, and kicks off a background refresh. Poll subsequent reads
-    // until the refreshed value appears (the background task is
-    // fire-and-forget so we don't know exactly when it lands).
-    const refreshed = await pollUntil(
-      () => getChat(server.url, chatId),
-      (chat) => chat?.activeSessionSummary === "Renamed: API refactor",
-      { timeoutMs: 4000 },
+    expect(chat?.activeSessionSummary).toBe("Login fix");
+    const { state } = await trpc<{ state: { title: string | null } }>(
+      server.url,
+      "chats.sessionState",
+      { chatId },
+      "query",
     );
-    expect(refreshed?.activeSessionSummary).toBe("Renamed: API refactor");
-    expect(refreshed?.activeSessionId).toBe(SESSION_B);
+    expect(state.title).toBe("Login fix");
   });
 
-  it("chats.get on a row with no persisted activeSessionId leaves it null (no auto-promotion)", async () => {
-    // Under the event-log model (see issue #478) we no longer promote
-    // the mtime-newest on-disk session as the chat's active one. That
-    // legacy fallback race-conditioned against the "New session" UX:
-    // clearing chat.activeSessionId would silently get reverted to the
-    // prior session by the very next chats.get. Discovery of prior
-    // sessions is now an explicit user action via the history dropdown
-    // (`sessions.list`).
-    const chatId = `chat_${Date.now()}_no_fallback`;
-    const created = await trpcMutation(server.url, "chats.create", {
-      workspaceId,
-      id: chatId,
-    });
-    expect(created.status).toBe(200);
+  it("survives a server restart (read from SQLite)", async () => {
+    const home = seedAcpHome();
+    homes.push(home);
+    const first = await boot({ home });
+    const chatId = newChatId();
+    await runTurn(first.url, chatId, "remember this title");
+    await first.close();
+    servers = servers.filter((s) => s !== first);
 
+    const second = await boot({ home });
+    const chat = await getChat(second.url, chatId);
+    expect(chat?.activeSessionSummary).toBe("remember this title");
+  });
+
+  it("setActiveSession persists the caller's summary, else the session's first prompt", async () => {
+    const server = await boot();
+    const source = newChatId();
+    const turn = await runTurn(server.url, source, "explore the codebase");
+    const attached = turn.find((e) => e.type === "session-attached");
+    const sessionId = attached?.type === "session-attached" ? attached.sessionId : "";
+
+    // No summary given: Band's log has the session, so its first prompt.
+    const fromLog = newChatId();
+    await trpc(server.url, "chats.setActiveSession", {
+      workspaceId: WORKSPACE_ID,
+      chatId: fromLog,
+      sessionId,
+    });
+    expect(await getChat(server.url, fromLog)).toMatchObject({
+      activeSessionId: sessionId,
+      activeSessionSummary: "explore the codebase",
+    });
+
+    // A summary given (from the agent's session list) wins.
+    const fromCaller = newChatId();
+    await trpc(server.url, "chats.setActiveSession", {
+      workspaceId: WORKSPACE_ID,
+      chatId: fromCaller,
+      sessionId,
+      summary: "Codebase tour",
+    });
+    expect(await getChat(server.url, fromCaller)).toMatchObject({
+      activeSessionId: sessionId,
+      activeSessionSummary: "Codebase tour",
+    });
+  });
+
+  it("setActiveSession to a session Band has no log for leaves the summary empty", async () => {
+    const server = await boot();
+    const chatId = newChatId();
+    await trpc(server.url, "chats.setActiveSession", {
+      workspaceId: WORKSPACE_ID,
+      chatId,
+      sessionId: "session-from-elsewhere",
+    });
+    const chat = await getChat(server.url, chatId);
+    expect(chat?.activeSessionId).toBe("session-from-elsewhere");
+    expect(chat?.activeSessionSummary == null).toBe(true);
+  });
+
+  it("chats.get on a row with no activeSessionId leaves it null (no auto-promotion)", async () => {
+    const server = await boot();
+    // Another chat in the workspace has a session Band could promote.
+    await runTurn(server.url, newChatId(), "some earlier work");
+
+    const chatId = newChatId();
+    await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: chatId });
     const first = await getChat(server.url, chatId);
     expect(first?.activeSessionId == null).toBe(true);
     expect(first?.activeSessionSummary == null).toBe(true);
-
-    // Background refresh shouldn't promote either. Give it a beat,
-    // then verify the row is still empty.
-    await new Promise((r) => setTimeout(r, 500));
     const second = await getChat(server.url, chatId);
     expect(second?.activeSessionId == null).toBe(true);
     expect(second?.activeSessionSummary == null).toBe(true);
   });
 
   it("setActiveSession with sessionId=undefined clears both id and summary and stays cleared", async () => {
-    const chatId = `chat_${Date.now()}_clear`;
-    await setActiveSession(server.url, workspaceId, chatId, SESSION_A);
-    const before = await getChat(server.url, chatId);
-    expect(before?.activeSessionId).toBe(SESSION_A);
-    expect(before?.activeSessionSummary).toBe("explore the codebase");
+    const server = await boot();
+    const chatId = newChatId();
+    await runTurn(server.url, chatId, "explore the codebase");
+    expect((await getChat(server.url, chatId))?.activeSessionSummary).toBe("explore the codebase");
 
-    await setActiveSession(server.url, workspaceId, chatId, undefined);
-    // Under the event-log model the cleared row stays cleared — no
-    // background re-promotion of the mtime-newest session. The "New
-    // session" UX depends on this guarantee. See issue #478.
+    await trpc(server.url, "chats.setActiveSession", { workspaceId: WORKSPACE_ID, chatId });
     const after = await getChat(server.url, chatId);
     expect(after?.activeSessionId == null).toBe(true);
     expect(after?.activeSessionSummary == null).toBe(true);
-
-    // Give the background refresh a beat to run — it must not resurrect
-    // any session either. 500ms is generous because the refresh involves
-    // a (synchronous, on-disk) `agent.getSessionInfo` call and runs on
-    // top of whatever parallel-test load is already on the CPU.
-    await new Promise((r) => setTimeout(r, 500));
+    // A second read (which fills in missing titles) must not resurrect it.
     const later = await getChat(server.url, chatId);
     expect(later?.activeSessionId == null).toBe(true);
     expect(later?.activeSessionSummary == null).toBe(true);
+  });
+
+  it("rejects chats.get without the band_token cookie (401)", async () => {
+    const server = await boot();
+    const res = await fetch(
+      `${server.url}/trpc/chats.get?input=${encodeURIComponent(JSON.stringify({ chatId: "x" }))}`,
+    );
+    expect(res.status).toBe(401);
   });
 });

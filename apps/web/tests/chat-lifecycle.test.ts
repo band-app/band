@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -32,10 +33,8 @@ import {
 //   • Negative auth — both procedures reject without the `band_token` cookie.
 //
 // Pattern: vitest + `startServer` + real production bundle. No tRPC
-// mocking, no in-process React. Matches the doctrine in
-// `.claude/skills/write-integration-test/`.
+// mocking, no in-process React.
 
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "chat-lifecycle-test-token";
 
 // ---------------------------------------------------------------------------
@@ -78,12 +77,6 @@ function createGitRepo(parentDir: string, name: string): string {
   git(repoPath, ["add", "."]);
   git(repoPath, ["commit", "-m", "init"]);
   return repoPath;
-}
-
-function writeScenario(tmpHome: string, events: object[]): string {
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(scenarioPath, JSON.stringify(events));
-  return scenarioPath;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,9 +140,7 @@ describe("chatLayout — populated by chats.create", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
     server = await startServer({ tmpHome });
   });
@@ -194,18 +185,9 @@ describe("chatLayout — populated by chats.create", () => {
 // ---------------------------------------------------------------------------
 
 describe("chats — stop/resume status transitions", () => {
-  // Long enough that the test can observe `status: "running"` and call
-  // `chats.stop` before the fake-agent's terminal `result` event lands.
-  // Strictly greater than `STATUS_POLL_TIMEOUT_MS` below so the poll
-  // window can't bleed past the agent's natural completion.
-  const FAKE_AGENT_SLEEP_MS = 5000;
-
-  // How long the test will poll `chats.list` waiting for the chat to
-  // transition to `status: "running"`. Strictly less than
-  // `FAKE_AGENT_SLEEP_MS` so a slow CI doesn't race the result event
-  // past the stop call. Same shape as `CONFLICT_POLL_TIMEOUT_MS` in
-  // `cronjobs.test.ts` — and the runtime check in `beforeAll` enforces
-  // the invariant.
+  // How long the test polls `tasks.list` for the running / stopped task.
+  // The stub agent's turn blocks until `session/cancel` arrives, so the
+  // task can't finish on its own inside this window.
   const STATUS_POLL_TIMEOUT_MS = 4000;
 
   let server: ServerHandle;
@@ -213,24 +195,8 @@ describe("chats — stop/resume status transitions", () => {
   const workspaceId = "stopproj-main";
 
   beforeAll(async () => {
-    if (STATUS_POLL_TIMEOUT_MS >= FAKE_AGENT_SLEEP_MS) {
-      throw new Error(
-        `STATUS_POLL_TIMEOUT_MS (${STATUS_POLL_TIMEOUT_MS}) must be strictly less than FAKE_AGENT_SLEEP_MS (${FAKE_AGENT_SLEEP_MS}) — see comments above`,
-      );
-    }
     tmpHome = createTmpHome("band-chat-stop-");
     const repoPath = createGitRepo(tmpHome, "stopproj");
-
-    // Long-running scenario: emit `init`, sleep, then `result`. The sleep
-    // window is what makes the "still running" + "stop while running"
-    // assertions deterministic. Without it, a slower test runner would
-    // race the terminal `result` past the stop call and the status
-    // assertion would silently flip back to `idle`.
-    const scenarioPath = writeScenario(tmpHome, [
-      { type: "system", subtype: "init", session_id: "stop-session" },
-      { _sleep_ms: FAKE_AGENT_SLEEP_MS },
-      { type: "result", subtype: "success", result: "Done" },
-    ]);
 
     seedState(tmpHome, {
       projects: [
@@ -244,13 +210,13 @@ describe("chats — stop/resume status transitions", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
-      ],
+      codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    // Every turn blocks until Band sends `session/cancel`, so "still
+    // running" and "stop while running" are deterministic.
+    server = await startAcpServer({
+      home: tmpHome,
+      turns: [{ steps: [{ say: "Working." }, { waitForCancel: true }] }],
     });
   });
 
@@ -338,10 +304,8 @@ describe("chats — stop/resume status transitions", () => {
     });
     const { chat } = await trpcData<{ chat: ChatRecord }>(createRes);
 
-    // Submit a task via `chats.send`. The fake-agent sleeps for
-    // `FAKE_AGENT_SLEEP_MS` before emitting `result`, so the next few
-    // lines run with a still-running task — enough time for the stop
-    // call to actually find a task to abort.
+    // Submit a task via `chats.send`. The stub agent's turn waits for
+    // `session/cancel`, so the task stays running until the stop call.
     const sendRes = await trpcMutate(server.url, "chats.send", {
       workspaceId,
       chatId: chat.id,
@@ -350,46 +314,27 @@ describe("chats — stop/resume status transitions", () => {
     expect(sendRes.status).toBe(200);
     const { taskId } = await trpcData<{ taskId: string }>(sendRes);
 
-    // Wait until `tasks.list` reports the task is actually running before
-    // calling stop. Without this poll, the stop could race the task
-    // submission and `abortTask` would return false (no-op) — the chats
-    // status would still flip to `stopped` via `chatService.updateStatus`,
-    // but we wouldn't actually exercise the abort path. Same poll shape
-    // as `cronjobs.test.ts`'s conflict test.
+    // Wait until the agent is inside the turn (it has received
+    // `session/prompt`) before calling stop, so the stop exercises the
+    // cancel path rather than racing the agent's start-up.
     await expect
-      .poll(
-        async () => {
-          const listRes = await trpcQuery(server.url, "tasks.list", {
-            workspaceId,
-            chatId: chat.id,
-            status: "running",
-          });
-          const listData = await trpcData<{ tasks: unknown[] }>(listRes);
-          return listData.tasks.length;
-        },
-        { timeout: STATUS_POLL_TIMEOUT_MS, interval: 50 },
-      )
-      .toBeGreaterThan(0);
+      .poll(() => stubRequests(tmpHome, "session/prompt").length, {
+        timeout: STATUS_POLL_TIMEOUT_MS,
+        interval: 50,
+      })
+      .toBe(1);
 
     const stopRes = await trpcMutate(server.url, "chats.stop", { chatId: chat.id });
     expect(stopRes.status).toBe(200);
     const stopData = await trpcData<{ ok: boolean }>(stopRes);
     expect(stopData.ok).toBe(true);
 
-    // The task is no longer running — `abortTask` marks it failed and
-    // removes it from the in-memory `tasks` map. The visible-status
-    // surface here is `tasks.list`, not `chats.list`: synchronously, the
-    // route ends with chat status `"stopped"` (`abortTask` flips it to
-    // `"idle"` inside the abort handler, then the router calls
-    // `chatService.updateStatus(chatId, "stopped")`). But shortly after,
-    // `runTask`'s in-flight `await` throws because of `agent.abort()`,
-    // its `catch (err)` block fires (see `apps/web/src/server/services/task-service.ts`
-    // — currently around line 851), and that path sets chat status to
-    // `"error"`. The final chat status is therefore timing-dependent
-    // (`stopped` → `error`), which is why this test pins the task-side
-    // half of the abort contract instead: the task is removed from
-    // `running` (and the persisted record is marked `failed`, asserted
-    // below).
+    // `chats.stop` sends `session/cancel`; the agent answers the pending
+    // `session/prompt` with `stopReason: "cancelled"` and the task settles
+    // as failed. That happens after the route returns, so poll for the
+    // task to leave `running`. (The chat's status is timing-dependent for
+    // the same reason: the route sets `stopped`, then the settling turn
+    // sets `error`, so the task is what this test pins.)
     await expect
       .poll(
         async () => {
@@ -415,6 +360,8 @@ describe("chats — stop/resume status transitions", () => {
     });
     const failedData = await trpcData<{ tasks: Array<{ id: string }> }>(failedRes);
     expect(failedData.tasks.find((t) => t.id === taskId)).toBeDefined();
+    // The stop reached the agent as an ACP `session/cancel`.
+    expect(stubRequests(tmpHome, "session/cancel")).toHaveLength(1);
   });
 
   it("chats.stop / chats.resume on an unknown chatId are no-ops (no 404)", async () => {

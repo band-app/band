@@ -30,6 +30,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -51,8 +52,6 @@ const WORKSPACE = toWorkspaceId(PROJECT, DEFAULT_BRANCH);
 // `FileLinkWorkspaceProvider` wraps the chat tree at the
 // dockview level.
 test.use({ viewport: { width: 1280, height: 800 } });
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "..", "tests", "fake-agent.mjs");
 
 function makeGitEnv(home: string): NodeJS.ProcessEnv {
   return {
@@ -99,7 +98,19 @@ test.beforeAll(async () => {
     ],
   });
 
-  // Fake-agent scenario: a single assistant message with text that
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [
+      {
+        id: "claude-code",
+        type: "claude-code",
+        label: "Claude Code",
+      },
+    ],
+  });
+
+  // Stub agent scenario: a single assistant message with text that
   // contains a path inside markdown inline code. The
   // `rehypeFileLinkedCode` plugin wraps the rendered `<code>` in
   // an `<a href="band-file:src/main.rs:42">` anchor — this is the
@@ -109,49 +120,11 @@ test.beforeAll(async () => {
   // and get blocked). The inline-code path is what real assistant
   // replies use when referencing files (Claude / GPT outputs
   // backtick-wrapped paths by convention).
-  const scenarioPath = join(tmpHome, "scenario.json");
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "dispatch-session" },
-      {
-        type: "assistant",
-        message: {
-          content: [
-            {
-              type: "text",
-              text: "Check `src/main.rs:42` for the implementation.",
-            },
-          ],
-        },
-      },
-      {
-        type: "result",
-        subtype: "success",
-        session_id: "dispatch-session",
-        duration_ms: 1,
-        num_turns: 1,
-        total_cost_usd: 0.0,
-      },
-    ]),
-  );
-
-  seedSettings(tmpHome, {
-    tokenSecret: TOKEN,
-    defaultCodingAgent: "claude-code",
-    codingAgents: [
-      {
-        id: "claude-code",
-        type: "claude-code",
-        label: "Claude Code",
-        command: FAKE_AGENT_PATH,
-      },
-    ],
-  });
-
   server = await startServer({
     tmpHome,
-    env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    env: acpStubEnv(tmpHome, {
+      turns: [{ steps: [{ say: "Check `src/main.rs:42` for the implementation." }] }],
+    }),
   });
 });
 
@@ -177,7 +150,7 @@ test.describe("FileLinkedAnchor — click → context → dispatch (issue #539)"
     await workspacePage.waitForReady();
     await chatPane.waitForReady();
 
-    // Send a message to wake up the fake-agent. The agent replies
+    // Send a message to wake up the stub agent. The agent replies
     // with an assistant message containing an inline-code path
     // `` `src/main.rs:42` `` (from the scenario seeded in
     // beforeAll). The `rehypeFileLinkedCode` plugin in

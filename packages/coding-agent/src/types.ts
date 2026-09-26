@@ -1,87 +1,9 @@
-import type { AgentEvent } from "./events.js";
-
-export interface UserInputRequest {
-  approvalId: string;
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface CodingAgentFeatures {
-  costTracking: boolean;
-  sessionListing: boolean;
-}
-
-export interface SessionListItem {
-  sessionId: string;
-  summary: string;
-  lastModified: number;
-  firstPrompt?: string;
-  gitBranch?: string;
-}
-
-export interface SessionInfo {
-  sessionId: string;
-  summary: string;
-  lastModified: number;
-}
-
-export interface SessionMessageItem {
-  role: "user" | "assistant";
-  id: string;
-  content: Array<
-    | { type: "text"; text: string }
-    | {
-        type: "tool_use";
-        toolCallId: string;
-        toolName: string;
-        displayTitle?: string;
-        input: unknown;
-      }
-    | { type: "tool_result"; toolCallId: string; output: string; isError: boolean }
-  >;
-}
-
-export interface GetSessionMessagesOptions {
-  /**
-   * Return the most recent `tail` messages. Equivalent to
-   * `{ offset: max(0, total - tail), limit: tail }` but doesn't require
-   * the caller to know `total` upfront. Takes precedence over
-   * `offset` / `limit` when set.
-   */
-  tail?: number;
-  /** Skip the first N messages before applying `limit`. */
-  offset?: number;
-  /** Return at most this many messages from `offset`. */
-  limit?: number;
-}
-
-export interface SkillInfo {
-  name: string;
-  description: string;
-  argumentHint?: string;
-}
-
-export interface AgentMode {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-export interface AgentModel {
-  id: string;
-  name: string;
-  description?: string;
-  /** Approximate max input context window in tokens (e.g. 200000, 1_000_000). */
-  contextWindow?: number;
-}
-
 /**
  * Per-turn token + cost snapshot for one session, read from the provider's
  * on-disk session storage (issue #425 — Reports dialog).
  *
- * Adapters that implement `getSessionUsage` walk their provider's session
- * file once and return the cumulative per-turn breakdown. The Reports
+ * Usage readers (`usage/`) walk their provider's session file once and
+ * return the cumulative per-turn breakdown. The Reports
  * scanner upserts these into `usage_events` keyed by
  * `(provider, sessionId, turnIndex)` so re-reads are idempotent — a session
  * still being appended to is rescanned each tick and only the new turns
@@ -116,21 +38,17 @@ export interface SessionUsageSnapshot {
   turns: SessionUsageTurn[];
 }
 
-export interface RunSessionOptions {
-  mode?: string;
-  model?: string;
-}
-
 /**
  * Resolved vendor-CLI invocation for spawning the agent interactively in a
- * terminal pane (see `cliInvocation` below). Composed by `terminalService`
+ * terminal pane (see `cli-invocation.ts`). Composed by `terminalService`
  * into a single shell command string with the prompt as the first positional
  * argument, so the CLI's REPL opens with the prompt already loaded
  * (cmux-style: `claude "<prompt>"`, `codex "<prompt>"`, etc.).
  *
- * `unsupported: true` is the sentinel an adapter returns when it cannot
- * resolve a vendor binary (Cursor CLI today). Callers should fall back to
- * the SDK/chat path rather than spawning a terminal in that case.
+ * `unsupported: true` is the sentinel returned when an agent has no vendor
+ * CLI for the requested mode (Cursor CLI today, Gemini CLI for resume) or
+ * the agent type is unknown. Callers fall back to the chat path rather than
+ * spawning a terminal in that case.
  */
 export type CliInvocation =
   | {
@@ -152,161 +70,8 @@ export type CliInvocation =
  *   - `needs_attention` → the ball is in the user's court: the agent finished
  *                         its turn or is blocked waiting for the user to act.
  *
- * Each adapter owns the translation from its own notification/hook payload to
- * one of these values (see e.g. `mapClaudeCodeHookStatus` in
- * `adapters/claude-code.ts`), so adding a new agent never requires touching
- * the Band CLI — only the adapter.
+ * `hook-status.ts` owns the translation from each agent's notification/hook
+ * payload to one of these values (e.g. `mapClaudeCodeHookStatus`), so adding
+ * a new agent never requires touching the Band CLI.
  */
 export type AgentHookStatus = "working" | "needs_attention";
-
-export interface CodingAgent {
-  readonly name: string;
-  readonly supportedFeatures: CodingAgentFeatures;
-  onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
-  runSession(
-    prompt: string,
-    sessionId?: string,
-    options?: RunSessionOptions,
-  ): AsyncGenerator<AgentEvent>;
-  abort?(): void;
-  listSessions?(dir: string): Promise<SessionListItem[]>;
-  /**
-   * Read metadata for a single session by ID. Optimised path that avoids
-   * walking the entire project directory — used to populate persisted
-   * tab titles without a full `listSessions` call. Returns undefined if
-   * the session file isn't found or has no extractable summary.
-   */
-  getSessionInfo?(sessionId: string, dir: string): Promise<SessionInfo | undefined>;
-  /**
-   * Find the most-recently-modified session in a project directory.
-   * Used as a fallback when no activeSessionId is persisted yet (e.g.
-   * a freshly-mounted workspace). Implementations should do an
-   * mtime-sorted directory scan + a single `getSessionInfo` rather than
-   * loading every session's metadata.
-   */
-  getLatestSession?(dir: string): Promise<SessionInfo | undefined>;
-  /**
-   * Read messages from a session's transcript.
-   *
-   * The router uses two access patterns:
-   *
-   *   • **First page** (`{ tail: pageSize }`) — return the last `tail`
-   *     messages. Equivalent to `{ offset: max(0, total - tail), limit: tail }`
-   *     but doesn't require the caller to know `total` upfront.
-   *
-   *   • **Older page** (`{ offset, limit }`) — skip `offset` messages then
-   *     return up to `limit`. Used to walk older pages by the cursor
-   *     returned in `firstOffset`.
-   *
-   * **`hasMore` semantics — "+1 trick"**: implementations should over-fetch
-   * by one message (e.g. SDK `limit: limit + 1` or ring buffer of size
-   * `tail + 1`) so they can report `hasMore: true` whenever an additional
-   * message exists beyond the slice. The extra message is dropped before
-   * returning. Callers use `hasMore` to decide whether to show a
-   * "load older" affordance — no total count required.
-   *
-   * `firstOffset` is the absolute index of the slice's first message in
-   * the adapter's filtered (user/assistant) message list. Used as the
-   * cursor for fetching the next older page (`offset: firstOffset - limit`).
-   *
-   * `tail`, when set, takes precedence over `offset`/`limit`.
-   */
-  getSessionMessages?(
-    sessionId: string,
-    dir: string,
-    options?: GetSessionMessagesOptions,
-  ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }>;
-  /**
-   * Read token + cost usage for a single session from the provider's
-   * on-disk record. Used by the Reports scanner (issue #425) to backfill
-   * `usage_events` for sessions the user runs in the terminal (outside
-   * Band's chat) as well as Band-driven sessions.
-   *
-   * Implementations should:
-   *
-   *   • Parse the provider's session file(s) without invoking the agent
-   *     (no `runSession` call, no streaming).
-   *   • Return *every* turn the file contains — the caller dedupes by
-   *     `(provider, sessionId, turnIndex)` via `INSERT OR IGNORE` so
-   *     re-scanning a growing session is cheap.
-   *   • Return `null` when the session isn't found on disk; the scanner
-   *     skips it without logging an error.
-   *
-   * Adapters whose provider doesn't persist usage data (Gemini CLI without
-   * telemetry, Cursor) omit this method entirely.
-   */
-  getSessionUsage?(sessionId: string, dir: string): Promise<SessionUsageSnapshot | null>;
-  listSkills?(): Promise<SkillInfo[]>;
-  listModes?(): AgentMode[];
-  listModels?(): AgentModel[] | Promise<AgentModel[]>;
-  /**
-   * Actively fetch the model list from the agent's SDK / binary, bypassing
-   * any in-memory cache. Used by the web server's `ModelRefreshService` to
-   * populate the persisted `cachedModels` array in
-   * `~/.band/settings.json` — both on boot (fire-and-forget) and when the
-   * user hits the Settings UI's "Refresh models" button.
-   *
-   * Implementations should:
-   *
-   *   • Avoid spawning a "real" workspace session — Claude Code's adapter
-   *     uses `settingSources: []` and a neutral cwd to skip the
-   *     `band notify` hook that would otherwise toggle workspace status.
-   *   • Throw on failure (network, missing binary, parse error). The
-   *     caller swallows errors and keeps the previously cached list.
-   *
-   * Adapters whose model list is fully hardcoded (Codex, Gemini CLI,
-   * Cursor CLI) may omit this method or implement it as a synchronous
-   * return of `listModels()`. Callers treat the result as equivalent to
-   * `listModels()` when omitted.
-   */
-  refreshModels?(): Promise<AgentModel[]>;
-  /**
-   * Resolve the one-shot CLI invocation for spawning this agent in an
-   * interactive terminal pane with `prompt` pre-loaded as the first
-   * positional argument (cmux-style, e.g. `claude "Implement X"`).
-   *
-   * Powers `workspaces.create --via terminal` (issue #551). The server
-   * passes the returned `command + args` straight to
-   * `terminalService.spawn`, which composes a shell-escaped command line
-   * inside the workspace's PTY.
-   *
-   * Adapters whose vendor binary doesn't have a usable interactive
-   * mode (e.g. `cursor-cli`) return `{ unsupported: true, reason: "..." }`;
-   * the workspace service then warns and falls back to the SDK/chat path
-   * so the create call still succeeds.
-   */
-  cliInvocation?(prompt: string): CliInvocation;
-  /**
-   * Resolve the *headless* (non-interactive) one-shot CLI invocation for
-   * `prompt` — the vendor CLI's "run this and exit" mode (`claude -p
-   * "<prompt>"`, `codex exec "<prompt>"`, `gemini --prompt "<prompt>"`,
-   * `opencode run "<prompt>"`).
-   *
-   * Distinct from {@link cliInvocation}, which opens the *interactive* REPL
-   * and never exits on its own. This variant powers automated, recurring
-   * dispatch — cronjobs with `via: "terminal"` (issue #581) — where the pane
-   * must run to completion, stream its output, and then exit so the terminal
-   * self-closes and the scheduler can tell "still running" from "done".
-   * Using the interactive form there would leave the pane parked at the REPL
-   * forever, blocking every subsequent tick.
-   *
-   * Adapters with no non-interactive CLI (e.g. `cursor-cli`) return
-   * `{ unsupported: true, reason: "..." }`; the caller falls back to the
-   * SDK/chat path.
-   */
-  cliHeadlessInvocation?(prompt: string): CliInvocation;
-  /**
-   * Resolve the CLI invocation that *resumes* an existing agent session in
-   * an interactive terminal pane (`claude --resume <id>`, `codex resume
-   * <id>`, `opencode --session <id>`). Powers the chat tab's "Continue in
-   * terminal" action: the server composes the returned `command + args`
-   * into a shell line and spawns it inside the workspace's PTY so the user
-   * keeps working in the very session the web chat was running.
-   *
-   * Adapters whose vendor binary has no by-id resume affordance (Gemini
-   * CLI has no session model; Cursor CLI is SDK-only) return
-   * `{ unsupported: true, reason: "..." }`; callers surface the reason and
-   * leave the menu item disabled rather than spawning a useless terminal.
-   */
-  resumeCliInvocation?(sessionId: string): CliInvocation;
-}

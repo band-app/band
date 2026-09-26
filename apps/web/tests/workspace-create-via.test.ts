@@ -17,9 +17,8 @@
 // Real production server (`dist/start-server.mjs`), real PTY (node-pty),
 // real git repo, real SQLite. No tRPC mocking, no MSW. Each describe
 // block boots its own server with a tmp `$HOME` so a regression that
-// crashes the server (e.g. an SDK adapter that panics on a malformed
-// stub) is contained to one scenario instead of cascading into the next
-// test's `beforeAll`.
+// crashes the server is contained to one scenario instead of cascading
+// into the next test's `beforeAll`.
 //
 // Two stubs are used for the spawned-process surface:
 //
@@ -28,19 +27,20 @@
 //     "the prompt landed in argv[1]". The script exits immediately;
 //     node-pty captures the stdout into the terminal scrollback.
 //
-//   - **fake-agent.mjs** — the project's shared Claude-Agent-SDK
-//     protocol stub (`apps/web/tests/fake-agent.mjs`). Used by the
+//   - **acp-stub-agent.mjs** — the scripted stub ACP agent
+//     (`apps/web/tests/fixtures/acp-stub-agent.mjs`), wired in by
+//     `startAcpServer` through `BAND_TEST_ACP_AGENT`. Used by the
 //     `via=chat` paths because the chat-path dispatch invokes
-//     `taskService.submitTask`, which spawns the real SDK and reads
-//     JSONL events back. A shell stub that doesn't speak the protocol
-//     hangs / crashes the SDK subprocess on Linux CI — fake-agent
-//     emits a success scenario and exits cleanly.
+//     `taskService.submitTask`, which starts the coding agent over ACP.
+//     The stub answers every prompt and ends the turn, and logs each
+//     ACP request (with the env it was spawned with) for assertions.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
+import { startAcpServer, stubRequests } from "./helpers/acp-chat";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -51,8 +51,6 @@ import {
 } from "./helpers/server";
 import { listTasksForWorkspace } from "./helpers/tasks";
 import { waitFor } from "./helpers/wait-for";
-
-const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 
 const gitEnv = {
   ...process.env,
@@ -112,7 +110,7 @@ function writeStubVendorCli(tmpHome: string, name: string): string {
  * `ENV_BAND_SERVER_URL:<value>|`. Used to prove that a process spawned
  * inside a terminal PTY inherits `BAND_DISPATCH=terminal` (pinned by
  * `terminal-pool`) and `BAND_SERVER_URL` (advertised by start-server) —
- * the terminal-side mirror of the chat-side `FAKE_AGENT_ENV_LOG`
+ * the terminal-side mirror of the chat-side `BAND_TEST_ACP_LOG`
  * assertion. Terminates immediately; the pool drains stdout into its
  * scrollback.
  */
@@ -124,26 +122,11 @@ function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
   );
 }
 
-/**
- * Minimal fake-agent scenario: emit `system.init`, then a terminal
- * `result` event so `taskService.submitTask` records a completed task
- * and tears down the agent cleanly. Used by every test whose dispatch
- * path lands on the chat (taskService.submitTask) side — without a
- * proper SDK-protocol stub, the Claude-Agent-SDK would hang or crash
- * its subprocess waiting for an `init` reply, which on Linux CI cascades
- * into the server process and breaks subsequent tests in the file.
- */
-function writeChatScenario(tmpHome: string, name: string): string {
-  const scenarioPath = join(tmpHome, name);
-  writeFileSync(
-    scenarioPath,
-    JSON.stringify([
-      { type: "system", subtype: "init", session_id: "chat-via-session" },
-      { type: "result", subtype: "success", result: "Done" },
-    ]),
-    "utf-8",
+/** The text of every prompt the stub ACP agent received. */
+function promptTexts(home: string): (string | undefined)[] {
+  return stubRequests(home, "session/prompt").map(
+    (r) => (r.params.prompt as { text?: string }[])[0]?.text,
   );
-  return scenarioPath;
 }
 
 interface TerminalListEntry {
@@ -189,8 +172,7 @@ interface CreateResponse {
 // Uses `stub-claude.sh` (raw shell stub) because the assertion is the
 // command line the terminal pool wrote to the PTY. Each scenario lives
 // in its own describe block to keep agent failures from cascading into
-// other tests (Linux CI exposes SDK-subprocess fragility that macOS
-// hides). ---------------------------------------------------------------------------
+// other tests. ---------------------------------------------------------------------------
 
 describe("workspaces.create via=terminal happy path", () => {
   const TOKEN = "wc-via-terminal-happy-token";
@@ -218,11 +200,9 @@ describe("workspaces.create via=terminal happy path", () => {
         { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
       ],
     });
-    // Note: the fire-and-forget boot refresh fires for this seeded
-    // claude-code agent and the SDK can't complete a model query against
-    // the 2-line `stub-claude.sh`. The 10 s timeout in
-    // `ClaudeCodeAdapter.refreshModels()` catches the wedge; the
-    // resulting "refresh failed" log line is expected and benign.
+    // Note: the fire-and-forget boot model probe starts the Claude Code
+    // ACP adapter against the 2-line `stub-claude.sh`, which can't answer
+    // it; the resulting "refresh failed" log line is expected and benign.
     server = await startServer({ tmpHome });
   });
 
@@ -349,23 +329,19 @@ describe("workspaces.create via=terminal — auth", () => {
 });
 
 // ---------------------------------------------------------------------------
-// via=chat — explicit and default. Both invoke `taskService.submitTask`
-// so the agent's `command` points at `fake-agent.mjs` (the project's
-// shared Claude-Agent-SDK protocol stub) with a small scenario that
-// completes the session cleanly. A bare shell stub would hang the SDK
-// subprocess on Linux CI and crash subsequent tests.
+// via=chat — explicit and default. Both invoke `taskService.submitTask`,
+// which starts the stub ACP agent (`startAcpServer`); it answers the
+// prompt and ends the turn cleanly.
 // ---------------------------------------------------------------------------
 
 describe("workspaces.create via=chat path", () => {
   const TOKEN = "wc-via-chat-token";
   let server: ServerHandle;
   let tmpHome: string;
-  let scenarioPath: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-via-chat-");
     const repoPath = createGitRepo(tmpHome, "chatproj");
-    scenarioPath = writeChatScenario(tmpHome, "chat-scenario.json");
     seedState(tmpHome, {
       projects: [
         {
@@ -383,19 +359,10 @@ describe("workspaces.create via=chat path", () => {
           id: "claude-code",
           type: "claude-code",
           label: "Claude Code",
-          command: FAKE_AGENT_PATH,
         },
       ],
     });
-    // The boot refresh fires for this seeded claude-code agent and
-    // `fake-agent.mjs` responds to its `control_request` with an empty
-    // payload — `supportedModels()` either rejects cleanly or times out
-    // (10 s) inside `ClaudeCodeAdapter.refreshModels()`, where it's
-    // caught and logged.
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath },
-    });
+    server = await startAcpServer({ home: tmpHome });
   });
 
   afterAll(async () => {
@@ -436,6 +403,8 @@ describe("workspaces.create via=chat path", () => {
       { label: "chat task submitted for via=chat" },
     );
     expect(tasks.some((t) => t.prompt === "implement feature Y")).toBe(true);
+    // ...and the prompt reached the agent over ACP.
+    await expect.poll(() => promptTexts(tmpHome)).toContain("implement feature Y");
 
     // No PTY should be associated with this workspace — chat-path
     // dispatch goes through `taskService.submitTask`, which never
@@ -481,8 +450,9 @@ describe("workspaces.create via=chat path", () => {
 // ---------------------------------------------------------------------------
 // Unsupported adapter fallback — cursor-cli's `cliInvocation` returns
 // `unsupported: true`. The server logs a warning and silently downgrades
-// the dispatch to chat. Because the real cursor SDK isn't safe to run in
-// the test process (no credentials, network-dependent), we only assert
+// the dispatch to chat. The real Cursor CLI isn't available in the test
+// process (no credentials, network-dependent), so the chat fallback runs
+// on the stub ACP agent (`startAcpServer`). We only assert
 // the response shape — the chat-path dispatch itself is exercised by
 // the `via=chat` describe above.
 // ---------------------------------------------------------------------------
@@ -510,7 +480,7 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
       codingAgents: [{ id: "cursor-cli", type: "cursor-cli", label: "Cursor CLI" }],
       defaultCodingAgent: "cursor-cli",
     });
-    server = await startServer({ tmpHome });
+    server = await startAcpServer({ home: tmpHome });
   });
 
   afterAll(async () => {
@@ -538,14 +508,10 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
     // the value the caller asked for — so a CLI scripting around
     // `terminalId` can branch on the absence of the field.
     //
-    // We do NOT poll `terminal.list` here: the cursor-cli adapter's
-    // `runSession` instantiates the real CursorAgent SDK, which on
-    // Linux CI without credentials destabilises the server long enough
-    // that any post-response tRPC fetch ECONNRESETs and the afterAll
-    // hook times out. The response-shape assertions are sufficient
-    // for the fallback contract; the via=terminal happy-path test in
-    // the first describe block already pins the spawn-side
-    // bookkeeping for the cases where a PTY *should* exist.
+    // The response-shape assertions are sufficient for the fallback
+    // contract; the via=terminal happy-path test in the first describe
+    // block already pins the spawn-side bookkeeping for the cases where a
+    // PTY *should* exist.
     expect(data.via).toBe("chat");
     expect(data.terminalId).toBeUndefined();
   });
@@ -563,41 +529,29 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
 // too so the nested CLI reaches THIS server rather than the hardcoded
 // `127.0.0.1:3456`.
 //
-// We can't drive the real Rust `band` binary through the Claude-Agent-SDK
-// stub (the stub speaks the SDK's stdin/stdout protocol; it can't also be
-// a shell that shells out to a CLI), so we assert the precondition the
-// nested CLI reads: the environment the server handed the spawned agent.
+// We can't drive the real Rust `band` binary through the stub ACP agent
+// (the stub speaks ACP over stdin/stdout; it can't also be a shell that
+// shells out to a CLI), so we assert the precondition the nested CLI
+// reads: the environment the server handed the spawned agent.
 // The CLI's `resolve_dispatch_target` (apps/cli/src/main.rs) consults
 // exactly `BAND_DISPATCH` then `BAND_SERVER_URL`, so pinning what the
 // agent received is what proves a nested create would resolve to chat.
 //
-// We exercise the claude-code adapter as the representative case rather
-// than all four: every adapter merges the SAME `AGENT_DISPATCH_ENV`
-// constant into its subprocess env (claude-code/codex/gemini-cli/opencode
-// in packages/coding-agent/src/adapters/), so one integration test plus
-// the shared constant covers the mechanism. The codex/gemini/opencode
-// stubs would each need a different protocol shim for no added signal.
+// We exercise the claude-code agent as the representative case: every
+// ACP launch merges the SAME `AGENT_DISPATCH_ENV` constant into the agent
+// subprocess env (`resolveAcpLaunch` in
+// src/server/infra/agents/acp-launch.ts), so one integration test plus
+// the shared constant covers the mechanism.
 // ---------------------------------------------------------------------------
 
 describe("chat-hosted agent dispatch env (band-start nested create)", () => {
-  // One JSONL record per fake-agent spawn (see fake-agent.mjs
-  // FAKE_AGENT_ENV_LOG). Scoped to this block — it's the only consumer.
-  interface AgentEnvRecord {
-    BAND_DISPATCH: string | null;
-    BAND_SERVER_URL: string | null;
-  }
-
   const TOKEN = "wc-dispatch-env-token";
   let server: ServerHandle;
   let tmpHome: string;
-  let scenarioPath: string;
-  let envLogPath: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-dispatch-env-");
     const repoPath = createGitRepo(tmpHome, "dispproj");
-    scenarioPath = writeChatScenario(tmpHome, "dispatch-scenario.json");
-    envLogPath = join(tmpHome, "agent-env.jsonl");
     seedState(tmpHome, {
       projects: [
         {
@@ -615,14 +569,10 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
           id: "claude-code",
           type: "claude-code",
           label: "Claude Code",
-          command: FAKE_AGENT_PATH,
         },
       ],
     });
-    server = await startServer({
-      tmpHome,
-      env: { FAKE_AGENT_SCENARIO: scenarioPath, FAKE_AGENT_ENV_LOG: envLogPath },
-    });
+    server = await startAcpServer({ home: tmpHome });
   });
 
   afterAll(async () => {
@@ -645,30 +595,21 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     const createBody = await createRes.text();
     expect(createRes.status, createBody).toBe(200);
 
-    // Poll the env log until the TASK spawn's record appears (the one
-    // carrying BAND_DISPATCH=chat). The boot-time model-refresh probe may
-    // also spawn the stub and append a record with BAND_DISPATCH=null
-    // (refreshModels runs with the SDK's default env) — we look past that
-    // for the runSession spawn that dispatches the prompt.
-    const record = await waitFor<AgentEnvRecord>(
-      async () => {
-        if (!existsSync(envLogPath)) return undefined;
-        const records = readFileSync(envLogPath, "utf-8")
-          .split("\n")
-          .filter((l) => l.trim().length > 0)
-          .map((l) => JSON.parse(l) as AgentEnvRecord);
-        return records.find((r) => r.BAND_DISPATCH === "chat");
-      },
-      { label: "agent spawned with BAND_DISPATCH=chat" },
+    // The stub ACP agent logs every request with the env it was spawned
+    // with. Wait for the chat task's `session/prompt`: the boot-time model
+    // probe only opens a session, it never prompts.
+    const prompt = await waitFor(
+      async () =>
+        stubRequests(tmpHome, "session/prompt").find(
+          (r) => (r.params.prompt as { text?: string }[])[0]?.text === "kick off nested work",
+        ),
+      { label: "chat agent received the prompt" },
     );
 
-    // The `waitFor` predicate above only resolves once a spawn recorded
-    // BAND_DISPATCH === "chat", so reaching here already proves the chat
-    // agent was spawned with the chat dispatch target. The remaining
-    // assertion pins the other half: the server advertised its own bound
-    // URL so a nested CLI call reaches it regardless of which port it
-    // claimed.
-    expect(record.BAND_SERVER_URL).toBe(server.url);
+    // The agent that ran the chat turn was spawned with the chat dispatch
+    // target, and the server advertised its own bound URL so a nested CLI
+    // call reaches it regardless of which port it claimed.
+    expect(prompt.env).toEqual({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
   });
 });
 
@@ -797,7 +738,7 @@ describe("workspaces.create via=terminal — long UTF-8 prompt", () => {
 // the chat agent inheriting `BAND_DISPATCH=chat`). `terminal-pool` pins
 // the var on the PTY env; this proves the spawned vendor CLI actually sees
 // it. The stub echoes `ENV_BAND_DISPATCH:<value>|` — the terminal-side
-// equivalent of the chat path's `FAKE_AGENT_ENV_LOG`.
+// equivalent of the chat path's `BAND_TEST_ACP_LOG`.
 // ---------------------------------------------------------------------------
 
 describe("terminal PTY env — BAND_DISPATCH=terminal", () => {

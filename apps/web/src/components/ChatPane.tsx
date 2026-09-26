@@ -10,17 +10,6 @@ import { ChatView } from "./ChatView";
 const settingsKey = () => ["settings.get"] as const;
 const chatKey = (chatId: string) => ["chats.get", chatId] as const;
 
-/**
- * Agent types whose adapters report `supportedFeatures.sessionListing: true`.
- * Keep in sync with `CodingAgentFeatures.sessionListing` on each adapter in
- * `packages/coding-agent/src/adapters/`.
- */
-const SESSION_LISTING_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
-
-export function agentTypeSupportsSessionListing(type: string | undefined): boolean {
-  return type !== undefined && SESSION_LISTING_AGENT_TYPES.has(type);
-}
-
 export interface CodingAgentDef {
   id: string;
   type: string;
@@ -29,7 +18,6 @@ export interface CodingAgentDef {
 
 /** State returned by useChatPaneState — consumed by the pane titlebar and ChatView. */
 export interface ChatPaneState {
-  supportsSessionListing: boolean;
   initialSessionId: string | undefined;
   sessionQueryDone: boolean;
   showSessionList: boolean;
@@ -55,7 +43,7 @@ export interface ChatPaneState {
    * chatQuery cache, AND bumps `paneKey` to remount ChatView so its
    * subscription opens fresh against the new session.
    */
-  onSwitchSession: (sessionId: string | undefined) => Promise<void>;
+  onSwitchSession: (sessionId: string | undefined, summary?: string) => Promise<void>;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
   /** Switch to a different coding agent — triggers chat reload. */
@@ -127,29 +115,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     staleTime: 30_000,
   });
 
-  // Whether the configured agent supports session listing — derived from
-  // the agent definition, no filesystem access required.
-  //
-  // Note: the server-side chat record is created lazily on first message
-  // send (see `task-stream.ts` and `tasks.submit`), so for a brand-new
-  // empty chat `chatQuery.data?.chat` is null. Fall back to the default
-  // coding agent from settings in that case so the session-history
-  // dropdown is available before the user types anything. Mirrors the
-  // `chat?.agent ?? defaultAgentId` pattern used in the agent-init effect
-  // below.
-  const supportsSessionListing = (() => {
-    const settings = settingsQuery.data as Record<string, unknown> | null | undefined;
-    if (!settings) return false;
-    const chat = chatQuery.data?.chat;
-    const raw = settings.codingAgents;
-    const codingAgents = Array.isArray(raw) ? (raw as Array<{ id: string; type: string }>) : [];
-    const defaultAgentId = settings.defaultCodingAgent as string | undefined;
-    const agentId = chat?.agent ?? defaultAgentId;
-    if (!agentId) return false;
-    const found = codingAgents.find((a) => a.id === agentId);
-    return found ? agentTypeSupportsSessionListing(found.type) : false;
-  })();
-
   // --- Agent config: derived from settings + chat record ---
   // Runs on first arrival and on chatId change. Subsequent background
   // refetches don't reapply because agentInitRef gates re-init; user-driven
@@ -180,10 +145,8 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   // --- Session state initialisation ---
   //
   // Single-phase: `chats.get` returns both the persisted activeSessionId
-  // and the cached summary. The server-side fallback (no activeSessionId)
-  // resolves the latest session via mtime-sorted readdir + a single
-  // getSessionInfo and persists the result, so the row we see here is
-  // always self-contained.
+  // and the cached summary (the session's title, or its first prompt from
+  // Band's event log).
   useEffect(() => {
     if (sessionInitRef.current) return;
     const chatResult = chatQuery.data;
@@ -198,9 +161,9 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     sessionInitRef.current = true;
   }, [chatQuery.data]);
 
-  // Keep the tab title in sync with background refetches — the server
-  // refreshes the cached summary after each chats.get and the next read
-  // (≤30 s later) reflects any drift (e.g. /rename).
+  // Keep the tab title in sync with background refetches — agents that
+  // name their sessions update the cached summary live
+  // (`session_info_update`), and the next read (≤30 s later) reflects it.
   useEffect(() => {
     const chatResult = chatQuery.data;
     if (!chatResult) return;
@@ -252,13 +215,14 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   // `useChatSubscription` opens a fresh stream, and the server's
   // chat-events handler picks up the new chat.activeSessionId for replay.
   const onSwitchSession = useCallback(
-    async (sessionId: string | undefined) => {
-      setActiveSessionSummary(undefined);
+    async (sessionId: string | undefined, summary?: string) => {
+      setActiveSessionSummary(summary);
       try {
         await trpc.chats.setActiveSession.mutate({
           workspaceId,
           chatId,
           sessionId: sessionId ?? undefined,
+          summary,
         });
       } catch (err) {
         console.error("[ChatPane] error persisting active session:", err);
@@ -300,7 +264,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   );
 
   return {
-    supportsSessionListing,
     initialSessionId,
     sessionQueryDone,
     showSessionList,
@@ -341,10 +304,7 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
         workspaceId={workspaceId}
         chatId={chatId}
         workspaceName={workspaceId}
-        supportsSessionListing={state.supportsSessionListing}
         initialSessionId={state.initialSessionId}
-        sessionQueryDone={state.sessionQueryDone}
-        showSessionList={state.showSessionList}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}
         onSessionDiscovered={state.onSessionDiscovered}
