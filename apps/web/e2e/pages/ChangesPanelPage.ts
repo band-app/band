@@ -313,14 +313,6 @@ export class ChangesPanelPage {
     );
   }
 
-  /** Reload the page and reopen the Changes tab of the same workspace. */
-  async reload(): Promise<void> {
-    if (!this.currentWorkspaceId) {
-      throw new Error("reload() called before goto()");
-    }
-    await this.goto(this.currentWorkspaceId);
-  }
-
   /** Type `query` into the open picker's search box. */
   async searchBranches(query: string): Promise<void> {
     await test.step(`Search branches for "${query}"`, async () => {
