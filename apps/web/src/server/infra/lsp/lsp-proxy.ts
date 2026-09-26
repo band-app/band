@@ -128,6 +128,11 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // a page reload's `didOpen` of a file the old page left open is rejected as
   // "already open" (tsserver then answers "No Project"), and one tab closing
   // would close a file another tab still has open.
+  //
+  // Limitation: with two connections holding one file, the server keeps the
+  // text of whichever opened it last. If that connection leaves first, the
+  // other's edits are applied to that text, which drifts when the two
+  // buffers differed.
   const openDocuments = new Set<string>();
   const { openDocuments: sessionDocuments } = session;
 

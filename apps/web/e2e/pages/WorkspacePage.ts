@@ -779,6 +779,11 @@ export class WorkspacePage {
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
   }
 
+  /** Every `file` leaf body's visibility marker, visible or hidden. */
+  allFileLeaves(): Locator {
+    return this.page.getByTestId(/^center-file-leaf__visible-/);
+  }
+
   /** A line of the visible `file` leaf's editor by its exact text. Specs pass
    *  fixture text they wrote themselves, so matching on text is stable. */
   fileLeafLine(text: string): Locator {

@@ -60,10 +60,14 @@ afterAll(async () => {
 
 /** A minimal LSP client over the proxy's WebSocket (JSON-RPC, no framing). */
 class LspSocket {
-  private nextId = 0;
+  private nextId: number;
   private pending = new Map<number, (msg: { result?: unknown; error?: unknown }) => void>();
 
-  private constructor(private readonly ws: WebSocket) {
+  private constructor(
+    private readonly ws: WebSocket,
+    idBase: number,
+  ) {
+    this.nextId = idBase;
     ws.on("message", (data) => {
       const msg = JSON.parse(data.toString()) as { id?: number; method?: string };
       // Responses only: a server-to-client request also carries an `id`.
@@ -74,7 +78,9 @@ class LspSocket {
     });
   }
 
-  static async open(cookie?: string): Promise<LspSocket> {
+  /** `idBase` keeps two live sockets' request ids apart: the proxy forwards
+   *  every server message to every connection on the language server. */
+  static async open(cookie?: string, idBase = 0): Promise<LspSocket> {
     const url = new URL(server.url);
     const ws = new WebSocket(
       `ws://${url.host}/lsp?workspaceId=${encodeURIComponent(toWorkspaceId(PROJECT, "main"))}&lang=typescript`,
@@ -84,7 +90,7 @@ class LspSocket {
       ws.once("open", () => resolve());
       ws.once("error", reject);
     });
-    return new LspSocket(ws);
+    return new LspSocket(ws, idBase);
   }
 
   request(method: string, params: unknown): Promise<{ result?: unknown; error?: unknown }> {
@@ -169,18 +175,25 @@ describe("/lsp proxy reconnects", () => {
   it("keeps a file open for a client while another client that had it open disconnects", async () => {
     // Two tabs on one workspace share the language server.
     const leaving = await LspSocket.open(`band_token=${TOKEN}`);
-    const staying = await LspSocket.open(`band_token=${TOKEN}`);
+    const staying = await LspSocket.open(`band_token=${TOKEN}`, 1_000);
     expect((await definitionOfAddNumbers(leaving)).result).toEqual([definition()]);
     expect((await definitionOfAddNumbers(staying)).result).toEqual([definition()]);
 
     await leaving.close();
 
-    const response = await staying.request("textDocument/definition", {
-      textDocument: { uri: `file://${repoPath}/src/main.ts` },
-      position: { line: 3, character: 21 },
-    });
-    expect(response.error).toBeUndefined();
-    expect(response.result).toEqual([definition()]);
+    // The client's close event does not order the proxy's disconnect handling
+    // before the next request, so keep asking over a window long enough for
+    // a `didClose` from the disconnect to have reached the server.
+    const start = Date.now();
+    while (Date.now() - start < 1_500) {
+      const response = await staying.request("textDocument/definition", {
+        textDocument: { uri: `file://${repoPath}/src/main.ts` },
+        position: { line: 3, character: 21 },
+      });
+      expect(response.error).toBeUndefined();
+      expect(response.result).toEqual([definition()]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
     await staying.close();
   }, 60_000);
 });

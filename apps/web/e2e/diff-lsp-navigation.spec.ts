@@ -213,4 +213,50 @@ test.describe("diff go-to-definition", () => {
     await expect(newSide.line(LOCAL_HELPER_DEF)).toBeInViewport();
     await expect(changes.fileLeaves).toHaveCount(0);
   });
+
+  test("The diff keeps linking after an editor opens and closes the same file", async ({
+    page,
+  }) => {
+    const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
+    await changes.goto(ctx.workspaceId);
+    await changes.openDiff("src/main.ts", "unified");
+
+    // An editor on the same file takes the document over on the server...
+    await changes.openDiffFileInEditor();
+    await changes.openedEditor.expectContent(DOUBLED_LINE);
+    // ...and closing it hands the diff's text back.
+    await changes.closeEditor("src/main.ts");
+    await changes.showDiff("src/main.ts");
+
+    const diff = changes.symbols("new");
+    await diff.cmdHover(DOUBLED_LINE, "localHelper");
+    await diff.expectLinkOn("localHelper");
+    await diff.releaseModifier();
+    await diff.cmdClick(DOUBLED_LINE, "localHelper");
+    await expect(diff.line(LOCAL_HELPER_DEF)).toBeInViewport();
+  });
+
+  test("The diff stops linking a line an editor's unsaved edits have moved", async ({ page }) => {
+    const changes = new ChangesPanelPage(page, ctx.server.url, TOKEN);
+    await changes.goto(ctx.workspaceId);
+    await changes.openDiff("src/main.ts", "unified");
+    const diff = changes.symbols("new");
+
+    // Positive anchor: the line links while the editor matches the disk.
+    await changes.openDiffFileInEditor();
+    await changes.openedEditor.expectContent(DOUBLED_LINE);
+    await changes.showDiff("src/main.ts");
+    await diff.cmdHover(DOUBLED_LINE, "addNumbers");
+    await diff.expectLinkOn("addNumbers");
+    await diff.releaseModifier();
+
+    // An unsaved line at the top shifts every line in the editor's copy, so
+    // the diff's line 4 is no longer the server's line 4.
+    await changes.showEditor("src/main.ts");
+    await changes.openedEditor.typeAtStart("// unsaved\n");
+    await changes.showDiff("src/main.ts");
+    await diff.cmdHover(DOUBLED_LINE, "addNumbers");
+    await diff.expectNoLinkFor();
+    await diff.releaseModifier();
+  });
 });

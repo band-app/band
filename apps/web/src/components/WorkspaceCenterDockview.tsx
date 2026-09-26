@@ -2042,6 +2042,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
           className={closeButtonClass(isActive)}
           onClick={handleClose}
           title="Close file"
+          data-testid={`center-file-tab__close--${filePath}`}
         >
           <X className="size-3" />
         </button>

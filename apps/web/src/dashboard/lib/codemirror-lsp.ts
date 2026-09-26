@@ -552,7 +552,10 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
       private mouseY = -1;
       /** The word currently shown (or being checked), as `from:to`. */
       private current: string | null = null;
-      /** Words (`from:to`) the server reported a definition for. */
+      /** Words (`from:to`) the server reported a definition for during the
+       *  current Cmd/Ctrl hold. Cleared on release: the answer can change
+       *  without this view's document changing (a diff view's text is fixed,
+       *  but an editor's unsaved edits move the server's copy). */
       private navigable = new Set<string>();
       private timer: ReturnType<typeof setTimeout> | undefined;
       private checkedDoc: Text;
@@ -591,6 +594,7 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
       private onKeyUp(e: KeyboardEvent) {
         if (e.key === "Meta" || e.key === "Control") {
           this.modDown = false;
+          this.navigable.clear();
           this.show(null);
         }
       }
@@ -611,6 +615,7 @@ function cmdClickLink(canNavigate: CanNavigate): Extension {
 
       private onBlur() {
         this.modDown = false;
+        this.navigable.clear();
         this.show(null);
       }
 

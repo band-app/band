@@ -209,6 +209,19 @@ export class FileViewerPage {
     });
   }
 
+  /** Type `text` at the very start of the document without saving, so every
+   *  existing line moves down. */
+  async typeAtStart(text: string): Promise<void> {
+    await test.step(`Type "${text.trim()}" at the start of the editor`, async () => {
+      await this.editor.click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+      await this.page.keyboard.type(text);
+      await expect(this.editor).toContainText(text.trim(), { timeout: 15_000 });
+    });
+  }
+
   /**
    * Replace the whole buffer with `text` (select-all + type). This makes
    * the tab dirty — the edited content differs from the on-disk baseline —
