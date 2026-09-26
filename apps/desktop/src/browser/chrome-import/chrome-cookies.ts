@@ -17,7 +17,7 @@
  */
 
 import { createDecipheriv, createHash, pbkdf2Sync } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -147,9 +147,13 @@ function snapshotCookieDb(cookiesPath: string): { dbPath: string; cleanup: () =>
   const cleanup = () => rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   try {
     const dbPath = join(dir, "Cookies");
+    // The copies are owner-only whatever the source's mode.
     copyFileSync(cookiesPath, dbPath);
+    chmodSync(dbPath, 0o600);
     for (const suffix of ["-wal", "-journal"]) {
-      if (existsSync(cookiesPath + suffix)) copyFileSync(cookiesPath + suffix, dbPath + suffix);
+      if (!existsSync(cookiesPath + suffix)) continue;
+      copyFileSync(cookiesPath + suffix, dbPath + suffix);
+      chmodSync(dbPath + suffix, 0o600);
     }
     return { dbPath, cleanup };
   } catch (err) {

@@ -295,11 +295,6 @@ export class BrowserViewManager {
     this.spawn(args.url, key, args.profileId ?? null);
   }
 
-  /**
-   * A view's partition is fixed at construction, so a view whose tab moved
-   * to another profile is destroyed here and respawned by the caller.
-   * `undefined` means the caller didn't say, and keeps the current view.
-   */
   /** Destroy every view running in `profileId` (the profile is being deleted). */
   destroyProfileViews(profileId: string): void {
     for (const [key, viewProfile] of [...this.profileByKey]) {
@@ -307,6 +302,11 @@ export class BrowserViewManager {
     }
   }
 
+  /**
+   * A view's partition is fixed at construction, so a view whose tab moved
+   * to another profile is destroyed here and respawned by the caller.
+   * `undefined` means the caller didn't say, and keeps the current view.
+   */
   private dropIfProfileChanged(key: string, profileId: string | null | undefined): void {
     if (profileId === undefined || !this.views.has(key)) return;
     if ((this.profileByKey.get(key) ?? null) === profileId) return;
