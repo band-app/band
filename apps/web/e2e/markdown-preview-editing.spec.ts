@@ -160,33 +160,34 @@ test("find in the preview counts and steps through matches, including text typed
   await viewer.typeInPreview("A **needle** in bold");
 
   await workspacePage.pressFindShortcut();
-  await expect(workspacePage.findInFileOrPreviewBar).toBeFocused();
+  const find = viewer.findWidget;
+  await expect(find.input).toBeFocused();
 
-  await workspacePage.typeInFindBar("needle");
-  await workspacePage.expectFindMatch(1, 3);
+  await find.type("needle");
+  await expect(find.count).toHaveText("1/3");
 
   // The table cell's match is counted while the table is rendered, and
   // stepping onto it swaps the table for its source so the match is visible.
   await expect(viewer.previewRenderedBlock("table")).toBeVisible();
-  await workspacePage.stepFind("next");
-  await workspacePage.expectFindMatch(2, 3);
+  await find.press("Enter");
+  await expect(find.count).toHaveText("2/3");
   await expect(viewer.previewRenderedBlock("table")).toHaveCount(0);
   await expect(viewer.markdownPreview).toContainText("| needle cell |");
 
-  // Text typed while the find bar is open is found too.
+  // Text typed while the find widget is open is found too.
   await viewer.focusPreviewEnd();
   await viewer.typeInPreview(" and another needle.");
-  await workspacePage.stepFind("next");
-  await workspacePage.expectFindMatch(3, 4);
-  await workspacePage.stepFind("next");
-  await workspacePage.expectFindMatch(4, 4);
-  await workspacePage.stepFind("next");
-  await workspacePage.expectFindMatch(1, 4);
-  await workspacePage.stepFind("previous");
-  await workspacePage.expectFindMatch(4, 4);
+  await find.press("Enter");
+  await expect(find.count).toHaveText("3/4");
+  await find.press("Enter");
+  await expect(find.count).toHaveText("4/4");
+  await find.press("Enter");
+  await expect(find.count).toHaveText("1/4");
+  await find.press("Shift+Enter");
+  await expect(find.count).toHaveText("4/4");
 
-  await workspacePage.typeInFindBar("not in this file");
-  await workspacePage.expectFindMatch(0, 0);
+  await find.type("not in this file");
+  await find.expectNoResults();
 });
 
 test("relative images load from the workspace and cannot climb out of it", async ({ page }) => {

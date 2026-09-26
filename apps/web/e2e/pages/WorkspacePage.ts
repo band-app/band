@@ -779,36 +779,6 @@ export class WorkspacePage {
     return this.page.getByPlaceholder(/Find in (file|preview)\.\.\./);
   }
 
-  /** The find bar's match counter. Carries `data-current` / `data-total`, so
-   *  tests read the numbers rather than the "2 of 3" / "No results" copy. */
-  private get findMatchCount(): Locator {
-    return this.page.getByTestId("search-bar__match-count");
-  }
-
-  /** Replace the find bar's query. */
-  async typeInFindBar(query: string): Promise<void> {
-    await test.step(`Search for "${query}"`, async () => {
-      await this.findInFileOrPreviewBar.fill(query);
-    });
-  }
-
-  /** Step to the next (Enter) or previous (Shift+Enter) match from the find bar. */
-  async stepFind(direction: "next" | "previous"): Promise<void> {
-    await test.step(`Step find to the ${direction} match`, async () => {
-      await this.findInFileOrPreviewBar.focus();
-      await this.findInFileOrPreviewBar.press(direction === "next" ? "Enter" : "Shift+Enter");
-    });
-  }
-
-  /** Assert (auto-retrying) the find counter shows match `current` of `total`.
-   *  `total` 0 is the "No results" state. */
-  async expectFindMatch(current: number, total: number): Promise<void> {
-    await test.step(`Find counter is at ${current} of ${total}`, async () => {
-      await expect(this.findMatchCount).toHaveAttribute("data-total", String(total));
-      await expect(this.findMatchCount).toHaveAttribute("data-current", String(current));
-    });
-  }
-
   /** The terminal's own find bar input (`Find in terminal...`, see
    *  `TerminalPanel.tsx`). Distinct placeholder from the file/preview bar, so a
    *  test can assert which surface's find bar a Cmd+F opened. */
