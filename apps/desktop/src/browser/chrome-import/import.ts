@@ -54,9 +54,9 @@ export interface ChromeImportSummary {
   total: number;
 }
 
-export function listChromeImportProfiles(): ChromeProfilesResult {
+export async function listChromeImportProfiles(): Promise<ChromeProfilesResult> {
   if (process.platform !== "darwin") return { supported: false, profiles: [] };
-  return { supported: true, profiles: listChromeProfiles(chromeUserDataDir()) };
+  return { supported: true, profiles: await listChromeProfiles(chromeUserDataDir()) };
 }
 
 export async function importChromeProfile(args: ChromeImportArgs): Promise<ChromeImportSummary> {
@@ -67,7 +67,9 @@ export async function importChromeProfile(args: ChromeImportArgs): Promise<Chrom
   if (!isSafeProfileDirectory(args.chromeProfileDirectory)) {
     throw new Error("Invalid Chrome profile");
   }
-  const cookiesPath = resolveCookiesPath(join(chromeUserDataDir(), args.chromeProfileDirectory));
+  const cookiesPath = await resolveCookiesPath(
+    join(chromeUserDataDir(), args.chromeProfileDirectory),
+  );
   if (!cookiesPath) throw new Error("This Chrome profile has no cookies to import.");
 
   let read: Awaited<ReturnType<typeof readChromeCookies>>;
@@ -138,7 +140,7 @@ export async function pruneProfileData(
   stopPages: (profileId: string) => void,
 ): Promise<string[]> {
   const known = new Set(keep);
-  const stale = listProfilePartitionsOnDisk().filter((id) => !known.has(id));
+  const stale = (await listProfilePartitionsOnDisk()).filter((id) => !known.has(id));
   for (const id of stale) await clearProfileData(id, stopPages);
   if (stale.length > 0) log.info({ count: stale.length }, "wiped deleted browser profiles");
   return stale;

@@ -13,7 +13,7 @@
  * prepares each session when its first guest attaches.
  */
 
-import { readdirSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { app, type Session, session } from "electron";
 import { BROWSER_PARTITION } from "./guest-policy.js";
@@ -62,12 +62,12 @@ export function isRetiredProfile(profileId: string | null | undefined): boolean 
  * Ids of the profile partitions on disk. Electron stores
  * `persist:<name>` under `<sessionData>/Partitions/<name>`.
  */
-export function listProfilePartitionsOnDisk(): string[] {
+export async function listProfilePartitionsOnDisk(): Promise<string[]> {
   const dir = join(app.getPath("sessionData"), "Partitions");
   const prefix = PROFILE_PARTITION_PREFIX.slice("persist:".length);
   let names: string[];
   try {
-    names = readdirSync(dir);
+    names = await readdir(dir);
   } catch {
     return [];
   }

@@ -162,15 +162,15 @@ describe("Chrome cookie import", () => {
     rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  it("lists only profiles with a cookie DB and a safe directory name", () => {
-    assert.deepEqual(listChromeProfiles(userDataDir), [
+  it("lists only profiles with a cookie DB and a safe directory name", async () => {
+    assert.deepEqual(await listChromeProfiles(userDataDir), [
       { directory: "Default", name: "Personal" },
       { directory: "Profile 1", name: "Work" },
     ]);
   });
 
-  it("returns no profiles when Chrome was never installed", () => {
-    assert.deepEqual(listChromeProfiles(join(userDataDir, "missing")), []);
+  it("returns no profiles when Chrome was never installed", async () => {
+    assert.deepEqual(await listChromeProfiles(join(userDataDir, "missing")), []);
   });
 
   it("decrypts cookies, strips the host hash and maps them for Electron", async () => {

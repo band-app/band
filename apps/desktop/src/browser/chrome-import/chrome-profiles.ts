@@ -10,7 +10,7 @@
  * (the consent dialog in the browser pane's profile menu).
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -41,34 +41,39 @@ export function isSafeProfileDirectory(directory: string): boolean {
   );
 }
 
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
+}
+
 /**
  * Chrome 96 moved the cookie DB into `Network/`; older profiles still keep
  * it at the profile root.
  */
-export function resolveCookiesPath(profileDir: string): string | null {
+export async function resolveCookiesPath(profileDir: string): Promise<string | null> {
   const networkPath = join(profileDir, "Network", "Cookies");
-  if (existsSync(networkPath)) return networkPath;
+  if (await exists(networkPath)) return networkPath;
   const legacyPath = join(profileDir, "Cookies");
-  return existsSync(legacyPath) ? legacyPath : null;
+  return (await exists(legacyPath)) ? legacyPath : null;
 }
 
 /**
  * List the profiles that have a cookie DB, in `Local State` order. Returns
- * an empty list when Chrome isn't installed or has never been run.
+ * an empty list when Chrome isn't installed or has never been run. Async
+ * because it runs in an IPC handler on the Electron main process.
  */
-export function listChromeProfiles(userDataDir: string): ChromeProfile[] {
-  const localStatePath = join(userDataDir, "Local State");
+export async function listChromeProfiles(userDataDir: string): Promise<ChromeProfile[]> {
   let infoCache: Record<string, { name?: unknown }> = {};
-  if (existsSync(localStatePath)) {
-    try {
-      const localState = JSON.parse(readFileSync(localStatePath, "utf-8")) as {
-        profile?: { info_cache?: Record<string, { name?: unknown }> };
-      };
-      infoCache = localState.profile?.info_cache ?? {};
-    } catch {
-      // A corrupt Local State still leaves the Default profile usable.
-      infoCache = {};
-    }
+  try {
+    const localState = JSON.parse(await readFile(join(userDataDir, "Local State"), "utf-8")) as {
+      profile?: { info_cache?: unknown };
+    };
+    const cache = localState.profile?.info_cache;
+    if (cache && typeof cache === "object") infoCache = cache as Record<string, { name?: unknown }>;
+  } catch {
+    // Missing or corrupt Local State still leaves the Default profile usable.
   }
 
   const candidates: ChromeProfile[] = Object.entries(infoCache).map(([directory, info]) => ({
@@ -77,9 +82,12 @@ export function listChromeProfiles(userDataDir: string): ChromeProfile[] {
   }));
   if (candidates.length === 0) candidates.push({ directory: "Default", name: "Default" });
 
-  return candidates.filter(
-    (p) =>
-      isSafeProfileDirectory(p.directory) &&
-      resolveCookiesPath(join(userDataDir, p.directory)) !== null,
+  const withCookies = await Promise.all(
+    candidates.map(
+      async (p) =>
+        isSafeProfileDirectory(p.directory) &&
+        (await resolveCookiesPath(join(userDataDir, p.directory))) !== null,
+    ),
   );
+  return candidates.filter((_, i) => withCookies[i]);
 }
