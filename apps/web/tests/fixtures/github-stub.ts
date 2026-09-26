@@ -25,6 +25,13 @@ export interface GitHubStub {
     status: number,
     opts?: { onRequest?: (r: CapturedAvatarRequest) => void },
   ) => void;
+  /** Answer `/<owner>.png` with a 302 to `location`, the way github.com
+   *  redirects to its avatar CDN. */
+  setAvatarRedirect: (
+    owner: string,
+    location: string,
+    opts?: { onRequest?: (r: CapturedAvatarRequest) => void },
+  ) => void;
   stop: () => Promise<void>;
 }
 
@@ -55,6 +62,12 @@ export const githubStub = {
         app.get(`/${owner}.png`, (req: Request, res: Response) => {
           opts?.onRequest?.(capture(req));
           res.sendStatus(status);
+        });
+      },
+      setAvatarRedirect(owner, location, opts) {
+        app.get(`/${owner}.png`, (req: Request, res: Response) => {
+          opts?.onRequest?.(capture(req));
+          res.redirect(302, location);
         });
       },
       stop: () =>

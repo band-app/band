@@ -1,4 +1,4 @@
-import type { RepoInfo } from "../../infra/git/git-client";
+import type { RepoInfo } from "../git/git-client";
 
 /**
  * GitHub coordinates of a project's `origin`, normalised for avatar
@@ -42,20 +42,4 @@ export function githubRepoRef(info: RepoInfo | null): GitHubRepoRef | null {
     return { host, owner: info.owner, repo: info.repo };
   }
   return null;
-}
-
-/**
- * URL of the owner's avatar, 64px. GitHub and GHES both serve it at
- * `/<login>.png` (github.com redirects to avatars.githubusercontent.com).
- *
- * `BAND_GITHUB_URL` replaces `https://github.com` so tests can point the
- * server at a local stub. It is read on every call, not at module load, so
- * the value in effect when the request is made wins.
- */
-export function githubAvatarUrl(ref: Pick<GitHubRepoRef, "host" | "owner">): string {
-  const base =
-    ref.host === "github.com"
-      ? (process.env.BAND_GITHUB_URL || "https://github.com").replace(/\/+$/, "")
-      : `https://${ref.host}`;
-  return `${base}/${encodeURIComponent(ref.owner)}.png?size=64`;
 }

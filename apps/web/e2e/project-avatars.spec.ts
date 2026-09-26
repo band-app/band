@@ -26,6 +26,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { CronjobsDialog } from "./pages/CronjobsDialog";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-project-avatars-token";
@@ -111,5 +112,17 @@ test.describe("GitHub project avatars", () => {
     await expect(workspacePage.projectFolderIcon(UNREACHABLE_PROJECT)).toBeVisible();
     // The failed image is removed rather than left as a broken glyph.
     await expect(workspacePage.projectAvatar(UNREACHABLE_PROJECT)).toHaveCount(0);
+  });
+
+  test("the cronjob project picker shows the avatar next to GitHub projects", async ({ page }) => {
+    const cronjobs = new CronjobsDialog(page, server.url, TOKEN);
+    await cronjobs.goto();
+    await cronjobs.open();
+    await cronjobs.openProjectPicker();
+
+    await expect(cronjobs.projectAvatar(GITHUB_PROJECT)).toBeVisible();
+    // Positive anchor: the GitLab project's option rendered, without an avatar.
+    await expect(cronjobs.projectOption(GITLAB_PROJECT)).toBeVisible();
+    await expect(cronjobs.projectAvatar(GITLAB_PROJECT)).toHaveCount(0);
   });
 });

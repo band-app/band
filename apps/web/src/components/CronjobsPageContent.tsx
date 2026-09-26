@@ -151,6 +151,7 @@ export function CronjobsPageContent() {
             variant="outline"
             size="xs"
             className="hidden sm:inline-flex"
+            data-testid="cronjobs__new-button"
             onClick={handleCreate}
           >
             <Plus className="size-3" />
@@ -555,13 +556,18 @@ function CronjobDialog({
               <div className="flex flex-col gap-2">
                 <Label>Project</Label>
                 <Select value={selectedProject} onValueChange={handleProjectChange}>
-                  <SelectTrigger>
+                  <SelectTrigger data-testid="cronjobs__project-select">
                     <SelectValue placeholder="Select a project" />
                   </SelectTrigger>
                   <SelectContent>
                     {projects.map((p) => (
                       <SelectItem key={p.name} value={p.name}>
-                        <ProjectAvatar avatar={p.avatar} className="size-4" fallback={null} />
+                        <ProjectAvatar
+                          avatar={p.avatar}
+                          className="size-4"
+                          fallback={null}
+                          testId={`cronjobs__project-avatar--${p.name}`}
+                        />
                         {p.name}
                       </SelectItem>
                     ))}

@@ -13,7 +13,7 @@ import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
 import { GitClient } from "../infra/git/git-client";
 import {
-  type ProjectAvatar,
+  type ProjectAvatarInfo,
   type ProjectAvatarService,
   projectAvatarService,
 } from "./project-avatar-service";
@@ -68,7 +68,7 @@ export class ProjectService {
       label: string | undefined;
       kind: ProjectKind;
       /** Owner avatar when `origin` is on GitHub; `null` otherwise. */
-      avatar: ProjectAvatar | null;
+      avatar: ProjectAvatarInfo | null;
       worktrees: Array<{
         name: string;
         branch: string;
@@ -108,6 +108,10 @@ export class ProjectService {
 
     const result = await Promise.all(
       projects.map(async (project) => {
+        // Reads the memoised remote and the on-disk cache only; the GitHub
+        // fetch happens when the browser requests `avatar.src`. Started
+        // here so its `git remote` call overlaps `git worktree list`.
+        const avatar = this.avatars.describe(project).catch(() => null);
         // Plain projects have a single implicit workspace whose path equals
         // the project path. They don't have a `.git` directory, so we skip
         // the `git worktree list` enrichment entirely and rely on the
@@ -161,9 +165,7 @@ export class ProjectService {
           defaultBranch: project.defaultBranch,
           label: project.label,
           kind: project.kind,
-          // Reads the memoised remote and the on-disk cache only; the
-          // GitHub fetch happens when the browser requests `avatar.src`.
-          avatar: await this.avatars.describe(project).catch(() => null),
+          avatar: await avatar,
           worktrees: worktrees.map((wt) => {
             // Identity is by the immutable `name`, not the live branch.
             const workspaceId = toWorkspaceId(project.name, wt.name);

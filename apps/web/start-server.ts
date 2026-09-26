@@ -614,6 +614,11 @@ async function main() {
         "Content-Length": avatar.bytes.length.toString(),
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",
+        // The bytes come from a remote host. If one is ever opened as a
+        // document rather than through <img>, it gets no script and no
+        // access to Band's origin.
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Disposition": "inline",
       });
       res.end(avatar.bytes);
       return;

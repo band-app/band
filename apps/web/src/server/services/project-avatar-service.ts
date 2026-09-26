@@ -4,29 +4,27 @@ import { createLogger } from "@band-app/logger";
 import { ProjectQueries, type ProjectState } from "../infra/db/queries/projects";
 import { bandHome } from "../infra/db/queries/settings";
 import { GitClient } from "../infra/git/git-client";
-import { type GitHubRepoRef, githubAvatarUrl, githubRepoRef } from "./_utils/github-avatar";
+import { GitHubClient } from "../infra/github/github-client";
+import { type GitHubRepoRef, githubRepoRef } from "../infra/github/github-repo-ref";
 
 const log = createLogger("project-avatars");
 
 /** How long a fetched avatar (or a confirmed "no avatar") is reused before
  *  the next request refetches it. Owners rarely change their picture. */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-/** After a failed fetch (offline, timeout, 5xx) with nothing cached, wait
- *  this long before trying GitHub again, so a sidebar re-render or the 30 s
- *  project-list refetch does not retry on every request. */
+/** After a failed fetch (offline, timeout, 5xx), wait this long before
+ *  trying GitHub again, so a sidebar re-render or the 30 s project-list
+ *  refetch does not retry on every request. */
 const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 /** `git remote get-url origin` result reuse. `projects.list` runs every
  *  30 s per open dashboard; a remote change shows up within a minute. */
 const REMOTE_TTL_MS = 60 * 1000;
-const FETCH_TIMEOUT_MS = 10_000;
-/** GitHub's 64px avatars are a few KB. Anything much larger is not one. */
-const MAX_AVATAR_BYTES = 1024 * 1024;
 
 /** What `projects.list` returns per project for the UI to render. */
-export interface ProjectAvatar {
-  /** Same-origin URL of the cached image, versioned by fetch time. */
+export interface ProjectAvatarInfo {
+  /** Same-origin URL of the cached image. */
   src: string;
-  /** `owner/repo`, for alt text and tooltips. */
+  /** `owner/repo`, for alt text. */
   label: string;
 }
 
@@ -43,7 +41,7 @@ interface CacheEntry {
   retryAfter: number;
 }
 
-export interface AvatarImage {
+interface AvatarImage {
   bytes: Buffer;
   contentType: string;
 }
@@ -54,7 +52,7 @@ export interface AvatarImage {
  * The image is fetched once per owner and cached under
  * `~/.band/cache/github-avatars/`, so the browser only ever talks to Band.
  * A cached image is served even when it is stale and GitHub is unreachable.
- * A 404 or a non-image response is remembered as "missing" for the TTL, and
+ * A "no avatar" answer (404, non-raster type) is remembered for the TTL, and
  * `projects.list` then returns no avatar so the UI keeps its folder icon
  * without making a request.
  */
@@ -66,6 +64,7 @@ export class ProjectAvatarService {
   constructor(
     private readonly queries: ProjectQueries = new ProjectQueries(),
     private readonly git: GitClient = new GitClient(),
+    private readonly github: GitHubClient = new GitHubClient(),
   ) {}
 
   /**
@@ -74,15 +73,14 @@ export class ProjectAvatarService {
    */
   async describe(
     project: Pick<ProjectState, "name" | "path" | "kind">,
-  ): Promise<ProjectAvatar | null> {
+  ): Promise<ProjectAvatarInfo | null> {
     if (project.kind !== "git") return null;
     const ref = await this.repoRef(project.path);
     if (!ref) return null;
     const entry = await this.entry(ref);
     if (entry.meta?.status === "missing" && !this.isStale(entry.meta)) return null;
-    const version = entry.meta?.status === "ok" ? `?v=${entry.meta.fetchedAt}` : "";
     return {
-      src: `/api/project-avatar/${encodeURIComponent(project.name)}${version}`,
+      src: `/api/project-avatar/${encodeURIComponent(project.name)}`,
       label: `${ref.owner}/${ref.repo}`,
     };
   }
@@ -93,7 +91,7 @@ export class ProjectAvatarService {
    * GitHub, has no avatar, or GitHub is unreachable with nothing cached.
    */
   async image(projectName: string): Promise<AvatarImage | null> {
-    const project = this.queries.loadAll().find((p) => p.name === projectName);
+    const project = this.queries.findLocation(projectName);
     if (!project || project.kind !== "git") return null;
     const ref = await this.repoRef(project.path);
     if (!ref) return null;
@@ -113,40 +111,36 @@ export class ProjectAvatarService {
 
   private async refresh(ref: GitHubRepoRef, entry: CacheEntry): Promise<AvatarImage | null> {
     const key = cacheKey(ref);
-    const url = githubAvatarUrl(ref);
-    let res: Response;
     try {
-      res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      const result = await this.github.fetchAvatar(ref);
+      if (result.kind === "unavailable") {
+        log.debug("avatar for %s/%s unavailable: %s", ref.host, ref.owner, result.reason);
+        entry.retryAfter = Date.now() + FAILURE_BACKOFF_MS;
+        return this.readCached(key, entry.meta);
+      }
+      if (result.kind === "missing") {
+        await this.writeMeta(key, entry, { status: "missing", fetchedAt: Date.now() });
+        return null;
+      }
+      await mkdir(cacheDir(), { recursive: true });
+      // Write to a temp name and rename so a concurrent reader never sees a
+      // half-written image.
+      const imagePath = join(cacheDir(), `${key}.img`);
+      await writeFile(`${imagePath}.tmp`, result.bytes);
+      await rename(`${imagePath}.tmp`, imagePath);
+      await this.writeMeta(key, entry, {
+        status: "ok",
+        contentType: result.contentType,
+        fetchedAt: Date.now(),
+      });
+      return { bytes: result.bytes, contentType: result.contentType };
     } catch (err) {
-      log.debug("avatar fetch failed for %s: %s", url, err instanceof Error ? err.message : err);
+      // Cache directory not writable, disk full: back off like a network
+      // failure and keep serving whatever is cached.
+      log.debug("avatar cache write for %s failed: %s", key, err);
       entry.retryAfter = Date.now() + FAILURE_BACKOFF_MS;
       return this.readCached(key, entry.meta);
     }
-
-    const contentType = res.headers.get("content-type")?.split(";")[0].trim() ?? "";
-    if (res.status === 404 || (res.ok && !contentType.startsWith("image/"))) {
-      await this.writeMeta(key, entry, { status: "missing", fetchedAt: Date.now() });
-      return null;
-    }
-    if (!res.ok) {
-      log.debug("avatar fetch for %s returned HTTP %d", url, res.status);
-      entry.retryAfter = Date.now() + FAILURE_BACKOFF_MS;
-      return this.readCached(key, entry.meta);
-    }
-
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > MAX_AVATAR_BYTES) {
-      await this.writeMeta(key, entry, { status: "missing", fetchedAt: Date.now() });
-      return null;
-    }
-    await mkdir(cacheDir(), { recursive: true });
-    // Write to a temp name and rename so a concurrent reader never sees a
-    // half-written image.
-    const imagePath = join(cacheDir(), `${key}.img`);
-    await writeFile(`${imagePath}.tmp`, bytes);
-    await rename(`${imagePath}.tmp`, imagePath);
-    await this.writeMeta(key, entry, { status: "ok", contentType, fetchedAt: Date.now() });
-    return { bytes, contentType };
   }
 
   private async readCached(key: string, meta: CacheMeta | null): Promise<AvatarImage | null> {
