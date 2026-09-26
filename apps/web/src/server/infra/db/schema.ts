@@ -121,6 +121,8 @@ export const chatEvents = sqliteTable(
     // every cold subscribe).
     index("chat_events_kind_idx").on(t.sessionId, t.revision, t.kind, t.id),
     index("chat_events_update_kind_idx").on(t.sessionId, t.revision, t.updateKind, t.id),
+    // Turn-based paging (`readTurns`) finds the last N turn starts.
+    index("chat_events_turn_start_idx").on(t.sessionId, t.revision, t.turnStart, t.id),
     index("chat_events_chat_idx").on(t.chatId),
   ],
 );

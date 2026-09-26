@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "b352ba5c-a9e8-4f1f-a2ed-c6ee20307ba4",
+  "id": "f34592af-a294-4a0b-b95c-59b1a70cda9f",
   "prevIds": [
     "f0053d67-cc4a-4ed1-baff-9dbf73ccd0a1"
   ],
@@ -1302,6 +1302,32 @@
       "where": null,
       "origin": "manual",
       "name": "chat_events_update_kind_idx",
+      "entityType": "indexes",
+      "table": "chat_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "session_id",
+          "isExpression": false
+        },
+        {
+          "value": "revision",
+          "isExpression": false
+        },
+        {
+          "value": "turn_start",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "chat_events_turn_start_idx",
       "entityType": "indexes",
       "table": "chat_events"
     },
