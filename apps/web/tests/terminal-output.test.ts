@@ -103,7 +103,8 @@ describe("terminal.output", () => {
     // Every full `seq` line in the tail follows the one before it, up to 50000:
     // no chunk was dropped from the middle or reordered.
     const numbers = output
-      .split("\r\n")
+      // The PTY now and then ends a line with "\r\r\n".
+      .split(/\r*\n/)
       .slice(1)
       .filter((line) => /^\d+$/.test(line))
       .map(Number);
