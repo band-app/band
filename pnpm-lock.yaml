@@ -81,6 +81,9 @@ importers:
       '@xterm/addon-serialize':
         specifier: 0.15.0-beta.291
         version: 0.15.0-beta.291(@xterm/xterm@6.1.0-beta.291)
+      '@xterm/addon-unicode11':
+        specifier: 0.10.0-beta.291
+        version: 0.10.0-beta.291(@xterm/xterm@6.1.0-beta.291)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.290
         version: 0.20.0-beta.290(@xterm/xterm@6.1.0-beta.291)
@@ -3437,6 +3440,11 @@ packages:
 
   '@xterm/addon-serialize@0.15.0-beta.291':
     resolution: {integrity: sha512-fHnKaduVDgcwewOUh/v9I1Ad39m69QSnKtjGeouJwaB7qxWFdlXBIRJIUe605Hdy/YuPQ5W3d+xmvmbe2rkpFg==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.291
+
+  '@xterm/addon-unicode11@0.10.0-beta.291':
+    resolution: {integrity: sha512-+XCKf3blKyXG1DiioLpkBrmLNXwDTIn/7Of5HajPNxNOWgdMR0bH1oN/3yGHgiwl8pw5X/wpk/C6wTZY53l++g==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.291
 
@@ -10687,6 +10695,10 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.291
 
   '@xterm/addon-serialize@0.15.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.291
+
+  '@xterm/addon-unicode11@0.10.0-beta.291(@xterm/xterm@6.1.0-beta.291)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.291
 

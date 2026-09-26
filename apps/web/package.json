@@ -39,6 +39,7 @@
     "@vscode/ripgrep": "^1.18.0",
     "@xterm/addon-search": "0.17.0-beta.291",
     "@xterm/addon-serialize": "0.15.0-beta.291",
+    "@xterm/addon-unicode11": "0.10.0-beta.291",
     "@xterm/addon-webgl": "0.20.0-beta.290",
     "@xterm/headless": "6.1.0-beta.291",
     "fzf": "0.5.2",
