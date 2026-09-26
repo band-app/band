@@ -11,6 +11,7 @@ export function useStatusWatcher() {
   const replaceAllStatuses = useDashboardStore((s) => s.replaceAllStatuses);
   const updateStatus = useDashboardStore((s) => s.updateStatus);
   const removeStatus = useDashboardStore((s) => s.removeStatus);
+  const setDeleting = useDashboardStore((s) => s.setDeleting);
   const previousStatuses = useRef<Map<string, AgentStatusType>>(new Map());
 
   useEffect(() => {
@@ -49,11 +50,18 @@ export function useStatusWatcher() {
       (workspaceId) => {
         previousStatuses.current.delete(workspaceId);
         removeStatus(workspaceId);
+        // A removal started elsewhere (the CLI, another window) would
+        // otherwise leave the card listed until the next projects poll.
+        // Keep it marked as deleting until the refetch drops it.
+        setDeleting(workspaceId, true);
+        void queryClient
+          .invalidateQueries({ queryKey: queryKeys.projects })
+          .finally(() => setDeleting(workspaceId, false));
       },
     );
 
     return unsubscribe;
-  }, [adapter, replaceAllStatuses, updateStatus, removeStatus]);
+  }, [adapter, replaceAllStatuses, updateStatus, removeStatus, setDeleting]);
 }
 
 export function useBranchStatusWatcher() {
@@ -92,13 +100,15 @@ export function useSetupStatusWatcher() {
 
       if (data.kind !== "setup-status" || !data.workspaceId) return;
 
+      const script = data.script ?? "setup";
       if (data.setupState === "running") {
-        updateSetupStatus(data.workspaceId, { state: "running" });
+        updateSetupStatus(data.workspaceId, { state: "running", script });
       } else if (data.setupState === "completed") {
         removeSetupStatus(data.workspaceId);
       } else if (data.setupState === "failed") {
         updateSetupStatus(data.workspaceId, {
           state: "failed",
+          script,
           error: data.setupError,
         });
       }

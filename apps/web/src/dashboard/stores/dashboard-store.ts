@@ -14,6 +14,8 @@ export interface DashboardState {
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
+  /** Workspaces this dashboard asked the server to remove, until the removal settles. */
+  deletingWorkspaces: ReadonlySet<string>;
 
   openWorkspace: (workspaceId: string) => void;
   clearNeedsAttention: (workspaceId: string) => void;
@@ -31,15 +33,31 @@ export interface DashboardState {
   updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
   removeSetupStatus: (workspaceId: string) => void;
   reconcileSetupStatuses: (runningSetups: string[]) => void;
+  setDeleting: (workspaceId: string, deleting: boolean) => void;
 }
 
 export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
+
+/**
+ * Whether a workspace is being deleted: from the moment this dashboard sends
+ * the removal, or while the server runs its teardown (which also covers a
+ * removal started from the CLI or another window).
+ */
+export function isWorkspaceDeleting(
+  state: Pick<DashboardState, "deletingWorkspaces" | "setupStatuses">,
+  workspaceId: string,
+): boolean {
+  if (state.deletingWorkspaces.has(workspaceId)) return true;
+  const setup = state.setupStatuses.get(workspaceId);
+  return setup?.script === "teardown" && setup.state === "running";
+}
 
 export function createDashboardStore(adapter: DashboardAdapter): DashboardStore {
   return create<DashboardState>((set, get) => ({
     statuses: new Map(),
     branchStatuses: new Map(),
     setupStatuses: new Map(),
+    deletingWorkspaces: new Set(),
     activeWorkspaceId: null,
     error: null,
 
@@ -73,7 +91,12 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       set((state) => {
         const statuses = new Map(state.statuses);
         statuses.delete(workspaceId);
-        return { statuses };
+        // The workspace is gone, so its teardown status goes with it. A new
+        // workspace created under the same name must not start as deleting.
+        if (!state.setupStatuses.has(workspaceId)) return { statuses };
+        const setupStatuses = new Map(state.setupStatuses);
+        setupStatuses.delete(workspaceId);
+        return { statuses, setupStatuses };
       });
     },
 
@@ -169,6 +192,16 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
           }
         }
         return changed ? { setupStatuses } : state;
+      });
+    },
+
+    setDeleting: (workspaceId: string, deleting: boolean) => {
+      set((state) => {
+        if (state.deletingWorkspaces.has(workspaceId) === deleting) return state;
+        const deletingWorkspaces = new Set(state.deletingWorkspaces);
+        if (deleting) deletingWorkspaces.add(workspaceId);
+        else deletingWorkspaces.delete(workspaceId);
+        return { deletingWorkspaces };
       });
     },
   }));

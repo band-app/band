@@ -73,6 +73,13 @@ export class WorkspacePage {
     return this.page.getByTestId(`project-list__workspace-card--${workspaceId}`);
   }
 
+  /** The "Deleting…" marker a workspace card shows while the workspace is
+   *  being removed (its teardown running). `data-testid` set in
+   *  `WorkspaceCard`. Scoped to the card. */
+  workspaceDeletingMarker(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).getByTestId("workspace-card__deleting");
+  }
+
   /** The root (default-branch) workspace card's house icon — the identity
    *  marker `AgentStatusIndicator` renders as its idle fallback for the root
    *  card. `data-testid` set on the lucide `Home` glyph in `WorkspaceCard`.
@@ -172,6 +179,15 @@ export class WorkspacePage {
    *  `useRemoveWorkspace` mutation — same path the user takes — so the
    *  reconcile-against-projects effect this test guards must actually
    *  fire end-to-end. */
+  /** Click a workspace card even when it is disabled (`aria-disabled`),
+   *  to check that the click does nothing. `force` skips Playwright's
+   *  actionability wait, which a disabled card never passes. */
+  async clickDisabledWorkspaceCard(workspaceId: string): Promise<void> {
+    await test.step(`Click disabled workspace card ${workspaceId}`, async () => {
+      await this.workspaceCard(workspaceId).click({ force: true });
+    });
+  }
+
   async deleteWorkspaceFromSidebar(workspaceId: string): Promise<void> {
     await test.step(`Delete workspace ${workspaceId} via sidebar context menu`, async () => {
       await this.workspaceCard(workspaceId).click({ button: "right" });

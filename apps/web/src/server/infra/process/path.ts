@@ -53,7 +53,7 @@ export function defaultShell(): string {
  *
  * Memoized: `process.platform` and the Linuxbrew directory's existence are
  * stable for the process lifetime, so the `existsSync` probe runs once
- * rather than on every `gitCmd()` / `execGh()` / setup / teardown call that
+ * rather than on every `gitCmd()` / `execGh()` call that
  * prepends the PATH (mirrors the `cachedShellPath` cache below).
  */
 let cachedBinDirs: readonly string[] | null = null;
@@ -82,23 +82,6 @@ export function extraBinDirs(): readonly string[] {
  */
 export function prependBinDirs(path: string | undefined): string {
   return [...extraBinDirs(), ...(path ? [path] : [])].join(delimiter);
-}
-
-/**
- * Build the argv to run a shell *command string* (the `sh -c "<command>"`
- * shape used by the `.band` setup/teardown hooks) cross-platform.
- *
- * POSIX keeps the historical `bash -c <command>` so user-authored setup
- * commands (which are written as bash) behave exactly as before. Windows
- * has no bash on a stock host, so route the command through the command
- * interpreter (`%ComSpec%`, i.e. cmd.exe) with `/d /s /c` — `/d` skips
- * AutoRun, `/s` fixes quote handling, `/c` runs the string and exits.
- */
-export function shellCommandInvocation(command: string): { file: string; args: string[] } {
-  if (process.platform === "win32") {
-    return { file: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", command] };
-  }
-  return { file: "bash", args: ["-c", command] };
 }
 
 /**

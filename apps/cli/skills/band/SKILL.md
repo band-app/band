@@ -117,7 +117,7 @@ band workspaces remove <project> <name>
 
 `<name>` is the workspace's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
 
-Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files.
+Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
 
 ### Show current settings
 
@@ -309,7 +309,7 @@ band projects remove my-app
 
 - The CLI never modifies files directly — all operations go through the server API
 - `workspaces create` is idempotent — creating an existing workspace returns its path
-- `setup` scripts run after workspace creation, `teardown` before removal (both non-fatal)
+- `setup` runs in its own terminal tab after workspace creation, in parallel with the `--prompt` dispatch (the agent does not wait for it). `teardown` runs in a terminal tab before removal, and removal waits for it. Both are non-fatal
 - Workspace file copying runs after `git worktree add` and before the `setup` script — see "Workspace file copying" below
 - Project and branch names must not contain control characters or path traversals (`../`)
 - Exit code 0 = success, 1 = error

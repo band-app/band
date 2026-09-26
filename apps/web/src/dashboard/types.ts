@@ -91,6 +91,8 @@ export type SetupState = "running" | "completed" | "failed";
 
 export interface SetupStatus {
   state: SetupState;
+  /** Which `.band/config.json` command the state is for. */
+  script: "setup" | "teardown";
   error?: string;
 }
 

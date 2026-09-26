@@ -154,13 +154,21 @@ export function useRemoveWorkspace() {
   const queryClient = useQueryClient();
   const setError = useDashboardStore((s) => s.setError);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const setDeleting = useDashboardStore((s) => s.setDeleting);
   const store = useRawDashboardStore();
 
   return useMutation({
     mutationFn: ({ project, name }: { project: string; name: string }) =>
       adapter.removeWorkspace(project, name),
-    onSuccess: (_data, { project, name }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    // The server runs the workspace's teardown before it removes anything,
+    // which can take up to a minute. Mark the card as deleting meanwhile.
+    onMutate: ({ project, name }) => {
+      setDeleting(toWorkspaceId(project, name), true);
+    },
+    onSuccess: async (_data, { project, name }) => {
+      // Awaited so the card is gone from the list before it stops showing
+      // as deleting (see onSettled), rather than flashing back to normal.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
       const deletedWorkspaceId = toWorkspaceId(project, name);
       if (store.getState().activeWorkspaceId === deletedWorkspaceId) {
@@ -183,6 +191,9 @@ export function useRemoveWorkspace() {
     },
     onError: (err) => {
       setError(String(err));
+    },
+    onSettled: (_data, _err, { project, name }) => {
+      setDeleting(toWorkspaceId(project, name), false);
     },
   });
 }

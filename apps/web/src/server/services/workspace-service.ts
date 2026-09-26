@@ -16,9 +16,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
-import { prependBinDirs, scriptInvocation, shellCommandInvocation } from "../infra/process/path";
-import { loadProjectConfig } from "../infra/setup/project-config";
-import { runSetup } from "../infra/setup/setup-runner";
+import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { formatShellCommand } from "./_utils/format-shell-command";
 import { clearQueuedMessages } from "./_utils/queued-message-store";
@@ -56,8 +54,16 @@ import {
 import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
+// FRAGILE: ESM cycle leg #3 — `./workspace-script-service` imports
+// `workspaceService` from this file. Keep every `workspaceScriptService`
+// reference inside a function body; capturing it at module load would
+// silently get `undefined`.
+import { workspaceScriptService } from "./workspace-script-service";
 
 const execFileAsync = promisify(execFile);
+
+/** How long {@link WorkspaceService.remove} waits for a `teardown` command. */
+const TEARDOWN_TIMEOUT_MS = 60_000;
 const log = createLogger("workspace-service");
 
 /**
@@ -208,9 +214,10 @@ export class PlainProjectError extends Error {
  * issue #314).
  *
  * Service tier — depends on Infra (`WorkspaceQueries`, `infra/git/git-
- * client` for git exec, `infra/setup/{setup-runner,project-config}` for
- * workspace bootstrap) plus a handful of sibling services
+ * client` for git exec, `infra/setup/workspace-files` for workspace
+ * bootstrap) plus a handful of sibling services
  * (`chatService`, `browserService`, `terminalService`,
+ * `workspaceScriptService` for the setup / teardown commands,
  * `cronjobService.removeForKey`) for workspace-scoped cleanup on
  * delete. Knows nothing about tRPC or the API surface — all callers
  * (routers, future CLI / scripts) funnel through this class.
@@ -251,6 +258,9 @@ export class WorkspaceService {
     private readonly usageEventQueries: UsageEventQueries = new UsageEventQueries(),
     private readonly usageScanStateQueries: UsageScanStateQueries = new UsageScanStateQueries(),
   ) {}
+
+  /** Removals waiting on their teardown, by workspace id, so a repeat call joins the first. */
+  private readonly removing = new Map<string, Promise<{ ok: true }>>();
 
   /**
    * Resolve a workspace ID to its parent project + worktree row.
@@ -436,7 +446,7 @@ export class WorkspaceService {
     // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
     // `.worktreeinclude` at the project root — see `copyWorkspaceFiles`
     // for the union/intersection semantics. Runs AFTER `git worktree add`
-    // (so the destination directory exists) and BEFORE `runSetup` (so the
+    // (so the destination directory exists) and BEFORE the setup command (so the
     // setup script can read `.env` / local credentials / etc. just like
     // it can in the main checkout). Missing source files are skipped
     // with a warning rather than failing the create, matching the
@@ -506,46 +516,42 @@ export class WorkspaceService {
       }
     }
 
-    // If a prompt is provided, defer dispatch until the setup script
-    // completes so the agent has dependencies installed. When there is
-    // no setup command, `runSetup` calls `onComplete` synchronously, so
-    // the dispatch happens immediately. The terminal-pane spawn lives
-    // in the same callback as the chat-task submit so both share the
-    // same "wait for setup" guarantee.
-    const onSetupComplete = input.prompt
-      ? () => {
-          if (via === "terminal" && terminalId && terminalCommand) {
-            terminalService
-              .spawn(workspaceId, terminalId, {
-                command: terminalCommand,
-              })
-              .then(() => {
-                emit({ kind: "terminal-created", workspaceId, terminalId: terminalId! });
-              })
-              .catch((err) => {
-                log.error(
-                  {
-                    err: err instanceof Error ? err.message : String(err),
-                    workspaceId,
-                    terminalId,
-                  },
-                  "failed to spawn terminal for via=terminal workspace create",
-                );
-              });
-            return;
-          }
-          taskService.submitTask({
-            workspaceId,
-            chatId: defaultChat.id,
-            prompt: input.prompt!,
-            mode: input.mode,
-            model: input.model,
-            codingAgentId: input.codingAgentId,
-          });
-        }
-      : undefined;
+    // The setup command runs in its own terminal tab, in parallel with the
+    // agent: the prompt goes out now rather than after setup, so a slow or
+    // failing setup never holds back or drops it, and the user can watch
+    // (and answer) the setup in its tab.
+    workspaceScriptService.startSetup(workspaceId, worktreePath, project.path);
 
-    runSetup(workspaceId, worktreePath, project.path, onSetupComplete);
+    if (input.prompt) {
+      if (via === "terminal" && terminalId && terminalCommand) {
+        terminalService
+          .spawn(workspaceId, terminalId, {
+            command: terminalCommand,
+          })
+          .then(() => {
+            emit({ kind: "terminal-created", workspaceId, terminalId: terminalId! });
+          })
+          .catch((err) => {
+            log.error(
+              {
+                err: err instanceof Error ? err.message : String(err),
+                workspaceId,
+                terminalId,
+              },
+              "failed to spawn terminal for via=terminal workspace create",
+            );
+          });
+      } else {
+        taskService.submitTask({
+          workspaceId,
+          chatId: defaultChat.id,
+          prompt: input.prompt,
+          mode: input.mode,
+          model: input.model,
+          codingAgentId: input.codingAgentId,
+        });
+      }
+    }
 
     // Only echo back `via` / `terminalId` when the call actually
     // dispatched something. Without a prompt no dispatch happens at
@@ -625,11 +631,18 @@ export class WorkspaceService {
    *      deletes the workspace's prompt file / DB statuses / chats /
    *      browsers / terminals / LSPs / cronjobs / tasks, and emits a
    *      `remove` event so subscribers (the dashboard) can drop the card.
-   *   2. **Background:** runs the `.band/teardown` script (if any), then
-   *      `git worktree remove --force` + `git branch -D`. Failures are
-   *      logged but never bubble back — by the time the user clicks
-   *      "Delete", the workspace is already gone from their perspective
-   *      and we don't want a stale `.git` to wedge the UI.
+   *   2. **Background:** `git worktree remove --force` + `git branch -D`.
+   *      Failures are logged but never bubble back — by then the
+   *      workspace is already gone from the user's perspective and we
+   *      don't want a stale `.git` to wedge the UI.
+   *
+   * When `.band/config.json` declares a `teardown` command, it runs first,
+   * in a terminal tab of the still-listed workspace, and this call waits
+   * for it (up to {@link TEARDOWN_TIMEOUT_MS}) before either phase. The
+   * dashboard shows the workspace as tearing down meanwhile. A failing
+   * teardown is logged and does not stop the removal. The workspace's
+   * chats, agents and cronjobs are still live while it runs; they stop in
+   * the fast path afterwards.
    *
    * Resolves the worktree path via `listWorktrees` rather than re-parsing
    * `git worktree list --porcelain` inline so detached-HEAD worktrees
@@ -662,8 +675,6 @@ export class WorkspaceService {
     }
     const currentBranch = wtRow.branch;
 
-    const { command, env: gitEnv } = gitCmd();
-
     // Resolve the worktree path via `listWorktrees` rather than re-parsing
     // porcelain inline — it applies the detached-HEAD → `detached-<sha>`
     // fallback that the rest of the app sees in `project.worktrees`, so
@@ -675,23 +686,56 @@ export class WorkspaceService {
     }
     const worktreePath = match.path;
 
-    // Capture teardown config before returning — the directory may be
-    // removed by background cleanup before `loadProjectConfig` can read it.
-    let teardownCmd: string | undefined;
-    try {
-      const config = loadProjectConfig(worktreePath, project.path);
-      if (config?.teardown && typeof config.teardown === "string") {
-        teardownCmd = config.teardown;
-      }
-    } catch {
-      // Config may not exist
+    const workspaceId = toWorkspaceId(input.project, input.name);
+    const teardownCmd = workspaceScriptService.getCommand("teardown", worktreePath, project.path);
+    if (!teardownCmd) {
+      return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
     }
+
+    const inFlight = this.removing.get(workspaceId);
+    if (inFlight) return inFlight;
+    const removal = (async () => {
+      const outcome = await workspaceScriptService.run(
+        workspaceId,
+        "teardown",
+        teardownCmd,
+        TEARDOWN_TIMEOUT_MS,
+      );
+      // `closed` from a duplicate run is not a failure; the first run reports.
+      if (outcome.kind !== "closed" && (outcome.kind !== "exited" || outcome.code !== 0)) {
+        log.warn({ workspaceId, outcome }, "teardown did not succeed; removing anyway");
+      }
+      return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
+    })().finally(() => this.removing.delete(workspaceId));
+    this.removing.set(workspaceId, removal);
+    return removal;
+  }
+
+  /**
+   * The two phases of {@link remove}, once any teardown is done. Reloads
+   * state because a teardown can take a while.
+   */
+  private async removeNow(
+    input: WorkspaceRemoveInput,
+    workspaceId: string,
+    worktreePath: string,
+    currentBranch: string,
+    matchedBranch: string,
+  ): Promise<{ ok: true }> {
+    const state = loadState();
+    const project = state.projects.find((p) => p.name === input.project);
+    if (!project) {
+      throw new ProjectNotFoundError(input.project);
+    }
+    if (!project.worktrees.some((wt) => wt.name === input.name)) {
+      throw new WorkspaceNotFoundError(input.name);
+    }
+    const { command, env: gitEnv } = gitCmd();
 
     // ── Fast path: update state and emit immediately ──
     project.worktrees = project.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
 
-    const workspaceId = toWorkspaceId(input.project, input.name);
     try {
       unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
     } catch {
@@ -775,29 +819,9 @@ export class WorkspaceService {
     // found") — the catch below swallows it cleanly, but skipping the
     // call up front keeps the background logs free of noise that's hard
     // to distinguish from a genuine problem.
-    const branchToDelete = match.branch.startsWith(DETACHED_BRANCH_PREFIX) ? null : currentBranch;
+    const branchToDelete = matchedBranch.startsWith(DETACHED_BRANCH_PREFIX) ? null : currentBranch;
     setImmediate(() => {
       (async () => {
-        // Run teardown script before removing worktree so it can access
-        // project files.
-        if (teardownCmd) {
-          try {
-            // `bash -c <cmd>` on POSIX, `cmd.exe /d /s /c <cmd>` on Windows.
-            const { file, args } = shellCommandInvocation(teardownCmd);
-            await execFileAsync(file, args, {
-              cwd: worktreePath,
-              env: {
-                ...process.env,
-                PATH: prependBinDirs(process.env.PATH),
-              },
-              encoding: "utf-8",
-              timeout: 60_000,
-            });
-          } catch (err) {
-            log.warn({ err, workspaceId }, "teardown script failed");
-          }
-        }
-
         // Unlock the worktree first. External tooling (e.g. `supacode`)
         // locks Band's worktrees — visible as a `locked "{...}"` line in
         // `git worktree list --porcelain` — most likely to stop `git gc` /

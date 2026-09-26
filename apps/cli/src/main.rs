@@ -2740,7 +2740,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Workspace name (the branch it was created on — its stable identity)"},
             ],
-            "notes": "Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files."
+            "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
         }),
         serde_json::json!({
             "name": "settings",

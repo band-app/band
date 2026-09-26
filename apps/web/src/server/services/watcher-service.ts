@@ -8,8 +8,8 @@
  * that *do* belong here:
  *
  *   - the on-connect snapshot replay (current workspace statuses,
- *     branch statuses, running setups) — needs DB access + the setup-
- *     runner registry, both services-tier concerns;
+ *     branch statuses, running setup/teardown scripts) — needs DB access
+ *     + the workspace-script registry, both services-tier concerns;
  *   - the branch-status poller lifecycle (start on first subscribe,
  *     stop when the last subscriber disconnects).
  *
@@ -26,9 +26,9 @@ import {
   type StatusListener,
   subscribe as subscribeRaw,
 } from "../infra/events/status-event-bus";
-import { getRunningSetups } from "../infra/setup/setup-runner";
 import { type BranchStatusPoller, branchStatusPoller } from "./branch-status-poller";
 import { loadCurrentStatuses } from "./state";
+import { workspaceScriptService } from "./workspace-script-service";
 
 export type { StatusEvent };
 export { emit };
@@ -75,9 +75,10 @@ export class WatcherService {
 
     // Send current agent status snapshot (always include runningSetups for reconciliation)
     const statuses = loadCurrentStatuses();
-    // Snapshot the running-setups map once — used both for the
-    // `snapshot` event below and the per-workspace `setup-status` loop.
-    const runningSetups = getRunningSetups();
+    // Snapshot the running scripts once — used both for the `snapshot`
+    // event below and the per-workspace `setup-status` loop.
+    const runningScripts = workspaceScriptService.getRunning();
+    const runningSetups = [...new Set(runningScripts.map((run) => run.workspaceId))];
     listener({ kind: "snapshot", statuses, runningSetups });
 
     // Send current branch status snapshots
@@ -86,8 +87,8 @@ export class WatcherService {
     }
 
     // Send current setup status snapshots
-    for (const workspaceId of runningSetups) {
-      listener({ kind: "setup-status", workspaceId, setupState: "running" });
+    for (const { workspaceId, script } of runningScripts) {
+      listener({ kind: "setup-status", workspaceId, script, setupState: "running" });
     }
 
     return () => {

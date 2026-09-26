@@ -82,6 +82,7 @@ apps/web/src/server/
     task-service.ts
     cronjob-service.ts
     terminal-service.ts
+    workspace-script-service.ts # setup/teardown commands in a workspace terminal tab
     session-service.ts
     settings-service.ts
     tunnel-service.ts
@@ -153,7 +154,7 @@ apps/web/src/server/
       du.ts                  # raw du -sk shell-out
       install.ts             # raw brew install shell-out
     setup/
-      setup-runner.ts        # bash setup-script process pool
+      script-run.ts          # wraps a setup/teardown command to report its exit code from a terminal
       project-config.ts      # .band/config.json reader
 ```
 
