@@ -7,7 +7,7 @@ import { AlertTriangle } from "lucide-react";
  * user is browsing a site whose cert they accepted.
  *
  * Driven by `useOverriddenHosts`. The interstitial itself lives
- * inside the WebContentsView (see
+ * inside the tab's page (see
  * `apps/desktop/src/browser/error-html.ts`), so this is the only
  * piece of cert-error UI that the dashboard renderer still owns.
  */

@@ -34,66 +34,32 @@ export const Channels = {
   updaterRestart: "updater_restart",
   updaterDismiss: "updater_dismiss",
 
-  // Browser panels
-  browserCreate: "browser_create",
-  browserNavigate: "browser_navigate",
-  browserGoBack: "browser_go_back",
-  browserGoForward: "browser_go_forward",
-  browserEval: "browser_eval",
-  browserReload: "browser_reload",
-  browserSetBounds: "browser_set_bounds",
-  browserHide: "browser_hide",
-  browserShow: "browser_show",
-  browserDestroy: "browser_destroy",
-  browserHideAllForWorkspace: "browser_hide_all_for_workspace",
-  browserShowAllForWorkspace: "browser_show_all_for_workspace",
+  // Browser panes. Tabs are `<webview>` guests the renderer drives
+  // directly (navigation, find, zoom); these cover what only main can do.
+  // Tie a guest to its Band tab id (CDP target lookup, DevTools docking,
+  // keyed events). See `BrowserGuestManager.registerGuest`.
+  browserRegisterGuest: "browser_register_guest",
   // CDP screencast experiment: bridge for the web/agent to materialise
-  // a Band browser tab as a real WebContentsView and read its
-  // chromium-side targetId.
+  // a Band browser tab (an offscreen page when no pane is mounted) and
+  // read its chromium-side targetId.
   browserEnsure: "browser_ensure",
   browserGetCdpTarget: "browser_get_cdp_target",
-  // Find-in-page (Cmd+F / Ctrl+F overlay on a browser tab). The main
-  // process calls Electron's native `webContents.findInPage` so matches
-  // are highlighted by Chromium itself; results stream back as
-  // `browser-found-in-page` events.
-  browserFindInPage: "browser_find_in_page",
-  browserStopFindInPage: "browser_stop_find_in_page",
-  // Snapshot the current rendered frame as a JPEG data URL. Used by
-  // the renderer-side "freeze-on-overlay" mechanism so popovers /
-  // dialogs / dropdowns stack visibly over a static raster instead of
-  // disappearing behind the native WebContentsView's OS compositor
-  // layer. See `BrowserViewManager.capturePage`.
-  browserCapturePage: "browser_capture_page",
-  // Pause / resume media playback alongside the freeze. `setVisible`
-  // alone doesn't stop audio; these IPCs add `setAudioMuted` plus a
-  // top-frame `pause()` / `play()` sweep so an open overlay matches
-  // the user's intuition that the page is "really" paused while the
-  // popup is up. See `BrowserViewManager.pauseMedia` / `resumeMedia`.
-  browserPauseMedia: "browser_pause_media",
-  browserResumeMedia: "browser_resume_media",
-  // Per-tab zoom (Cmd+= / Cmd+- / Actual Size). Adjusts
-  // `webContents.zoomFactor` on the matching view — independent of the
-  // dashboard's `document.documentElement.style.zoom` and from other
-  // tabs.
-  browserZoom: "browser_zoom",
-  // Toggle Chromium DevTools for the matching view. DevTools is docked
-  // inside the tab area (bottom split) via a sibling `WebContentsView`
-  // wired up with `setDevToolsWebContents` — not as a detached OS
-  // window.
-  browserToggleDevTools: "browser_toggle_dev_tools",
+  // Dock a tab's DevTools into the pane's second `<webview>` via
+  // `setDevToolsWebContents`, and close them again.
+  browserOpenDevTools: "browser_open_dev_tools",
+  browserCloseDevTools: "browser_close_dev_tools",
   // Chrome-style error pages for cert / load failures are rendered
-  // INSIDE the WebContentsView via a `data:` URI (issue #444 — see
+  // INSIDE the guest via a `data:` URI (issue #444, see
   // `browser/error-html.ts`). The user's button clicks become
-  // `band-action://…` navigations which the per-tab `will-navigate`
-  // interceptor in `view-manager.ts` translates into the matching
-  // manager call — no renderer-side IPC needed for the buttons
-  // themselves. The only renderer-facing surface is the
-  // `browser-host-overridden` event below, so the dashboard chrome
-  // can paint the "Not Secure" badge.
+  // `band-action://…` navigations which the guest manager translates
+  // into the matching action, so the buttons need no renderer IPC. The
+  // only renderer-facing surface is the `browser-host-overridden`
+  // event below, so the dashboard chrome can paint the "Not Secure"
+  // badge.
   //
   // Renderer-mounted-late catch-up: report which hosts already have
   // an active session exception so the badge shows up correctly
-  // when a panel is restored after the user already proceeded.
+  // when a pane is restored after the user already proceeded.
   browserGetOverriddenHosts: "browser_get_overridden_hosts",
 } as const;
 
@@ -109,58 +75,31 @@ export const Events = {
   systemResumed: "system-resumed",
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
-  /** Emitted when a `WebContentsView` is destroyed (LRU eviction,
-   *  explicit close, or `destroyAll` on app quit). The renderer uses
-   *  this to invalidate the server's bandTabId → cdpTargetId cache via
-   *  the `browserHost.viewDestroyed` tRPC mutation. */
+  /** Emitted when a tab's page WebContents goes away (its `<webview>` was
+   *  removed or replaced, or an ensure-only offscreen page closed). The
+   *  renderer uses this to invalidate the server's bandTabId →
+   *  cdpTargetId cache via the `browserHost.viewDestroyed` tRPC mutation. */
   browserViewDestroyed: "browser-view-destroyed",
-  /** Streamed for every `webContents.findInPage` request (one initial
-   *  result + zero or more updates ending with `final_update: true`).
-   *  Drives the match counter (`3 of 12`) in the renderer find bar. */
-  browserFoundInPage: "browser-found-in-page",
-  /** Pushed when the user presses Cmd+F / Ctrl+F while keyboard focus is
-   *  inside the WebContentsView. The renderer's DOM-level keydown
-   *  listener never sees those events (Chromium consumes them inside the
-   *  child view) so the main process intercepts them via
-   *  `before-input-event` and forwards them back as this event for the
-   *  React find bar to open. */
-  browserFindShortcut: "browser-find-shortcut",
-  /** Pushed when the user presses Cmd+T / Ctrl+T while focus is inside a
-   *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
-   *  opening a new tab in whichever container holds the source pane. */
-  browserNewTabShortcut: "browser-new-tab-shortcut",
-  /** Pushed when the user presses Cmd+D / Cmd+Shift+D while focus is
-   *  inside a WebContentsView. The payload's `direction` ("right" or
-   *  "below") tells the renderer which split orientation to apply. */
-  browserSplitShortcut: "browser-split-shortcut",
-  /** Pushed when the user presses Cmd+W while focus is inside a
-   *  WebContentsView. The renderer closes the source tab via the same
-   *  path as the close-button click. */
-  browserCloseShortcut: "browser-close-shortcut",
-  /** Pushed when the user presses Cmd+[ / Cmd+] / Cmd+Shift+[ / Cmd+Shift+]
-   *  / Ctrl+(Shift)+Tab while focus is inside a WebContentsView.
-   *  The payload's `target` is "tabs" (cycle inside the current group)
-   *  or "groups" (cycle between split groups); `direction` is +1 or -1. */
-  browserCycleShortcut: "browser-cycle-shortcut",
+  /** Pushed when the user presses a pane shortcut (Cmd/Ctrl+F, T, W, D,
+   *  [ and ], Ctrl+Tab) while keyboard focus is inside a guest page. The
+   *  guest consumes its own keydowns, so the main process intercepts them
+   *  via `before-input-event` and the renderer re-dispatches them on the
+   *  tab's `<webview>`. */
+  browserGuestShortcut: "browser-guest-shortcut",
   /** Pushed when the user accepts a TLS exception (clicks Proceed
    *  in the in-view cert interstitial). Carries the host so the
    *  renderer can flag the address bar with a "Not Secure" badge
    *  for that origin. The cert interstitial itself is rendered
-   *  inside the WebContentsView (see `browser/error-html.ts`) so
-   *  it stays visible during screencast — this event is only for
-   *  the surrounding dashboard chrome. */
+   *  inside the guest (see `browser/error-html.ts`) so it stays
+   *  visible during screencast; this event is only for the
+   *  surrounding dashboard chrome. */
   browserHostOverridden: "browser-host-overridden",
-  /** Pushed when a page inside a `WebContentsView` requests a new
-   *  window — `window.open(...)`, `target="_blank"`, middle / Cmd+
-   *  click on a link, etc. The main process *always* denies the
-   *  native OS window (so no detached browser window ever appears)
-   *  and forwards the request here so the renderer can materialize
-   *  the request as a new Band browser tab in the same workspace
-   *  (issue #488). The renderer's `DockviewBrowserContainer` picks
-   *  up the event and calls its existing add-tab flow scoped to the
-   *  source pane's dockview group; events whose `browser_id` isn't
-   *  in this container are ignored, so multiple workspaces don't all
-   *  spawn tabs for one window.open. */
+  /** Pushed when a page inside a tab requests a new window:
+   *  `window.open(...)`, `target="_blank"`, middle / Cmd+click on a
+   *  link, etc. The main process always denies the native OS window
+   *  (so no detached browser window ever appears) and forwards the
+   *  request here so the renderer can open it as a new Band browser
+   *  tab next to the source tab (issue #488). */
   browserOpenWindow: "browser-open-window",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process on every auto-update status change.

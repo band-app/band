@@ -7,7 +7,7 @@
  * whose certificate Chromium rejected (expired, self-signed,
  * hostname mismatch, untrusted CA), we record the
  * (partition, host, fingerprint) triple here. The per-`webContents`
- * `certificate-error` listener in `view-manager.ts` consults this
+ * `certificate-error` listener in `guest-manager.ts` consults this
  * store and calls `callback(true)` for matches, transparently
  * allowing the load.
  *
@@ -23,14 +23,14 @@
  *     with a management UI is an explicit follow-up.
  *   - **Partition-aware**. Band's browser tabs live in the dedicated
  *     `persist:band-browser` partition (see `BROWSER_PARTITION` in
- *     `view-manager.ts`), so their exceptions are keyed by that
+ *     `guest-policy.ts`), so their exceptions are keyed by that
  *     partition's `storagePath`. Keying by partition also keeps the
  *     store correct if further named partitions are ever introduced
  *     (e.g. per-workspace storage isolation).
  *   - **No global "ignore all" flag**. Per-host only by design.
  *
  * This module is intentionally pure: no Electron imports, no IPC.
- * The `BrowserViewManager` and the bootstrap glue in `main/index.ts`
+ * The `BrowserGuestManager` and the bootstrap glue in `main/index.ts`
  * thread an instance through. Keeps the store unit-testable under
  * `node:test` without an Electron runtime.
  */

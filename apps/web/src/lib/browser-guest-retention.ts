@@ -2,9 +2,9 @@
 // Budget for live browser webviews in hidden workspaces (desktop only).
 // Ported from orca's `browser-pane/host-guest/browser-guest-worktree-retention.ts`.
 //
-// Every visited workspace stays mounted, and a hidden workspace's browser panes
-// only `browser_hide` their native WebContentsView, so each one keeps a guest
-// process alive purely for an instant revisit. Guest memory would grow linearly
+// Every visited workspace stays mounted, and so do its browser panes' `<webview>`
+// elements, so each one keeps a guest process alive purely for an instant
+// revisit. Guest memory would grow linearly
 // with workspaces visited (orca hit this as their #12137). So at most 4 hidden
 // workspaces keep live guests, chosen by activation order; older ones are
 // destroyed and rebuilt from the pane's last URL on the next visit. The active
@@ -66,9 +66,10 @@ export function touchBrowserGuestWorkspaceRecency(recency: string[], workspaceId
 }
 
 // ---------------------------------------------------------------------------
-// Registry of live guests. `BrowserPaneComponent` registers while its native
-// view exists and hands over an `evict` callback that destroys the view and
-// flags the pane to recreate it when it is next shown.
+// Registry of live guests. `BrowserPaneComponent` registers while its
+// `<webview>` exists and hands over an `evict` callback that removes the
+// element (destroying the guest) and flags the pane to recreate it when it is
+// next shown.
 // ---------------------------------------------------------------------------
 
 type EvictGuest = () => void;

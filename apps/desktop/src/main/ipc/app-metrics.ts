@@ -3,7 +3,7 @@
  *
  * Surfaces what `app.getAppMetrics()` reports: the Electron main (Browser)
  * process, the GPU process, each Chromium renderer (the dashboard webview
- * plus every browser-tab `WebContentsView`), and the Utility processes
+ * plus every browser tab's `<webview>` guest), and the Utility processes
  * (network service, audio, storage, helpers). The web server has no
  * visibility into any of this — it's all Electron-side — so this lives on
  * the desktop side and is rendered by a self-gating card in the renderer.
@@ -118,10 +118,11 @@ export function mapAppMetrics(raw: ProcessMetric[], pidLabels: Map<number, strin
  *     (type `"window"`) — e.g. the hidden CDP-parking window created when the
  *     screencast experiment is on — are labelled `"Window"` so they aren't
  *     mistaken for the dashboard.
- *   - `"DevTools"` — a docked DevTools view, recognised by its
- *     `devtools://` URL (these are non-`"window"` `WebContentsView`s that
- *     would otherwise be mislabelled as browser tabs).
- *   - `"Browser tab: <title or url>"` — every other `WebContentsView`.
+ *   - `"DevTools"` — the DevTools host `<webview>` docked under a tab,
+ *     recognised by its `devtools://` URL (it is a non-`"window"` guest
+ *     that would otherwise be mislabelled as a browser tab).
+ *   - `"Browser tab: <title or url>"` — every other WebContents: a tab's
+ *     `<webview>` guest, or an ensure-only offscreen `WebContentsView`.
  *
  * `getOSProcessId()` throws if the renderer has already gone away (a tab
  * closing mid-refresh), so each lookup is guarded.

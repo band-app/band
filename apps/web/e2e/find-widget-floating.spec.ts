@@ -5,8 +5,9 @@
  * must not push the content down, and it keeps the Cmd/Ctrl+F, Enter,
  * Shift+Enter and Escape behaviour.
  *
- * The browser pane's find-in-page is not covered here: it needs the Electron
- * WebContentsView, which the web build that e2e boots does not create.
+ * The browser pane's find-in-page is not covered here: it needs an Electron
+ * `<webview>`, which the plain-Chromium web build that e2e boots does not
+ * have.
  *
  * Boots the real production server against a fresh tmp home and a real git
  * worktree, and drives a real Chromium through page objects. No tRPC mocking,

@@ -17,7 +17,7 @@ const log = createLogger("trpc.browser-host");
  *   - `hostRouter`        — `host.readFile` / `host.saveFile` for the
  *     external file viewer (paths outside any worktree).
  *   - `browserHostRouter` — bridge between the web server and the
- *     desktop's BrowserViewManager. See the docstring on
+ *     desktop's BrowserGuestManager. See the docstring on
  *     `server/infra/browser-host/host-state.ts` for the full ensure/destroy
  *     protocol; the `BrowserHostService` wrapper in services/ keeps the
  *     router from importing infra directly.
