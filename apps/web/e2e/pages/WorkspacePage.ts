@@ -1327,6 +1327,53 @@ export class WorkspacePage {
     });
   }
 
+  /** The workspace title bar over the center (dockview) column
+   *  (`WorkspaceTitleBar` in `DesktopTitleBar.tsx`). */
+  get workspaceTitleBar(): Locator {
+    return this.page.getByTestId("desktop-title-bar__workspace-surface");
+  }
+
+  /** The right sidepanel's header row (tabs + open-in-editor + collapse), level
+   *  with the workspace title bar. */
+  get rightPanelHeader(): Locator {
+    return this.page.getByTestId("right-sidepanel__header");
+  }
+
+  /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
+  get rightPanelToggleInHeader(): Locator {
+    return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** The right-sidepanel toggle hosted in the workspace title bar (expand).
+   *  Rendered only while the sidepanel is collapsed. */
+  get rightPanelToggleInTitleBar(): Locator {
+    return this.workspaceTitleBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** Collapse the right sidepanel with the button in its own header. */
+  async collapseRightPanelViaHeader(): Promise<void> {
+    await test.step("Collapse the right sidepanel from its header", async () => {
+      await this.rightPanelToggleInHeader.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "false");
+    });
+  }
+
+  /** Expand the collapsed right sidepanel with the button in the title bar. */
+  async expandRightPanelViaTitleBar(): Promise<void> {
+    await test.step("Expand the right sidepanel from the title bar", async () => {
+      await this.rightPanelToggleInTitleBar.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
+    });
+  }
+
+  /** Viewport bounding box of a locator. Throws when it has none (hidden), so
+   *  a geometric comparison can't pass vacuously. */
+  async boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no bounding box — not visible");
+    return box;
+  }
+
   /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
    *  rendered as a strip in `RightSidepanel.tsx`; only the active tab's body
    *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
