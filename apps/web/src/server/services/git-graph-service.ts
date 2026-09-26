@@ -121,11 +121,14 @@ function parseNameStatus(output: string): CommitFileChange[] {
       continue;
     }
     // Renames/copies carry two paths, old then new: report the new one.
+    // A record cut short by truncated output is skipped.
     if (code === "R" || code === "C") {
-      files.push({ path: fields[i + 2], status: code, oldPath: fields[i + 1] });
+      const [oldPath, path] = [fields[i + 1], fields[i + 2]];
+      if (oldPath && path) files.push({ path, status: code, oldPath });
       i += 3;
     } else {
-      files.push({ path: fields[i + 1], status: code });
+      const path = fields[i + 1];
+      if (path) files.push({ path, status: code });
       i += 2;
     }
   }
@@ -175,16 +178,16 @@ export class GitGraphService {
     const skip = options.skip ?? 0;
     const limit = options.limit ?? COMMIT_HISTORY_DEFAULT_LIMIT;
 
-    // Read the signature first: if refs move while the log runs, the client
-    // sees a newer signature on its next poll and reloads.
-    const signature = await this.signature(cwd);
-
-    let head: string | null = null;
-    try {
-      head = (await execGit(["rev-parse", "--verify", "HEAD"], cwd)).trim();
-    } catch {
-      return { commits: [], head: null, hasMore: false, signature };
-    }
+    // Read the signature before the log: if refs move while the log runs,
+    // the client sees a newer signature on its next poll and reloads.
+    const [signature, head] = await Promise.all([
+      this.signature(cwd),
+      execGit(["rev-parse", "--verify", "HEAD"], cwd).then(
+        (out) => out.trim(),
+        () => null,
+      ),
+    ]);
+    if (!head) return { commits: [], head: null, hasMore: false, signature };
 
     const fmt = `${["%H", "%P", "%an", "%ae", "%at", "%s", "%D"].join(FS)}${RS}`;
     const stdout = await execGit(
