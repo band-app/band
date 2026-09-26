@@ -67,6 +67,82 @@ export interface ListBranchesResult {
   branches: string[];
   defaultBranch: string;
   headBranch: string;
+  /** More branches matched than `limit` allowed through. */
+  truncated: boolean;
+}
+
+/** Branches `listBranches` returns when the caller passes no `limit`. */
+const DEFAULT_BRANCH_LIMIT = 50;
+
+/**
+ * Integration/staging branches ranked first in the diff-target picker, ahead
+ * of the default branch: they're the branches a user most often diffs against
+ * (#599). Matched case-insensitively on the name without its remote prefix;
+ * array order is the rank.
+ */
+const STAGING_BRANCH_PRIORITY = [
+  "develop",
+  "dev",
+  "development",
+  "stage",
+  "staging",
+  "integration",
+  "release",
+  "qa",
+  "uat",
+];
+
+interface BranchRef {
+  /** Short name as git accepts it: `feature/x` or `origin/feature/x`. */
+  name: string;
+  /** `name` without the remote prefix; equal to `name` for local branches. */
+  shortName: string;
+  remote: boolean;
+}
+
+/** Parses a full refname from `for-each-ref`. Drops `refs/remotes/<r>/HEAD`,
+ *  the symbolic pointer to the remote's default branch. */
+function parseBranchRef(refname: string): BranchRef | null {
+  if (refname.startsWith("refs/heads/")) {
+    const name = refname.slice("refs/heads/".length);
+    return name ? { name, shortName: name, remote: false } : null;
+  }
+  if (refname.startsWith("refs/remotes/")) {
+    const name = refname.slice("refs/remotes/".length);
+    const slash = name.indexOf("/");
+    if (slash <= 0) return null;
+    const shortName = name.slice(slash + 1);
+    if (!shortName || shortName === "HEAD") return null;
+    return { name, shortName, remote: true };
+  }
+  return null;
+}
+
+/**
+ * Sort rank of `ref` for `query` (lower first), or `null` when it doesn't
+ * match. Match quality decides first (exact, then prefix, then substring,
+ * compared against both the full and the remote-less name). Within one
+ * quality, staging-style branches come first, then the default branch and
+ * its remote-tracking copies, then everything else.
+ */
+function rankBranch(ref: BranchRef, defaultBranch: string, query: string): number | null {
+  const name = ref.name.toLowerCase();
+  const shortName = ref.shortName.toLowerCase();
+  let match = 0;
+  if (query) {
+    if (name === query || shortName === query) match = 0;
+    else if (name.startsWith(query) || shortName.startsWith(query)) match = 1;
+    else if (name.includes(query)) match = 2;
+    else return null;
+  }
+
+  let pin = 100;
+  const staging = STAGING_BRANCH_PRIORITY.indexOf(shortName);
+  if (staging >= 0) pin = staging * 2 + (ref.remote ? 1 : 0);
+  else if (ref.name === defaultBranch) pin = 50;
+  else if (ref.remote && ref.shortName === defaultBranch) pin = 51;
+
+  return match * 1000 + pin;
 }
 
 export interface DiffResult {
@@ -211,16 +287,26 @@ export class DiffService {
   constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
 
   /**
-   * List local branches in this workspace, with the project's default
-   * branch pinned to the front (when it isn't the current branch) and the
-   * current branch dropped — you don't compare against yourself.
+   * Search the workspace's local and remote-tracking branches for the
+   * Changes view's diff-target picker. Repos can have thousands of
+   * branches, so the filter runs here and only the top `limit` matches
+   * travel to the client.
+   *
+   * The current branch is dropped (you don't compare against yourself), and
+   * so is the default branch while it is checked out. `rankBranch` orders
+   * the matches; ties keep git's order, most recent commit first.
    */
-  async listBranches(workspaceId: string): Promise<ListBranchesResult> {
+  async listBranches(
+    workspaceId: string,
+    options: { query?: string; limit?: number } = {},
+  ): Promise<ListBranchesResult> {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
     const defaultBranch = workspace.project.defaultBranch;
+    const limit = options.limit ?? DEFAULT_BRANCH_LIMIT;
+    const query = options.query?.trim().toLowerCase() ?? "";
 
     let headBranch: string | null = null;
     try {
@@ -229,39 +315,44 @@ export class DiffService {
       // No commits yet — leave headBranch null
     }
 
-    let branches: string[] = [];
+    let refs: BranchRef[] = [];
     try {
       const output = await execGit(
-        ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+        [
+          "for-each-ref",
+          "--sort=-committerdate",
+          "--format=%(refname)",
+          "refs/heads/",
+          "refs/remotes/",
+        ],
         cwd,
       );
-      branches = output
-        .trim()
+      refs = output
         .split("\n")
-        .map((b) => b.trim())
-        .filter(Boolean);
+        .map((line) => parseBranchRef(line.trim()))
+        .filter((ref): ref is BranchRef => ref !== null);
     } catch (err) {
       log.error(
         `listBranches: for-each-ref failed for ${cwd}: ${err instanceof Error ? err.message : err}`,
       );
     }
 
-    // Drop the current branch (you don't compare against yourself) and pin
-    // the default branch to the front. When you're on the default branch,
-    // skip the re-add — comparing main↔main is a no-op and confusing.
-    const filtered = branches.filter((b) => b !== headBranch);
-    if (defaultBranch !== headBranch) {
-      const idx = filtered.indexOf(defaultBranch);
-      if (idx >= 0) {
-        filtered.splice(idx, 1);
-      }
-      filtered.unshift(defaultBranch);
-    }
+    const ranked: Array<{ name: string; rank: number; order: number }> = [];
+    refs.forEach((ref, order) => {
+      if (ref.name === headBranch) return;
+      // When you're on the default branch, comparing main↔main is a no-op
+      // and confusing, so it isn't offered.
+      if (ref.name === defaultBranch && defaultBranch === headBranch) return;
+      const rank = rankBranch(ref, defaultBranch, query);
+      if (rank !== null) ranked.push({ name: ref.name, rank, order });
+    });
+    ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
 
     return {
-      branches: filtered,
+      branches: ranked.slice(0, limit).map((b) => b.name),
       defaultBranch,
       headBranch: headBranch ?? defaultBranch,
+      truncated: ranked.length > limit,
     };
   }
 

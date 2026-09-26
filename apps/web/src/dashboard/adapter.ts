@@ -10,6 +10,7 @@ import type {
   FormatFileResult,
   GitStatus,
   HooksStatus,
+  ListWorkspaceBranchesResult,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
@@ -202,9 +203,12 @@ export interface DashboardAdapter {
     mergeBase: string,
     contextLines?: number,
   ): Promise<FileDiffResult>;
+  /** Local and remote branches matching `query`, best matches first, at most
+   *  `limit` of them. `truncated` is set when more matched. */
   listWorkspaceBranches?(
     workspaceId: string,
-  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }>;
+    options?: { query?: string; limit?: number },
+  ): Promise<ListWorkspaceBranchesResult>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
