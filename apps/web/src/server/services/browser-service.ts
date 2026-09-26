@@ -48,6 +48,8 @@ export interface CreateBrowserOptions {
   id?: string;
   name?: string;
   url?: string;
+  /** Browser profile to open the tab in. `null`/absent is the Default profile. */
+  profileId?: string | null;
 }
 
 export interface UpdateBrowserOptions {
@@ -156,6 +158,7 @@ export class BrowserService {
       name: options?.name ?? "Browser",
       url: options?.url ?? "",
       status: "idle",
+      profileId: options?.profileId ?? null,
     };
 
     this.queries.insert({ ...tab, createdAt: now, updatedAt: now });
@@ -173,7 +176,10 @@ export class BrowserService {
       initialUrl: tab.url || undefined,
     });
 
-    log.info({ browserId: tab.id, workspaceId, url: tab.url }, "browser tab created");
+    log.info(
+      { browserId: tab.id, workspaceId, url: tab.url, profileId: tab.profileId },
+      "browser tab created",
+    );
     return tab;
   }
 
@@ -230,6 +236,34 @@ export class BrowserService {
       updatedAt: Date.now(),
     });
     this.browserTabs.set(browserId, merged);
+  }
+
+  /**
+   * Switch a browser tab to another profile. `null` is the Default profile.
+   * Returns the updated tab, or `undefined` when no tab matched.
+   */
+  setProfile(browserId: string, profileId: string | null): BrowserTab | undefined {
+    this.ensureInitialized();
+    const tab = this.browserTabs.get(browserId);
+    if (!tab) return undefined;
+    const merged = this.queries.update(browserId, tab, { profileId, updatedAt: Date.now() });
+    this.browserTabs.set(browserId, merged);
+    log.info({ browserId, profileId }, "browser tab profile changed");
+    return merged;
+  }
+
+  /**
+   * Move every tab that uses `profileId` back to the Default profile.
+   * Called when the profile is deleted.
+   */
+  clearProfile(profileId: string): void {
+    this.ensureInitialized();
+    const now = Date.now();
+    for (const tab of [...this.browserTabs.values()]) {
+      if (tab.profileId !== profileId) continue;
+      const merged = this.queries.update(tab.id, tab, { profileId: null, updatedAt: now });
+      this.browserTabs.set(tab.id, merged);
+    }
   }
 
   /**

@@ -12,4 +12,6 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   projects: ["projects"] as const,
   settings: ["settings"] as const,
+  browserProfiles: ["browserProfiles"] as const,
+  projectBrowserProfiles: ["projectBrowserProfiles"] as const,
 };

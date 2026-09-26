@@ -42,6 +42,7 @@
  */
 
 import { browserHostRouter, hostRouter } from "./browser-host/router";
+import { browserProfilesRouter } from "./browser-profiles/router";
 import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
 import { chatsRouter } from "./chats/router";
@@ -77,6 +78,7 @@ export const appRouter = t.router({
   chats: chatsRouter,
   chat: chatRouter,
   browsers: browsersRouter,
+  browserProfiles: browserProfilesRouter,
   panelFocus: panelFocusRouter,
   tasks: tasksRouter,
   sessions: sessionsRouter,

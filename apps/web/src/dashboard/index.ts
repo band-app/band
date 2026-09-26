@@ -47,6 +47,13 @@ export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export {
+  useBrowserProfiles,
+  useInvalidateBrowserProfiles,
+  useProjectBrowserProfiles,
+  useRemoveBrowserProfile,
+  useSetProjectBrowserProfile,
+} from "./hooks/use-browser-profiles";
 export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
 export {
   type EditorHistoryEntry,
@@ -146,6 +153,7 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
+  BrowserProfileInfo,
   CIState,
   CIStatus,
   CodingAgentConfig,
