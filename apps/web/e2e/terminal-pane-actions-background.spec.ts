@@ -34,7 +34,14 @@ const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
 // Wide viewport so `useIsDesktop()` reports true and terminals can split.
 test.use({ viewport: { width: 1280, height: 800 } });
 
-for (const theme of ["dark", "light"] as const) {
+// The xterm theme backgrounds in lib/terminal-cache.ts, as `getComputedStyle`
+// reports them. Pinning them proves the seeded theme took effect.
+const THEMES = [
+  { theme: "dark", background: "rgb(30, 30, 30)" },
+  { theme: "light", background: "rgb(255, 255, 255)" },
+] as const;
+
+for (const { theme, background } of THEMES) {
   test.describe(`Terminal pane icons in the ${theme} theme`, () => {
     let server: ServerHandle;
     let tmpHome: string;
@@ -78,12 +85,9 @@ for (const theme of ["dark", "light"] as const) {
 
       for (const index of [0, 1]) {
         await expect(workspacePage.paneActions(index)).toBeAttached();
-        // Guard against both reading transparent, which would also be "equal".
         await expect
-          .poll(async () => (await workspacePage.paneActionsBackground(index)).terminal)
-          .not.toBe("rgba(0, 0, 0, 0)");
-        const { actions, terminal } = await workspacePage.paneActionsBackground(index);
-        expect(actions).toBe(terminal);
+          .poll(() => workspacePage.paneActionsBackground(index))
+          .toEqual({ actions: background, terminal: background });
       }
     });
   });
