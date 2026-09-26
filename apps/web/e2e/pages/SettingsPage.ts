@@ -42,6 +42,9 @@ export class SettingsPage {
    *  Anchored via `data-testid` (set in `DashboardShell.tsx`). Opens the
    *  Settings dialog directly — no intermediate dropdown. */
   readonly settingsButton: Locator;
+  /** The dialog footer holding Save; on mobile it sits on the bottom screen
+   *  edge. `data-testid` set in `SettingsPage.tsx`. */
+  readonly footer: Locator;
 
   constructor(
     private readonly page: Page,
@@ -51,6 +54,7 @@ export class SettingsPage {
     this.dialog = page.getByRole("dialog", { name: "Settings" });
     this.settingsButton = page.getByTestId("project-list__settings-button");
     this.saveButton = this.dialog.getByRole("button", { name: "Save" });
+    this.footer = page.getByTestId("settings-page__footer");
   }
 
   /** Navigate to the dashboard root with the test token. */

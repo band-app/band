@@ -701,7 +701,10 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
+      {/* The shell reaches the bottom screen edge, so it pads the home
+       *  indicator inset (0 outside an iOS home-screen app / notched device)
+       *  once for every pane. */}
+      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground pb-[env(safe-area-inset-bottom)]">
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"

@@ -20,6 +20,10 @@
  *   BAND_TEST_ACP_CAPS      JSON overriding advertised capabilities:
  *                           { "loadSession": false, "list": false,
  *                             "resume": false, "image": false }.
+ *   BAND_TEST_ACP_OPTIONS   JSON overriding the session config options:
+ *                           { "models": [{ value, name }], "modes": [...],
+ *                             "extra": [{ id, name, options }] }. `extra`
+ *                           adds select options after model and mode.
  *   BAND_TEST_ACP_FAIL_START  When set, `initialize` fails with this message.
  *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
  *                           default `echo` and `review` commands, in the
@@ -84,14 +88,16 @@ function logRequest(method, params) {
 // Sessions
 // ---------------------------------------------------------------------------
 
-const MODELS = [
+const optionOverrides = env.BAND_TEST_ACP_OPTIONS ? JSON.parse(env.BAND_TEST_ACP_OPTIONS) : {};
+const MODELS = optionOverrides.models ?? [
   { value: "stub-small", name: "Stub Small" },
   { value: "stub-large", name: "Stub Large" },
 ];
-const MODES = [
+const MODES = optionOverrides.modes ?? [
   { value: "default", name: "Default" },
   { value: "plan", name: "Plan" },
 ];
+const EXTRA_OPTIONS = optionOverrides.extra ?? [];
 const COMMANDS = env.BAND_TEST_ACP_COMMANDS
   ? JSON.parse(env.BAND_TEST_ACP_COMMANDS)
   : [
@@ -136,6 +142,7 @@ function configOptions(s) {
   return [
     { id: "model", name: "Model", category: "model", type: "select", currentValue: s.model, options: MODELS },
     { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: MODES },
+    ...EXTRA_OPTIONS.map((o) => ({ type: "select", currentValue: o.options[0].value, ...o })),
   ];
 }
 

@@ -37,6 +37,17 @@ export interface AcpStubOptions {
   /** Slash commands the agent advertises, in its order. Defaults to the
    *  stub's `echo` and `review`. */
   commands?: { name: string; description: string }[];
+  /** Session config options the stub advertises in place of its defaults. */
+  options?: {
+    models?: StubChoice[];
+    modes?: StubChoice[];
+    extra?: { id: string; name: string; options: StubChoice[] }[];
+  };
+}
+
+export interface StubChoice {
+  value: string;
+  name: string;
 }
 
 /** Where the stub saves sessions, so a restarted server (or `session/load`)
@@ -67,6 +78,7 @@ export function acpStubEnv(home: string, opts: AcpStubOptions = {}): Record<stri
   }
   if (opts.caps) env.BAND_TEST_ACP_CAPS = JSON.stringify(opts.caps);
   if (opts.commands) env.BAND_TEST_ACP_COMMANDS = JSON.stringify(opts.commands);
+  if (opts.options) env.BAND_TEST_ACP_OPTIONS = JSON.stringify(opts.options);
   return env;
 }
 
