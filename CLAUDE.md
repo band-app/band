@@ -63,6 +63,18 @@ All issues are created in the `band-app/band` GitHub repo.
 
 The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
 
+## Architecture: Web Server vs Terminal Daemon
+
+Terminal PTYs do not live in the web server. They live in the **terminal daemon** (`apps/web/terminal-daemon.ts`, bundled to `dist/terminal-daemon.mjs`), a detached process the server launches on the first terminal spawn, so shells survive a server restart (desktop relaunch, auto-update, `pnpm dev` reload, crash). The restarted server reattaches to the same shells, and the browser replays their screens over the unchanged `/terminal` WebSocket.
+
+- `TerminalService` talks to a `TerminalBackend` (`src/server/infra/terminals/terminal-backend.ts`). `DaemonTerminalBackend` is the default. `InProcessTerminalBackend` is used on Windows, when `BAND_TERMINAL_DAEMON=0`, and as a fallback when the daemon cannot start; its terminals die with the server. Nothing outside `infra/terminals/` touches node-pty.
+- The daemon knows nothing about workspaces, layouts or events. It runs a `TerminalPool` behind a Unix socket (NDJSON, token hello, separate control and stream connections). The wire protocol is in `src/server/infra/terminals/daemon/protocol.ts`; bump `PROTOCOL_VERSION` on any change to it.
+- Runtime files live in `~/.band/run/` (mode 0700): `terminal-daemon-v1.sock`, `.token`, `.pid`, and `terminal-daemon.log`. If the socket path would exceed the 104-byte `sun_path` limit, the socket moves to `/tmp/band-<uid>/`, named by a hash of the run dir.
+- Socket publishing follows orca's endpoint-ownership rules (see the header of `daemon/endpoint.ts`): never unlink a socket you did not create, only a refused or missing connect proves a daemon dead, and a daemon never removes its endpoint on shutdown.
+- Server shutdown only disconnects. A session ends when its tab is closed, its workspace is deleted (or found deleted at boot), or its shell exits.
+- The daemon exits on its own, following orca's daemon: when it has no shells, no spawn in flight and no connection, the moment its last server disconnects (or 2 minutes after launch if none ever connects). If its socket is replaced or removed, it drains: no new sessions, existing shells keep working over already-open connections, and it exits when the last one ends. If `~/.band/run` disappears, it kills its shells and exits.
+- Tests: the server helpers' `close()` stops the home's daemon (`tests/helpers/terminal-daemon.ts`), because it is detached and escapes the process-group kill. Pass `{ keepTerminalDaemon: true }`, or use the e2e fixture's `restart()`, to model a restart.
+
 ## Band CLI Skills
 
 The Band CLI ships **six domain-specific skills**, each authored directly as `apps/cli/skills/<name>/SKILL.md` — that file is the single source of truth and is baked into the Rust binary via `include_str!`:

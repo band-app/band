@@ -54,6 +54,53 @@ export interface SpawnOptions {
 }
 
 /**
+ * Per-spawn settings that come from the caller rather than the user.
+ */
+export interface SpawnExtras {
+  /**
+   * Reported back on the session's {@link TerminalExitEvent} so the caller can
+   * prune the tab when the shell exits on its own (issue #581). Stored on the
+   * session rather than held in a closure so it survives the caller: the
+   * terminal daemon keeps sessions alive across web-server restarts, and the
+   * restarted server still has to honour it.
+   */
+  cleanupOnExit?: boolean;
+  /**
+   * Environment the shell inherits before the pool's own overrides. Defaults
+   * to this process's env. The terminal daemon passes the web server's env
+   * here, because the server sets per-instance values (`BAND_SERVER_URL`,
+   * `BAND_PORT`) that a long-lived daemon's own env would have frozen at
+   * launch.
+   */
+  baseEnv?: Record<string, string | undefined>;
+}
+
+/**
+ * Fired once per session when its PTY exits, for natural exits and explicit
+ * kills alike.
+ */
+export interface TerminalExitEvent {
+  terminalId: string;
+  workspaceId: string;
+  exitCode: number;
+  /** True when the exit came from {@link TerminalPool.kill} / `killWorkspace` / `killAll`. */
+  killed: boolean;
+  cleanupOnExit: boolean;
+}
+
+/** Live output chunk plus its per-session sequence number (1-based, gap-free). */
+export type TerminalOutputListener = (data: string, seq: number) => void;
+
+/**
+ * A serialized snapshot and the sequence number of the last output chunk it
+ * contains. Chunks with a higher `seq` are not in the snapshot.
+ */
+export interface TerminalSnapshot {
+  data: string;
+  seq: number;
+}
+
+/**
  * One live PTY session tracked by the pool.
  *
  * The pool owns the `IPty` handle, the buffered scrollback, and the
@@ -78,6 +125,9 @@ export interface TerminalSession {
   headless: HeadlessTerminal;
   serializeAddon: SerializeAddon;
   workspaceId: string;
+  /** Number of output chunks emitted so far; the last chunk's `seq`. */
+  seq: number;
+  cleanupOnExit: boolean;
   /**
    * Path of the temp file staging an auto-run command, if any. Removed
    * when the PTY exits (see {@link TerminalPool.autoRunCommand}). Kept on
@@ -96,20 +146,21 @@ export interface TerminalListEntry {
   pid: number;
   scrollbackLength: number;
   title: string;
+  /** Prune the tab when the shell exits on its own (see `SpawnExtras.cleanupOnExit`). */
+  cleanupOnExit: boolean;
 }
 
 /**
  * Stateful in-memory registry of PTY sessions.
  *
- * Infra tier — manages an external resource (forked shell processes) and
- * exposes a typed CRUD-shaped API to the service tier. The class is
- * deliberately small and dependency-free aside from `node-pty` and the
- * `shellPath` helper; all business logic (workspace resolution, layout
+ * Infra tier — manages an external resource (forked shell processes). The
+ * class is deliberately small and dependency-free aside from `node-pty` and
+ * the `shellPath` helper; all business logic (workspace resolution, layout
  * persistence, event emission) lives in `TerminalService`.
  *
- * Singleton — see `terminalPool` at the bottom of this file. PTY sessions
- * live for the lifetime of the server process and are not partitioned per
- * tenant, so a module-level instance is the natural shape.
+ * One instance per PTY host: the terminal daemon owns one, and
+ * `InProcessTerminalBackend` owns one when the daemon isn't used. Callers in
+ * the web server go through a `TerminalBackend`, never the pool directly.
  */
 export class TerminalPool {
   /** terminalId -> session */
@@ -119,7 +170,9 @@ export class TerminalPool {
   private readonly workspaceTerminals = new Map<string, Set<string>>();
 
   /** terminalId -> Set<listener> for live output streaming */
-  private readonly outputListeners = new Map<string, Set<(data: string) => void>>();
+  private readonly outputListeners = new Map<string, Set<TerminalOutputListener>>();
+
+  private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
 
   /**
    * terminalId -> in-flight spawn promise. A single terminal is created via TWO
@@ -135,7 +188,7 @@ export class TerminalPool {
 
   /** terminalId -> in-flight serialize drain, shared by concurrent callers
    *  (see {@link serialize} for why the pause/resume pair must not overlap). */
-  private readonly serializing = new Map<string, Promise<string | null>>();
+  private readonly serializing = new Map<string, Promise<TerminalSnapshot | null>>();
 
   /** terminalIds with a shrink-and-restore nudge in flight (see
    *  {@link nudgeResize} for why concurrent nudges must not compound). */
@@ -156,7 +209,7 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
-    onExit?: () => void,
+    extras?: SpawnExtras,
   ): Promise<TerminalSession> {
     const existing = this.terminals.get(terminalId);
     if (existing) return existing;
@@ -164,7 +217,7 @@ export class TerminalPool {
     if (inflight) return inflight;
     // Store the promise synchronously (before any await) so a concurrent call
     // that arrives while this one is awaiting sees it and reuses it.
-    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options, onExit);
+    const promise = this.spawnNew(workspaceId, terminalId, workspaceRoot, options, extras);
     this.spawning.set(terminalId, promise);
     try {
       return await promise;
@@ -178,14 +231,14 @@ export class TerminalPool {
     terminalId: string,
     workspaceRoot: string,
     options?: SpawnOptions,
-    onExit?: () => void,
+    extras?: SpawnExtras,
   ): Promise<TerminalSession> {
     const shell = defaultShell();
     const resolvedPath = await shellPath();
 
     // Filter env to only string values — posix_spawnp fails on undefined/null
     const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
+    for (const [key, value] of Object.entries(extras?.baseEnv ?? process.env)) {
       if (value != null) {
         env[key] = value;
       }
@@ -341,6 +394,8 @@ export class TerminalPool {
       headless,
       serializeAddon,
       workspaceId,
+      seq: 0,
+      cleanupOnExit: extras?.cleanupOnExit ?? false,
     };
     this.terminals.set(terminalId, session);
 
@@ -367,11 +422,13 @@ export class TerminalPool {
         session.scrollback = session.scrollback.slice(-MAX_SCROLLBACK_SIZE);
       }
       session.headless.write(data);
+      session.seq += 1;
+      const seq = session.seq;
       const listeners = this.outputListeners.get(terminalId);
       if (listeners) {
         for (const cb of listeners) {
           try {
-            cb(data);
+            cb(data, seq);
           } catch {
             // listener errors must not crash the PTY data handler
           }
@@ -379,7 +436,7 @@ export class TerminalPool {
       }
     });
 
-    ptyProcess.onExit(() => {
+    ptyProcess.onExit(({ exitCode }) => {
       log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
       // Distinguish a natural exit from an explicit `kill()`: the `kill()` path
       // calls `pty.kill()` and then synchronously deletes the session from
@@ -409,18 +466,22 @@ export class TerminalPool {
       // explicit `kill()` paths too (pty.kill → onExit), so it is the single
       // dispose site; also disposes the loaded SerializeAddon.
       session.headless.dispose();
-      // Notify the caller that the PTY exited on its OWN (e.g. a self-closing
-      // cron pane whose command ended with `exit`). The pool stays oblivious to
-      // layout / event concerns; the service-supplied callback does that
-      // cleanup. Skipped on an explicit `kill()` — that path already runs the
-      // same teardown synchronously, so firing here too would double-emit
-      // `terminal-killed`. Guarded so a throwing callback can't wedge the exit
-      // handler.
-      if (onExit && !explicitlyKilled) {
+      // The pool stays oblivious to layout / event concerns; listeners decide
+      // what an exit means. `killed` lets them skip the teardown an explicit
+      // `kill()` caller already ran, so `terminal-killed` isn't emitted twice.
+      // Guarded so a throwing listener can't wedge the exit handler.
+      const event: TerminalExitEvent = {
+        terminalId,
+        workspaceId,
+        exitCode,
+        killed: explicitlyKilled,
+        cleanupOnExit: session.cleanupOnExit,
+      };
+      for (const listener of this.exitListeners) {
         try {
-          onExit();
+          listener(event);
         } catch (err) {
-          log.warn("onExit callback threw for terminal %s: %s", terminalId, err);
+          log.warn("exit listener threw for terminal %s: %s", terminalId, err);
         }
       }
     });
@@ -629,24 +690,45 @@ export class TerminalPool {
     if (!ids) return [];
     const result: TerminalListEntry[] = [];
     for (const terminalId of ids) {
-      const session = this.terminals.get(terminalId);
-      if (session) {
-        let title = "";
-        try {
-          title = session.pty.process;
-        } catch {
-          // pty.process can throw if the process has exited
-        }
-        result.push({
-          terminalId,
-          workspaceId,
-          pid: session.pty.pid,
-          scrollbackLength: session.scrollback.length,
-          title,
-        });
-      }
+      const entry = this.info(terminalId);
+      if (entry) result.push(entry);
     }
     return result;
+  }
+
+  /** Number of live sessions. */
+  get size(): number {
+    return this.terminals.size;
+  }
+
+  /** Every live session across all workspaces. */
+  listAll(): TerminalListEntry[] {
+    const result: TerminalListEntry[] = [];
+    for (const terminalId of this.terminals.keys()) {
+      const entry = this.info(terminalId);
+      if (entry) result.push(entry);
+    }
+    return result;
+  }
+
+  /** Metadata for one session, or `null` if it isn't live. */
+  info(terminalId: string): TerminalListEntry | null {
+    const session = this.terminals.get(terminalId);
+    if (!session) return null;
+    let title = "";
+    try {
+      title = session.pty.process;
+    } catch {
+      // pty.process can throw if the process has exited
+    }
+    return {
+      terminalId,
+      workspaceId: session.workspaceId,
+      pid: session.pty.pid,
+      scrollbackLength: session.scrollback.length,
+      title,
+      cleanupOnExit: session.cleanupOnExit,
+    };
   }
 
   /**
@@ -692,7 +774,7 @@ export class TerminalPool {
    * second was still draining, letting fresh chunks flow before the second
    * caller's output forwarder exists: silent output loss.
    */
-  serialize(terminalId: string): Promise<string | null> {
+  serialize(terminalId: string): Promise<TerminalSnapshot | null> {
     const inflight = this.serializing.get(terminalId);
     if (inflight) return inflight;
     const promise = this.drainAndSerialize(terminalId).finally(() => {
@@ -702,7 +784,7 @@ export class TerminalPool {
     return promise;
   }
 
-  private async drainAndSerialize(terminalId: string): Promise<string | null> {
+  private async drainAndSerialize(terminalId: string): Promise<TerminalSnapshot | null> {
     const session = this.terminals.get(terminalId);
     if (!session) return null;
     // No output has ever been emitted — there is no state to snapshot, so
@@ -711,7 +793,7 @@ export class TerminalPool {
     // flow control under load (the shell's prompt then never reaches any
     // client). A chunk that lands right after this check is simply
     // delivered live by the caller's forwarder — not lost, not duplicated.
-    if (session.scrollback.length === 0) return "";
+    if (session.scrollback.length === 0) return { data: "", seq: session.seq };
     session.pty.pause();
     let deathWatch: NodeJS.Timeout | undefined;
     let drainCap: NodeJS.Timeout | undefined;
@@ -738,7 +820,10 @@ export class TerminalPool {
         drainCap.unref();
       });
       if (this.terminals.get(terminalId) !== session) return null;
-      return session.serializeAddon.serialize();
+      // The PTY is paused, so no chunk lands between reading `seq` and
+      // serializing: the snapshot holds exactly chunks 1..seq (modulo the
+      // drain cap above, whose late chunks the caller gets live).
+      return { data: session.serializeAddon.serialize(), seq: session.seq };
     } finally {
       if (deathWatch) clearInterval(deathWatch);
       if (drainCap) clearTimeout(drainCap);
@@ -759,10 +844,60 @@ export class TerminalPool {
   }
 
   /**
+   * Replay-on-attach in one step: resize to the client's dims (so the snapshot
+   * reconstructs the grid at the width it will be rendered at), subscribe
+   * `listener`, then serialize.
+   *
+   * The listener is subscribed BEFORE the snapshot, so it may receive chunks
+   * that are already inside it. The caller drops every chunk whose `seq` is
+   * at or below the returned snapshot's `seq`. That cut, rather than event
+   * loop timing, is what keeps the replay free of gaps and duplicates, and it
+   * is the only ordering guarantee that survives a socket hop to the daemon.
+   *
+   * Returns `null` (and subscribes nothing) when the terminal isn't live.
+   */
+  async attach(
+    terminalId: string,
+    dims: { cols: number; rows: number } | undefined,
+    listener: TerminalOutputListener,
+  ): Promise<{ snapshot: TerminalSnapshot; unsubscribe: () => void } | null> {
+    if (!this.terminals.has(terminalId)) return null;
+    if (dims) this.resize(terminalId, dims.cols, dims.rows);
+    const unsubscribe = this.subscribeOutput(terminalId, listener);
+    let snapshot: TerminalSnapshot | null;
+    try {
+      snapshot = await this.serialize(terminalId);
+    } catch (err) {
+      // Replay is best-effort: a serialize failure must not abandon the
+      // attach, or the client would hold a socket that accepts keystrokes but
+      // never shows output. An empty snapshot at seq 0 lets every chunk the
+      // listener receives through.
+      log.error("Failed to serialize terminal %s for replay: %s", terminalId, err);
+      snapshot = { data: "", seq: 0 };
+    }
+    if (!snapshot) {
+      unsubscribe();
+      return null;
+    }
+    return { snapshot, unsubscribe };
+  }
+
+  /**
+   * Subscribe to a pool-wide exit feed: one {@link TerminalExitEvent} per
+   * session. Returns an unsubscribe function.
+   */
+  onExit(listener: (event: TerminalExitEvent) => void): () => void {
+    this.exitListeners.add(listener);
+    return () => {
+      this.exitListeners.delete(listener);
+    };
+  }
+
+  /**
    * Subscribe to live output from a terminal's PTY.
    * Returns an unsubscribe function.
    */
-  subscribeOutput(terminalId: string, callback: (data: string) => void): () => void {
+  private subscribeOutput(terminalId: string, callback: TerminalOutputListener): () => void {
     let listeners = this.outputListeners.get(terminalId);
     if (!listeners) {
       listeners = new Set();
@@ -823,13 +958,8 @@ export class TerminalPool {
     }
     this.terminals.clear();
     this.workspaceTerminals.clear();
+    // Output subscribers go with their sessions. Exit listeners stay: the
+    // kills above still report their exits through them.
+    this.outputListeners.clear();
   }
 }
-
-/**
- * Process-wide singleton used by the service tier and the WebSocket entry
- * point. PTY processes outlive any single request so a single shared
- * instance is the correct shape — analogous to `agentPool` and the eventual
- * `lspPool`.
- */
-export const terminalPool = new TerminalPool();

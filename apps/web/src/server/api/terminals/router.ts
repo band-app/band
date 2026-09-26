@@ -20,8 +20,8 @@ import { stripTerminalQueries } from "./strip-queries";
  */
 
 const terminalRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return { terminals: terminalService.list(input.workspaceId) };
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
+    return { terminals: await terminalService.list(input.workspaceId) };
   }),
 
   create: publicProcedure
@@ -40,24 +40,24 @@ const terminalRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const terminalId = input.id ?? randomUUID();
-      // `terminalService.spawn` resolves the workspace, asks the pool to
+      // `terminalService.spawn` resolves the workspace, asks the backend to
       // fork the PTY, and registers the new terminal in the saved
       // dockview layout. The event emit stays here so the WebSocket
       // spawn path (which goes through the same service method) doesn't
       // double-broadcast.
-      const session = await terminalService.spawn(input.workspaceId, terminalId, {
+      const entry = await terminalService.spawn(input.workspaceId, terminalId, {
         command: input.command,
         cwd: input.cwd,
         env: input.env,
       });
       emit({ kind: "terminal-created", workspaceId: input.workspaceId, terminalId });
-      return { terminalId, workspaceId: input.workspaceId, pid: session.pty.pid };
+      return { terminalId, workspaceId: input.workspaceId, pid: entry.pid };
     }),
 
   send: publicProcedure
     .input(z.object({ terminalId: z.string(), data: z.string() }))
-    .mutation(({ input }) => {
-      const ok = terminalService.write(input.terminalId, input.data);
+    .mutation(async ({ input }) => {
+      const ok = await terminalService.write(input.terminalId, input.data);
       if (!ok) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -69,8 +69,11 @@ const terminalRouter = t.router({
 
   output: publicProcedure
     .input(z.object({ terminalId: z.string(), lines: z.number().int().positive().optional() }))
-    .query(({ input }) => {
-      const output = terminalService.getScrollback(input.terminalId, input.lines ?? undefined);
+    .query(async ({ input }) => {
+      const output = await terminalService.getScrollback(
+        input.terminalId,
+        input.lines ?? undefined,
+      );
       if (output == null) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -86,8 +89,8 @@ const terminalRouter = t.router({
       return { output: stripTerminalQueries(output) };
     }),
 
-  kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(({ input }) => {
-    terminalService.kill(input.terminalId);
+  kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(async ({ input }) => {
+    await terminalService.kill(input.terminalId);
     return { ok: true };
   }),
 
@@ -100,66 +103,29 @@ const terminalRouter = t.router({
     )
     .subscription(async function* (opts) {
       const { terminalId, replay } = opts.input;
-
-      // Check if terminal exists
-      const session = terminalService.getSession(terminalId);
-      if (!session) {
-        yield { type: "error" as const, data: `Terminal not found: ${terminalId}` };
-        return;
-      }
-
-      // Register the live-output queue BEFORE serializing. `serialize`
-      // pauses the PTY synchronously in this same tick, so no chunk can be
-      // double-delivered (queued AND baked into the snapshot); every chunk
-      // emitted after the drain's resume lands in the queue — including
-      // ones arriving while the snapshot `yield` below is suspended waiting
-      // on the consumer. Subscribing after that yield would silently drop
-      // them.
-      const queue: string[] = [];
-      let resolve: (() => void) | null = null;
-
-      const unsubscribe = terminalService.subscribeOutput(terminalId, (data: string) => {
-        queue.push(data);
-        resolve?.();
-      });
-
-      opts.signal?.addEventListener("abort", () => {
-        unsubscribe();
-        resolve?.();
-      });
-
-      try {
-        // Replay a serialized reconstruction of the terminal state first,
-        // same as the `/terminal` WebSocket path: the raw scrollback tail
-        // can be cut mid-escape-sequence and garble TUI apps drawn with
-        // relative cursor motion. Query/report escapes are still stripped
-        // (band-app/band#613) — serialize shouldn't emit them, but the
-        // guard is cheap and keeps this path aligned with the WS replay.
-        if (replay) {
-          const snapshot = await terminalService.serialize(terminalId);
-          if (snapshot) {
-            yield { type: "output" as const, data: stripTerminalQueries(snapshot) };
-          }
-        }
-
-        while (!opts.signal?.aborted) {
-          while (queue.length > 0) {
-            yield { type: "output" as const, data: queue.shift()! };
-          }
-
-          // Check if terminal is still alive
-          if (!terminalService.getSession(terminalId)) {
+      for await (const event of terminalService.stream(terminalId, opts.signal)) {
+        switch (event.kind) {
+          case "missing":
+            yield { type: "error" as const, data: `Terminal not found: ${terminalId}` };
+            return;
+          case "snapshot":
+            // Replay a serialized reconstruction of the terminal state first,
+            // same as the `/terminal` WebSocket path: the raw scrollback tail
+            // can be cut mid-escape-sequence and garble TUI apps drawn with
+            // relative cursor motion. Query/report escapes are still stripped
+            // (band-app/band#613). With `replay: false` the snapshot is not
+            // sent; live output still starts from the same cut.
+            if (replay && event.data.length > 0) {
+              yield { type: "output" as const, data: stripTerminalQueries(event.data) };
+            }
+            break;
+          case "output":
+            yield { type: "output" as const, data: event.data };
+            break;
+          case "exit":
             yield { type: "exit" as const };
             return;
-          }
-
-          await new Promise<void>((r) => {
-            resolve = r;
-          });
-          resolve = null;
         }
-      } finally {
-        unsubscribe();
       }
     }),
 });

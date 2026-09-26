@@ -719,8 +719,12 @@ export class WorkspaceService {
     // `BrowserService.removeAllForWorkspace` drops the layout row itself.
     browserService.removeAllForWorkspace(workspaceId);
 
-    // Kill any running terminal PTY sessions + layout
-    terminalService.killWorkspace(workspaceId);
+    // Kill any running terminal PTY sessions + layout. Fire-and-forget: the
+    // kill may hop to the terminal daemon, and a failure there must not fail
+    // the workspace removal (the boot reconcile retries it).
+    void terminalService.killWorkspace(workspaceId).catch((err) => {
+      log.warn({ workspaceId, err }, "failed to kill the workspace's terminals");
+    });
     terminalService.deleteLayout(workspaceId);
 
     // Drop the last-focused-panel record so it doesn't outlive the workspace.
