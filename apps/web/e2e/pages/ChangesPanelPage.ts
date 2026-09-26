@@ -42,6 +42,10 @@ export class ChangesPanelPage {
    *  no testid hook on its own DOM. Centralised here so a CodeMirror upgrade
    *  that renames it flows through one file. */
   readonly cmScrollers: Locator;
+  /** The diff leaf's vertical scroller, which holds the editor(s). */
+  readonly diffScroller: Locator;
+  /** The overview ruler down the diff scroller's right edge. */
+  readonly overviewRuler: Locator;
 
   private readonly workspace: WorkspacePage;
   /** Workspace opened via `goto`, remembered so `diffMode()` can build the
@@ -58,6 +62,8 @@ export class ChangesPanelPage {
     this.firstDiffTargetOption = page.getByRole("option").first();
     this.diffLeaf = page.getByTestId("center-diff-leaf__visible-true");
     this.cmScrollers = this.diffLeaf.locator(".cm-scroller");
+    this.diffScroller = this.diffLeaf.getByTestId("center-diff-leaf__scroller");
+    this.overviewRuler = this.diffLeaf.getByTestId("diff-overview-ruler");
   }
 
   /** Navigate to the workspace, reveal the right sidepanel, and select its
@@ -159,5 +165,83 @@ export class ChangesPanelPage {
         computedOverflowX: window.getComputedStyle(el).overflowX,
       })),
     );
+  }
+
+  /** The overview-ruler markers of one change kind, top to bottom. */
+  rulerMarkers(kind: "added" | "removed" | "modified"): Locator {
+    return this.overviewRuler.getByTestId(`diff-overview-ruler__marker--${kind}`);
+  }
+
+  /** Vertical center of every marker of `kind`, in px from the top of the
+   *  ruler, so specs can compare where changes sit in the file. */
+  async rulerMarkerCenters(kind: "added" | "removed" | "modified"): Promise<number[]> {
+    const ruler = await this.overviewRuler.boundingBox();
+    if (!ruler) return [];
+    const centers: number[] = [];
+    for (const marker of await this.rulerMarkers(kind).all()) {
+      const box = await marker.boundingBox();
+      if (box) centers.push(box.y + box.height / 2 - ruler.y);
+    }
+    return centers;
+  }
+
+  /** Click the first ruler marker of `kind`. Markers let clicks through to the
+   *  ruler track, which resolves the marker under the pointer, so this clicks
+   *  the track at the marker's position the way a user's click lands. */
+  async clickRulerMarker(kind: "added" | "removed" | "modified"): Promise<void> {
+    await test.step(`Click the ${kind} ruler marker`, async () => {
+      const [center] = await this.rulerMarkerCenters(kind);
+      if (center === undefined) throw new Error(`no ${kind} marker on the ruler`);
+      const ruler = await this.overviewRuler.boundingBox();
+      await this.overviewRuler.click({ position: { x: (ruler?.width ?? 12) / 2, y: center } });
+    });
+  }
+
+  /** Click the ruler track at `fraction` (0 = top, 1 = bottom) of its height. */
+  async clickRulerTrack(fraction: number): Promise<void> {
+    await test.step(`Click the ruler track at ${Math.round(fraction * 100)}%`, async () => {
+      const ruler = await this.overviewRuler.boundingBox();
+      if (!ruler) throw new Error("overview ruler is not visible");
+      await this.overviewRuler.click({
+        position: { x: ruler.width / 2, y: ruler.height * fraction },
+      });
+    });
+  }
+
+  /** Drag the ruler's slider down by `dy` pixels with the mouse. */
+  async dragRulerSlider(dy: number): Promise<void> {
+    await test.step(`Drag the ruler slider by ${dy}px`, async () => {
+      const box = await this.overviewRuler.getByTestId("diff-overview-ruler__slider").boundingBox();
+      if (!box) throw new Error("overview ruler slider is not visible");
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x, y + dy, { steps: 5 });
+      await this.page.mouse.up();
+    });
+  }
+
+  /** A line of the diff by its exact text. Specs pass fixture text they
+   *  wrote themselves, so matching on text is stable here.
+   *
+   *  FRAGILITY: `.cm-line` is a class owned by CodeMirror, which exposes no
+   *  testid hook on its own DOM. Centralised here so a CodeMirror upgrade
+   *  that renames it flows through one file. */
+  diffLine(text: string): Locator {
+    return this.diffLeaf.locator(".cm-line").getByText(text, { exact: true }).first();
+  }
+
+  /** The diff scroller's current vertical scroll offset. */
+  async diffScrollTop(): Promise<number> {
+    return await this.diffScroller.evaluate((el) => el.scrollTop);
+  }
+
+  /** The diff scroller's scroll range: content height and visible height. */
+  async diffScrollRange(): Promise<{ scrollHeight: number; clientHeight: number }> {
+    return await this.diffScroller.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
   }
 }

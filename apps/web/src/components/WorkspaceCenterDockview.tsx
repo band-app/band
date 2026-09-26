@@ -68,6 +68,7 @@ import {
   type ChatInsertDetail,
   createLspExtension,
   DiffFileContent,
+  DiffOverviewRuler,
   FileViewer,
   getFileIcon,
   getFilePreviewType,
@@ -1367,6 +1368,10 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
 // with the changes in place (not just the changed hunks).
 const FULL_FILE_CONTEXT = 99999;
 
+// The diff's CodeMirror views, typed through the ruler's props so this file
+// keeps no direct @codemirror/view dependency.
+type DiffEditorViews = React.ComponentProps<typeof DiffOverviewRuler>["views"];
+
 function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
   // On desktop the diff selection tooltip offers only "Copy reference"; the
   // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
@@ -1380,6 +1385,17 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
   const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
+  // The diff's editors also feed the overview ruler, which measures where each
+  // change sits inside `diffScrollerRef`.
+  const diffScrollerRef = useRef<HTMLDivElement>(null);
+  const [diffViews, setDiffViews] = useState<DiffEditorViews>([]);
+  const handleEditorViews = useCallback(
+    (views: DiffEditorViews) => {
+      setViews(views);
+      setDiffViews(views);
+    },
+    [setViews],
+  );
 
   const setMode = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -1495,21 +1511,30 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
       {searchBar}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {diff ? (
-          <DiffFileContent
-            hunks={diff}
-            filename={filePath}
-            // Mobile is always unified — no room for a side-by-side split.
-            viewMode={isMobile ? "unified" : viewMode}
-            onEditorViews={setViews}
-            copyReferenceOnly={!isMobile}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-            {loading ? "Loading diff…" : "No changes"}
-          </div>
-        )}
+      <div className="relative min-h-0 flex-1">
+        {/* The overview ruler stands in for this scroller's vertical scrollbar,
+            so the native one is hidden and the content leaves room for it. */}
+        <div
+          ref={diffScrollerRef}
+          data-testid="center-diff-leaf__scroller"
+          className={`h-full overflow-auto ${diff ? "pr-3 [scrollbar-width:none]" : ""}`}
+        >
+          {diff ? (
+            <DiffFileContent
+              hunks={diff}
+              filename={filePath}
+              // Mobile is always unified — no room for a side-by-side split.
+              viewMode={isMobile ? "unified" : viewMode}
+              onEditorViews={handleEditorViews}
+              copyReferenceOnly={!isMobile}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+              {loading ? "Loading diff…" : "No changes"}
+            </div>
+          )}
+        </div>
+        {diff && <DiffOverviewRuler views={diffViews} scrollerRef={diffScrollerRef} />}
       </div>
 
       <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
