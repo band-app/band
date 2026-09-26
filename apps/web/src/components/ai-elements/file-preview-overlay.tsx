@@ -69,7 +69,10 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
           </div>
 
           {/* Content area */}
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div
+            data-testid="file-preview-overlay__content"
+            className="min-h-0 flex-1 overflow-hidden pb-[env(safe-area-inset-bottom)]"
+          >
             {isImage && <ImagePreview url={part.url} alt={filename} />}
             {isText && <TextPreview url={part.url} filename={filename} />}
             {!isImage && !isText && (

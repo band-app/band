@@ -241,6 +241,32 @@ export class ChatPanePage {
     });
   }
 
+  /** Attach a file to the prompt through the composer's file input, the
+   *  input the paperclip button opens. Scoped to the visible composer, since
+   *  other visited workspaces keep their chats mounted. */
+  async attachFile(file: { name: string; mimeType: string; buffer: Buffer }): Promise<void> {
+    await test.step(`Attach ${file.name}`, async () => {
+      await this.page
+        .getByTestId("chat-pane__composer")
+        .filter({ visible: true })
+        .getByTestId("prompt-input__file-input")
+        .setInputFiles(file);
+    });
+  }
+
+  /** Open the full-screen preview of the first image in a message. */
+  async openImagePreview(message: Locator): Promise<void> {
+    await test.step("Open the image preview", async () => {
+      await message.getByTestId("message__image-preview-button").first().click();
+      await expect(this.filePreviewContent).toBeVisible();
+    });
+  }
+
+  /** The content area of the open full-screen file preview. */
+  get filePreviewContent(): Locator {
+    return this.page.getByTestId("file-preview-overlay__content");
+  }
+
   /** Locator for a user-role message bubble carrying the given text.
    *  Scoped to the `chat-pane__user-message` data-testid container so a
    *  future change that renders user text inside an assistant bubble

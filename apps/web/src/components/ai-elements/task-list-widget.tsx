@@ -66,12 +66,16 @@ export function TaskListWidget({ plan, workspaceId }: { plan: PlanEntry[]; works
       {!collapsed && (
         <div className="border-t border-border/50 px-2.5 py-1">
           {taskList.map((task, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
-            <div key={i} className="flex items-center gap-1.5 py-0.5">
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: plan entries have no id; each update replaces the whole plan
+              key={i}
+              data-testid="task-list-widget__entry"
+              className="flex items-center gap-1.5 py-0.5"
+            >
               <TaskStatusIcon status={task.status} />
               <span
                 className={cn(
-                  "text-xs",
+                  "min-w-0 break-words text-xs [overflow-wrap:anywhere]",
                   task.status === "completed" && "text-muted-foreground line-through",
                 )}
               >

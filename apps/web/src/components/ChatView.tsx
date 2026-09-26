@@ -780,7 +780,10 @@ export function ChatView({
           <ConversationScrollButton />
         </Conversation>
 
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
+        <div
+          data-testid="chat-pane__composer"
+          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4"
+        >
           <TaskListWidget plan={plan} workspaceId={workspaceId} />
           <PromptInput
             onSubmit={handleSubmit}
@@ -799,7 +802,9 @@ export function ChatView({
               onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
             />
             <PromptInputActions>
-              <div className="flex items-center gap-0.5">
+              {/* min-w-0 lets the picker labels truncate on a narrow screen
+                  instead of pushing the send button out of the composer. */}
+              <div className="flex min-w-0 items-center gap-0.5">
                 <PromptInputAttach />
                 <SessionHistoryMenu
                   workspaceId={workspaceId}
@@ -879,10 +884,10 @@ function ConfigOptionMenu({
         <button
           type="button"
           data-testid={`chat-pane__config-option--${option.id}`}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <SlidersHorizontal className="size-3" />
-          {current?.name ?? option.name}
+          <SlidersHorizontal className="size-3 shrink-0" />
+          <span className="truncate">{current?.name ?? option.name}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[160px]">
@@ -935,10 +940,11 @@ function ModeMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="chat-pane__mode-menu"
+              className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <ModeIcon modeId={current?.id ?? ""} className="size-3" />
-              {current?.name ?? "Mode"}
+              <ModeIcon modeId={current?.id ?? ""} className="size-3 shrink-0" />
+              <span className="truncate">{current?.name ?? "Mode"}</span>
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -999,16 +1005,16 @@ function AgentModelMenu({
           data-testid="chat-pane__model-menu"
           disabled={disabled}
           className={cn(
-            "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >
           {currentAgentType ? (
-            <AgentIcon type={currentAgentType} className="size-3" />
+            <AgentIcon type={currentAgentType} className="size-3 shrink-0" />
           ) : (
-            <ChevronDown className="size-3" />
+            <ChevronDown className="size-3 shrink-0" />
           )}
-          {displayName}
+          <span className="truncate">{displayName}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[200px] max-h-[400px] overflow-y-auto">
@@ -1172,7 +1178,7 @@ function ContextMeter({
               ? `Context window: ${pctRounded}% of ${formatTokens(usage.size)}`
               : "Context window: no usage yet"
           }
-          className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onPointerEnter={(e) => {
             if (e.pointerType === "mouse") setOpen(true);
           }}
@@ -1290,7 +1296,7 @@ function SessionHistoryMenu({
             type="button"
             data-testid="chat-pane__session-history-button"
             aria-label="Session history"
-            className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Clock className="size-4" />
           </DropdownMenuTrigger>

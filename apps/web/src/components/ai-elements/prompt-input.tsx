@@ -404,7 +404,10 @@ function formatFileSize(bytes: number): string {
 export type PromptInputActionsProps = HTMLAttributes<HTMLDivElement>;
 
 export const PromptInputActions = ({ className, ...props }: PromptInputActionsProps) => (
-  <div className={cn("flex w-full items-center justify-between", className)} {...props} />
+  <div
+    className={cn("flex w-full min-w-0 items-center justify-between gap-1", className)}
+    {...props}
+  />
 );
 
 // Attach button
@@ -419,6 +422,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <input
         ref={fileInputRef}
         type="file"
+        data-testid="prompt-input__file-input"
         multiple
         accept={ACCEPTED_TYPES}
         className="hidden"
@@ -574,7 +578,7 @@ export const PromptInputSubmit = ({
   const isBusy = isSubmitting || isStreaming;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
       {isStreaming && (
         <button
           type="button"
@@ -601,6 +605,7 @@ export const PromptInputSubmit = ({
       ) : (
         <button
           type="submit"
+          data-testid="prompt-input__submit-button"
           disabled={!hasContent}
           className={cn(
             "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full transition-colors",

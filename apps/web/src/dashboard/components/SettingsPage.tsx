@@ -993,7 +993,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             </SettingsSection>
           </div>
         </div>
-        <DialogFooter className="border-t border-border px-6 py-3 sm:justify-end">
+        {/* The footer sits on the bottom screen edge in the mobile drawer, so it
+            clears the home indicator. The wide-layout card floats off the edge. */}
+        <DialogFooter
+          data-testid="settings-page__footer"
+          className="border-t border-border px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:pb-3 sm:justify-end"
+        >
           <Button
             type="button"
             size="sm"

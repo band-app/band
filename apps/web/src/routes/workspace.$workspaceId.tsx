@@ -392,7 +392,10 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
           <SheetDescription className="sr-only">
             Browse workspace files and open one in the editor
           </SheetDescription>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div
+            data-testid="mobile-workspace__explorer-body"
+            className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom)]"
+          >
             <FileBrowser
               workspaceId={workspaceId}
               workspacePath={workspacePath}
@@ -418,7 +421,10 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
           <SheetDescription className="sr-only">
             Browse changed files and open one as a diff
           </SheetDescription>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div
+            data-testid="mobile-workspace__changes-body"
+            className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom)]"
+          >
             {changeCount === 0 ? (
               <p className="px-3 py-2 text-xs text-muted-foreground">No changes</p>
             ) : (
@@ -472,7 +478,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             Browse projects and open a workspace
           </SheetDescription>
           <ToolbarOverflowProvider>
-            <DashboardShell bottomActions={<ToolbarActionBar />} hideTitleBar />
+            <DashboardShell bottomActions={<ToolbarActionBar />} hideTitleBar padBottomInset />
           </ToolbarOverflowProvider>
         </SheetContent>
       </Sheet>

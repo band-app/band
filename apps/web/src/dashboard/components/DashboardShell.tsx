@@ -55,6 +55,10 @@ interface DashboardShellProps {
   bottomActions?: ReactNode;
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
+  /** Pad the home-indicator inset below the action bar even with
+   *  `hideTitleBar`. Set by the mobile project-list fly-out, which reaches the
+   *  bottom screen edge with no AppShell below it to pad the inset. */
+  padBottomInset?: boolean;
 }
 
 // Desktop-shell detection. The Electron preload
@@ -78,7 +82,11 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
-export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellProps) {
+export function DashboardShell({
+  bottomActions,
+  hideTitleBar,
+  padBottomInset,
+}: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -329,6 +337,11 @@ export function DashboardShell({ bottomActions, hideTitleBar }: DashboardShellPr
         // workspace layout. Standalone (mobile / narrow web): plain background.
         hideTitleBar ? "h-full bg-sidebar" : "bg-background",
         !isDesktop && "pt-[env(safe-area-inset-top)]",
+        // Full screen the action bar keeps a 16px gap above the bottom edge,
+        // widened to the home-indicator inset when there is one. In the
+        // wide-layout sidebar the AppShell column pads the inset instead.
+        !isDesktop && !hideTitleBar && "pb-[max(1rem,env(safe-area-inset-bottom))]",
+        !isDesktop && hideTitleBar && padBottomInset && "pb-[env(safe-area-inset-bottom)]",
       )}
       // CSS `zoom` does not scale viewport units (vh, dvh, svh, lvh) per
       // spec, so `height: 100dvh` under `<html style="zoom: 0.5">` resolves
