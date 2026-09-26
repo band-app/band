@@ -7,6 +7,10 @@
 @source "../../node_modules/streamdown/dist";
 
 @custom-variant dark (&:is(.dark *));
+/* Active while the macOS desktop app shows the desktop through the sidebar
+   (see lib/translucent-sidebar.ts). `:where` adds no specificity, so
+   `hover:`/`active:` utilities still win over it. */
+@custom-variant translucent-sidebar (&:where([data-translucent-sidebar] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -238,6 +242,41 @@ body {
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * Translucent sidebar (macOS desktop app, `data-translucent-sidebar` on
+ * <html>, see lib/translucent-sidebar.ts). The Electron window is transparent
+ * over a `sidebar` vibrancy layer, so the page itself must be transparent for
+ * the blur to reach the sidebar column. The AppShell keeps every other region
+ * solid, and the sidebar column paints `--sidebar-translucent`: the sidebar
+ * colour at `--sidebar-tint` opacity.
+ *
+ * The vibrancy material follows the macOS appearance, not Band's theme. When
+ * the two disagree (Band dark on a light macOS, or the reverse), text in
+ * Band's theme colours is hard to read on a light tint, so the tint goes
+ * near-opaque. `prefers-color-scheme` reports the macOS appearance here.
+ */
+html[data-translucent-sidebar],
+html[data-translucent-sidebar] body {
+  background: transparent;
+}
+
+html[data-translucent-sidebar] {
+  --sidebar-tint: 40%;
+  --sidebar-translucent: color-mix(in oklab, var(--sidebar) var(--sidebar-tint), transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-translucent-sidebar].dark {
+    --sidebar-tint: 88%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-translucent-sidebar]:not(.dark) {
+    --sidebar-tint: 88%;
+  }
 }
 
 /*

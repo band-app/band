@@ -531,7 +531,7 @@ export function QuickOpenDialog({
             onValueChange={setQuery}
           />
           {parsedQuery.line != null && (
-            <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">
+            <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
               Go to line {parsedQuery.line}
               {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`}
               {parsedQuery.column != null && `, column ${parsedQuery.column}`}

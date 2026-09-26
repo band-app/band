@@ -37,6 +37,7 @@ import type {
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
+import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
 import { browserHandlers } from "./browser.js";
 import {
@@ -63,14 +64,8 @@ export interface RegisterOptions {
    * resolve the sidecar binary inside the trust boundary.
    */
   cliPaths: CliPathOptions;
-  /**
-   * Background app-update banner state. The bootstrap owns the
-   * `pendingUpdate` cache and the install closure (which captures the
-   * `electron-updater` deps). Passing them in keeps `register.ts`
-   * decoupled from the updater module.
-   */
-  getPendingUpdate: () => { version: string } | null;
-  installUpdate: () => Promise<void>;
+  /** The bootstrap's auto-update controller, which the update toast drives. */
+  updates: UpdateController;
 }
 
 /**
@@ -120,14 +115,20 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   handle(Channels.openExternal, (args: OpenExternalArgs) => openExternal(args.url));
 
-  // ---- Background app-update banner ----
-  // The renderer calls `updater_status` once on mount to seed initial state
-  // (a missed broadcast race) and subscribes to `updater-status-changed`
-  // for subsequent transitions. `updater_install` kicks off
-  // `installPendingUpdate` — the response never resolves on success because
-  // `electron-updater` quits the process to install.
-  handle(Channels.updaterStatus, () => opts.getPendingUpdate());
-  handle(Channels.updaterInstall, () => opts.installUpdate());
+  // ---- App-update toast ----
+  // The renderer reads `updater_status` once on mount (it may mount after a
+  // check already finished) and follows `updater-status-changed` after
+  // that. The action channels resolve when the step starts, not when it
+  // finishes: progress and results arrive as status events.
+  handle(Channels.updaterStatus, () => opts.updates.getStatus());
+  handle(Channels.updaterCheck, () => {
+    void opts.updates.check({ userInitiated: true });
+  });
+  handle(Channels.updaterDownload, () => {
+    void opts.updates.download();
+  });
+  handle(Channels.updaterRestart, () => opts.updates.restart());
+  handle(Channels.updaterDismiss, () => opts.updates.dismiss());
 
   // ---- Browser panels ----
   const bm = { manager: opts.browserManager };

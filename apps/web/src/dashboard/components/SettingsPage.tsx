@@ -120,6 +120,8 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.enableFilePreviewTabs ?? true,
   );
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
+  // Default true — see Settings.translucentSidebar JSDoc.
+  const [translucentSidebar, setTranslucentSidebar] = useState(settings.translucentSidebar ?? true);
   // Default true — see Settings.useWebGLTerminalRenderer JSDoc.
   const [useWebGLTerminalRenderer, setUseWebGLTerminalRenderer] = useState(
     settings.useWebGLTerminalRenderer ?? true,
@@ -329,6 +331,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
+    if (translucentSidebar !== (settings.translucentSidebar ?? true)) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
     if (webBrowserCdpEnabled !== (settings.webBrowserCdpEnabled ?? false)) return true;
     if (usageRetentionDays !== (settings.usageRetentionDays?.toString() ?? "")) return true;
@@ -346,6 +349,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     enableLSP,
     enableFilePreviewTabs,
     selectedTheme,
+    translucentSidebar,
     useWebGLTerminalRenderer,
     webBrowserCdpEnabled,
     usageRetentionDays,
@@ -365,6 +369,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setEnableLSP(settings.enableLSP ?? false);
     setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
     setSelectedTheme(settings.theme ?? "system");
+    setTranslucentSidebar(settings.translucentSidebar ?? true);
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
     setWebBrowserCdpEnabled(settings.webBrowserCdpEnabled ?? false);
     setUsageRetentionDays(settings.usageRetentionDays?.toString() ?? "");
@@ -380,6 +385,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.enableLSP,
     settings.enableFilePreviewTabs,
     settings.theme,
+    settings.translucentSidebar,
     settings.useWebGLTerminalRenderer,
     settings.webBrowserCdpEnabled,
     settings.usageRetentionDays,
@@ -428,6 +434,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       enableLSP,
       enableFilePreviewTabs,
       theme: selectedTheme,
+      translucentSidebar,
       useWebGLTerminalRenderer,
       webBrowserCdpEnabled,
       usageRetentionDays: parsedUsageRetentionDays,
@@ -479,6 +486,19 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </SelectContent>
                 </Select>
               </SettingsRow>
+              {capabilities.translucentSidebar && (
+                <SettingsRow
+                  htmlFor="translucent-sidebar"
+                  label="Translucent sidebar"
+                  description="Show the desktop through the project list, blurred and tinted."
+                >
+                  <Switch
+                    id="translucent-sidebar"
+                    checked={translucentSidebar}
+                    onCheckedChange={setTranslucentSidebar}
+                  />
+                </SettingsRow>
+              )}
             </SettingsSection>
 
             {/* ── General ────────────────────────────────────── */}

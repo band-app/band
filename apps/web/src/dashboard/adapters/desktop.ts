@@ -1,4 +1,4 @@
-import type { PlatformCapabilities, Unsubscribe } from "../adapter";
+import type { PlatformCapabilities, Unsubscribe, UpdateStatus } from "../adapter";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
 // ---------------------------------------------------------------------------
@@ -90,37 +90,39 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
     }
   }
 
-  // ---- Background app-update banner (see updater.ts) -----------------------
-  // The web adapter intentionally omits these so a plain browser tab never
-  // sees the banner (the hook short-circuits to "none" when the adapter
-  // method is undefined). Only the desktop shell can drive electron-updater.
+  // ---- App-update toast (see apps/desktop/src/main/updater.ts) -----------
+  // The web adapter omits these, so a plain browser tab never shows the
+  // toast. Only the desktop shell can drive electron-updater.
 
-  /** Read the current pending update, if any. Used by the hook on mount to
-   *  catch the race where the renderer mounts after the startup check
-   *  already populated main-process state. */
-  async getUpdateStatus(): Promise<{ version: string } | null> {
-    return desktopInvoke<{ version: string } | null>("updater_status");
+  /** The current status. Read on mount, since the startup check may have
+   *  finished before the renderer subscribed. */
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return desktopInvoke<UpdateStatus>("updater_status");
   }
 
-  /** Kick off the download + install. On success the OS quits the process,
-   *  so this promise typically never resolves in production. */
-  async installUpdate(): Promise<void> {
-    await desktopInvoke<void>("updater_install");
-  }
-
-  /** Subscribe to `updater-status-changed` events emitted by the main
-   *  process. Returns the unlisten. Throws if called outside the shell —
-   *  callers should gate on `getUpdateStatus` being defined first. */
-  subscribeUpdateStatus(cb: (pending: { version: string } | null) => void): Unsubscribe {
+  subscribeUpdateStatus(cb: (status: UpdateStatus) => void): Unsubscribe {
     const bridge = electronBridge();
     if (!bridge) {
-      // The hook guards on the method being defined, but if for some reason
-      // this is called outside the shell, fail loud rather than silently.
       throw new Error("subscribeUpdateStatus called outside the desktop shell");
     }
-    return bridge.on("updater-status-changed", (payload) =>
-      cb(payload as { version: string } | null),
-    );
+    return bridge.on("updater-status-changed", (payload) => cb(payload as UpdateStatus));
+  }
+
+  async checkForUpdates(): Promise<void> {
+    await desktopInvoke<void>("updater_check");
+  }
+
+  async downloadUpdate(): Promise<void> {
+    await desktopInvoke<void>("updater_download");
+  }
+
+  /** Quits the app to install the downloaded update. */
+  async restartToUpdate(): Promise<void> {
+    await desktopInvoke<void>("updater_restart");
+  }
+
+  async dismissUpdate(): Promise<void> {
+    await desktopInvoke<void>("updater_dismiss");
   }
 }
 
@@ -134,6 +136,12 @@ export class NativeShellCapabilities implements PlatformCapabilities {
 
   get copyPath(): boolean {
     return isDesktopShell();
+  }
+
+  // The desktop window only gets its vibrancy layer on macOS (see
+  // `apps/desktop/src/main/window.ts`).
+  get translucentSidebar(): boolean {
+    return isDesktopShell() && /Mac/.test(navigator.userAgent);
   }
 
   getWorkspaceHref(workspaceId: string): string | undefined {

@@ -19,6 +19,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { FindWidget } from "./FindWidget";
 
 /** Test id on the `FileViewer` root element (set in FileViewer.tsx).
  *  Exported so other page objects that need to wait for the viewer to mount
@@ -44,6 +45,18 @@ export class FileViewerPage {
   /** The file viewer root, optionally scoped to a single workspace. */
   private get root(): Locator {
     return (this.scope ?? this.page).getByTestId(FILE_VIEWER_ROOT_TESTID);
+  }
+
+  /** The floating find widget over this viewer's content (source or
+   *  markdown preview). */
+  get findWidget(): FindWidget {
+    return new FindWidget(this.root);
+  }
+
+  /** Every file or preview find input on the whole page, unscoped, so a spec
+   *  can assert exactly one opened (the "stacked bars" regression, #435). */
+  get allFileFindInputs(): Locator {
+    return this.page.getByPlaceholder(/Find in (preview|file)\.\.\./);
   }
 
   /** The active file viewer's CodeMirror content element. */

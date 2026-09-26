@@ -18,6 +18,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
@@ -47,6 +48,10 @@ import {
   saveSidebarCollapsed,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
+import {
+  applyTranslucentSidebar,
+  TRANSLUCENT_SIDEBAR_INIT_SCRIPT,
+} from "../lib/translucent-sidebar";
 import { setActiveWorkspace } from "../lib/workspace-cold-park";
 import {
   applyZoomLevel,
@@ -164,6 +169,24 @@ function ThemeSync() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
+
+  return null;
+}
+
+/** Keeps the `data-translucent-sidebar` attribute on `<html>` in sync with
+ *  `settings.translucentSidebar` (default on). A no-op outside the macOS
+ *  desktop app, where the attribute is never set. */
+function TranslucentSidebarSync() {
+  const { settings, isLoading, error } = useSettingsQuery();
+  const enabled = settings.translucentSidebar ?? true;
+
+  // Wait for the real settings: applying the loading-state (or failed-fetch)
+  // default would undo the pre-paint script for a user who turned it off.
+  const loaded = !isLoading && !error;
+  useEffect(() => {
+    if (!loaded) return;
+    applyTranslucentSidebar(enabled);
+  }, [enabled, loaded]);
 
   return null;
 }
@@ -702,7 +725,10 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
+      {/* With the translucent sidebar on, this root is transparent so the
+          window's vibrancy layer reaches the sidebar column; the main panel
+          below paints its own solid background. */}
+      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground translucent-sidebar:bg-transparent">
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"
@@ -723,11 +749,13 @@ function AppShell() {
             >
               {/* The whole sidebar column (its title-bar half + the project
                   list) is painted with the `--sidebar` surface so it reads as a
-                  distinct panel from the workspace layout to its right. */}
+                  distinct panel from the workspace layout to its right. With
+                  the translucent sidebar on (macOS desktop), the surface is a
+                  light tint over the window's vibrancy layer instead. */}
               {/* Each column pads the home-indicator inset itself, so the
                   padding takes that column's surface colour. */}
               <div
-                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar pb-[env(safe-area-inset-bottom)]"
+                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar translucent-sidebar:bg-(--sidebar-translucent) pb-[env(safe-area-inset-bottom)]"
                 data-testid="app-shell__sidebar"
               >
                 {/* Pure drag/paint surface — the sidebar toggle + back/forward
@@ -739,11 +767,16 @@ function AppShell() {
                 </div>
               </div>
             </Panel>
-            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+            {/* Opaque in every state, hover and drag included: under the
+                translucent sidebar the root behind it is transparent, so a
+                see-through tint would let the vibrancy layer through past the
+                sidebar's border. The colours equal the other separator's
+                accent tints over `--background`. */}
+            <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
             <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              <div className="h-full flex flex-col min-w-0 overflow-hidden pb-[env(safe-area-inset-bottom)]">
+              <div className="h-full flex flex-col min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
                 <WorkspaceTitleBar
                   workspaceName={activeWorkspaceId ?? undefined}
                   workspacePath={activeWorkspaceId ? workspacePath : undefined}
@@ -833,14 +866,18 @@ function RootLayout() {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent zoom layout flash */}
         <script dangerouslySetInnerHTML={{ __html: ZOOM_INIT_SCRIPT }} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent a solid-sidebar flash */}
+        <script dangerouslySetInnerHTML={{ __html: TRANSLUCENT_SIDEBAR_INIT_SCRIPT }} />
       </head>
       <body>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <ThemeSync />
+          <TranslucentSidebarSync />
           <ZoomSync />
           <ReloadSync />
           <TooltipProvider>
             <AppShell />
+            <UpdateToast />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />

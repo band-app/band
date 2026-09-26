@@ -5,7 +5,11 @@
  * the post-build adjustments in `apps/dashboard/src-tauri/src/lib.rs`:
  *   - 1200×800 default, min 800
  *   - Black window background (so the area behind macOS traffic lights
- *     matches the dark UI; identical to Tauri's NSColor setBackgroundColor)
+ *     matches the dark UI; identical to Tauri's NSColor setBackgroundColor),
+ *     except on macOS, where the window is transparent over a `sidebar`
+ *     vibrancy layer so the renderer can let the blurred desktop show
+ *     through the project-list sidebar (see `data-translucent-sidebar` in
+ *     apps/web/src/styles/globals.css)
  *   - Hidden inset title bar (overlay) with traffic lights at (13, 16)
  *   - Resize to fill the primary monitor on launch
  *   - Drag-drop disabled on the window chrome
@@ -51,7 +55,15 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     x: 0,
     y: 0,
     show: false,
-    backgroundColor: "#000000",
+    // On macOS the window is transparent over a `sidebar` vibrancy layer. The
+    // renderer paints every region opaque except the project-list sidebar,
+    // which it tints lightly so the blurred desktop shows through (or paints
+    // solid when the user turns the translucent sidebar off in Settings).
+    // `visualEffectState: "active"` keeps the blur when the window loses
+    // focus, like Finder's sidebar.
+    ...(process.platform === "darwin"
+      ? { backgroundColor: "#00000000", vibrancy: "sidebar", visualEffectState: "active" }
+      : { backgroundColor: "#000000" }),
     // BrowserWindow.icon is honoured on Windows/Linux; on macOS the dock
     // icon comes from the .icns in the packaged app, so we set it via
     // app.dock.setIcon() below for dev mode.

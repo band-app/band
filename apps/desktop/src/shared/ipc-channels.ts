@@ -27,9 +27,12 @@ export const Channels = {
   installCli: "install_cli",
   openExternal: "open_external",
 
-  // Background app-update banner (see updater.ts)
+  // App-update toast (see updater.ts)
   updaterStatus: "updater_status",
-  updaterInstall: "updater_install",
+  updaterCheck: "updater_check",
+  updaterDownload: "updater_download",
+  updaterRestart: "updater_restart",
+  updaterDismiss: "updater_dismiss",
 
   // Browser panels
   browserCreate: "browser_create",
@@ -170,9 +173,8 @@ export const Events = {
    *  spawn tabs for one window.open. */
   browserOpenWindow: "browser-open-window",
   windowFullscreenChanged: "window-fullscreen-changed",
-  /** Pushed by the main process when the background updater detects (or
-   *  clears) a pending app update. Payload: `PendingUpdate` from
-   *  updater.ts — `null` or `{ version }`. */
+  /** Pushed by the main process on every auto-update status change.
+   *  Payload: `UpdateStatus` from shared/update-status.ts. */
   updaterStatusChanged: "updater-status-changed",
 } as const;
 

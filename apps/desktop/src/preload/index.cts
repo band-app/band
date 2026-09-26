@@ -49,9 +49,12 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "open_with_app",
   "install_cli",
   "open_external",
-  // Background app-update banner
+  // App-update toast
   "updater_status",
-  "updater_install",
+  "updater_check",
+  "updater_download",
+  "updater_restart",
+  "updater_dismiss",
   // Phase 3 — browser panels
   "browser_create",
   "browser_navigate",

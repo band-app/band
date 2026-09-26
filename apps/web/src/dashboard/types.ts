@@ -37,6 +37,20 @@ export interface ProjectInfo {
    * UI consumers can therefore branch on `kind` without `?? "git"` guards.
    */
   kind: ProjectKind;
+  /**
+   * The GitHub owner's avatar when the project's `origin` is on GitHub,
+   * served from Band's cache (`/api/project-avatar/<name>`). `null` or
+   * absent for plain projects, non-GitHub remotes, no remote, and owners
+   * GitHub has no avatar for; the UI then shows its folder icon.
+   */
+  avatar?: ProjectAvatarInfo | null;
+}
+
+export interface ProjectAvatarInfo {
+  /** Same-origin image URL. */
+  src: string;
+  /** `owner/repo`, used as alt text. */
+  label: string;
 }
 
 export interface WorktreeInfo {
@@ -218,6 +232,13 @@ export interface Settings {
    */
   enableFilePreviewTabs?: boolean;
   theme?: Theme;
+  /**
+   * Let the blurred desktop show through the project-list sidebar (macOS
+   * vibrancy). Only takes effect in the macOS desktop app; the browser build
+   * always paints the sidebar solid.
+   * @default true
+   */
+  translucentSidebar?: boolean;
   /**
    * Use the GPU-accelerated WebGL renderer for terminal panels. Enables
    * `customGlyphs` (continuous box-drawing / powerline / block art) and

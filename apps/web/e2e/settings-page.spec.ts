@@ -106,6 +106,18 @@ test("settings dialog renders every section in a single scrolling list", async (
   await settingsPage.expectRowVisible(settingsPage.defaultAgentSelect());
 });
 
+test("the browser build does not offer the translucent sidebar toggle", async ({ page }) => {
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  // Positive anchor: the Appearance section rendered its Theme row. The
+  // translucent sidebar only works over the macOS desktop window's vibrancy
+  // layer, so a browser tab has no toggle for it.
+  await expect(settingsPage.themeSelect()).toBeVisible();
+  await expect(settingsPage.translucentSidebarSwitch()).toHaveCount(0);
+});
+
 test("the General section no longer offers a cached-workspaces count", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
