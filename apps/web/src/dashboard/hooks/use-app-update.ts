@@ -48,7 +48,7 @@ export function useAppUpdate() {
   const dismiss = useCallback(() => {
     // Hide right away; main confirms with an `idle` broadcast.
     setStatus({ state: "idle" });
-    void adapter.dismissUpdate?.();
+    adapter.dismissUpdate?.().catch(ignore);
   }, [adapter]);
 
   useEffect(() => {
@@ -59,18 +59,22 @@ export function useAppUpdate() {
 
   const retry = useCallback(() => {
     if (status.state !== "error") return;
-    if (status.phase === "download") void adapter.downloadUpdate?.();
-    else void adapter.checkForUpdates?.();
+    if (status.phase === "download") adapter.downloadUpdate?.().catch(ignore);
+    else adapter.checkForUpdates?.().catch(ignore);
   }, [adapter, status]);
 
   return {
     status: isVisible(status) ? status : null,
-    download: useCallback(() => void adapter.downloadUpdate?.(), [adapter]),
-    restart: useCallback(() => void adapter.restartToUpdate?.(), [adapter]),
+    download: useCallback(() => adapter.downloadUpdate?.().catch(ignore), [adapter]),
+    restart: useCallback(() => adapter.restartToUpdate?.().catch(ignore), [adapter]),
     retry,
     dismiss,
   };
 }
+
+/** The IPC call only fails once the window is closing; the main process logs
+ *  updater failures and reports them through the status. */
+function ignore(): void {}
 
 function isVisible(status: UpdateStatus): boolean {
   switch (status.state) {

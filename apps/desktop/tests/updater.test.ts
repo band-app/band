@@ -1,7 +1,7 @@
 /**
  * Integration tests for the auto-update controller behind the update toast.
  *
- * Per CLAUDE.md: black-box, no mocks of our own modules. The only thing we
+ * Black-box, no mocks of our own modules. The only thing we
  * substitute is the third-party `electron-updater` singleton, which binds to
  * the running Electron binary at module load and cannot run under plain
  * Node. The controller takes it through `loadUpdater`, so the code under
@@ -391,15 +391,15 @@ describe("download and restart", () => {
 describe("scheduling", () => {
   test("checks after the startup delay, then on every interval, until stopped", async () => {
     const h = harness();
-    const stop = h.controller.start({ startupDelayMs: 5, intervalMs: 30 });
+    const stop = h.controller.start({ startupDelayMs: 5, intervalMs: 200 });
     assert.equal(h.updater.checkCalls, 0);
-    await delay(20);
+    await delay(50);
     assert.equal(h.updater.checkCalls, 1);
-    await delay(75);
+    await delay(400);
     stop();
     const calls = h.updater.checkCalls;
     assert.ok(calls >= 3, `expected startup + >=2 interval checks, got ${calls}`);
-    await delay(70);
+    await delay(250);
     assert.equal(h.updater.checkCalls, calls);
     // Background checks with no update never show the toast.
     assert.deepEqual(h.statuses, []);
@@ -436,7 +436,7 @@ describe("release notes", () => {
     const status = h.controller.getStatus();
     assert.equal(status.state, "available");
     const notes = status.state === "available" ? status.releaseNotes : null;
-    assert.ok(notes && notes.length <= 601 && notes.endsWith("…"));
+    assert.equal(notes, `${"a".repeat(600)}…`);
   });
 
   test("missing notes and name come through as null", async () => {

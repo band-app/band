@@ -13,7 +13,7 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow, powerMonitor, protocol, session } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "electron";
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BROWSER_PARTITION, BrowserViewManager } from "../browser/view-manager.js";
 import { Events } from "../shared/ipc-channels.js";
@@ -71,10 +71,9 @@ const state: AppState = {
 };
 
 /**
- * Owns the auto-update flow for the life of the process. It outlives a
- * macOS window close + dock re-activate, so a downloaded update is still
- * offered to the next window. Every status change goes to every renderer,
- * which shows it in the update toast.
+ * Owns the auto-update flow for the life of the process, so a download
+ * started from the toast keeps its state across a dashboard reload. Every
+ * status change goes to every renderer, which shows it in the update toast.
  */
 const updates = new UpdateController({
   currentVersion: app.getVersion(),
@@ -89,12 +88,60 @@ const updates = new UpdateController({
 /** "Check for Updates…": bring the dashboard forward so its toast is seen. */
 function checkForUpdatesFromMenu(): void {
   const win = state.mainWindow;
-  if (win && !win.isDestroyed()) {
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+  if (!win || win.isDestroyed()) {
+    // On macOS the app outlives its closed window, and no renderer is left
+    // to show the toast. Run the same flow with native dialogs instead.
+    void checkForUpdatesWithDialogs().catch((err) => {
+      log.error({ err: String(err) }, "check for updates (no window) failed");
+    });
+    return;
   }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
   void updates.check({ userInitiated: true });
+}
+
+async function checkForUpdatesWithDialogs(): Promise<void> {
+  await updates.check({ userInitiated: true });
+  let status = updates.getStatus();
+  if (status.state === "available") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is available`,
+      detail: `You have v${status.currentVersion}.`,
+      buttons: ["Update", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+    await updates.download();
+    status = updates.getStatus();
+  }
+  if (status.state === "downloaded") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is ready`,
+      detail: "Restart Band to finish updating. It also installs when you quit.",
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) updates.restart();
+  } else if (status.state === "up-to-date") {
+    await dialog.showMessageBox({
+      type: "info",
+      message: "You're on the latest version",
+      detail: `Band v${status.currentVersion}`,
+    });
+  } else if (status.state === "error") {
+    await dialog.showMessageBox({
+      type: "warning",
+      message:
+        status.phase === "download" ? "Couldn't download the update" : "Couldn't check for updates",
+      detail: status.message,
+    });
+  }
 }
 
 function installCrashHandlers(): void {
