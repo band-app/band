@@ -84,6 +84,105 @@ export class ChangesPanelPage {
     return new FindWidget(this.diffLeaf);
   }
 
+  // ---- Commits panel (bottom of the Changes tab) ----
+
+  /** The Commits section below the changed-file tree. */
+  get commitsPanel(): Locator {
+    return this.page.getByTestId("commits-panel");
+  }
+
+  /** The Commits header button that collapses / expands the section. */
+  get commitsToggle(): Locator {
+    return this.page.getByTestId("commits-panel__toggle");
+  }
+
+  /** The loaded-commit count in the Commits header (`50+` when more exist). */
+  get commitsCount(): Locator {
+    return this.page.getByTestId("commits-panel__count");
+  }
+
+  /** The scrollable commit list; absent while the section is collapsed. */
+  get commitsList(): Locator {
+    return this.page.getByTestId("commits-panel__list");
+  }
+
+  /** A commit row, keyed by full SHA. */
+  commitRow(sha: string): Locator {
+    return this.page.getByTestId(`commits-panel__row--${sha}`);
+  }
+
+  /** A ref pill (branch / remote / tag name) inside a commit row. */
+  commitRef(sha: string, name: string): Locator {
+    return this.commitRow(sha).getByTestId(`commits-panel__ref--${name}`);
+  }
+
+  /** The "+N" marker for refs that did not fit in a commit row. */
+  commitMoreRefs(sha: string): Locator {
+    return this.commitRow(sha).getByTestId("commits-panel__more-refs");
+  }
+
+  /** A changed file listed under an expanded commit. */
+  commitFile(sha: string, path: string): Locator {
+    return this.page
+      .getByTestId(`commits-panel__files--${sha}`)
+      .getByTestId(`commits-panel__file--${path}`);
+  }
+
+  /** The dockview tab of a file's diff. A commit's diff tab carries the
+   *  commit SHA in `data-commit`; a working-tree diff tab has none. */
+  diffTab(path: string): Locator {
+    return this.workspace.diffTab(path);
+  }
+
+  /** Close the diff tab for `path` with its close button. */
+  async closeDiffTab(path: string): Promise<void> {
+    await test.step(`Close the diff tab for ${path}`, async () => {
+      await this.diffTab(path).getByRole("button", { name: "Close diff" }).click();
+    });
+  }
+
+  /** Expand a commit row to list its changed files. */
+  async expandCommit(sha: string): Promise<void> {
+    await test.step(`Expand commit ${sha.slice(0, 7)}`, async () => {
+      await this.commitRow(sha).click();
+      await expect(this.commitRow(sha)).toHaveAttribute("aria-expanded", "true");
+    });
+  }
+
+  /** Open `path`'s diff for commit `sha` from the expanded commit. */
+  async openCommitFile(sha: string, path: string): Promise<void> {
+    await test.step(`Open ${path} at ${sha.slice(0, 7)}`, async () => {
+      await this.commitFile(sha, path).click();
+      await expect(this.diffLeaf).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  async toggleCommits(): Promise<void> {
+    await test.step("Toggle the Commits section", async () => {
+      await this.commitsToggle.click();
+    });
+  }
+
+  /** Scroll the commit list to its end, which loads the next page. */
+  async scrollCommitsToEnd(): Promise<void> {
+    await test.step("Scroll the commit list to the end", async () => {
+      await this.commitsList.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+    });
+  }
+
+  /** Reload the page and reopen the Changes tab. */
+  async reload(): Promise<void> {
+    await test.step("Reload the workspace", async () => {
+      await this.page.reload();
+      await this.workspace.waitForReady();
+      await this.workspace.revealRightPanel();
+      await this.workspace.selectRightPanelTab("changes");
+      await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
   /** A changed-file row in the Changes tree, keyed by workspace-relative path. */
   changesTreeRow(path: string): Locator {
     return this.page.getByTestId(`changes-tree__row--${path}`);

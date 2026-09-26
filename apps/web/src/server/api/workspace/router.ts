@@ -4,6 +4,7 @@ import { diffService } from "../../services/diff-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
+import { gitGraphService } from "../../services/git-graph-service";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
 import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
@@ -18,6 +19,7 @@ import { publicProcedure, t } from "../trpc";
  *   - `filesService`  → file CRUD + path-traversal / .git guards.
  *   - `searchService` → file-name fuzzy search and ripgrep content search.
  *   - `diffService`   → branch listing, diff, file diff, revert.
+ *   - `gitGraphService` → commit history, commit files, per-commit file diff.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
  *     generateCommitMessage, switchAgent.
  *   - `editorService` → file watcher subscription + Prettier formatFile.
@@ -56,6 +58,15 @@ const compareBranchSchema = z
 const mergeBaseSchema = z
   .string()
   .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
+
+/**
+ * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
+ * chars so git can never read it as a flag (`--exec=…`) or a symbolic ref:
+ * the Commits panel always hands us a real object id.
+ */
+const commitShaSchema = z
+  .string()
+  .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
 
 /**
  * Wire-contract note: every workspace-tier service error (including
@@ -216,6 +227,44 @@ export const workspaceRouter = t.router({
   listBranches: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .query(({ input }) => diffService.listBranches(input.workspaceId)),
+
+  getCommitHistory: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        skip: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      gitGraphService.getCommitHistory(input.workspaceId, {
+        skip: input.skip,
+        limit: input.limit,
+      }),
+    ),
+
+  getCommitHistorySignature: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(({ input }) => gitGraphService.getCommitHistorySignature(input.workspaceId)),
+
+  getCommitDetails: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
+    .query(({ input }) => gitGraphService.getCommitDetails(input.workspaceId, input.sha)),
+
+  getCommitFileDiff: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sha: commitShaSchema,
+        filePath: z.string().min(1).regex(/^[^-]/, "filePath must not start with '-'"),
+        contextLines: z.number().int().min(0).max(99999).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      gitGraphService.getCommitFileDiff(input.workspaceId, input.sha, input.filePath, {
+        contextLines: input.contextLines,
+      }),
+    ),
 
   getDiff: publicProcedure
     .input(
