@@ -1,6 +1,8 @@
 /**
- * Which localStorage keys are kept on the Band server (see `client-state.ts`)
- * and how each maps to a server entry.
+ * Which localStorage keys are kept on the Band server (see
+ * `lib/client-state.ts`) and how each maps to a server entry. The server uses
+ * the same table to refuse keys that aren't listed and to take a key's
+ * workspace from the key itself.
  *
  * A key's scope is `all` (one value shared by every device) or `device` (one
  * value per device type: desktop or mobile). A key can map to several server

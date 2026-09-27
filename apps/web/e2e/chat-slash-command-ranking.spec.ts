@@ -25,6 +25,7 @@ import { acpStubEnv } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -73,6 +74,10 @@ test.beforeAll(async () => {
   });
   server = await startServer({ tmpHome, env: acpStubEnv(tmpHome, { commands: COMMANDS }) });
 });
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   if (server) await server.close();

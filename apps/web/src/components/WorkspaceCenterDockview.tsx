@@ -2967,19 +2967,27 @@ function applyCenterTabsFull(api: DockviewApi, workspaceId: string, target: Cent
       (a, b) =>
         (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
     );
+    const shown = group.activePanel;
+    let moved = false;
     desired.forEach((panel, index) => {
       if (group.panels.indexOf(panel) === index) return;
       try {
         panel.api.moveTo({ group, index, skipSetActive: true });
-        changed = true;
+        moved = true;
       } catch {}
     });
+    // dockview moves a panel within its group by removing and re-adding it
+    // without activating it, which leaves the group showing no content.
+    if (moved) {
+      changed = true;
+      shown?.api.setActive();
+    }
   }
 
   const active = target.active ? api.getPanel(target.active) : undefined;
-  if (active && api.activePanel?.id !== active.id) {
+  if (active) {
+    if (api.activePanel?.id !== active.id) changed = true;
     active.api.setActive();
-    changed = true;
   }
   return changed;
 }

@@ -38,6 +38,7 @@ import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -105,6 +106,12 @@ test.beforeAll(async () => {
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
+});
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => {
+  if (tmpHome) resetClientState(tmpHome);
 });
 
 test.afterAll(async () => {

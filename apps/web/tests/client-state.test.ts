@@ -25,6 +25,7 @@ import {
   startServer,
   trpcData,
 } from "./helpers/server";
+import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "client-state-test-token";
 const WS_MAIN = "proj-main";
@@ -66,7 +67,6 @@ async function setEntry(
   input: {
     key: string;
     scope: Entry["scope"];
-    workspaceId: string | null;
     value: unknown;
     baseVersion: number;
     clientId?: string;
@@ -138,16 +138,6 @@ function subscribeClientStateEvents(serverUrl: string): {
   return { events, ready, close: () => ws.close() };
 }
 
-async function waitFor<T>(read: () => T | undefined, timeoutMs = 5000): Promise<T> {
-  const start = Date.now();
-  for (;;) {
-    const value = read();
-    if (value !== undefined) return value;
-    if (Date.now() - start > timeoutMs) throw new Error("timed out");
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-
 describe("clientState", () => {
   let server: ServerHandle;
   let tmpHome: string;
@@ -191,7 +181,6 @@ describe("clientState", () => {
       body: JSON.stringify({
         key: "band-recent-workspaces",
         scope: "all",
-        workspaceId: null,
         value: [],
         baseVersion: 0,
         clientId: "client-a",
@@ -204,7 +193,6 @@ describe("clientState", () => {
     const res = await trpcMutate(server.url, "clientState.set", {
       key: "band:zoom-level",
       scope: "tablet",
-      workspaceId: null,
       value: "1.1",
       baseVersion: 0,
       clientId: "client-a",
@@ -212,12 +200,43 @@ describe("clientState", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a key that isn't synced, and a scope the key doesn't use", async () => {
+    const unknown = await trpcMutate(server.url, "clientState.set", {
+      key: "band.agent-mode",
+      scope: "all",
+      value: "tui",
+      baseVersion: 0,
+      clientId: "client-a",
+    });
+    expect(unknown.status).toBe(400);
+    // Sidebar width is per device type, never shared.
+    const wrongScope = await trpcMutate(server.url, "clientState.set", {
+      key: "band:sidebar-width",
+      scope: "all",
+      value: "20",
+      baseVersion: 0,
+      clientId: "client-a",
+    });
+    expect(wrongScope.status).toBe(400);
+  });
+
+  it("rejects a write for a workspace that doesn't exist", async () => {
+    const res = await trpcMutate(server.url, "clientState.set", {
+      key: "band-draft:proj-missing",
+      scope: "all",
+      value: "hello",
+      baseVersion: 0,
+      clientId: "client-a",
+    });
+    expect(res.status).toBe(404);
+    expect(await listEntries(server.url, "proj-missing", "desktop")).toEqual([]);
+  });
+
   it("stores a value, then refuses a write based on a stale version", async () => {
     const key = `band:center-tabs:${WS_MAIN}`;
     const first = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: WS_MAIN,
       value: { tabs: [{ id: "file:a.ts", kind: "file" }], active: "file:a.ts" },
       baseVersion: 0,
     });
@@ -237,7 +256,6 @@ describe("clientState", () => {
     const second = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: WS_MAIN,
       value: { tabs: [{ id: "file:b.ts", kind: "file" }], active: "file:b.ts" },
       baseVersion: 1,
       clientId: "client-b",
@@ -249,7 +267,6 @@ describe("clientState", () => {
     const stale = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: WS_MAIN,
       value: { tabs: [], active: null },
       baseVersion: 1,
     });
@@ -269,7 +286,6 @@ describe("clientState", () => {
     const migration = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: WS_MAIN,
       value: { tabs: [{ id: "file:old.ts", kind: "file" }], active: null },
       baseVersion: 0,
     });
@@ -282,34 +298,26 @@ describe("clientState", () => {
     await setEntry(server.url, {
       key,
       scope: "desktop",
-      workspaceId: WS_FEATURE,
       value: { grid: "desktop" },
       baseVersion: 0,
     });
-    await setEntry(server.url, {
-      key,
-      scope: "mobile",
-      workspaceId: WS_FEATURE,
-      value: { grid: "mobile" },
-      baseVersion: 0,
-    });
+    await setEntry(server.url, { key, scope: "mobile", value: { grid: "mobile" }, baseVersion: 0 });
     await setEntry(server.url, {
       key: `band-draft:${WS_FEATURE}`,
       scope: "all",
-      workspaceId: WS_FEATURE,
       value: "half-written message",
       baseVersion: 0,
     });
 
     const desktop = await listEntries(server.url, WS_FEATURE, "desktop");
-    expect(desktop.map((e) => [e.key, e.scope, e.value])).toEqual([
-      [`band-draft:${WS_FEATURE}`, "all", "half-written message"],
-      [key, "desktop", { grid: "desktop" }],
+    expect(desktop.map((e) => [e.key, e.scope, e.workspaceId, e.value])).toEqual([
+      [`band-draft:${WS_FEATURE}`, "all", WS_FEATURE, "half-written message"],
+      [key, "desktop", WS_FEATURE, { grid: "desktop" }],
     ]);
     const mobile = await listEntries(server.url, WS_FEATURE, "mobile");
-    expect(mobile.map((e) => [e.key, e.scope, e.value])).toEqual([
-      [`band-draft:${WS_FEATURE}`, "all", "half-written message"],
-      [key, "mobile", { grid: "mobile" }],
+    expect(mobile.map((e) => [e.key, e.scope, e.workspaceId, e.value])).toEqual([
+      [`band-draft:${WS_FEATURE}`, "all", WS_FEATURE, "half-written message"],
+      [key, "mobile", WS_FEATURE, { grid: "mobile" }],
     ]);
   });
 
@@ -317,7 +325,6 @@ describe("clientState", () => {
     await setEntry(server.url, {
       key: "band-recent-workspaces",
       scope: "all",
-      workspaceId: null,
       value: [WS_FEATURE, WS_MAIN],
       baseVersion: 0,
     });
@@ -332,44 +339,66 @@ describe("clientState", () => {
     const created = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: null,
       value: "label-1",
       baseVersion: 0,
     });
     const res = await trpcMutate(server.url, "clientState.delete", {
       key,
       scope: "all",
-      workspaceId: null,
       baseVersion: created.entry.version,
       clientId: "client-a",
     });
     expect(res.status).toBe(200);
     const deleted = await trpcData<WriteResult>(res);
-    expect(deleted.ok).toBe(true);
-    expect(deleted.entry.value).toBeNull();
-    expect(deleted.entry.version).toBe(created.entry.version + 1);
+    expect(deleted).toEqual({
+      ok: true,
+      entry: {
+        key,
+        scope: "all",
+        workspaceId: null,
+        value: null,
+        version: created.entry.version + 1,
+        updatedAt: expect.any(Number),
+      },
+    });
 
     // A client that still has the old value can't bring it back.
     const stale = await setEntry(server.url, {
       key,
       scope: "all",
-      workspaceId: null,
       value: "label-1",
       baseVersion: created.entry.version,
     });
-    expect(stale.ok).toBe(false);
-    expect(stale.entry.value).toBeNull();
+    expect(stale).toEqual({ ok: false, entry: deleted.entry });
 
-    const listed = (await listEntries(server.url, null, "mobile")).find((e) => e.key === key);
-    expect(listed?.value).toBeNull();
-    expect(listed?.version).toBe(created.entry.version + 1);
+    // Tombstones aren't listed.
+    expect((await listEntries(server.url, null, "mobile")).map((e) => e.key)).not.toContain(key);
+  });
+
+  it("refuses a delete based on a stale version", async () => {
+    const key = "band.projects-list.collapsed-labels";
+    const first = await setEntry(server.url, { key, scope: "all", value: ["a"], baseVersion: 0 });
+    const second = await setEntry(server.url, {
+      key,
+      scope: "all",
+      value: ["a", "b"],
+      baseVersion: first.entry.version,
+      clientId: "client-b",
+    });
+    const res = await trpcMutate(server.url, "clientState.delete", {
+      key,
+      scope: "all",
+      baseVersion: first.entry.version,
+      clientId: "client-a",
+    });
+    expect(res.status).toBe(200);
+    expect(await trpcData<WriteResult>(res)).toEqual({ ok: false, entry: second.entry });
   });
 
   it("refuses a value over the size limit", async () => {
     const res = await trpcMutate(server.url, "clientState.set", {
       key: `band-draft:${WS_MAIN}`,
       scope: "all",
-      workspaceId: WS_MAIN,
       value: "x".repeat(300 * 1024),
       baseVersion: 0,
       clientId: "client-a",
@@ -385,7 +414,6 @@ describe("clientState", () => {
       const written = await setEntry(server.url, {
         key,
         scope: "mobile",
-        workspaceId: null,
         value: "1.2",
         baseVersion: 0,
         clientId: "phone-page",
@@ -393,30 +421,66 @@ describe("clientState", () => {
       await setEntry(server.url, {
         key,
         scope: "mobile",
-        workspaceId: null,
         value: "0.8",
         baseVersion: 0,
         clientId: "stale-page",
       });
-      const event = await waitFor(() => sub.events.find((e) => e.clientState.key === key));
+      const event = await waitFor(async () => sub.events.find((e) => e.clientState.key === key), {
+        label: "zoom event",
+      });
       expect(event).toEqual({ clientState: written.entry, clientId: "phone-page" });
-      // Give a refused write's (non-)event time to arrive before counting.
+      // An event for a later write proves the refused write's (non-)event
+      // would have arrived by now.
       await setEntry(server.url, {
         key: "band:sidebar-width",
         scope: "mobile",
-        workspaceId: null,
         value: "20",
         baseVersion: 0,
       });
-      await waitFor(() => sub.events.find((e) => e.clientState.key === "band:sidebar-width"));
+      await waitFor(
+        async () => sub.events.find((e) => e.clientState.key === "band:sidebar-width"),
+        { label: "sidebar event" },
+      );
       expect(sub.events.filter((e) => e.clientState.key === key)).toHaveLength(1);
     } finally {
       sub.close();
     }
   });
 
-  it("removes a workspace's keys when the workspace is deleted", async () => {
-    expect(countRows(tmpHome, WS_FEATURE)).toBe(3);
+  it("removes a workspace's keys when the workspace is deleted, and refuses new ones", async () => {
+    const featureDraft = `band-draft:${WS_FEATURE}`;
+    const featureSplit = `band:term-split:${WS_FEATURE}:leaf-1`;
+    const mainBranch = `band:diff-compare-branch:${WS_MAIN}`;
+    const globalKey = "band.projects-list.label-last-workspace";
+    const draft = (await listEntries(server.url, WS_FEATURE, "desktop")).find(
+      (e) => e.key === featureDraft,
+    );
+    await setEntry(server.url, {
+      key: featureDraft,
+      scope: "all",
+      value: "draft before delete",
+      baseVersion: draft?.version ?? 0,
+    });
+    await setEntry(server.url, {
+      key: featureSplit,
+      scope: "all",
+      value: { panels: {} },
+      baseVersion: 0,
+    });
+    const kept = await setEntry(server.url, {
+      key: mainBranch,
+      scope: "all",
+      value: "develop",
+      baseVersion: 0,
+    });
+    const global = await setEntry(server.url, {
+      key: globalKey,
+      scope: "all",
+      value: { lbl: WS_MAIN },
+      baseVersion: 0,
+    });
+    expect(countRows(tmpHome, WS_FEATURE)).toBeGreaterThanOrEqual(2);
+
     const res = await trpcMutate(server.url, "workspaces.remove", {
       project: "proj",
       name: "feature",
@@ -424,8 +488,24 @@ describe("clientState", () => {
     expect(res.status).toBe(200);
     expect(countRows(tmpHome, WS_FEATURE)).toBe(0);
     expect(await listEntries(server.url, WS_FEATURE, "desktop")).toEqual([]);
+
+    // A device that missed the deletion can't bring the rows back.
+    const late = await trpcMutate(server.url, "clientState.set", {
+      key: featureDraft,
+      scope: "all",
+      value: "written offline",
+      baseVersion: 0,
+      clientId: "offline-page",
+    });
+    expect(late.status).toBe(404);
+    expect(countRows(tmpHome, WS_FEATURE)).toBe(0);
+
     // Other workspaces and global keys are untouched.
-    expect(countRows(tmpHome, WS_MAIN)).toBe(1);
-    expect((await listEntries(server.url, null, "desktop")).length).toBeGreaterThan(0);
+    expect(
+      (await listEntries(server.url, WS_MAIN, "desktop")).find((e) => e.key === mainBranch),
+    ).toEqual(kept.entry);
+    expect(
+      (await listEntries(server.url, null, "desktop")).find((e) => e.key === globalKey),
+    ).toEqual(global.entry);
   });
 });

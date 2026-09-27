@@ -11,8 +11,8 @@
  */
 
 import type { DockviewApi } from "dockview";
+import { CENTER_TABS_PREFIX } from "../shared/client-state-keys";
 import { clientStorage } from "./client-state";
-import { CENTER_TABS_PREFIX } from "./client-state-keys";
 
 export type CenterTabKind = "chat" | "term" | "browser" | "file" | "diff";
 

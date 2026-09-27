@@ -17,6 +17,7 @@ import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -166,6 +167,10 @@ test.beforeAll(async () => {
 
   server = await startServer({ tmpHome });
 });
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   if (typeof server !== "undefined") await server.close();

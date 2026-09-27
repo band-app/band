@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
-const DESKTOP_QUERY = "(min-width: 1024px)";
+/** The viewport width at which the dashboard switches to its desktop layout. */
+export const DESKTOP_QUERY = "(min-width: 1024px)";
 
 function subscribe(cb: () => void) {
   const mql = window.matchMedia(DESKTOP_QUERY);

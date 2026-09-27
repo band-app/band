@@ -23,13 +23,14 @@
  * pushes them on the next load.
  */
 
+import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import type {
   ClientStateEntry,
   ClientStateScope,
   ClientStateWriteResult,
   DeviceType,
 } from "../shared/client-state";
-import { type KeyPart, matchKey } from "./client-state-keys";
+import { type KeyPart, matchKey } from "../shared/client-state-keys";
 import { isDesktop } from "./is-desktop";
 
 /**
@@ -118,6 +119,7 @@ class ClientStateStore {
   readonly clientId = Math.random().toString(36).slice(2) + Date.now().toString(36);
   private device: DeviceType | null = null;
   private meta: Meta | null = null;
+  private metaSaveQueued = false;
   /** Last server value per entry id, as seen by this page. */
   private readonly confirmed = new Map<string, unknown>();
   private readonly hydrated = new Set<string>();
@@ -133,8 +135,7 @@ class ClientStateStore {
   /** Desktop or mobile, fixed for the page's lifetime (same breakpoint as the layout). */
   deviceType(): DeviceType {
     if (!this.device) {
-      const wide =
-        typeof window !== "undefined" && window.matchMedia?.("(min-width: 1024px)")?.matches;
+      const wide = typeof window !== "undefined" && window.matchMedia?.(DESKTOP_QUERY)?.matches;
       this.device = isDesktop || wide ? "desktop" : "mobile";
     }
     return this.device;
@@ -165,8 +166,14 @@ class ClientStateStore {
     return meta;
   }
 
+  /** Write the meta blob once per task, however many entries changed in it. */
   private saveMeta(): void {
-    writeLocal(META_KEY, JSON.stringify(this.getMeta()));
+    if (this.metaSaveQueued) return;
+    this.metaSaveQueued = true;
+    queueMicrotask(() => {
+      this.metaSaveQueued = false;
+      writeLocal(META_KEY, JSON.stringify(this.getMeta()));
+    });
   }
 
   private setPending(id: string, pending: boolean): void {
@@ -245,13 +252,7 @@ class ClientStateStore {
     this.inflight.add(id);
     let result: ClientStateWriteResult;
     try {
-      const common = {
-        key,
-        scope,
-        workspaceId: matched.workspaceId,
-        baseVersion,
-        clientId: this.clientId,
-      };
+      const common = { key, scope, baseVersion, clientId: this.clientId };
       const trpc = await api();
       // tRPC types a `z.unknown()` field as optional; the server always sets it.
       result = (
@@ -523,6 +524,7 @@ export function startClientStateSync(
       if (snapshots > 1) store.resync();
     }
   });
+  // Writes still pending when the page closes stay in the meta blob and are
+  // pushed on the next load.
   window.addEventListener("online", () => store.flushPending());
-  window.addEventListener("pagehide", () => store.flushPending());
 }

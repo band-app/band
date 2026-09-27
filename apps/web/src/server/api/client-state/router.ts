@@ -11,13 +11,31 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { ClientStateValueTooLargeError } from "../../errors";
+import {
+  ClientStateKeyError,
+  ClientStateValueTooLargeError,
+  ClientStateWorkspaceNotFoundError,
+} from "../../errors";
 import { clientStateService } from "../../services/client-state-service";
 import { publicProcedure, t } from "../trpc";
 
 const key = z.string().min(1).max(512);
 const scope = z.enum(["all", "desktop", "mobile"]);
 const workspaceId = z.string().min(1).max(512).nullable();
+
+/** Map the service's domain errors to tRPC codes; rethrow anything else. */
+function rethrowClientStateError(err: unknown): never {
+  if (err instanceof ClientStateValueTooLargeError) {
+    throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: err.message });
+  }
+  if (err instanceof ClientStateKeyError) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+  }
+  if (err instanceof ClientStateWorkspaceNotFoundError) {
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+  }
+  throw err;
+}
 const baseVersion = z.number().int().min(0);
 const clientId = z.string().min(1).max(100);
 
@@ -29,22 +47,23 @@ export const clientStateRouter = t.router({
     }),
 
   set: publicProcedure
-    .input(z.object({ key, scope, workspaceId, value: z.unknown(), baseVersion, clientId }))
+    .input(z.object({ key, scope, value: z.unknown(), baseVersion, clientId }))
     .mutation(({ input }) => {
       try {
         return clientStateService.set(input);
       } catch (err) {
-        if (err instanceof ClientStateValueTooLargeError) {
-          throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: err.message });
-        }
-        throw err;
+        rethrowClientStateError(err);
       }
     }),
 
   delete: publicProcedure
-    .input(z.object({ key, scope, workspaceId, baseVersion, clientId }))
+    .input(z.object({ key, scope, baseVersion, clientId }))
     .mutation(({ input }) => {
-      return clientStateService.delete(input);
+      try {
+        return clientStateService.delete(input);
+      } catch (err) {
+        rethrowClientStateError(err);
+      }
     }),
 });
 

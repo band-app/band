@@ -84,3 +84,27 @@ export class ClientStateValueTooLargeError extends Error {
     this.name = "ClientStateValueTooLargeError";
   }
 }
+
+/**
+ * Thrown by `ClientStateService` for a key that isn't a synced client-state
+ * key (`shared/client-state-keys.ts`), or a scope the key doesn't use.
+ * `api/client-state/router.ts` maps it to 400 `BAD_REQUEST`.
+ */
+export class ClientStateKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientStateKeyError";
+  }
+}
+
+/**
+ * Thrown by `ClientStateService` for a write to a key of a workspace that
+ * doesn't exist (for example deleted while the writing device was offline).
+ * `api/client-state/router.ts` maps it to 404 `NOT_FOUND`.
+ */
+export class ClientStateWorkspaceNotFoundError extends Error {
+  constructor(workspaceId: string) {
+    super(`Workspace not found: ${workspaceId}`);
+    this.name = "ClientStateWorkspaceNotFoundError";
+  }
+}

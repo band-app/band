@@ -21,6 +21,7 @@ import { gitInHome as git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -33,6 +34,8 @@ const TOKEN = "e2e-client-state-shared-tabs-token";
 const PROJECT = "shared-tabs-repo";
 const BRANCH = "main";
 const FILES = ["shared-alpha.txt", "shared-beta.txt", "shared-gamma.txt"];
+// One worktree per test, so no test sees another's tabs on the server.
+const TEST_BRANCHES = ["one", "two", "three"];
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -47,9 +50,8 @@ test.beforeAll(async () => {
   for (const file of FILES) writeFileSync(join(repo, file), `${file}\n`);
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
-  // One worktree per test, so no test sees another's tabs on the server.
   const worktrees = [{ branch: BRANCH, path: repo }];
-  for (const name of ["one", "two", "three"]) {
+  for (const name of TEST_BRANCHES) {
     const path = join(tmpHome, `${PROJECT}-${name}`);
     git(repo, ["worktree", "add", "-b", name, path]);
     worktrees.push({ branch: name, path });
@@ -61,6 +63,10 @@ test.beforeAll(async () => {
   server = await startServer({ tmpHome });
 });
 
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
+
 test.afterAll(async () => {
   await server.close();
   cleanupTmpHome(tmpHome);
@@ -68,8 +74,10 @@ test.afterAll(async () => {
 
 /** A workspace no earlier test has touched. */
 function freshWorkspace(): string {
+  const branch = TEST_BRANCHES[nextWorkspace];
+  if (!branch) throw new Error("add a branch to TEST_BRANCHES for the new test");
   nextWorkspace += 1;
-  return toWorkspaceId(PROJECT, ["one", "two", "three"][nextWorkspace - 1]);
+  return toWorkspaceId(PROJECT, branch);
 }
 
 async function openDevices(browser: Browser): Promise<{
@@ -133,8 +141,11 @@ test.describe("center tabs shared between desktop and phone", () => {
 
       await desktop.openFileViaQuickOpen(FILES[2]);
       await expect(phone.fileTab(FILES[2])).toBeAttached();
-      // The phone user stays on the tab they were looking at.
+      // The desktop made the new tab active, and the server has that…
+      await expect.poll(() => desktop.readSharedActiveTab(workspace)).toBe(`file:${FILES[2]}`);
+      // …but the phone user stays on the tab they were looking at.
       await expect(phone.fileLeafLine(FILES[0])).toBeVisible();
+      await expect(phone.fileLeafLine(FILES[2])).toHaveCount(0);
     } finally {
       for (const context of contexts) await context.close();
     }
