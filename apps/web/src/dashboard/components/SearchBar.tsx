@@ -145,6 +145,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
           floating ? "text-[13px]" : "text-sm",
         )}
         placeholder={placeholder}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         aria-label={placeholder}
         aria-invalid={noResults || undefined}
         value={query}

@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -150,6 +151,7 @@ test.describe("Mobile bottom drawers", () => {
       "data-variant",
       "command-palette",
     );
+    await expectNoKeyboardSuggestions(workspacePage.quickOpenInput);
 
     const box = await workspacePage.settledBoxOf(workspacePage.quickOpenDialog());
     expect(Math.abs(box.y + box.height - VIEWPORT.height)).toBeLessThanOrEqual(2);

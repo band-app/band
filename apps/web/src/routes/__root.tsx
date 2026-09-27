@@ -84,7 +84,13 @@ export const Route = createRootRoute({
       },
       { title: "Band" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      // Not `black-translucent`: on iOS 26 a home-screen app with that style and
+      // `viewport-fit=cover` draws from the top screen edge but sizes the window
+      // one status bar short (WebKit bug 301108), so the header sits under the
+      // status bar and an unpaintable strip opens above the home indicator.
+      // `black` gives an opaque status bar and a window that reaches the bottom
+      // edge. iOS reads this tag at install time: re-add the app to pick it up.
+      { name: "apple-mobile-web-app-status-bar-style", content: "black" },
       { name: "theme-color", content: "#1e1e1e" },
     ],
   }),

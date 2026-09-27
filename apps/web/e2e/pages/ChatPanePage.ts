@@ -29,6 +29,8 @@ export class ChatPanePage {
   /** The prompt textarea — placeholder is stable, hard-coded in
    *  `ChatView.tsx` and not user-localised. */
   readonly promptInput: Locator;
+  /** The `<form>` around the prompt textarea and its toolbar. */
+  readonly promptForm: Locator;
   /** The "Thinking…" indicator that surfaces while a task is in flight.
    *  Targeted by `data-testid` so the test doesn't depend on the user-
    *  visible copy. */
@@ -100,6 +102,7 @@ export class ChatPanePage {
     private readonly token: string,
   ) {
     this.promptInput = page.getByPlaceholder("Type a message...");
+    this.promptForm = page.getByTestId("prompt-input__form").filter({ visible: true });
     this.thinkingIndicator = page.getByTestId("chat-pane__thinking-indicator");
     // System-controlled aria-label set in `ChatView.tsx::SessionHistoryMenu` —
     // doctrine-preferred locator (role + name).

@@ -288,6 +288,10 @@ export const PromptInput = ({
 
   return (
     <form
+      // Keeps iOS AutoFill from offering saved contacts / passwords above the
+      // keyboard for the message field.
+      autoComplete="off"
+      data-testid="prompt-input__form"
       className={cn(
         "relative flex w-full flex-col rounded-md border-2 border-white/20 bg-muted/50 p-2 shadow-sm",
         isDragging && "border-primary/50 bg-primary/5",
@@ -541,6 +545,7 @@ export const PromptInputTextarea = ({
         ref={textareaRef}
         autoComplete="off"
         autoCorrect="off"
+        autoCapitalize="off"
         spellCheck={false}
         className={cn(
           "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
