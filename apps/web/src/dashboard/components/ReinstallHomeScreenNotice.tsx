@@ -16,15 +16,15 @@ function readSafeAreaInsetTop(): number {
   return inset;
 }
 
-/** An iOS home-screen app still running with the translucent status bar
- *  Band asked for before v0.33. iOS reads `apple-mobile-web-app-status-bar-style`
- *  only when the app is added, so those installs keep it: on iOS 26 the page
- *  then draws under the status bar and its window stops one status bar short of
- *  the bottom edge (WebKit bug 301108). With the current opaque `black` style
- *  the page starts below the status bar, so its top inset is 0. */
-function isStaleHomeScreenInstall(): boolean {
-  const standalone = (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  return standalone && readSafeAreaInsetTop() > 0;
+/** Whether this is an iOS home-screen app. One that reports a top inset still
+ *  runs with the translucent status bar Band asked for before #681 (v0.33.0).
+ *  iOS reads `apple-mobile-web-app-status-bar-style` only when the app is
+ *  added, so those installs keep it: on iOS 26 the page then draws under the
+ *  status bar and its window stops one status bar short of the bottom edge
+ *  (WebKit bug 301108). With the current opaque `black` style the page starts
+ *  below the status bar, so its top inset is 0. */
+function isIosHomeScreenApp(): boolean {
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
 /**
@@ -37,16 +37,20 @@ export function ReinstallHomeScreenNotice() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
+    if (!isIosHomeScreenApp()) return;
     try {
       if (localStorage.getItem(DISMISSED_KEY)) return;
     } catch {}
     // A stale install reports no top inset in landscape, so check again when
-    // the device turns.
+    // the device turns. Stop once found: the answer can't change, and a
+    // later resize must not bring back a dismissed notice.
     const check = () => {
-      if (isStaleHomeScreenInstall()) setShow(true);
+      if (readSafeAreaInsetTop() <= 0) return;
+      setShow(true);
+      window.removeEventListener("resize", check);
     };
-    check();
     window.addEventListener("resize", check);
+    check();
     return () => window.removeEventListener("resize", check);
   }, []);
 

@@ -135,6 +135,15 @@ export class MobileLayoutPage {
     });
   }
 
+  /** Resize the window, as turning the device does, and wait for the page to
+   *  see the new size. */
+  async rotate(size: { width: number; height: number }): Promise<void> {
+    await test.step(`Resize to ${size.width}x${size.height}`, async () => {
+      await this.page.setViewportSize(size);
+      await expect.poll(() => this.page.evaluate(() => window.innerWidth)).toBe(size.width);
+    });
+  }
+
   /** Close the open Explorer / Changes sheet, back to the editor. */
   async closeSheet(): Promise<void> {
     await test.step("Close the bottom sheet", async () => {

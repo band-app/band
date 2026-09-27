@@ -206,6 +206,9 @@ test.describe("safe-area insets in a home-screen app", () => {
     const viewport = await layout.readViewport();
     expect(viewport.standalone).toBe(true);
     expect(await layout.readStatusBarStyle()).toBe("black");
+    // Not an iOS home-screen app (no `navigator.standalone`), so a top inset
+    // alone doesn't ask for a reinstall.
+    await expect(layout.reinstallNotice).toHaveCount(0);
 
     const header = await layout.readLayout(layout.header);
     expect(header.top).toBe(0);
@@ -317,9 +320,9 @@ test.describe("safe-area insets in a wide home-screen app", () => {
 
     // Both columns and the nav buttons over them start below the status bar,
     // so the title bars and the tab strip are not drawn under it.
-    const sidebarTop = await layout.readLayout(layout.sidebar);
-    expect(sidebarTop.top).toBe(0);
-    expect(sidebarTop.paddingTop).toBe(SAFE_AREA_TOP);
+    const sidebar = await layout.readLayout(layout.sidebar);
+    expect(sidebar.top).toBe(0);
+    expect(sidebar.paddingTop).toBe(SAFE_AREA_TOP);
     const mainColumn = await layout.readLayout(layout.appShellMain);
     expect(mainColumn.top).toBe(0);
     expect(mainColumn.paddingTop).toBe(SAFE_AREA_TOP);
@@ -328,7 +331,6 @@ test.describe("safe-area insets in a wide home-screen app", () => {
 
     // The sidebar column pads the inset itself, so the gap under its action
     // bar is painted in the sidebar colour rather than the app background.
-    const sidebar = await layout.readLayout(layout.sidebar);
     expect(sidebar.paddingBottom).toBe(SAFE_AREA_BOTTOM);
     const sidebarBar = await layout.readLayout(layout.sidebarActionBar);
     expect(sidebarBar.bottom).toBe(viewport.height - SAFE_AREA_BOTTOM);
@@ -371,10 +373,17 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
     await chat.waitForReady();
 
     await expect(layout.reinstallNotice).toBeVisible();
+    const viewport = await layout.readViewport();
     const notice = await layout.readLayout(layout.reinstallNotice);
-    expect(notice.bottom).toBeLessThanOrEqual(PHONE.height - SAFE_AREA_BOTTOM);
+    expect(notice.bottom).toBeLessThanOrEqual(viewport.height - SAFE_AREA_BOTTOM);
 
+    // Turning the device doesn't bring a dismissed notice back.
     await layout.dismissReinstallNotice();
+    await layout.rotate({ width: PHONE.height, height: PHONE.width });
+    await layout.rotate(PHONE);
+    await expect(chat.promptInput).toBeVisible();
+    await expect(layout.reinstallNotice).toHaveCount(0);
+
     await chat.goto(WORKSPACE);
     await chat.waitForReady();
     await expect(layout.reinstallNotice).toHaveCount(0);
