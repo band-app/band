@@ -57,20 +57,27 @@ export class CenterTabStrip {
 
   /** Drag a finger along the strip, starting on `startTab`. `distance` is how
    *  far the finger moves left, so a positive value scrolls toward the tabs on
-   *  the right. Chromium turns the gesture into real touch pointer events plus
-   *  a native pan, the same as a phone. */
+   *  the right. Sends raw touch start / move / end input, which Chromium turns
+   *  into touch pointer events plus a native pan, the same as a phone.
+   *  (`Input.synthesizeScrollGesture` sends no touchmove events on the Linux
+   *  headless shell CI runs, so it can't stand in for a finger there.) */
   async touchSwipe(startTab: Locator, distance: number): Promise<void> {
     await test.step(`Swipe the tab strip ${distance}px with a finger`, async () => {
-      const point = await this.touchPoint(startTab);
-      await this.withCdp((cdp) =>
-        cdp.send("Input.synthesizeScrollGesture", {
-          ...point,
-          xDistance: -distance,
-          yDistance: 0,
-          gestureSourceType: "touch",
-          speed: 600,
-        }),
-      );
+      const { x, y } = await this.touchPoint(startTab);
+      const steps = 10;
+      await this.withCdp(async (cdp) => {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [{ x, y }],
+        });
+        for (let i = 1; i <= steps; i++) {
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x: x - (distance * i) / steps, y }],
+          });
+        }
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      });
     });
   }
 
