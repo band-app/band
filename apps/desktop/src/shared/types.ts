@@ -104,7 +104,7 @@ export interface BrowserViewDestroyedPayload {
  * The guest consumes its own keydowns, so the renderer never sees them; the
  * main process swallows the key and forwards it, and the renderer re-dispatches
  * it as a `keydown` on the tab's `<webview>` so the ordinary DOM handlers
- * (find bar, new tab, close, split, cycle) run as if focus were in Band's UI.
+ * (find bar, new tabs, close, split, cycle) run as if focus were in Band's UI.
  */
 export interface BrowserGuestShortcutPayload {
   browser_id: string;
@@ -113,6 +113,7 @@ export interface BrowserGuestShortcutPayload {
   shift: boolean;
   control: boolean;
   meta: boolean;
+  alt: boolean;
 }
 
 /**

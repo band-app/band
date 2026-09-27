@@ -5,6 +5,8 @@
  * both the CommandPaletteDialog component and the keyboard shortcut handler.
  */
 
+import { isDesktop } from "../../lib/is-desktop";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -68,6 +70,27 @@ export interface CommandRegistryDeps {
    */
   editorGoBack: () => void;
   editorGoForward: () => void;
+  /**
+   * Add a new leaf of the given kind to the active workspace's active group.
+   * Mirrors the ⌘T / ⌥⌘T / ⇧⌘B shortcuts in SharedDockviewLayout.
+   */
+  newLeaf: (kind: "term" | "chat" | "browser") => void;
+  /** Open the workspace picker (⌘K). */
+  openWorkspacePicker: () => void;
+  /** Close the active tab of the active workspace (⌘W). */
+  closeActiveTab: () => void;
+  /** Split the active tab (⌘D / ⌘⇧D). A terminal splits into nested panes. */
+  splitActiveTab: (direction: "right" | "below") => void;
+  /** Move to the next / previous tab in the active group (⇧⌘] / ⇧⌘[). */
+  cycleTabs: (direction: 1 | -1) => void;
+  /** Move to the next / previous pane group (⌘] / ⌘[). */
+  cycleGroups: (direction: 1 | -1) => void;
+  /** Show / hide the right or bottom edge panel (⌥⌘B / ⌘J). */
+  toggleEdgePanel: (edge: "right" | "bottom") => void;
+  /** Maximize or restore the active group (⇧⌘M). */
+  toggleMaximize: () => void;
+  /** Open the active editor's file in the external editor (⌘O). */
+  openFileExternal: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +136,35 @@ export function formatShortcut(shortcut: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Platform-specific chords
+// ---------------------------------------------------------------------------
+
+/**
+ * Chords that differ between macOS and Windows / Linux, where the plain
+ * `Cmd+` → `Ctrl+` swap in `formatShortcut` would name a binding that
+ * doesn't exist. The keyboard handlers apply the same split.
+ */
+function platformShortcuts() {
+  const mac = isMacPlatform();
+  return {
+    // Ctrl+Alt is AltGr on Windows and "open terminal" on Linux, so there is no
+    // ⌥⌘T there; Ctrl+Shift+N opens the same default-agent chat.
+    newChat: mac ? "Cmd+Alt+T" : "Cmd+Shift+N",
+    // Ctrl+D is the shell's EOF, so Windows / Linux split with Orca's chords.
+    splitRight: mac ? "Cmd+D" : "Ctrl+Shift+D",
+    splitDown: mac ? "Cmd+Shift+D" : "Alt+Shift+D",
+    // ⌃⌘I needs the Cmd key; Windows / Linux use VS Code's chat chord.
+    showChat: mac ? "Ctrl+Cmd+I" : "Ctrl+Alt+I",
+  };
+}
+
+/** Call a `window.__band*` global registered by the app shell, if present. */
+function callWindowGlobal(name: string, ...args: unknown[]): void {
+  const fn = (window as unknown as Record<string, unknown>)[name];
+  if (typeof fn === "function") fn(...args);
+}
+
+// ---------------------------------------------------------------------------
 // Command builder
 // ---------------------------------------------------------------------------
 
@@ -122,6 +174,7 @@ function activatePanel(deps: CommandRegistryDeps, panelId: string): void {
 }
 
 export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
+  const keys = platformShortcuts();
   return [
     {
       // ⌘N — open a new untitled (scratch) editor tab. Listed first
@@ -133,6 +186,30 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       shortcut: "Cmd+N",
       action: () => deps.newUntitledTab(),
     },
+    {
+      // New-tab chords copied from Orca (see SharedDockviewLayout).
+      id: "new-terminal",
+      label: "New Terminal",
+      shortcut: "Cmd+T",
+      action: () => deps.newLeaf("term"),
+    },
+    {
+      id: "new-chat",
+      label: "New Chat (Default Agent)",
+      shortcut: keys.newChat,
+      action: () => deps.newLeaf("chat"),
+    },
+    // Browser tabs are <webview> guests, which exist only in the desktop app.
+    ...(isDesktop
+      ? [
+          {
+            id: "new-browser",
+            label: "New Browser",
+            shortcut: "Cmd+Shift+B",
+            action: () => deps.newLeaf("browser"),
+          },
+        ]
+      : []),
     {
       id: "quick-open",
       label: "Quick Open",
@@ -185,7 +262,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     {
       id: "show-chat",
       label: "Show Chat",
-      shortcut: "Ctrl+Cmd+I",
+      shortcut: keys.showChat,
       action: () => activatePanel(deps, "chat"),
     },
     {
@@ -209,9 +286,146 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     {
       id: "show-browser",
       label: "Show Browser",
-      shortcut: "Cmd+Shift+B",
       action: () => activatePanel(deps, "browser"),
     },
+    {
+      id: "close-tab",
+      label: "Close Tab",
+      shortcut: "Cmd+W",
+      action: () => deps.closeActiveTab(),
+    },
+    {
+      id: "split-right",
+      label: "Split Right",
+      shortcut: keys.splitRight,
+      action: () => deps.splitActiveTab("right"),
+    },
+    {
+      id: "split-down",
+      label: "Split Down",
+      shortcut: keys.splitDown,
+      action: () => deps.splitActiveTab("below"),
+    },
+    {
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs too.
+      id: "next-tab",
+      label: "Next Tab",
+      shortcut: "Cmd+Shift+]",
+      action: () => deps.cycleTabs(1),
+    },
+    {
+      id: "previous-tab",
+      label: "Previous Tab",
+      shortcut: "Cmd+Shift+[",
+      action: () => deps.cycleTabs(-1),
+    },
+    {
+      id: "next-pane",
+      label: "Next Pane",
+      shortcut: "Cmd+]",
+      action: () => deps.cycleGroups(1),
+    },
+    {
+      id: "previous-pane",
+      label: "Previous Pane",
+      shortcut: "Cmd+[",
+      action: () => deps.cycleGroups(-1),
+    },
+    {
+      id: "toggle-maximize",
+      label: "Maximize / Restore Pane",
+      shortcut: "Cmd+Shift+M",
+      action: () => deps.toggleMaximize(),
+    },
+    {
+      id: "toggle-sidebar",
+      label: "Toggle Sidebar",
+      shortcut: "Cmd+B",
+      action: () => window.dispatchEvent(new CustomEvent("band:toggle-sidebar")),
+    },
+    {
+      id: "toggle-right-panel",
+      label: "Toggle Right Panel",
+      shortcut: "Cmd+Alt+B",
+      action: () => deps.toggleEdgePanel("right"),
+    },
+    {
+      id: "toggle-bottom-panel",
+      label: "Toggle Bottom Panel",
+      shortcut: "Cmd+J",
+      action: () => deps.toggleEdgePanel("bottom"),
+    },
+    {
+      id: "switch-workspace",
+      label: "Switch Workspace…",
+      shortcut: "Cmd+K",
+      action: () => deps.openWorkspacePicker(),
+    },
+    {
+      // ⌥⌘← / ⌥⌘→, copied from Orca's worktree history. AppShell owns the
+      // history stack and listens for these events and the keys.
+      id: "workspace-go-back",
+      label: "Previous Workspace",
+      shortcut: "Cmd+Alt+←",
+      action: () => window.dispatchEvent(new CustomEvent("band:workspace-go-back")),
+    },
+    {
+      id: "workspace-go-forward",
+      label: "Next Workspace",
+      shortcut: "Cmd+Alt+→",
+      action: () => window.dispatchEvent(new CustomEvent("band:workspace-go-forward")),
+    },
+    {
+      // ⌘1..9 pick the Nth label; they depend on the user's labels, so only
+      // "All projects" is listed here.
+      id: "show-all-projects",
+      label: "Show All Projects",
+      shortcut: "Cmd+0",
+      action: () => window.dispatchEvent(new CustomEvent("band:show-all-projects")),
+    },
+    {
+      id: "open-file-external",
+      label: "Open File in External Editor",
+      shortcut: "Cmd+O",
+      action: () => deps.openFileExternal(),
+    },
+    {
+      id: "zoom-in",
+      label: "Zoom In",
+      shortcut: "Cmd+=",
+      action: () => callWindowGlobal("__bandZoom", "in"),
+    },
+    {
+      id: "zoom-out",
+      label: "Zoom Out",
+      shortcut: "Cmd+-",
+      action: () => callWindowGlobal("__bandZoom", "out"),
+    },
+    {
+      id: "zoom-reset",
+      label: "Actual Size",
+      shortcut: "Cmd+Shift+0",
+      action: () => callWindowGlobal("__bandZoom", "reset"),
+    },
+    {
+      // ⌘, is a desktop View-menu accelerator; the browser keeps it.
+      id: "open-settings",
+      label: "Open Settings",
+      shortcut: isDesktop ? "Cmd+," : undefined,
+      action: () => callWindowGlobal("__bandOpenSettings"),
+    },
+    // ⌘R is a desktop View-menu accelerator. From the palette nothing inside
+    // a browser tab has focus, so it reloads the app.
+    ...(isDesktop
+      ? [
+          {
+            id: "reload",
+            label: "Reload",
+            shortcut: "Cmd+R",
+            action: () => callWindowGlobal("__bandReload"),
+          },
+        ]
+      : []),
     {
       // ⌃0 — reveal the project-list sidebar (which lives outside the
       // dockview) and move keyboard focus into the list. `band:show-sidebar`

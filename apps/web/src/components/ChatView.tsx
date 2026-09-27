@@ -17,7 +17,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
   Popover,
   PopoverContent,
@@ -1338,7 +1337,6 @@ function SessionHistoryMenu({
         <DropdownMenuItem onSelect={() => onNewSession()}>
           <Plus className="size-3.5" />
           New session
-          <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

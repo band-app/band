@@ -9,7 +9,12 @@ import {
 import { Columns2, Rows2, X } from "lucide-react";
 import type React from "react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { cycleGridGroups, selectNeighbourBeforeRemove } from "../lib/dockview-section-actions";
+import { isMacPlatform } from "../dashboard/lib/command-registry";
+import {
+  cycleGridGroups,
+  selectNeighbourBeforeRemove,
+  splitDirectionForKey,
+} from "../lib/dockview-section-actions";
 import { newTerminalId } from "../lib/leaf-instance-ids";
 import { disposeTerminal } from "../lib/terminal-cache";
 import {
@@ -551,6 +556,16 @@ export function TerminalSplitLeaf({
       const api = apiRef.current;
       if (!api) return;
       const key = e.key.toLowerCase();
+
+      // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) → split right / below.
+      const split = mobile ? null : splitDirectionForKey(e, isMacPlatform());
+      if (split) {
+        e.preventDefault();
+        e.stopPropagation();
+        splitFocused(split);
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
@@ -569,12 +584,7 @@ export function TerminalSplitLeaf({
         return;
       }
       if (key === "d") {
-        if (e.metaKey && !e.ctrlKey && !mobile) {
-          // ⌘D / ⌘⇧D → split right / below.
-          e.preventDefault();
-          e.stopPropagation();
-          splitFocused(e.shiftKey ? "below" : "right");
-        } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
           // Ctrl+D → close the focused pane, but on a LONE pane let it fall
           // through to xterm so the shell receives EOF (exits).
           if (api.panels.length > 1 && api.activePanel) {
@@ -592,6 +602,17 @@ export function TerminalSplitLeaf({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, mobile, splitFocused]);
+
+  // The command palette's Split Right / Split Down on a terminal tab.
+  useEffect(() => {
+    if (mobile) return;
+    const onSplit = (e: Event) => {
+      const detail = (e as CustomEvent<{ leafId: string; direction: "right" | "below" }>).detail;
+      if (detail?.leafId === leafId) splitFocused(detail.direction);
+    };
+    window.addEventListener("band:split-terminal-pane", onSplit);
+    return () => window.removeEventListener("band:split-terminal-pane", onSplit);
+  }, [leafId, mobile, splitFocused]);
 
   // Keep the latest `flushPersist` reachable from the unmount cleanup below
   // without putting it in the dep list (which would re-run the teardown).

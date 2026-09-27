@@ -892,27 +892,82 @@ export class WorkspacePage {
     return this.page.getByTestId(/^center-term-tab--/).filter({ visible: true });
   }
 
+  /** Visible center CHAT tabs in the outer dockview strip. */
+  chatTabs(): Locator {
+    return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
+  }
+
   private get modifier(): "Meta" | "Control" {
     return process.platform === "darwin" ? "Meta" : "Control";
+  }
+
+  /** Open a new terminal tab with ⌘T (Ctrl+T off macOS), caught by the
+   *  shell's window listener in `SharedDockviewLayout.tsx`. */
+  async pressNewTerminalShortcut(): Promise<void> {
+    await test.step("Open a new terminal tab (⌘T)", async () => {
+      await this.page.keyboard.press(`${this.modifier}+t`);
+    });
+  }
+
+  /** Open a new chat tab with the default agent: ⌥⌘T on macOS, Ctrl+Shift+N
+   *  on Windows / Linux, where Ctrl+Alt is AltGr / the desktop's terminal key.
+   *  The app picks by `navigator.platform`, which follows the host OS in
+   *  Playwright's Chromium, as `process.platform` does here. */
+  async pressNewChatShortcut(): Promise<void> {
+    await test.step("Open a new chat tab (⌥⌘T / Ctrl+Shift+N)", async () => {
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+Alt+t" : "Control+Shift+n",
+      );
+    });
+  }
+
+  /** The split chord: ⌘D / ⌘⇧D on macOS, Orca's Ctrl+Shift+D / Alt+Shift+D on
+   *  Windows / Linux, where plain Ctrl+D is the shell's EOF and closes a pane.
+   *  Same platform rule as `pressNewChatShortcut`. */
+  private splitChord(direction: "right" | "below"): string {
+    if (process.platform === "darwin") return direction === "right" ? "Meta+d" : "Meta+Shift+d";
+    return direction === "right" ? "Control+Shift+d" : "Alt+Shift+d";
+  }
+
+  /** Split the focused leaf or terminal pane to the RIGHT (⌘D). */
+  async pressSplitRight(): Promise<void> {
+    await test.step("Split right (⌘D / Ctrl+Shift+D)", async () => {
+      await this.page.keyboard.press(this.splitChord("right"));
+    });
   }
 
   /** Split the focused terminal pane to the RIGHT (⌘D). Assumes the terminal is
    *  already focused (call `focusTerminal` first, or a prior split leaves the
    *  new pane focused). */
   async splitTerminalRight(): Promise<void> {
-    await test.step("Split terminal pane right (⌘D)", async () => {
-      // Split is bound to ⌘D only (`e.metaKey && !e.ctrlKey`): Ctrl+D is the
-      // shell's EOF and closes a pane. Send Meta on every platform, including
-      // the Linux CI runner, where the platform modifier would be Control.
-      await this.page.keyboard.press("Meta+d");
+    await test.step("Split terminal pane right (⌘D / Ctrl+Shift+D)", async () => {
+      await this.page.keyboard.press(this.splitChord("right"));
     });
   }
 
   /** Split the focused terminal pane BELOW (⌘⇧D). */
   async splitTerminalBelow(): Promise<void> {
-    await test.step("Split terminal pane below (⌘⇧D)", async () => {
-      // ⌘⇧D only; see `splitTerminalRight`.
-      await this.page.keyboard.press("Meta+Shift+d");
+    await test.step("Split terminal pane below (⌘⇧D / Alt+Shift+D)", async () => {
+      await this.page.keyboard.press(this.splitChord("below"));
+    });
+  }
+
+  /** Step workspace history back / forward: ⌥⌘← / ⌥⌘→ on macOS, Ctrl+Alt+← /
+   *  → elsewhere (caught by AppShell in `routes/__root.tsx`). */
+  async pressWorkspaceHistory(direction: "back" | "forward"): Promise<void> {
+    await test.step(`Workspace history ${direction} (⌥⌘←/→)`, async () => {
+      const arrow = direction === "back" ? "ArrowLeft" : "ArrowRight";
+      await this.page.keyboard.press(`${this.modifier}+Alt+${arrow}`);
+    });
+  }
+
+  /** Show the chat: ⌃⌘I on macOS, Ctrl+Alt+I on Windows / Linux. Same
+   *  platform rule as `pressNewChatShortcut`. */
+  async pressShowChatShortcut(): Promise<void> {
+    await test.step("Show chat (⌃⌘I / Ctrl+Alt+I)", async () => {
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Control+Meta+i" : "Control+Alt+i",
+      );
     });
   }
 
@@ -1192,7 +1247,7 @@ export class WorkspacePage {
       .getByTestId(new RegExp(`^${prefix}`))
       .first()
       .click();
-    await this.page.keyboard.press("Meta+d");
+    await this.page.keyboard.press(this.splitChord("right"));
   }
 
   /** Split the active chat leaf to the right (Cmd+D) in the given workspace. */
@@ -1214,8 +1269,7 @@ export class WorkspacePage {
         .first()
         .click();
       await host.getByRole("textbox", { name: "Terminal input" }).first().focus();
-      // ⌘D only; see `splitTerminalRight`.
-      await this.page.keyboard.press("Meta+d");
+      await this.page.keyboard.press(this.splitChord("right"));
     });
   }
 
