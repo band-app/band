@@ -155,13 +155,26 @@ interface TableWidgetOptions {
 const editors = new WeakMap<HTMLElement, TableEditor>();
 
 export class TableWidget extends WidgetType {
+  private cells: Inline[][][] | null = null;
+
   constructor(
     readonly source: string,
-    readonly inline: Inline[][][],
+    private readonly state: EditorState,
+    private readonly node: SyntaxNode,
     readonly readOnly: boolean,
     readonly options: TableWidgetOptions,
   ) {
     super();
+  }
+
+  /**
+   * Each cell's inline markdown. Built on first use: the preview makes a new
+   * widget for every table on each edit, but only a table whose source
+   * changed (`eq` fails) is drawn and needs it.
+   */
+  get inline(): Inline[][][] {
+    this.cells ??= tableInline(this.state, this.node);
+    return this.cells;
   }
   eq(other: TableWidget): boolean {
     return other.source === this.source && other.readOnly === this.readOnly;
@@ -194,12 +207,7 @@ export function tableWidget(
   to: number,
   options: TableWidgetOptions,
 ): TableWidget {
-  return new TableWidget(
-    state.doc.sliceString(from, to),
-    tableInline(state, node),
-    state.readOnly,
-    options,
-  );
+  return new TableWidget(state.doc.sliceString(from, to), state, node, state.readOnly, options);
 }
 
 type Caret = "start" | "end" | number;
@@ -222,6 +230,8 @@ class TableEditor {
   private table: TableSource;
   private menu: { el: HTMLElement; close: () => void } | null = null;
   private pendingFocus: { row: RowIndex; col: number; caret: Caret } | null = null;
+  /** The cell elements by row and column, filled by `render`. */
+  private cells: HTMLElement[][] = [];
 
   constructor(
     private readonly view: EditorView,
@@ -279,7 +289,8 @@ class TableEditor {
             el.textContent = text;
             placeCaret(el, "end");
           }
-        } else if (text !== cellText(prev, row, col) || !sameInline(prevWidget, widget, row, col)) {
+        } else if (text !== cellText(prev, row, col)) {
+          // A cell's inline markdown follows from its text alone.
           renderInline(el, widget.inline[row]?.[col]);
         }
       }
@@ -301,13 +312,17 @@ class TableEditor {
     table.className = "cm-md-table";
     const thead = table.createTHead();
     const tbody = table.createTBody();
+    this.cells = [];
     for (let row = 0; row <= this.lastRow; row++) {
       const tr = (row === 0 ? thead : tbody).insertRow();
+      this.cells.push([]);
       for (let col = 0; col < this.table.columns; col++) {
         const cell = document.createElement(row === 0 ? "th" : "td");
         const align = this.table.align[col];
         if (align) cell.style.textAlign = align;
-        cell.appendChild(this.createCell(row, col, editable));
+        const content = this.createCell(row, col, editable);
+        this.cells[row].push(content);
+        cell.appendChild(content);
         if (editable && row === 0) {
           cell.appendChild(
             this.createButton(
@@ -434,9 +449,7 @@ class TableEditor {
   }
 
   private cellEl(row: RowIndex, col: number): HTMLElement | null {
-    return this.dom.querySelector<HTMLElement>(
-      `.cm-md-table-cell[data-row="${row}"][data-col="${col}"]`,
-    );
+    return this.cells[row]?.[col] ?? null;
   }
 
   private focusedCell(): { row: RowIndex; col: number } | null {
@@ -531,6 +544,9 @@ class TableEditor {
       },
       userEvent,
     });
+    // `update` consumes it inside the dispatch; if the table did not redraw
+    // (it stopped parsing as a table), drop it so a later update ignores it.
+    this.pendingFocus = null;
   }
 
   /**
@@ -585,6 +601,8 @@ class TableEditor {
   }
 
   private onCellKeyDown(e: KeyboardEvent, el: HTMLElement, row: RowIndex, col: number): void {
+    // Enter and the arrows belong to the input method while it composes.
+    if (e.isComposing || e.keyCode === 229) return;
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const handled = () => {
@@ -838,10 +856,6 @@ class TableEditor {
     // would let the browser put the editor caret next to the widget.
     if (!target.closest(".cm-md-table-cell, button")) e.preventDefault();
   }
-}
-
-function sameInline(a: TableWidget, b: TableWidget, row: RowIndex, col: number): boolean {
-  return JSON.stringify(a.inline[row]?.[col]) === JSON.stringify(b.inline[row]?.[col]);
 }
 
 /** The caret offset in a single-text-node cell, or null without a collapsed selection. */

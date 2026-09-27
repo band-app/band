@@ -23,6 +23,8 @@ export interface TableRowSource {
   trail: boolean;
   /** Whitespace after the last cell or trailing pipe. */
   tail: string;
+  /** The line this row was parsed from; absent for rows an edit created. */
+  source?: string;
 }
 
 export interface TableSource {
@@ -64,15 +66,16 @@ export function parseRow(line: string): TableRowSource {
     cells.push(body.slice(start, end));
     cellStarts.push(indent.length + start);
   }
-  return { indent, lead, cells, cellStarts, trail, tail };
+  return { indent, lead, cells, cellStarts, trail, tail, source: line };
 }
 
 export function serializeRow(row: TableRowSource): string {
-  // A row that is a single cell with no pipe is not a table row any more.
-  const pipes = row.cells.length === 1 && !row.lead && !row.trail;
-  const lead = row.lead || pipes;
-  const trail = row.trail || pipes;
-  return `${row.indent}${lead ? "|" : ""}${row.cells.join("|")}${trail ? "|" : ""}${row.tail}`;
+  const line = `${row.indent}${row.lead ? "|" : ""}${row.cells.join("|")}${row.trail ? "|" : ""}${row.tail}`;
+  // An edit that leaves a single cell and no pipe has made the row plain
+  // text, so it gets pipes. A row that was already written that way (GFM
+  // allows it in a single-column body) keeps its bytes.
+  if (row.cells.length !== 1 || row.lead || row.trail || line === row.source) return line;
+  return `${row.indent}|${row.cells[0]}|${row.tail}`;
 }
 
 function alignOf(raw: string): ColumnAlign {
@@ -138,7 +141,9 @@ function withContent(raw: string, text: string): string {
   const post = m?.[3] ?? "";
   if (!content) return text ? ` ${text} ` : raw || " ";
   if (!text) return pre + post || " ";
-  return pre + text + post;
+  // A trailing backslash would escape the pipe that closes the cell.
+  const escapesPipe = (/\\+$/.exec(text)?.[0].length ?? 0) % 2 === 1;
+  return pre + text + (post || (escapesPipe ? " " : ""));
 }
 
 function padRow(table: TableSource, row: TableRowSource, count: number): string[] {

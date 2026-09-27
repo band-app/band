@@ -10,7 +10,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
@@ -35,6 +35,8 @@ const TABLE = ["| Name | Role |", "|------|:----:|", "| Ada   | **eng** |", "| B
 const FILE = (table: string[]) => ["# Team", "", ...table, "", "After.", ""].join("\n");
 
 const FILES = ["CELLS.md", "KEYS.md", "STRUCTURE.md"];
+// No padding around the cells, so nothing separates cell text from its pipe.
+const COMPACT = ["|Name|Role|", "|-|-|", "|Ada|eng|"];
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -48,6 +50,7 @@ test.beforeAll(async () => {
   mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-b", BRANCH]);
   for (const name of FILES) writeFileSync(join(repo, name), FILE(TABLE));
+  writeFileSync(join(repo, "COMPACT.md"), FILE(COMPACT));
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
@@ -69,7 +72,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-async function openTable(page: import("@playwright/test").Page, file: string) {
+async function openTable(page: Page, file: string) {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
   await workspacePage.goto(WORKSPACE);
@@ -101,6 +104,8 @@ test("editing cell text in place rewrites only those cells, and undo goes throug
   // Undo and redo from inside the cell use the editor's history.
   await table.press("ControlOrMeta+z");
   await expect(table.cell(2, 1)).toHaveText("pm");
+  // One undo takes back one cell's typing, not the earlier cell's.
+  await expect(table.cell(1, 0)).toHaveText("Grace");
   await table.press("ControlOrMeta+Shift+z");
   await expect(table.cell(2, 1)).toHaveText("a\\|b");
 
@@ -113,7 +118,19 @@ test("editing cell text in place rewrites only those cells, and undo goes throug
     .toBe(FILE(["| Name | Role |", "|------|:----:|", "| Grace   | **eng** |", "| Bob | a\\|b |"]));
 });
 
-test("Tab and Enter move between cells and add rows at the end, Escape leaves the table", async ({
+test("a cell ending in a backslash does not escape the pipe that closes it", async ({ page }) => {
+  const { viewer, table } = await openTable(page, "COMPACT.md");
+
+  await table.replaceCell(1, 0, "C:\\");
+  await expect(table.cell(1, 1)).toHaveText("eng");
+
+  await viewer.saveWithShortcut();
+  await expect
+    .poll(() => readFile("COMPACT.md"), { timeout: 10_000 })
+    .toBe(FILE(["|Name|Role|", "|-|-|", "|C:\\ |eng|"]));
+});
+
+test("keyboard moves between cells, adds rows at the end and leaves the table", async ({
   page,
 }) => {
   const { viewer, table } = await openTable(page, "KEYS.md");
@@ -123,30 +140,46 @@ test("Tab and Enter move between cells and add rows at the end, Escape leaves th
   await table.press("Tab");
   await expect(table.cell(3, 0)).toBeFocused();
   await table.type("Cy");
-  await table.press("Tab");
+  // ArrowRight at the end of a cell moves to the next one.
+  await table.press("ArrowRight");
   await expect(table.cell(3, 1)).toBeFocused();
   await table.type("qa");
   // Enter on the last row adds a row below, in the same column.
   await table.press("Enter");
   await expect(table.cell(4, 1)).toBeFocused();
   await table.type("ops");
-  // Shift+Tab walks back; Shift+Enter moves up.
+  // Shift+Tab walks back; Shift+Enter and ArrowUp move up.
   await table.press("Shift+Tab");
   await expect(table.cell(4, 0)).toBeFocused();
   await table.press("Shift+Enter");
   await expect(table.cell(3, 0)).toBeFocused();
+  await table.press("ArrowUp");
+  await expect(table.cell(2, 0)).toBeFocused();
+  await table.press("ArrowDown");
+  await table.press("ArrowDown");
+  await expect(table.cell(4, 0)).toBeFocused();
   await expect(table.cell(4, 1)).toHaveText("ops");
 
-  // Escape puts the editor cursor on the next block, so typing there does
-  // not turn into a table row.
-  await table.press("Escape");
+  // ArrowDown on the last row leaves the table for the next block, so
+  // typing there does not turn into a table row.
+  await table.press("ArrowDown");
   await viewer.typeInPreview("Tail ");
+  // ArrowUp in the header leaves it for the block above.
+  await table.clickCell(0, 0);
+  await table.press("ArrowUp");
+  await viewer.typeInPreview("!");
+  // Escape leaves for the block below.
+  await table.clickCell(1, 0);
+  await table.press("Escape");
+  await viewer.typeInPreview("More ");
   await expect(viewer.previewRenderedBlock("table")).toBeVisible();
 
   await viewer.saveWithShortcut();
   await expect
     .poll(() => readFile("KEYS.md"), { timeout: 10_000 })
-    .toBe(["# Team", "", ...TABLE, "| Cy | qa |", "|  | ops |", "", "Tail After.", ""].join("\n"));
+    .toBe(
+      ["# Team!", "", ...TABLE, "| Cy | qa |", "|  | ops |", "", "More Tail After.", ""].join("\n"),
+    );
 });
 
 test("row and column menus insert, delete and align, and the cell menu shows the source", async ({
@@ -179,16 +212,34 @@ test("row and column menus insert, delete and align, and the cell menu shows the
   await expect(table.cell(0, 3)).toHaveCount(0);
   await expect(table.cell(0, 2)).toHaveText("Team");
 
+  await table.openRowMenu(2);
+  await table.chooseMenuItem("Insert row above");
+  await expect(table.cell(2, 0)).toBeFocused();
+  await table.type("Cat");
+  await expect(table.cell(3, 0)).toHaveText("Dee");
+
+  await table.openColumnMenu(0);
+  await table.chooseMenuItem("Insert column left");
+  await expect(table.cell(0, 0)).toBeFocused();
+  await table.type("No");
+  await expect(table.cell(0, 1)).toHaveText("Name");
+
   // "Edit as markdown" swaps the grid for the table's source.
-  await table.openCellMenu(1, 0);
+  await table.openCellMenu(1, 1);
   await table.chooseMenuItem("Edit as markdown");
   await expect(viewer.previewRenderedBlock("table")).toHaveCount(0);
-  await expect(viewer.markdownPreview).toContainText("|------|:----:|---:|");
+  await expect(viewer.markdownPreview).toContainText("|---|------|:----:|---:|");
 
   await viewer.saveWithShortcut();
   await expect
     .poll(() => readFile("STRUCTURE.md"), { timeout: 10_000 })
     .toBe(
-      FILE(["| Name | Role | Team |", "|------|:----:|---:|", "| Bob | pm |  |", "| Dee |  |  |"]),
+      FILE([
+        "| No | Name | Role | Team |",
+        "|---|------|:----:|---:|",
+        "|  | Bob | pm |  |",
+        "|  | Cat |  |  |",
+        "|  | Dee |  |  |",
+      ]),
     );
 });

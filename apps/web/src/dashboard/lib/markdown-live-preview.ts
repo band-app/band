@@ -5,8 +5,9 @@
  * top of it with decorations: heading lines get heading styles, the `**` /
  * `_` / backtick / `#` / `>` markers are hidden, bullets become `•`, task
  * markers become checkboxes, frontmatter and mermaid fences are swapped for a
- * rendered block, and tables for an editable grid (`markdown-table-widget.ts`). Wherever the selection touches a construct,
- * its raw markers come back so the user can edit them.
+ * rendered block, and tables for an editable grid (`markdown-table-widget.ts`).
+ * Wherever the selection touches a construct, its raw markers come back so
+ * the user can edit them.
  *
  * Because the document is the file's text, saving writes back exactly what is
  * in the buffer: nothing is re-serialised, so parts of the file the user did
