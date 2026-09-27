@@ -6,6 +6,7 @@ import {
   buildCommands,
   type ChatInsertDetail,
   CommandPaletteDialog,
+  isMacPlatform,
   parseFileLocation,
   QuickOpenDialog,
   recordWorkspaceAccess,
@@ -15,6 +16,7 @@ import {
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
+import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
@@ -80,6 +82,30 @@ function activateLeafOfKind(workspaceId: string | null, kind: LeafKind): boolean
     return true;
   }
   return false;
+}
+
+/** Add a new leaf of `kind` to the active group of a workspace's dockview.
+ *  An edge group collapses to zero size when empty, so when one is active the
+ *  leaf goes to the first grid group instead (same rule as the "+" menu). */
+function addLeafToActiveGroup(workspaceId: string | null, kind: LeafKind): void {
+  const api = getWorkspaceDockviewApi(workspaceId);
+  const active = api?.activeGroup;
+  const group =
+    active?.api.location.type === "grid"
+      ? active
+      : api?.groups.find((g) => g.api.location.type === "grid");
+  getWorkspaceLeafActions(workspaceId)?.onAdd(kind, group?.id);
+}
+
+/** Maximize the active group of a workspace's dockview, or restore it. */
+function toggleMaximizeActiveGroup(workspaceId: string | null): void {
+  const active = getWorkspaceDockviewApi(workspaceId)?.activeGroup;
+  if (!active) return;
+  if (active.api.isMaximized()) {
+    active.api.exitMaximized();
+  } else {
+    active.api.maximize();
+  }
 }
 
 /** Reveal the right sidepanel and (optionally) select its Explorer/Changes tab.
@@ -292,6 +318,48 @@ export function SharedDockviewLayout() {
             new CustomEvent("band:editor-go-forward", { detail: { workspaceId: ws } }),
           );
         },
+        newLeaf: (kind) => addLeafToActiveGroup(activeWorkspaceIdRef.current, kind),
+        openWorkspacePicker: () => setWorkspacePickerOpen(true),
+        closeActiveTab: () => {
+          const ws = activeWorkspaceIdRef.current;
+          const active = getWorkspaceDockviewApi(ws)?.activePanel;
+          if (!active) return;
+          getWorkspaceLeafActions(ws)?.onClose(active.id, active.api.component as LeafKind);
+        },
+        splitActiveTab: (direction) => {
+          const ws = activeWorkspaceIdRef.current;
+          const api = getWorkspaceDockviewApi(ws);
+          const active = api?.activePanel;
+          const groupId = api?.activeGroup?.id;
+          if (!active || !groupId) return;
+          const kind = active.api.component as LeafKind;
+          if (kind === "term") {
+            // Terminals split into nested panes, owned by the leaf's own dockview.
+            window.dispatchEvent(
+              new CustomEvent("band:split-terminal-pane", {
+                detail: { leafId: active.id, direction },
+              }),
+            );
+          } else if (kind === "chat" || kind === "browser") {
+            getWorkspaceLeafActions(ws)?.onSplit(kind, groupId, direction);
+          }
+        },
+        cycleTabs: (direction) =>
+          cycleTabsInActiveGroup(
+            getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null,
+            direction,
+          ),
+        cycleGroups: (direction) =>
+          cycleGridGroups(getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null, direction),
+
+        toggleMaximize: () => toggleMaximizeActiveGroup(activeWorkspaceIdRef.current),
+        openFileExternal: () => {
+          const ws = activeWorkspaceIdRef.current;
+          if (!ws) return;
+          window.dispatchEvent(
+            new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
+          );
+        },
       }),
     [],
   );
@@ -357,14 +425,41 @@ export function SharedDockviewLayout() {
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      if (terminalFocused && !e.metaKey) return;
 
       const key = e.key.toLowerCase();
+
+      // Off macOS the modifier is Ctrl, and a focused terminal keeps Ctrl chords
+      // for the shell (Ctrl+T transposes, Ctrl+B moves back). The shell has no
+      // use for Ctrl+Shift+N / B / P or Ctrl+Alt+I, so new chat, new browser,
+      // the command palette and show chat still work there.
+      const shellFreeChord =
+        (e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p")) ||
+        (e.altKey && !e.shiftKey && e.code === "KeyI");
+      if (terminalFocused && !e.metaKey && !shellFreeChord) return;
+
+      // New-tab chords copied from Orca: ⌘T terminal, ⌥⌘T chat with the
+      // default agent, ⇧⌘B browser. Each opens in the active group. ⌥⌘T is
+      // macOS only (Ctrl+Alt is AltGr on Windows and the desktop's "open
+      // terminal" on Linux), so Windows / Linux open a chat with Ctrl+Shift+N
+      // (below). It matches on `code` because ⌥ rewrites `key`.
+      if (key === "t" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        addLeafToActiveGroup(ws, "term");
+        return;
+      }
+      if (e.code === "KeyT" && e.altKey && e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        addLeafToActiveGroup(ws, "chat");
+        return;
+      }
 
       if (key === "n" && e.shiftKey) {
         // ⇧⌘N → the default agent, in this device's mode (issue #682).
         e.preventDefault();
-        getWorkspaceLeafActions(ws)?.onAdd("chat");
+        e.stopPropagation();
+        addLeafToActiveGroup(ws, "chat");
       } else if (key === "n" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
@@ -395,7 +490,15 @@ export function SharedDockviewLayout() {
         window.dispatchEvent(
           new CustomEvent("band:open-file-external", { detail: { workspaceId: ws } }),
         );
-      } else if (key === "i" && e.ctrlKey && e.metaKey) {
+      } else if (
+        e.code === "KeyI" &&
+        (isMacPlatform()
+          ? e.ctrlKey && e.metaKey
+          : e.ctrlKey && e.altKey && !e.metaKey && key === "i")
+      ) {
+        // ⌃⌘I (Ctrl+Alt+I off macOS, VS Code's chat key there) → show chat.
+        // Windows AltGr arrives as Ctrl+Alt; checking `key` leaves an
+        // AltGr-typed character (Hungarian Í) to the input.
         e.preventDefault();
         activateLeafOfKind(ws, "chat");
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-chat")));
@@ -408,9 +511,9 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         revealRightPanel("explorer");
       } else if (key === "b" && e.shiftKey) {
+        // ⇧⌘B → New Browser leaf.
         e.preventDefault();
-        activateLeafOfKind(ws, "browser");
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-browser")));
+        addLeafToActiveGroup(ws, "browser");
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
         // ⌘B → toggle the project sidebar.
         e.preventDefault();
@@ -422,14 +525,7 @@ export function SharedDockviewLayout() {
       } else if (key === "m" && e.shiftKey) {
         // ⇧⌘M → maximize / restore the active group.
         e.preventDefault();
-        const api = getWorkspaceDockviewApi(ws);
-        const active = api?.activeGroup;
-        if (!api || !active) return;
-        if (active.api.isMaximized()) {
-          active.api.exitMaximized();
-        } else {
-          active.api.maximize();
-        }
+        toggleMaximizeActiveGroup(ws);
       }
     };
     window.addEventListener("keydown", handler, true);

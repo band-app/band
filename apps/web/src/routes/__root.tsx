@@ -19,6 +19,7 @@ import {
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { UpdateToast } from "@/dashboard/components/UpdateToast";
+import { isMacPlatform } from "@/dashboard/lib/command-registry";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
@@ -332,6 +333,30 @@ function AppShell() {
   // Workspace back/forward history — drives the title-bar arrow buttons.
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
+
+  // ⌥⌘← / ⌥⌘→ (Ctrl+Alt+← / → off macOS) step workspace history, copied from
+  // Orca's worktree history keys. ⌘[ / ⌘] belong to pane cycling. The command
+  // palette's Previous / Next Workspace dispatch the events.
+  const { goBack, goForward } = navigationHistory;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const mod = isMacPlatform() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!mod || !e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "ArrowLeft") goBack();
+      else goForward();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("band:workspace-go-back", goBack);
+    window.addEventListener("band:workspace-go-forward", goForward);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("band:workspace-go-back", goBack);
+      window.removeEventListener("band:workspace-go-forward", goForward);
+    };
+  }, [goBack, goForward]);
 
   // Cmd+= / Cmd+- / Cmd+Shift+0 — zoom in/out/reset (browser mode only;
   // in the desktop shell the View menu accelerators handle these keys)

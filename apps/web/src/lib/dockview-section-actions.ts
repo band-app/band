@@ -227,3 +227,25 @@ export function selectNeighbourBeforeRemove(api: DockviewApi, panelId: string): 
   const previous = ordered[groupIdx === 0 ? ordered.length - 1 : groupIdx - 1];
   previous?.activePanel?.api.setActive();
 }
+
+/**
+ * The split direction a keydown asks for, or null when it isn't a split chord.
+ *
+ * macOS: ⌘D right, ⌘⇧D below. Windows / Linux take Orca's defaults,
+ * Ctrl+Shift+D right and Alt+Shift+D below, because plain Ctrl+D is the
+ * shell's EOF (TerminalSplitLeaf uses it to close a pane).
+ */
+export function splitDirectionForKey(
+  e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+  mac: boolean,
+): "right" | "below" | null {
+  if (e.key.toLowerCase() !== "d") return null;
+  if (mac) {
+    if (!e.metaKey || e.ctrlKey || e.altKey) return null;
+    return e.shiftKey ? "below" : "right";
+  }
+  if (!e.shiftKey || e.metaKey) return null;
+  if (e.ctrlKey && !e.altKey) return "right";
+  if (e.altKey && !e.ctrlKey) return "below";
+  return null;
+}

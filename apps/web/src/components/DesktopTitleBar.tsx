@@ -1,6 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { ChevronLeft, ChevronRight, ChevronsUpDown, PanelLeft, PanelRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { formatShortcut } from "../dashboard/lib/command-registry";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { EditorPicker } from "./EditorPicker";
@@ -40,9 +41,9 @@ export interface NavControlsProps {
   /** Whether the sidebar is currently visible — drives the toggle button's
    *  pressed state. */
   sidebarVisible?: boolean;
-  /** Navigate to the previous workspace in the history stack (⌘[). */
+  /** Navigate to the previous workspace in the history stack (⌥⌘←). */
   onGoBack?: () => void;
-  /** Navigate to the next workspace in the history stack (⌘]). */
+  /** Navigate to the next workspace in the history stack (⌥⌘→). */
   onGoForward?: () => void;
   /** Whether back navigation is currently available (enables/disables the button). */
   canGoBack?: boolean;
@@ -92,7 +93,7 @@ function RightPanelToggle({ onToggle, visible }: { onToggle: () => void; visible
       <TooltipContent side="bottom" className="text-xs">
         Toggle Explorer / Changes{" "}
         <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-          ⇧⌘E
+          {formatShortcut("Cmd+Shift+E")}
         </kbd>
       </TooltipContent>
     </Tooltip>
@@ -164,7 +165,7 @@ export function NavControls({
           <TooltipContent side="bottom" className="text-xs">
             Toggle Sidebar{" "}
             <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-              ⌘B
+              {formatShortcut("Cmd+B")}
             </kbd>
           </TooltipContent>
         </Tooltip>
@@ -187,7 +188,7 @@ export function NavControls({
             <TooltipContent side="bottom" className="text-xs">
               Back{" "}
               <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                ⌘[
+                {formatShortcut("Cmd+Alt+←")}
               </kbd>
             </TooltipContent>
           </Tooltip>
@@ -207,7 +208,7 @@ export function NavControls({
             <TooltipContent side="bottom" className="text-xs">
               Forward{" "}
               <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                ⌘]
+                {formatShortcut("Cmd+Alt+→")}
               </kbd>
             </TooltipContent>
           </Tooltip>
