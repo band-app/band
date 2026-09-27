@@ -877,9 +877,19 @@ export class AgentSessionService {
    * one reattaches), except for a mode change: only the agent keeps options
    * like effort and fast mode, and it reshapes the option list when the
    * model changes (fast mode only exists on some models).
+   *
+   * With `workspaceId`, a chat that has no row yet (a new pane, created
+   * lazily like on its first message) gets one with the default agent.
    */
-  async setConfigOption(chatId: string, configId: string, value: string): Promise<SessionState> {
-    const chat = chatService.get(chatId);
+  async setConfigOption(
+    chatId: string,
+    configId: string,
+    value: string,
+    workspaceId?: string,
+  ): Promise<SessionState> {
+    const chat =
+      chatService.get(chatId) ??
+      (workspaceId ? chatService.create(workspaceId, { id: chatId, name: "Chat" }) : undefined);
     if (!chat) throw new ChatNotFoundError(chatId);
     const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
     const category =

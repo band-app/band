@@ -196,8 +196,10 @@ function sessionPickers(session: SessionState | null) {
   const rest = (session?.configOptions ?? []).filter(
     (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
   );
-  const effort = rest.find((o) => o.category === "thought_level" || o.id === "effort");
   const fast = rest.find(isFastModeOption);
+  const effort = rest.find(
+    (o) => o !== fast && (o.category === "thought_level" || o.id === "effort"),
+  );
   return {
     models,
     model: modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId,
@@ -215,10 +217,9 @@ function sessionPickers(session: SessionState | null) {
 /** Fast mode as an on/off select. Band doesn't advertise boolean config
  *  options, so agents (Claude Code's `fast`) fall back to this shape. */
 function isFastModeOption(option: SelectOption): boolean {
-  const values = selectChoices(option)
-    .map((c) => c.id)
-    .sort();
-  return option.id === "fast" && values.length === 2 && values[0] === "off" && values[1] === "on";
+  if (option.id !== "fast") return false;
+  const values = new Set(selectChoices(option).map((c) => c.id));
+  return values.size === 2 && values.has("off") && values.has("on");
 }
 
 interface ChatViewProps {

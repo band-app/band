@@ -168,6 +168,7 @@ test.describe("Chat model settings menu", () => {
     await chatPane.clickNewSession();
     await expect(chatPane.emptyConversation).toBeVisible();
     const sessionsBefore = stubRequests(tmpHome, "session/new").length;
+    const optionsBefore = stubRequests(tmpHome, "session/set_config_option").length;
 
     await chatPane.openModelMenu();
     await chatPane.selectEffort("High");
@@ -178,11 +179,13 @@ test.describe("Chat model settings menu", () => {
     await chatPane.closeMenu();
 
     // The first change started a session and both changes reached it.
-    const newSessions = stubRequests(tmpHome, "session/new");
-    expect(newSessions).toHaveLength(sessionsBefore + 1);
-    const setOption = stubRequests(tmpHome, "session/set_config_option").map((r) => r.params);
-    const sessionId = (setOption.at(-1) as { sessionId: string }).sessionId;
-    expect(setOption.slice(-2)).toEqual([
+    await expect.poll(() => stubRequests(tmpHome, "session/new").length).toBe(sessionsBefore + 1);
+    const setOption = stubRequests(tmpHome, "session/set_config_option")
+      .slice(optionsBefore)
+      .map((r) => r.params);
+    expect(setOption).toHaveLength(2);
+    const sessionId = (setOption[0] as { sessionId: string }).sessionId;
+    expect(setOption).toEqual([
       { sessionId, configId: "effort", value: "high" },
       { sessionId, configId: "fast", value: "on" },
     ]);

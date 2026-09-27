@@ -435,8 +435,8 @@ describe("chat over ACP", () => {
 
     await trpc(server.url, "chats.setConfigOption", { chatId, configId: "effort", value: "high" });
 
-    expect(stubRequests(server.home, "session/resume").map((r) => r.params.sessionId)).toEqual([
-      chat.activeSessionId,
+    expect(stubRequests(server.home, "session/resume").map((r) => r.params)).toEqual([
+      { sessionId: chat.activeSessionId, cwd: `${server.home}/repo`, mcpServers: [] },
     ]);
     expect(stubRequests(server.home, "session/set_config_option").map((r) => r.params)).toEqual([
       { sessionId: chat.activeSessionId, configId: "effort", value: "high" },

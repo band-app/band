@@ -101,15 +101,13 @@ export const chatsRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      if (input.workspaceId && !chatService.get(input.chatId)) {
-        chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
-      }
       try {
         return {
           state: await agentSessionService.setConfigOption(
             input.chatId,
             input.configId,
             input.value,
+            input.workspaceId,
           ),
         };
       } catch (err) {
