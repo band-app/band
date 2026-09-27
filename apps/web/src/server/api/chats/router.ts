@@ -90,7 +90,16 @@ export const chatsRouter = t.router({
    * config options (Gemini CLI, Cursor CLI).
    */
   setConfigOption: publicProcedure
-    .input(z.object({ chatId: z.string(), configId: z.string(), value: z.string() }))
+    .input(
+      z.object({
+        chatId: z.string(),
+        configId: z.string(),
+        value: z.string(),
+        // Lets a new pane's first settings change create its chat record,
+        // like its first message does.
+        workspaceId: z.string().optional(),
+      }),
+    )
     .mutation(async ({ input }) => {
       try {
         return {
@@ -98,6 +107,7 @@ export const chatsRouter = t.router({
             input.chatId,
             input.configId,
             input.value,
+            input.workspaceId,
           ),
         };
       } catch (err) {

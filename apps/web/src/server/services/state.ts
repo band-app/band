@@ -174,8 +174,8 @@ export function upsertWorkspaceStatus(
     // could be inserted with empty `project`/`branch`/`worktreePath`
     // when the agent started before the project's worktree was
     // persisted (or were left behind by a prior version of Band). The
-    // desktop title-bar EditorPicker is gated on a non-empty
-    // `worktreePath` (DesktopTitleBar.tsx), so an empty value hides
+    // desktop EditorPicker in the right sidepanel header is gated on a
+    // non-empty `worktreePath` (DesktopTitleBar.tsx), so an empty value hides
     // the dropdown forever even though the worktree path is
     // recoverable from the projects/worktrees tables. Only overwrite
     // fields that are currently empty so we never clobber correct

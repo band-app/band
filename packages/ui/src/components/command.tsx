@@ -51,6 +51,12 @@ function CommandInput({
       <SearchIcon className="mr-2 h-4 w-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
+        // Search boxes take file / branch / workspace names: no autocorrect,
+        // capitalisation or QuickType suggestions on mobile keyboards.
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         className={cn(
           "flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className,

@@ -3787,3 +3787,281 @@ fn open_valid_line_range_is_parsed_and_round_tripped() {
         "json: {json}",
     );
 }
+
+// --- agents (issue #682) ---
+
+/// Read-modify-write the test home's `settings.json`.
+fn update_settings(env: &TestEnv, edit: impl FnOnce(&mut serde_json::Value)) {
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    edit(&mut settings);
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+}
+
+/// Configure agents whose CLI is a shell stub that prints `marker` and its
+/// arguments, then stays running, so a `tui` launch never starts a real
+/// agent. `claude-code` is the default; `codex` uses the same stub.
+fn use_stub_agent_cli(env: &TestEnv, marker: &str) {
+    let stub = env.tmp.path().join("stub-agent-cli.sh");
+    fs::write(
+        &stub,
+        format!("#!/bin/sh\necho {marker} \"$@\"\nexec sleep 600\n"),
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&stub, perms).unwrap();
+
+    let command = stub.to_string_lossy().to_string();
+    update_settings(env, |settings| {
+        settings["codingAgents"] = serde_json::json!([
+            {"id": "claude-code", "type": "claude-code", "label": "Claude Code", "command": command},
+            {"id": "codex", "type": "codex", "label": "Codex", "command": command},
+            {"id": "cursor-cli", "type": "cursor-cli", "label": "Cursor CLI"},
+        ]);
+        settings["defaultCodingAgent"] = serde_json::json!("claude-code");
+    });
+}
+
+/// Run `band` with an empty `BAND_DISPATCH`, so a value in the developer's
+/// shell can't pick the agent mode.
+fn band_clean(env: &TestEnv, args: &[&str]) -> std::process::Output {
+    env.band_with_env(args, &[("BAND_DISPATCH", "")])
+}
+
+fn band_json(env: &TestEnv, args: &[&str]) -> serde_json::Value {
+    let mut full = vec!["--output", "json"];
+    full.extend_from_slice(args);
+    let output = band_clean(env, &full);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON")
+}
+
+fn wait_for_terminal_output(env: &TestEnv, terminal_id: &str, needle: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let output = env.band(&["terminals", "output", terminal_id]);
+        if stdout(&output).contains(needle) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "terminal {terminal_id} never printed {needle:?}: {}",
+            stdout(&output)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-gui"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_id = "my-project-feat-agents-gui";
+
+    // Text output: `<mode>\t<chat id>`.
+    let output = band_clean(&env, &["agents", "launch", workspace_id, "--mode", "gui"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    let (mode, chat_id) = text.split_once('\t').expect("mode and pane, tab-separated");
+    assert_eq!(mode, "gui", "got {text:?}");
+    let chat_id = chat_id.to_string();
+
+    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let sessions = listed["agentSessions"]
+        .as_array()
+        .expect("agentSessions array");
+    assert_eq!(sessions.len(), 1, "got {listed}");
+    assert_eq!(sessions[0]["mode"], "gui");
+    assert_eq!(sessions[0]["chatId"], chat_id.as_str());
+    assert_eq!(sessions[0]["agentDefinitionId"], "claude-code");
+    let session_id = sessions[0]["id"].as_str().unwrap().to_string();
+
+    // Text output of `agents list`: the header, then a row whose PANE is the chat.
+    let table = band_clean(&env, &["agents", "list", workspace_id]);
+    assert!(table.status.success(), "stderr: {}", stderr(&table));
+    let table = stdout(&table);
+    let mut lines = table.lines();
+    let header = lines.next().expect("header row");
+    for column in [
+        "SESSION ID",
+        "AGENT",
+        "MODE",
+        "STATE",
+        "PANE",
+        "PROVIDER SESSION",
+    ] {
+        assert!(header.contains(column), "header {header:?} lacks {column}");
+    }
+    let row = lines.next().expect("session row");
+    for cell in [session_id.as_str(), "claude-code", "gui", chat_id.as_str()] {
+        assert!(row.contains(cell), "row {row:?} lacks {cell}");
+    }
+
+    let chats = band_json(&env, &["chats", "list", workspace_id]);
+    let has_chat = chats["chats"]
+        .as_array()
+        .expect("chats array")
+        .iter()
+        .any(|c| c["id"] == chat_id.as_str());
+    assert!(has_chat, "launched chat missing from chats list: {chats}");
+}
+
+#[test]
+fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-tui"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_id = "my-project-feat-agents-tui";
+
+    // `terminal` is the `--via` name for `tui`.
+    let launched = band_json(
+        &env,
+        &[
+            "agents",
+            "launch",
+            workspace_id,
+            "--mode",
+            "terminal",
+            "--agent",
+            "codex",
+            "--prompt",
+            "hello-from-cli",
+        ],
+    );
+    assert_eq!(launched["mode"], "tui", "got {launched}");
+    let terminal_id = launched["terminalId"]
+        .as_str()
+        .expect("terminalId on a tui launch")
+        .to_string();
+    wait_for_terminal_output(&env, &terminal_id, "STUB_AGENT_STARTED hello-from-cli");
+
+    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let sessions = listed["agentSessions"]
+        .as_array()
+        .expect("agentSessions array");
+    assert_eq!(sessions.len(), 1, "got {listed}");
+    assert_eq!(sessions[0]["mode"], "tui");
+    assert_eq!(sessions[0]["agentDefinitionId"], "codex");
+    assert_eq!(sessions[0]["terminalId"], terminal_id.as_str());
+
+    let killed = env.band(&["terminals", "kill", &terminal_id]);
+    assert!(killed.status.success(), "stderr: {}", stderr(&killed));
+}
+
+#[test]
+fn agents_launch_prints_a_note_when_an_agent_falls_back_to_a_chat() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-note"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let output = band_clean(
+        &env,
+        &[
+            "agents",
+            "launch",
+            "my-project-feat-agents-note",
+            "--mode",
+            "tui",
+            "--agent",
+            "cursor-cli",
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    let mut lines = text.lines();
+    let first = lines.next().expect("mode line");
+    assert!(first.starts_with("gui\t"), "got {text:?}");
+    let note = lines.next().expect("note line");
+    assert!(note.starts_with("note: "), "got {text:?}");
+}
+
+#[test]
+fn agents_launch_without_mode_uses_the_server_default() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    update_settings(&env, |settings| {
+        settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
+    });
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-default"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let launched = band_json(
+        &env,
+        &["agents", "launch", "my-project-feat-agents-default"],
+    );
+    assert_eq!(launched["mode"], "tui", "got {launched}");
+    let terminal_id = launched["terminalId"].as_str().expect("terminalId");
+    let killed = env.band(&["terminals", "kill", terminal_id]);
+    assert!(killed.status.success(), "stderr: {}", stderr(&killed));
+}
+
+#[test]
+fn agents_launch_follows_band_dispatch_over_the_server_default() {
+    let env = TestEnv::new();
+    update_settings(&env, |settings| {
+        settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
+    });
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-env"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // An agent in a Band chat has BAND_DISPATCH=chat, so it starts chats.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "agents",
+            "launch",
+            "my-project-feat-agents-env",
+        ],
+        &[("BAND_DISPATCH", "chat")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let launched: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(launched["mode"], "gui", "got {launched}");
+    assert!(launched["chatId"].is_string(), "got {launched}");
+}
+
+#[test]
+fn agents_launch_rejects_an_unknown_mode() {
+    // The mode is checked before the CLI reads settings or calls the
+    // server, so this needs no server.
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["agents", "launch", "my-project-main", "--mode", "web"])
+        .env("BAND_HOME", tmp.path())
+        .output()
+        .expect("failed to execute band");
+    assert!(!output.status.success(), "expected failure for --mode web");
+    assert!(
+        stderr(&output).contains("Invalid agent mode 'web'"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}

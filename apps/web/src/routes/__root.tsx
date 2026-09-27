@@ -21,7 +21,13 @@ import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { isMacPlatform } from "@/dashboard/lib/command-registry";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
-import { NavControls, SidebarTitleBar, WorkspaceTitleBar } from "../components/DesktopTitleBar";
+import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
+import {
+  NavControls,
+  RightPanelHeaderActions,
+  SidebarTitleBar,
+  WorkspaceTitleBar,
+} from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -79,7 +85,13 @@ export const Route = createRootRoute({
       },
       { title: "Band" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      // Not `black-translucent`: on iOS 26 a home-screen app with that style and
+      // `viewport-fit=cover` draws from the top screen edge but sizes the window
+      // one status bar short (WebKit bug 301108), so the header sits under the
+      // status bar and an unpaintable strip opens above the home indicator.
+      // `black` gives an opaque status bar and a window that reaches the bottom
+      // edge. iOS reads this tag at install time: re-add the app to pick it up.
+      { name: "apple-mobile-web-app-status-bar-style", content: "black" },
       { name: "theme-color", content: "#1e1e1e" },
     ],
   }),
@@ -667,7 +679,8 @@ function AppShell() {
     };
   }, [toggleSidebar, sidebarPanelRef, animateSidebarToggle]);
 
-  // ⇧⌘E / ⇧⌘G (and the title-bar switcher) toggle / reveal the right sidepanel.
+  // ⌥⌘B toggles the right sidepanel; ⇧⌘E / ⇧⌘G (and the title-bar switcher)
+  // reveal it.
   useEffect(() => {
     const onToggle = () => toggleRightPanel();
     const onShow = () => {
@@ -787,56 +800,70 @@ function AppShell() {
             <Panel id="main" elementRef={mainElRef} minSize="20%">
               {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              <div className="h-full flex flex-col min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
-                <WorkspaceTitleBar
-                  workspaceName={activeWorkspaceId ?? undefined}
-                  workspacePath={activeWorkspaceId ? workspacePath : undefined}
-                  onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-                  onWorkspaceNameClick={activeWorkspaceId ? handleWorkspaceNameClick : undefined}
-                  onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
-                  rightPanelVisible={rightVisible}
-                />
-                {/* Below the title bar the dockview and the right sidepanel share
-                    one horizontal row, so the sidepanel aligns with the dockview
-                    content rather than spanning up alongside the title-bar row. */}
-                <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-                  <Group
-                    orientation="horizontal"
-                    defaultLayout={centerDefaultLayout}
-                    onLayoutChanged={handleCenterLayoutChanged}
-                    className="h-full w-full"
-                  >
-                    <Panel id="center" elementRef={centerElRef} minSize="30%">
+              {/* The dockview column and the right sidepanel share one
+                  full-height row. The workspace title bar sits at the top of
+                  the dockview column only; the sidepanel's own header row
+                  (tabs, open in editor, collapse) fills the title-bar row
+                  above it. */}
+              <div className="h-full min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
+                <Group
+                  orientation="horizontal"
+                  defaultLayout={centerDefaultLayout}
+                  onLayoutChanged={handleCenterLayoutChanged}
+                  className="h-full w-full"
+                >
+                  <Panel id="center" elementRef={centerElRef} minSize="30%">
+                    <div className="h-full flex flex-col min-w-0 overflow-hidden">
+                      <WorkspaceTitleBar
+                        workspaceName={activeWorkspaceId ?? undefined}
+                        onWorkspaceNameClick={
+                          activeWorkspaceId ? handleWorkspaceNameClick : undefined
+                        }
+                        onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
+                        rightPanelVisible={rightVisible}
+                      />
                       {/* `relative` anchors SharedDockviewLayout's `absolute
                           inset-0` overlay to the dockview area. */}
-                      <div className="h-full min-w-0 overflow-hidden relative">
+                      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
                         <Outlet />
                         <SharedDockviewLayout />
                         <BrowserHostBridge />
+                        <BrowserProfileSweeper />
                       </div>
-                    </Panel>
-                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-                    <Panel
-                      id="rightpanel"
-                      panelRef={rightPanelRef}
-                      elementRef={rightPanelElRef}
-                      defaultSize={RIGHT_PANEL_MIN_SIZE}
-                      minSize={RIGHT_PANEL_MIN_SIZE}
-                      maxSize={RIGHT_PANEL_MAX_SIZE}
-                      collapsible
-                      collapsedSize="0%"
-                      onResize={handleRightResize}
+                    </div>
+                  </Panel>
+                  <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                  <Panel
+                    id="rightpanel"
+                    panelRef={rightPanelRef}
+                    elementRef={rightPanelElRef}
+                    defaultSize={RIGHT_PANEL_MIN_SIZE}
+                    minSize={RIGHT_PANEL_MIN_SIZE}
+                    maxSize={RIGHT_PANEL_MAX_SIZE}
+                    collapsible
+                    collapsedSize="0%"
+                    onResize={handleRightResize}
+                  >
+                    <div
+                      className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
+                      data-testid="app-shell__right-panel"
+                      data-visible={rightVisible ? "true" : "false"}
                     >
-                      <div
-                        className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
-                        data-testid="app-shell__right-panel"
-                        data-visible={rightVisible ? "true" : "false"}
-                      >
-                        <RightSidepanel visible={rightVisible} />
-                      </div>
-                    </Panel>
-                  </Group>
-                </div>
+                      <RightSidepanel
+                        visible={rightVisible}
+                        headerActions={
+                          <RightPanelHeaderActions
+                            workspacePath={activeWorkspaceId ? workspacePath : undefined}
+                            onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+                            onToggleRightPanel={
+                              activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
+                            }
+                          />
+                        }
+                      />
+                    </div>
+                  </Panel>
+                </Group>
               </div>
             </Panel>
           </Group>

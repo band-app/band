@@ -32,6 +32,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { AGENT_MODE_KEY } from "@/dashboard";
 
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
@@ -183,6 +184,30 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "GPU-accelerated rendering" });
   }
 
+  /** "Restart terminal service" button in the Terminal section. */
+  restartTerminalServiceButton(): Locator {
+    return this.dialog.getByRole("button", { name: "Restart terminal service" });
+  }
+
+  /** The confirm dialog opened by {@link restartTerminalServiceButton}. */
+  restartTerminalServiceDialog(): Locator {
+    return this.page.getByRole("dialog", { name: "Restart the terminal service?" });
+  }
+
+  /**
+   * Click "Restart terminal service", confirm the dialog, and wait for it to
+   * close (the mutation settling, per `SettingsPage.tsx`'s `onSettled`).
+   */
+  async restartTerminalService(): Promise<void> {
+    await test.step("Restart the terminal service from Settings", async () => {
+      await this.restartTerminalServiceButton().click();
+      const dialog = this.restartTerminalServiceDialog();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Restart" }).click();
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+    });
+  }
+
   /** Per-agent enable switch. The button's `aria-label="Enable <Agent>"`
    *  is set explicitly in `SettingsPage.tsx` (the agent label appears in
    *  two other places, so a unique aria-label disambiguates). */
@@ -280,6 +305,73 @@ export class SettingsPage {
     });
   }
 
+  /** One row per Band browser profile in the Browser section (the built-in
+   *  Default row is not included). `data-testid` set in
+   *  `BrowserProfilesSettings.tsx`. */
+  browserProfileRows(): Locator {
+    return this.dialog.getByTestId("settings__browser-profile");
+  }
+
+  /** Trash button of a browser profile row. `aria-label="Delete browser
+   *  profile <name>"` is set explicitly in `BrowserProfilesSettings.tsx`. */
+  deleteBrowserProfileButton(profileName: string): Locator {
+    return this.dialog.getByRole("button", { name: `Delete browser profile ${profileName}` });
+  }
+
+  /** Trigger of the "Project defaults" accordion in the Browser section,
+   *  collapsed by default. `data-testid` set in `BrowserProfilesSettings.tsx`. */
+  projectDefaultsTrigger(): Locator {
+    return this.dialog.getByTestId("settings__project-defaults-trigger");
+  }
+
+  /** One row per project inside the "Project defaults" accordion.
+   *  `data-testid` set in `BrowserProfilesSettings.tsx`. */
+  projectBrowserProfileRows(): Locator {
+    return this.dialog.getByTestId("settings__project-browser-profile");
+  }
+
+  /** Per-project default profile dropdown, inside the "Project defaults"
+   *  accordion. `aria-label="Browser profile for <project name>"` is set
+   *  explicitly in `BrowserProfilesSettings.tsx`. Tests assert its shown
+   *  value by option name ("Default" or a seeded profile name), under the
+   *  same carve-out as the theme names above: "Default" is the fixed name
+   *  of the built-in profile, not product copy. */
+  projectBrowserProfileSelect(projectName: string): Locator {
+    return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectName}` });
+  }
+
+  /** Open the "Project defaults" accordion and wait for its rows to show. */
+  async expandProjectDefaults(): Promise<void> {
+    await test.step("Expand Project defaults", async () => {
+      const trigger = this.projectDefaultsTrigger();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(this.projectBrowserProfileRows().first()).toBeVisible();
+    });
+  }
+
+  /** Pick a project's default browser profile. Applies immediately. The
+   *  "Project defaults" accordion must be expanded first. */
+  async selectProjectBrowserProfile(projectName: string, profileName: string): Promise<void> {
+    await test.step(`Set ${projectName}'s browser profile to "${profileName}"`, async () => {
+      const trigger = this.projectBrowserProfileSelect(projectName);
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByRole("option", { name: profileName }).click();
+      await expect(trigger).toContainText(profileName);
+    });
+  }
+
+  /** Click a browser profile row's trash button. */
+  async deleteBrowserProfile(profileName: string): Promise<void> {
+    await test.step(`Delete browser profile "${profileName}"`, async () => {
+      const button = this.deleteBrowserProfileButton(profileName);
+      await button.scrollIntoViewIfNeeded();
+      await button.click();
+    });
+  }
+
   /**
    * Scroll the given locator into view and assert it is visible.
    *
@@ -307,6 +399,33 @@ export class SettingsPage {
       await trigger.click();
       await this.page.getByRole("option", { name: theme }).click();
       await expect(trigger).toContainText(theme);
+    });
+  }
+
+  /** Pick this browser's agent mode ("Open agents on this device as"). It
+   *  saves straight to localStorage, with no Save click. */
+  async selectDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await test.step(`Set this device's agent mode to ${mode}`, async () => {
+      const trigger = this.dialog.getByTestId("settings-page__device-agent-mode");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByTestId(`settings-page__agent-mode-option--${mode}`).click();
+    });
+  }
+
+  /** This browser's saved agent mode, or null. */
+  async readDeviceAgentMode(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), AGENT_MODE_KEY);
+  }
+
+  /** Pick the server's default agent mode ("Open agents started without a
+   *  device as"). Takes effect on Save. */
+  async selectDefaultAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await test.step(`Set the default agent mode to ${mode}`, async () => {
+      const trigger = this.dialog.getByTestId("settings-page__default-agent-mode");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByTestId(`settings-page__default-agent-mode-option--${mode}`).click();
     });
   }
 

@@ -167,7 +167,6 @@ test("the command palette lists the shortcuts and runs them", async ({ page }) =
     "toggle-maximize": mac ? "⌘⇧M" : "Ctrl+Shift+M",
     "toggle-sidebar": mac ? "⌘B" : "Ctrl+B",
     "toggle-right-panel": mac ? "⌘⌥B" : "Ctrl+Alt+B",
-    "toggle-bottom-panel": mac ? "⌘J" : "Ctrl+J",
     "switch-workspace": mac ? "⌘K" : "Ctrl+K",
     "workspace-go-back": mac ? "⌘⌥←" : "Ctrl+Alt+←",
     "workspace-go-forward": mac ? "⌘⌥→" : "Ctrl+Alt+→",

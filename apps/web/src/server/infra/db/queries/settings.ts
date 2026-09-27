@@ -146,6 +146,17 @@ export interface Settings {
     defaultVia?: "chat" | "terminal";
     [key: string]: unknown;
   };
+  /**
+   * Agent preferences (issue #682). `defaultMode` is how an agent session
+   * starts when the caller sends no mode: `gui` in a chat pane, `tui` as the
+   * agent's CLI in a terminal. Browsers keep their own per-device mode and
+   * always send it, so this applies to the CLI, cronjobs and MCP. Replaces
+   * `cli.defaultVia`, which boot migrates once.
+   */
+  agents?: {
+    defaultMode?: "gui" | "tui";
+    [key: string]: unknown;
+  };
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

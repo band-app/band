@@ -6,6 +6,7 @@ export interface LayoutBox {
   right: number;
   top: number;
   bottom: number;
+  paddingTop: number;
   paddingBottom: number;
   /** How far the content overflows the box sideways (`scrollWidth -
    *  clientWidth`); 0 when it fits. */
@@ -25,15 +26,26 @@ export interface ViewportInfo {
 }
 
 /**
- * The elements that sit on the bottom screen edge (the mobile workspace bottom
- * bar and its Explorer / Changes sheets, the dashboard action bar in each of
- * its three homes, the Settings drawer footer) and the chat composer controls
- * that must fit a phone-width screen. Measures them for layout assertions; the
+ * The elements that sit on a screen edge (the mobile workspace header with its
+ * Explorer / Changes buttons, the editor area and the tree sheets, the
+ * dashboard action bar in each of its three homes, the Settings drawer footer)
+ * and the chat composer controls that must fit a phone-width screen. Measures them for layout assertions; the
  * chat itself is driven through `ChatPanePage`, the fly-out through
  * `WorkspacePage` and the Settings dialog through `SettingsPage`.
  */
 export class MobileLayoutPage {
-  readonly bottomBar: Locator;
+  /** The mobile workspace header row (project list, workspace switcher,
+   *  Explorer / Changes). */
+  readonly header: Locator;
+  /** The workspace switcher button in the middle of the header. */
+  readonly workspaceSwitcher: Locator;
+  readonly explorerButton: Locator;
+  readonly changesButton: Locator;
+  readonly changesBadge: Locator;
+  /** The editor area under the header; it reaches the bottom screen edge. */
+  readonly main: Locator;
+  /** The bottom tab bar the mobile workspace used to have. */
+  readonly legacyBottomBar: Locator;
   /** The action bar of the full-screen mobile dashboard. */
   readonly dashboardActionBar: Locator;
   /** The action bar inside the mobile project-list fly-out. */
@@ -56,7 +68,13 @@ export class MobileLayoutPage {
     private readonly baseUrl: string,
     private readonly token: string,
   ) {
-    this.bottomBar = page.getByTestId("mobile-workspace__bottom-bar").filter({ visible: true });
+    this.header = page.getByTestId("mobile-workspace__header");
+    this.workspaceSwitcher = page.getByTestId("mobile-workspace__switcher");
+    this.explorerButton = page.getByTestId("mobile-workspace__header-explorer");
+    this.changesButton = page.getByTestId("mobile-workspace__header-changes");
+    this.changesBadge = page.getByTestId("mobile-workspace__header-changes-badge");
+    this.main = page.getByTestId("mobile-workspace__main");
+    this.legacyBottomBar = page.getByTestId("mobile-workspace__bottom-bar");
     this.dashboardActionBar = page
       .getByTestId("project-list__action-bar")
       .filter({ visible: true });
@@ -91,27 +109,22 @@ export class MobileLayoutPage {
     });
   }
 
-  /** Open the Explorer or Changes bottom sheet from the mobile bottom bar. */
+  /** Open the Explorer or Changes bottom sheet from its header button. */
   async openSheet(sheet: "explorer" | "changes"): Promise<void> {
     await test.step(`Open the ${sheet} sheet`, async () => {
-      await this.page.getByTestId(`mobile-workspace__bar--${sheet}`).click();
+      await (sheet === "explorer" ? this.explorerButton : this.changesButton).click();
       const body = sheet === "explorer" ? this.explorerSheetBody : this.changesSheetBody;
       await expect(body).toBeVisible();
     });
   }
 
-  /** Close the open Explorer / Changes sheet; it covers the bottom bar. */
+  /** Close the open Explorer / Changes sheet, back to the editor. */
   async closeSheet(): Promise<void> {
     await test.step("Close the bottom sheet", async () => {
       await this.page.keyboard.press("Escape");
       await expect(this.explorerSheetBody).toBeHidden();
       await expect(this.changesSheetBody).toBeHidden();
     });
-  }
-
-  /** A config-option picker in the composer toolbar, e.g. reasoning effort. */
-  configOptionMenu(optionId: string): Locator {
-    return this.page.getByTestId(`chat-pane__config-option--${optionId}`).filter({ visible: true });
   }
 
   /** Measure an element once every running animation (sheet slide-ins) has
@@ -129,10 +142,21 @@ export class MobileLayoutPage {
         right: r.right,
         top: r.top,
         bottom: r.bottom,
+        paddingTop: Number.parseFloat(getComputedStyle(el).paddingTop),
         paddingBottom: Number.parseFloat(getComputedStyle(el).paddingBottom),
         horizontalOverflow: el.scrollWidth - el.clientWidth,
       };
     });
+  }
+
+  /** The `apple-mobile-web-app-status-bar-style` the page asks iOS for. */
+  async readStatusBarStyle(): Promise<string | null> {
+    return await this.page.evaluate(
+      () =>
+        document
+          .querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+          ?.getAttribute("content") ?? null,
+    );
   }
 
   async readViewport(): Promise<ViewportInfo> {

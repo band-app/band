@@ -55,7 +55,8 @@ export function terminalDaemons(home: string): TerminalDaemonRecord[] {
  * Start a terminal daemon on `home` the way a server of build `buildId` would,
  * from `entry`, as if an older (or deleted) build had left it running. Speaks
  * the daemon's socket protocol directly, since the point is that no server of
- * this build would put a shell on it.
+ * this build would put a shell on it. Holds a connection to the daemon until
+ * the first `spawnShell` call, so callers must make one.
  */
 export async function startDaemonOfBuild(
   home: string,
@@ -65,15 +66,23 @@ export async function startDaemonOfBuild(
   const paths = daemonPaths(join(bandHome, "run"));
   const outcome = await launchDaemon({ entry, paths, cwd: bandHome, buildId });
   if (outcome !== "launched") throw new Error(`expected a fresh daemon, got ${outcome}`);
-  const probe = await DaemonClient.connect(paths, buildId);
+  // Held open until the first shell exists: a daemon with no shells and no
+  // connection exits at once, so closing the probe first races the next
+  // connect, and a loaded machine loses that race.
+  let probe: DaemonClient | null = await DaemonClient.connect(paths, buildId);
   const pid = probe.pid;
-  probe.close();
   return {
     pid,
     // Connects per call: the daemon may no longer own the endpoint by then,
     // and a shell must land on this daemon or fail.
     async spawnShell(shell) {
-      const client = await DaemonClient.connect(paths, buildId);
+      let client: DaemonClient;
+      try {
+        client = await DaemonClient.connect(paths, buildId);
+      } finally {
+        probe?.close();
+        probe = null;
+      }
       try {
         if (client.pid !== pid) throw new Error("another daemon serves the endpoint");
         const env: Record<string, string> = {};

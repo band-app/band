@@ -1,7 +1,7 @@
 ---
 name: band
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, start a coding agent in a workspace or list its agent sessions, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "start an agent", "list agent sessions", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: "[command] [args...]"
 ---
@@ -10,7 +10,7 @@ argument-hint: "[command] [args...]"
 
 Thin client for the Band web server. All state, git operations, and script execution happen server-side.
 
-This skill covers **core workspace, project, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
+This skill covers **core workspace, project, agent, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
 
 - **`band-chat`** — chat panes (`band chats list/create/send/watch/stop/remove/label/unlabel`)
 - **`band-terminal`** — terminal sessions (`band terminals list/create/send/output/kill/attach`)
@@ -118,6 +118,40 @@ band workspaces remove <project> <name>
 `<name>` is the workspace's stable identity — the branch it was created on (unchanged even if the git branch was later switched).
 
 Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files.
+
+### Start a coding agent in a workspace
+
+```sh
+band agents launch [workspace_id] [--agent <string>] [--mode <string>] [--prompt <string>]
+```
+
+Starts an agent session. `--mode gui` opens a chat pane and submits the prompt to the agent. `--mode tui` opens a terminal running the agent's CLI with the prompt pre-loaded (`claude "<prompt>"`, `codex "<prompt>"`, ...). `chat` and `terminal` are accepted as aliases. Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent, so an agent starts new agents the way it runs itself) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting (Settings > Coding Agents > "Open programmatically created agents in"). `--agent` picks a coding agent ID from settings; the default agent is used when omitted. The workspace is auto-detected from the cwd when `workspace_id` is omitted.
+
+An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.
+
+Text output: `<mode>\t<chat or terminal ID>`, plus a `note:` line after a fallback.
+JSON output: `{"agentSession": {...}, "mode": "gui" | "tui", "chatId": "...", "terminalId": "...", "notice": "..."}`. `chatId` is set for gui, `terminalId` for tui, `notice` only after a fallback.
+
+```sh
+# Start the default agent in the cwd's workspace, in the server's default mode
+band agents launch --prompt "Fix the failing test in auth.test.ts"
+
+# Start Codex in a terminal
+band agents launch my-app-feat-auth --agent codex --mode tui --prompt "Review the diff"
+```
+
+To start an agent in a new workspace, use `band workspaces create --prompt` instead.
+
+### List the running agent sessions of a workspace
+
+```sh
+band agents list [workspace_id]
+```
+
+An agent session is one run of a coding agent, in a chat (`gui`) or in a terminal (`tui`). A session keeps its mode for its whole life. Ended sessions are not listed.
+
+Text output: `SESSION ID\tAGENT\tMODE\tSTATE\tPANE\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions; PROVIDER SESSION is the agent's own session ID once it is known.
+JSON output: `{"agentSessions": [{"id": "...", "workspaceId": "...", "agentDefinitionId": "...", "providerSessionId": "..." | null, "mode": "gui" | "tui", "chatId": "..." | null, "terminalId": "..." | null, "state": "starting" | "running", "createdAt": N, "updatedAt": N}]}`
 
 ### Show current settings
 

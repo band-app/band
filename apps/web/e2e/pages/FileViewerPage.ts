@@ -18,8 +18,10 @@
  * convention of primary page objects.
  */
 
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { type Download, expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
+import { MarkdownTableEditor } from "./MarkdownTableEditor";
 
 /** Test id on the `FileViewer` root element (set in FileViewer.tsx).
  *  Exported so other page objects that need to wait for the viewer to mount
@@ -59,6 +61,11 @@ export class FileViewerPage {
     return this.page.getByPlaceholder(/Find in (preview|file)\.\.\./);
   }
 
+  /** Go-to-definition (Cmd/Ctrl+hover link, Cmd/Ctrl+Click) in the editor. */
+  get symbols(): CodeSymbolLinks {
+    return new CodeSymbolLinks(this.page, this.root);
+  }
+
   /** The active file viewer's CodeMirror content element. */
   private get editor(): Locator {
     return this.root.locator(".cm-content").first();
@@ -95,6 +102,155 @@ export class FileViewerPage {
     });
   }
 
+  /** The editable markdown preview (`file-viewer__markdown-preview`). */
+  get markdownPreview(): Locator {
+    return this.root.getByTestId("file-viewer__markdown-preview");
+  }
+
+  /** A heading rendered in the markdown preview. Heading lines carry
+   *  `role="heading"` + `aria-level`. */
+  previewHeading(level: number, name: string): Locator {
+    return this.markdownPreview.getByRole("heading", { level, name, exact: true });
+  }
+
+  /** An image the preview renders in place of `![alt](src)`. */
+  previewImage(alt: string): Locator {
+    return this.markdownPreview.getByRole("img", { name: alt, exact: true });
+  }
+
+  /** The loaded width of a preview image; 0 when its URL did not load. */
+  async previewImageNaturalWidth(alt: string): Promise<number> {
+    return this.previewImage(alt).evaluate((img) => (img as HTMLImageElement).naturalWidth);
+  }
+
+  /** Click the checkbox the preview renders for a task-list item. */
+  async toggleTask(text: string): Promise<void> {
+    await test.step(`Toggle the task "${text}"`, async () => {
+      await this.taskCheckbox(text).click();
+    });
+  }
+
+  /** Bold / inline-code / list-item text rendered in the markdown preview,
+   *  located by the element's implicit role (`<strong>`, `<code>`) or the
+   *  line's `role="listitem"`. */
+  previewFormatted(role: "strong" | "code" | "listitem", text: string): Locator {
+    return this.markdownPreview.getByRole(role).filter({ hasText: text });
+  }
+
+  /** A block the preview renders instead of showing its source (table,
+   *  frontmatter, mermaid). */
+  previewRenderedBlock(kind: "table" | "frontmatter" | "mermaid"): Locator {
+    return this.markdownPreview.getByTestId(`markdown-preview__block--${kind}`);
+  }
+
+  /** The `<table>` inside the preview's rendered table block. */
+  get previewTable(): Locator {
+    return this.previewRenderedBlock("table").getByRole("table");
+  }
+
+  /** The editable table the preview renders for the `index`th table. */
+  previewTableEditor(index = 0): MarkdownTableEditor {
+    return new MarkdownTableEditor(
+      this.page,
+      this.previewRenderedBlock("table").nth(index),
+      this.markdownPreview,
+    );
+  }
+
+  /** The editable Key / Value grid the preview renders for the frontmatter. */
+  previewFrontmatterEditor(): MarkdownTableEditor {
+    return new MarkdownTableEditor(
+      this.page,
+      this.previewRenderedBlock("frontmatter"),
+      this.markdownPreview,
+      "Property",
+    );
+  }
+
+  /** A control Streamdown renders in the corner of a rendered block, by the
+   *  `title` Streamdown gives it ("Copy Code", "View fullscreen", ...). */
+  previewBlockControl(kind: "table" | "frontmatter" | "mermaid", name: string): Locator {
+    return this.previewRenderedBlock(kind).getByRole("button", { name, exact: true });
+  }
+
+  /** The close button of Streamdown's fullscreen diagram view. Streamdown
+   *  portals that view to `document.body`, outside the file viewer. */
+  get fullscreenExitButton(): Locator {
+    return this.page.getByRole("button", { name: "Exit fullscreen", exact: true });
+  }
+
+  /** Click a rendered block's corner control. */
+  async clickPreviewBlockControl(
+    kind: "table" | "frontmatter" | "mermaid",
+    name: string,
+  ): Promise<void> {
+    await test.step(`Click "${name}" on the rendered ${kind} block`, async () => {
+      await this.previewBlockControl(kind, name).click();
+    });
+  }
+
+  /** Open a mermaid block's download menu and download the diagram source. */
+  async downloadMermaidSource(): Promise<Download> {
+    return await test.step("Download the mermaid diagram as MMD", async () => {
+      await this.clickPreviewBlockControl("mermaid", "Download diagram");
+      const download = this.page.waitForEvent("download");
+      // The menu item's text ("MMD") is its accessible name; its title only
+      // describes it.
+      await this.previewBlockControl("mermaid", "MMD").click();
+      return await download;
+    });
+  }
+
+  /** Close Streamdown's fullscreen diagram view. */
+  async exitFullscreen(): Promise<void> {
+    await test.step("Exit the fullscreen diagram", async () => {
+      await this.fullscreenExitButton.click();
+    });
+  }
+
+  /** The system clipboard's text. Needs the clipboard-read permission. */
+  async readClipboard(): Promise<string> {
+    return await this.page.evaluate(() => navigator.clipboard.readText());
+  }
+
+  /** The checkbox the preview renders for the task-list item `text`. */
+  taskCheckbox(text: string): Locator {
+    return this.previewFormatted("listitem", text).getByRole("checkbox");
+  }
+
+  /** Put the cursor at the end of the markdown preview's document. Clicks the
+   *  editable surface (CodeMirror reports role="textbox") and presses the
+   *  doc-end binding: Cmd+Down on macOS, Ctrl+End elsewhere. */
+  async focusPreviewEnd(): Promise<void> {
+    await test.step("Put the cursor at the end of the markdown preview", async () => {
+      // Table cells are textboxes too; the editor's own content element
+      // contains them, so it comes first in document order.
+      await this.markdownPreview.getByRole("textbox").first().click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
+      );
+    });
+  }
+
+  /** Type into the focused preview. Each `\n` in `text` is an Enter press, so
+   *  the markdown keymap (list continuation) runs the way it does for a user. */
+  async typeInPreview(text: string): Promise<void> {
+    await test.step(`Type into the markdown preview: ${JSON.stringify(text)}`, async () => {
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) await this.page.keyboard.press("Enter");
+        if (lines[i]) await this.page.keyboard.type(lines[i]);
+      }
+    });
+  }
+
+  /** Save the focused editor with Cmd/Ctrl+S. */
+  async saveWithShortcut(): Promise<void> {
+    await test.step("Save with Cmd/Ctrl+S", async () => {
+      await this.page.keyboard.press("ControlOrMeta+s");
+    });
+  }
+
   /** Assert (auto-retrying) that the file viewer is mounted and visible.
    *  Used for previews (e.g. markdown) that render outside the CodeMirror
    *  `.cm-content` surface, where `expectContent` doesn't apply. */
@@ -118,6 +274,19 @@ export class FileViewerPage {
   async expectNotContent(text: string): Promise<void> {
     await test.step(`Editor does not show "${text}"`, async () => {
       await expect(this.editor).not.toContainText(text, { timeout: 8_000 });
+    });
+  }
+
+  /** Type `text` at the very start of the document without saving, so every
+   *  existing line moves down. */
+  async typeAtStart(text: string): Promise<void> {
+    await test.step(`Type "${text.trim()}" at the start of the editor`, async () => {
+      await this.editor.click();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+      await this.page.keyboard.type(text);
+      await expect(this.editor).toContainText(text.trim(), { timeout: 15_000 });
     });
   }
 

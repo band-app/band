@@ -38,52 +38,57 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>What it shows</h2>
 
   <p>
-    Each entry in the file list reports its <strong>git status</strong> with
-    a short badge:
+    The file list is split into sections. A section appears only while it
+    has files, and its
+    header shows how many. Click a header to collapse the section; Band
+    remembers which sections you collapsed.
   </p>
 
   <ul>
-    <li><strong>M</strong> &mdash; modified.</li>
-    <li><strong>A</strong> &mdash; added (newly tracked).</li>
-    <li><strong>D</strong> &mdash; deleted.</li>
-    <li><strong>R</strong> &mdash; renamed.</li>
-    <li><strong>U</strong> &mdash; untracked (a new file that has not been added yet).</li>
+    <li>
+      <strong>Conflicts</strong> &mdash; files left unmerged by a merge,
+      rebase or cherry-pick, marked with a red <strong>!</strong>.
+    </li>
+    <li>
+      <strong>Changes</strong> &mdash; edits in the working tree that are not
+      staged (<code>git diff</code>).
+    </li>
+    <li>
+      <strong>Staged Changes</strong> &mdash; what the next commit will
+      contain (<code>git diff --cached</code>). A file edited again after
+      staging is listed here and under Changes.
+    </li>
+    <li><strong>Untracked Files</strong> &mdash; new files git does not track yet.</li>
+    <li>
+      <strong>Committed on Branch</strong> &mdash; files changed by the
+      branch's commits since it forked from the compare branch. Uncommitted
+      work never shows up here.
+    </li>
   </ul>
 
   <p>
-    Clicking a file in the sidebar tree expands its diff and scrolls it to
-    the top of the viewport. Clicking the file again, or the chevron in its
-    header, collapses it. The active file in view is highlighted in the tree
-    so you always know where you are in a long change set.
+    Each row shows the lines added and removed and a status letter:
+    <strong>M</strong> modified, <strong>A</strong> added, <strong>D</strong>
+    deleted, <strong>R</strong> renamed, <strong>C</strong> copied and
+    <strong>U</strong> untracked. Clicking a row opens that section's diff
+    for the file; <strong>View all</strong> in a section header opens every
+    file of the section in one tab.
   </p>
 
   <h2>Comparing against a branch</h2>
 
   <p>
-    By default the Changes view shows the diff between the workspace's
-    <strong>HEAD</strong> and the project's default branch (e.g.
-    <code>main</code>). The branch picker in the toolbar lets you change
-    that target on the fly:
+    The <strong>Committed on Branch</strong> section compares the
+    workspace's <strong>HEAD</strong> against the project's default branch
+    (e.g. <code>main</code>). The branch picker under the current branch
+    name lets you pick any other local or remote branch instead. Band uses
+    <code>git merge-base</code>, so you see only the changes your branch
+    introduced, not unrelated commits that have landed on the target.
   </p>
 
-  <ul>
-    <li>
-      <strong>Uncommitted</strong> &mdash; show only what has not been
-      committed yet (the working tree vs <code>HEAD</code>). Useful when
-      you've already made commits on the branch and only want to review
-      what is still pending.
-    </li>
-    <li>
-      <strong>Any branch</strong> &mdash; pick another branch to compare
-      against. Band uses <code>git merge-base</code> so you see only the
-      changes introduced by your branch, not unrelated commits that have
-      landed on the target.
-    </li>
-  </ul>
-
   <p>
-    Your selection is remembered per workspace, so coming back to a
-    workspace later restores the same compare target.
+    Your pick is remembered per workspace, so coming back to a workspace
+    later restores the same compare branch.
   </p>
 
   <h2>Reading diffs</h2>
@@ -118,28 +123,32 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     so jumping to a line in the editor lines up with what the diff shows.
   </p>
 
-  <h2>Per-file actions</h2>
+  <h2>Staging and discarding</h2>
 
-  <p>The header of each file row carries three quick actions:</p>
+  <p>
+    Hover a file or folder row for its actions, or right-click it. The same
+    actions sit in each section header, where they apply to every file in
+    the section.
+  </p>
 
   <ul>
     <li>
-      <strong>Copy file path</strong> &mdash; puts the path on the
-      clipboard, handy for sharing or pasting into a terminal.
+      <strong>Stage</strong> (<strong>+</strong>) &mdash; in Changes and
+      Untracked Files. In Conflicts it marks the file resolved.
     </li>
+    <li><strong>Unstage</strong> (<strong>&minus;</strong>) &mdash; in Staged Changes.</li>
     <li>
-      <strong>Open in code browser</strong> &mdash; jumps to the file in
-      Band's editor pane, scrolled to the first changed line.
-    </li>
-    <li>
-      <strong>Revert file</strong> &mdash; restores the file to its state
-      on the compare target. For added or untracked files this deletes the
-      file; for modified, deleted, or renamed files it runs
-      <code>git checkout</code> against the merge base. A confirmation
-      dialog explains exactly what will happen for the file's status before
-      anything is touched.
+      <strong>Discard</strong> &mdash; in Changes it throws away unstaged
+      edits and keeps what is staged; in Staged Changes it returns the file
+      to its last committed version; in Untracked Files it deletes the file.
+      A confirmation dialog comes first.
     </li>
   </ul>
+
+  <p>
+    Files in Committed on Branch have no actions: they are history. The
+    right-click menu also copies a file's relative or absolute path.
+  </p>
 
   <h2>Commit changes</h2>
 

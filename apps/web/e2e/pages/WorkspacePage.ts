@@ -13,7 +13,8 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 import { FindWidget } from "./FindWidget";
 
 /** DEAD localStorage key prefix — the legacy `SharedDockviewLayout`
@@ -659,6 +660,18 @@ export class WorkspacePage {
     });
   }
 
+  /** Toggle the right sidepanel via the ⌥⌘B keyboard shortcut. The keydown is
+   *  caught by the window listener in `SharedDockviewLayout.tsx` and
+   *  re-dispatched as `band:toggle-right-panel`, which `AppShell`
+   *  (`__root.tsx`) handles. Anchored on the always-present sidebar toggle
+   *  button so the key press has a stable, non-editable focus target. */
+  async toggleRightPanelViaShortcut(): Promise<void> {
+    await test.step("Toggle the right sidepanel via ⌥⌘B", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Meta+Alt+KeyB");
+    });
+  }
+
   /** Read the persisted sidebar-collapsed flag (`band:sidebar-collapsed`)
    *  from localStorage. */
   async readSidebarCollapsed(): Promise<boolean> {
@@ -739,6 +752,38 @@ export class WorkspacePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** The close button on the `file` leaf tab for `path`. */
+  fileTabCloseButton(path: string): Locator {
+    return this.page.getByTestId(`center-file-tab__close--${path}`);
+  }
+
+  /** The active file leaf's "View changes" button in the group header
+   *  (`center-file-leaf__view-diff`). It only renders while that file has
+   *  changes against the workspace's diff target. */
+  get fileLeafViewChangesButton(): Locator {
+    return this.page.getByTestId("center-file-leaf__view-diff");
+  }
+
+  /** Open `path` as a pinned file leaf through Quick Open (type the name,
+   *  Enter) and wait until its tab exists. */
+  async openFileViaQuickOpen(path: string): Promise<void> {
+    await test.step(`Open ${path} via Quick Open`, async () => {
+      await this.openQuickOpen();
+      await this.typeQuickOpen(path);
+      await expect.poll(() => this.selectedQuickOpenValue()).toBe(path);
+      await this.pressQuickOpenKey("Enter");
+      await expect(this.fileTab(path)).toBeAttached({ timeout: 15_000 });
+    });
+  }
+
+  /** Save the active file leaf through its group-header Save button, which
+   *  only renders while the buffer is dirty. */
+  async saveFileLeaf(): Promise<void> {
+    await test.step("Save the active file leaf", async () => {
+      await this.page.getByTestId("center-file-leaf__save").click();
+    });
+  }
+
   /** Locate the per-path `diff` leaf tab opened from the sidepanel Changes
    *  section (`center-diff-tab--<path>`). */
   diffTab(path: string): Locator {
@@ -750,6 +795,11 @@ export class WorkspacePage {
   fileLeafVisibilityMarker(visible: boolean, workspaceId?: string): Locator {
     const scope = workspaceId ? this.cachedPanelEntries(workspaceId) : this.page;
     return scope.getByTestId(`center-file-leaf__visible-${visible ? "true" : "false"}`);
+  }
+
+  /** Every `file` leaf body's visibility marker, visible or hidden. */
+  allFileLeaves(): Locator {
+    return this.page.getByTestId(/^center-file-leaf__visible-/);
   }
 
   /** A line of the visible `file` leaf's editor by its exact text. Specs pass
@@ -892,11 +942,6 @@ export class WorkspacePage {
     return this.page.getByTestId(/^center-term-tab--/).filter({ visible: true });
   }
 
-  /** Visible center CHAT tabs in the outer dockview strip. */
-  chatTabs(): Locator {
-    return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
-  }
-
   private get modifier(): "Meta" | "Control" {
     return process.platform === "darwin" ? "Meta" : "Control";
   }
@@ -984,6 +1029,157 @@ export class WorkspacePage {
     return this.terminalPanes().nth(index).getByRole("textbox", { name: "Terminal input" });
   }
 
+  /** Start the in-app typing-latency probe (`window.__bandTypingLatency`). */
+  async startTypingLatencyProbe(): Promise<void> {
+    await this.page.evaluate(() => {
+      (window as unknown as { __bandTypingLatency: { start(): void } }).__bandTypingLatency.start();
+    });
+  }
+
+  /** Stop the typing-latency probe and return its report. */
+  async stopTypingLatencyProbe(): Promise<TypingLatencyReport> {
+    return await this.page.evaluate(() =>
+      (
+        window as unknown as { __bandTypingLatency: { stop(): TypingLatencyReport } }
+      ).__bandTypingLatency.stop(),
+    );
+  }
+
+  /** Readiness barrier that also works under the WebGL renderer (whose rows
+   *  aren't in the DOM): press a key into the focused terminal until the probe
+   *  records it echoed and painted, then erase it. */
+  async waitForTypingEcho(timeoutMs = 20_000): Promise<void> {
+    await test.step("Wait for a keystroke to echo in the focused terminal", async () => {
+      await this.startTypingLatencyProbe();
+      await expect
+        .poll(
+          async () => {
+            await this.page.keyboard.press("x");
+            await this.page.keyboard.press("Backspace");
+            return await this.page.evaluate(
+              () =>
+                (
+                  window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
+                ).__bandTypingLatency.report().samples,
+            );
+          },
+          { timeout: timeoutMs },
+        )
+        .toBeGreaterThan(0);
+      await this.stopTypingLatencyProbe();
+    });
+  }
+
+  /** Start recording long animation frames (>50 ms) for {@link stopFrameAttribution}. */
+  async startFrameAttribution(): Promise<void> {
+    await this.page.evaluate(() => {
+      const store = window as unknown as {
+        __benchLoaf?: PerformanceEntry[];
+        __benchObs?: PerformanceObserver;
+      };
+      store.__benchLoaf = [];
+      store.__benchObs = new PerformanceObserver((list) => {
+        store.__benchLoaf?.push(...list.getEntries());
+      });
+      store.__benchObs.observe({ type: "long-animation-frame", buffered: false });
+    });
+  }
+
+  /** Summarise the long animation frames since {@link startFrameAttribution}:
+   *  total time, how much of it was script vs rendering, and script time by
+   *  invoker (e.g. `WebSocket.onmessage`, `TimerHandler:setTimeout`). */
+  async stopFrameAttribution(): Promise<{
+    frames: number;
+    totalMs: number;
+    scriptMs: number;
+    renderMs: number;
+    byInvoker: Record<string, number>;
+  }> {
+    return await this.page.evaluate(() => {
+      interface Loaf extends PerformanceEntry {
+        renderStart: number;
+        scripts: { invoker: string; duration: number; sourceFunctionName: string }[];
+      }
+      const store = window as unknown as { __benchLoaf?: Loaf[]; __benchObs?: PerformanceObserver };
+      store.__benchObs?.disconnect();
+      const entries = store.__benchLoaf ?? [];
+      const byInvoker: Record<string, number> = {};
+      let scriptMs = 0;
+      let renderMs = 0;
+      let totalMs = 0;
+      for (const entry of entries) {
+        totalMs += entry.duration;
+        if (entry.renderStart > 0) renderMs += entry.startTime + entry.duration - entry.renderStart;
+        for (const script of entry.scripts) {
+          scriptMs += script.duration;
+          const key = `${script.invoker} ${script.sourceFunctionName}`.trim();
+          byInvoker[key] = Math.round((byInvoker[key] ?? 0) + script.duration);
+        }
+      }
+      return {
+        frames: entries.length,
+        totalMs: Math.round(totalMs),
+        scriptMs: Math.round(scriptMs),
+        renderMs: Math.round(renderMs),
+        byInvoker,
+      };
+    });
+  }
+
+  /** Record a V8 CPU profile of the page's main thread until the returned
+   *  function is called; it resolves with self time per function (ms), the
+   *  busiest first, plus the idle share. */
+  async profileMainThread(): Promise<
+    () => Promise<{ idlePct: number; top: { fn: string; ms: number }[] }>
+  > {
+    const cdp = await this.page.context().newCDPSession(this.page);
+    await cdp.send("Profiler.enable");
+    await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
+    await cdp.send("Profiler.start");
+    return async () => {
+      const { profile } = await cdp.send("Profiler.stop");
+      const selfUs = new Map<number, number>();
+      const samples = profile.samples ?? [];
+      const deltas = profile.timeDeltas ?? [];
+      for (let i = 0; i < samples.length; i++) {
+        selfUs.set(samples[i], (selfUs.get(samples[i]) ?? 0) + (deltas[i] ?? 0));
+      }
+      const byFn = new Map<string, number>();
+      let total = 0;
+      let idle = 0;
+      for (const node of profile.nodes) {
+        const us = selfUs.get(node.id) ?? 0;
+        total += us;
+        const { functionName, url, lineNumber, columnNumber } = node.callFrame;
+        if (functionName === "(idle)") idle += us;
+        const file = url.split("/").pop() ?? "";
+        const key = `${functionName || "(anonymous)"} ${file}:${lineNumber}:${columnNumber}`;
+        byFn.set(key, (byFn.get(key) ?? 0) + us);
+      }
+      await cdp.detach();
+      return {
+        idlePct: Math.round((idle / Math.max(total, 1)) * 100),
+        top: [...byFn.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 25)
+          .map(([fn, us]) => ({ fn, ms: Math.round(us / 1000) })),
+      };
+    };
+  }
+
+  /** Press `count` printable keys into the focused terminal, `intervalMs`
+   *  apart (a fast typist), clearing the line with Ctrl+U every 40 keys. */
+  async typeKeysPaced(count: number, intervalMs: number): Promise<void> {
+    await test.step(`Type ${count} keys, ${intervalMs} ms apart`, async () => {
+      const alphabet = "abcdefghijklmnopqrstuvwxyz";
+      for (let i = 0; i < count; i++) {
+        await this.page.keyboard.press(alphabet[i % alphabet.length]);
+        if (i % 40 === 39) await this.page.keyboard.press("Control+u");
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    });
+  }
+
   /** Move focus into the nth terminal pane (activates it in the nested split). */
   async focusPane(index: number): Promise<void> {
     await test.step(`Focus terminal pane ${index}`, async () => {
@@ -1036,6 +1232,32 @@ export class WorkspacePage {
       .getByTestId(/^term-pane-header__/)
       .filter({ visible: true })
       .nth(index);
+  }
+
+  /** The split / close icon cluster (`term-pane-actions__<id>`) that floats over
+   *  the top-right of the nth visible pane's terminal. */
+  paneActions(index: number): Locator {
+    return this.paneHeader(index).getByTestId(/^term-pane-actions__/);
+  }
+
+  /** The computed background of the nth pane's icon cluster next to the
+   *  background xterm paints for that pane's terminal (xterm 6 sets the active
+   *  theme's background inline on `.xterm-scrollable-element`; the
+   *  `.xterm-viewport` under it keeps xterm.css's fixed #000). Both come out of
+   *  `getComputedStyle`, so they compare as plain strings.
+   *
+   *  FRAGILITY: `.xterm-scrollable-element` is a class owned by xterm, which
+   *  exposes no testid hook on its own DOM. Centralised here so an xterm
+   *  upgrade that renames it flows through one place. */
+  async paneActionsBackground(index: number): Promise<{ actions: string; terminal: string }> {
+    const actions = await this.paneActions(index).evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    const terminal = await this.terminalPanes()
+      .nth(index)
+      .locator(".xterm-scrollable-element")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    return { actions, terminal };
   }
 
   /** Drag one pane's header onto another pane to reorder — dockview moves the
@@ -1127,7 +1349,7 @@ export class WorkspacePage {
   // Add-tab / split helpers below are scoped to a workspace's cached panel
   // host so they target the active workspace's toolbar, not another mounted
   // workspace's. `.filter({ visible: true })` picks the visible grid group's
-  // toolbar (edge groups render a "+"-only, hidden row).
+  // toolbar.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The visible "+" new-tab menu button for a workspace's center dockview. */
@@ -1144,6 +1366,11 @@ export class WorkspacePage {
     workspaceId: string,
     kind: "term" | "chat" | "browser",
   ): Promise<void> {
+    // A chat is an agent started from the "New agent" submenu (issue #682).
+    if (kind === "chat") {
+      await this.startAgentViaMenu(workspaceId);
+      return;
+    }
     // Open the Radix menu via keyboard (focus + Enter) rather than a mouse
     // click: a dockview splitview sash (`dv-sash`) overlaps the header `+`
     // button's centre in the hit-test, so a coordinate click lands on the sash
@@ -1159,6 +1386,42 @@ export class WorkspacePage {
       .filter({ visible: true })
       .first()
       .click();
+  }
+
+  /** Open the "+" menu and start an agent from its "New agent" submenu: the
+   *  given agent, or the first one listed (the default). It opens in this
+   *  browser's agent mode (issue #682). */
+  async startAgentViaMenu(workspaceId: string, agentId?: string): Promise<void> {
+    await test.step(`Start agent ${agentId ?? "(default)"} via "+" menu`, async () => {
+      // Keyboard open, for the same sash-overlap reason as `addLeafViaMenu`.
+      await this.newTabButton(workspaceId).first().focus();
+      await this.page.keyboard.press("Enter");
+      await this.page
+        .getByTestId("workspace-center__new-tab--agent")
+        .filter({ visible: true })
+        .first()
+        .click();
+      const menu = this.page.getByTestId("workspace-center__new-agent-menu").filter({
+        visible: true,
+      });
+      const item = agentId
+        ? menu.getByTestId(`workspace-center__new-agent--${agentId}`)
+        : menu.getByTestId(/^workspace-center__new-agent(--.+)?$/).first();
+      await item.click();
+    });
+  }
+
+  /** Save this browser's agent mode, as the Settings page does. */
+  async setDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await this.page.evaluate(([key, value]) => localStorage.setItem(key, value), [
+      AGENT_MODE_KEY,
+      mode,
+    ] as const);
+  }
+
+  /** Visible center CHAT tabs in the outer dockview strip. */
+  chatTabs(): Locator {
+    return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
   }
 
   /** The visible "+" new-tab menu button for a workspace's chat host.
@@ -1381,6 +1644,53 @@ export class WorkspacePage {
     });
   }
 
+  /** The workspace title bar over the center (dockview) column
+   *  (`WorkspaceTitleBar` in `DesktopTitleBar.tsx`). */
+  get workspaceTitleBar(): Locator {
+    return this.page.getByTestId("desktop-title-bar__workspace-surface");
+  }
+
+  /** The right sidepanel's header row (tabs + open-in-editor + collapse), level
+   *  with the workspace title bar. */
+  get rightPanelHeader(): Locator {
+    return this.page.getByTestId("right-sidepanel__header");
+  }
+
+  /** The right-sidepanel toggle hosted in the sidepanel header (collapse). */
+  get rightPanelToggleInHeader(): Locator {
+    return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** The right-sidepanel toggle hosted in the workspace title bar (expand).
+   *  Rendered only while the sidepanel is collapsed. */
+  get rightPanelToggleInTitleBar(): Locator {
+    return this.workspaceTitleBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** Collapse the right sidepanel with the button in its own header. */
+  async collapseRightPanelViaHeader(): Promise<void> {
+    await test.step("Collapse the right sidepanel from its header", async () => {
+      await this.rightPanelToggleInHeader.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "false");
+    });
+  }
+
+  /** Expand the collapsed right sidepanel with the button in the title bar. */
+  async expandRightPanelViaTitleBar(): Promise<void> {
+    await test.step("Expand the right sidepanel from the title bar", async () => {
+      await this.rightPanelToggleInTitleBar.click();
+      await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
+    });
+  }
+
+  /** Viewport bounding box of a locator. Throws when it has none (hidden), so
+   *  a geometric comparison can't pass vacuously. */
+  async boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no bounding box — not visible");
+    return box;
+  }
+
   /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
    *  rendered as a strip in `RightSidepanel.tsx`; only the active tab's body
    *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
@@ -1409,13 +1719,11 @@ export class WorkspacePage {
   /** Wait for the mobile workspace layout to be interactive. The mobile route
    *  (`MobileWorkspaceLayout`) doesn't render the dockview's header Maximize
    *  buttons, so `waitForReady` won't work — instead we anchor on the mobile
-   *  bottom bar (`mobile-workspace__bottom-bar`, Editor | Explorer | Changes),
-   *  which is always present once the mobile layout has mounted. (#643 Phase 4
-   *  replaced the old per-app `WorkspaceTabNav` — whose "Files" button this used
-   *  to key off — with `<WorkspaceCenterDockview mobile>` + this bottom bar.) */
+   *  header's Explorer button (`mobile-workspace__header-explorer`), which is
+   *  always present once the mobile layout has mounted. */
   async waitForMobileReady(): Promise<void> {
     await this.page
-      .getByTestId("mobile-workspace__bottom-bar")
+      .getByTestId("mobile-workspace__header-explorer")
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
@@ -1445,9 +1753,9 @@ export class WorkspacePage {
   }
 
   /** The mobile terminal container's grid-group toolbar (`RightHeaderActions`
-   *  tags only grid groups with `dockview-terminal__toolbar`; the mobile layout
-   *  has no edge groups). One per rendered terminal group — its count is the
-   *  observable "how many split groups" signal. */
+   *  tags only grid groups with `dockview-terminal__toolbar`). One per
+   *  rendered terminal group — its count is the observable "how many split
+   *  groups" signal. */
   get mobileTerminalToolbar(): Locator {
     return this.page.getByTestId("dockview-terminal__toolbar");
   }
@@ -2198,6 +2506,55 @@ export class WorkspacePage {
     }, workspaceId);
   }
 
+  /** Read the first `cols` cells of the top `rows` rows of a workspace
+   *  terminal's active xterm buffer, plus the cursor position. Each entry is
+   *  the cell's chars; the right half of a wide character (and an unwritten
+   *  cell) is the empty string. This is xterm's own column layout, so a test
+   *  can assert where text lands after a wide emoji regardless of renderer.
+   *  Same one-terminal-per-workspace assumption as `terminalCols`. Returns
+   *  null when the terminal isn't loaded yet. */
+  async readTerminalBufferCells(
+    workspaceId: string,
+    rows: number,
+    cols: number,
+  ): Promise<{ rows: string[][]; cursor: { x: number; y: number } } | null> {
+    return await this.page.evaluate(
+      ([id, rowCount, colCount]) => {
+        type Buffer = {
+          cursorX: number;
+          cursorY: number;
+          viewportY: number;
+          getLine(
+            y: number,
+          ): { getCell(x: number): { getChars(): string } | undefined } | undefined;
+        };
+        const cache = (
+          globalThis as unknown as {
+            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          }
+        ).__bandTerminalCache__;
+        if (!cache) return null;
+        for (const entry of cache.values()) {
+          if (entry.workspaceId !== id) continue;
+          const term = entry.getTerminal() as { buffer: { active: Buffer } } | null;
+          if (!term) return null;
+          const buffer = term.buffer.active;
+          const rows: string[][] = [];
+          for (let y = 0; y < rowCount; y++) {
+            const line = buffer.getLine(buffer.viewportY + y);
+            if (!line) return null;
+            const cells: string[] = [];
+            for (let x = 0; x < colCount; x++) cells.push(line.getCell(x)?.getChars() ?? "");
+            rows.push(cells);
+          }
+          return { rows, cursor: { x: buffer.cursorX, y: buffer.cursorY } };
+        }
+        return null;
+      },
+      [workspaceId, rows, cols] as const,
+    );
+  }
+
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
    *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
    *  `readTerminalRenderedText` (which joins everything into one string), this
@@ -2584,22 +2941,13 @@ export class WorkspacePage {
     await this.seedGlobalLayout(workspaceId, layout);
   }
 
-  /** The dockview bottom edge-group container that is currently on-screen.
-   *
-   *  dockview tags every edge-group shell element with a library-provided
-   *  `data-testid` (`dv-edge-group-edge-<direction>`), and renders the
-   *  bottom slot in more than one shell position — only the populated one
-   *  is laid out at a non-zero size. Filtering to `visible` collapses that
-   *  to the single on-screen instance, so the test can assert
-   *  `toHaveCount(1)` (edge shown) vs `toHaveCount(0)` (edge collapsed to
-   *  zero size while a group is maximized).
-   *
-   *  Using dockview's own testid here mirrors how the maximize spec already
-   *  asserts on dockview-owned chrome (e.g. the `dv-active-tab` class on
-   *  `.dv-tab`): the edge shell is third-party markup we don't render, so
-   *  there's no BEM `data-testid` of our own to key off. */
-  bottomEdgeGroup(): Locator {
-    return this.page.getByTestId("dv-edge-group-edge-bottom").filter({ visible: true });
+  /** Every dockview edge group (the left / right / bottom docked areas that
+   *  used to sit around the grid). dockview tags each edge-group element with
+   *  a library-provided `data-testid` (`dv-edge-group-<groupId>`); it is
+   *  third-party markup, so there is no BEM testid of our own to key off.
+   *  Edge groups were removed, so this should always resolve to nothing. */
+  edgeGroups(): Locator {
+    return this.page.getByTestId(/^dv-edge-group-/);
   }
 
   /** Reset the per-workspace shared-dockview state entry in
@@ -2626,43 +2974,6 @@ export class WorkspacePage {
         [ACTIVE_STATE_KEY_PREFIX, workspaceId] as const,
       );
     });
-  }
-
-  /** Fetch the persisted server-side dockview layout for the given
-   *  inner container (`chat`, `terminal`, or `browser`). Each container
-   *  has its own tRPC namespace (`chatLayout.get`, `terminalLayout.get`,
-   *  `browserLayout.get`) that returns `{ tree }`; this helper unwraps
-   *  the response and returns the parsed tree (or `null` when no layout
-   *  has been persisted yet).
-   *
-   *  Used by the panel-default-position regression test to verify that
-   *  newly-added panels end up in a central (grid-located) leaf instead
-   *  of being appended into one of the three collapsed edge groups
-   *  (`edge-left`, `edge-right`, `edge-bottom`) that `ensureEdgeGroups`
-   *  adds in `onReady`. The return type narrows the response into the
-   *  dockview-toJSON shape the test traverses — keeps dockview
-   *  knowledge inside the page object so test bodies can skip casts. */
-  async readInnerLayout(
-    container: "chat" | "terminal" | "browser",
-    workspaceId: string,
-  ): Promise<DockviewLayoutSnapshot | null> {
-    const procedure =
-      container === "chat"
-        ? "chatLayout.get"
-        : container === "terminal"
-          ? "terminalLayout.get"
-          : "browserLayout.get";
-    const input = encodeURIComponent(JSON.stringify({ workspaceId }));
-    const res = await this.page.request.get(
-      `${this.baseUrl}/trpc/${procedure}?input=${input}&token=${this.token}`,
-    );
-    if (!res.ok()) {
-      throw new Error(`readInnerLayout(${container}) failed: ${res.status()} ${await res.text()}`);
-    }
-    const body = (await res.json()) as {
-      result: { data: { tree: DockviewLayoutSnapshot | null } };
-    };
-    return body.result.data.tree;
   }
 
   /** Fire the `workspaces.create` mutation over HTTP with `via:
@@ -3569,19 +3880,3 @@ export class WorkspacePage {
     return rect!;
   }
 }
-
-/** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of
- *  `dockview.toJSON()` the regression test traverses (`grid.root` walk
- *  + `panels` lookup); other fields are ignored. Lives at the bottom of
- *  the page-object file so callers get a typed return from
- *  `readInnerLayout` without re-deriving the shape inline. */
-export interface DockviewLayoutSnapshot {
-  grid?: {
-    root?: DockviewGridNode;
-  };
-  panels: Record<string, unknown>;
-}
-
-export type DockviewGridNode =
-  | { type: "leaf"; data: { id: string; views: string[]; activeView?: string } }
-  | { type: "branch"; data: DockviewGridNode[] };

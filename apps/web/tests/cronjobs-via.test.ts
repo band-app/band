@@ -200,7 +200,7 @@ describe("cronjobs.trigger via=terminal happy path", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("spawns a self-closing terminal running the prompt, then prunes it", async () => {
@@ -314,7 +314,7 @@ describe("cronjobs.trigger via=terminal skips overlapping runs", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("returns 409 when the previous terminal run is still active", async () => {
@@ -406,7 +406,7 @@ describe("cronjobs.trigger default dispatches to chat", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("returns via=chat with a taskId and spawns no terminal", async () => {
@@ -508,7 +508,7 @@ describe("cronjobs.trigger via=terminal falls back to chat when unsupported", ()
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("reports via=chat and does not return a terminalId", async () => {
@@ -591,7 +591,7 @@ describe("cronjobs.delete tears down a via=terminal job's terminal", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("kills the spawned terminal when the job is deleted", async () => {
@@ -670,7 +670,7 @@ describe("cronjobs.trigger — auth", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("rejects cronjobs.trigger without the band_token cookie (401)", async () => {
@@ -743,7 +743,7 @@ describe("cronjobs.trigger via=terminal is safe under concurrent fires", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("two concurrent triggers spawn exactly one terminal; the loser gets 409", async () => {
@@ -840,7 +840,7 @@ describe("cronjobs.trigger via=terminal on a workspace-scoped job", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("dispatches the terminal into the job's own workspace", async () => {

@@ -24,6 +24,7 @@ export interface BrowserLookupSnapshot {
   id: BrowserRow["id"];
   workspaceId: BrowserRow["workspaceId"];
   url: BrowserRow["url"];
+  profileId: BrowserRow["profileId"];
 }
 
 type BrowserLookup = (browserId: string) => BrowserLookupSnapshot | undefined;

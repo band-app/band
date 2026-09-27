@@ -816,3 +816,103 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     expect(output).toContain(`ENV_BAND_SERVER_URL:${server.url}|`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// agentMode (issue #682): the device's `gui` / `tui` choice. It beats the
+// older `via`, and with neither the server's `agents.defaultMode` applies.
+// ---------------------------------------------------------------------------
+
+describe("workspaces.create agentMode", () => {
+  const TOKEN = "wc-agent-mode-token";
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  async function create(branch: string, extra: object): Promise<CreateResponse> {
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.create",
+      { project: "modeproj", branch, prompt: `prompt for ${branch}`, ...extra },
+      TOKEN,
+    );
+    const body = await res.text();
+    expect(res.status, body).toBe(200);
+    return (JSON.parse(body) as { result: { data: CreateResponse } }).result.data;
+  }
+
+  async function setDefaultMode(defaultMode: "gui" | "tui"): Promise<void> {
+    const res = await trpcMutate(server.url, "settings.update", { agents: { defaultMode } }, TOKEN);
+    expect(res.status, await res.text()).toBe(200);
+  }
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-agent-mode-");
+    const repoPath = createGitRepo(tmpHome, "modeproj");
+    const stubBin = writeStubVendorCli(tmpHome, "stub-claude.sh");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "modeproj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: stubBin },
+      ],
+    });
+    server = await startAcpServer({ home: tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("agentMode tui spawns the agent's CLI with the prompt", async () => {
+    const data = await create("feat/mode-tui", { agentMode: "tui" });
+    expect(data).toEqual({
+      ok: true,
+      path: expect.stringMatching(/\/feat\/mode-tui$/),
+      via: "terminal",
+      terminalId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+    const output = await waitFor(
+      async () => {
+        const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
+        return out?.includes("prompt for feat/mode-tui|") ? out : undefined;
+      },
+      { label: "stub vendor CLI argv echoed" },
+    );
+    expect(output).toContain("ARGV:prompt for feat/mode-tui|");
+  });
+
+  it("agentMode gui wins over via terminal", async () => {
+    const data = await create("feat/mode-gui", { agentMode: "gui", via: "terminal" });
+    expect(data).toEqual({
+      ok: true,
+      path: expect.stringMatching(/\/feat\/mode-gui$/),
+      via: "chat",
+    });
+    const workspaceId = toWorkspaceId("modeproj", "feat/mode-gui");
+    expect(await listTerminals(server.url, workspaceId, TOKEN)).toEqual([]);
+    await waitFor(() => promptTexts(tmpHome).includes("prompt for feat/mode-gui"), {
+      label: "prompt reached the chat agent",
+    });
+  });
+
+  it("without a mode uses agents.defaultMode", async () => {
+    await setDefaultMode("tui");
+    const data = await create("feat/mode-default", {});
+    expect(data).toEqual({
+      ok: true,
+      path: expect.stringMatching(/\/feat\/mode-default$/),
+      via: "terminal",
+      terminalId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
+    await setDefaultMode("gui");
+  });
+});

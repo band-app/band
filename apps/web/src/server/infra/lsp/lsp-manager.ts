@@ -31,6 +31,12 @@ export interface LspServerSession {
   process: ChildProcess;
   workspaceId: string;
   lang: string;
+  /**
+   * How many connected clients hold each document open. Every WebSocket for
+   * this workspace and language shares the process, so `lsp-proxy.ts` only
+   * forwards the first `didOpen` and the last `didClose` of a URI.
+   */
+  openDocuments: Map<string, number>;
 }
 
 /** serverId -> session (serverId = `${workspaceId}:${lang}`) */
@@ -105,7 +111,12 @@ export async function getOrSpawnServer(
     },
   });
 
-  const session: LspServerSession = { process: child, workspaceId, lang };
+  const session: LspServerSession = {
+    process: child,
+    workspaceId,
+    lang,
+    openDocuments: new Map(),
+  };
 
   function removeSession(): void {
     servers.delete(serverId);

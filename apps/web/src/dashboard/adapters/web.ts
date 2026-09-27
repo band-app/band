@@ -1,17 +1,19 @@
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import type { AgentMode } from "../../shared/agent-sessions";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
+  BrowserProfileInfo,
   CIStatus,
   CliStatus,
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileListResult,
   FormatFileResult,
   GitStatus,
   HooksStatus,
+  ListWorkspaceBranchesResult,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
@@ -86,8 +88,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
     branch: string,
     base?: string,
     prompt?: string,
+    agentMode?: AgentMode,
   ): Promise<void> {
-    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt });
+    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt, agentMode });
   }
 
   async removeWorkspace(project: string, name: string): Promise<void> {
@@ -112,6 +115,28 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async gitPush(project: string, name: string): Promise<void> {
     await this.trpc.workspaces.gitPush.mutate({ project, name });
+  }
+
+  async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {
+    const data = await this.trpc.browserProfiles.list.query();
+    return data.profiles as BrowserProfileInfo[];
+  }
+
+  async removeBrowserProfile(profileId: string): Promise<void> {
+    await this.trpc.browserProfiles.remove.mutate({ profileId });
+  }
+
+  async listProjectBrowserProfiles(): Promise<Record<string, string>> {
+    const data = await this.trpc.browserProfiles.projectDefaults.query();
+    const byProject: Record<string, string> = {};
+    for (const row of data.defaults as { projectName: string; profileId: string }[]) {
+      byProject[row.projectName] = row.profileId;
+    }
+    return byProject;
+  }
+
+  async setProjectBrowserProfile(projectName: string, profileId: string | null): Promise<void> {
+    await this.trpc.browserProfiles.setProjectDefault.mutate({ projectName, profileId });
   }
 
   async getSettings(): Promise<Settings> {
@@ -382,26 +407,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async listWorkspaceBranches(
     workspaceId: string,
-  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }> {
-    return (await this.trpc.workspace.listBranches.query({ workspaceId })) as {
-      branches: string[];
-      defaultBranch: string;
-      headBranch: string;
-    };
-  }
-
-  async getFileDiff(
-    workspaceId: string,
-    filePath: string,
-    mergeBase: string,
-    contextLines?: number,
-  ): Promise<FileDiffResult> {
-    return (await this.trpc.workspace.getFileDiff.query({
-      workspaceId,
-      filePath,
-      mergeBase,
-      contextLines,
-    })) as FileDiffResult;
+    options?: { query?: string; limit?: number },
+  ): Promise<ListWorkspaceBranchesResult> {
+    return await this.trpc.workspace.listBranches.query({ workspaceId, ...options });
   }
 
   async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
@@ -492,20 +500,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
       fromPath,
       toPath,
     })) as { kind: "file" | "directory" };
-  }
-
-  async revertFile(
-    workspaceId: string,
-    filePath: string,
-    diffMode: DiffMode,
-    compareBranch?: string,
-  ): Promise<void> {
-    await this.trpc.workspace.revertFile.mutate({
-      workspaceId,
-      filePath,
-      diffMode,
-      compareBranch,
-    });
   }
 
   getWorkspaceFileUrl(workspaceId: string, path: string): string {

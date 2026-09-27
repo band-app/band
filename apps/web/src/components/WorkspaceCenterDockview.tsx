@@ -20,7 +20,7 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import type { Extension } from "@codemirror/state";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
   DockviewReact,
@@ -33,6 +33,8 @@ import {
 } from "dockview";
 import {
   AlignJustify,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Code,
   Columns2,
@@ -66,7 +68,10 @@ import {
 import {
   AgentIcon,
   buildLspWsUrl,
+  type ChangeEntry,
+  type ChangeSection,
   type ChatInsertDetail,
+  createDiffLspNavigation,
   createLspExtension,
   DiffFileContent,
   DiffOverviewRuler,
@@ -75,9 +80,9 @@ import {
   getFilePreviewType,
   getLspLanguageId,
   getStoredViewMode,
+  readAgentMode,
   releaseLspClient,
   SearchBar,
-  type SearchOptions,
   serializeViewPosition,
   storeViewMode,
   type TerminalInsertDetail,
@@ -85,7 +90,6 @@ import {
   toLspServerLang,
   useAdapter,
   useCapabilities,
-  useDiffTarget,
   useSearch,
   useSettingsQuery,
   useWorkspacePath,
@@ -94,22 +98,22 @@ import {
 import { formatShortcut, isMacPlatform } from "../dashboard/lib/command-registry";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
+import {
+  findChange,
+  invalidateWorkspaceChanges,
+  SECTION_LABELS,
+  useWorkspaceChanges,
+} from "../hooks/useWorkspaceChanges";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
 import { listen as desktopListen } from "../lib/desktop-ipc";
-import {
-  attachEdgeGroupDragVisibility,
-  centralPanelPosition,
-  ensureEdgeGroups,
-  prepareMaximizeRestoreAnimation,
-  registerInnerDockview,
-} from "../lib/dockview-edge-groups";
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
   splitDirectionForKey,
 } from "../lib/dockview-section-actions";
+import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
 import { isDesktop } from "../lib/is-desktop";
 import {
   markBrowserFresh,
@@ -134,12 +138,10 @@ import {
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
+import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
-import {
-  MarkdownPreview,
-  type MarkdownPreviewHandle,
-  type MarkdownPreviewMatchInfo,
-} from "./MarkdownPreview";
+import { renderMarkdownBlock } from "./markdown-block-renderer";
+import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
@@ -238,8 +240,8 @@ const bandTheme: DockviewTheme = {
 //
 // The shell (`SharedDockviewLayout`) owns global keyboard shortcuts + dialogs
 // but no longer owns a dockview. It resolves the ACTIVE workspace's dockview
-// api from this registry to route panel-activation / maximize / edge-toggle
-// shortcuts. Registered on `onReady`, cleared on unmount.
+// api from this registry to route panel-activation / maximize shortcuts.
+// Registered on `onReady`, cleared on unmount.
 // ---------------------------------------------------------------------------
 
 const workspaceDockviewApis = new Map<string, DockviewApi>();
@@ -351,24 +353,89 @@ function isDockviewLayout(obj: unknown): boolean {
   return typeof o.grid === "object" && typeof o.panels === "object";
 }
 
-/** Recursively strip a set of view ids from a dockview grid branch. */
+/** Recursively strip a set of view ids from a dockview grid branch. dockview
+ *  serializes a leaf's group as an object in `data` and a branch's children as
+ *  an array in `data`. */
 function pruneGridViews(node: unknown, removed: Set<string>): void {
   if (!node || typeof node !== "object") return;
   const n = node as Record<string, unknown>;
+  if (Array.isArray(n.data)) {
+    for (const child of n.data) pruneGridViews(child, removed);
+    return;
+  }
   const data = n.data as { views?: string[]; activeView?: string } | undefined;
   if (data && Array.isArray(data.views)) {
     data.views = data.views.filter((v) => !removed.has(v));
     if (data.activeView && removed.has(data.activeView)) data.activeView = data.views[0];
   }
-  if (Array.isArray(n.children)) {
-    for (const child of n.children) pruneGridViews(child, removed);
+}
+
+/** First leaf of a dockview grid branch, depth-first. */
+function firstGridLeaf(node: unknown): { views: string[]; activeView?: string } | undefined {
+  if (!node || typeof node !== "object") return undefined;
+  const n = node as { type?: string; data?: unknown };
+  if (n.type === "leaf") {
+    const data = n.data as { views?: unknown } | undefined;
+    if (data && Array.isArray(data.views)) return data as { views: string[] };
+    return undefined;
+  }
+  if (n.type === "branch" && Array.isArray(n.data)) {
+    for (const child of n.data) {
+      const leaf = firstGridLeaf(child);
+      if (leaf) return leaf;
+    }
+  }
+  return undefined;
+}
+
+/** Move the panels of any dockview edge groups (left / right / bottom docked
+ *  areas, written by layouts saved before edge panels were removed) into the
+ *  first grid group as tabs, then drop `edgeGroups` so `fromJSON` never
+ *  recreates an edge group. dockview only builds panels a group references, so
+ *  deleting `edgeGroups` alone would silently lose those panels. */
+function moveEdgePanelsIntoGrid(layout: Record<string, unknown>): void {
+  const edgeGroups = layout.edgeGroups as
+    | Record<string, { group?: { views?: unknown } } | undefined>
+    | undefined;
+  delete layout.edgeGroups;
+  if (!edgeGroups || typeof edgeGroups !== "object") return;
+  // Only move views that have a panel entry. dockview's edge restore skipped a
+  // view with no entry, but its grid restore throws on one, which would make
+  // `fromJSON` fail and reset the whole layout to the default.
+  const panels = (layout.panels ?? {}) as Record<string, unknown>;
+  const moved: string[] = [];
+  for (const edge of Object.values(edgeGroups)) {
+    const views = edge?.group?.views;
+    if (Array.isArray(views)) {
+      for (const v of views) if (typeof v === "string" && panels[v]) moved.push(v);
+    }
+  }
+  if (moved.length === 0) return;
+  const grid = layout.grid as { root?: unknown } | undefined;
+  const leaf = firstGridLeaf(grid?.root);
+  if (leaf) {
+    leaf.views.push(...moved.filter((v) => !leaf.views.includes(v)));
+    if (!leaf.activeView) leaf.activeView = leaf.views[0];
+  } else if (grid?.root && typeof grid.root === "object") {
+    // A grid with no leaf at all (every grid group closed, panels only at the
+    // edges): give the root branch a single leaf holding the moved panels.
+    const root = grid.root as { data?: unknown; size?: number };
+    root.data = [
+      {
+        type: "leaf",
+        data: { views: moved, activeView: moved[0], id: "edge-panels" },
+        size: root.size ?? 0,
+      },
+    ];
   }
 }
 
 /** Drop panels whose `component` isn't a renderable leaf kind (e.g. a stale
  *  `files`/`changes` singleton from an older layout) so `fromJSON` can't mount
- *  an unregistered component. Mutates + returns the layout clone. */
+ *  an unregistered component, and fold any legacy edge-group panels into the
+ *  grid. Mutates + returns the layout clone. */
 function sanitizeSavedLayout(layout: Record<string, unknown>): Record<string, unknown> {
+  moveEdgePanelsIntoGrid(layout);
   const panels = layout.panels as Record<string, { contentComponent?: string }> | undefined;
   if (!panels) return layout;
   const removed = new Set<string>();
@@ -427,11 +494,29 @@ function reinjectParams(
       // back into the filePath param. Line/column are transient (jump targets)
       // and intentionally not persisted.
       else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
-      else if (comp === "diff") panel.params = { workspaceId, filePath: id.slice(5) };
-      else panel.params = { workspaceId };
+      else if (comp === "diff") {
+        const commit = COMMIT_DIFF_ID.exec(id);
+        const allOf = SECTION_DIFFS_ID.exec(id);
+        panel.params = commit
+          ? { workspaceId, filePath: commit[2], commit: commit[1] }
+          : allOf
+            ? { workspaceId, filePath: "", allOf: allOf[1] }
+            : { workspaceId, filePath: id.slice(5) };
+      } else panel.params = { workspaceId };
     }
   }
   return clone;
+}
+
+/** Pin a new panel to a grid group rather than whatever `activeGroup` is (which
+ *  can be a floating group). With no grid group left, `{ direction: "within" }`
+ *  without a reference makes dockview create a fresh central group. */
+function centralPanelPosition(
+  api: DockviewApi,
+): { referenceGroup: string } | { direction: "within" } {
+  const central = api.groups.find((g) => g.api.location.type === "grid");
+  if (central) return { referenceGroup: central.id };
+  return { direction: "within" };
 }
 
 /** Where a newly-opened file/diff leaf should go: the group the user is
@@ -549,6 +634,33 @@ interface DiffLeafParams {
   workspaceId: string;
   filePath: string;
   preview?: boolean;
+  /** Set for a diff opened from the Commits panel: the file's change in
+   *  this commit (vs its first parent) instead of the working-tree diff. */
+  commit?: string;
+  /** Which Changes section's diff to show (staged, unstaged, committed on
+   *  the branch, …). Unset for a diff restored from a saved layout or opened
+   *  with "View changes": the leaf uses the first section listing the file. */
+  section?: ChangeSection;
+  /** The path before a rename, so the diff pairs both sides. */
+  oldPath?: string;
+  /** Set for a section's "View all" tab: every file of that section, stacked
+   *  (`filePath` is empty). */
+  allOf?: ChangeSection;
+}
+
+// Diff leaves are keyed `diff:<path>` — one tab per path, whichever section it
+// was opened from. A commit's file diff is keyed `diff@<sha>:<path>` and a
+// section's "View all" tab `diffs:<section>`, so renames/deletes in the
+// Explorer (which match on the `diff:` prefix) leave them alone.
+const COMMIT_DIFF_ID = /^diff@([0-9a-f]{7,40}):(.+)$/i;
+const SECTION_DIFFS_ID = /^diffs:(conflicts|unstaged|staged|untracked|branch)$/;
+
+function commitDiffId(sha: string, filePath: string): string {
+  return `diff@${sha}:${filePath}`;
+}
+
+function sectionDiffsId(section: ChangeSection): string {
+  return `diffs:${section}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -844,14 +956,10 @@ function removeFileTabState(ws: string, path: string): void {
 function useLeafFind(
   workspaceId: string,
   visible: boolean,
-  // When set + `active`, ⌘F drives the rendered markdown preview (a DOM find)
-  // instead of the CodeMirror editor — the file leaf passes this while a
-  // markdown file is shown in preview mode.
-  previewSearch?: {
-    active: boolean;
-    ref: React.RefObject<MarkdownPreviewHandle | null>;
-    matchInfo: MarkdownPreviewMatchInfo;
-  },
+  // True while a markdown file is shown as its rendered preview. The preview
+  // is a CodeMirror view too, so find works the same; only the placeholder
+  // changes.
+  previewActive = false,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   // The set of CodeMirror EditorViews to search. `file` leaves have one;
@@ -909,38 +1017,19 @@ function useLeafFind(
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, search.handleOpenSearch]);
 
-  // When a markdown file is shown as preview, the same SearchBar drives the
-  // preview's DOM find (via the MarkdownPreview handle) instead of CodeMirror.
-  const previewActive = previewSearch?.active ?? false;
-  const runPreviewSearch = useCallback(
-    (q: string, opts: SearchOptions) => previewSearch?.ref.current?.search(q, opts),
-    [previewSearch?.ref],
-  );
-
   const searchBar = search.searchOpen ? (
     <SearchBar
       ref={search.searchBarRef}
       variant="floating"
       query={search.searchQuery}
-      onQueryChange={(q) => {
-        search.setSearchQuery(q);
-        if (previewActive) runPreviewSearch(q, search.searchOptions);
-      }}
+      onQueryChange={search.setSearchQuery}
       options={search.searchOptions}
-      onOptionsChange={(o) => {
-        search.setSearchOptions(o);
-        if (previewActive) runPreviewSearch(search.searchQuery, o);
-      }}
+      onOptionsChange={search.setSearchOptions}
       placeholder={previewActive ? "Find in preview..." : "Find in file..."}
-      matchInfo={previewActive && previewSearch ? previewSearch.matchInfo : search.matchInfo}
-      onNext={previewActive ? () => previewSearch?.ref.current?.next() : search.handleNext}
-      onPrevious={
-        previewActive ? () => previewSearch?.ref.current?.previous() : search.handlePrevious
-      }
-      onClose={() => {
-        if (previewActive) previewSearch?.ref.current?.clear();
-        search.handleCloseSearch();
-      }}
+      matchInfo={search.matchInfo}
+      onNext={search.handleNext}
+      onPrevious={search.handlePrevious}
+      onClose={search.handleCloseSearch}
     />
   ) : undefined;
 
@@ -948,18 +1037,15 @@ function useLeafFind(
 }
 
 // ---------------------------------------------------------------------------
-// Per-file LSP extension for the file leaf
+// Per-file LSP extensions for the file and diff leaves
 // ---------------------------------------------------------------------------
 //
-// Mirrors CodeBrowserView's LSP wiring (createLspExtension on mount /
-// path+language change, releaseLspClient on cleanup). External + untitled
-// paths get no LSP (external files are outside the project root; untitled
-// buffers have no file URI). `createLspExtension` / `releaseLspClient`
-// refcount a shared client per WS url, so multiple file leaves open at once
-// acquire/release safely — same guarantee CodeBrowserView relies on.
+// External + untitled paths get no LSP (external files are outside the project
+// root; untitled buffers have no file URI). The LSP clients are refcounted per
+// WS url, so several leaves on one workspace share a language server; each
+// effect run releases exactly the reference it acquired.
 
-// Maps a file extension to the CodeMirror language name used by the LSP layer
-// (identical table to CodeBrowserView's).
+// Maps a file extension to the CodeMirror language name used by the LSP layer.
 const LSP_EXT_LANG_MAP: Record<string, string> = {
   ts: "typescript",
   tsx: "tsx",
@@ -976,10 +1062,19 @@ function fileCmLang(filePath: string): string | undefined {
   return ext ? LSP_EXT_LANG_MAP[ext] : undefined;
 }
 
-function useFileLeafLsp(
+type LspExtensionFactory = (
+  wsUrl: string,
+  rootUri: string,
+  documentUri: string,
+  languageId: string,
+  workspaceId: string,
+) => Promise<Extension>;
+
+function useLeafLsp(
   workspaceId: string,
   filePath: string,
-  external: boolean,
+  disabled: boolean,
+  create: LspExtensionFactory,
 ): Extension | null {
   const { settings } = useSettingsQuery();
   const workspacePath = useWorkspacePath(workspaceId);
@@ -988,14 +1083,12 @@ function useFileLeafLsp(
   // can hold hundreds of MB) and re-acquires it when shown again.
   const coldParked = useWorkspaceColdParked(workspaceId);
 
-  // External / untitled files skip LSP entirely (no useful project context /
-  // no file URI). Only TS/JS-family files have a mapped server language.
+  // Only TS/JS-family files have a mapped server language.
   const lspServerLang = useMemo(() => {
-    if (!settings.enableLSP || coldParked) return null;
-    if (external || isUntitledPath(filePath)) return null;
+    if (!settings.enableLSP || coldParked || disabled) return null;
     const cmLang = fileCmLang(filePath);
     return cmLang ? toLspServerLang(cmLang) : null;
-  }, [filePath, external, settings.enableLSP, coldParked]);
+  }, [filePath, disabled, settings.enableLSP, coldParked]);
 
   const lspWsUrl = useMemo(
     () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
@@ -1003,34 +1096,31 @@ function useFileLeafLsp(
   );
 
   useEffect(() => {
-    if (!lspWsUrl || !workspacePath) {
-      setLspExtension(null);
-      return;
-    }
+    setLspExtension(null);
+    if (!lspWsUrl || !workspacePath) return;
     let cancelled = false;
-    const rootUri = toFileUri(workspacePath);
-    const documentUri = toFileUri(workspacePath, filePath);
     const cmLang = fileCmLang(filePath);
-    const languageId = cmLang ? getLspLanguageId(cmLang) : undefined;
-    createLspExtension(lspWsUrl, rootUri, documentUri, languageId, workspaceId)
+    const created = create(
+      lspWsUrl,
+      toFileUri(workspacePath),
+      toFileUri(workspacePath, filePath),
+      (cmLang && getLspLanguageId(cmLang)) || "",
+      workspaceId,
+    );
+    created
       .then((ext) => {
         if (!cancelled) setLspExtension(ext);
       })
-      .catch((err) => {
-        console.warn("[FileLeaf] LSP extension creation failed:", err);
-        if (!cancelled) setLspExtension(null);
-      });
+      .catch((err) => console.warn("[leaf] LSP extension creation failed:", err));
     return () => {
       cancelled = true;
+      // Release only once the client was acquired (a failed connect holds none).
+      created.then(
+        () => releaseLspClient(lspWsUrl),
+        () => {},
+      );
     };
-  }, [lspWsUrl, workspacePath, filePath, workspaceId]);
-
-  // Release the shared client for the *previous* url on change / unmount.
-  useEffect(() => {
-    return () => {
-      if (lspWsUrl) releaseLspClient(lspWsUrl);
-    };
-  }, [lspWsUrl]);
+  }, [lspWsUrl, workspacePath, filePath, workspaceId, create]);
 
   return lspExtension;
 }
@@ -1076,27 +1166,24 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     () => getFileTabState(workspaceIdRaw, filePathRaw)?.viewMode,
   );
 
-  // Markdown preview find target: the rendered MarkdownPreview exposes an
-  // imperative search handle, and reports its match counter here. `⌘F` routes
-  // to it (instead of CodeMirror) while a markdown file is shown as preview
-  // (markdown defaults to preview, so anything but explicit "source").
-  const markdownRef = useRef<MarkdownPreviewHandle | null>(null);
-  const [previewMatchInfo, setPreviewMatchInfo] = useState<MarkdownPreviewMatchInfo>({
-    total: 0,
-    current: 0,
-  });
+  // Markdown defaults to the rendered preview, so anything but explicit "source".
   const previewFindActive = getFilePreviewType(filePathRaw) === "markdown" && viewMode !== "source";
 
-  const { containerRef, setViews, searchBar } = useLeafFind(workspaceIdRaw, visible, {
-    active: previewFindActive,
-    ref: markdownRef,
-    matchInfo: previewMatchInfo,
-  });
+  const { containerRef, setViews, searchBar } = useLeafFind(
+    workspaceIdRaw,
+    visible,
+    previewFindActive,
+  );
   useActiveFileTracking(api, workspaceIdRaw, filePathRaw, visible);
   const capabilities = useCapabilities();
   const untitled = params.untitled === true || isUntitledPath(filePathRaw);
   const external = untitled ? false : (params.external ?? filePathRaw.startsWith("/"));
-  const lspExtension = useFileLeafLsp(workspaceIdRaw, filePathRaw, external || untitled);
+  const lspExtension = useLeafLsp(
+    workspaceIdRaw,
+    filePathRaw,
+    external || untitled,
+    createLspExtension,
+  );
   const coldParked = useWorkspaceColdParked(workspaceIdRaw);
 
   const workspacePath = useWorkspacePath(workspaceIdRaw);
@@ -1167,21 +1254,6 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     // mount/unmount.
   }, [workspaceIdRaw, filePathRaw]);
 
-  // Stable renderer (identity never changes — markdownRef/setPreviewMatchInfo
-  // are stable) so FileViewer's `showMarkdownToggle` doesn't churn each render.
-  // Threads the imperative find handle + match-counter so ⌘F can drive the
-  // rendered preview (see `useLeafFind`'s `previewSearch`).
-  const renderMarkdown = useCallback(
-    (content: string) => (
-      <MarkdownPreview
-        ref={markdownRef}
-        content={content}
-        onMatchInfoChange={setPreviewMatchInfo}
-      />
-    ),
-    [],
-  );
-
   // Save-as flow for untitled buffers. `capabilities.pickSaveFile` bundles the
   // OS "Save As" dialog + the disk write and resolves with the absolute path
   // (null on cancel). On success we open the now-real file as its own leaf
@@ -1210,9 +1282,27 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
+  // "View changes" only shows while this file is in one of the Changes
+  // sections, read from the same cached result the Changes panel uses (a
+  // renamed file is listed under its new path). Untitled and external files are
+  // never in it. The poll runs only while the leaf is visible; a save
+  // refetches at once so the button appears without waiting for the next poll.
+  const changesEnabled = !untitled && !external;
+  const changesQuery = useWorkspaceChanges(workspaceIdRaw, {
+    enabled: changesEnabled && visible,
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const canViewDiff = changesEnabled && !!findChange(changesQuery.data, filePathRaw);
+  const refetchChanges = changesQuery.refetch;
+  const wasDirtyRef = useRef(false);
+  const isDirty = fileActions?.isDirty ?? false;
+  useEffect(() => {
+    if (wasDirtyRef.current && !isDirty && changesEnabled) void refetchChanges();
+    wasDirtyRef.current = isDirty;
+  }, [isDirty, changesEnabled, refetchChanges]);
+
   // Publish this file leaf's actions (markdown toggle, Save, View changes) to
   // the group header — the FileViewer's own title bar is hidden (#643).
-  const canViewDiff = !untitled && !external;
   usePublishHeaderActions(
     api.id,
     workspaceIdRaw && filePathRaw
@@ -1310,7 +1400,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         external={external}
         untitled={untitled}
         // LSP is workspace-scoped: external files have no project root and
-        // untitled buffers have no file URI, so `useFileLeafLsp` returns null
+        // untitled buffers have no file URI, so `useLeafLsp` returns null
         // for both — pass it straight through.
         lspExtension={lspExtension}
         // A cold-parked hidden workspace releases its server-side file watcher.
@@ -1332,9 +1422,10 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
           removeFileTabState(workspaceId, filePath);
           getWorkspaceLeafActions(workspaceId)?.onClose(`file:${filePath}`, "file");
         }}
-        // Markdown files get a code/preview toggle in the title bar; the
-        // preview reuses the shared MarkdownPreview renderer.
-        renderMarkdown={renderMarkdown}
+        // Markdown files open in an editable rendered preview with a
+        // preview/source toggle; tables, frontmatter and mermaid blocks render
+        // through Streamdown.
+        renderMarkdownBlock={renderMarkdownBlock}
         onEditorView={handleEditorView}
         overlay={searchBar}
         // Cursor selection + scroll restore: seeded from the per-tab store;
@@ -1381,17 +1472,65 @@ const FULL_FILE_CONTEXT = 99999;
 // keeps no direct @codemirror/view dependency.
 type DiffEditorViews = React.ComponentProps<typeof DiffOverviewRuler>["views"];
 
-function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
+function DiffLeaf(props: IDockviewPanelProps<DiffLeafParams>) {
+  // A panel's id never changes, so neither does which of the two it renders.
+  return props.params.allOf ? (
+    <SectionDiffsLeaf {...props} section={props.params.allOf} />
+  ) : (
+    <FileDiffLeaf {...props} />
+  );
+}
+
+/** Sections whose changes live in the working tree or index, so the diff
+ *  leaf's revert button can discard them. */
+function discardableSection(
+  section: ChangeSection | undefined,
+): "unstaged" | "staged" | "untracked" | null {
+  return section === "unstaged" || section === "staged" || section === "untracked" ? section : null;
+}
+
+function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
   // On desktop the diff selection tooltip offers only "Copy reference"; the
   // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
   // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
-  const { workspaceId, filePath } = params;
-  const adapter = useAdapter();
+  const { workspaceId, filePath, commit } = params;
+  const queryClient = useQueryClient();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
-  useActiveFileTracking(api, workspaceId ?? "", filePath ?? "", visible);
-  const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
+
+  // A commit's diff doesn't compare against the working tree, so it never
+  // reads the workspace's Changes sections.
+  const changesQuery = useWorkspaceChanges(workspaceId ?? "", {
+    enabled: !!filePath && !commit,
+    // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
+    // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
+    // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
+    refetchInterval: visible ? 15_000 : false,
+  });
+  // The section the tab was opened from, unless the file has since left it
+  // (staged, committed, …) for another one.
+  const found = findChange(changesQuery.data, filePath);
+  const inParamSection =
+    !!params.section && !!changesQuery.data?.[params.section].some((e) => e.path === filePath);
+  const section = inParamSection || !found ? params.section : found.section;
+  const oldPath =
+    (section === params.section ? params.oldPath : undefined) ??
+    (section ? changesQuery.data?.[section].find((e) => e.path === filePath)?.oldPath : undefined);
+  // Only the `branch` section diffs against the merge base.
+  const mergeBase = section === "branch" ? (changesQuery.data?.mergeBase ?? undefined) : undefined;
+  // A commit's diff is history, not the worktree file: it doesn't mark a row
+  // in the Explorer / Changes trees as the open file.
+  useActiveFileTracking(api, workspaceId ?? "", commit ? "" : (filePath ?? ""), visible);
+  // Go-to-definition on the working-tree side (see `createDiffLspNavigation`).
+  // Off where the new side isn't the file on disk: a commit's diff, a staged
+  // diff (the index) and a branch diff (HEAD).
+  const lspNavigation = useLeafLsp(
+    workspaceId ?? "",
+    filePath ?? "",
+    !!commit || section === "staged" || section === "branch",
+    createDiffLspNavigation,
+  );
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
   // The diff's editors also feed the overview ruler, which measures where each
@@ -1411,40 +1550,44 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     storeViewMode(mode);
   }, []);
 
-  const summaryQuery = useQuery({
-    queryKey: ["diffLeafSummary", workspaceId, diffMode, compareBranch],
-    queryFn: () =>
-      trpc.workspace.getDiffSummary.query({
-        workspaceId,
-        diffMode,
-        compareBranch: compareBranch ?? undefined,
-      }),
-    enabled: !!workspaceId && !!filePath,
-    // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
-    // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
-    refetchInterval: visible ? 10_000 : false,
-  });
-
-  const mergeBase = summaryQuery.data?.mergeBase;
-
   const fileDiffQuery = useQuery({
-    queryKey: ["diffLeafFile", workspaceId, filePath, mergeBase],
+    queryKey: ["diffLeafFile", workspaceId, filePath, section, mergeBase, oldPath],
     queryFn: () =>
       trpc.workspace.getFileDiff.query({
         workspaceId,
         filePath,
-        mergeBase: mergeBase ?? "",
+        section: section ?? "unstaged",
+        mergeBase,
+        oldPath,
         // Show the full file, with the diff in place — clicking a changed file
         // opens its whole contents, not just the changed hunks.
         contextLines: FULL_FILE_CONTEXT,
       }),
-    enabled: !!workspaceId && !!filePath && !!mergeBase,
+    enabled:
+      !!workspaceId && !!filePath && !!section && (section !== "branch" || !!mergeBase) && !commit,
     refetchInterval: visible ? 10_000 : false,
+  });
+
+  // A commit's diff never changes, so it is fetched once and never polled.
+  const commitDiffQuery = useQuery({
+    queryKey: ["diffLeafCommitFile", workspaceId, commit, filePath],
+    queryFn: () =>
+      trpc.workspace.getCommitFileDiff.query({
+        workspaceId,
+        sha: commit ?? "",
+        filePath,
+        contextLines: FULL_FILE_CONTEXT,
+      }),
+    enabled: !!workspaceId && !!filePath && !!commit,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
   // Publish this diff leaf's actions (view toggle, open-for-edit, revert) to the
   // group header — the tab content itself carries no toolbar (#643).
-  const canRevert = !!adapter.revertFile;
+  // A commit's diff is history, and so is a branch diff: there is nothing to
+  // revert in the worktree. A conflict is resolved, not reverted.
+  const revertSection = commit ? null : discardableSection(section);
+  const canRevert = revertSection !== null;
   usePublishHeaderActions(
     api.id,
     workspaceId && filePath
@@ -1480,17 +1623,20 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
                 </button>
               </>
             )}
-            <button
-              type="button"
-              onClick={() =>
-                getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
-              }
-              title="Open file for editing"
-              data-testid="center-diff-leaf__open-file"
-              className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <SquarePen className="size-3.5" />
-            </button>
+            {/* The file may no longer exist in the worktree for a commit's diff. */}
+            {!commit && (
+              <button
+                type="button"
+                onClick={() =>
+                  getWorkspaceLeafActions(workspaceId)?.openFile(filePath, { preview: false })
+                }
+                title="Open file for editing"
+                data-testid="center-diff-leaf__open-file"
+                className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <SquarePen className="size-3.5" />
+              </button>
+            )}
             {canRevert && (
               <button
                 type="button"
@@ -1505,13 +1651,15 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           </div>
         )
       : null,
-    [viewMode, workspaceId, filePath, canRevert],
+    [viewMode, workspaceId, filePath, canRevert, commit],
   );
 
   if (!workspaceId || !filePath) return null;
 
-  const diff = fileDiffQuery.data?.diff;
-  const loading = summaryQuery.isLoading || fileDiffQuery.isLoading;
+  const diff = commit ? commitDiffQuery.data?.diff : fileDiffQuery.data?.diff;
+  const loading = commit
+    ? commitDiffQuery.isLoading
+    : changesQuery.isLoading || fileDiffQuery.isLoading;
 
   return (
     <div
@@ -1536,10 +1684,17 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
               viewMode={isMobile ? "unified" : viewMode}
               onEditorViews={handleEditorViews}
               copyReferenceOnly={!isMobile}
+              lspNavigation={lspNavigation}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-              {loading ? "Loading diff…" : "No changes"}
+              {loading
+                ? "Loading diff…"
+                : commit && commitDiffQuery.isError
+                  ? commitDiffQuery.error instanceof Error
+                    ? commitDiffQuery.error.message
+                    : "Failed to load the diff"
+                  : "No changes"}
             </div>
           )}
         </div>
@@ -1551,8 +1706,8 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           <DialogHeader>
             <DialogTitle>Revert file</DialogTitle>
             <DialogDescription>
-              Discard all changes to <span className="font-mono">{basename(filePath)}</span>? This
-              cannot be undone.
+              Discard the changes to <span className="font-mono">{basename(filePath)}</span>?{" "}
+              {revertSection && discardWarning(revertSection)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1561,13 +1716,19 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
             </Button>
             <Button
               variant="destructive"
+              data-testid="center-diff-leaf__revert-confirm"
               onClick={() => {
-                void adapter.revertFile
-                  ?.call(adapter, workspaceId, filePath, diffMode, compareBranch ?? undefined)
+                if (!revertSection) return;
+                trpc.workspace.discardChanges
+                  .mutate({
+                    workspaceId,
+                    section: revertSection,
+                    paths: revertSection === "staged" && oldPath ? [filePath, oldPath] : [filePath],
+                  })
                   .then(() => {
                     setRevertOpen(false);
                     fileDiffQuery.refetch();
-                    summaryQuery.refetch();
+                    void invalidateWorkspaceChanges(queryClient, workspaceId);
                   })
                   .catch((err) => console.error("[DiffLeaf] revert failed:", err));
               }}
@@ -1577,6 +1738,155 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * A Changes section's "View all" tab: every file of the section as a diff,
+ * one under the other, like orca's combined diff. Each file fetches its diff
+ * only once it scrolls near the viewport, so a section of hundreds of
+ * untracked files doesn't start hundreds of requests at once.
+ */
+function SectionDiffsLeaf({
+  params,
+  section,
+}: IDockviewPanelProps<DiffLeafParams> & { section: ChangeSection }) {
+  const { workspaceId } = params;
+  const { visible } = usePanelVisibility();
+  const changesQuery = useWorkspaceChanges(workspaceId, {
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const entries = changesQuery.data?.[section] ?? [];
+  const mergeBase = changesQuery.data?.mergeBase ?? undefined;
+
+  return (
+    <div className="h-full w-full overflow-auto" data-testid={`center-section-diffs--${section}`}>
+      {entries.length === 0 ? (
+        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          {changesQuery.isLoading ? "Loading diff…" : "No changes"}
+        </div>
+      ) : (
+        entries.map((entry) => (
+          <SectionDiffFile
+            key={entry.path}
+            workspaceId={workspaceId}
+            section={section}
+            entry={entry}
+            mergeBase={mergeBase}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function SectionDiffFile({
+  workspaceId,
+  section,
+  entry,
+  mergeBase,
+}: {
+  workspaceId: string;
+  section: ChangeSection;
+  entry: ChangeEntry;
+  mergeBase: string | undefined;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || nearViewport) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((r) => r.isIntersecting)) setNearViewport(true);
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [nearViewport]);
+
+  const diffQuery = useQuery({
+    // The line counts change whenever the file does, so they refresh the diff
+    // on the section's poll without a poll of their own.
+    queryKey: [
+      "sectionDiffFile",
+      workspaceId,
+      section,
+      entry.path,
+      entry.oldPath,
+      mergeBase,
+      entry.additions,
+      entry.deletions,
+    ],
+    queryFn: () =>
+      trpc.workspace.getFileDiff.query({
+        workspaceId,
+        filePath: entry.path,
+        section,
+        mergeBase: section === "branch" ? mergeBase : undefined,
+        oldPath: entry.oldPath,
+      }),
+    enabled: nearViewport && (section !== "branch" || !!mergeBase),
+  });
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+
+  return (
+    <div
+      ref={ref}
+      className="border-b border-border"
+      data-testid={`center-section-diffs__file--${entry.path}`}
+    >
+      <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-border bg-background px-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium" title={entry.path}>
+            {entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
+          </span>
+          {!!entry.additions && (
+            <span className="shrink-0 text-green-600 dark:text-green-400">+{entry.additions}</span>
+          )}
+          {!!entry.deletions && (
+            <span className="shrink-0 text-red-600 dark:text-red-400">-{entry.deletions}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          title="Open diff"
+          data-testid="center-section-diffs__open"
+          onClick={() =>
+            getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+              preview: false,
+              section,
+              oldPath: entry.oldPath,
+            })
+          }
+          className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <GitCompare className="size-3.5" />
+        </button>
+      </div>
+      {!collapsed &&
+        (diffQuery.data?.diff ? (
+          <DiffFileContent
+            hunks={diffQuery.data.diff}
+            filename={entry.path}
+            viewMode="unified"
+            copyReferenceOnly
+          />
+        ) : (
+          <div className="px-3 py-2 text-xs text-muted-foreground">
+            {diffQuery.data ? "No textual changes" : "Loading diff…"}
+          </div>
+        ))}
     </div>
   );
 }
@@ -1593,8 +1903,18 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
 // into the props), reading the latest closures via the ref holder.
 // ---------------------------------------------------------------------------
 
+interface OpenDiffOptions {
+  preview?: boolean;
+  /** The Changes section the diff comes from; see `DiffLeafParams.section`. */
+  section?: ChangeSection;
+  oldPath?: string;
+}
+
 interface LeafActions {
-  onAdd: (kind: LeafKind, groupId?: string) => void;
+  /** `kind: "chat"` starts a coding agent in this device's mode, a chat or a
+   *  terminal (issue #682). `agentId` picks the agent; the default agent
+   *  without it. */
+  onAdd: (kind: LeafKind, groupId?: string, agentId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
   onClose: (id: string, kind: LeafKind) => void;
   openFile: (
@@ -1608,7 +1928,11 @@ interface LeafActions {
       fromHistory?: boolean;
     },
   ) => void;
-  openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  openDiff: (filePath: string, opts?: OpenDiffOptions) => void;
+  /** Open every file of a Changes section in one tab ("View all"). */
+  openSectionDiffs: (section: ChangeSection) => void;
+  /** Open `filePath`'s change in commit `sha` (Commits panel). */
+  openCommitDiff: (sha: string, filePath: string, opts?: { preview?: boolean }) => void;
   /** Retarget file / diff leaves at or under `oldPath` after the Explorer
    *  renamed or moved it (workspace-relative paths). */
   onPathMoved: (oldPath: string, newPath: string) => void;
@@ -2065,6 +2389,7 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
           className={closeButtonClass(isActive)}
           onClick={handleClose}
           title="Close file"
+          data-testid={`center-file-tab__close--${filePath}`}
         >
           <X className="size-3" />
         </button>
@@ -2074,19 +2399,45 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
 }
 
 function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
-  const { workspaceId, filePath } = props.params;
+  const { workspaceId, filePath, commit, section, allOf } = props.params;
   const containerApi = props.containerApi;
+  const panelId = props.api.id;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api, props.params.preview);
-  const title = basename(filePath);
+  const title = commit
+    ? `${basename(filePath)} @ ${commit.slice(0, 7)}`
+    : section === "staged"
+      ? `${basename(filePath)} (Staged)`
+      : section === "branch"
+        ? `${basename(filePath)} (Committed)`
+        : basename(filePath);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      leafActionsByApiId.get(containerApi.id)?.current?.onClose(`diff:${filePath}`, "diff");
+      leafActionsByApiId.get(containerApi.id)?.current?.onClose(panelId, "diff");
     },
-    [containerApi, filePath],
+    [containerApi, panelId],
   );
+
+  if (allOf) {
+    return (
+      <div className={TAB_ROOT_CLASS} data-testid={`center-section-diffs-tab--${allOf}`}>
+        <div className={TAB_CONTENT_WRAP}>
+          <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className={TAB_TITLE_CLASS}>{SECTION_LABELS[allOf]}</span>
+        </div>
+        <button
+          type="button"
+          className={closeButtonClass(isActive)}
+          onClick={handleClose}
+          title="Close diff"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <TabPathContextMenu
@@ -2094,7 +2445,11 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
       filePath={filePath}
       testidPrefix={`center-diff-tab--${filePath}`}
     >
-      <div className={TAB_ROOT_CLASS} data-testid={`center-diff-tab--${filePath}`}>
+      <div
+        className={TAB_ROOT_CLASS}
+        data-testid={`center-diff-tab--${filePath}`}
+        data-commit={commit}
+      >
         <div className={TAB_CONTENT_WRAP}>
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={`${TAB_TITLE_CLASS}${isPreview ? " italic" : ""}`} title={filePath}>
@@ -2120,9 +2475,8 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
 // ---------------------------------------------------------------------------
 
 const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
-  // Only grid groups get the "+" new-tab menu. Edge groups (the ⌘B/⌘J side
-  // panels) are collapsed to zero size when empty, so adding a leaf there would
-  // drop it into an invisible 0-px group — mirror RightHeaderActions' guard.
+  // Only grid groups get the "+" new-tab menu, not floating groups — mirror
+  // RightHeaderActions' guard.
   if ((props.location?.type ?? "grid") !== "grid") return null;
   return (
     <div className="flex h-full items-center px-0.5">
@@ -2158,7 +2512,7 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     };
   }, [props.containerApi, props.group]);
 
-  // Edge groups don't maximize — the add menu (left slot) is enough there.
+  // Floating groups don't maximize.
   if (!isGridGroup) return null;
 
   // The active tab's own action buttons (view toggle, save, revert…).
@@ -2201,9 +2555,8 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
           <button
             type="button"
             aria-label={maxLabel}
-            onClick={(e) => {
+            onClick={() => {
               if (props.api.isMaximized()) {
-                prepareMaximizeRestoreAnimation(e.currentTarget.closest<HTMLElement>(".dv-shell"));
                 props.api.exitMaximized();
               } else {
                 props.api.maximize();
@@ -2226,7 +2579,8 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
 });
 
 function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
-  const add = (kind: LeafKind) => leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId);
+  const add = (kind: LeafKind, agentId?: string) =>
+    leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId, agentId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2240,17 +2594,11 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="bottom" data-testid="workspace-center__new-tab-menu">
+        <NewAgentSubmenu onPick={(agentId) => add("chat", agentId)} />
         <DropdownMenuItem onClick={() => add("term")} data-testid="workspace-center__new-tab--term">
           <TerminalIcon className="size-4" />
-          New Terminal
+          New terminal
           <DropdownMenuShortcut>{formatShortcut("Cmd+T")}</DropdownMenuShortcut>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => add("chat")} data-testid="workspace-center__new-tab--chat">
-          <MessageSquare className="size-4" />
-          New Chat
-          <DropdownMenuShortcut>
-            {formatShortcut(isMacPlatform() ? "Cmd+Alt+T" : "Cmd+Shift+N")}
-          </DropdownMenuShortcut>
         </DropdownMenuItem>
         {isDesktop && (
           <DropdownMenuItem
@@ -2258,7 +2606,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
             data-testid="workspace-center__new-tab--browser"
           >
             <Globe className="size-4" />
-            New Browser
+            New browser
             <DropdownMenuShortcut>{formatShortcut("Cmd+Shift+B")}</DropdownMenuShortcut>
           </DropdownMenuItem>
         )}
@@ -2288,6 +2636,9 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   diff: DiffTab,
   icon: IconTab,
 };
+
+const EMPTY_STATE_BUTTON_CLASS =
+  "flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
 // ---------------------------------------------------------------------------
 // addPanel helpers
@@ -2392,8 +2743,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const edgeDragDisposerRef = useRef<(() => void) | null>(null);
-  const innerRegisterDisposerRef = useRef<(() => void) | null>(null);
+  const touchTabsDisposerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // VS Code-style preview tabs: at most one previewing file leaf and one
   // previewing diff leaf per dockview. A single-click in the sidepanel opens
@@ -2536,8 +2886,60 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   }, [workspaceId]);
 
   // ---- add / split / close ----
+
+  // Where a leaf the server is still creating should go. The server's
+  // `chat-created` / `terminal-created` echo can arrive before the launch
+  // mutation returns, and the live-sync handler reads this so the tab still
+  // lands in the group the user picked.
+  const pendingLeafPositionsRef = useRef(new Map<string, AddPanelOptions["position"]>());
+
+  // Start a coding agent in this device's mode (issue #682). The server
+  // creates the chat or spawns the agent's CLI first, so the pane never
+  // mounts before its chat row (with the picked agent) or its PTY exists.
+  const launchAgent = useCallback(
+    (position: AddPanelOptions["position"], agentId?: string) => {
+      const mode = readAgentMode();
+      const pending = pendingLeafPositionsRef.current;
+      const chatId = newChatId();
+      const terminalId = newTerminalId();
+      if (mode !== "tui") markChatFresh(chatId);
+      pending.set(chatId, position);
+      pending.set(terminalId, position);
+      trpc.agentSessions.launch
+        .mutate({ workspaceId, agentId, mode, chatId, terminalId })
+        .then((result) => {
+          const api = apiRef.current;
+          if (!api) return;
+          if (result.mode === "tui" && result.terminalId) {
+            if (!api.getPanel(result.terminalId)) {
+              addTermLeaf(api, workspaceId, result.terminalId, { autoFocus: true }, position);
+            }
+          } else if (result.chatId && !api.getPanel(result.chatId)) {
+            addChatLeaf(api, workspaceId, result.chatId, position);
+          }
+          if (result.notice) console.warn("[WorkspaceCenterDockview]", result.notice);
+        })
+        .catch((err) => {
+          console.error("[WorkspaceCenterDockview] agent launch failed:", err);
+          // A default-agent chat pane still works without its launch: it
+          // creates its chat row on the first message, the way panes did
+          // before #682. With a picked agent no pane opens, since it would
+          // fall back to the default agent.
+          const api = apiRef.current;
+          if (mode !== "tui" && !agentId && api && !api.getPanel(chatId)) {
+            addChatLeaf(api, workspaceId, chatId, position);
+          }
+        })
+        .finally(() => {
+          pending.delete(chatId);
+          pending.delete(terminalId);
+        });
+    },
+    [workspaceId],
+  );
+
   const handleAdd = useCallback(
-    (kind: LeafKind, groupId?: string) => {
+    (kind: LeafKind, groupId?: string, agentId?: string) => {
       const api = apiRef.current;
       if (!api) return;
       const position = groupId ? { referenceGroup: groupId } : undefined;
@@ -2548,9 +2950,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           console.error("[WorkspaceCenterDockview] terminal create failed:", err);
         });
       } else if (kind === "chat") {
-        const id = newChatId();
-        markChatFresh(id);
-        addChatLeaf(api, workspaceId, id, position);
+        launchAgent(position, agentId);
       } else if (kind === "browser") {
         if (!isDesktop) return;
         const id = newBrowserId();
@@ -2561,7 +2961,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         });
       }
     },
-    [workspaceId],
+    [workspaceId, launchAgent],
   );
 
   const handleSplit = useCallback(
@@ -2574,9 +2974,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         addTermLeaf(api, workspaceId, id, { autoFocus: true }, position);
         trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
       } else if (kind === "chat") {
-        const id = newChatId();
-        markChatFresh(id);
-        addChatLeaf(api, workspaceId, id, position);
+        launchAgent(position);
       } else if (kind === "browser" && isDesktop) {
         const id = newBrowserId();
         markBrowserFresh(id);
@@ -2584,7 +2982,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         trpc.browsers.create.mutate({ workspaceId, id }).catch(() => {});
       }
     },
-    [workspaceId],
+    [workspaceId, launchAgent],
   );
 
   // Actually remove a leaf (panel + any server-side instance). Shared by the
@@ -2722,17 +3120,30 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
-  const handleOpenDiff = useCallback(
-    (filePath: string, opts?: { preview?: boolean }) => {
+  // Working-tree diffs (`diff:<path>`) and commit diffs (`diff@<sha>:<path>`)
+  // share one preview slot, so browsing either reuses the same italic tab.
+  const openDiffLeaf = useCallback(
+    (filePath: string, commit: string | undefined, opts?: OpenDiffOptions) => {
       const api = apiRef.current;
       if (!api) return;
       const preview = opts?.preview ?? false;
-      const id = `diff:${filePath}`;
+      const id = commit ? commitDiffId(commit, filePath) : `diff:${filePath}`;
       const existing = api.getPanel(id);
       if (existing) {
         if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
-        if (!preview) {
-          const cur = existing.api.getParameters<DiffLeafParams>();
+        // One tab per path: opening the file from another section switches
+        // the tab to that section's diff. An open without a section ("View
+        // changes") clears it, so the leaf picks the file's section afresh.
+        const cur = existing.api.getParameters<DiffLeafParams>();
+        const sectionChanged = opts?.section !== cur.section || opts?.oldPath !== cur.oldPath;
+        if (!commit && (!preview || sectionChanged)) {
+          existing.api.updateParameters({
+            ...cur,
+            ...(preview ? {} : { preview: false }),
+            section: opts?.section,
+            oldPath: opts?.oldPath,
+          });
+        } else if (!preview) {
           existing.api.updateParameters({ ...cur, preview: false });
         }
         existing.api.setActive();
@@ -2752,13 +3163,53 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         component: "diff",
         tabComponent: "diff",
         title: basename(filePath),
-        params: { workspaceId, filePath, preview },
+        params: {
+          workspaceId,
+          filePath,
+          preview,
+          commit,
+          section: opts?.section,
+          oldPath: opts?.oldPath,
+        },
         position,
       } as AddPanelOptions);
       if (previewToRemove) api.removePanel(previewToRemove);
       previewDiffIdRef.current = preview ? id : previewDiffIdRef.current;
     },
     [workspaceId],
+  );
+
+  const handleOpenDiff = useCallback(
+    (filePath: string, opts?: OpenDiffOptions) => openDiffLeaf(filePath, undefined, opts),
+    [openDiffLeaf],
+  );
+
+  const handleOpenSectionDiffs = useCallback(
+    (section: ChangeSection) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const id = sectionDiffsId(section);
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      api.addPanel({
+        id,
+        component: "diff",
+        tabComponent: "diff",
+        title: SECTION_LABELS[section],
+        params: { workspaceId, filePath: "", allOf: section },
+        position: activeOrCentralPosition(api),
+      } as AddPanelOptions);
+    },
+    [workspaceId],
+  );
+
+  const handleOpenCommitDiff = useCallback(
+    (sha: string, filePath: string, opts?: { preview?: boolean }) =>
+      openDiffLeaf(filePath, sha, opts),
+    [openDiffLeaf],
   );
 
   // ---- keep file / diff leaves in step with Explorer renames and deletes ----
@@ -2863,6 +3314,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    openSectionDiffs: () => {},
+    openCommitDiff: () => {},
     onPathMoved: () => {},
     onPathRemoved: () => {},
   });
@@ -2872,6 +3325,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    openSectionDiffs: handleOpenSectionDiffs,
+    openCommitDiff: handleOpenCommitDiff,
     onPathMoved: handlePathMoved,
     onPathRemoved: handlePathRemoved,
   };
@@ -3050,13 +3505,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         });
       }
 
-      // Edge groups + drag visibility + shortcut registry.
-      ensureEdgeGroups(api);
-      edgeDragDisposerRef.current?.();
-      edgeDragDisposerRef.current = attachEdgeGroupDragVisibility(api);
-      innerRegisterDisposerRef.current?.();
+      // Touch: a drag along the tab strip scrolls it; only a tap switches tabs.
+      touchTabsDisposerRef.current?.();
       if (containerRef.current) {
-        innerRegisterDisposerRef.current = registerInnerDockview(containerRef.current, api);
+        touchTabsDisposerRef.current = attachTouchTabActivation(containerRef.current, api);
       }
 
       // Persistence + focus reporting. Structural changes (add/remove leaf or
@@ -3134,8 +3586,11 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       const api = apiRef.current;
       if (!api) return;
 
+      const pendingPositions = pendingLeafPositionsRef.current;
       if (event.kind === "chat-created" && typeof event.chatId === "string") {
-        if (!api.getPanel(event.chatId)) addChatLeaf(api, workspaceId, event.chatId);
+        if (!api.getPanel(event.chatId)) {
+          addChatLeaf(api, workspaceId, event.chatId, pendingPositions.get(event.chatId));
+        }
       } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
         const panel = api.getPanel(event.chatId);
         if (panel) api.removePanel(panel);
@@ -3145,7 +3600,15 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         // stray top-level tab. Only genuine CLI-created terminals (no owner)
         // seed a new leaf.
         if (!isOwnedPane(event.terminalId) && !api.getPanel(event.terminalId)) {
-          addTermLeaf(api, workspaceId, event.terminalId);
+          // A terminal this tab launched an agent into gets focus, like New terminal.
+          const launched = pendingPositions.has(event.terminalId);
+          addTermLeaf(
+            api,
+            workspaceId,
+            event.terminalId,
+            launched ? { autoFocus: true } : undefined,
+            pendingPositions.get(event.terminalId),
+          );
         }
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
         disposeTerminal(event.terminalId);
@@ -3394,10 +3857,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           workspaceLeafActions.delete(workspaceId);
         }
       }
-      edgeDragDisposerRef.current?.();
-      edgeDragDisposerRef.current = null;
-      innerRegisterDisposerRef.current?.();
-      innerRegisterDisposerRef.current = null;
+      touchTabsDisposerRef.current?.();
+      touchTabsDisposerRef.current = null;
       // Flush a pending debounced save rather than dropping it, so a layout
       // tweak right before a workspace switch / unmount still persists.
       if (saveTimerRef.current && api) {
@@ -3437,11 +3898,15 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           rightHeaderActionsComponent={RightHeaderActions}
           // Mobile: no drag→split. Every leaf stays a tab in a single group.
           disableDnd={mobile}
+          // No "N hidden tabs" dropdown: the strip scrolls sideways instead
+          // (wheel, trackpad, touch — see `.dockview-center-tabs` in
+          // dockview-theme.css).
+          disableTabsOverflowList
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
 
-      {/* Empty state: shown when every leaf is closed. Offers the same three
+      {/* Empty state: shown when every leaf is closed. Offers the same
           "New …" actions as the header "+" menu, centered in the vacant area,
           so a closed-out workspace is a deliberate blank slate rather than a
           dead end. */}
@@ -3451,33 +3916,28 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           data-testid="workspace-center__empty-state"
         >
           <div className="flex flex-col gap-2">
+            <NewAgentButton
+              className={EMPTY_STATE_BUTTON_CLASS}
+              onPick={(agentId) => handleAdd("chat", undefined, agentId)}
+            />
             <button
               type="button"
               onClick={() => handleAdd("term")}
-              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className={EMPTY_STATE_BUTTON_CLASS}
               data-testid="workspace-center__empty-new-term"
             >
               <TerminalIcon className="size-4" />
-              New Terminal
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAdd("chat")}
-              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              data-testid="workspace-center__empty-new-chat"
-            >
-              <MessageSquare className="size-4" />
-              New Chat
+              New terminal
             </button>
             {isDesktop && (
               <button
                 type="button"
                 onClick={() => handleAdd("browser")}
-                className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className={EMPTY_STATE_BUTTON_CLASS}
                 data-testid="workspace-center__empty-new-browser"
               >
                 <Globe className="size-4" />
-                New Browser
+                New browser
               </button>
             )}
           </div>

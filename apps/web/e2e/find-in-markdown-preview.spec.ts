@@ -6,12 +6,10 @@
  * find UX through the renderer: open with Cmd+F, count matches, step
  * through them with Enter / Shift+Enter, and dismiss with Escape.
  *
- * The test runs against Playwright's bundled Chromium, which supports
- * the CSS Custom Highlight API the preview uses for painting. The
- * assertions key off observable UI state (the match counter, the
- * input's presence and focus) rather than the highlight overlay
- * itself, so the test stays useful even on browsers that fall back to
- * the no-paint path.
+ * The preview is an editable CodeMirror view (see
+ * `markdown-live-preview.ts`), so it uses the same find as the source
+ * editor. The assertions key off observable UI state (the match counter,
+ * the input's presence and focus) rather than the highlight paint.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -19,6 +17,7 @@ import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -28,6 +27,8 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
+import { MobileLayoutPage } from "./pages/MobileLayoutPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 
 // Force the mobile layout (viewport < 1024 px) so the workspace route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
@@ -107,17 +108,14 @@ test.afterAll(async () => {
  * the same UI flow a real mobile user would take.
  */
 async function openMarkdownPreview(page: Page): Promise<void> {
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
-
-  // The mobile layout (`MobileWorkspaceLayout`) is ready once its bottom bar
-  // (Editor | Explorer | Changes) renders (#643 replaced the old WorkspaceTabNav).
-  await page
-    .getByTestId("mobile-workspace__bottom-bar")
-    .waitFor({ state: "visible", timeout: 20_000 });
+  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const layout = new MobileLayoutPage(page, server.url, TOKEN);
+  await workspace.goto(workspaceId);
+  await workspace.waitForMobileReady();
 
   // Open the Explorer sheet and tap the markdown file — it opens as a `file`
   // leaf in the center dockview (markdown files default to the rendered preview).
-  await page.getByTestId("mobile-workspace__bar--explorer").click();
+  await layout.openSheet("explorer");
   await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
   // The markdown renders into a sticky heading — when it appears, the
@@ -145,8 +143,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
 
   // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
   // keybind → `useSearch.handleOpenSearch` → renders the toolbar
-  // SearchBar. CodeBrowserView routes the input through to
-  // MarkdownPreview's imperative ref while preview mode is active.
+  // SearchBar, which searches the preview's editor view.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+f`);
 
@@ -157,6 +154,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   await expect(find.input).toBeVisible();
   await expect(find.input).toBeFocused();
   await expect(find.input).toHaveAttribute("placeholder", "Find in preview...");
+  await expectNoKeyboardSuggestions(find.input);
 
   await find.type("needle");
 

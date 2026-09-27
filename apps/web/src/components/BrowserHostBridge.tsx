@@ -44,12 +44,18 @@ export function BrowserHostBridge() {
 
     // ---- ensureView subscription ----
     const ensureSub = trpc.browserHost.ensureView.subscribe(undefined, {
-      onData(event: { bandTabId: string; workspaceId: string; url: string }) {
+      onData(event: {
+        bandTabId: string;
+        workspaceId: string;
+        url: string;
+        profileId?: string | null;
+      }) {
         void (async () => {
           try {
             await desktopInvoke("browser_ensure", {
               browserId: event.bandTabId,
               url: event.url,
+              profileId: event.profileId ?? null,
             });
             const cdpTargetId = (await desktopInvoke("browser_get_cdp_target", {
               browserId: event.bandTabId,

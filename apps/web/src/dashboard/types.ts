@@ -1,3 +1,5 @@
+import type { AgentMode } from "../shared/agent-sessions";
+
 export type AgentStatusType = "working" | "needs_attention" | "waiting";
 
 export interface AgentInfo {
@@ -217,6 +219,12 @@ export interface Settings {
   worktreesDir: string | null;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
+  /**
+   * Agent preferences (issue #682). `defaultMode` is how agents start when
+   * the caller has no device mode of its own (the CLI, cronjobs, MCP).
+   * Browsers use their per-device mode (`dashboard/lib/agent-mode.ts`).
+   */
+  agents?: { defaultMode?: AgentMode };
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
@@ -300,9 +308,68 @@ export interface DeleteDialogInfo {
   hasUnpushedCommits: boolean;
 }
 
-export type FileStatus = "A" | "M" | "D" | "R" | "U";
+/** `A`dded, `M`odified, `D`eleted, `R`enamed, `C`opied, `U`ntracked. */
+export type FileStatus = "A" | "M" | "D" | "R" | "C" | "U";
+
+/**
+ * A section of the Changes view, as in orca's source control panel:
+ * merge conflicts, unstaged and staged changes, untracked files, and the
+ * files committed on the branch since it forked from the compare branch.
+ */
+export type ChangeSection = "conflicts" | "unstaged" | "staged" | "untracked" | "branch";
+
+/** How the two sides of a merge conflict touched the file. */
+export type ConflictKind =
+  | "both_modified"
+  | "both_added"
+  | "both_deleted"
+  | "added_by_us"
+  | "added_by_them"
+  | "deleted_by_us"
+  | "deleted_by_them";
+
+export interface ChangeEntry {
+  path: string;
+  /** The path before a rename or copy. */
+  oldPath?: string;
+  status: FileStatus;
+  /** Lines added / deleted; unset for binary files. */
+  additions?: number;
+  deletions?: number;
+  /** Set on `conflicts` entries only. */
+  conflict?: ConflictKind;
+}
+
+/** Why the `branch` section is empty when it isn't `ready`. */
+export type BranchCompareStatus = "ready" | "invalid-base" | "no-merge-base" | "unborn-head";
+
+export interface WorkspaceChanges {
+  headBranch: string;
+  defaultBranch: string;
+  /** The branch the `branch` section compares against. */
+  compareBranch: string;
+  /** Where HEAD forked from `compareBranch`; null unless `branchStatus` is ready. */
+  mergeBase: string | null;
+  branchStatus: BranchCompareStatus;
+  conflicts: ChangeEntry[];
+  unstaged: ChangeEntry[];
+  staged: ChangeEntry[];
+  untracked: ChangeEntry[];
+  branch: ChangeEntry[];
+}
 
 export type DiffMode = "uncommitted" | "branch";
+
+export interface ListWorkspaceBranchesResult {
+  /** Matching branch names, local (`feature/x`) and remote (`origin/feature/x`). */
+  branches: string[];
+  /** The project's default branch (e.g. `main`). */
+  defaultBranch: string;
+  /** The worktree's current branch; `defaultBranch` when HEAD is detached or unborn. */
+  headBranch: string;
+  /** More branches matched than the requested limit. */
+  truncated: boolean;
+}
 
 export interface WorkspaceDiff {
   diff: string;
@@ -334,23 +401,21 @@ export interface FileContentResult {
   language?: string;
 }
 
-export interface WorkspaceDiffSummary {
-  stats: { filesChanged: number; insertions: number; deletions: number };
-  /** Branch the diff was computed against — user's pick, or defaults to `defaultBranch`. */
-  compareBranch: string;
-  /** The project's default branch (e.g. `main`). Always present, regardless of `compareBranch`. */
-  defaultBranch: string;
-  headBranch: string;
-  fileStatuses: Record<string, FileStatus>;
-  mergeBase: string;
-}
-
-export interface FileDiffResult {
-  diff: string;
-}
-
 export interface ContentSearchMatch {
   file: string;
   line: number;
   content: string;
+}
+
+/**
+ * A Band browser profile: its own cookie jar for browser-pane tabs. The
+ * built-in Default profile has no entry and is `null` wherever a profile id
+ * is expected.
+ */
+export interface BrowserProfileInfo {
+  id: string;
+  name: string;
+  /** Where its cookies came from, e.g. `"chrome"`. `null` for an empty profile. */
+  source: string | null;
+  createdAt: number;
 }

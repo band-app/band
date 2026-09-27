@@ -50,6 +50,16 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
  * it can show the dialog reliably; the web server cannot.
  */
 export class DesktopDashboardAdapter extends WebDashboardAdapter {
+  /**
+   * Delete the profile on the server, then wipe its session partition
+   * (cookies, storage, cache) on this Mac so no signed-in session is left
+   * behind on disk.
+   */
+  async removeBrowserProfile(profileId: string): Promise<void> {
+    await super.removeBrowserProfile(profileId);
+    await desktopInvoke("browser_profile_clear_data", { profileId });
+  }
+
   async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
     try {
       // Try the web server path first (works when /usr/local/bin is writable).

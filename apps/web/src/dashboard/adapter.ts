@@ -1,14 +1,16 @@
+import type { AgentMode } from "../shared/agent-sessions";
 import type {
+  BrowserProfileInfo,
   CIStatus,
   CliStatus,
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileListResult,
   FormatFileResult,
   GitStatus,
   HooksStatus,
+  ListWorkspaceBranchesResult,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
@@ -60,12 +62,30 @@ export interface DashboardAdapter {
   // Workspaces. `name` is the immutable workspace identity (the initial
   // branch), not the live git branch — see `WorktreeInfo.name`. `create`
   // still takes `branch` because it names a *new* branch (which seeds `name`).
-  createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
+  // `agentMode` is how the prompt's agent is displayed (issue #682): this
+  // device's mode, or the server default when omitted.
+  createWorkspace(
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+    agentMode?: AgentMode,
+  ): Promise<void>;
   removeWorkspace(project: string, name: string): Promise<void>;
   setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
   gitPull(project: string, name: string): Promise<void>;
   gitPush(project: string, name: string): Promise<void>;
+
+  // Browser profiles (optional). Profiles hold the browser pane's cookies;
+  // each project remembers which one its new tabs open with.
+  listBrowserProfiles?(): Promise<BrowserProfileInfo[]>;
+  /** Delete a profile. The desktop adapter also wipes its cookies from disk. */
+  removeBrowserProfile?(profileId: string): Promise<void>;
+  /** `projectName → profileId` for every project with a non-Default profile. */
+  listProjectBrowserProfiles?(): Promise<Record<string, string>>;
+  /** `profileId: null` resets the project to the Default profile. */
+  setProjectBrowserProfile?(projectName: string, profileId: string | null): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;
@@ -185,15 +205,12 @@ export interface DashboardAdapter {
     diffMode?: DiffMode,
     compareBranch?: string,
   ): Promise<WorkspaceDiff>;
-  getFileDiff?(
-    workspaceId: string,
-    filePath: string,
-    mergeBase: string,
-    contextLines?: number,
-  ): Promise<FileDiffResult>;
+  /** Local and remote branches matching `query`, best matches first, at most
+   *  `limit` of them. `truncated` is set when more matched. */
   listWorkspaceBranches?(
     workspaceId: string,
-  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }>;
+    options?: { query?: string; limit?: number },
+  ): Promise<ListWorkspaceBranchesResult>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
@@ -289,14 +306,6 @@ export interface DashboardAdapter {
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }>;
-
-  /** Revert a single file to its original state, discarding all changes. */
-  revertFile?(
-    workspaceId: string,
-    filePath: string,
-    diffMode: DiffMode,
-    compareBranch?: string,
-  ): Promise<void>;
 
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorkspaceFileUrl?(workspaceId: string, path: string): string;

@@ -25,6 +25,7 @@ import {
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
+import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `agent-session-service` imports `chatService`
 // back from this file. Safe because it is only used inside method bodies.
 import { agentSessionService } from "./agent-session-service";
@@ -488,6 +489,7 @@ export class ChatService {
     }
     const merged = this.queries.update(chatId, session, patch);
     this.chatSessions.set(chatId, merged);
+    agentSessionRegistry.recordChatProviderSession(merged, merged.activeSessionId);
   }
 
   /**

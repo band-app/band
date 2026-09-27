@@ -67,6 +67,12 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   // inside the guest; only the overridden-hosts catch-up
   // crosses the IPC boundary.
   "browser_get_overridden_hosts",
+  // Browser profiles + Chrome cookie / history import
+  "browser_chrome_profiles",
+  "browser_chrome_running",
+  "browser_chrome_import",
+  "browser_profile_clear_data",
+  "browser_profile_prune",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([

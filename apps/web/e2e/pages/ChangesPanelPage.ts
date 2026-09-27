@@ -2,8 +2,11 @@
  * Page object for the Changes UI of the unified workspace layout (#643):
  *
  *   - The Changes tab of the right sidepanel (`RightSidepanel.tsx`), which
- *     holds the diff-target picker (`right-sidepanel__diff-target-select`)
- *     and the changed-file tree (`changes-tree__row--<path>` rows).
+ *     holds the current-branch / compare-branch header (`DiffTargetHeader.tsx`)
+ *     with its branch picker, and the Changes sections (`ChangesSections.tsx`:
+ *     `changes-section--<section>`, each a tree of `changes-tree__row--<path>`
+ *     rows).
+ *   - A section's "View all" tab (`center-section-diffs--<section>`).
  *   - The per-file `diff` leaf a changed-file click opens in the center
  *     dockview (`center-diff-leaf__visible-*`), with its unified / split
  *     toggle (`center-diff-leaf__view--unified|split`).
@@ -18,19 +21,38 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { CodeSymbolLinks } from "./CodeSymbolLinks";
+import { FileViewerPage } from "./FileViewerPage";
 import { FindWidget } from "./FindWidget";
 import { WorkspacePage } from "./WorkspacePage";
 
 export type DiffViewMode = "unified" | "split";
 
-/** Testid of the "Uncommitted" entry in the diff-target dropdown. Exposed so
- *  specs assert its position by id rather than by the localisable label. */
-export const UNCOMMITTED_OPTION_TESTID = "right-sidepanel__diff-target-option-uncommitted";
+/** A section of the Changes tab, as `ChangesSections.tsx` keys it. */
+export type ChangeSection = "conflicts" | "unstaged" | "staged" | "untracked" | "branch";
+
+/** Testid of a branch entry in the diff-target dropdown. Exposed so specs
+ *  assert what the dropdown offers by id rather than by localisable labels. */
+export const BRANCH_OPTION_TESTID = "right-sidepanel__diff-target-option";
 
 export class ChangesPanelPage {
-  /** The diff-target `<Select>` trigger in the Changes tab. Its rendered text
-   *  is the selected target (e.g. "Uncommitted" or a branch name). */
+  /** The compare-branch button in the Changes header. Its rendered text is
+   *  the branch the "Committed on Branch" section compares against. */
   readonly diffTargetTrigger: Locator;
+  /** The worktree's current branch, shown above the diff target. */
+  readonly headBranch: Locator;
+  /** The branch picker popover the diff-target button opens. */
+  readonly diffTargetPicker: Locator;
+  /** Search input of the open branch picker. */
+  readonly diffTargetSearch: Locator;
+  /** The picker's "Default branch" button. */
+  readonly defaultBranchButton: Locator;
+  /** Branch options in the open picker. */
+  readonly branchOptions: Locator;
+  /** Shown when no branch matches the search. */
+  readonly noBranchesMatch: Locator;
+  /** Notice shown when more branches matched than the picker lists. */
+  readonly truncatedNotice: Locator;
   /** First option in the open diff-target dropdown. */
   readonly firstDiffTargetOption: Locator;
   /** The body of the visible `diff` leaf. Scopes the CodeMirror locators below
@@ -49,8 +71,8 @@ export class ChangesPanelPage {
   readonly overviewRuler: Locator;
 
   private readonly workspace: WorkspacePage;
-  /** Workspace opened via `goto`, remembered so `diffMode()` can build the
-   *  per-workspace `band:diff-mode:<id>` localStorage key. */
+  /** Workspace opened via `goto`, remembered so `compareBranch()` can build
+   *  the per-workspace `band:diff-compare-branch:<id>` localStorage key. */
   private currentWorkspaceId: string | null = null;
 
   constructor(
@@ -60,6 +82,13 @@ export class ChangesPanelPage {
   ) {
     this.workspace = new WorkspacePage(page, baseUrl, token);
     this.diffTargetTrigger = page.getByTestId("right-sidepanel__diff-target-select");
+    this.headBranch = page.getByTestId("right-sidepanel__head-branch");
+    this.diffTargetPicker = page.getByTestId("right-sidepanel__diff-target-picker");
+    this.diffTargetSearch = page.getByTestId("right-sidepanel__diff-target-search");
+    this.defaultBranchButton = page.getByTestId("right-sidepanel__diff-target-default");
+    this.branchOptions = page.getByTestId(BRANCH_OPTION_TESTID);
+    this.noBranchesMatch = page.getByTestId("right-sidepanel__diff-target-empty");
+    this.truncatedNotice = page.getByTestId("right-sidepanel__diff-target-truncated");
     this.firstDiffTargetOption = page.getByRole("option").first();
     this.diffLeaf = page.getByTestId("center-diff-leaf__visible-true");
     this.cmScrollers = this.diffLeaf.locator(".cm-scroller");
@@ -84,9 +113,300 @@ export class ChangesPanelPage {
     return new FindWidget(this.diffLeaf);
   }
 
-  /** A changed-file row in the Changes tree, keyed by workspace-relative path. */
+  // ---- Commits panel (bottom of the Changes tab) ----
+
+  /** The Commits section below the changed-file tree. */
+  get commitsPanel(): Locator {
+    return this.page.getByTestId("commits-panel");
+  }
+
+  /** The Commits header button that collapses / expands the section. */
+  get commitsToggle(): Locator {
+    return this.page.getByTestId("commits-panel__toggle");
+  }
+
+  /** The loaded-commit count in the Commits header (`50+` when more exist). */
+  get commitsCount(): Locator {
+    return this.page.getByTestId("commits-panel__count");
+  }
+
+  /** The scrollable commit list; absent while the section is collapsed. */
+  get commitsList(): Locator {
+    return this.page.getByTestId("commits-panel__list");
+  }
+
+  /** A commit row, keyed by full SHA. */
+  commitRow(sha: string): Locator {
+    return this.page.getByTestId(`commits-panel__row--${sha}`);
+  }
+
+  /** A ref pill (branch / remote / tag name) inside a commit row. */
+  commitRef(sha: string, name: string): Locator {
+    return this.commitRow(sha).getByTestId(`commits-panel__ref--${name}`);
+  }
+
+  /** The "+N" marker for refs that did not fit in a commit row. */
+  commitMoreRefs(sha: string): Locator {
+    return this.commitRow(sha).getByTestId("commits-panel__more-refs");
+  }
+
+  /** A changed file listed under an expanded commit. */
+  commitFile(sha: string, path: string): Locator {
+    return this.page
+      .getByTestId(`commits-panel__files--${sha}`)
+      .getByTestId(`commits-panel__file--${path}`);
+  }
+
+  /** The dockview tab of a file's diff. A commit's diff tab carries the
+   *  commit SHA in `data-commit`; a working-tree diff tab has none. */
+  diffTab(path: string): Locator {
+    return this.workspace.diffTab(path);
+  }
+
+  /** Close the diff tab for `path` with its close button. */
+  async closeDiffTab(path: string): Promise<void> {
+    await test.step(`Close the diff tab for ${path}`, async () => {
+      await this.diffTab(path).getByRole("button", { name: "Close diff" }).click();
+    });
+  }
+
+  /** Expand a commit row to list its changed files. */
+  async expandCommit(sha: string): Promise<void> {
+    await test.step(`Expand commit ${sha.slice(0, 7)}`, async () => {
+      await this.commitRow(sha).click();
+      await expect(this.commitRow(sha)).toHaveAttribute("aria-expanded", "true");
+    });
+  }
+
+  /** Open `path`'s diff for commit `sha` from the expanded commit. */
+  async openCommitFile(sha: string, path: string): Promise<void> {
+    await test.step(`Open ${path} at ${sha.slice(0, 7)}`, async () => {
+      await this.commitFile(sha, path).click();
+      await expect(this.diffLeaf).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  async toggleCommits(): Promise<void> {
+    await test.step("Toggle the Commits section", async () => {
+      await this.commitsToggle.click();
+    });
+  }
+
+  /** Scroll the commit list to its end, which loads the next page. */
+  async scrollCommitsToEnd(): Promise<void> {
+    await test.step("Scroll the commit list to the end", async () => {
+      await this.commitsList.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+    });
+  }
+
+  /** Reload the page and reopen the Changes tab. */
+  async reload(): Promise<void> {
+    await test.step("Reload the workspace", async () => {
+      await this.page.reload();
+      await this.workspace.waitForReady();
+      await this.workspace.revealRightPanel();
+      await this.workspace.selectRightPanelTab("changes");
+      await expect(this.workspace.changesSection).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Go-to-definition on one editor of the visible diff leaf: `"new"` is the
+   *  working-tree side (the only editor in unified mode, the right one in
+   *  split mode), `"old"` the merge-base side of a split. */
+  symbols(side: "new" | "old" = "new"): CodeSymbolLinks {
+    return new CodeSymbolLinks(this.page, this.diffLeaf.getByTestId(`diff-file__editor--${side}`));
+  }
+
+  /** The editor tab a go-to-definition from the diff opened (the visible
+   *  file leaf). */
+  get openedEditor(): FileViewerPage {
+    return new FileViewerPage(this.page, this.workspace.fileLeafVisibilityMarker(true));
+  }
+
+  /** Open the visible diff's file in an editor tab (the diff leaf's "Open
+   *  file for editing" header button). */
+  async openDiffFileInEditor(): Promise<void> {
+    await test.step("Open the diffed file in an editor", async () => {
+      await this.page.getByTestId("center-diff-leaf__open-file").click();
+      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Close `path`'s editor tab. */
+  async closeEditor(path: string): Promise<void> {
+    await test.step(`Close the editor for ${path}`, async () => {
+      await this.workspace.fileTab(path).hover();
+      await this.page.getByTestId(`center-file-tab__close--${path}`).click();
+      await expect(this.workspace.fileTab(path)).toHaveCount(0);
+    });
+  }
+
+  /** Bring `path`'s editor tab to the front. */
+  async showEditor(path: string): Promise<void> {
+    await test.step(`Show the editor for ${path}`, async () => {
+      await this.workspace.fileTab(path).click();
+      await expect(this.workspace.fileLeafVisibilityMarker(true)).toBeVisible();
+    });
+  }
+
+  /** Bring `path`'s diff tab back to the front. */
+  async showDiff(path: string): Promise<void> {
+    await test.step(`Show the diff for ${path}`, async () => {
+      await this.workspace.diffTab(path).click();
+      await expect(this.diffLeaf).toBeVisible();
+    });
+  }
+
+  /** Every file leaf in the workspace, visible or not. A go-to-definition
+   *  into another file adds one. */
+  get fileLeaves(): Locator {
+    return this.workspace.allFileLeaves();
+  }
+
+  /** A changed-file row in the Changes tab, keyed by workspace-relative path.
+   *  Matches the row in any section; use `sectionRow` when a file is listed
+   *  in more than one (staged and unstaged, say). */
   changesTreeRow(path: string): Locator {
     return this.page.getByTestId(`changes-tree__row--${path}`);
+  }
+
+  // ---- Changes sections ----
+
+  /** One section of the Changes tab; absent while it has no files. */
+  section(section: ChangeSection): Locator {
+    return this.page.getByTestId(`changes-section--${section}`);
+  }
+
+  /** A file or folder row inside `section`. */
+  sectionRow(section: ChangeSection, path: string): Locator {
+    return this.section(section).getByTestId(`changes-tree__row--${path}`);
+  }
+
+  /** The file count in a section's header. */
+  sectionCount(section: ChangeSection): Locator {
+    return this.section(section).getByTestId("changes-section__count");
+  }
+
+  /** The `+N` line count on a file row. */
+  rowAdditions(section: ChangeSection, path: string): Locator {
+    return this.sectionRow(section, path).getByTestId("changes-tree__additions");
+  }
+
+  /** The `-N` line count on a file row. */
+  rowDeletions(section: ChangeSection, path: string): Locator {
+    return this.sectionRow(section, path).getByTestId("changes-tree__deletions");
+  }
+
+  /** The conflict marker on a row of the Conflicts section. */
+  conflictBadge(path: string): Locator {
+    return this.sectionRow("conflicts", path).getByTestId("changes-tree__conflict-badge");
+  }
+
+  /** Every rendered section, top to bottom, by its key. */
+  async visibleSections(): Promise<string[]> {
+    const ids = await this.page
+      .getByTestId(/^changes-section--/)
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? ""));
+    return ids.map((id) => id.replace("changes-section--", ""));
+  }
+
+  /** Collapse or expand a section with its header. */
+  async toggleSection(section: ChangeSection): Promise<void> {
+    await test.step(`Toggle the ${section} section`, async () => {
+      await this.section(section).getByTestId("changes-section__toggle").click();
+    });
+  }
+
+  /** Whether a section is expanded, from its header's `aria-expanded`. */
+  sectionToggle(section: ChangeSection): Locator {
+    return this.section(section).getByTestId("changes-section__toggle");
+  }
+
+  /** Run a section header action on every file of the section:
+   *  `discard` (discard / delete all), `stage` (stage all, or mark all
+   *  resolved for conflicts) or `unstage` (unstage all). */
+  async runSectionAction(
+    section: ChangeSection,
+    action: "discard" | "stage" | "unstage",
+  ): Promise<void> {
+    await test.step(`Run ${action} on the whole ${section} section`, async () => {
+      // The header's icon actions show on hover.
+      await this.sectionToggle(section).hover();
+      await this.section(section).getByTestId(`changes-section__action--${action}-all`).click();
+    });
+  }
+
+  /** Run a row's hover action (`discard`, `stage` or `unstage`) on one file
+   *  or folder. Hovers the row first, since the buttons show on hover. */
+  async runRowAction(
+    section: ChangeSection,
+    path: string,
+    action: "discard" | "stage" | "unstage",
+  ): Promise<void> {
+    await test.step(`Run ${action} on ${path} in ${section}`, async () => {
+      const item = this.section(section).getByTestId(`changes-tree__item--${path}`);
+      await item.hover();
+      await item.getByTestId(`changes-tree__action--${action}`).click();
+    });
+  }
+
+  /** The confirmation dialog that discard / delete actions open. */
+  get discardDialog(): Locator {
+    return this.page.getByTestId("changes-sections__discard-dialog");
+  }
+
+  /** Confirm the open discard / delete dialog. */
+  async confirmDiscard(): Promise<void> {
+    await test.step("Confirm the discard", async () => {
+      await this.page.getByTestId("changes-sections__discard-confirm").click();
+      await expect(this.discardDialog).toHaveCount(0);
+    });
+  }
+
+  /** Open a file's diff from one section (single click: preview tab). */
+  async openSectionFile(section: ChangeSection, path: string): Promise<void> {
+    await test.step(`Open ${path} from ${section}`, async () => {
+      await this.sectionRow(section, path).click();
+      await expect(this.diffLeaf).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Revert the visible diff with its header button and confirm. */
+  async revertVisibleDiff(): Promise<void> {
+    await test.step("Revert the visible diff", async () => {
+      await this.page.getByTestId("center-diff-leaf__revert").click();
+      await this.page.getByTestId("center-diff-leaf__revert-confirm").click();
+    });
+  }
+
+  /** Click a section's "View all". */
+  async viewAll(section: ChangeSection): Promise<void> {
+    await test.step(`View all of ${section}`, async () => {
+      await this.section(section).getByTestId("changes-section__view-all").click();
+      await expect(this.sectionDiffs(section)).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** The "View all" tab body of a section. */
+  sectionDiffs(section: ChangeSection): Locator {
+    return this.page.getByTestId(`center-section-diffs--${section}`);
+  }
+
+  /** One file's block in a section's "View all" tab. */
+  sectionDiffsFile(section: ChangeSection, path: string): Locator {
+    return this.sectionDiffs(section).getByTestId(`center-section-diffs__file--${path}`);
+  }
+
+  /** A line of a file's diff in the "View all" tab, by its exact text.
+   *
+   *  FRAGILITY: `.cm-line` is owned by CodeMirror; see `diffLine`. */
+  sectionDiffsLine(section: ChangeSection, path: string, text: string): Locator {
+    return this.sectionDiffsFile(section, path)
+      .locator(".cm-line")
+      .getByText(text, { exact: true })
+      .first();
   }
 
   /** Open `path`'s per-file diff leaf from the Changes tree and put it in
@@ -105,25 +425,55 @@ export class ChangesPanelPage {
     });
   }
 
-  /** The selected diff mode as a stable enum (`"uncommitted"` | `"branch"`),
-   *  read from the per-workspace `band:diff-mode:<id>` localStorage key that
-   *  `useDiffTarget` mirrors the mode into. Reading persisted client state
-   *  keeps this black-box and avoids the localisable trigger label. Falls back
-   *  to `"uncommitted"` when the key is absent, which is the app's own default
-   *  for a fresh workspace where nothing has been written yet. */
-  async diffMode(): Promise<string> {
+  /** The stored compare branch, read from the per-workspace
+   *  `band:diff-compare-branch:<id>` localStorage key `useDiffTarget` writes.
+   *  `null` when nothing has been picked. */
+  async compareBranch(): Promise<string | null> {
     if (!this.currentWorkspaceId) {
-      throw new Error("diffMode() called before goto()");
+      throw new Error("compareBranch() called before goto()");
     }
-    return await this.page.evaluate((workspaceId) => {
-      const v = localStorage.getItem(`band:diff-mode:${workspaceId}`);
-      return v === "uncommitted" || v === "branch" ? v : "uncommitted";
-    }, this.currentWorkspaceId);
+    return await this.page.evaluate(
+      (workspaceId) => localStorage.getItem(`band:diff-compare-branch:${workspaceId}`),
+      this.currentWorkspaceId,
+    );
   }
 
-  /** Open the diff-target dropdown. Radix renders the listbox into a portal
-   *  and re-renders it as the branch list arrives, so callers open ONCE here
-   *  and then poll `visibleDiffTargetOptions()`. Re-clicking the trigger in a
+  /** Type `query` into the open picker's search box. */
+  async searchBranches(query: string): Promise<void> {
+    await test.step(`Search branches for "${query}"`, async () => {
+      await this.diffTargetSearch.fill(query);
+    });
+  }
+
+  /** Press a key while the picker has focus (ArrowDown, Enter, Escape…). */
+  async pressInPicker(key: string): Promise<void> {
+    await test.step(`Press ${key} in the branch picker`, async () => {
+      await this.diffTargetSearch.press(key);
+    });
+  }
+
+  /** Click the picker's "Default branch" button. */
+  async pickDefaultBranch(): Promise<void> {
+    await test.step("Pick the default branch", async () => {
+      await this.defaultBranchButton.click();
+    });
+  }
+
+  /** Branch names listed in the open picker, in DOM order. */
+  async visibleBranchOptions(): Promise<string[]> {
+    return (await this.branchOptions.allTextContents()).map((t) => t.trim());
+  }
+
+  /** Name of the option the keyboard cursor is on (cmdk marks it with
+   *  `aria-selected`). */
+  async highlightedOption(): Promise<string | null> {
+    const option = this.diffTargetPicker.getByRole("option", { selected: true });
+    return (await option.count()) === 0 ? null : ((await option.textContent())?.trim() ?? null);
+  }
+
+  /** Open the diff-target dropdown. The picker renders into a portal and
+   *  re-renders as the branch list arrives, so callers open ONCE here and
+   *  then poll `visibleDiffTargetOptions()`. Re-clicking the trigger in a
    *  poll loop would toggle it shut. */
   async openDiffTargetDropdown(): Promise<void> {
     await test.step("Open diff-target dropdown", async () => {
@@ -133,8 +483,7 @@ export class ChangesPanelPage {
   }
 
   /** Every option label in the open diff-target dropdown, in DOM order. Each
-   *  `<SelectItem>` has `role="option"`; the `<SelectSeparator>` is
-   *  `role="separator"` and is excluded. Doesn't click, so it's safe inside
+   *  picker entry has `role="option"`. Doesn't click, so it's safe inside
    *  `expect.poll` while the branch list settles. */
   async visibleDiffTargetOptions(): Promise<string[]> {
     return (await this.page.getByRole("option").allTextContents()).map((t) => t.trim());

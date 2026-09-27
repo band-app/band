@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -112,6 +113,7 @@ test.describe("Explorer file actions", () => {
 
     // New File with nothing selected lands at the root and opens the file.
     await trees.clickHeaderButton("new-file");
+    await expectNoKeyboardSuggestions(trees.nameInput);
     await trees.submitName("from-toolbar.txt");
     await expect.poll(() => onDisk("from-toolbar.txt")).toBe(true);
     await expect(trees.fileTreeRow("from-toolbar.txt")).toBeVisible();

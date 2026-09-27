@@ -85,8 +85,6 @@ export interface CommandRegistryDeps {
   cycleTabs: (direction: 1 | -1) => void;
   /** Move to the next / previous pane group (⌘] / ⌘[). */
   cycleGroups: (direction: 1 | -1) => void;
-  /** Show / hide the right or bottom edge panel (⌥⌘B / ⌘J). */
-  toggleEdgePanel: (edge: "right" | "bottom") => void;
   /** Maximize or restore the active group (⇧⌘M). */
   toggleMaximize: () => void;
   /** Open the active editor's file in the external editor (⌘O). */
@@ -345,15 +343,9 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     },
     {
       id: "toggle-right-panel",
-      label: "Toggle Right Panel",
+      label: "Toggle Explorer / Changes Panel",
       shortcut: "Cmd+Alt+B",
-      action: () => deps.toggleEdgePanel("right"),
-    },
-    {
-      id: "toggle-bottom-panel",
-      label: "Toggle Bottom Panel",
-      shortcut: "Cmd+J",
-      action: () => deps.toggleEdgePanel("bottom"),
+      action: () => window.dispatchEvent(new CustomEvent("band:toggle-right-panel")),
     },
     {
       id: "switch-workspace",

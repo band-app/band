@@ -4,6 +4,7 @@ import { diffService } from "../../services/diff-service";
 import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
+import { gitGraphService } from "../../services/git-graph-service";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
 import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
@@ -11,15 +12,17 @@ import { publicProcedure, t } from "../trpc";
 
 /**
  * Workspace (singular) sub-router — per-workspace operations: file CRUD,
- * search, diff, git pull/push/commit, agent switching, format. The router
+ * search, diff, git pull/push/commit, format. The router
  * is validation + delegation only (issue #535, follow-up 1): every line of
  * business logic lives behind a service-tier seam:
  *
  *   - `filesService`  → file CRUD + path-traversal / .git guards.
  *   - `searchService` → file-name fuzzy search and ripgrep content search.
- *   - `diffService`   → branch listing, diff, file diff, revert.
+ *   - `diffService`   → branch listing, Changes sections, file diff,
+ *     stage / unstage / discard.
+ *   - `gitGraphService` → commit history, commit files, per-commit file diff.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
- *     generateCommitMessage, switchAgent.
+ *     generateCommitMessage.
  *   - `editorService` → file watcher subscription + Prettier formatFile.
  *   - `terminalService.getWorkspaceConfig` → per-workspace terminal config.
  *
@@ -44,18 +47,41 @@ const compareBranchSchema = z
   .optional();
 
 /**
- * `mergeBase` is the SHA returned by `getDiffSummary` and threaded
+ * `mergeBase` is the SHA returned by `getChanges` and threaded
  * back into `getFileDiff` as a revision argument to `git diff`. Pin to
  * a 40-character hex SHA: this closes the leading-dash injection
  * vector (`--exec=`, `--output=…`) AND enforces that `getFileDiff`
- * operates on the same revision shape `getDiffSummary` returned. Real
+ * operates on the same revision shape `getChanges` returned. Real
  * merge-base SHAs from git are always 40-char hex; symbolic refs like
  * `HEAD`, `main`, or `@{-1}` are rejected so a client can't accidentally
- * desync from the summary's view of the world.
+ * desync from the Changes list's view of the world.
  */
 const mergeBaseSchema = z
   .string()
   .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
+
+/** A section of the Changes view (see `DiffService.getChanges`). */
+const changeSectionSchema = z.enum(["conflicts", "unstaged", "staged", "untracked", "branch"]);
+
+/**
+ * A worktree-relative path handed to git as a pathspec. The leading-dash
+ * guard keeps it from being read as a flag; the service also checks it
+ * stays inside the worktree.
+ */
+const filePathSchema = z.string().min(1).regex(/^[^-]/, "path must not start with '-'");
+
+/** Paths for the stage / unstage / discard mutations. A header action sends
+ *  every file of its section; the service hands them to git in batches. */
+const pathListSchema = z.array(filePathSchema).min(1).max(50_000);
+
+/**
+ * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
+ * chars so git can never read it as a flag (`--exec=…`) or a symbolic ref:
+ * the Commits panel always hands us a real object id.
+ */
+const commitShaSchema = z
+  .string()
+  .regex(/^[0-9a-f]{7,40}$/i, "sha must be a 7–40 character hex commit id");
 
 /**
  * Wire-contract note: every workspace-tier service error (including
@@ -69,19 +95,19 @@ const mergeBaseSchema = z
  *
  *
  * TODO(#535-followup): the `WorkspaceNotFoundError` → 404 migration
- * should cover `listBranches`, `getDiff`, `getDiffSummary`, `getFile`,
- * `getFileDiff`, `revertFile`, the `git*` mutations, the `*Path` /
+ * should cover `listBranches`, `getDiff`, `getChanges`, `getFile`,
+ * `getFileDiff`, `stageFiles`, `discardChanges`, the `git*` mutations, the `*Path` /
  * `*File` / `*Directory` file CRUD, and the two search procedures —
  * any procedure that goes through `WorkspaceService.resolve` or its
  * `WorkspaceNotFoundError`-throwing siblings. When that lands, the
  * `tests/trpc.test.ts` cases that pin status=500 for "unknown
  * workspace" need to flip to 404 in the same change.
  *
- * `formatFile` and `switchAgent` are the historical exceptions — both
- * threw `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup
- * branch even before the follow-up-1 split. Both kept as-is to
- * preserve the pre-existing wire contract; a future cleanup can align
- * the two against the rest of the router.
+ * `formatFile` is the historical exception — it threw
+ * `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup branch even
+ * before the follow-up-1 split, and is kept as-is to preserve the
+ * pre-existing wire contract; a future cleanup can align it with the
+ * rest of the router.
  */
 export const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
@@ -214,8 +240,54 @@ export const workspaceRouter = t.router({
     }),
 
   listBranches: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        query: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      diffService.listBranches(input.workspaceId, { query: input.query, limit: input.limit }),
+    ),
+
+  getCommitHistory: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        skip: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      gitGraphService.getCommitHistory(input.workspaceId, {
+        skip: input.skip,
+        limit: input.limit,
+      }),
+    ),
+
+  getCommitHistorySignature: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => diffService.listBranches(input.workspaceId)),
+    .query(({ input }) => gitGraphService.getCommitHistorySignature(input.workspaceId)),
+
+  getCommitDetails: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sha: commitShaSchema }))
+    .query(({ input }) => gitGraphService.getCommitDetails(input.workspaceId, input.sha)),
+
+  getCommitFileDiff: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sha: commitShaSchema,
+        filePath: z.string().min(1).regex(/^[^-]/, "filePath must not start with '-'"),
+        contextLines: z.number().int().min(0).max(99999).optional(),
+      }),
+    )
+    .query(({ input }) =>
+      gitGraphService.getCommitFileDiff(input.workspaceId, input.sha, input.filePath, {
+        contextLines: input.contextLines,
+      }),
+    ),
 
   getDiff: publicProcedure
     .input(
@@ -234,52 +306,55 @@ export const workspaceRouter = t.router({
       }),
     ),
 
-  getDiffSummary: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        diffMode: z.enum(["uncommitted", "branch"]).optional(),
-        compareBranch: compareBranchSchema,
-      }),
-    )
+  getChanges: publicProcedure
+    .input(z.object({ workspaceId: z.string(), compareBranch: compareBranchSchema }))
     .query(({ input }) =>
-      diffService.getDiffSummary(input.workspaceId, {
-        diffMode: input.diffMode,
-        compareBranch: input.compareBranch,
-      }),
+      diffService.getChanges(input.workspaceId, { compareBranch: input.compareBranch }),
     ),
 
   getFileDiff: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string().min(1),
-        mergeBase: mergeBaseSchema,
+        filePath: filePathSchema,
+        section: changeSectionSchema,
+        /** Required for the `branch` section. */
+        mergeBase: mergeBaseSchema.optional(),
+        /** The path before a rename, so git pairs the two sides. */
+        oldPath: filePathSchema.optional(),
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
     )
     .query(({ input }) =>
       diffService.getFileDiff(input.workspaceId, {
         filePath: input.filePath,
+        section: input.section,
         mergeBase: input.mergeBase,
+        oldPath: input.oldPath,
         contextLines: input.contextLines,
       }),
     ),
 
-  revertFile: publicProcedure
+  stageFiles: publicProcedure
+    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.stageFiles(input.workspaceId, input.paths)),
+
+  unstageFiles: publicProcedure
+    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.unstageFiles(input.workspaceId, input.paths)),
+
+  discardChanges: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string().min(1),
-        diffMode: z.enum(["uncommitted", "branch"]),
-        compareBranch: compareBranchSchema,
+        paths: pathListSchema,
+        section: z.enum(["unstaged", "staged", "untracked"]),
       }),
     )
     .mutation(({ input }) =>
-      diffService.revertFile(input.workspaceId, {
-        filePath: input.filePath,
-        diffMode: input.diffMode,
-        compareBranch: input.compareBranch,
+      diffService.discardChanges(input.workspaceId, {
+        paths: input.paths,
+        section: input.section,
       }),
     ),
 
@@ -429,31 +504,6 @@ export const workspaceRouter = t.router({
         limit: input.limit,
       }),
     ),
-
-  switchAgent: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        agentId: z.string(),
-        chatId: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      // Keep the pre-#535 wire contract: `switchAgent` returned NOT_FOUND
-      // (404) when the workspace lookup failed. Other procedures in this
-      // router collapse the same condition to a plain 500 to match the
-      // legacy pinned-test contract; switchAgent and formatFile are the
-      // historical exceptions where the 404 mapping pre-existed the
-      // follow-up-1 split.
-      try {
-        return await workspaceService.switchAgent(input);
-      } catch (err) {
-        if (err instanceof WorkspaceNotFoundError) {
-          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-        }
-        throw err;
-      }
-    }),
 });
 
 export type WorkspaceRouter = typeof workspaceRouter;

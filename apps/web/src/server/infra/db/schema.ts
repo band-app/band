@@ -260,3 +260,56 @@ export const browserHistory = sqliteTable(
     index("browser_history_workspace_visited_idx").on(t.workspaceId, t.lastVisitedAt),
   ],
 );
+
+// Band browser profiles. Each profile is a separate Electron session
+// partition in the desktop app (`persist:band-browser-profile-<id>`), so
+// cookies and storage never leak between profiles. The built-in "Default"
+// profile (the pre-existing `persist:band-browser` partition) has no row.
+//
+// Only metadata lives here. Cookie data stays in the desktop's partition
+// and is never sent to the server.
+export const browserProfiles = sqliteTable("browser_profiles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  // Where the profile's cookies came from, e.g. "chrome". Null for an
+  // empty profile.
+  source: text("source"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// The browser profile each project opens new browser tabs with. Keyed by
+// project name with no FK, because `ProjectQueries.saveAll` rewrites the
+// `projects` table wholesale and a cascade would wipe this mapping. The
+// projects router removes the row when a project is removed.
+export const projectBrowserProfiles = sqliteTable("project_browser_profiles", {
+  projectName: text("project_name").primaryKey(),
+  profileId: text("profile_id").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// Agent sessions (issue #682). One row per run of a coding agent, whichever
+// way it is displayed: `gui` runs in a chat pane (`chat_id`), `tui` runs its
+// vendor CLI in a terminal (`terminal_id`). `provider_session_id` is the
+// agent's own session id (Claude's `session_id`, a chat's
+// `activeSessionId`), null until the agent reports it. A session never
+// changes mode; converting one ends it and starts a new row.
+export const agentSessions = sqliteTable(
+  "agent_sessions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    agentDefinitionId: text("agent_definition_id").notNull(),
+    providerSessionId: text("provider_session_id"),
+    mode: text("mode", { enum: ["gui", "tui"] }).notNull(),
+    chatId: text("chat_id"),
+    terminalId: text("terminal_id"),
+    state: text("state", { enum: ["starting", "running", "ended"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("agent_sessions_workspace_idx").on(t.workspaceId),
+    index("agent_sessions_chat_idx").on(t.chatId),
+    index("agent_sessions_terminal_idx").on(t.terminalId),
+  ],
+);

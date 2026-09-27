@@ -71,6 +71,13 @@ const PROJECT_A = "alpha-visibility";
 const PROJECT_B = "bravo-visibility";
 const WORKSPACE_A = toWorkspaceId(PROJECT_A, "main");
 const WORKSPACE_B = toWorkspaceId(PROJECT_B, "main");
+// The terminal test gets its own pair. The chat test's chats are saved on
+// the server, and a workspace with a saved chat no longer boots into the
+// single-terminal default layout.
+const PROJECT_C = "charlie-visibility";
+const PROJECT_D = "delta-visibility";
+const WORKSPACE_C = toWorkspaceId(PROJECT_C, "main");
+const WORKSPACE_D = toWorkspaceId(PROJECT_D, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders (>= 1024px in `apps/web/src/hooks/useIsDesktop.ts`). The chat
@@ -83,20 +90,12 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [
-      {
-        name: PROJECT_A,
-        path: `/tmp/fake/${PROJECT_A}`,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_A}` }],
-      },
-      {
-        name: PROJECT_B,
-        path: `/tmp/fake/${PROJECT_B}`,
-        defaultBranch: "main",
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_B}` }],
-      },
-    ],
+    projects: [PROJECT_A, PROJECT_B, PROJECT_C, PROJECT_D].map((name) => ({
+      name,
+      path: `/tmp/fake/${name}`,
+      defaultBranch: "main",
+      worktrees: [{ branch: "main", path: `/tmp/fake/${name}` }],
+    })),
   });
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
@@ -116,7 +115,11 @@ test.beforeEach(async ({ page }) => {
     ([keys]) => {
       for (const key of keys) localStorage.removeItem(key);
     },
-    [[`band:dockview-active:${WORKSPACE_A}`, `band:dockview-active:${WORKSPACE_B}`]],
+    [
+      [WORKSPACE_A, WORKSPACE_B, WORKSPACE_C, WORKSPACE_D].map(
+        (id) => `band:dockview-active:${id}`,
+      ),
+    ],
   );
 });
 
@@ -165,7 +168,7 @@ test.describe("Panel visibility context (issue #469)", () => {
   }) => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
 
-    await workspacePage.goto(WORKSPACE_A);
+    await workspacePage.goto(WORKSPACE_C);
     await workspacePage.waitForReady();
 
     // Activate the outer Terminal tab. The default layout starts with
@@ -175,31 +178,31 @@ test.describe("Panel visibility context (issue #469)", () => {
     // group on the left and stays mounted regardless.
     await workspacePage.tab("terminal").click();
 
-    // Sanity-check A's terminal tab observed visible=true via the
+    // Sanity-check C's terminal tab observed visible=true via the
     // shared context.
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible();
 
-    // Switch to B — A becomes cached, B is now active. The outer
+    // Switch to D — C becomes cached, D is now active. The outer
     // Terminal tab stays selected (the outer dockview is shared across
-    // workspaces), so both A's and B's terminal containers stay
+    // workspaces), so both C's and D's terminal containers stay
     // mounted simultaneously.
-    await workspacePage.switchWorkspace(WORKSPACE_B);
+    await workspacePage.switchWorkspace(WORKSPACE_D);
 
-    // Positive anchor on B before asserting A is hidden.
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible();
+    // Positive anchor on D before asserting C is hidden.
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_D, true)).toBeVisible();
 
-    // A's cached terminal tab must now report visible=false. The same
+    // C's cached terminal tab must now report visible=false. The same
     // regression-lever logic as the chat test above: the only way for
     // `wsActive=false` to reach the leaf is via the shared context.
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, false)).toBeAttached();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toHaveCount(0);
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, false)).toBeAttached();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toHaveCount(0);
 
-    // Round-trip back to A — A becomes active, B becomes cached. The
+    // Round-trip back to C — C becomes active, D becomes cached. The
     // direction of the visibility flip reverses, proving the context
     // tracks `wsActive` symmetrically.
-    await workspacePage.switchWorkspace(WORKSPACE_A);
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, false)).toBeAttached();
-    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toHaveCount(0);
+    await workspacePage.switchWorkspace(WORKSPACE_C);
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_C, true)).toBeVisible();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_D, false)).toBeAttached();
+    await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_D, true)).toHaveCount(0);
   });
 });

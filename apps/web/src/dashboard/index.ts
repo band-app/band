@@ -6,7 +6,7 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
-export { ChangesFileTree } from "./components/ChangesFileTree";
+export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
@@ -47,6 +47,13 @@ export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export {
+  useBrowserProfiles,
+  useInvalidateBrowserProfiles,
+  useProjectBrowserProfiles,
+  useRemoveBrowserProfile,
+  useSetProjectBrowserProfile,
+} from "./hooks/use-browser-profiles";
 export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
 export {
   type EditorHistoryEntry,
@@ -79,8 +86,10 @@ export {
   useStatusWatcher,
 } from "./hooks/use-status";
 export { useWorkspacePath } from "./hooks/use-workspace-path";
+export { AGENT_MODE_KEY, readAgentMode, useAgentMode } from "./lib/agent-mode";
 export {
   buildLspWsUrl,
+  createDiffLspNavigation,
   createLspExtension,
   getLspLanguageId,
   hasPendingNavigation,
@@ -117,6 +126,10 @@ export {
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "./lib/language-map";
+export type {
+  RenderedBlockKind,
+  RenderMarkdownBlock,
+} from "./lib/markdown-live-preview";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export {
   type AddToTerminalDetail,
@@ -142,15 +155,19 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
+  BranchCompareStatus,
+  BrowserProfileInfo,
+  ChangeEntry,
+  ChangeSection,
   CIState,
   CIStatus,
   CodingAgentConfig,
   CodingAgentDefinition,
   CodingAgentType,
+  ConflictKind,
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileEntry,
   FileListResult,
   FileStatus,
@@ -159,6 +176,7 @@ export type {
   GitSyncState,
   HooksStatus,
   LabelDefinition,
+  ListWorkspaceBranchesResult,
   NotificationSettings,
   ProjectAvatarInfo,
   ProjectInfo,
@@ -169,8 +187,8 @@ export type {
   TerminalLayoutNode,
   TerminalPaneConfig,
   WorkspaceBranchStatus,
+  WorkspaceChanges,
   WorkspaceDiff,
-  WorkspaceDiffSummary,
   WorkspaceStatus,
   WorkspaceTerminalConfig,
   WorktreeInfo,

@@ -22,6 +22,7 @@ import {
   stubRequests,
   trpc,
   turnEnded,
+  WORKSPACE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 
@@ -43,6 +44,24 @@ async function boot(opts: Parameters<typeof startAcpServer>[0] = {}) {
 
 let seq = 0;
 const newChatId = () => `acp-chat-${Date.now()}-${seq++}`;
+
+type ConfigState = { configOptions: { id: string; currentValue: string }[] };
+
+/** Stub options with a reasoning-effort select, which the chat row can't
+ *  hold: only the agent's session keeps it. */
+const EFFORT_OPTION = {
+  extra: [
+    {
+      id: "effort",
+      name: "Effort",
+      category: "thought_level",
+      options: [
+        { value: "low", name: "Low" },
+        { value: "high", name: "High" },
+      ],
+    },
+  ],
+};
 
 describe("chat over ACP", () => {
   it("streams the agent's reply as ACP session/updates and logs the prompt", async () => {
@@ -361,6 +380,103 @@ describe("chat over ACP", () => {
       "query",
     );
     expect(chat.chat.model).toBe("stub-large");
+  });
+
+  it("starts the session of a new chat to apply an option only the agent keeps", async () => {
+    const server = await boot({ env: { BAND_TEST_ACP_OPTIONS: JSON.stringify(EFFORT_OPTION) } });
+    const chatId = newChatId();
+
+    // No message yet: the pane has no chat row and no session.
+    const { state } = await trpc<{ state: ConfigState }>(server.url, "chats.setConfigOption", {
+      chatId,
+      workspaceId: WORKSPACE_ID,
+      configId: "effort",
+      value: "high",
+    });
+    expect(state.configOptions.find((o) => o.id === "effort")?.currentValue).toBe("high");
+
+    const { chat } = await trpc<{ chat: { agent: string; activeSessionId?: string } | null }>(
+      server.url,
+      "chats.get",
+      { chatId },
+      "query",
+    );
+    expect(chat?.agent).toBe("claude-code");
+    const inRepo = stubRequests(server.home, "session/new").filter(
+      (r) => r.params.cwd === `${server.home}/repo`,
+    );
+    expect(inRepo).toHaveLength(1);
+    expect(stubRequests(server.home, "session/set_config_option").map((r) => r.params)).toEqual([
+      { sessionId: chat?.activeSessionId, configId: "effort", value: "high" },
+    ]);
+
+    // The first message runs in that session.
+    const events = await runTurn(server.url, chatId, "go");
+    expect(agentText(events)).toBe('Heard "go" on stub-small.');
+    const [prompt] = stubRequests(server.home, "session/prompt");
+    expect(prompt.params.sessionId).toBe(chat?.activeSessionId);
+  });
+
+  it("reattaches an idle chat's session to apply an option", async () => {
+    const server = await boot({
+      env: { BAND_TEST_ACP_OPTIONS: JSON.stringify(EFFORT_OPTION) },
+      turns: [{ match: "^crash", steps: [{ say: "bye" }, { exit: 3 }] }],
+    });
+    const chatId = newChatId();
+    // The agent process exits after the turn, leaving the chat with a
+    // session but no process.
+    await runTurn(server.url, chatId, "crash");
+    const { chat } = await trpc<{ chat: { activeSessionId?: string } }>(
+      server.url,
+      "chats.get",
+      { chatId },
+      "query",
+    );
+
+    await trpc(server.url, "chats.setConfigOption", { chatId, configId: "effort", value: "high" });
+
+    expect(stubRequests(server.home, "session/resume").map((r) => r.params)).toEqual([
+      { sessionId: chat.activeSessionId, cwd: `${server.home}/repo`, mcpServers: [] },
+    ]);
+    expect(stubRequests(server.home, "session/set_config_option").map((r) => r.params)).toEqual([
+      { sessionId: chat.activeSessionId, configId: "effort", value: "high" },
+    ]);
+  });
+
+  it("saves a mode change on a new chat without starting its agent", async () => {
+    const server = await boot();
+    const chatId = newChatId();
+
+    await trpc(server.url, "chats.setConfigOption", {
+      chatId,
+      workspaceId: WORKSPACE_ID,
+      configId: "mode",
+      value: "plan",
+    });
+
+    const { chat } = await trpc<{ chat: { mode?: string; activeSessionId?: string } }>(
+      server.url,
+      "chats.get",
+      { chatId },
+      "query",
+    );
+    expect(chat.mode).toBe("plan");
+    expect(chat.activeSessionId).toBeUndefined();
+    const inRepo = stubRequests(server.home, "session/new").filter(
+      (r) => r.params.cwd === `${server.home}/repo`,
+    );
+    expect(inRepo).toHaveLength(0);
+  });
+
+  it("rejects an option change for an unknown chat without a workspace", async () => {
+    const server = await boot();
+    await expect(
+      trpc(server.url, "chats.setConfigOption", {
+        chatId: newChatId(),
+        configId: "effort",
+        value: "high",
+      }),
+    ).rejects.toThrow(/\(404\)/);
   });
 
   it("reports an agent that fails to start as an error turn", async () => {

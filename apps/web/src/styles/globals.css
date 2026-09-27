@@ -29,6 +29,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-sidebar: var(--sidebar);
   --color-destructive: var(--destructive);
+  --color-link: var(--link);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -55,6 +56,9 @@
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+  /* xterm's background (LIGHT_TERMINAL_THEME in lib/terminal-cache.ts). Keep
+     the two in sync: chrome floating over a terminal paints with this. */
+  --terminal-background: #ffffff;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -72,6 +76,8 @@
      the workspace layout. */
   --sidebar: oklch(0.962 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Clickable text in code, e.g. a Cmd/Ctrl+hover go-to-definition link. */
+  --link: oklch(0.546 0.245 262.881);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -92,6 +98,8 @@
   scrollbar-color: oklch(0.32 0 0) transparent;
   --background: #1e1e1e;
   --foreground: oklch(0.922 0 0);
+  /* DARK_TERMINAL_THEME's background in lib/terminal-cache.ts. */
+  --terminal-background: #1e1e1e;
   --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.922 0 0);
   /* Popover/dropdown surfaces are elevated above the page, so they're a touch
@@ -112,6 +120,7 @@
      from the workspace layout (mirrors the VS Code editor/sidebar contrast). */
   --sidebar: #252526;
   --destructive: oklch(0.704 0.191 22.216);
+  --link: oklch(0.707 0.165 254.624);
   --border: oklch(0.35 0 0);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.556 0 0);
@@ -179,55 +188,6 @@ button,
 
 pre {
   overflow-x: auto;
-}
-
-/*
- * Markdown preview find-in-page highlights.
- *
- * `MarkdownPreview` registers two Custom Highlight API names —
- * `band-md-find` for the non-active matches, `band-md-find-active` for
- * the currently-focused one — and paints them via `::highlight()`. The
- * colour palette mirrors CodeMirror's `cm-searchMatch` /
- * `cm-searchMatch-selected` (defined in
- * `packages/dashboard-core/src/lib/codemirror-setup.ts`) so the editor
- * and preview surfaces feel consistent. Browsers without the Custom
- * Highlight API silently ignore these rules; the find bar still
- * navigates and counts matches, just without paint.
- */
-/* Highlight tints for the markdown-preview find bar. `::highlight()`
- * pseudo-elements cascade through their *originating element* (the
- * range's parent), so a `.dark ::highlight(name)` rule applies when
- * the matched text is descended from `.dark` on the document root —
- * which is exactly how Band's theme toggle works. We keep a
- * `prefers-color-scheme` fallback for any future surface that paints
- * without first being wrapped in `.dark`. Opacities mirror the
- * CodeMirror palette in
- * `packages/dashboard-core/src/lib/codemirror-setup.ts`: a touch
- * dimmer on light, a touch brighter on dark, so neither read as a
- * full block. */
-::highlight(band-md-find) {
-  background-color: rgba(255, 213, 0, 0.35);
-}
-
-::highlight(band-md-find-active) {
-  background-color: rgba(255, 150, 50, 0.5);
-}
-
-.dark ::highlight(band-md-find) {
-  background-color: rgba(255, 213, 0, 0.4);
-}
-
-.dark ::highlight(band-md-find-active) {
-  background-color: rgba(255, 150, 50, 0.55);
-}
-
-@media (prefers-color-scheme: dark) {
-  ::highlight(band-md-find) {
-    background-color: rgba(255, 213, 0, 0.4);
-  }
-  ::highlight(band-md-find-active) {
-    background-color: rgba(255, 150, 50, 0.55);
-  }
 }
 
 html,

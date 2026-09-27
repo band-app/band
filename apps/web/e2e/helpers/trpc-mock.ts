@@ -157,10 +157,21 @@ export function createTrpcMock() {
     // DashboardShell sidebar: project list
     query("projects.list" as ProcedurePath, (() => ({ projects: [] })) as Handler<ProcedurePath>);
 
-    // DockviewWorkspaceLayout: diff count badge
+    // Changes tab badge
     query(
-      "workspace.getDiffSummary" as ProcedurePath,
-      (() => ({ stats: null })) as Handler<ProcedurePath>,
+      "workspace.getChanges" as ProcedurePath,
+      (() => ({
+        headBranch: "main",
+        defaultBranch: "main",
+        compareBranch: "main",
+        mergeBase: null,
+        branchStatus: "ready",
+        conflicts: [],
+        unstaged: [],
+        staged: [],
+        untracked: [],
+        branch: [],
+      })) as Handler<ProcedurePath>,
     );
   }
 

@@ -16,11 +16,6 @@ import {
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
-import {
-  findFocusedInnerDockview,
-  prepareMaximizeRestoreAnimation,
-  toggleEdgeGroup,
-} from "../lib/dockview-edge-groups";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
@@ -107,7 +102,6 @@ function toggleMaximizeActiveGroup(workspaceId: string | null): void {
   const active = getWorkspaceDockviewApi(workspaceId)?.activeGroup;
   if (!active) return;
   if (active.api.isMaximized()) {
-    prepareMaximizeRestoreAnimation(document.querySelector<HTMLElement>(".dv-shell"));
     active.api.exitMaximized();
   } else {
     active.api.maximize();
@@ -357,10 +351,7 @@ export function SharedDockviewLayout() {
           ),
         cycleGroups: (direction) =>
           cycleGridGroups(getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null, direction),
-        toggleEdgePanel: (edge) => {
-          const api = getWorkspaceDockviewApi(activeWorkspaceIdRef.current);
-          if (api) toggleEdgeGroup(api, edge);
-        },
+
         toggleMaximize: () => toggleMaximizeActiveGroup(activeWorkspaceIdRef.current),
         openFileExternal: () => {
           const ws = activeWorkspaceIdRef.current;
@@ -465,7 +456,7 @@ export function SharedDockviewLayout() {
       }
 
       if (key === "n" && e.shiftKey) {
-        // ⇧⌘N → New Chat leaf.
+        // ⇧⌘N → the default agent, in this device's mode (issue #682).
         e.preventDefault();
         e.stopPropagation();
         addLeafToActiveGroup(ws, "chat");
@@ -524,25 +515,13 @@ export function SharedDockviewLayout() {
         e.preventDefault();
         addLeafToActiveGroup(ws, "browser");
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
-        // ⌘B → toggle inner-dockview left edge, else the project sidebar.
+        // ⌘B → toggle the project sidebar.
         e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "left")) return;
         window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
       } else if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
-        // ⌥⌘B → toggle right edge of the focused / active dockview.
+        // ⌥⌘B → toggle the right sidepanel (Explorer / Changes).
         e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "right")) return;
-        const api = getWorkspaceDockviewApi(ws);
-        if (api) toggleEdgeGroup(api, "right");
-      } else if (key === "j" && !e.shiftKey && !e.altKey) {
-        // ⌘J → toggle bottom edge.
-        e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "bottom")) return;
-        const api = getWorkspaceDockviewApi(ws);
-        if (api) toggleEdgeGroup(api, "bottom");
+        window.dispatchEvent(new CustomEvent("band:toggle-right-panel"));
       } else if (key === "m" && e.shiftKey) {
         // ⇧⌘M → maximize / restore the active group.
         e.preventDefault();
@@ -573,15 +552,26 @@ export function SharedDockviewLayout() {
   // clicking "Go to definition" across files did nothing.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ filePath?: string; workspaceId?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{
+          filePath?: string;
+          workspaceId?: string;
+          line?: number;
+          column?: number;
+        }>
+      ).detail;
       if (!detail?.filePath) return;
       // Open in the ADDRESSED workspace (falling through to the active one when
       // the event carries no id, for backwards-compat). Targeting the owning
       // workspace directly is what prevents an A-relative path from leaking
       // into a cached hidden workspace B/C — the nav opens in A even when A is
       // not the active workspace.
+      // A diff view's jump carries the definition's 1-based position; the
+      // editor's own jump positions the cursor itself and sends none.
       getWorkspaceLeafActions(detail.workspaceId ?? activeWorkspaceId)?.openFile(detail.filePath, {
         preview: false,
+        line: detail.line,
+        column: detail.column,
       });
     };
     window.addEventListener("band:lsp-navigate", handler);

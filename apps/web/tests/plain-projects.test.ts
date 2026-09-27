@@ -530,37 +530,42 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
 
-  it("workspace.getDiffSummary returns an empty summary for plain projects", async () => {
+  it("workspace.getChanges returns empty sections for plain projects", async () => {
     // The Changes sidepanel fetches this on mount. For plain projects we don't want
     // to surface a git error — return an empty result so the UI renders its
     // "folder is not a git repo" message instead.
-    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+    const res = await trpcQuery(server.url, "workspace.getChanges", {
       workspaceId: "scratch-main",
     });
     expect(res.status).toBe(200);
-    const data = await trpcData<{
-      stats: { filesChanged: number; insertions: number; deletions: number };
-      fileStatuses: Record<string, string>;
-      defaultBranch: string;
-    }>(res);
-    expect(data.stats).toEqual({ filesChanged: 0, insertions: 0, deletions: 0 });
-    expect(data.fileStatuses).toEqual({});
-    expect(data.defaultBranch).toBe("main");
+    const data = await trpcData<Record<string, unknown>>(res);
+    expect(data).toEqual({
+      headBranch: "main",
+      defaultBranch: "main",
+      compareBranch: "main",
+      mergeBase: null,
+      branchStatus: "ready",
+      conflicts: [],
+      unstaged: [],
+      staged: [],
+      untracked: [],
+      branch: [],
+    });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Defensive guard: getDiffSummary short-circuits when .git is missing on
+// Defensive guard: getChanges short-circuits when .git is missing on
 // disk regardless of the recorded kind.
 // ---------------------------------------------------------------------------
 //
 // Race scenario: the user deletes `.git` from a terminal AFTER a
 // `projects.list` cached a kind="git" classification. A subsequent
-// `getDiffSummary` call lands before the next list refresh self-heals
+// `getChanges` call lands before the next list refresh self-heals
 // kind. Without the existsSync belt-and-braces in the server, that call
 // would invoke `git diff` against a non-git folder and surface a raw
 // subprocess error in the Changes view.
-describe("tRPC — plain projects (getDiffSummary defensive .git guard)", () => {
+describe("tRPC — plain projects (getChanges defensive .git guard)", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let plainPath: string;
@@ -593,21 +598,19 @@ describe("tRPC — plain projects (getDiffSummary defensive .git guard)", () => 
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("getDiffSummary on a stale-git workspace returns empty stats (no git error)", async () => {
-    // Call getDiffSummary directly via the workspace endpoint. Without
+  it("getChanges on a stale-git workspace returns empty sections (no git error)", async () => {
+    // Call getChanges directly via the workspace endpoint. Without
     // the `!hasGit` short-circuit on the server, this would `execGit`
     // against a folder with no `.git` and throw — surfacing as the wall
     // of red text in the Changes view that motivated #427's hardening.
-    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+    const res = await trpcQuery(server.url, "workspace.getChanges", {
       workspaceId: "stale-git-main",
     });
     expect(res.status).toBe(200);
-    const data = await trpcData<{
-      stats: { filesChanged: number; insertions: number; deletions: number };
-      fileStatuses: Record<string, string>;
-    }>(res);
-    expect(data.stats).toEqual({ filesChanged: 0, insertions: 0, deletions: 0 });
-    expect(data.fileStatuses).toEqual({});
+    const data = await trpcData<Record<string, unknown[]>>(res);
+    for (const section of ["conflicts", "unstaged", "staged", "untracked", "branch"]) {
+      expect(data[section]).toEqual([]);
+    }
   });
 });
 
@@ -708,28 +711,23 @@ describe("tRPC — plain projects (promote to git)", () => {
     expect(body.error.message).toMatch(/no longer exists/i);
   });
 
-  it("after promotion, workspace.getDiffSummary returns real diff data, not the empty stub", async () => {
+  it("after promotion, workspace.getChanges returns real git data, not the empty stub", async () => {
     // The pre-promotion test in the plain-rejection block verifies
-    // that getDiffSummary returns an empty stub for plain projects.
-    // Once promoted, the same workspaceId should get real `git diff`
+    // that getChanges returns an empty stub for plain projects.
+    // Once promoted, the same workspaceId should get real `git status`
     // output. The freshly-promoted repo has the existing `notes.md`
-    // file from createPlainDir as an untracked file, so the diff
-    // summary should report it.
-    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+    // file from createPlainDir as an untracked file.
+    const res = await trpcQuery(server.url, "workspace.getChanges", {
       workspaceId: "scratch-main",
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
-      stats: { filesChanged: number; insertions: number; deletions: number };
-      fileStatuses: Record<string, string>;
-      mergeBase: string;
+      untracked: Array<{ path: string; status: string }>;
+      branchStatus: string;
     }>(res);
-    // Untracked `notes.md` from createPlainDir() should show up.
-    expect(data.fileStatuses["notes.md"]).toBe("U");
-    expect(data.stats.filesChanged).toBeGreaterThan(0);
-    // mergeBase is a real 40-char SHA now (the empty tree), not the
-    // synthetic sentinel we'd return for a non-git folder.
-    expect(data.mergeBase).toMatch(/^[0-9a-f]{40}$/);
+    expect(data.untracked.map((e) => [e.path, e.status])).toEqual([["notes.md", "U"]]);
+    // No commits yet, so there is nothing to compare a branch against.
+    expect(data.branchStatus).toBe("unborn-head");
   });
 
   it("after promotion, workspaces.create is no longer blocked by the plain-kind backstop", async () => {

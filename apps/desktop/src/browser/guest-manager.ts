@@ -58,12 +58,13 @@ import {
   htmlToDataUrl,
   parseBandAction,
 } from "./error-html.js";
-import { admitWebviewAttach, BROWSER_PARTITION, isAllowedGuestNavigation } from "./guest-policy.js";
+import { admitWebviewAttach, isAllowedGuestNavigation } from "./guest-policy.js";
 import {
   type BrowserLoadErrorPayload,
   buildLoadErrorPayload,
   isMainFrameFailure,
 } from "./load-error.js";
+import { isRetiredProfile, partitionForProfile, sessionForProfile } from "./profiles.js";
 import { decideWindowOpenAction } from "./window-open.js";
 
 const log = createLogger("guest-manager");
@@ -203,12 +204,15 @@ export class BrowserGuestManager {
       if (oldest === undefined) break;
       this.closeOffscreen(oldest);
     }
+    // The tab's browser profile, or Default for a profile deleted this run.
+    const profileId = isRetiredProfile(args.profileId) ? null : (args.profileId ?? null);
+    const partition = partitionForProfile(profileId);
     const view = new WebContentsView({
       webPreferences: {
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false,
-        partition: BROWSER_PARTITION,
+        partition,
       },
     });
     const wc = view.webContents;
@@ -223,9 +227,7 @@ export class BrowserGuestManager {
     this.keyByWebContentsId.set(wc.id, args.browserId);
     // The URL comes from the server's tab record, which anything can write;
     // hold it to the same rule as a guest's first `src`.
-    const url = admitWebviewAttach({ src: args.url, partition: BROWSER_PARTITION })
-      ? args.url
-      : "about:blank";
+    const url = admitWebviewAttach({ src: args.url, partition }) ? args.url : "about:blank";
     void wc.loadURL(url);
   }
 
@@ -317,6 +319,24 @@ export class BrowserGuestManager {
   }
 
   /** Close every offscreen page (app quit). Guests go with their window. */
+  /**
+   * Stop every page running in a profile that is being deleted, so none
+   * writes storage back while its partition is wiped. Offscreen pages are
+   * closed. Pane guests belong to the renderer, which remounts them in
+   * Default once the profile is gone; until then they are parked on
+   * about:blank.
+   */
+  stopProfilePages(profileId: string): void {
+    const sess = sessionForProfile(profileId);
+    for (const [key, view] of [...this.offscreenViews]) {
+      if (view.webContents.session === sess) this.closeOffscreen(key);
+    }
+    for (const id of this.attachedGuestIds) {
+      const guest = this.attachedGuest(id);
+      if (guest && guest.session === sess) void guest.loadURL("about:blank");
+    }
+  }
+
   destroyAll(): void {
     for (const key of [...this.offscreenViews.keys()]) this.closeOffscreen(key);
   }

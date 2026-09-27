@@ -13,14 +13,17 @@ import {
   DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuPortal,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Switch,
   Textarea,
   Tooltip,
   TooltipContent,
@@ -44,6 +47,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Bot,
   Brain,
+  Check,
   ChevronDown,
   Clock,
   CodeXml,
@@ -51,10 +55,10 @@ import {
   Loader2,
   Plus,
   ScrollText,
-  SlidersHorizontal,
   X,
+  Zap,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
@@ -145,22 +149,6 @@ interface QueuedFilePart {
   filename?: string;
 }
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  description?: string;
-  /** Approximate max input context window in tokens, when known. */
-  contextWindow?: number;
-}
-
-interface AgentGroup {
-  agentId: string;
-  agentType: string;
-  agentLabel: string;
-  models: ModelInfo[];
-  defaultModel?: string;
-}
-
 interface Choice {
   id: string;
   name: string;
@@ -204,6 +192,13 @@ function sessionPickers(session: SessionState | null) {
         name: m.name,
         description: m.description ?? undefined,
       }));
+  const rest = (session?.configOptions ?? []).filter(
+    (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
+  );
+  const fast = rest.find(isFastModeOption);
+  const effort = rest.find(
+    (o) => o !== fast && (o.category === "thought_level" || o.id === "effort"),
+  );
   return {
     models,
     model: modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId,
@@ -211,11 +206,19 @@ function sessionPickers(session: SessionState | null) {
     modes,
     mode: modeOption ? String(modeOption.currentValue) : session?.modes?.currentModeId,
     modeConfigId: modeOption?.id ?? "__legacy_mode",
-    // Everything else the agent lets the user choose (reasoning effort, …).
-    others: (session?.configOptions ?? []).filter(
-      (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
-    ),
+    effort,
+    fast,
+    // Everything else the agent lets the user choose.
+    others: rest.filter((o) => o !== effort && o !== fast),
   };
+}
+
+/** Fast mode as an on/off select. Band doesn't advertise boolean config
+ *  options, so agents (Claude Code's `fast`) fall back to this shape. */
+function isFastModeOption(option: SelectOption): boolean {
+  if (option.id !== "fast") return false;
+  const values = new Set(selectChoices(option).map((c) => c.id));
+  return values.size === 2 && values.has("off") && values.has("on");
 }
 
 interface ChatViewProps {
@@ -240,8 +243,6 @@ interface ChatViewProps {
   onSwitchSession?: (sessionId: string | undefined, summary?: string) => Promise<void> | void;
   agentType?: string;
   codingAgentId?: string;
-  /** Called when the user picks a model under a different coding agent. */
-  onSwitchAgent?: (agentId: string) => void;
   visible?: boolean;
   /** Workspace is active (even if the chat tab isn't the focused tab). */
   wsActive?: boolean;
@@ -259,7 +260,6 @@ export function ChatView({
   onSwitchSession,
   agentType,
   codingAgentId,
-  onSwitchAgent,
   visible,
   wsActive,
 }: ChatViewProps) {
@@ -351,11 +351,15 @@ export function ChatView({
     [session?.commands],
   );
 
+  // Changes in flight. A chat without a live session starts one before the
+  // change applies, which takes a few seconds.
+  const [pendingConfig, setPendingConfig] = useState(0);
   const handleConfig = useCallback(
     (configId: string, value: string) => {
-      setConfigOption(configId, value).catch((err) =>
-        console.error("[ChatView] error setting session option:", err),
-      );
+      setPendingConfig((n) => n + 1);
+      setConfigOption(configId, value)
+        .catch((err) => console.error("[ChatView] error setting session option:", err))
+        .finally(() => setPendingConfig((n) => n - 1));
     },
     [setConfigOption],
   );
@@ -383,24 +387,6 @@ export function ChatView({
     window.addEventListener("band:toggle-mode", handler);
     return () => window.removeEventListener("band:toggle-mode", handler);
   }, [pickers, handleModeSelect]);
-
-  // Other agents' cached models, for switching agent from the model menu.
-  const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
-  useEffect(() => {
-    trpc.models.listAll
-      .query()
-      .then((data) => setAgentGroups(data.agents as AgentGroup[]))
-      .catch(() => setAgentGroups([]));
-  }, []);
-  const menuGroups = useMemo(
-    () =>
-      agentGroups.map((g) =>
-        g.agentId === codingAgentId && pickers.models.length > 0
-          ? { ...g, models: pickers.models }
-          : g,
-      ),
-    [agentGroups, codingAgentId, pickers.models],
-  );
 
   // Forward a session the chat attached to on its own to the parent, for
   // the tab title. Seeded with `initialSessionId` so a remount doesn't
@@ -779,9 +765,11 @@ export function ChatView({
           <ConversationScrollButton />
         </Conversation>
 
+        {/* On a phone the composer sits right on the home-indicator inset (or
+            the keyboard), so it keeps only a small gap below the input. */}
         <div
           data-testid="chat-pane__composer"
-          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4"
+          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-2 lg:pb-4"
         >
           <TaskListWidget plan={plan} workspaceId={workspaceId} />
           <PromptInput
@@ -815,28 +803,6 @@ export function ChatView({
                 {contextMeterEnabled && (
                   <ContextMeter usage={session?.usage ?? null} costUsd={session?.costUsd ?? null} />
                 )}
-                {(menuGroups.length > 0 || pickers.models.length > 0) && (
-                  <AgentModelMenu
-                    agentGroups={
-                      menuGroups.length > 0
-                        ? menuGroups
-                        : [
-                            {
-                              agentId: codingAgentId ?? "",
-                              agentType: agentType ?? "",
-                              agentLabel: "",
-                              models: pickers.models,
-                            },
-                          ]
-                    }
-                    currentAgentId={codingAgentId}
-                    currentAgentType={agentType}
-                    selectedModel={pickers.model}
-                    onSelectModel={handleModelSelect}
-                    onSwitchAgent={onSwitchAgent}
-                    disabled={isStreaming}
-                  />
-                )}
                 {pickers.modes.length > 0 && (
                   <ModeMenu
                     modes={pickers.modes}
@@ -844,70 +810,36 @@ export function ChatView({
                     onSelect={handleModeSelect}
                   />
                 )}
-                {pickers.others.map((option) => (
-                  <ConfigOptionMenu
-                    key={option.id}
-                    option={option}
-                    onSelect={(value) => handleConfig(option.id, value)}
-                  />
-                ))}
               </div>
-              <PromptInputSubmit
-                status={
-                  status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
-                }
-                onStop={handleStop}
-              />
+              <div className="flex min-w-0 items-center gap-0.5">
+                {(pickers.models.length > 0 ||
+                  pickers.effort ||
+                  pickers.fast ||
+                  pickers.others.length > 0) && (
+                  <ModelSettingsMenu
+                    models={pickers.models}
+                    selectedModel={pickers.model}
+                    onSelectModel={handleModelSelect}
+                    effort={pickers.effort}
+                    fast={pickers.fast}
+                    others={pickers.others}
+                    onConfig={handleConfig}
+                    modelsDisabled={isStreaming}
+                    pending={pendingConfig > 0}
+                  />
+                )}
+                <PromptInputSubmit
+                  status={
+                    status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
+                  }
+                  onStop={handleStop}
+                />
+              </div>
             </PromptInputActions>
           </PromptInput>
         </div>
       </div>
     </FileLinkWorkspaceProvider>
-  );
-}
-
-/** A select-type session config option other than model and mode, such as
- *  reasoning effort. */
-function ConfigOptionMenu({
-  option,
-  onSelect,
-}: {
-  option: SelectOption;
-  onSelect: (value: string) => void;
-}) {
-  const choices = selectChoices(option);
-  const current = choices.find((c) => c.id === option.currentValue);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          data-testid={`chat-pane__config-option--${option.id}`}
-          className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <SlidersHorizontal className="size-3 shrink-0" />
-          <span className="truncate">{current?.name ?? option.name}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[160px]">
-        <DropdownMenuLabel>{option.name}</DropdownMenuLabel>
-        {choices.map((choice) => (
-          <DropdownMenuItem
-            key={choice.id}
-            onClick={() => onSelect(choice.id)}
-            className={cn(
-              "flex flex-col items-start gap-0.5",
-              choice.id === option.currentValue && "bg-accent",
-            )}
-          >
-            <span className="text-sm font-medium">{choice.name}</span>
-            {choice.description && (
-              <span className="text-xs text-muted-foreground">{choice.description}</span>
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -973,28 +905,38 @@ function ModeMenu({
   );
 }
 
-function AgentModelMenu({
-  agentGroups,
-  currentAgentId,
-  currentAgentType,
+/**
+ * Model, effort, fast mode and any other per-model settings behind one
+ * trigger. It only changes settings within the session's agent: a session
+ * belongs to the agent that started it, so the agent is picked when a chat
+ * is created (the "New Chat" submenu in the tab bar).
+ */
+function ModelSettingsMenu({
+  models,
   selectedModel,
   onSelectModel,
-  onSwitchAgent,
-  disabled,
+  effort,
+  fast,
+  others,
+  onConfig,
+  modelsDisabled,
+  pending,
 }: {
-  agentGroups: AgentGroup[];
-  currentAgentId?: string;
-  currentAgentType?: string;
+  models: Choice[];
   selectedModel: string | undefined;
   onSelectModel: (model: string | undefined) => void;
-  onSwitchAgent?: (agentId: string) => void;
-  disabled?: boolean;
+  effort: SelectOption | undefined;
+  fast: SelectOption | undefined;
+  others: SelectOption[];
+  onConfig: (configId: string, value: string) => void;
+  modelsDisabled?: boolean;
+  /** A change is being applied. */
+  pending?: boolean;
 }) {
-  const currentGroup = agentGroups.find((g) => g.agentId === currentAgentId) ?? agentGroups[0];
-  const currentModels = currentGroup?.models ?? [];
-  const current = currentModels.find((m) => m.id === selectedModel) ?? currentModels[0];
-  const displayName = current?.name ?? "Model";
-  const showGroups = agentGroups.length > 1;
+  const current = models.find((m) => m.id === selectedModel) ?? models[0];
+  const otherModels = models.filter((m) => m !== current);
+  const effortChoice = effort && selectChoices(effort).find((c) => c.id === effort.currentValue);
+  const fastOn = fast?.currentValue === "on";
 
   return (
     <DropdownMenu>
@@ -1002,91 +944,166 @@ function AgentModelMenu({
         <button
           type="button"
           data-testid="chat-pane__model-menu"
-          disabled={disabled}
-          className={cn(
-            "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-            disabled && "opacity-50 cursor-not-allowed",
-          )}
+          aria-busy={pending || undefined}
+          className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
         >
-          {currentAgentType ? (
-            <AgentIcon type={currentAgentType} className="size-3 shrink-0" />
-          ) : (
-            <ChevronDown className="size-3 shrink-0" />
+          <span data-testid="chat-pane__model-menu-model" className="truncate">
+            {current?.name ?? "Model"}
+          </span>
+          {effortChoice && (
+            <span
+              data-testid="chat-pane__model-menu-effort"
+              className="truncate text-muted-foreground"
+            >
+              {effortChoice.name}
+            </span>
           )}
-          <span className="truncate">{displayName}</span>
+          {fastOn && <Zap aria-label="Fast mode on" className="size-3 shrink-0" />}
+          {pending ? (
+            <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+          )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[200px] max-h-[400px] overflow-y-auto">
-        {showGroups
-          ? agentGroups.map((group, groupIndex) => {
-              const isCurrentAgent = group.agentId === currentAgentId;
-              return (
-                <Fragment key={group.agentId}>
-                  {groupIndex > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="flex items-center gap-1.5">
-                    <AgentIcon type={group.agentType} className="size-3.5" />
-                    {group.agentLabel}
-                  </DropdownMenuLabel>
-                  <DropdownMenuGroup>
-                    {group.models.length > 0 ? (
-                      group.models.map((model) => (
-                        <DropdownMenuItem
-                          key={`${group.agentId}:${model.id}`}
-                          onClick={() => {
-                            if (isCurrentAgent) {
-                              onSelectModel(model.id);
-                            } else {
-                              onSwitchAgent?.(group.agentId);
-                            }
-                          }}
-                          className={cn(
-                            "flex flex-col items-start gap-0.5 pl-6",
-                            isCurrentAgent && model.id === selectedModel ? "bg-accent" : "",
-                          )}
-                        >
-                          <ModelLine model={model} />
-                          {model.description && (
-                            <span className="text-xs text-muted-foreground">
-                              {model.description}
-                            </span>
-                          )}
-                        </DropdownMenuItem>
-                      ))
-                    ) : (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          if (!isCurrentAgent) {
-                            onSwitchAgent?.(group.agentId);
-                          }
-                        }}
-                        className="pl-6 text-muted-foreground"
-                      >
-                        <span className="text-sm italic">
-                          {isCurrentAgent ? "Default model" : "Switch to this agent"}
-                        </span>
-                      </DropdownMenuItem>
+      <DropdownMenuContent
+        side="top"
+        align="end"
+        className="w-64"
+        data-testid="chat-pane__model-menu-content"
+      >
+        {current && (
+          <DropdownMenuItem className="flex items-start gap-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="text-sm font-medium">{current.name}</span>
+              {current.description && (
+                <span className="text-xs text-muted-foreground">{current.description}</span>
+              )}
+            </div>
+            <Check className="mt-0.5 size-4 shrink-0" />
+          </DropdownMenuItem>
+        )}
+        {current && (effort || fast || others.length > 0 || otherModels.length > 0) && (
+          <DropdownMenuSeparator />
+        )}
+        {effort && (
+          <OptionSubmenu
+            option={effort}
+            label="Effort"
+            disabled={pending}
+            testId="chat-pane__model-menu-effort-submenu"
+            onSelect={(value) => onConfig(effort.id, value)}
+          />
+        )}
+        {fast && (
+          <DropdownMenuItem
+            data-testid="chat-pane__model-menu-fast"
+            // The switch flips from the last confirmed value, so wait for it.
+            disabled={pending}
+            // Keep the menu open so the switch visibly flips.
+            onSelect={(e) => {
+              e.preventDefault();
+              onConfig(fast.id, fastOn ? "off" : "on");
+            }}
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span>{fast.name}</span>
+              {fast.description && (
+                <span className="text-xs text-muted-foreground">{fast.description}</span>
+              )}
+            </div>
+            <Switch
+              checked={fastOn}
+              tabIndex={-1}
+              aria-hidden="true"
+              className="pointer-events-none data-[state=unchecked]:bg-muted-foreground/30"
+            />
+          </DropdownMenuItem>
+        )}
+        {others.map((option) => (
+          <OptionSubmenu
+            key={option.id}
+            option={option}
+            label={option.name}
+            disabled={pending}
+            testId={`chat-pane__model-menu-option--${option.id}`}
+            onSelect={(value) => onConfig(option.id, value)}
+          />
+        ))}
+        {otherModels.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              disabled={modelsDisabled || pending}
+              data-testid="chat-pane__model-menu-more-models"
+            >
+              More models
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent className="w-64 max-h-[400px] overflow-y-auto">
+                {otherModels.map((model) => (
+                  <DropdownMenuItem
+                    key={model.id}
+                    onClick={() => onSelectModel(model.id)}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="text-sm font-medium">{model.name}</span>
+                    {model.description && (
+                      <span className="text-xs text-muted-foreground">{model.description}</span>
                     )}
-                  </DropdownMenuGroup>
-                </Fragment>
-              );
-            })
-          : currentModels.map((model) => (
-              <DropdownMenuItem
-                key={model.id}
-                onClick={() => onSelectModel(model.id)}
-                className={cn(
-                  "flex flex-col items-start gap-0.5",
-                  model.id === selectedModel ? "bg-accent" : "",
-                )}
-              >
-                <ModelLine model={model} />
-                {model.description && (
-                  <span className="text-xs text-muted-foreground">{model.description}</span>
-                )}
-              </DropdownMenuItem>
-            ))}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** A select-type session config option (reasoning effort, …) as a submenu
+ *  row showing its current value. */
+function OptionSubmenu({
+  option,
+  label,
+  testId,
+  disabled,
+  onSelect,
+}: {
+  option: SelectOption;
+  label: string;
+  testId: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const choices = selectChoices(option);
+  const current = choices.find((c) => c.id === option.currentValue);
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger data-testid={testId} disabled={disabled}>
+        <span className="flex-1">{label}</span>
+        {current && <span className="text-xs text-muted-foreground">{current.name}</span>}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent className="min-w-[180px]">
+          {choices.map((choice) => (
+            <DropdownMenuItem
+              key={choice.id}
+              onClick={() => onSelect(choice.id)}
+              className="flex items-start gap-2"
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm">{choice.name}</span>
+                {choice.description && (
+                  <span className="text-xs text-muted-foreground">{choice.description}</span>
+                )}
+              </div>
+              {choice.id === option.currentValue && <Check className="mt-0.5 size-4 shrink-0" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
   );
 }
 
@@ -1107,29 +1124,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
   return String(n);
-}
-
-/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
-function formatCtxWindow(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
-
-function ModelLine({ model }: { model: ModelInfo }) {
-  return (
-    <span className="flex w-full items-baseline justify-between gap-2">
-      <span className="text-sm font-medium">{model.name}</span>
-      {model.contextWindow !== undefined && (
-        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
-          {formatCtxWindow(model.contextWindow)} ctx
-        </span>
-      )}
-    </span>
-  );
 }
 
 // Donut geometry — 24×24 viewBox keeps the SVG aligned with `size-4`

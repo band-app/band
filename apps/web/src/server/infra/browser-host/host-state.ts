@@ -50,6 +50,8 @@ export interface EnsureViewEvent {
   bandTabId: string;
   workspaceId: string;
   url: string;
+  /** Browser profile whose session the view runs in. `null` is Default. */
+  profileId: string | null;
 }
 
 type EnsureListener = (event: EnsureViewEvent) => void;
@@ -164,6 +166,7 @@ export async function ensureCdpTargetId(bandTabId: string): Promise<string> {
         bandTabId,
         workspaceId: tab.workspaceId,
         url: tab.url,
+        profileId: tab.profileId,
       });
     } catch (err) {
       log.warn("ensureView listener threw: %s", err instanceof Error ? err.message : err);

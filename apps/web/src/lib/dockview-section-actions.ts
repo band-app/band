@@ -106,22 +106,12 @@ function readElement(group: DockviewGroupPanel): ElementBearing["element"] | nul
 }
 
 /**
- * Return the navigable in-document groups in row-major reading order.
- * Includes:
- *   - Every grid group (the regular split layout)
- *   - Every edge group (left/right/bottom) that currently holds at
- *     least one panel
+ * Return the navigable in-document groups (every grid group) in row-major
+ * reading order.
  *
  * Floating/popout groups are excluded — they live in their own
  * surfaces, not the dockview grid, and treating them as cycle stops
  * would teleport focus across windows.
- *
- * Empty edge groups are also excluded: when an edge group has no
- * panels we hide it via `setEdgeGroupVisible(direction, false)` (see
- * `dockview-edge-groups.ts`), so it shouldn't be a focus target.
- * The downstream zero-rect filter would catch most of those, but
- * checking `panels.length` is more robust against future dockview
- * changes that keep hidden groups dimensioned.
  *
  * Measurement uses `getBoundingClientRect()`, which means the section's
  * sub-dockview must be in the DOM and laid out at call time. That's
@@ -130,12 +120,7 @@ function readElement(group: DockviewGroupPanel): ElementBearing["element"] | nul
  * the element to be visible.
  */
 export function getNavigableGroupsInVisualOrder(api: DockviewApi): DockviewGroupPanel[] {
-  const groups = api.groups.filter((g) => {
-    const loc = g.api.location;
-    if (loc.type === "grid") return true;
-    if (loc.type === "edge") return g.panels.length > 0;
-    return false;
-  });
+  const groups = api.groups.filter((g) => g.api.location.type === "grid");
   if (groups.length < 2) return groups;
 
   const rects: GroupRect[] = [];
@@ -145,8 +130,7 @@ export function getNavigableGroupsInVisualOrder(api: DockviewApi): DockviewGroup
     const r = el.getBoundingClientRect();
     // A zero-size rect means the element is detached or display:none.
     // Skip it so the sort isn't fed phantom (0, 0) coordinates that
-    // would always land first. Hidden edge groups also fall through
-    // here — `setEdgeGroupVisible(_, false)` collapses the rect.
+    // would always land first.
     if (r.width === 0 && r.height === 0) continue;
     rects.push({ id: g.id, top: r.top, left: r.left });
   }
@@ -161,14 +145,8 @@ export function getNavigableGroupsInVisualOrder(api: DockviewApi): DockviewGroup
 }
 
 /**
- * Cycle between in-document panel groups in row-major reading order.
- * Includes edge groups (left/right/bottom) that currently hold at
- * least one panel, so users can Cmd+[/] into and out of edge-docked
- * panels. Skips floating/popout groups.
- *
- * Named `cycleGridGroups` historically (when only grid-located groups
- * were in the cycle); kept for the import surface in the three inner
- * containers.
+ * Cycle between grid groups in row-major reading order. Skips
+ * floating/popout groups.
  */
 export function cycleGridGroups(
   api: DockviewApi | null,
@@ -240,10 +218,7 @@ export function selectNeighbourBeforeRemove(api: DockviewApi, panelId: string): 
 
   // Last tab in a group: pre-activate the previous group in reading
   // order, so focus lands next to the closed pane instead of snapping to
-  // some arbitrary group. Includes edge groups with panels as fallback
-  // targets — if the user closes the only tab in a grid group and a
-  // panel is docked at the edge, focusing the edge panel is better
-  // than dockview's arbitrary first-in-list choice.
+  // some arbitrary group.
   if (!group) return;
   const ordered = getNavigableGroupsInVisualOrder(api);
   if (ordered.length <= 1) return; // no other group to fall back to
