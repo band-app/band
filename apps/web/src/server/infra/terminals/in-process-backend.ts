@@ -81,6 +81,11 @@ export class InProcessTerminalBackend implements TerminalBackend {
     return this.pool.onExit(listener);
   }
 
+  /** No separate daemon process exists in this mode, so there is nothing to restart. */
+  async restartDaemon(): Promise<{ killedCount: number }> {
+    return { killedCount: 0 };
+  }
+
   async close(): Promise<void> {
     this.pool.killAll();
   }

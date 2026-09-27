@@ -51,6 +51,12 @@ export interface TerminalBackend {
   /** Subscribe to every terminal's exit. Returns an unsubscribe function. */
   onExit(listener: (event: TerminalExitEvent) => void): () => void;
   /**
+   * End every terminal hosted by the current daemon and let the next spawn
+   * start a fresh one. A no-op (`{ killedCount: 0 }`) when there is no
+   * separate daemon process to restart, as with {@link InProcessTerminalBackend}.
+   */
+  restartDaemon(): Promise<{ killedCount: number }>;
+  /**
    * Release this process's hold on the backend at server shutdown. The
    * in-process backend kills its PTYs; the daemon backend only disconnects,
    * which is what lets shells outlive the server.

@@ -94,6 +94,10 @@ const terminalRouter = t.router({
     return { ok: true };
   }),
 
+  restartDaemon: publicProcedure.mutation(async () => {
+    return terminalService.restartDaemon();
+  }),
+
   stream: publicProcedure
     .input(
       z.object({
