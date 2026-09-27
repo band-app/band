@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { z } from "zod";
+import type { AgentMode } from "../../shared/agent-sessions";
 import {
   bandHome,
   type CodingAgentDefinition,
@@ -101,6 +102,14 @@ export const settingsUpdateInput = z
     cli: z
       .object({
         defaultVia: z.enum(["chat", "terminal"]).optional(),
+      })
+      .passthrough()
+      .optional(),
+    // Agent preferences (issue #682). `defaultMode` is the mode a new agent
+    // session starts in when the caller sends none.
+    agents: z
+      .object({
+        defaultMode: z.enum(["gui", "tui"]).optional(),
       })
       .passthrough()
       .optional(),
@@ -223,6 +232,18 @@ export class SettingsService {
   }
 
   /**
+   * The mode a new agent session starts in when its caller sends none
+   * (issue #682): `agents.defaultMode`, else the pre-#682 `cli.defaultVia`
+   * for a settings file boot hasn't migrated yet, else `gui`.
+   */
+  defaultAgentMode(): AgentMode {
+    const settings = this.queries.load();
+    const mode = settings.agents?.defaultMode;
+    if (mode === "gui" || mode === "tui") return mode;
+    return agentModeFromVia(settings.cli?.defaultVia) ?? "gui";
+  }
+
+  /**
    * Where Band creates new workspace worktrees. Defaults to
    * `$BAND_HOME/worktrees` when the user hasn't overridden it.
    *
@@ -275,3 +296,10 @@ export class SettingsService {
  * eventually lands.
  */
 export const settingsService = new SettingsService();
+
+/** Map the pre-#682 `chat` / `terminal` dispatch names onto agent modes. */
+export function agentModeFromVia(via: unknown): AgentMode | undefined {
+  if (via === "chat") return "gui";
+  if (via === "terminal") return "tui";
+  return undefined;
+}

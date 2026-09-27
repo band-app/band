@@ -15,6 +15,8 @@
  * the database.
  */
 
+import type { AgentSessionRecord } from "../../../shared/agent-sessions";
+
 /**
  * Per-workspace agent info embedded in a `WorkspaceStatusSnapshot`. The
  * canonical shape originally lived in `services/state.ts::AgentInfo`;
@@ -73,6 +75,9 @@ export interface StatusEvent {
     | "terminal-killed"
     | "chat-created"
     | "chat-removed"
+    | "agent-session-created"
+    | "agent-session-updated"
+    | "agent-session-ended"
     | "open-file";
   status?: WorkspaceStatusSnapshot;
   statuses?: WorkspaceStatusSnapshot[];
@@ -89,6 +94,8 @@ export interface StatusEvent {
   browserId?: string;
   terminalId?: string;
   chatId?: string;
+  /** For the `agent-session-*` kinds: the session's current record (issue #682). */
+  agentSession?: AgentSessionRecord;
   /**
    * For `kind: "open-file"`: workspace-relative file path with optional
    * line / column suffix in the standard `path:line[:column]` /

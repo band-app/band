@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAdapter } from "../context";
+import { readAgentMode } from "../lib/agent-mode";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { queryKeys } from "../query-client";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
@@ -137,7 +138,7 @@ export function useCreateWorkspace() {
       branch: string;
       base?: string;
       prompt?: string;
-    }) => adapter.createWorkspace(project, branch, base, prompt),
+    }) => adapter.createWorkspace(project, branch, base, prompt, readAgentMode()),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       const workspaceId = toWorkspaceId(vars.project, vars.branch);

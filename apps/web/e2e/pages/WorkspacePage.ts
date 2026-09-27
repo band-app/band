@@ -13,7 +13,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import { AGENT_MODE_KEY, LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 import type { TypingLatencyReport } from "@/lib/terminal-typing-latency";
 import { FindWidget } from "./FindWidget";
 
@@ -1311,6 +1311,11 @@ export class WorkspacePage {
     workspaceId: string,
     kind: "term" | "chat" | "browser",
   ): Promise<void> {
+    // A chat is an agent started from the "New agent" submenu (issue #682).
+    if (kind === "chat") {
+      await this.startAgentViaMenu(workspaceId);
+      return;
+    }
     // Open the Radix menu via keyboard (focus + Enter) rather than a mouse
     // click: a dockview splitview sash (`dv-sash`) overlaps the header `+`
     // button's centre in the hit-test, so a coordinate click lands on the sash
@@ -1321,28 +1326,47 @@ export class WorkspacePage {
     // The menu is portalled to <body>, and with several workspaces cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
-    if (kind !== "chat") {
+    await this.page
+      .getByTestId(`workspace-center__new-tab--${kind}`)
+      .filter({ visible: true })
+      .first()
+      .click();
+  }
+
+  /** Open the "+" menu and start an agent from its "New agent" submenu: the
+   *  given agent, or the first one listed (the default). It opens in this
+   *  browser's agent mode (issue #682). */
+  async startAgentViaMenu(workspaceId: string, agentId?: string): Promise<void> {
+    await test.step(`Start agent ${agentId ?? "(default)"} via "+" menu`, async () => {
+      // Keyboard open, for the same sash-overlap reason as `addLeafViaMenu`.
+      await this.newTabButton(workspaceId).first().focus();
+      await this.page.keyboard.press("Enter");
       await this.page
-        .getByTestId(`workspace-center__new-tab--${kind}`)
+        .getByTestId("workspace-center__new-tab--agent")
         .filter({ visible: true })
         .first()
         .click();
-      return;
-    }
-    // One configured agent: a plain "New Chat" item. Several: a submenu with
-    // the default agent first.
-    const item = this.page
-      .getByTestId(/^workspace-center__new-tab--chat(-agents)?$/)
-      .filter({ visible: true })
-      .first();
-    await item.click();
-    if ((await item.getAttribute("data-testid"))?.endsWith("-agents")) {
-      await this.page
-        .getByTestId("workspace-center__new-chat-agent-menu")
-        .getByTestId(/^workspace-center__new-chat-agent--/)
-        .first()
-        .click();
-    }
+      const menu = this.page.getByTestId("workspace-center__new-agent-menu").filter({
+        visible: true,
+      });
+      const item = agentId
+        ? menu.getByTestId(`workspace-center__new-agent--${agentId}`)
+        : menu.getByTestId(/^workspace-center__new-agent(--.+)?$/).first();
+      await item.click();
+    });
+  }
+
+  /** Save this browser's agent mode, as the Settings page does. */
+  async setDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await this.page.evaluate(([key, value]) => localStorage.setItem(key, value), [
+      AGENT_MODE_KEY,
+      mode,
+    ] as const);
+  }
+
+  /** Visible center CHAT tabs in the outer dockview strip. */
+  chatTabs(): Locator {
+    return this.page.getByTestId(/^center-chat-tab--/).filter({ visible: true });
   }
 
   /** The visible "+" new-tab menu button for a workspace's chat host.

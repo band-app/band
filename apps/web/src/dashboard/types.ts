@@ -1,3 +1,5 @@
+import type { AgentMode } from "../shared/agent-sessions";
+
 export type AgentStatusType = "working" | "needs_attention" | "waiting";
 
 export interface AgentInfo {
@@ -217,6 +219,12 @@ export interface Settings {
   worktreesDir: string | null;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
+  /**
+   * Agent preferences (issue #682). `defaultMode` is how agents start when
+   * the caller has no device mode of its own (the CLI, cronjobs, MCP).
+   * Browsers use their per-device mode (`dashboard/lib/agent-mode.ts`).
+   */
+  agents?: { defaultMode?: AgentMode };
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];

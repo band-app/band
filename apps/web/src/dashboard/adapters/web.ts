@@ -1,4 +1,5 @@
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import type { AgentMode } from "../../shared/agent-sessions";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
@@ -87,8 +88,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
     branch: string,
     base?: string,
     prompt?: string,
+    agentMode?: AgentMode,
   ): Promise<void> {
-    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt });
+    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt, agentMode });
   }
 
   async removeWorkspace(project: string, name: string): Promise<void> {

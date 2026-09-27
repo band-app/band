@@ -41,6 +41,7 @@
  * `./trpc.ts`) for `mergeRouters` to accept them.
  */
 
+import { agentSessionsRouter } from "./agent-sessions/router";
 import { browserHostRouter, hostRouter } from "./browser-host/router";
 import { browserProfilesRouter } from "./browser-profiles/router";
 import { browsersRouter } from "./browsers/router";
@@ -76,6 +77,7 @@ export const appRouter = t.router({
   workspace: workspaceRouter,
   cronjobs: cronjobsRouter,
   chats: chatsRouter,
+  agentSessions: agentSessionsRouter,
   chat: chatRouter,
   browsers: browsersRouter,
   browserProfiles: browserProfilesRouter,

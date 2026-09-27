@@ -3,6 +3,7 @@ import { checkCli, installCli, SYMLINK_PATH } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
 import { modelRefreshService } from "./model-refresh-service";
+import { agentModeFromVia } from "./settings-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
@@ -140,6 +141,7 @@ async function refreshAgentModelsInBackground(): Promise<void> {
 async function ensureSettingsDefaults(): Promise<void> {
   await ensureDefaultCodingAgents();
   ensureNotificationDefaults();
+  migrateAgentDefaultMode();
 }
 
 /**
@@ -270,6 +272,19 @@ function ensureNotificationDefaults(): void {
     notifications: { ...notifications, soundOnNeedsAttention: true },
   });
   log.info("Set default notifications.soundOnNeedsAttention = true");
+}
+
+/**
+ * Copy the pre-#682 `cli.defaultVia` into `agents.defaultMode` once. The old
+ * key stays so an older CLI binary that still reads it keeps working.
+ */
+function migrateAgentDefaultMode(): void {
+  const settings = loadSettings();
+  if (settings.agents?.defaultMode) return;
+  const mode = agentModeFromVia(settings.cli?.defaultVia);
+  if (!mode) return;
+  saveSettings({ ...settings, agents: { ...settings.agents, defaultMode: mode } });
+  log.info("Migrated cli.defaultVia to agents.defaultMode = %s", mode);
 }
 
 /**

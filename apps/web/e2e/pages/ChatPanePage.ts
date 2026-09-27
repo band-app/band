@@ -179,18 +179,10 @@ export class ChatPanePage {
       .catch(() => false);
     if (!hasChat) {
       // No chat leaf (the default layout is a single terminal) — create one
-      // with the default agent.
+      // with the default agent, which opens as a chat in the default mode.
       await this.openNewTabMenu();
-      // One configured agent: a plain "New Chat" item. Several: a submenu
-      // with the default agent first.
-      const item = this.page
-        .getByTestId(/^workspace-center__new-tab--chat(-agents)?$/)
-        .filter({ visible: true })
-        .first();
-      await item.click();
-      if ((await item.getAttribute("data-testid"))?.endsWith("-agents")) {
-        await this.newChatAgentItems.first().click();
-      }
+      await this.openNewChatAgentMenu();
+      await this.newChatAgentItems.first().click();
       await chatTab.waitFor({ state: "visible", timeout: 15_000 });
     }
     // Activate the chat tab so its pane (and prompt) is the shown content — a
@@ -210,32 +202,43 @@ export class ChatPanePage {
       await addBtn.waitFor({ state: "visible", timeout: 15_000 });
       await addBtn.focus();
       await this.page.keyboard.press("Enter");
-      await this.page.getByTestId("workspace-center__new-tab-menu").waitFor({ state: "visible" });
+      await this.page
+        .getByTestId("workspace-center__new-tab-menu")
+        .filter({ visible: true })
+        .first()
+        .waitFor({ state: "visible" });
     });
   }
 
-  /** The agent rows in the open "New Chat" submenu, top to bottom. */
+  /** The agent rows in the open "New agent" submenu, top to bottom. */
   get newChatAgentItems(): Locator {
     return this.page
-      .getByTestId("workspace-center__new-chat-agent-menu")
-      .getByTestId(/^workspace-center__new-chat-agent--/);
+      .getByTestId("workspace-center__new-agent-menu")
+      .filter({ visible: true })
+      .getByTestId(/^workspace-center__new-agent(--.+)?$/);
   }
 
-  /** Open the "New Chat" agent submenu of the open new-tab menu. */
+  /** Open the "New agent" submenu of the open new-tab menu (issue #682). */
   async openNewChatAgentMenu(): Promise<void> {
-    await test.step("Open the New Chat agent submenu", async () => {
-      await this.page.getByTestId("workspace-center__new-tab--chat-agents").click();
+    await test.step("Open the New agent submenu", async () => {
+      await this.page
+        .getByTestId("workspace-center__new-tab--agent")
+        .filter({ visible: true })
+        .first()
+        .click();
       await expect(this.newChatAgentItems.first()).toBeVisible();
     });
   }
 
   /** Start a new chat with the given coding agent from the open agent
    *  submenu, then show its tab and wait for its prompt. The workspace must
-   *  have no other chat tab. The leaf opens once the server has created
-   *  the chat. */
+   *  have no other chat tab, and this browser's agent mode must be unset or
+   *  `gui`. The leaf opens once the server has created the chat. */
   async startChatWithAgent(agentId: string): Promise<void> {
     await test.step(`Start a new chat with ${agentId}`, async () => {
-      await this.page.getByTestId(`workspace-center__new-chat-agent--${agentId}`).click();
+      await this.newChatAgentItems
+        .and(this.page.getByTestId(`workspace-center__new-agent--${agentId}`))
+        .click();
       const chatTab = this.page
         .getByTestId(/^center-chat-tab--/)
         .filter({ visible: true })

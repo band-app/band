@@ -23,10 +23,12 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { AgentMode } from "../../shared/agent-sessions";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
+import { useAgentMode } from "../lib/agent-mode";
 import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
@@ -110,6 +112,10 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     Array.isArray(settings.codingAgents) ? settings.codingAgents : [],
   );
   const [defaultAgentId, setDefaultAgentId] = useState(settings.defaultCodingAgent ?? "");
+  const [defaultAgentMode, setDefaultAgentMode] = useState<AgentMode>(
+    settings.agents?.defaultMode ?? "gui",
+  );
+  const [deviceAgentMode, setDeviceAgentMode] = useAgentMode();
   const [webServerPort, setWebServerPort] = useState(settings.webServerPort?.toString() ?? "");
   const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
     settings.notifications?.soundOnNeedsAttention ?? false,
@@ -326,6 +332,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     )
       return true;
     if (defaultAgentId !== (settings.defaultCodingAgent ?? "")) return true;
+    if (defaultAgentMode !== (settings.agents?.defaultMode ?? "gui")) return true;
     if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
       return true;
@@ -345,6 +352,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     worktreesDir,
     codingAgents,
     defaultAgentId,
+    defaultAgentMode,
     webServerPort,
     soundOnNeedsAttention,
     selectedSound,
@@ -365,6 +373,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setWorktreesDir(settings.worktreesDir ?? "");
     setCodingAgents(Array.isArray(settings.codingAgents) ? settings.codingAgents : []);
     setDefaultAgentId(settings.defaultCodingAgent ?? "");
+    setDefaultAgentMode(settings.agents?.defaultMode ?? "gui");
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
@@ -382,6 +391,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.worktreesDir,
     settings.codingAgents,
     settings.defaultCodingAgent,
+    settings.agents,
     settings.webServerPort,
     settings.notifications,
     settings.labels,
@@ -423,6 +433,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       worktreesDir: worktreesDir.trim() || null,
       codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
       defaultCodingAgent: defaultAgentId || undefined,
+      agents: { ...settings.agents, defaultMode: defaultAgentMode },
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
@@ -681,6 +692,64 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </Select>
                 </SettingsRow>
               )}
+              <SettingsRow
+                variant="responsive"
+                label="Open agents on this device as"
+                description="New agents you start from this device open as a chat or as the agent's CLI in a terminal. Saved in this browser only. Running sessions keep their mode."
+              >
+                <Select
+                  value={deviceAgentMode ?? ""}
+                  onValueChange={(v: string) => setDeviceAgentMode(v as AgentMode)}
+                >
+                  <SelectTrigger
+                    className="h-8 w-full text-sm sm:w-48"
+                    aria-label="Agent mode on this device"
+                    data-testid="settings-page__device-agent-mode"
+                  >
+                    <SelectValue placeholder="Not set" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gui" data-testid="settings-page__agent-mode-option--gui">
+                      Chat
+                    </SelectItem>
+                    <SelectItem value="tui" data-testid="settings-page__agent-mode-option--tui">
+                      Terminal
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingsRow>
+              <SettingsRow
+                variant="responsive"
+                label="Open agents started without a device as"
+                description="Used by the CLI, cronjobs and MCP, and by a device with no mode set."
+              >
+                <Select
+                  value={defaultAgentMode}
+                  onValueChange={(v: string) => setDefaultAgentMode(v as AgentMode)}
+                >
+                  <SelectTrigger
+                    className="h-8 w-full text-sm sm:w-48"
+                    aria-label="Default agent mode"
+                    data-testid="settings-page__default-agent-mode"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      value="gui"
+                      data-testid="settings-page__default-agent-mode-option--gui"
+                    >
+                      Chat
+                    </SelectItem>
+                    <SelectItem
+                      value="tui"
+                      data-testid="settings-page__default-agent-mode-option--tui"
+                    >
+                      Terminal
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingsRow>
               <SettingsRow
                 htmlFor="agents-context-meter"
                 label="Context window meter"

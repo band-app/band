@@ -362,7 +362,7 @@ export function SharedDockviewLayout() {
       const key = e.key.toLowerCase();
 
       if (key === "n" && e.shiftKey) {
-        // ⇧⌘N → New Chat leaf.
+        // ⇧⌘N → the default agent, in this device's mode (issue #682).
         e.preventDefault();
         getWorkspaceLeafActions(ws)?.onAdd("chat");
       } else if (key === "n" && !e.shiftKey && !e.altKey) {
