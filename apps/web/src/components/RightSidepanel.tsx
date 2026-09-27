@@ -1,3 +1,4 @@
+import { ClientPluginHostProvider } from "@band-app/plugin-api/client";
 import { useRouterState } from "@tanstack/react-router";
 import {
   ChevronsDownUp,
@@ -19,6 +20,9 @@ import {
 } from "@/dashboard";
 import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { clientPluginHost } from "../plugins/client-plugin-host";
+import { PluginErrorBoundary } from "../plugins/PluginErrorBoundary";
+import { useWorkspaceSideTabs } from "../plugins/use-plugin-slot";
 import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
@@ -27,15 +31,25 @@ import { usePerWorkspaceState } from "./per-workspace-state-store";
 import { getWorkspaceLeafActions } from "./WorkspaceCenterDockview";
 
 // ---------------------------------------------------------------------------
-// Active-tab persistence (Explorer | Changes rendered as tabs, one at a time)
+// Active-tab persistence (Explorer | Changes | plugin tabs, one at a time)
 // ---------------------------------------------------------------------------
 
-type RightTab = "explorer" | "changes";
+/** A plugin tab is `plugin:<pluginId>.<tabId>` (see `useWorkspaceSideTabs`). */
+type RightTab = "explorer" | "changes" | `plugin:${string}`;
 const TAB_KEY = "band:right-sidepanel-tab";
+
+function isRightTab(value: unknown): value is RightTab {
+  return (
+    value === "explorer" ||
+    value === "changes" ||
+    (typeof value === "string" && value.startsWith("plugin:"))
+  );
+}
 
 function loadActiveTab(): RightTab {
   try {
-    return localStorage.getItem(TAB_KEY) === "changes" ? "changes" : "explorer";
+    const stored = localStorage.getItem(TAB_KEY);
+    return isRightTab(stored) ? stored : "explorer";
   } catch {
     return "explorer";
   }
@@ -60,7 +74,7 @@ function TabButton({
   testid,
 }: {
   label: string;
-  icon: React.FC<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
   active: boolean;
   onClick: () => void;
   badge?: number;
@@ -72,6 +86,7 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
+      title={label}
       data-testid={testid}
       style={NO_DRAG_STYLE}
       className={`flex h-full min-w-0 max-w-[120px] flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
@@ -245,6 +260,10 @@ function RightSidepanelInner({
   headerActions?: React.ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<RightTab>(() => loadActiveTab());
+  const pluginTabs = useWorkspaceSideTabs();
+  const activePluginTab = pluginTabs.find((t) => `plugin:${t.key}` === activeTab);
+  // A saved plugin tab whose plugin is disabled, or not listed yet, shows Explorer.
+  const shownTab = activeTab.startsWith("plugin:") && !activePluginTab ? "explorer" : activeTab;
   useEffect(() => {
     saveActiveTab(activeTab);
   }, [activeTab]);
@@ -254,7 +273,7 @@ function RightSidepanelInner({
   useEffect(() => {
     const handler = (e: Event) => {
       const tab = (e as CustomEvent<{ tab?: RightTab }>).detail?.tab;
-      if (tab === "explorer" || tab === "changes") setActiveTab(tab);
+      if (isRightTab(tab)) setActiveTab(tab);
     };
     window.addEventListener("band:right-sidepanel-set-tab", handler);
     return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
@@ -340,7 +359,7 @@ function RightSidepanelInner({
         <TabButton
           label="Explorer"
           icon={FolderOpen}
-          active={activeTab === "explorer"}
+          active={shownTab === "explorer"}
           onClick={() => setActiveTab("explorer")}
           testid="right-sidepanel__tab--explorer"
         />
@@ -352,10 +371,31 @@ function RightSidepanelInner({
           onClick={() => setActiveTab("changes")}
           testid="right-sidepanel__tab--changes"
         />
+        {pluginTabs.map(({ key, slug, tab }) => (
+          <TabButton
+            key={key}
+            label={tab.label}
+            icon={tab.icon}
+            active={activeTab === `plugin:${key}`}
+            onClick={() => setActiveTab(`plugin:${key}`)}
+            testid={`right-sidepanel__tab--${slug}`}
+          />
+        ))}
       </SidepanelHeader>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {activeTab === "explorer" ? (
+        {activePluginTab ? (
+          <div
+            className="flex h-full flex-col overflow-hidden"
+            data-testid={`right-sidepanel__plugin--${activePluginTab.slug}`}
+          >
+            <PluginErrorBoundary pluginId={activePluginTab.pluginId}>
+              <ClientPluginHostProvider value={clientPluginHost}>
+                <activePluginTab.tab.component workspaceId={workspaceId} visible={visible} />
+              </ClientPluginHostProvider>
+            </PluginErrorBoundary>
+          </div>
+        ) : shownTab === "explorer" ? (
           <div className="flex h-full flex-col" data-testid="right-sidepanel__explorer">
             <ExplorerHeader folderName={folderName} browserRef={fileBrowserRef} />
             <div className="min-h-0 flex-1">

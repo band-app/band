@@ -4,6 +4,7 @@
 
 @source "../../../../packages/dashboard-core/src";
 @source "../../../../packages/ui/src";
+@source "../../../../plugins";
 @source "../../node_modules/streamdown/dist";
 
 @custom-variant dark (&:is(.dark *));

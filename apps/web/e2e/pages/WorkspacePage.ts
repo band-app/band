@@ -1729,14 +1729,29 @@ export class WorkspacePage {
     return box;
   }
 
-  /** Select a tab in the right sidepanel (Explorer | Changes). The tabs are
+  /** Select a tab in the right sidepanel (Explorer | Changes | a plugin tab,
+   *  keyed `<pluginId>-<tabId>`). The tabs are
    *  rendered as a strip in `RightSidepanel.tsx`; only the active tab's body
    *  (`right-sidepanel__explorer` / `right-sidepanel__changes`) is mounted, so
    *  callers that assert on the Changes section MUST select it first — the
    *  panel defaults to Explorer. */
-  async selectRightPanelTab(tab: "explorer" | "changes"): Promise<void> {
+  /** Navigate to a workspace and wait until the server has listed its
+   *  plugins, after which the right sidepanel's plugin tabs are final. */
+  async gotoAndWaitForPlugins(workspaceId: string): Promise<void> {
+    const listed = this.page.waitForResponse(
+      (res) => res.url().includes("plugins.list") && res.ok(),
+    );
+    await this.goto(workspaceId);
+    await listed;
+  }
+
+  rightPanelTab(tab: "explorer" | "changes" | "github-pull-request"): Locator {
+    return this.page.getByTestId(`right-sidepanel__tab--${tab}`);
+  }
+
+  async selectRightPanelTab(tab: "explorer" | "changes" | "github-pull-request"): Promise<void> {
     await test.step(`Select the right sidepanel ${tab} tab`, async () => {
-      await this.page.getByTestId(`right-sidepanel__tab--${tab}`).click();
+      await this.rightPanelTab(tab).click();
     });
   }
 

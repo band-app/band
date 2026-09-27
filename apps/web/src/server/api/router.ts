@@ -55,10 +55,12 @@ import { hooksRouter } from "./hooks/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
 import { panelFocusRouter } from "./panel-focus/router";
+import { pluginsRouter } from "./plugins/router";
 import { prereqsRouter } from "./prereqs/router";
 import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
+import { reviewsRouter } from "./reviews/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
@@ -99,6 +101,8 @@ export const appRouter = t.router({
   history: historyRouter,
   queue: queueRouter,
   reports: reportsRouter,
+  plugins: pluginsRouter,
+  reviews: reviewsRouter,
   // `system` is the new home for the legacy `servicesRouter`. The wire
   // surface is preserved by mounting it under the original `services`
   // key so every existing client (TunnelDialog, ResourcesPage, the

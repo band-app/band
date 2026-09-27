@@ -2,6 +2,7 @@ packages:
   - "."
   - "apps/*"
   - "packages/*"
+  - "plugins/*"
 
 # Native packages allowed to run install scripts. Without an approval entry a
 # package counts as unapproved and `pnpm install` exits 1 with
