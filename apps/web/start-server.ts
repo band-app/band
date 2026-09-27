@@ -36,6 +36,7 @@ import {
 } from "./src/server/infra/usage-scanner/usage-scanner.ts";
 import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
+import { agentSessionRegistry } from "./src/server/services/agent-session-registry-service.ts";
 import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
@@ -1130,6 +1131,9 @@ async function main() {
     // (currently 5 min — see the rationale on that constant in
     // `infra/usage-scanner/usage-scanner.ts`).
     startUsageScanner();
+
+    // End agent sessions when their chat or terminal goes away (issue #682).
+    agentSessionRegistry.start();
 
     // Reset any "working" agent statuses — no agent is active on a
     // fresh server start.

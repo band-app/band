@@ -32,6 +32,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
     },
+    /// Start coding agents and list their sessions
+    Agents {
+        #[command(subcommand)]
+        cmd: AgentsCmd,
+    },
     /// Manage chat panes (multi-agent)
     Chats {
         #[command(subcommand)]
@@ -288,6 +293,31 @@ enum BrowsersCmd {
 }
 
 #[derive(Subcommand)]
+enum AgentsCmd {
+    /// List the running agent sessions of a workspace
+    List {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+    },
+    /// Start a coding agent, as a chat (gui) or as its CLI in a terminal (tui)
+    Launch {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+        /// Coding agent ID from settings (default agent if omitted)
+        #[arg(long)]
+        agent: Option<String>,
+        /// `gui` (chat) or `tui` (terminal); `chat` / `terminal` also accepted.
+        /// Falls back to `$BAND_DISPATCH`, the repo's `.band/config.json`
+        /// `workspace.defaultVia`, then the server's `agents.defaultMode`.
+        #[arg(long)]
+        mode: Option<String>,
+        /// First prompt for the agent
+        #[arg(long)]
+        prompt: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum TerminalsCmd {
     /// List terminal sessions for a workspace
     List {
@@ -507,6 +537,20 @@ fn main() {
                 via.as_deref(),
             ),
             WorkspacesCmd::Remove { project, name } => cmd_workspaces_remove(&project, &name),
+        },
+        Commands::Agents { cmd } => match cmd {
+            AgentsCmd::List { workspace_id } => cmd_agents_list(workspace_id.as_deref()),
+            AgentsCmd::Launch {
+                workspace_id,
+                agent,
+                mode,
+                prompt,
+            } => cmd_agents_launch(
+                workspace_id.as_deref(),
+                agent.as_deref(),
+                mode.as_deref(),
+                prompt.as_deref(),
+            ),
         },
         Commands::Chats { cmd } => match cmd {
             ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
@@ -1631,6 +1675,136 @@ fn cmd_browser_remove(browser_id: Option<&str>) -> Result<CommandResult, String>
         text: format!("Browser {browser_id} removed\n"),
         json: serde_json::json!({"ok": true, "browserId": browser_id}),
     })
+}
+
+// --- Agent commands ---
+
+/// Normalize an agent mode flag: `gui` / `tui`, with the `--via` names
+/// `chat` / `terminal` as aliases.
+fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {
+    match mode {
+        "gui" | "chat" => Ok("gui"),
+        "tui" | "terminal" => Ok("tui"),
+        other => Err(format!(
+            "Invalid agent mode '{other}': expected gui, tui, chat or terminal"
+        )),
+    }
+}
+
+fn cmd_agents_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let data = client.trpc_query(
+        "agentSessions.list",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+    let sessions = data
+        .get("agentSessions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let field = |s: &serde_json::Value, key: &str| {
+        s.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let rows: Vec<[String; 6]> = sessions
+        .iter()
+        .map(|s| {
+            // A gui session lives in a chat, a tui session in a terminal.
+            let pane = s
+                .get("chatId")
+                .and_then(|v| v.as_str())
+                .or_else(|| s.get("terminalId").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            [
+                field(s, "id"),
+                field(s, "agentDefinitionId"),
+                field(s, "mode"),
+                field(s, "state"),
+                pane,
+                field(s, "providerSessionId"),
+            ]
+        })
+        .collect();
+
+    let text = format_table(
+        &[
+            "SESSION ID",
+            "AGENT",
+            "MODE",
+            "STATE",
+            "PANE",
+            "PROVIDER SESSION",
+        ],
+        &rows,
+    );
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"agentSessions": sessions}),
+    })
+}
+
+/// Resolve `band agents launch`'s mode, highest first: `--mode`, then
+/// `$BAND_DISPATCH` (so an agent running in a Band terminal or chat starts
+/// its agents the same way), then the repo's `.band/config.json`
+/// `workspace.defaultVia`. `None` leaves the choice to the server's
+/// `agents.defaultMode`, which also covers the older `cli.defaultVia`.
+fn resolve_agent_mode(flag: Option<&str>) -> Result<Option<&'static str>, String> {
+    if let Some(m) = flag {
+        return parse_agent_mode(m).map(Some);
+    }
+    if let Ok(env) = std::env::var("BAND_DISPATCH") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return parse_agent_mode(trimmed)
+                .map(Some)
+                .map_err(|e| format!("{e} (from BAND_DISPATCH env var)"));
+        }
+    }
+    if let Some(v) = read_repo_default_via() {
+        return parse_agent_mode(&v)
+            .map(Some)
+            .map_err(|e| format!("{e} (from .band/config.json workspace.defaultVia)"));
+    }
+    Ok(None)
+}
+
+fn cmd_agents_launch(
+    workspace_id: Option<&str>,
+    agent: Option<&str>,
+    mode: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<CommandResult, String> {
+    let mode = resolve_agent_mode(mode)?;
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    if let Some(a) = agent {
+        input["agentId"] = serde_json::json!(a);
+    }
+    if let Some(m) = mode {
+        input["mode"] = serde_json::json!(m);
+    }
+    if let Some(p) = prompt {
+        input["prompt"] = serde_json::json!(p);
+    }
+    let data = client.trpc_mutate("agentSessions.launch", &input)?;
+
+    let started_mode = data.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+    let pane = data
+        .get("chatId")
+        .and_then(|v| v.as_str())
+        .or_else(|| data.get("terminalId").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let mut text = format!("{started_mode}\t{pane}\n");
+    if let Some(notice) = data.get("notice").and_then(|v| v.as_str()) {
+        text = format!("{text}note: {notice}\n");
+    }
+    Ok(CommandResult { text, json: data })
 }
 
 // --- Terminal commands ---
@@ -2954,6 +3128,25 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Removes the browser tab and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "agents list",
+            "description": "List the running agent sessions of a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+            ],
+            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"workspaceId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
+        }),
+        serde_json::json!({
+            "name": "agents launch",
+            "description": "Start a coding agent as a chat (gui) or as its CLI in a terminal (tui)",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID from settings (default agent if omitted)"},
+                {"name": "--mode", "type": "string", "required": false, "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Falls back to BAND_DISPATCH, then .band/config.json workspace.defaultVia, then the server's agents.defaultMode"},
+                {"name": "--prompt", "type": "string", "required": false, "description": "First prompt for the agent"},
+            ],
+            "notes": "`gui` opens a chat pane and submits the prompt to the agent. `tui` opens a terminal running the agent's CLI (`claude \"<prompt>\"`, `codex \"<prompt>\"`, ...). Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting. An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.\nText output: `<mode>\\t<chat or terminal ID>`, plus a `note:` line after a fallback.\nJSON output: `{\"agentSession\": {...}, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\", \"terminalId\": \"...\", \"notice\": \"...\"}` (chatId for gui, terminalId for tui, notice only after a fallback).\nExample: band agents launch --agent codex --mode tui --prompt \"Fix the failing test\""
         }),
         serde_json::json!({
             "name": "terminals list",

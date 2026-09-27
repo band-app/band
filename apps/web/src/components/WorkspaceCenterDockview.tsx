@@ -13,11 +13,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -84,6 +79,7 @@ import {
   getFilePreviewType,
   getLspLanguageId,
   getStoredViewMode,
+  readAgentMode,
   releaseLspClient,
   SearchBar,
   serializeViewPosition,
@@ -142,6 +138,7 @@ import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./Brow
 import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
+import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
 import { setPerWorkspaceState } from "./per-workspace-state-store";
 // `crossPanelHandlers` is a module-level mutable registry exported from
@@ -1911,8 +1908,9 @@ interface OpenDiffOptions {
 }
 
 interface LeafActions {
-  /** `agentId` picks the coding agent for a new chat; without it the chat
-   *  uses the default agent. */
+  /** `kind: "chat"` starts a coding agent in this device's mode, a chat or a
+   *  terminal (issue #682). `agentId` picks the agent; the default agent
+   *  without it. */
   onAdd: (kind: LeafKind, groupId?: string, agentId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
   onClose: (id: string, kind: LeafKind) => void;
@@ -2580,28 +2578,6 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
 function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
   const add = (kind: LeafKind, agentId?: string) =>
     leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId, agentId);
-  const [agents, setAgents] = useState<CodingAgentDef[]>([]);
-  const [defaultAgentId, setDefaultAgentId] = useState<string | undefined>(undefined);
-  // Until the agents load, "New Chat" is disabled: it may still turn into
-  // the agent submenu, and a click in between would open the wrong thing.
-  const [agentsLoaded, setAgentsLoaded] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    getSharedSettings().then((settings) => {
-      if (cancelled) return;
-      const s = settings as Record<string, unknown> | null;
-      setAgents(Array.isArray(s?.codingAgents) ? (s.codingAgents as CodingAgentDef[]) : []);
-      setDefaultAgentId(s?.defaultCodingAgent as string | undefined);
-      setAgentsLoaded(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  // Default agent first.
-  const sortedAgents = [...agents].sort(
-    (a, b) => Number(b.id === defaultAgentId) - Number(a.id === defaultAgentId),
-  );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2615,53 +2591,18 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="bottom" data-testid="workspace-center__new-tab-menu">
+        <NewAgentSubmenu onPick={(agentId) => add("chat", agentId)} />
         <DropdownMenuItem onClick={() => add("term")} data-testid="workspace-center__new-tab--term">
           <TerminalIcon className="size-4" />
-          New Terminal
+          New terminal
         </DropdownMenuItem>
-        {sortedAgents.length > 1 ? (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger data-testid="workspace-center__new-tab--chat-agents">
-              <MessageSquare className="size-4" />
-              New Chat
-            </DropdownMenuSubTrigger>
-            <DropdownMenuPortal>
-              <DropdownMenuSubContent data-testid="workspace-center__new-chat-agent-menu">
-                {sortedAgents.map((agent) => (
-                  <DropdownMenuItem
-                    key={agent.id}
-                    onClick={() => add("chat", agent.id)}
-                    data-testid={`workspace-center__new-chat-agent--${agent.id}`}
-                  >
-                    <AgentIcon type={agent.type} className="size-4" />
-                    {agent.label}
-                    {agent.id === defaultAgentId && (
-                      <DropdownMenuShortcut className="tracking-normal">
-                        Default
-                      </DropdownMenuShortcut>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuPortal>
-          </DropdownMenuSub>
-        ) : (
-          <DropdownMenuItem
-            onClick={() => add("chat")}
-            disabled={!agentsLoaded}
-            data-testid="workspace-center__new-tab--chat"
-          >
-            <MessageSquare className="size-4" />
-            New Chat
-          </DropdownMenuItem>
-        )}
         {isDesktop && (
           <DropdownMenuItem
             onClick={() => add("browser")}
             data-testid="workspace-center__new-tab--browser"
           >
             <Globe className="size-4" />
-            New Browser
+            New browser
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -2691,16 +2632,14 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   icon: IconTab,
 };
 
+const EMPTY_STATE_BUTTON_CLASS =
+  "flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+
 // ---------------------------------------------------------------------------
 // addPanel helpers
 // ---------------------------------------------------------------------------
 
 type AddPanelOptions = Parameters<DockviewApi["addPanel"]>[0];
-
-/** Chats this window is creating with a picked agent. Their leaf opens once
- *  `chats.create` returns, in the group whose "+" was used, so the live-sync
- *  handler ignores their `chat-created` event. */
-const creatingChats = new Set<string>();
 
 function addChatLeaf(
   api: DockviewApi,
@@ -2942,6 +2881,58 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   }, [workspaceId]);
 
   // ---- add / split / close ----
+
+  // Where a leaf the server is still creating should go. The server's
+  // `chat-created` / `terminal-created` echo can arrive before the launch
+  // mutation returns, and the live-sync handler reads this so the tab still
+  // lands in the group the user picked.
+  const pendingLeafPositionsRef = useRef(new Map<string, AddPanelOptions["position"]>());
+
+  // Start a coding agent in this device's mode (issue #682). The server
+  // creates the chat or spawns the agent's CLI first, so the pane never
+  // mounts before its chat row (with the picked agent) or its PTY exists.
+  const launchAgent = useCallback(
+    (position: AddPanelOptions["position"], agentId?: string) => {
+      const mode = readAgentMode();
+      const pending = pendingLeafPositionsRef.current;
+      const chatId = newChatId();
+      const terminalId = newTerminalId();
+      if (mode !== "tui") markChatFresh(chatId);
+      pending.set(chatId, position);
+      pending.set(terminalId, position);
+      trpc.agentSessions.launch
+        .mutate({ workspaceId, agentId, mode, chatId, terminalId })
+        .then((result) => {
+          const api = apiRef.current;
+          if (!api) return;
+          if (result.mode === "tui" && result.terminalId) {
+            if (!api.getPanel(result.terminalId)) {
+              addTermLeaf(api, workspaceId, result.terminalId, { autoFocus: true }, position);
+            }
+          } else if (result.chatId && !api.getPanel(result.chatId)) {
+            addChatLeaf(api, workspaceId, result.chatId, position);
+          }
+          if (result.notice) console.warn("[WorkspaceCenterDockview]", result.notice);
+        })
+        .catch((err) => {
+          console.error("[WorkspaceCenterDockview] agent launch failed:", err);
+          // A default-agent chat pane still works without its launch: it
+          // creates its chat row on the first message, the way panes did
+          // before #682. With a picked agent no pane opens, since it would
+          // fall back to the default agent.
+          const api = apiRef.current;
+          if (mode !== "tui" && !agentId && api && !api.getPanel(chatId)) {
+            addChatLeaf(api, workspaceId, chatId, position);
+          }
+        })
+        .finally(() => {
+          pending.delete(chatId);
+          pending.delete(terminalId);
+        });
+    },
+    [workspaceId],
+  );
+
   const handleAdd = useCallback(
     (kind: LeafKind, groupId?: string, agentId?: string) => {
       const api = apiRef.current;
@@ -2954,28 +2945,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           console.error("[WorkspaceCenterDockview] terminal create failed:", err);
         });
       } else if (kind === "chat") {
-        const id = newChatId();
-        markChatFresh(id);
-        if (!agentId) {
-          addChatLeaf(api, workspaceId, id, position);
-          return;
-        }
-        // A chat keeps the agent it starts with, so create its row with the
-        // chosen agent before the pane mounts and reads it. The live-sync
-        // handler skips the `chat-created` echo so the leaf opens in this
-        // group. On failure no pane opens: it would fall back to the
-        // default agent.
-        creatingChats.add(id);
-        trpc.chats.create
-          .mutate({ workspaceId, id, agent: agentId })
-          .then(() => {
-            const current = apiRef.current;
-            if (current && !current.getPanel(id)) addChatLeaf(current, workspaceId, id, position);
-          })
-          .catch((err) => {
-            console.error("[WorkspaceCenterDockview] chat create failed:", err);
-          })
-          .finally(() => creatingChats.delete(id));
+        launchAgent(position, agentId);
       } else if (kind === "browser") {
         if (!isDesktop) return;
         const id = newBrowserId();
@@ -2986,7 +2956,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         });
       }
     },
-    [workspaceId],
+    [workspaceId, launchAgent],
   );
 
   const handleSplit = useCallback(
@@ -2999,9 +2969,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         addTermLeaf(api, workspaceId, id, { autoFocus: true }, position);
         trpc.terminal.create.mutate({ workspaceId, id }).catch(() => {});
       } else if (kind === "chat") {
-        const id = newChatId();
-        markChatFresh(id);
-        addChatLeaf(api, workspaceId, id, position);
+        launchAgent(position);
       } else if (kind === "browser" && isDesktop) {
         const id = newBrowserId();
         markBrowserFresh(id);
@@ -3009,7 +2977,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         trpc.browsers.create.mutate({ workspaceId, id }).catch(() => {});
       }
     },
-    [workspaceId],
+    [workspaceId, launchAgent],
   );
 
   // Actually remove a leaf (panel + any server-side instance). Shared by the
@@ -3613,9 +3581,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       const api = apiRef.current;
       if (!api) return;
 
+      const pendingPositions = pendingLeafPositionsRef.current;
       if (event.kind === "chat-created" && typeof event.chatId === "string") {
-        if (!creatingChats.has(event.chatId) && !api.getPanel(event.chatId)) {
-          addChatLeaf(api, workspaceId, event.chatId);
+        if (!api.getPanel(event.chatId)) {
+          addChatLeaf(api, workspaceId, event.chatId, pendingPositions.get(event.chatId));
         }
       } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
         const panel = api.getPanel(event.chatId);
@@ -3626,7 +3595,15 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         // stray top-level tab. Only genuine CLI-created terminals (no owner)
         // seed a new leaf.
         if (!isOwnedPane(event.terminalId) && !api.getPanel(event.terminalId)) {
-          addTermLeaf(api, workspaceId, event.terminalId);
+          // A terminal this tab launched an agent into gets focus, like New terminal.
+          const launched = pendingPositions.has(event.terminalId);
+          addTermLeaf(
+            api,
+            workspaceId,
+            event.terminalId,
+            launched ? { autoFocus: true } : undefined,
+            pendingPositions.get(event.terminalId),
+          );
         }
       } else if (event.kind === "terminal-killed" && typeof event.terminalId === "string") {
         disposeTerminal(event.terminalId);
@@ -3933,7 +3910,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         />
       </PanelVisibilityContext.Provider>
 
-      {/* Empty state: shown when every leaf is closed. Offers the same three
+      {/* Empty state: shown when every leaf is closed. Offers the same
           "New …" actions as the header "+" menu, centered in the vacant area,
           so a closed-out workspace is a deliberate blank slate rather than a
           dead end. */}
@@ -3943,33 +3920,28 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           data-testid="workspace-center__empty-state"
         >
           <div className="flex flex-col gap-2">
+            <NewAgentButton
+              className={EMPTY_STATE_BUTTON_CLASS}
+              onPick={(agentId) => handleAdd("chat", undefined, agentId)}
+            />
             <button
               type="button"
               onClick={() => handleAdd("term")}
-              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className={EMPTY_STATE_BUTTON_CLASS}
               data-testid="workspace-center__empty-new-term"
             >
               <TerminalIcon className="size-4" />
-              New Terminal
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAdd("chat")}
-              className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              data-testid="workspace-center__empty-new-chat"
-            >
-              <MessageSquare className="size-4" />
-              New Chat
+              New terminal
             </button>
             {isDesktop && (
               <button
                 type="button"
                 onClick={() => handleAdd("browser")}
-                className="flex w-56 items-center gap-3 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className={EMPTY_STATE_BUTTON_CLASS}
                 data-testid="workspace-center__empty-new-browser"
               >
                 <Globe className="size-4" />
-                New Browser
+                New browser
               </button>
             )}
           </div>

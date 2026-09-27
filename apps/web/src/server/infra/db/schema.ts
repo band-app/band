@@ -286,3 +286,30 @@ export const projectBrowserProfiles = sqliteTable("project_browser_profiles", {
   profileId: text("profile_id").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
+
+// Agent sessions (issue #682). One row per run of a coding agent, whichever
+// way it is displayed: `gui` runs in a chat pane (`chat_id`), `tui` runs its
+// vendor CLI in a terminal (`terminal_id`). `provider_session_id` is the
+// agent's own session id (Claude's `session_id`, a chat's
+// `activeSessionId`), null until the agent reports it. A session never
+// changes mode; converting one ends it and starts a new row.
+export const agentSessions = sqliteTable(
+  "agent_sessions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    agentDefinitionId: text("agent_definition_id").notNull(),
+    providerSessionId: text("provider_session_id"),
+    mode: text("mode", { enum: ["gui", "tui"] }).notNull(),
+    chatId: text("chat_id"),
+    terminalId: text("terminal_id"),
+    state: text("state", { enum: ["starting", "running", "ended"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("agent_sessions_workspace_idx").on(t.workspaceId),
+    index("agent_sessions_chat_idx").on(t.chatId),
+    index("agent_sessions_terminal_idx").on(t.terminalId),
+  ],
+);

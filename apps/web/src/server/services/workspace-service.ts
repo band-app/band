@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { cliInvocation, resumeCliInvocation } from "@band-app/coding-agent";
+import { resumeCliInvocation } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
@@ -19,6 +19,11 @@ import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { formatShellCommand } from "./_utils/format-shell-command";
+// FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
+// back from this file. Safe only while `agentLaunchService` is used inside
+// method bodies, never at module top level.
+import { agentLaunchService } from "./agent-launch-service";
+import { agentSessionRegistry } from "./agent-session-registry-service";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
 // `workspaceService` directly from this file (the `services/workspace.ts`
 // shim that used to broker this hop was deleted in the #535 cleanup).
@@ -39,7 +44,7 @@ import { chatService } from "./chat-service";
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
 import { panelFocusService } from "./panel-focus-service";
-import { SettingsService, settingsService } from "./settings-service";
+import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
   deleteWorkspaceStatus,
@@ -49,7 +54,6 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "./state";
-import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 // FRAGILE: ESM cycle leg #3 — `./workspace-script-service` imports
@@ -98,11 +102,10 @@ export interface ResolvedWorkspace {
  * tier and any future non-tRPC entry points (the Rust CLI included)
  * forward through `WorkspaceService.create`.
  *
- * Default behavior when omitted: `"chat"` — the field is optional so
- * existing callers (the web UI in particular) keep their current
- * behavior. The CLI defaults to `"terminal"` *client-side* (resolved
- * in `cmd_workspaces_create`), so the server never silently overrides
- * a CLI caller's intent.
+ * Superseded by `agentMode` (`gui` / `tui`, issue #682), which wins when
+ * both are sent. With neither, the server's `agents.defaultMode` applies.
+ * The CLI resolves `via` *client-side* (in `cmd_workspaces_create`) and
+ * forwards it on every call.
  */
 export const workspaceVia = z.enum(["chat", "terminal"]);
 export type WorkspaceVia = z.infer<typeof workspaceVia>;
@@ -121,6 +124,11 @@ export const workspaceCreateInput = z.object({
   mode: z.string().optional(),
   model: z.string().optional(),
   codingAgentId: z.string().optional(),
+  // How the prompt's agent session is displayed (issue #682): `gui` (chat)
+  // or `tui` (the agent's CLI in a terminal). Browsers send their per-device
+  // mode. `via` is the older name for the same choice and loses to
+  // `agentMode`. With neither, `agents.defaultMode` applies.
+  agentMode: z.enum(["gui", "tui"]).optional(),
   via: workspaceVia.optional(),
 });
 export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
@@ -316,14 +324,16 @@ export class WorkspaceService {
    *      installed). When there is no setup script, the task is dispatched
    *      synchronously.
    *
-   * Dispatch target (`input.via`, issue #551):
-   *   - `"chat"` (default when absent) — submit the prompt to the workspace's
-   *     default chat pane via `taskService.submitTask`.
-   *   - `"terminal"` — resolve the chosen agent's interactive CLI invocation
-   *     (`cliInvocation(type, prompt)`) and spawn it in a fresh terminal
-   *     pane via `terminalService.spawn`. The pane id is returned alongside
-   *     the worktree path so callers (the Rust CLI in particular) can wire
-   *     follow-up commands directly to the new pane.
+   * Dispatch target (`input.agentMode`, else `input.via`, else
+   * `agents.defaultMode`; issues #551 and #682). `agentLaunchService` starts
+   * the agent:
+   *   - `gui` / `"chat"` — submit the prompt to the workspace's default chat
+   *     pane via `taskService.submitTask`.
+   *   - `tui` / `"terminal"` — resolve the chosen agent's interactive CLI
+   *     invocation (`cliInvocation(type, prompt)`) and spawn it in a fresh
+   *     terminal pane via `terminalService.spawn`. The pane id is returned
+   *     alongside the worktree path so callers (the Rust CLI in particular)
+   *     can wire follow-up commands directly to the new pane.
    *
    *   When the resolved agent doesn't have a vendor CLI for terminal
    *   dispatch (e.g. cursor-cli today), the service logs a warning and
@@ -462,57 +472,15 @@ export class WorkspaceService {
       log.warn({ err, workspaceId }, "copyWorkspaceFiles raised — continuing");
     }
 
+    // How the prompt's agent is displayed (issue #682): the caller's
+    // `agentMode`, else its legacy `via`, else `agents.defaultMode`.
+    const agentMode =
+      input.agentMode ?? agentModeFromVia(input.via) ?? settingsService.defaultAgentMode();
+
     // Materialize the default chat pane so the workspace surfaces a
-    // ready-to-use UI even when the caller didn't pass a prompt.
+    // ready-to-use UI even when the caller didn't pass a prompt. A `gui`
+    // prompt runs in it.
     const defaultChat = chatService.getOrCreateDefault(workspaceId);
-
-    // Resolve the dispatch target. The router schema lets `via` be
-    // absent; server-side default is `"chat"` so existing callers (the
-    // web UI) keep their behavior unchanged. The Rust CLI defaults to
-    // `"terminal"` *client-side* and forwards it on every call, so the
-    // server never silently overrides a CLI caller's intent.
-    let via: WorkspaceVia = input.via ?? "chat";
-    let terminalId: string | undefined;
-
-    // Pre-resolve the terminal-pane CLI invocation while we're still on
-    // the request thread so we can fall back to chat early when the
-    // chosen agent doesn't support a one-shot terminal launch (e.g.
-    // cursor-cli today). Doing the resolution up front keeps the
-    // fall-back synchronous from the caller's perspective — the
-    // response carries the actual `via` we ended up dispatching with.
-    let terminalCommand: string | undefined;
-    if (via === "terminal" && input.prompt) {
-      try {
-        const agentDef = settingsService.getAgentDefinition(input.codingAgentId);
-        const invocation = cliInvocation(agentDef.type, input.prompt, {
-          command: agentDef.command,
-        });
-        if (invocation.unsupported) {
-          log.warn(
-            { workspaceId, agentId: input.codingAgentId, reason: invocation.reason },
-            "via=terminal requested but agent does not support it; falling back to chat",
-          );
-          via = "chat";
-        } else {
-          terminalCommand = formatShellCommand(invocation.command, invocation.args);
-          terminalId = randomUUID();
-        }
-      } catch (err) {
-        // Log just `err.message` rather than the full Error object —
-        // pino-style structured loggers serialise the entire object
-        // including stack traces that may carry agent-config detail
-        // we don't want to leak.
-        log.warn(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            workspaceId,
-            agentId: input.codingAgentId,
-          },
-          "failed to resolve cliInvocation for via=terminal; falling back to chat",
-        );
-        via = "chat";
-      }
-    }
 
     // The setup command runs in its own terminal tab, in parallel with the
     // agent: the prompt goes out now rather than after setup, so a slow or
@@ -520,47 +488,29 @@ export class WorkspaceService {
     // (and answer) the setup in its tab.
     workspaceScriptService.startSetup(workspaceId, worktreePath, project.path);
 
-    if (input.prompt) {
-      if (via === "terminal" && terminalId && terminalCommand) {
-        terminalService
-          .spawn(workspaceId, terminalId, {
-            command: terminalCommand,
-          })
-          .then(() => {
-            emit({ kind: "terminal-created", workspaceId, terminalId: terminalId! });
-          })
-          .catch((err) => {
-            log.error(
-              {
-                err: err instanceof Error ? err.message : String(err),
-                workspaceId,
-                terminalId,
-              },
-              "failed to spawn terminal for via=terminal workspace create",
-            );
-          });
-      } else {
-        taskService.submitTask({
-          workspaceId,
-          chatId: defaultChat.id,
-          prompt: input.prompt,
-          mode: input.mode,
-          model: input.model,
-          codingAgentId: input.codingAgentId,
-        });
-      }
-    }
-
-    // Only echo back `via` / `terminalId` when the call actually
-    // dispatched something. Without a prompt no dispatch happens at
-    // all — including the field with `"terminal"` would imply a PTY
-    // was reserved when none was. The Rust CLI propagates that absence
-    // so a caller scripting on `.terminalId` can distinguish
-    // "newly created + dispatched" from "newly created, no dispatch."
     if (!input.prompt) {
       return { ok: true, path: worktreePath };
     }
-    return { ok: true, path: worktreePath, via, terminalId };
+
+    // Fire-and-forget: the launch logs its own spawn failure, and the
+    // response only reserves the terminal id (see the JSDoc above). An agent
+    // without a TUI invocation falls back to a chat, which the response
+    // reports as `via: "chat"`.
+    const launched = agentLaunchService.launch({
+      workspaceId,
+      agentDefinitionId: input.codingAgentId,
+      prompt: input.prompt,
+      mode: agentMode,
+      chatId: defaultChat.id,
+      model: input.model,
+      permissionMode: input.mode,
+    });
+    return {
+      ok: true,
+      path: worktreePath,
+      via: launched.mode === "tui" ? "terminal" : "chat",
+      terminalId: launched.terminalId,
+    };
   }
 
   /**
@@ -747,6 +697,7 @@ export class WorkspaceService {
     // `ChatService.removeAllForWorkspace`) so a separate `deleteChatLayout`
     // step is no longer required here.
     chatService.removeAllForWorkspace(workspaceId);
+    agentSessionRegistry.removeAllForWorkspace(workspaceId);
 
     // Clean up all browser tabs + layout. Same contract as chats —
     // `BrowserService.removeAllForWorkspace` drops the layout row itself.

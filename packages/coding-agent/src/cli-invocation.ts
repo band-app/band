@@ -70,28 +70,31 @@ function unknownAgent(agentType: string): CliInvocation {
  * the returned `command + args` to `terminalService.spawn`, which composes a
  * shell-escaped command line inside the workspace's PTY.
  *
+ * Without a prompt it opens the agent's REPL with nothing pre-loaded (a TUI
+ * agent session started from the New agent menu, issue #682).
+ *
  * Agents whose vendor binary has no usable interactive mode (`cursor-cli`)
  * and unknown agent types return `{ unsupported: true, reason }`; the
- * workspace service then warns and falls back to the chat path.
+ * caller then warns and falls back to the chat path.
  */
 export function cliInvocation(
   agentType: string,
-  prompt: string,
+  prompt: string | undefined,
   opts?: CliInvocationOptions,
 ): CliInvocation {
   switch (agentType) {
     case "claude-code":
     case "codex":
       // First positional is the prompt: `claude "<prompt>"`, `codex "<prompt>"`.
-      return { command: binary(agentType, opts), args: [prompt] };
+      return { command: binary(agentType, opts), args: prompt ? [prompt] : [] };
     case "gemini-cli":
       // The end-of-options `--` prevents a prompt that starts with `-` from
       // being parsed as a flag by the Gemini binary.
-      return { command: binary(agentType, opts), args: ["--", prompt] };
+      return { command: binary(agentType, opts), args: prompt ? ["--", prompt] : [] };
     case "opencode":
       // The OpenCode TUI's positional is a *project path* (`opencode
       // [project]`), so the prompt goes through the dedicated `--prompt` flag.
-      return { command: binary(agentType, opts), args: ["--prompt", prompt] };
+      return { command: binary(agentType, opts), args: prompt ? ["--prompt", prompt] : [] };
     case "cursor-cli":
       return {
         unsupported: true,

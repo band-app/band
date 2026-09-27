@@ -32,6 +32,7 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { AGENT_MODE_KEY } from "@/dashboard";
 
 export class SettingsPage {
   /** The dialog itself — only visible after `openDialog()`. */
@@ -398,6 +399,33 @@ export class SettingsPage {
       await trigger.click();
       await this.page.getByRole("option", { name: theme }).click();
       await expect(trigger).toContainText(theme);
+    });
+  }
+
+  /** Pick this browser's agent mode ("Open agents on this device as"). It
+   *  saves straight to localStorage, with no Save click. */
+  async selectDeviceAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await test.step(`Set this device's agent mode to ${mode}`, async () => {
+      const trigger = this.dialog.getByTestId("settings-page__device-agent-mode");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByTestId(`settings-page__agent-mode-option--${mode}`).click();
+    });
+  }
+
+  /** This browser's saved agent mode, or null. */
+  async readDeviceAgentMode(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), AGENT_MODE_KEY);
+  }
+
+  /** Pick the server's default agent mode ("Open agents started without a
+   *  device as"). Takes effect on Save. */
+  async selectDefaultAgentMode(mode: "gui" | "tui"): Promise<void> {
+    await test.step(`Set the default agent mode to ${mode}`, async () => {
+      const trigger = this.dialog.getByTestId("settings-page__default-agent-mode");
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await this.page.getByTestId(`settings-page__default-agent-mode-option--${mode}`).click();
     });
   }
 

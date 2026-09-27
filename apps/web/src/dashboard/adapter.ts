@@ -1,3 +1,4 @@
+import type { AgentMode } from "../shared/agent-sessions";
 import type {
   BrowserProfileInfo,
   CIStatus,
@@ -61,7 +62,15 @@ export interface DashboardAdapter {
   // Workspaces. `name` is the immutable workspace identity (the initial
   // branch), not the live git branch — see `WorktreeInfo.name`. `create`
   // still takes `branch` because it names a *new* branch (which seeds `name`).
-  createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
+  // `agentMode` is how the prompt's agent is displayed (issue #682): this
+  // device's mode, or the server default when omitted.
+  createWorkspace(
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+    agentMode?: AgentMode,
+  ): Promise<void>;
   removeWorkspace(project: string, name: string): Promise<void>;
   setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;

@@ -86,6 +86,7 @@ export {
   useStatusWatcher,
 } from "./hooks/use-status";
 export { useWorkspacePath } from "./hooks/use-workspace-path";
+export { AGENT_MODE_KEY, readAgentMode, useAgentMode } from "./lib/agent-mode";
 export {
   buildLspWsUrl,
   createDiffLspNavigation,
