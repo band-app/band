@@ -115,7 +115,7 @@ test("project defaults start collapsed and list each project once by name", asyn
   await settingsPage.expandProjectDefaults();
 
   await expect(settingsPage.projectBrowserProfileRows()).toHaveCount(2);
-  // Project names come from the seed above, so matching on them is allowed (TEST-23).
+  // The project names come from the seed above, so matching on their text is safe.
   await expect(settingsPage.projectBrowserProfileRows()).toContainText([PROJECT, OTHER_PROJECT]);
   await expect(settingsPage.projectBrowserProfileSelect(PROJECT)).toBeVisible();
   await expect(settingsPage.projectBrowserProfileSelect(OTHER_PROJECT)).toBeVisible();
