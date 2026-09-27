@@ -47,3 +47,11 @@ supportedArchitectures:
     - current
     - x64
     - arm64
+
+# Bug fixes xterm.js has not released, generated from the source patches in
+# patches/xterm-src/. Never edit these patch files by hand. patches/README.md
+# says what each one fixes, how to regenerate them, and why pnpm-lock.yaml must
+# keep the two-line pnpm 10 shape for these entries.
+patchedDependencies:
+  "@xterm/addon-search@0.17.0-beta.300": patches/@xterm__addon-search@0.17.0-beta.300.patch
+  "@xterm/addon-serialize@0.15.0-beta.300": patches/@xterm__addon-serialize@0.15.0-beta.300.patch
