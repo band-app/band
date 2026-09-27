@@ -946,13 +946,23 @@ export class WorkspacePage {
     return this.page.getByTestId("center-file-leaf__remote-edit").filter({ visible: true });
   }
 
+  async keepOwnEdit(): Promise<void> {
+    await test.step("Keep this device's unsaved edits", async () => {
+      await this.remoteEditBanner.getByTestId("center-file-leaf__remote-edit-keep").click();
+    });
+  }
+
   async loadRemoteEdit(): Promise<void> {
     await test.step("Load the other device's unsaved edits", async () => {
       await this.remoteEditBanner.getByTestId("center-file-leaf__remote-edit-load").click();
     });
   }
 
-  /** Open a new untitled scratch buffer, as ⌘N does (`band:new-untitled-tab`). */
+  /** Open a new untitled scratch buffer through `band:new-untitled-tab`, the
+   *  event ⌘N and the command palette fire. Not the key itself: a fresh
+   *  workspace focuses its terminal, and off macOS a focused terminal keeps
+   *  Ctrl chords for the shell, so Ctrl+N on the Linux CI runner would go to
+   *  the shell instead. */
   async openUntitledTab(): Promise<void> {
     await test.step("Open a new untitled buffer", async () => {
       await this.page.evaluate(() => {

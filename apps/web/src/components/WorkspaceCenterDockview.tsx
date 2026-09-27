@@ -353,8 +353,9 @@ const untitledCounters = new Map<string, number>();
 export function nextUntitledPath(workspaceId: string): string {
   let n = untitledCounters.get(workspaceId) ?? 0;
   for (const tab of readCenterTabs(workspaceId)?.tabs ?? []) {
-    const m = /^file:untitled:(\d+)$/.exec(tab.id);
-    if (m) n = Math.max(n, Number(m[1]));
+    if (!tab.id.startsWith(`file:${UNTITLED_PREFIX}`)) continue;
+    const num = Number(tab.id.slice(`file:${UNTITLED_PREFIX}`.length));
+    if (Number.isInteger(num)) n = Math.max(n, num);
   }
   n += 1;
   untitledCounters.set(workspaceId, n);
@@ -999,6 +1000,22 @@ function setUnsavedContent(ws: string, path: string, content: string | null): vo
   else clientStorage.setItem(unsavedKey(ws, path), content);
 }
 
+// Files this page has typed into since it loaded (or since it last took
+// another device's copy). Unlike `isFileDirty`, which is true for another
+// device's unsaved text too, this decides whether an arriving copy may replace
+// what's on screen, and whether another device may close the tab.
+const editedHere = new Set<string>();
+const editedHereKey = (ws: string, path: string): string => `${ws}\u0000${path}`;
+
+function isEditedHere(ws: string, path: string): boolean {
+  return editedHere.has(editedHereKey(ws, path));
+}
+
+function setEditedHere(ws: string, path: string, edited: boolean): void {
+  if (edited) editedHere.add(editedHereKey(ws, path));
+  else editedHere.delete(editedHereKey(ws, path));
+}
+
 function isFileDirty(ws: string, path: string): boolean {
   readTabStates(ws); // moves a legacy `editedContent` out of the blob first
   return getUnsavedContent(ws, path) !== null;
@@ -1018,6 +1035,7 @@ function removeFileTabState(ws: string, path: string): void {
     writeTabStates(ws, states);
   }
   if (getUnsavedContent(ws, path) !== null) setUnsavedContent(ws, path, null);
+  setEditedHere(ws, path, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,21 +1303,48 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   } | null>(null);
 
   // Another device's copy of this file's unsaved text (last save wins). With
-  // no edits here the leaf just reloads it; with edits of its own it asks.
-  // `bufferKey` remounts FileViewer so it reads the new copy.
+  // no edits typed here the leaf takes it; with edits of its own it asks.
+  // `bufferKey` remounts FileViewer to read a copy when there's no editor to
+  // put it in (a rendered markdown preview). `localTextRef` is the text this
+  // device typed, for "Keep mine".
   const [bufferKey, setBufferKey] = useState(0);
   const [remoteEdit, setRemoteEdit] = useState(false);
-  const isDirtyRef = useRef(false);
-  isDirtyRef.current = fileActions?.isDirty ?? false;
+  const localTextRef = useRef<string | null>(null);
+  const applyingRemoteRef = useRef(false);
+  const takeRemoteCopy = useCallback(() => {
+    setEditedHere(workspaceIdRaw, filePathRaw, false);
+    const view = editorViewRef.current;
+    if (!view) {
+      setBufferKey((k) => k + 1);
+      return;
+    }
+    // Put the copy (or the file on disk, when the other device saved or
+    // discarded) into the open editor, keeping the cursor where it can stay.
+    const text = getUnsavedContent(workspaceIdRaw, filePathRaw);
+    applyingRemoteRef.current = true;
+    try {
+      if (text === null) {
+        setBufferKey((k) => k + 1);
+      } else {
+        const head = Math.min(view.state.selection.main.head, text.length);
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: text },
+          selection: { anchor: head },
+        });
+      }
+    } finally {
+      applyingRemoteRef.current = false;
+    }
+  }, [workspaceIdRaw, filePathRaw]);
   useEffect(() => {
     if (!workspaceIdRaw || !filePathRaw) return;
     const key = unsavedKey(workspaceIdRaw, filePathRaw);
     return subscribeClientState((change) => {
       if (change.key !== key) return;
-      if (isDirtyRef.current) setRemoteEdit(true);
-      else setBufferKey((k) => k + 1);
+      if (isEditedHere(workspaceIdRaw, filePathRaw)) setRemoteEdit(true);
+      else takeRemoteCopy();
     });
-  }, [workspaceIdRaw, filePathRaw]);
+  }, [workspaceIdRaw, filePathRaw, takeRemoteCopy]);
 
   // Hold the live EditorView so we can serialize its cursor selection + scroll
   // offset on unmount/pagehide and restore it next open (see `persistEditorState`).
@@ -1503,7 +1548,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
             data-testid="center-file-leaf__remote-edit-load"
             onClick={() => {
               setRemoteEdit(false);
-              setBufferKey((k) => k + 1);
+              takeRemoteCopy();
               window.dispatchEvent(new CustomEvent("band:dirty-change"));
             }}
           >
@@ -1515,8 +1560,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
             data-testid="center-file-leaf__remote-edit-keep"
             onClick={() => {
               setRemoteEdit(false);
-              const view = editorViewRef.current;
-              if (view) setUnsavedContent(workspaceId, filePath, view.state.doc.toString());
+              setUnsavedContent(workspaceId, filePath, localTextRef.current);
               window.dispatchEvent(new CustomEvent("band:dirty-change"));
             }}
           >
@@ -1579,9 +1623,14 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // too would double the per-keystroke re-checks.
         initialEditedContent={getUnsavedContent(workspaceId, filePath)}
         onEditedContentChange={(content) => {
+          // Putting another device's copy into the editor fires this too; it's
+          // already stored and isn't this device's edit.
+          if (applyingRemoteRef.current) return;
           // Typing after another device's copy arrived keeps this device's
           // text: it is now the last save.
           setRemoteEdit(false);
+          localTextRef.current = content;
+          setEditedHere(workspaceId, filePath, content !== null);
           setUnsavedContent(workspaceId, filePath, content);
         }}
         viewMode={viewMode}
@@ -3001,7 +3050,7 @@ function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" }
  * Open and close file and diff tabs to match another device's changes.
  * Chats, terminals and browser tabs aren't touched: they open and close with
  * their server records (`chat-created`, `terminal-killed`, …). A file with
- * unsaved edits on this device stays open. Returns whether anything changed.
+ * edits typed on this device stays open. Returns whether anything changed.
  */
 function applyCenterTabMembership(
   api: DockviewApi,
@@ -3014,7 +3063,7 @@ function applyCenterTabMembership(
   for (const tab of removed) {
     if (!isViewTab(tab)) continue;
     const panel = api.getPanel(tab.id);
-    if (!panel || (tab.kind === "file" && isFileDirty(workspaceId, tab.id.slice(5)))) continue;
+    if (!panel || (tab.kind === "file" && isEditedHere(workspaceId, tab.id.slice(5)))) continue;
     api.removePanel(panel);
     changed = true;
   }
@@ -3657,6 +3706,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         if (unsaved !== null) {
           setUnsavedContent(workspaceId, nextPath, unsaved);
           setUnsavedContent(workspaceId, filePath, null);
+        }
+        if (isEditedHere(workspaceId, filePath)) {
+          setEditedHere(workspaceId, nextPath, true);
+          setEditedHere(workspaceId, filePath, false);
         }
         closedFileLeaves.add(closedFileLeafKey(workspaceId, filePath));
       }
