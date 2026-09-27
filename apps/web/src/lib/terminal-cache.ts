@@ -24,6 +24,7 @@ import {
   wordSelectionAt,
 } from "./terminal-selection";
 import { ownerOfTerminal } from "./terminal-split-registry";
+import { attachTerminalTouchScroll } from "./terminal-touch-scroll";
 import {
   noteTypingLatencyDispatch,
   noteTypingLatencyOutput,
@@ -543,33 +544,11 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Mobile touch: scroll / long-press word-select / tap-to-focus ---
     // All bound to the persistent wrapper so they survive attach/detach moves.
-    // `.xterm-viewport` is created once by `term.open()` and (unlike the WebGL
-    // `.xterm-screen` canvas) is not rebuilt on renderer switches, so cache it
-    // rather than re-`querySelector` on every ~60 Hz touchmove.
-    const viewportEl = wrapper.querySelector(".xterm-viewport") as HTMLElement | null;
-    let lastTouchY: number | null = null;
-    const onTouchStart = (e: TouchEvent) => {
-      lastTouchY = e.touches.length === 1 ? e.touches[0].clientY : null;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1 || lastTouchY === null) return;
-      const currentY = e.touches[0].clientY;
-      const deltaY = lastTouchY - currentY;
-      const cellHeight = viewportEl && term.rows > 0 ? viewportEl.clientHeight / term.rows : 17;
-      const lineDelta = Math.trunc(deltaY / cellHeight);
-      if (lineDelta !== 0) {
-        term.scrollLines(lineDelta);
-        lastTouchY = currentY + (deltaY - lineDelta * cellHeight);
-        e.preventDefault();
-      }
-    };
-    const onTouchEnd = () => {
-      lastTouchY = null;
-    };
-    wrapper.addEventListener("touchstart", onTouchStart, { passive: true });
-    wrapper.addEventListener("touchmove", onTouchMove, { passive: false });
-    wrapper.addEventListener("touchend", onTouchEnd, { passive: true });
-    wrapper.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    // Finger scrolling (and its momentum) lives in terminal-touch-scroll.ts. It
+    // stops every touchmove in the capture phase so xterm's own gesture
+    // handler never sees one, which is why the long-press move listener below
+    // also runs in the capture phase.
+    const touchScroll = attachTerminalTouchScroll(wrapper, term);
 
     let longPressTimer: number | null = null;
     let longPressStart: { x: number; y: number } | null = null;
@@ -618,7 +597,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (dx > LONG_PRESS_SLOP_PX || dy > LONG_PRESS_SLOP_PX) cancelLongPress();
     };
     wrapper.addEventListener("touchstart", onLongPressStart, { passive: true });
-    wrapper.addEventListener("touchmove", onLongPressMove, { passive: true });
+    wrapper.addEventListener("touchmove", onLongPressMove, { capture: true, passive: true });
     wrapper.addEventListener("touchend", cancelLongPress, { passive: true });
     wrapper.addEventListener("touchcancel", cancelLongPress, { passive: true });
 
@@ -747,6 +726,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           // previous connection would land on top of it.
           output.clear();
           term.reset();
+          touchScroll.resetModes();
         }
 
         // Are we already fitted to a visible live box? If so we can carry our
@@ -1169,6 +1149,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       dprMql?.removeEventListener("change", onDprMediaChange);
       unsubscribeZoom();
       cancelLongPress();
+      touchScroll.dispose();
       ws?.close();
       term.dispose(); // cascades to loaded addons
     };
