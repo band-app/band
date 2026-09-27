@@ -482,18 +482,15 @@ export function SharedDockviewLayout() {
     return () => window.removeEventListener("band:lsp-navigate", handler);
   }, [activeWorkspaceId]);
 
-  // Toolbar / title-bar window-event triggers for the dialogs.
+  // Toolbar window-event triggers for the dialogs.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
-    const openPicker = () => setWorkspacePickerOpen(true);
     window.addEventListener("band:open-quick-open", openQO);
     window.addEventListener("band:open-search-files", openSF);
-    window.addEventListener("band:open-workspace-picker", openPicker);
     return () => {
       window.removeEventListener("band:open-quick-open", openQO);
       window.removeEventListener("band:open-search-files", openSF);
-      window.removeEventListener("band:open-workspace-picker", openPicker);
     };
   }, []);
 

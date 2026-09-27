@@ -40,7 +40,7 @@ const PROJECT = "alpha-sidebar";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the desktop layout
-// (title bar + sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
+// (sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;

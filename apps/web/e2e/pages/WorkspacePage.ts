@@ -576,9 +576,10 @@ export class WorkspacePage {
 
   /** Whether the nav-cluster overlay renders AFTER every top-row drag
    *  surface in DOM order (the sidebar's title bar, the center tab strip's
-   *  toolbar, and the sidebar gutter the strip reserves while collapsed). Load-bearing in the desktop shell: Chromium
-   *  computes the window's draggable region by walking the layout tree in
-   *  document order — unioning `app-region: drag` rects and subtracting
+   *  toolbar, the sidebar gutter the strip reserves while collapsed, and the
+   *  drag bar that replaces the strip when there are no tabs).
+   *  Load-bearing in the desktop shell: Chromium computes the window's
+   *  draggable region by walking the layout tree in document order — unioning `app-region: drag` rects and subtracting
    *  `no-drag` rects as it goes, z-index irrelevant. If the overlay renders
    *  before the bars, the bars' drag rects re-cover the buttons and every
    *  click on them starts a window drag (PR #634). True drag-region
@@ -588,7 +589,7 @@ export class WorkspacePage {
   async navOverlayFollowsDragSurfaces(): Promise<boolean> {
     return await this.navOverlay.evaluate((overlay) => {
       const bars = document.querySelectorAll(
-        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="workspace-center__toolbar"], [data-testid="workspace-center__sidebar-gutter"]',
+        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="workspace-center__toolbar"], [data-testid="workspace-center__sidebar-gutter"], [data-testid="workspace-center__drag-bar"]',
       );
       if (bars.length === 0) {
         throw new Error("no top-row drag surfaces found — testids renamed?");
@@ -1610,10 +1611,32 @@ export class WorkspacePage {
     return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true }).first();
   }
 
+  /** Every visible center-toolbar action slot, one per top-level tab group. */
+  get centerToolbars(): Locator {
+    return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true });
+  }
+
+  /** Every right-sidepanel expand button hosted in a center tab strip. */
+  get rightPanelTogglesInTabStrips(): Locator {
+    return this.centerToolbars.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
   /** The draggable space the top-left tab group reserves under the nav-cluster
    *  overlay while the sidebar is collapsed (`SidebarGutter`). */
   get sidebarGutter(): Locator {
     return this.page.getByTestId("workspace-center__sidebar-gutter").filter({ visible: true });
+  }
+
+  /** The draggable top row the center column shows in place of the tab strip
+   *  when there is none: no active workspace, or every tab closed
+   *  (`CenterDragBar`). */
+  get centerDragBar(): Locator {
+    return this.page.getByTestId("workspace-center__drag-bar").filter({ visible: true });
+  }
+
+  /** The right-sidepanel expand button hosted in `centerDragBar`. */
+  get rightPanelToggleInDragBar(): Locator {
+    return this.centerDragBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
   }
 
   /** The right sidepanel's header row (tabs + open-in-editor + collapse), level

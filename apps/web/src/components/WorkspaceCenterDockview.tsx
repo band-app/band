@@ -63,6 +63,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   AgentIcon,
@@ -2497,6 +2498,69 @@ interface GroupEdges {
 
 const NO_EDGES: GroupEdges = { top: false, left: false, right: false };
 
+interface GroupEdgesStore {
+  edges: GroupEdges;
+  subscribe: (onChange: () => void) => () => void;
+}
+
+// One store per group, shared by the group's prefix and right header-action
+// slots so each group is measured once.
+const groupEdgesStores = new WeakMap<IDockviewHeaderActionsProps["group"], GroupEdgesStore>();
+
+function getGroupEdgesStore(props: IDockviewHeaderActionsProps): GroupEdgesStore {
+  const existing = groupEdgesStores.get(props.group);
+  if (existing) return existing;
+  const el = props.group.element;
+  const containerApi = props.containerApi;
+  const listeners = new Set<() => void>();
+  let stop: (() => void) | null = null;
+  const measure = () => {
+    const root = el.closest(".dv-dockview");
+    if (!root) return;
+    const g = el.getBoundingClientRect();
+    const r = root.getBoundingClientRect();
+    const next = {
+      top: g.top - r.top < 2,
+      left: g.left - r.left < 2,
+      right: r.right - g.right < 2,
+    };
+    el.toggleAttribute("data-band-top-row", next.top);
+    const prev = store.edges;
+    if (prev.top === next.top && prev.left === next.left && prev.right === next.right) return;
+    store.edges = next;
+    for (const l of listeners) l();
+  };
+  const store: GroupEdgesStore = {
+    edges: NO_EDGES,
+    subscribe(onChange) {
+      listeners.add(onChange);
+      if (!stop) {
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        const d = containerApi.onDidLayoutChange(measure);
+        stop = () => {
+          ro.disconnect();
+          d.dispose();
+          el.removeAttribute("data-band-top-row");
+          store.edges = NO_EDGES;
+        };
+      }
+      return () => {
+        listeners.delete(onChange);
+        if (listeners.size === 0 && stop) {
+          stop();
+          stop = null;
+        }
+      };
+    },
+  };
+  groupEdgesStores.set(props.group, store);
+  return store;
+}
+
+const noopSubscribe = () => () => {};
+
 /** Which edges of the dockview this group's rect touches. Re-measured when the
  *  group resizes (which covers a hidden workspace being shown again) and on
  *  every dockview layout change (a split, move, close or maximize). Also marks
@@ -2504,35 +2568,11 @@ const NO_EDGES: GroupEdges = { top: false, left: false, right: false };
  *  space a window drag region (see `.dockview-center-desktop` in
  *  dockview-theme.css). Measures nothing when `enabled` is false. */
 function useGroupEdges(props: IDockviewHeaderActionsProps, enabled: boolean): GroupEdges {
-  const [edges, setEdges] = useState(NO_EDGES);
-  useEffect(() => {
-    if (!enabled) return;
-    const el = props.group.element;
-    const measure = () => {
-      const root = el.closest(".dv-dockview");
-      if (!root) return;
-      const g = el.getBoundingClientRect();
-      const r = root.getBoundingClientRect();
-      const next = {
-        top: g.top - r.top < 2,
-        left: g.left - r.left < 2,
-        right: r.right - g.right < 2,
-      };
-      el.toggleAttribute("data-band-top-row", next.top);
-      setEdges((prev) =>
-        prev.top === next.top && prev.left === next.left && prev.right === next.right ? prev : next,
-      );
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    const d = props.containerApi.onDidLayoutChange(measure);
-    return () => {
-      ro.disconnect();
-      d.dispose();
-    };
-  }, [props.group, props.containerApi, enabled]);
-  return edges;
+  const store = enabled ? getGroupEdgesStore(props) : null;
+  return useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    () => store?.edges ?? NO_EDGES,
+  );
 }
 
 const PrefixHeaderActions = memo(function PrefixHeaderActions(props: IDockviewHeaderActionsProps) {

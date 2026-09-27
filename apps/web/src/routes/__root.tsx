@@ -706,8 +706,8 @@ function AppShell() {
 
   // Single source for the macOS traffic-light gutter: the offset is applied
   // to the stationary nav-cluster overlay below so the sidebar-toggle /
-  // back-forward buttons clear the traffic lights; the title bars themselves
-  // no longer take an offset prop.
+  // back-forward buttons clear the traffic lights; the top-row drag surfaces
+  // themselves take no offset prop.
   const isFullscreen = useIsFullscreen();
   const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
 
@@ -854,19 +854,22 @@ function AppShell() {
             </Group>
           </div>
           {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
-            this stationary overlay pinned over the title-bar row's left edge, floating above
-            both title bars. Hosting it inside either bar means remounting it
+            this stationary overlay pinned over the top row's left edge,
+            floating above the sidebar's title bar and the center column's tab
+            strip. Hosting it inside either means remounting it
             on every sidebar toggle inside an overflow-clipped, animating
             panel — the buttons visibly flickered mid-tween. Here the panels
             slide beneath it and it never moves or remounts. The container is
             pointer-events-none so the drag regions beneath stay draggable;
             NavControls re-enables pointer events on itself.
 
-            MUST come after the title bars in DOM order: Chromium computes the
+            MUST come after every top-row drag surface in DOM order (the
+            sidebar's title bar, the center tab strip, its sidebar gutter, and
+            the center drag bar): Chromium computes the
             window's draggable region by walking the layout tree in document
             order, unioning `app-region: drag` rects and subtracting `no-drag`
             rects as it goes — z-index is irrelevant. If this overlay renders
-            before the bars, the bars' drag rects re-cover the buttons and
+            before them, their drag rects re-cover the buttons and
             every click on them starts a window drag in the desktop app. */}
           <div
             ref={navOverlayRef}

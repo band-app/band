@@ -133,6 +133,27 @@ test("collapsing moves the toggle to the tab strip, and expanding moves it back"
   await expect(wp.rightPanelToggleInTabStrip).toHaveCount(0);
 });
 
+test("with every tab closed, a drag bar keeps the sidepanel's expand button reachable", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+  await wp.revealRightPanel();
+  await wp.collapseRightPanelViaHeader();
+
+  // Closing the only tab removes the tab strip, the window's top row.
+  await wp.closeTerminalTab(WORKSPACE);
+  await expect(wp.tab("terminal")).toHaveCount(0);
+  await expect(wp.centerDragBar).toBeVisible();
+  const bar = await wp.boxOf(wp.centerDragBar);
+  expect(bar.y).toBe(0);
+
+  await wp.rightPanelToggleInDragBar.click();
+  await expect(wp.rightPanel).toHaveAttribute("data-visible", "true");
+  await expect(wp.rightPanelToggleInDragBar).toHaveCount(0);
+});
+
 test("⌥⌘B collapses and expands the right sidepanel", async ({ page }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);
@@ -146,4 +167,33 @@ test("⌥⌘B collapses and expands the right sidepanel", async ({ page }) => {
   await wp.toggleRightPanelViaShortcut();
   await expect(wp.rightPanel).toHaveAttribute("data-visible", "true");
   await expect(wp.rightPanelToggleInHeader).toBeVisible();
+});
+
+// Last in the file: the split persists in the workspace's saved layout.
+test("with two side-by-side groups, only the outer ones carry the gutter and the expand button", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+  await wp.openChat(WORKSPACE);
+  await wp.clickChatSplitRight(WORKSPACE);
+  await expect(wp.centerToolbars).toHaveCount(2);
+
+  await wp.revealRightPanel();
+  await wp.collapseRightPanelViaHeader();
+  await expect(wp.rightPanelTogglesInTabStrips).toHaveCount(1);
+  const [leftGroup, rightGroup] = await Promise.all([
+    wp.boxOf(wp.centerToolbars.nth(0)),
+    wp.boxOf(wp.centerToolbars.nth(1)),
+  ]);
+  const outerToolbarX = Math.max(leftGroup.x, rightGroup.x);
+  const toggle = await wp.boxOf(wp.rightPanelTogglesInTabStrips);
+  expect(toggle.x).toBeGreaterThanOrEqual(outerToolbarX);
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarGutter).toHaveCount(1);
+  const gutter = await wp.boxOf(wp.sidebarGutter);
+  expect(gutter.x).toBeLessThan(Math.min(leftGroup.x, rightGroup.x));
 });
