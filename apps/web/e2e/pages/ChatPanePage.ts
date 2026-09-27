@@ -57,9 +57,22 @@ export class ChatPanePage {
   /** Elicitation forms (ACP form `elicitation/create`, e.g. Claude Code's
    *  AskUserQuestion). Same `data-answered` attribute as the cards. */
   readonly elicitationForms: Locator;
-  /** The model picker's trigger, built from the session's `model` config
-   *  option. */
+  /** The model settings trigger on the right of the composer: model name
+   *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
+  /** The effort value shown in the model settings trigger. */
+  readonly modelMenuEffort: Locator;
+  /** The open model settings menu. */
+  readonly modelMenuContent: Locator;
+  /** The "Effort" row in the model settings menu (opens a submenu). */
+  readonly effortSubmenu: Locator;
+  /** The "Fast mode" row in the model settings menu. */
+  readonly fastModeItem: Locator;
+  /** The switch inside the "Fast mode" row (`data-state` checked /
+   *  unchecked). */
+  readonly fastModeSwitch: Locator;
+  /** The "More models" row in the model settings menu (opens a submenu). */
+  readonly moreModelsSubmenu: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
@@ -115,6 +128,12 @@ export class ChatPanePage {
     this.permissionCards = page.getByTestId("chat-pane__permission");
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
     this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
+    this.modelMenuEffort = page.getByTestId("chat-pane__model-menu-effort");
+    this.modelMenuContent = page.getByTestId("chat-pane__model-menu-content");
+    this.effortSubmenu = page.getByTestId("chat-pane__model-menu-effort-submenu");
+    this.fastModeItem = page.getByTestId("chat-pane__model-menu-fast");
+    this.fastModeSwitch = this.fastModeItem.getByRole("switch", { includeHidden: true });
+    this.moreModelsSubmenu = page.getByTestId("chat-pane__model-menu-more-models");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -159,12 +178,19 @@ export class ChatPanePage {
       .then(() => true)
       .catch(() => false);
     if (!hasChat) {
-      // No chat leaf (the default layout is a single terminal) — create one.
-      await addBtn.focus();
-      await this.page.keyboard.press("Enter");
-      const menu = this.page.getByTestId("workspace-center__new-tab-menu");
-      await menu.waitFor({ state: "visible" });
-      await menu.getByTestId("workspace-center__new-tab--chat").click();
+      // No chat leaf (the default layout is a single terminal) — create one
+      // with the default agent.
+      await this.openNewTabMenu();
+      // One configured agent: a plain "New Chat" item. Several: a submenu
+      // with the default agent first.
+      const item = this.page
+        .getByTestId(/^workspace-center__new-tab--chat(-agents)?$/)
+        .filter({ visible: true })
+        .first();
+      await item.click();
+      if ((await item.getAttribute("data-testid"))?.endsWith("-agents")) {
+        await this.newChatAgentItems.first().click();
+      }
       await chatTab.waitFor({ state: "visible", timeout: 15_000 });
     }
     // Activate the chat tab so its pane (and prompt) is the shown content — a
@@ -172,6 +198,92 @@ export class ChatPanePage {
     await chatTab.click();
 
     await this.promptInput.waitFor({ state: "visible", timeout: 15_000 });
+  }
+
+  /** Open the "+" new-tab menu of the visible center dockview. */
+  async openNewTabMenu(): Promise<void> {
+    await test.step("Open the new-tab menu", async () => {
+      const addBtn = this.page
+        .getByTestId("workspace-center__new-tab-button")
+        .filter({ visible: true })
+        .first();
+      await addBtn.waitFor({ state: "visible", timeout: 15_000 });
+      await addBtn.focus();
+      await this.page.keyboard.press("Enter");
+      await this.page.getByTestId("workspace-center__new-tab-menu").waitFor({ state: "visible" });
+    });
+  }
+
+  /** The agent rows in the open "New Chat" submenu, top to bottom. */
+  get newChatAgentItems(): Locator {
+    return this.page
+      .getByTestId("workspace-center__new-chat-agent-menu")
+      .getByTestId(/^workspace-center__new-chat-agent--/);
+  }
+
+  /** Open the "New Chat" agent submenu of the open new-tab menu. */
+  async openNewChatAgentMenu(): Promise<void> {
+    await test.step("Open the New Chat agent submenu", async () => {
+      await this.page.getByTestId("workspace-center__new-tab--chat-agents").click();
+      await expect(this.newChatAgentItems.first()).toBeVisible();
+    });
+  }
+
+  /** Start a new chat with the given coding agent from the open agent
+   *  submenu, then show its tab and wait for its prompt. The workspace must
+   *  have no other chat tab. The leaf opens once the server has created
+   *  the chat. */
+  async startChatWithAgent(agentId: string): Promise<void> {
+    await test.step(`Start a new chat with ${agentId}`, async () => {
+      await this.page.getByTestId(`workspace-center__new-chat-agent--${agentId}`).click();
+      const chatTab = this.page
+        .getByTestId(/^center-chat-tab--/)
+        .filter({ visible: true })
+        .first();
+      await expect(chatTab).toBeVisible({ timeout: 15_000 });
+      await chatTab.click();
+      await expect(this.promptInput).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** A row in the open model settings menu naming a coding agent (its label
+   *  from settings, i.e. test data). The menu must not offer any. */
+  modelMenuAgentOption(label: string): Locator {
+    return this.modelMenuContent.getByText(label);
+  }
+
+  /** Open the model settings menu. */
+  async openModelMenu(): Promise<void> {
+    await test.step("Open the model settings menu", async () => {
+      await this.modelMenuButton.click();
+      await expect(this.modelMenuContent).toBeVisible();
+    });
+  }
+
+  /** Close an open menu with Escape. */
+  async closeMenu(): Promise<void> {
+    await test.step("Close the menu", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.modelMenuContent).toBeHidden();
+    });
+  }
+
+  /** Pick an effort level in the model settings menu, by its name (agent
+   *  test data). The menu must be open. */
+  async selectEffort(name: string): Promise<void> {
+    await test.step(`Select effort "${name}"`, async () => {
+      await this.effortSubmenu.click();
+      await this.page.getByRole("menuitem", { name, exact: true }).click();
+      await expect(this.modelMenuContent).toBeHidden();
+    });
+  }
+
+  /** Flip the fast mode switch in the open model settings menu. The menu
+   *  stays open. */
+  async toggleFastMode(): Promise<void> {
+    await test.step("Toggle fast mode", async () => {
+      await this.fastModeItem.click();
+    });
   }
 
   /** Type into the prompt textarea. Doesn't submit. */
@@ -428,12 +540,15 @@ export class ChatPanePage {
     });
   }
 
-  /** Open the model picker and choose a model by its display name (from
-   *  the agent's `model` config option, i.e. test data). */
+  /** Open the model settings menu and choose another model from its
+   *  "More models" submenu, by display name (the agent's `model` config
+   *  option, i.e. test data). */
   async selectModel(modelName: string): Promise<void> {
     await test.step(`Select model "${modelName}"`, async () => {
-      await this.modelMenuButton.click();
+      await this.openModelMenu();
+      await this.moreModelsSubmenu.click();
       await this.page.getByRole("menuitem", { name: modelName }).click();
+      await expect(this.modelMenuContent).toBeHidden();
     });
   }
 

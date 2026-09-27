@@ -12,7 +12,7 @@ import { publicProcedure, t } from "../trpc";
 
 /**
  * Workspace (singular) sub-router — per-workspace operations: file CRUD,
- * search, diff, git pull/push/commit, agent switching, format. The router
+ * search, diff, git pull/push/commit, format. The router
  * is validation + delegation only (issue #535, follow-up 1): every line of
  * business logic lives behind a service-tier seam:
  *
@@ -21,7 +21,7 @@ import { publicProcedure, t } from "../trpc";
  *   - `diffService`   → branch listing, diff, file diff, revert.
  *   - `gitGraphService` → commit history, commit files, per-commit file diff.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
- *     generateCommitMessage, switchAgent.
+ *     generateCommitMessage.
  *   - `editorService` → file watcher subscription + Prettier formatFile.
  *   - `terminalService.getWorkspaceConfig` → per-workspace terminal config.
  *
@@ -88,11 +88,11 @@ const commitShaSchema = z
  * `tests/trpc.test.ts` cases that pin status=500 for "unknown
  * workspace" need to flip to 404 in the same change.
  *
- * `formatFile` and `switchAgent` are the historical exceptions — both
- * threw `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup
- * branch even before the follow-up-1 split. Both kept as-is to
- * preserve the pre-existing wire contract; a future cleanup can align
- * the two against the rest of the router.
+ * `formatFile` is the historical exception — it threw
+ * `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup branch even
+ * before the follow-up-1 split, and is kept as-is to preserve the
+ * pre-existing wire contract; a future cleanup can align it with the
+ * rest of the router.
  */
 export const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
@@ -486,31 +486,6 @@ export const workspaceRouter = t.router({
         limit: input.limit,
       }),
     ),
-
-  switchAgent: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        agentId: z.string(),
-        chatId: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      // Keep the pre-#535 wire contract: `switchAgent` returned NOT_FOUND
-      // (404) when the workspace lookup failed. Other procedures in this
-      // router collapse the same condition to a plain 500 to match the
-      // legacy pinned-test contract; switchAgent and formatFile are the
-      // historical exceptions where the 404 mapping pre-existed the
-      // follow-up-1 split.
-      try {
-        return await workspaceService.switchAgent(input);
-      } catch (err) {
-        if (err instanceof WorkspaceNotFoundError) {
-          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-        }
-        throw err;
-      }
-    }),
 });
 
 export type WorkspaceRouter = typeof workspaceRouter;

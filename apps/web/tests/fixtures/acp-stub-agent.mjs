@@ -22,8 +22,9 @@
  *                             "resume": false, "image": false }.
  *   BAND_TEST_ACP_OPTIONS   JSON overriding the session config options:
  *                           { "models": [{ value, name }], "modes": [...],
- *                             "extra": [{ id, name, options }] }. `extra`
- *                           adds select options after model and mode.
+ *                             "extra": [{ id, name, category?, options }] }.
+ *                           `extra` adds select options after model and
+ *                           mode, settable through set_config_option.
  *   BAND_TEST_ACP_FAIL_START  When set, `initialize` fails with this message.
  *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
  *                           default `echo` and `review` commands, in the
@@ -142,7 +143,11 @@ function configOptions(s) {
   return [
     { id: "model", name: "Model", category: "model", type: "select", currentValue: s.model, options: MODELS },
     { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: MODES },
-    ...EXTRA_OPTIONS.map((o) => ({ type: "select", currentValue: o.options[0]?.value ?? "", ...o })),
+    ...EXTRA_OPTIONS.map((o) => ({
+      type: "select",
+      ...o,
+      currentValue: s.extra?.[o.id] ?? o.options[0]?.value ?? "",
+    })),
   ];
 }
 
@@ -306,11 +311,14 @@ acp
   .onRequest("session/set_config_option", (ctx) => {
     logRequest("session/set_config_option", ctx.params);
     const s = lookup(ctx.params.sessionId);
-    const choices = ctx.params.configId === "model" ? MODELS : ctx.params.configId === "mode" ? MODES : null;
-    if (!s || !choices?.some((c) => c.value === ctx.params.value)) {
-      throw acp.RequestError.invalidParams({ configId: ctx.params.configId, value: ctx.params.value });
+    const { configId, value } = ctx.params;
+    const extra = EXTRA_OPTIONS.find((o) => o.id === configId);
+    const choices = configId === "model" ? MODELS : configId === "mode" ? MODES : extra?.options;
+    if (!s || !choices?.some((c) => c.value === value)) {
+      throw acp.RequestError.invalidParams({ configId, value });
     }
-    s[ctx.params.configId] = ctx.params.value;
+    if (extra) s.extra = { ...s.extra, [configId]: value };
+    else s[configId] = value;
     save(ctx.params.sessionId);
     return { configOptions: configOptions(s) };
   })

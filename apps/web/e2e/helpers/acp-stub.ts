@@ -41,7 +41,7 @@ export interface AcpStubOptions {
   options?: {
     models?: StubChoice[];
     modes?: StubChoice[];
-    extra?: { id: string; name: string; options: StubChoice[] }[];
+    extra?: { id: string; name: string; category?: string; options: StubChoice[] }[];
   };
 }
 

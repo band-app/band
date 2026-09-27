@@ -1,7 +1,7 @@
 // Black-box integration tests for the workspace router's git-side
 // procedures that were lifted out of the legacy inline handler into
 // `WorkspaceService` in issue #535: `workspace.gitPull`, `gitPush`,
-// `gitCommit`, `switchAgent`, plus the no-agent pre-flight branch of
+// `gitCommit`, plus the no-agent pre-flight branch of
 // `generateCommitMessage`.
 //
 // These tests boot the real production server (`dist/start-server.mjs`)
@@ -382,127 +382,6 @@ describe("tRPC — workspace.gitCommit", () => {
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// workspace.switchAgent — wire-contract + state side-effect coverage
-// ---------------------------------------------------------------------------
-
-describe("tRPC — workspace.switchAgent", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-  let workingPath: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome("band-workspace-switch-agent-");
-    const originPath = createBareOrigin(tmpHome, "origin");
-    workingPath = createWorkingClone(tmpHome, "alpha", originPath);
-
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: "alpha",
-          path: workingPath,
-          defaultBranch: "main",
-          worktrees: [{ branch: "main", path: workingPath }],
-        },
-      ],
-    });
-
-    // Seed both agent definitions so the switch has a non-default target
-    // to flip to. `command: "/bin/false"` ensures the agent binary never
-    // actually launches — `switchAgent` invokes `replaceAgent` which
-    // calls into the SDK lazily; the synchronous pool slot update is
-    // what we actually want to observe, and the agent process is torn
-    // down before it runs by the abort + clear-queued-messages calls.
-    seedSettings(tmpHome, {
-      tokenSecret: DEFAULT_TOKEN,
-      defaultCodingAgent: "claude-code",
-      codingAgents: [
-        { id: "claude-code", type: "claude-code", label: "Claude Code", command: "/bin/false" },
-        { id: "codex", type: "codex", label: "Codex", command: "/bin/false" },
-      ],
-    });
-
-    seedGitIdentity(tmpHome);
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns NOT_FOUND (404) for an unknown workspaceId", async () => {
-    // Pinned wire contract: pre-#535 the router threw
-    // TRPCError({ code: "NOT_FOUND" }) for this branch; the refactor
-    // restored it via an explicit catch in workspace/router.ts. This
-    // assertion regresses if the catch is dropped.
-    const res = await trpcMutate(
-      server.url,
-      "workspace.switchAgent",
-      { workspaceId: "nope-main", agentId: "codex" },
-      DEFAULT_TOKEN,
-    );
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 401 without a token", async () => {
-    const res = await fetch(`${server.url}/trpc/workspace.switchAgent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: "alpha-main", agentId: "codex" }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("happy path: switching the agent updates the chat row and bumps the workspace status", async () => {
-    // The router first materialises the default chat via
-    // `chatService.getOrCreateDefault`. We let `switchAgent` itself
-    // do that — it's the same code path the dashboard hits.
-    const res = await trpcMutate(
-      server.url,
-      "workspace.switchAgent",
-      { workspaceId: "alpha-main", agentId: "codex" },
-      DEFAULT_TOKEN,
-    );
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ ok: boolean }>(res);
-    expect(data).toEqual({ ok: true });
-
-    // Side effect 1: the chat row's `agent` field now reflects the
-    // new agent id. Drive `chats.list` via real HTTP — the same
-    // surface the dashboard renders the agent dropdown from.
-    const chatsRes = await fetch(
-      `${server.url}/trpc/chats.list?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: "alpha-main" }),
-      )}`,
-      { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } },
-    );
-    expect(chatsRes.status).toBe(200);
-    const chatsData = await trpcData<{
-      chats: Array<{ id: string; agent: string | null }>;
-    }>(chatsRes);
-    expect(chatsData.chats.length).toBeGreaterThan(0);
-    expect(chatsData.chats[0].agent).toBe("codex");
-
-    // Side effect 2: the workspace_statuses row stores the new
-    // codingAgentId, visible via the per-workspace `statuses.get`.
-    const statusesRes = await fetch(
-      `${server.url}/trpc/statuses.get?input=${encodeURIComponent(
-        JSON.stringify({ workspaceId: "alpha-main" }),
-      )}`,
-      { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } },
-    );
-    expect(statusesRes.status).toBe(200);
-    // `statuses.get` returns the `WorkspaceStatus | null` shape directly,
-    // not wrapped under a `.status` field.
-    const statusData = await trpcData<{
-      workspaceId: string;
-      agent?: { codingAgentId?: string };
-    } | null>(statusesRes);
-    expect(statusData?.agent?.codingAgentId).toBe("codex");
   });
 });
 

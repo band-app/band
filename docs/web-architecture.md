@@ -28,7 +28,7 @@ apps/web/src/server/
       router.ts
     workspaces/               # plural — workspace lifecycle (create/remove/setPinned/runScript/gitPull/gitPush by (project, branch))
       router.ts
-    workspace/                # singular — per-workspace ops (file CRUD, search, diff, gitPull/Push by workspaceId, switchAgent, formatFile, generateCommitMessage, fileChanges)
+    workspace/                # singular — per-workspace ops (file CRUD, search, diff, gitPull/Push by workspaceId, formatFile, generateCommitMessage, fileChanges)
       router.ts
     chats/                    # plural — list/create + per-chat CRUD/send/stop/resume
       router.ts
