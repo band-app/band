@@ -5,7 +5,9 @@
  * key (nested maps, list items, block scalars) belong to the entry above and
  * make its value read-only in the grid; comments and blank lines are kept
  * as they are. Every edit rewrites only the lines of the entry it changes,
- * keeping the key's spacing and the value's quote style.
+ * keeping the key's spacing, the value's quote style and a trailing comment.
+ * A double-quoted value with escapes other than `\\` and `\"` (`\n`,
+ * `\t`, `\u…`) is read-only too, rather than decoded and re-encoded.
  */
 
 export interface FrontmatterEntry {
@@ -17,8 +19,12 @@ export interface FrontmatterEntry {
   /** The value as shown: unquoted, or the continuation lines joined. */
   value: string;
   quote: '"' | "'" | null;
+  /** A trailing ` # comment` after the value, leading space included. */
+  comment: string;
   /** The value spans lines (list, nested map, block scalar). */
   multiline: boolean;
+  /** The grid cannot write the value (multi-line, or escapes it would lose). */
+  readOnly: boolean;
 }
 
 export interface FrontmatterSource {
@@ -29,18 +35,46 @@ export interface FrontmatterSource {
 
 /** `key`, the colon, the spaces after it, and the raw value. */
 const ENTRY_LINE = /^([^\s#:][^:]*?)(\s*:)( *)(.*)$/;
-/** Keys the grid writes: the frontmatter scan only recognises these. */
+/**
+ * Keys the grid writes. The preview only treats a block as frontmatter when
+ * its first entry's key looks like this (`findFrontmatter`).
+ */
 const KEY = /^[\w-]+$/;
+const KEY_LINE = /^[\w-]+\s*:/;
 const BLOCK_SCALAR = /^[|>][-+]?\d*$/;
+const DOUBLE_QUOTED = /^("(?:[^"\\]|\\.)*")(\s+#.*)?$/;
+const SINGLE_QUOTED = /^('(?:[^']|'')*')(\s+#.*)?$/;
 
-function unquote(raw: string): { value: string; quote: '"' | "'" | null } {
-  if (raw.length > 1 && raw.startsWith('"') && raw.endsWith('"')) {
-    return { value: raw.slice(1, -1).replace(/\\(.)/g, "$1"), quote: '"' };
+interface ParsedValue {
+  value: string;
+  quote: '"' | "'" | null;
+  comment: string;
+  /** Escapes the grid would not round-trip. */
+  escaped: boolean;
+}
+
+function parseValue(raw: string): ParsedValue {
+  const double = DOUBLE_QUOTED.exec(raw);
+  if (double) {
+    const inner = double[1].slice(1, -1);
+    const escaped = /\\[^\\"]/.test(inner);
+    const value = escaped ? inner : inner.replace(/\\(["\\])/g, "$1");
+    return { value, quote: '"', comment: double[2] ?? "", escaped };
   }
-  if (raw.length > 1 && raw.startsWith("'") && raw.endsWith("'")) {
-    return { value: raw.slice(1, -1).replace(/''/g, "'"), quote: "'" };
+  const single = SINGLE_QUOTED.exec(raw);
+  if (single) {
+    const value = single[1].slice(1, -1).replace(/''/g, "'");
+    return { value, quote: "'", comment: single[2] ?? "", escaped: false };
   }
-  return { value: raw, quote: null };
+  const hash = /\s#/.exec(raw);
+  return hash
+    ? {
+        value: raw.slice(0, hash.index),
+        quote: null,
+        comment: raw.slice(hash.index),
+        escaped: false,
+      }
+    : { value: raw, quote: null, comment: "", escaped: false };
 }
 
 export function parseFrontmatterBlock(source: string): FrontmatterSource {
@@ -65,6 +99,7 @@ export function parseFrontmatterBlock(source: string): FrontmatterSource {
       if (current) {
         current.end = i;
         current.multiline = true;
+        current.readOnly = true;
         continuation.push(trimmed);
       }
       continue;
@@ -76,14 +111,17 @@ export function parseFrontmatterBlock(source: string): FrontmatterSource {
       continue;
     }
     const raw = m[4].trim();
-    const { value, quote } = unquote(raw);
+    const { value, quote, comment, escaped } = parseValue(raw);
+    const blockScalar = BLOCK_SCALAR.test(value);
     current = {
       line: i,
       end: i,
       key: m[1].trim(),
       value,
       quote,
-      multiline: BLOCK_SCALAR.test(raw),
+      comment,
+      multiline: blockScalar,
+      readOnly: blockScalar || escaped,
     };
     entries.push(current);
   }
@@ -115,19 +153,24 @@ function withLines(fm: FrontmatterSource, from: number, to: number, insert: stri
 export function setKey(fm: FrontmatterSource, index: number, key: string): string | null {
   const entry = fm.entries[index];
   if (!entry || !KEY.test(key)) return null;
+  // A second entry with the same key is not valid YAML.
+  if (fm.entries.some((e, i) => i !== index && e.key === key)) return null;
   const m = ENTRY_LINE.exec(fm.lines[entry.line]);
   if (!m) return null;
   return withLines(fm, entry.line, entry.line + 1, [`${key}${m[2]}${m[3]}${m[4]}`]);
 }
 
-/** Sets entry `index`'s value, keeping its quote style. Null for multi-line values. */
+/**
+ * Sets entry `index`'s value, keeping its quote style and trailing comment.
+ * Null for a read-only value.
+ */
 export function setValue(fm: FrontmatterSource, index: number, text: string): string | null {
   const entry = fm.entries[index];
-  if (!entry || entry.multiline) return null;
+  if (!entry || entry.readOnly) return null;
   const m = ENTRY_LINE.exec(fm.lines[entry.line]);
   if (!m) return null;
   const encoded = encodeValue(text, entry.quote);
-  const line = encoded ? `${m[1]}${m[2]}${m[3] || " "}${encoded}` : `${m[1]}${m[2]}`;
+  const line = `${m[1]}${m[2]}${encoded ? `${m[3] || " "}${encoded}` : ""}${entry.comment}`;
   return withLines(fm, entry.line, entry.line + 1, [line]);
 }
 
@@ -145,9 +188,15 @@ export function insertEntry(fm: FrontmatterSource, index: number): string {
   return withLines(fm, at, at, [`${unusedKey(fm)}:`]);
 }
 
-/** Removes entry `index` with its continuation lines. */
+/**
+ * Removes entry `index` with its continuation lines. Null for the last
+ * entry, and when the block would no longer start with a key line (a comment
+ * or blank line would move up to be its first line) and stop being read as
+ * frontmatter.
+ */
 export function deleteEntry(fm: FrontmatterSource, index: number): string | null {
   const entry = fm.entries[index];
   if (!entry || fm.entries.length <= 1) return null;
-  return withLines(fm, entry.line, entry.end + 1, []);
+  const next = withLines(fm, entry.line, entry.end + 1, []);
+  return KEY_LINE.test(next.split("\n")[1] ?? "") ? next : null;
 }

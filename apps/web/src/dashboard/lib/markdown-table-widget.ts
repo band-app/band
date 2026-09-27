@@ -257,7 +257,7 @@ function frontmatterModel(source: string): GridModel {
     noun: "property",
     text: cell,
     display: (row, col) => [cell(row, col)],
-    canEdit: (row, col) => row > 0 && (col === 0 || !fm.entries[row - 1]?.multiline),
+    canEdit: (row, col) => row > 0 && (col === 0 || fm.entries[row - 1]?.readOnly === false),
     normalize: (typed) => typed.replace(/\r?\n/g, " ").trim(),
     setCell(row, col, typed) {
       const text = typed.replace(/\r?\n/g, " ").trim();
@@ -265,7 +265,7 @@ function frontmatterModel(source: string): GridModel {
     },
     insertRow: (at) => insertEntry(fm, at - 1),
     deleteRow: (row) => deleteEntry(fm, row - 1),
-    canDeleteRow: (row) => row > 0 && fm.entries.length > 1,
+    canDeleteRow: (row) => row > 0 && deleteEntry(fm, row - 1) != null,
     newRowCaret: "all",
     columnOps: null,
     markdown: () =>
@@ -281,7 +281,7 @@ function frontmatterModel(source: string): GridModel {
 function toDelimited(rows: string[][], separator: "," | "\t"): string {
   const field =
     separator === ","
-      ? (text: string) => (/[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text)
+      ? (text: string) => (/[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text)
       : (text: string) => text.replace(/[\t\r\n]+/g, " ");
   return rows.map((row) => row.map(field).join(separator)).join("\n");
 }
@@ -336,9 +336,9 @@ export class TableWidget extends WidgetType {
     editors.set(editor.dom, editor);
     return editor.dom;
   }
-  updateDOM(dom: HTMLElement, _view: EditorView, from: WidgetType): boolean {
+  updateDOM(dom: HTMLElement, _view: EditorView, from: TableWidget): boolean {
     const editor = editors.get(dom);
-    if (!editor || (from as TableWidget).kind !== this.kind) return false;
+    if (!editor || from.kind !== this.kind) return false;
     editor.update(this);
     return true;
   }
@@ -407,6 +407,8 @@ class TableEditor {
   private model: GridModel;
   private menu: { el: HTMLElement; close: () => void } | null = null;
   private pendingFocus: { row: RowIndex; col: number; caret: Caret } | null = null;
+  /** Restores the copy button's icon after the check mark. */
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
   /** The cell elements by row and column, filled by `render`. */
   private cells: HTMLElement[][] = [];
 
@@ -482,6 +484,7 @@ class TableEditor {
 
   destroy(): void {
     this.menu?.close();
+    clearTimeout(this.copiedTimer);
   }
 
   // -------------------------------------------------------------------------
@@ -613,7 +616,8 @@ class TableEditor {
       .then(() => {
         button.innerHTML = CHECK_ICON;
         button.dataset.copied = "true";
-        setTimeout(() => {
+        clearTimeout(this.copiedTimer);
+        this.copiedTimer = setTimeout(() => {
           button.innerHTML = COPY_ICON;
           delete button.dataset.copied;
         }, 2000);
