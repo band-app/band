@@ -188,11 +188,12 @@ function MobileHeaderButton({
     <button
       type="button"
       onClick={onClick}
-      aria-label={label}
+      // The count joins the name so a screen reader hears it too.
+      aria-label={badge ? `${label}, ${badge}` : label}
       aria-pressed={active}
       aria-haspopup="dialog"
       data-testid={testid}
-      className={`relative inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent active:bg-accent ${
+      className={`relative inline-flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent active:bg-accent ${
         active ? "text-foreground" : "text-muted-foreground"
       }`}
     >
@@ -339,6 +340,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
           onClick={() => setPickerOpen(true)}
           aria-haspopup="dialog"
           aria-label="Switch workspace"
+          data-testid="mobile-workspace__switcher"
           className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent active:bg-accent"
         >
           <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>

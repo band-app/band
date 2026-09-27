@@ -36,6 +36,7 @@ import { type BrowserContext, chromium, expect, type Page, test } from "@playwri
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -195,7 +196,7 @@ test.describe("safe-area insets in a home-screen app", () => {
 
     const viewport = await layout.readViewport();
     expect(viewport.standalone).toBe(true);
-    expect(await layout.readStatusBarStyle()).not.toBe("black-translucent");
+    expect(await layout.readStatusBarStyle()).toBe("black");
 
     const header = await layout.readLayout(layout.header);
     expect(header.top).toBe(0);
@@ -339,9 +340,9 @@ test.describe("in a phone browser tab", () => {
     page,
   }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
-    const workspace = new WorkspacePage(page, server.url, TOKEN);
-    await workspace.goto(WORKSPACE);
-    await workspace.waitForMobileReady();
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
 
     await expect(layout.legacyBottomBar).toHaveCount(0);
     const header = await layout.readLayout(layout.header);
@@ -359,10 +360,12 @@ test.describe("in a phone browser tab", () => {
     await layout.openSheet("changes");
     await layout.closeSheet();
     await expect(layout.changesButton).toHaveAttribute("aria-pressed", "false");
+    await expect(chat.promptInput).toBeVisible();
 
     await layout.openSheet("explorer");
     await layout.closeSheet();
     await expect(layout.explorerButton).toHaveAttribute("aria-pressed", "false");
+    await expect(chat.promptInput).toBeVisible();
   });
 
   test("the chat composer fills to the bottom edge and turns off keyboard suggestions", async ({
@@ -377,10 +380,8 @@ test.describe("in a phone browser tab", () => {
     const composer = await layout.readLayout(layout.composer);
     expect(composer.bottom).toBe(viewport.height);
 
-    await expect(chat.promptInput).toHaveAttribute("autocomplete", "off");
-    await expect(chat.promptInput).toHaveAttribute("autocorrect", "off");
-    await expect(chat.promptInput).toHaveAttribute("autocapitalize", "off");
-    await expect(chat.promptInput).toHaveAttribute("spellcheck", "false");
+    await expectNoKeyboardSuggestions(chat.promptInput);
+    await expect(chat.promptForm).toHaveAttribute("autocomplete", "off");
   });
 
   test("the dashboard action bar keeps its gap above the bottom edge", async ({ page }) => {

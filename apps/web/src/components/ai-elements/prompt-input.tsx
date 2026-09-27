@@ -291,6 +291,7 @@ export const PromptInput = ({
       // Keeps iOS AutoFill from offering saved contacts / passwords above the
       // keyboard for the message field.
       autoComplete="off"
+      data-testid="prompt-input__form"
       className={cn(
         "relative flex w-full flex-col rounded-md border-2 border-white/20 bg-muted/50 p-2 shadow-sm",
         isDragging && "border-primary/50 bg-primary/5",

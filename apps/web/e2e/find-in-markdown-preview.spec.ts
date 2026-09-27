@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -26,6 +27,8 @@ import {
   startServer,
 } from "./helpers/server";
 import { FileViewerPage } from "./pages/FileViewerPage";
+import { MobileLayoutPage } from "./pages/MobileLayoutPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 
 // Force the mobile layout (viewport < 1024 px) so the workspace route's
 // `Outlet` mounts `CodeBrowserView` directly via the routed component
@@ -105,16 +108,14 @@ test.afterAll(async () => {
  * the same UI flow a real mobile user would take.
  */
 async function openMarkdownPreview(page: Page): Promise<void> {
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
-
-  // The mobile layout (`MobileWorkspaceLayout`) is ready once its header's
-  // Explorer button renders.
-  const explorer = page.getByTestId("mobile-workspace__header-explorer");
-  await explorer.waitFor({ state: "visible", timeout: 20_000 });
+  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const layout = new MobileLayoutPage(page, server.url, TOKEN);
+  await workspace.goto(workspaceId);
+  await workspace.waitForMobileReady();
 
   // Open the Explorer sheet and tap the markdown file — it opens as a `file`
   // leaf in the center dockview (markdown files default to the rendered preview).
-  await explorer.click();
+  await layout.openSheet("explorer");
   await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
   // The markdown renders into a sticky heading — when it appears, the
@@ -153,6 +154,7 @@ test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", a
   await expect(find.input).toBeVisible();
   await expect(find.input).toBeFocused();
   await expect(find.input).toHaveAttribute("placeholder", "Find in preview...");
+  await expectNoKeyboardSuggestions(find.input);
 
   await find.type("needle");
 

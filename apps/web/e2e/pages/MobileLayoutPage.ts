@@ -69,9 +69,9 @@ export class MobileLayoutPage {
     private readonly token: string,
   ) {
     this.header = page.getByTestId("mobile-workspace__header");
-    this.workspaceSwitcher = this.header.getByRole("button", { name: "Switch workspace" });
-    this.explorerButton = this.header.getByRole("button", { name: "Explorer" });
-    this.changesButton = this.header.getByRole("button", { name: "Changes" });
+    this.workspaceSwitcher = page.getByTestId("mobile-workspace__switcher");
+    this.explorerButton = page.getByTestId("mobile-workspace__header-explorer");
+    this.changesButton = page.getByTestId("mobile-workspace__header-changes");
     this.changesBadge = page.getByTestId("mobile-workspace__header-changes-badge");
     this.main = page.getByTestId("mobile-workspace__main");
     this.legacyBottomBar = page.getByTestId("mobile-workspace__bottom-bar");
