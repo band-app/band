@@ -18,6 +18,7 @@ import {
   useWorkspacePath,
 } from "@/dashboard";
 import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
+import { clientStorage } from "../lib/client-state";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
@@ -43,7 +44,7 @@ function loadActiveTab(): RightTab {
 
 function saveActiveTab(tab: RightTab): void {
   try {
-    localStorage.setItem(TAB_KEY, tab);
+    clientStorage.setItem(TAB_KEY, tab);
   } catch {}
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { clientStorage } from "../../lib/client-state";
 
 // Workspace-scoped so the Changes sidepanel, the diff leaves and the
 // Changes-tab badge always read the same target — see issue #396 ("Changes
@@ -41,9 +42,9 @@ function readStoredCompareBranch(workspaceId: string): string | null {
 function writeCompareBranch(workspaceId: string, branch: string | null) {
   try {
     if (branch) {
-      localStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId, branch);
+      clientStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId, branch);
     } else {
-      localStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
+      clientStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
     }
   } catch {}
 }
@@ -87,8 +88,9 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   }, [workspaceId]);
 
   // Same-window broadcast: when another subscriber changes the target, mirror
-  // it locally so React re-renders. Cross-window `storage` events are
-  // intentionally ignored — Band is single-window.
+  // it locally so React re-renders. The `storage` event carries a pick made on
+  // another device: the client-state sync writes it into localStorage and
+  // dispatches one (see `lib/client-state.ts`).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<DiffTargetChangeDetail>).detail;
@@ -96,8 +98,16 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
       if (detail.source && detail.source === instanceId) return;
       setCompareBranchState(detail.compareBranch);
     };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== COMPARE_BRANCH_KEY_PREFIX + workspaceId) return;
+      setCompareBranchState(e.newValue);
+    };
     window.addEventListener(CHANGE_EVENT, handler);
-    return () => window.removeEventListener(CHANGE_EVENT, handler);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, handler);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [workspaceId, instanceId]);
 
   const setCompareBranch = useCallback(

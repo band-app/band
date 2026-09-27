@@ -1,3 +1,5 @@
+import { clientStorage } from "./client-state";
+
 const ZOOM_LEVEL_KEY = "band:zoom-level";
 
 export const DEFAULT_ZOOM = 1.0;
@@ -42,7 +44,7 @@ export function saveZoomLevel(level: number): void {
   const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
   const rounded = Math.round(clamped * 100) / 100;
   try {
-    localStorage.setItem(ZOOM_LEVEL_KEY, String(rounded));
+    clientStorage.setItem(ZOOM_LEVEL_KEY, String(rounded));
   } catch {}
 }
 

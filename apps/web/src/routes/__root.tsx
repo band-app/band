@@ -8,7 +8,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resizable-panels";
 import {
   DashboardProvider,
@@ -39,6 +39,7 @@ import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
 import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
+import { hydrateGlobal, startClientStateSync } from "../lib/client-state";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
@@ -311,6 +312,29 @@ function ZoomSync() {
   }, []);
 
   return null;
+}
+
+/**
+ * Renders its children once the server-kept client state (panel widths,
+ * collapsed projects, …) is in localStorage, so the shell mounts with this
+ * device's saved layout instead of a stale local copy. Gives up waiting
+ * after `HYDRATE_WAIT_MS` so an offline load still renders from
+ * localStorage. Server-side it renders nothing: the state lives in the
+ * browser.
+ */
+function ClientStateGate({ children }: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    startClientStateSync((handler) => adapter.subscribeStatusEvents(handler));
+    let cancelled = false;
+    void hydrateGlobal().then(() => {
+      if (!cancelled) setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return ready ? children : null;
 }
 
 function AppShell() {
@@ -933,7 +957,9 @@ function RootLayout() {
           <ZoomSync />
           <ReloadSync />
           <TooltipProvider>
-            <AppShell />
+            <ClientStateGate>
+              <AppShell />
+            </ClientStateGate>
             <UpdateToast />
             <ReinstallHomeScreenNotice />
           </TooltipProvider>

@@ -11,6 +11,7 @@ import type {
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
+import { clientStorage } from "../../lib/client-state";
 
 let fileIdCounter = 0;
 
@@ -63,13 +64,24 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
   chatId?: string;
 };
 
+/**
+ * The draft is kept on the server with the other client state, so a message
+ * started on the phone is there on the desktop. Drafts used to live in
+ * sessionStorage; one found there moves over on first read.
+ */
 function readDraft(key: string | null): string {
   if (!key) return "";
+  const draft = clientStorage.getItem(key);
+  if (draft) return draft;
   try {
-    return sessionStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
+    const legacy = sessionStorage.getItem(key);
+    if (legacy) {
+      sessionStorage.removeItem(key);
+      clientStorage.setItem(key, legacy);
+      return legacy;
+    }
+  } catch {}
+  return "";
 }
 
 export const PromptInput = ({
@@ -165,7 +177,7 @@ export const PromptInput = ({
       setHasText(false);
       setInputValue("");
       setCommandHint(null);
-      if (draftStorageKey) sessionStorage.removeItem(draftStorageKey);
+      if (draftStorageKey) clientStorage.removeItem(draftStorageKey);
     },
     [onSubmit, fileEntries, draftStorageKey],
   );
@@ -210,9 +222,9 @@ export const PromptInput = ({
       setHasText(value.trim().length > 0);
       if (draftStorageKey) {
         if (value) {
-          sessionStorage.setItem(draftStorageKey, value);
+          clientStorage.setItem(draftStorageKey, value);
         } else {
-          sessionStorage.removeItem(draftStorageKey);
+          clientStorage.removeItem(draftStorageKey);
         }
       }
     },

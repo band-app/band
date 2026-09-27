@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { clientStorage } from "../../lib/client-state";
 
 /**
  * Per-label "last selected workspace" memory.
@@ -57,7 +58,7 @@ function write(value: Record<string, string>): void {
   // rather than read back from storage on each event, so the
   // trade-off there doesn't apply.
   try {
-    window.localStorage.setItem(LABEL_LAST_WORKSPACE_KEY, JSON.stringify(value));
+    clientStorage.setItem(LABEL_LAST_WORKSPACE_KEY, JSON.stringify(value));
     window.dispatchEvent(new CustomEvent(SYNC_EVENT));
   } catch {
     // localStorage full or unavailable — ignore, and skip the dispatch.

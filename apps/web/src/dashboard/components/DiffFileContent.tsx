@@ -2,6 +2,7 @@ import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { Compartment, EditorState, type Extension, RangeSetBuilder, Text } from "@codemirror/state";
 import { Decoration, EditorView, lineNumbers, WidgetType } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import { clientStorage } from "../../lib/client-state";
 import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
@@ -23,7 +24,7 @@ export function getStoredViewMode(): ViewMode {
 /** Persist the split/unified diff preference. */
 export function storeViewMode(mode: ViewMode) {
   try {
-    localStorage.setItem(VIEW_MODE_KEY, mode);
+    clientStorage.setItem(VIEW_MODE_KEY, mode);
   } catch {}
 }
 

@@ -122,6 +122,52 @@ export class WorkspacePage {
     });
   }
 
+  /** A value the server keeps for the dashboard (`clientState.list`): the
+   *  entry for `key` visible to `deviceType`, or null when nothing is stored.
+   *  `workspaceId` is null for a global key. Lets a test wait until one
+   *  device's write reached the server before another device loads. */
+  async readServerClientState(
+    workspaceId: string | null,
+    key: string,
+    deviceType: "desktop" | "mobile" = "desktop",
+  ): Promise<unknown> {
+    const res = await this.page.request.get(
+      `${this.baseUrl}/trpc/clientState.list?input=${encodeURIComponent(
+        JSON.stringify({ workspaceId, deviceType }),
+      )}`,
+      { headers: { Cookie: `band_token=${this.token}` } },
+    );
+    if (!res.ok()) throw new Error(`clientState.list failed: ${res.status()} ${await res.text()}`);
+    const body = (await res.json()) as {
+      result: { data: { entries: { key: string; value: unknown }[] } };
+    };
+    return body.result.data.entries.find((e) => e.key === key)?.value ?? null;
+  }
+
+  /** The active tab id of the center tab list the server shares between
+   *  devices (`band:center-tabs:<ws>`), or null when nothing is stored yet. */
+  async readSharedActiveTab(workspaceId: string): Promise<string | null> {
+    const value = (await this.readServerClientState(
+      workspaceId,
+      `band:center-tabs:${workspaceId}`,
+    )) as { active?: string } | null;
+    return value?.active ?? null;
+  }
+
+  /** Put values in localStorage before the app loads, the way a browser that
+   *  used Band before its UI state moved to the server has them. Must run
+   *  BEFORE `goto`; applies to every later navigation of this page. */
+  async seedLocalStorageBeforeLoad(entries: Record<string, string>): Promise<void> {
+    await this.page.addInitScript((values) => {
+      for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
+    }, entries);
+  }
+
+  /** A raw localStorage value in this page's browser context. */
+  async readLocalStorageItem(key: string): Promise<string | null> {
+    return await this.page.evaluate((k) => localStorage.getItem(k), key);
+  }
+
   /** Locate the mounted entry div for the given workspaceId (issue #508).
    *  The single `MultiWorkspacePanelHost` renders exactly one of these per
    *  mounted workspace; tests assert on their presence / absence to verify

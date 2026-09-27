@@ -48,6 +48,7 @@ import { browsersRouter } from "./browsers/router";
 import { chatRouter } from "./chat/router";
 import { chatsRouter } from "./chats/router";
 import { cliRouter } from "./cli/router";
+import { clientStateRouter } from "./client-state/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { historyRouter } from "./history/router";
@@ -82,6 +83,7 @@ export const appRouter = t.router({
   browsers: browsersRouter,
   browserProfiles: browserProfilesRouter,
   panelFocus: panelFocusRouter,
+  clientState: clientStateRouter,
   tasks: tasksRouter,
   sessions: sessionsRouter,
   ...terminalsRouters,

@@ -36,6 +36,7 @@ import { agentSessionRegistry } from "./agent-session-registry-service";
 import { agentSessionService } from "./agent-session-service";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
+import { clientStateService } from "./client-state-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `workspaceService` from this
 // file (see the cycle note on the import block above). Same live-
@@ -743,6 +744,9 @@ export class WorkspaceService {
 
     // Drop the last-focused-panel record so it doesn't outlive the workspace.
     panelFocusService.remove(workspaceId);
+
+    // Drop the workspace's shared UI state (center tabs, drafts, splits).
+    clientStateService.removeAllForWorkspace(workspaceId);
 
     // Kill any running language server processes
     killWorkspaceServers(workspaceId);

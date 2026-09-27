@@ -1,4 +1,12 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
@@ -311,5 +319,28 @@ export const agentSessions = sqliteTable(
     index("agent_sessions_workspace_idx").on(t.workspaceId),
     index("agent_sessions_chat_idx").on(t.chatId),
     index("agent_sessions_terminal_idx").on(t.terminalId),
+  ],
+);
+
+// Client state: small UI state the dashboard keeps on the server so every
+// device shows the same thing (open center tabs, panel widths, drafts, …).
+// `scope` is `all` for one value on every device, or `desktop` / `mobile` for
+// a value per device type. `value` is JSON, NULL once the key is deleted: the
+// row stays as a tombstone so its version keeps counting and a stale client
+// can't recreate the key. `workspace_id` is null for a global key; the
+// workspace delete path removes a workspace's rows.
+export const clientState = sqliteTable(
+  "client_state",
+  {
+    key: text("key").notNull(),
+    scope: text("scope", { enum: ["all", "desktop", "mobile"] }).notNull(),
+    workspaceId: text("workspace_id"),
+    value: text("value"),
+    version: integer("version").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.key, t.scope] }),
+    index("client_state_workspace_idx").on(t.workspaceId),
   ],
 );
