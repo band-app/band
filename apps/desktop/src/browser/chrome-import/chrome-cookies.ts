@@ -9,17 +9,14 @@
  * cookie's `host_key`. It is checked and stripped here, which also rejects a
  * wrong key whose output happens to have valid padding.
  *
- * Chrome holds its DB open and writes through a WAL, so the DB and its WAL
- * are copied into a private temp dir (mode 0700) and read from there. The
- * copy is deleted before this module returns.
+ * The DB is read from a private copy (`snapshot.ts`), because Chrome holds
+ * it open and writes through a WAL.
  *
  * Cookie values are secrets: nothing here logs them.
  */
 
 import { createDecipheriv, createHash, pbkdf2Sync } from "node:crypto";
-import { chmod, copyFile, mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { withDbSnapshot } from "./snapshot.js";
 
 export type CookieSameSite = "unspecified" | "no_restriction" | "lax" | "strict";
 
@@ -139,37 +136,6 @@ interface CookieRow {
 }
 
 /**
- * Copy a live cookie DB (plus its WAL / rollback journal) into a fresh
- * private temp dir and return the copy's path and a cleanup function.
- * Async so a multi-MB copy doesn't stall the Electron main process.
- */
-async function snapshotCookieDb(
-  cookiesPath: string,
-): Promise<{ dbPath: string; cleanup: () => Promise<void> }> {
-  const dir = await mkdtemp(join(tmpdir(), "band-chrome-cookies-"));
-  const cleanup = () => rm(dir, { recursive: true, force: true, maxRetries: 3 });
-  try {
-    const dbPath = join(dir, "Cookies");
-    // The copies are owner-only whatever the source's mode.
-    await copyFile(cookiesPath, dbPath);
-    await chmod(dbPath, 0o600);
-    for (const suffix of ["-wal", "-journal"]) {
-      const exists = await stat(cookiesPath + suffix).then(
-        () => true,
-        () => false,
-      );
-      if (!exists) continue;
-      await copyFile(cookiesPath + suffix, dbPath + suffix);
-      await chmod(dbPath + suffix, 0o600);
-    }
-    return { dbPath, cleanup };
-  } catch (err) {
-    await cleanup();
-    throw err;
-  }
-}
-
-/**
  * Read every cookie from a Chrome cookie DB and decrypt it.
  *
  * `getPassword` is only called when at least one row is encrypted, so the
@@ -180,38 +146,25 @@ export async function readChromeCookies(
   getPassword: () => Promise<string>,
   now: number = Date.now(),
 ): Promise<ChromeCookieReadResult> {
-  // Loaded here, not at module top: this module is imported at main-process
-  // boot, and a failure to load `node:sqlite` must only fail the import.
-  const { DatabaseSync } = await import("node:sqlite");
-  const { dbPath, cleanup } = await snapshotCookieDb(cookiesPath);
-  let rows: CookieRow[];
-  let dbVersion = 0;
-  try {
-    // Read-write on purpose: the copy is private, and SQLite needs to write
-    // a `-shm` file to open a WAL-mode DB.
-    const db = new DatabaseSync(dbPath, { readBigInts: true });
-    try {
-      const meta = db.prepare("SELECT value FROM meta WHERE key = 'version'").get() as
-        | { value: string }
-        | undefined;
-      dbVersion = Number(meta?.value ?? 0);
-      const columns = new Set(
-        (db.prepare("PRAGMA table_info(cookies)").all() as { name: string }[]).map((c) => c.name),
-      );
-      const partitionColumn = columns.has("top_frame_site_key") ? ", top_frame_site_key" : "";
-      rows = db
+  const { rows, dbVersion } = await withDbSnapshot(cookiesPath, (db) => {
+    const meta = db.prepare("SELECT value FROM meta WHERE key = 'version'").get() as
+      | { value: string }
+      | undefined;
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(cookies)").all() as { name: string }[]).map((c) => c.name),
+    );
+    const partitionColumn = columns.has("top_frame_site_key") ? ", top_frame_site_key" : "";
+    return {
+      dbVersion: Number(meta?.value ?? 0),
+      rows: db
         .prepare(
           `SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure,
                   is_httponly, samesite${partitionColumn}
              FROM cookies ORDER BY rowid`,
         )
-        .all() as unknown as CookieRow[];
-    } finally {
-      db.close();
-    }
-  } finally {
-    await cleanup();
-  }
+        .all() as unknown as CookieRow[],
+    };
+  });
 
   const result: ChromeCookieReadResult = {
     cookies: [],

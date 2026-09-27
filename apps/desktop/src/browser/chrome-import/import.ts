@@ -1,10 +1,15 @@
 /**
- * Import a Chrome profile's cookies into a Band browser profile's session.
+ * Import a Chrome profile's cookies and browsing history.
  *
- * The renderer only calls this after the user agreed to let Band read
- * Chrome data. Cookies go straight from Chrome's DB into the Electron
+ * The renderer only calls this after the user picked what to import in the
+ * import dialog. Cookies go straight from Chrome's DB into the Electron
  * session partition; they are not returned over IPC, sent to the web
- * server, or logged. The IPC result carries counts only.
+ * server, or logged, and the IPC result carries their counts only. History
+ * entries are returned to the renderer, which stores them in the web
+ * server's per-workspace history (where Band's own browsing is recorded).
+ *
+ * Every selected DB is read before anything is written, so a locked or
+ * unreadable DB fails the whole import instead of leaving half of it done.
  */
 
 import { join } from "node:path";
@@ -15,13 +20,16 @@ import {
   retireProfile,
   sessionForProfile,
 } from "../profiles.js";
-import { readChromeCookies } from "./chrome-cookies.js";
+import { type ChromeCookieReadResult, readChromeCookies } from "./chrome-cookies.js";
+import { type ChromeHistoryEntry, readChromeHistory } from "./chrome-history.js";
 import {
   type ChromeProfile,
   chromeUserDataDir,
+  isChromeRunning,
   isSafeProfileDirectory,
   listChromeProfiles,
   resolveCookiesPath,
+  resolveHistoryPath,
 } from "./chrome-profiles.js";
 import { getChromeSafeStoragePassword } from "./keychain.js";
 
@@ -33,17 +41,21 @@ const SET_CONCURRENCY = 32;
 export interface ChromeProfilesResult {
   /** False on platforms Band can't import from (only macOS is supported). */
   supported: boolean;
+  /** Chrome is open, so its DBs may be mid-write. The dialog asks the user to quit it. */
+  running: boolean;
   profiles: ChromeProfile[];
 }
 
 export interface ChromeImportArgs {
-  /** Band profile to import into. */
+  /** Band profile to import cookies into. Ignored when `cookies` is false. */
   profileId: string;
   /** Chrome profile directory, as returned by `listChromeImportProfiles`. */
   chromeProfileDirectory: string;
+  cookies: boolean;
+  history: boolean;
 }
 
-export interface ChromeImportSummary {
+export interface ChromeCookieSummary {
   imported: number;
   /** Cookies Chromium refused (e.g. a value with non-ASCII bytes). */
   rejected: number;
@@ -54,37 +66,97 @@ export interface ChromeImportSummary {
   total: number;
 }
 
-export async function listChromeImportProfiles(): Promise<ChromeProfilesResult> {
-  if (process.platform !== "darwin") return { supported: false, profiles: [] };
-  return { supported: true, profiles: await listChromeProfiles(chromeUserDataDir()) };
+export interface ChromeImportResult {
+  /** `null` when cookies weren't selected. */
+  cookies: ChromeCookieSummary | null;
+  /** `null` when history wasn't selected. */
+  history: ChromeHistoryEntry[] | null;
 }
 
-export async function importChromeProfile(args: ChromeImportArgs): Promise<ChromeImportSummary> {
+export async function listChromeImportProfiles(): Promise<ChromeProfilesResult> {
+  if (process.platform !== "darwin") return { supported: false, running: false, profiles: [] };
+  const userDataDir = chromeUserDataDir();
+  const [running, profiles] = await Promise.all([
+    isChromeRunning(userDataDir),
+    listChromeProfiles(userDataDir),
+  ]);
+  return { supported: true, running, profiles };
+}
+
+/** Polled by the import dialog so its "close Chrome" hint goes away once Chrome quits. */
+export async function chromeRunningStatus(): Promise<{ running: boolean }> {
+  if (process.platform !== "darwin") return { running: false };
+  return { running: await isChromeRunning(chromeUserDataDir()) };
+}
+
+/** Errors whose message is already written for the user. */
+function isUserFacing(err: unknown): err is Error {
+  return (
+    err instanceof Error &&
+    (err.name === "KeychainAccessError" || err.name === "ChromeDataLockedError")
+  );
+}
+
+async function readOrExplain<T>(what: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    if (isUserFacing(err)) throw err;
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      `reading Chrome ${what} failed`,
+    );
+    throw new Error(`Could not read Chrome's ${what}. Quit Google Chrome and try again.`);
+  }
+}
+
+export async function importChromeProfile(args: ChromeImportArgs): Promise<ChromeImportResult> {
   if (process.platform !== "darwin") {
     throw new Error("Importing Chrome profiles is only supported on macOS.");
   }
-  if (!isValidProfileId(args.profileId)) throw new Error("Invalid browser profile id");
+  if (!args.cookies && !args.history) throw new Error("Choose something to import.");
+  if (args.cookies && !isValidProfileId(args.profileId)) {
+    throw new Error("Invalid browser profile id");
+  }
   if (!isSafeProfileDirectory(args.chromeProfileDirectory)) {
     throw new Error("Invalid Chrome profile");
   }
-  const cookiesPath = await resolveCookiesPath(
-    join(chromeUserDataDir(), args.chromeProfileDirectory),
-  );
-  if (!cookiesPath) throw new Error("This Chrome profile has no cookies to import.");
+  const profileDir = join(chromeUserDataDir(), args.chromeProfileDirectory);
 
-  let read: Awaited<ReturnType<typeof readChromeCookies>>;
-  try {
-    read = await readChromeCookies(cookiesPath, getChromeSafeStoragePassword);
-  } catch (err) {
-    if (err instanceof Error && err.name === "KeychainAccessError") throw err;
-    log.warn(
-      { profileId: args.profileId, err: err instanceof Error ? err.message : String(err) },
-      "reading Chrome cookie DB failed",
+  // Read everything first. Nothing is written until every read succeeded.
+  let cookies: ChromeCookieReadResult | null = null;
+  if (args.cookies) {
+    const cookiesPath = await resolveCookiesPath(profileDir);
+    if (!cookiesPath) throw new Error("This Chrome profile has no cookies to import.");
+    cookies = await readOrExplain("cookies", () =>
+      readChromeCookies(cookiesPath, getChromeSafeStoragePassword),
     );
-    throw new Error("Could not read Chrome's cookies. Quit Chrome and try again.");
+  }
+  let history: ChromeHistoryEntry[] | null = null;
+  if (args.history) {
+    const historyPath = await resolveHistoryPath(profileDir);
+    if (!historyPath) throw new Error("This Chrome profile has no browsing history to import.");
+    history = await readOrExplain("browsing history", () => readChromeHistory(historyPath));
   }
 
-  const sess = sessionForProfile(args.profileId);
+  const summary = cookies ? await writeCookies(args.profileId, cookies) : null;
+  // Counts only. Never names, domains, URLs or values.
+  log.info(
+    {
+      profileId: args.cookies ? args.profileId : null,
+      ...summary,
+      historyEntries: history?.length,
+    },
+    "imported Chrome profile data",
+  );
+  return { cookies: summary, history };
+}
+
+async function writeCookies(
+  profileId: string,
+  read: ChromeCookieReadResult,
+): Promise<ChromeCookieSummary> {
+  const sess = sessionForProfile(profileId);
   let imported = 0;
   let rejected = 0;
   for (let i = 0; i < read.cookies.length; i += SET_CONCURRENCY) {
@@ -96,8 +168,7 @@ export async function importChromeProfile(args: ChromeImportArgs): Promise<Chrom
     }
   }
   await sess.cookies.flushStore();
-
-  const summary: ChromeImportSummary = {
+  return {
     imported,
     rejected,
     skippedGoogle: read.skippedGoogle,
@@ -106,9 +177,6 @@ export async function importChromeProfile(args: ChromeImportArgs): Promise<Chrom
     undecryptable: read.undecryptable,
     total: read.total,
   };
-  // Counts only. Never names, domains or values.
-  log.info({ profileId: args.profileId, ...summary }, "imported Chrome cookies");
-  return summary;
 }
 
 /**

@@ -13,6 +13,8 @@ import { publicProcedure, t } from "../trpc";
  *   - `useBrowserPaneControls` — calls `search` to drive address-bar
  *     autocomplete.
  *   - `HistoryPopover` — calls `list` / `search` / `delete` / `clear`.
+ *   - `ChromeImportDialog` — calls `import` with the history the desktop
+ *     app read from a Chrome profile.
  *
  * Visits are upserted on (workspaceId, url) — see the dedupe / frecency
  * rules in `infra/db/queries/browser-history.ts`. The router goes
@@ -31,6 +33,15 @@ const clearRangeSchema = z.enum(["hour", "day", "week", "all"]);
 // renderer inflating the DB with megabyte-sized `data:` URIs.
 const MAX_URL_LENGTH = 2048;
 const MAX_TITLE_LENGTH = 1024;
+// The desktop app reads at most this many URLs from a Chrome profile
+// (`HISTORY_IMPORT_LIMIT` in `chrome-history.ts`).
+const MAX_IMPORT_ENTRIES = 5000;
+
+const importedUrlSchema = z
+  .string()
+  .min(1)
+  .max(MAX_URL_LENGTH)
+  .refine((val) => /^https?:\/\//i.test(val), { message: "url must be a http(s) URL" });
 
 // Whitelist of URL schemes accepted for `faviconUrl`. The rendered
 // `<img src={faviconUrl}>` in `HistoryPopover` /
@@ -137,6 +148,27 @@ export const historyRouter = t.router({
     .mutation(({ input }) => {
       browserHistoryService.deleteHistoryEntry(input.id, input.workspaceId);
       return { ok: true };
+    }),
+
+  import: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        entries: z
+          .array(
+            z.object({
+              url: importedUrlSchema,
+              title: z.string().max(MAX_TITLE_LENGTH).nullable(),
+              visitCount: z.number().int().positive(),
+              lastVisitedAt: z.number().int().nonnegative(),
+            }),
+          )
+          .max(MAX_IMPORT_ENTRIES),
+      }),
+    )
+    .mutation(({ input }) => {
+      const imported = browserHistoryService.importVisits(input.workspaceId, input.entries);
+      return { imported };
     }),
 
   clear: publicProcedure

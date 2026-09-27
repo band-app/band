@@ -100,6 +100,61 @@ export function recordVisit(input: RecordVisitInput): boolean {
   return true;
 }
 
+export interface ImportedVisit {
+  url: string;
+  title: string | null;
+  visitCount: number;
+  lastVisitedAt: number;
+}
+
+/** Guessed favicon for an imported row, the same one `BrowserPanel` records. */
+function faviconFor(url: string): string | null {
+  try {
+    const { protocol, origin } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? `${origin}/favicon.ico` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge visits imported from another browser into a workspace's history,
+ * in one transaction. A URL already in the history keeps the larger visit
+ * count and the later visit time, and keeps its own title when it has
+ * one, so importing the same profile twice changes nothing.
+ *
+ * Returns how many visits were accepted (after `shouldRecord`).
+ */
+export function importVisits(workspaceId: string, visits: ImportedVisit[]): number {
+  const accepted = visits.filter((v) => shouldRecord(v.url));
+  if (accepted.length === 0) return 0;
+  const db = getDb();
+  db.transaction((tx) => {
+    for (const v of accepted) {
+      tx.insert(browserHistory)
+        .values({
+          workspaceId,
+          url: v.url,
+          title: v.title,
+          faviconUrl: faviconFor(v.url),
+          lastVisitedAt: v.lastVisitedAt,
+          visitCount: v.visitCount,
+        })
+        .onConflictDoUpdate({
+          target: [browserHistory.workspaceId, browserHistory.url],
+          set: {
+            lastVisitedAt: sql`MAX(${browserHistory.lastVisitedAt}, ${v.lastVisitedAt})`,
+            visitCount: sql`MAX(${browserHistory.visitCount}, ${v.visitCount})`,
+            title: sql`COALESCE(${browserHistory.title}, ${v.title})`,
+            faviconUrl: sql`COALESCE(${browserHistory.faviconUrl}, ${faviconFor(v.url)})`,
+          },
+        })
+        .run();
+    }
+  });
+  return accepted.length;
+}
+
 export interface UpdateMetaInput {
   workspaceId: string;
   url: string;

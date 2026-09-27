@@ -1,8 +1,9 @@
 /**
- * Chrome profile discovery and cookie decryption against a real on-disk
- * Chrome layout: a temp user-data dir with a `Local State` file and a
- * SQLite `Cookies` DB (Chrome's schema) whose values are encrypted the way
- * Chrome encrypts them on macOS. No mocks. The Keychain lookup is the only
+ * Chrome profile discovery, cookie decryption and history reading against a
+ * real on-disk Chrome layout: a temp user-data dir with a `Local State`
+ * file, a `SingletonLock` symlink, a SQLite `Cookies` DB (Chrome's schema)
+ * whose values are encrypted the way Chrome encrypts them on macOS, and a
+ * SQLite `History` DB. No mocks. The Keychain lookup is the only
  * thing replaced, by passing a known password to `readChromeCookies`,
  * because the real call needs an interactive macOS dialog.
  *
@@ -12,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, pbkdf2Sync } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -21,7 +22,12 @@ import {
   chromeTimeToUnixSeconds,
   readChromeCookies,
 } from "../src/browser/chrome-import/chrome-cookies.ts";
-import { listChromeProfiles } from "../src/browser/chrome-import/chrome-profiles.ts";
+import { readChromeHistory } from "../src/browser/chrome-import/chrome-history.ts";
+import {
+  isChromeRunning,
+  listChromeProfiles,
+} from "../src/browser/chrome-import/chrome-profiles.ts";
+import { ChromeDataLockedError } from "../src/browser/chrome-import/snapshot.ts";
 
 const PASSWORD = "test-safe-storage-password";
 const CHROME_EPOCH_OFFSET_S = 11644473600;
@@ -90,6 +96,31 @@ function writeCookieDb(path: string, version: number, rows: Row[]) {
   db.close();
 }
 
+interface UrlRow {
+  url: string;
+  title?: string;
+  visitCount?: number;
+  lastVisit: bigint;
+  hidden?: boolean;
+}
+
+/** Create a history DB with Chrome's `urls` table. */
+function writeHistoryDb(path: string, rows: UrlRow[]) {
+  const db = new DatabaseSync(path);
+  db.exec(`
+    CREATE TABLE urls (id INTEGER PRIMARY KEY AUTOINCREMENT, url LONGVARCHAR, title LONGVARCHAR,
+      visit_count INTEGER DEFAULT 0 NOT NULL, typed_count INTEGER DEFAULT 0 NOT NULL,
+      last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL);
+  `);
+  const insert = db.prepare(
+    "INSERT INTO urls (url, title, visit_count, last_visit_time, hidden) VALUES (?, ?, ?, ?, ?)",
+  );
+  for (const r of rows) {
+    insert.run(r.url, r.title ?? "", r.visitCount ?? 1, r.lastVisit, r.hidden ? 1 : 0);
+  }
+  db.close();
+}
+
 describe("Chrome cookie import", () => {
   let userDataDir: string;
   const inOneYear = Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
@@ -104,6 +135,7 @@ describe("Chrome cookie import", () => {
             Default: { name: "Personal" },
             "Profile 1": { name: "Work" },
             "Profile 2": { name: "Never opened" },
+            "Profile 3": { name: "History only" },
             "../escape": { name: "Evil" },
           },
         },
@@ -156,16 +188,20 @@ describe("Chrome cookie import", () => {
     ]);
     // "Profile 2" has no cookie DB at all.
     mkdirSync(join(userDataDir, "Profile 2"), { recursive: true });
+    // "Profile 3" has browsing history but no cookie DB.
+    mkdirSync(join(userDataDir, "Profile 3"), { recursive: true });
+    writeHistoryDb(join(userDataDir, "Profile 3", "History"), []);
   });
 
   after(() => {
     rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  it("lists only profiles with a cookie DB and a safe directory name", async () => {
+  it("lists only profiles with a cookie or history DB and a safe directory name", async () => {
     assert.deepEqual(await listChromeProfiles(userDataDir), [
       { directory: "Default", name: "Personal" },
       { directory: "Profile 1", name: "Work" },
+      { directory: "Profile 3", name: "History only" },
     ]);
   });
 
@@ -263,5 +299,137 @@ describe("Chrome cookie import", () => {
   it("converts Chrome timestamps to Unix seconds", () => {
     assert.equal(chromeTimeToUnixSeconds(0n), 0);
     assert.equal(chromeTimeToUnixSeconds(chromeTime(1_700_000_000)), 1_700_000_000);
+  });
+});
+
+describe("Chrome history import", () => {
+  let dir: string;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "band-chrome-history-test-"));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads visible http(s) URLs, newest first", async () => {
+    const path = join(dir, "History");
+    writeHistoryDb(path, [
+      {
+        url: "https://older.example/",
+        title: "Older",
+        visitCount: 3,
+        lastVisit: chromeTime(1_700_000_000),
+      },
+      {
+        url: "http://newer.example/path?q=1",
+        title: "Newer",
+        visitCount: 9,
+        lastVisit: chromeTime(1_700_000_500),
+      },
+      { url: "https://untitled.example/", lastVisit: chromeTime(1_700_000_100) },
+      { url: "https://subframe.example/", hidden: true, lastVisit: chromeTime(1_700_000_900) },
+      { url: "chrome://settings/", lastVisit: chromeTime(1_700_000_900) },
+      { url: "file:///Users/someone/notes.txt", lastVisit: chromeTime(1_700_000_900) },
+      { url: "https://never-visited.example/", lastVisit: 0n },
+      { url: `https://long.example/${"a".repeat(2100)}`, lastVisit: chromeTime(1_700_000_900) },
+      {
+        url: "https://long-title.example/",
+        title: "t".repeat(1500),
+        lastVisit: chromeTime(1_699_000_000),
+      },
+    ]);
+
+    assert.deepEqual(await readChromeHistory(path), [
+      {
+        url: "http://newer.example/path?q=1",
+        title: "Newer",
+        visitCount: 9,
+        lastVisitedAt: 1_700_000_500_000,
+      },
+      {
+        url: "https://untitled.example/",
+        title: null,
+        visitCount: 1,
+        lastVisitedAt: 1_700_000_100_000,
+      },
+      {
+        url: "https://older.example/",
+        title: "Older",
+        visitCount: 3,
+        lastVisitedAt: 1_700_000_000_000,
+      },
+      {
+        url: "https://long-title.example/",
+        title: "t".repeat(1024),
+        visitCount: 1,
+        lastVisitedAt: 1_699_000_000_000,
+      },
+    ]);
+  });
+
+  it("keeps only the most recent URLs up to the limit", async () => {
+    const path = join(dir, "History-limit");
+    writeHistoryDb(
+      path,
+      Array.from({ length: 5 }, (_, i) => ({
+        url: `https://site-${i}.example/`,
+        lastVisit: chromeTime(1_700_000_000 + i),
+      })),
+    );
+    const entries = await readChromeHistory(path, 2);
+    assert.deepEqual(
+      entries.map((e) => e.url),
+      ["https://site-4.example/", "https://site-3.example/"],
+    );
+  });
+
+  it("reports a torn or locked DB as ChromeDataLockedError", async () => {
+    // What a copy taken mid-write can look like: not a readable SQLite file.
+    const historyPath = join(dir, "History-torn");
+    writeFileSync(historyPath, Buffer.alloc(8192, 0x5a));
+    await assert.rejects(readChromeHistory(historyPath), ChromeDataLockedError);
+
+    const cookiesPath = join(dir, "Cookies-torn");
+    writeFileSync(cookiesPath, Buffer.alloc(8192, 0x5a));
+    await assert.rejects(
+      readChromeCookies(cookiesPath, async () => PASSWORD),
+      ChromeDataLockedError,
+    );
+  });
+});
+
+describe("Chrome running check", () => {
+  let dir: string;
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), "band-chrome-running-test-"));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function userDataDirWithLock(name: string, target: string | null): string {
+    const userDataDir = join(dir, name);
+    mkdirSync(userDataDir);
+    if (target !== null) symlinkSync(target, join(userDataDir, "SingletonLock"));
+    return userDataDir;
+  }
+
+  it("is true while the SingletonLock points at a live process", async () => {
+    const userDataDir = userDataDirWithLock("live", `some-host-${process.pid}`);
+    assert.equal(await isChromeRunning(userDataDir), true);
+  });
+
+  it("is false for a lock left behind by a process that has exited", async () => {
+    // Above the macOS pid limit, so no process can have it.
+    const userDataDir = userDataDirWithLock("stale", "some-host-99999999");
+    assert.equal(await isChromeRunning(userDataDir), false);
+  });
+
+  it("is false without a SingletonLock", async () => {
+    assert.equal(await isChromeRunning(userDataDirWithLock("none", null)), false);
   });
 });

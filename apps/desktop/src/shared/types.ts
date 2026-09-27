@@ -63,10 +63,12 @@ export interface BrowserEnsureArgs extends BrowserKeyArg {
 }
 
 export interface BrowserChromeImportArgs {
-  /** Band browser profile to import into. */
+  /** Band browser profile to import cookies into. */
   profileId: string;
   /** Chrome profile directory from `browser_chrome_profiles`. */
   chromeProfileDirectory: string;
+  cookies: boolean;
+  history: boolean;
 }
 
 export interface BrowserProfileArg {

@@ -6,11 +6,11 @@
  * `profile.info_cache` maps each directory to its display name. Only the
  * display name is read; emails and avatars are left alone.
  *
- * Nothing here runs until the user has agreed to let Band read Chrome data
- * (the consent dialog in the browser pane's profile menu).
+ * Nothing here runs until the user opens the import dialog from the browser
+ * pane's profile menu.
  */
 
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readlink, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -59,8 +59,37 @@ export async function resolveCookiesPath(profileDir: string): Promise<string | n
   return (await exists(legacyPath)) ? legacyPath : null;
 }
 
+/** The profile's history DB, or `null` if it has none. */
+export async function resolveHistoryPath(profileDir: string): Promise<string | null> {
+  const historyPath = join(profileDir, "History");
+  return (await exists(historyPath)) ? historyPath : null;
+}
+
 /**
- * List the profiles that have a cookie DB, in `Local State` order. Returns
+ * Whether Chrome is running on this user-data dir. A running Chrome keeps a
+ * `SingletonLock` symlink there whose target is `<hostname>-<pid>`. A lock
+ * left behind by a crash points at a dead pid.
+ */
+export async function isChromeRunning(userDataDir: string): Promise<boolean> {
+  let target: string;
+  try {
+    target = await readlink(join(userDataDir, "SingletonLock"));
+  } catch {
+    return false;
+  }
+  const pid = Number(/-(\d+)$/.exec(target)?.[1]);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * List the profiles that have a cookie or history DB, in `Local State` order. Returns
  * an empty list when Chrome isn't installed or has never been run. Async
  * because it runs in an IPC handler on the Electron main process.
  */
@@ -82,12 +111,15 @@ export async function listChromeProfiles(userDataDir: string): Promise<ChromePro
   }));
   if (candidates.length === 0) candidates.push({ directory: "Default", name: "Default" });
 
-  const withCookies = await Promise.all(
-    candidates.map(
-      async (p) =>
-        isSafeProfileDirectory(p.directory) &&
-        (await resolveCookiesPath(join(userDataDir, p.directory))) !== null,
-    ),
+  const importable = await Promise.all(
+    candidates.map(async (p) => {
+      if (!isSafeProfileDirectory(p.directory)) return false;
+      const profileDir = join(userDataDir, p.directory);
+      return (
+        (await resolveCookiesPath(profileDir)) !== null ||
+        (await resolveHistoryPath(profileDir)) !== null
+      );
+    }),
   );
-  return candidates.filter((_, i) => withCookies[i]);
+  return candidates.filter((_, i) => importable[i]);
 }

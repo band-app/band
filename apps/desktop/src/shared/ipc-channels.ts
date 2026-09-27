@@ -61,12 +61,14 @@ export const Channels = {
   // an active session exception so the badge shows up correctly
   // when a pane is restored after the user already proceeded.
   browserGetOverriddenHosts: "browser_get_overridden_hosts",
-  // Browser profiles: list the user's Chrome profiles, import one's
-  // cookies into a Band profile's session partition, wipe a deleted
-  // profile's partition, and wipe partitions the server no longer knows.
-  // The renderer asks the user before the first two; cookie values never
-  // cross IPC (only counts come back).
+  // Browser profiles: list the user's Chrome profiles (and whether Chrome
+  // is running), import one's cookies into a Band profile's session
+  // partition and return its history, wipe a deleted profile's partition,
+  // and wipe partitions the server no longer knows. Only the import dialog
+  // calls the first three; cookie values never cross IPC (only counts come
+  // back).
   browserChromeProfiles: "browser_chrome_profiles",
+  browserChromeRunning: "browser_chrome_running",
   browserChromeImport: "browser_chrome_import",
   browserProfileClearData: "browser_profile_clear_data",
   browserProfilePrune: "browser_profile_prune",
