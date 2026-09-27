@@ -24,11 +24,12 @@
  */
 
 import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
-import type {
-  ClientStateEntry,
-  ClientStateScope,
-  ClientStateWriteResult,
-  DeviceType,
+import {
+  CLIENT_STATE_MAX_VALUE_BYTES,
+  type ClientStateEntry,
+  type ClientStateScope,
+  type ClientStateWriteResult,
+  type DeviceType,
 } from "../shared/client-state";
 import { type KeyPart, matchKey } from "../shared/client-state-keys";
 import { isDesktop } from "./is-desktop";
@@ -77,6 +78,10 @@ function parseEntryId(id: string): { scope: ClientStateScope; key: string } {
 
 function groupOf(workspaceId: string | null): string {
   return workspaceId === null ? "global" : `ws:${workspaceId}`;
+}
+
+function byteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -241,7 +246,12 @@ class ClientStateStore {
       this.setPending(id, false);
       return;
     }
-    const value = part.pick(readLocal(key));
+    let value = part.pick(readLocal(key));
+    // Too large for the server (a big file's unsaved text): keep it on this
+    // device and clear the server copy, so no device loads a stale one.
+    if (value != null && byteLength(JSON.stringify(value)) > CLIENT_STATE_MAX_VALUE_BYTES) {
+      value = null;
+    }
     const baseVersion = this.getMeta().versions[id] ?? 0;
     const known = this.confirmed.has(id) || baseVersion > 0;
     if ((known && sameValue(value, this.confirmed.get(id))) || (!known && value == null)) {
@@ -322,20 +332,21 @@ class ClientStateStore {
 
     const oldRaw = readLocal(entry.key);
     const newRaw = part.merge(oldRaw, entry.value);
-    if (newRaw !== oldRaw) {
-      writeLocal(entry.key, newRaw);
-      try {
-        window.dispatchEvent(
-          new StorageEvent("storage", {
-            key: entry.key,
-            oldValue: oldRaw,
-            newValue: newRaw,
-            storageArea: localStorage,
-            url: location.href,
-          }),
-        );
-      } catch {}
-    }
+    // Nothing to tell anyone when this device already had the value (a
+    // re-read after a reconnect, or a change to another part of the key).
+    if (newRaw === oldRaw) return;
+    writeLocal(entry.key, newRaw);
+    try {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: entry.key,
+          oldValue: oldRaw,
+          newValue: newRaw,
+          storageArea: localStorage,
+          url: location.href,
+        }),
+      );
+    } catch {}
     const change: ClientStateChange = {
       key: entry.key,
       scope: entry.scope,
