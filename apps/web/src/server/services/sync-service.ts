@@ -22,6 +22,32 @@ import {
 const PROJECT_SYNC_BATCH_SIZE = 8;
 
 /**
+ * Worktree paths `workspaces.remove` has taken out of state that git may still
+ * list, with how many removals hold each: the worktree itself is removed in
+ * the background after the mutation returns. A sync that saw one would add
+ * the workspace back.
+ */
+const removingWorktrees = new Map<string, number>();
+
+/**
+ * Paths among {@link removingWorktrees} whose removal has saved state. A sync
+ * that loaded state before that save drops their rows before its own save, so
+ * it can't write them back.
+ */
+const removedWorktrees = new Set<string>();
+
+/** A worktree removal in progress; see {@link SyncService.beginWorktreeRemoval}. */
+export interface WorktreeRemoval {
+  /** Call right after saving state without the row. */
+  commit(): void;
+  /** Call once git no longer lists the worktree, or when the removal fails. */
+  end(): void;
+}
+
+/** Syncs in progress; each may hold a state snapshot from before a removal. */
+const syncsInFlight = new Set<Promise<void>>();
+
+/**
  * Detect the remote's default branch from the local origin/HEAD ref.
  * Returns null if the ref doesn't exist (e.g. origin/HEAD was never set).
  */
@@ -49,7 +75,17 @@ async function detectRemoteDefaultBranch(projectPath: string): Promise<string | 
   return null;
 }
 
-export async function syncWorktrees(): Promise<void> {
+export function syncWorktrees(): Promise<void> {
+  const sync = runSync();
+  syncsInFlight.add(sync);
+  const done = () => {
+    syncsInFlight.delete(sync);
+  };
+  sync.then(done, done);
+  return sync;
+}
+
+async function runSync(): Promise<void> {
   const state = loadState();
   let changed = false;
 
@@ -95,6 +131,9 @@ export async function syncWorktrees(): Promise<void> {
   }
 
   if (changed) {
+    for (const project of state.projects) {
+      project.worktrees = project.worktrees.filter((wt) => !removedWorktrees.has(wt.path));
+    }
     saveState(state);
   }
 }
@@ -125,8 +164,16 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     // worktrees created outside Band (first time we see them), matching the
     // create-time invariant that `name === branch` initially.
     const existingByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
+    // A worktree being removed is neither added nor dropped: the removal
+    // saves after every sync that could have loaded its row, and git may list
+    // it until the background `git worktree remove` is done.
     diskWorktrees = gitWorktrees
-      .filter((wt) => !wt.isBare)
+      .filter(
+        (wt) =>
+          !wt.isBare &&
+          (!removingWorktrees.has(wt.path) ||
+            (existingByPath.has(wt.path) && !removedWorktrees.has(wt.path))),
+      )
       .map((wt) => {
         const existing = existingByPath.get(wt.path);
         return {
@@ -216,6 +263,34 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
 export class SyncService {
   async syncWorktrees(): Promise<void> {
     return syncWorktrees();
+  }
+
+  /**
+   * Stop syncs from adding `path` until `end`, once git no longer lists it.
+   * Resolves after every sync already running has finished, so none of them
+   * drops the row before the removal loads state. Syncs that start later and
+   * load state before `commit` drop the row before they save.
+   */
+  async beginWorktreeRemoval(path: string): Promise<WorktreeRemoval> {
+    removingWorktrees.set(path, (removingWorktrees.get(path) ?? 0) + 1);
+    await Promise.allSettled(syncsInFlight);
+    let ended = false;
+    return {
+      commit() {
+        if (!ended) removedWorktrees.add(path);
+      },
+      end() {
+        if (ended) return;
+        ended = true;
+        const holders = (removingWorktrees.get(path) ?? 1) - 1;
+        if (holders > 0) {
+          removingWorktrees.set(path, holders);
+        } else {
+          removingWorktrees.delete(path);
+          removedWorktrees.delete(path);
+        }
+      },
+    };
   }
 }
 

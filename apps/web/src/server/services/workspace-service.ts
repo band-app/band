@@ -54,6 +54,7 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "./state";
+import { syncService, type WorktreeRemoval } from "./sync-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 // FRAGILE: ESM cycle leg #3 — `./workspace-script-service` imports
@@ -575,7 +576,8 @@ export class WorkspaceService {
    *
    * Two-phase to keep the UI snappy:
    *
-   *   1. **Fast path (synchronous):** drops the worktree row from state,
+   *   1. **Fast path (synchronous):** waits for any worktree sync already
+   *      running (it could save the row back), then drops the row from state,
    *      deletes the workspace's prompt file / DB statuses / chats /
    *      browsers / terminals / LSPs / cronjobs / tasks, and emits a
    *      `remove` event so subscribers (the dashboard) can drop the card.
@@ -670,6 +672,33 @@ export class WorkspaceService {
     currentBranch: string,
     matchedBranch: string,
   ): Promise<{ ok: true }> {
+    // Until git no longer lists the worktree, a sync would add it back.
+    const removal = await syncService.beginWorktreeRemoval(worktreePath);
+    let cleanupScheduled = false;
+    try {
+      const result = this.removeFromState(
+        input,
+        workspaceId,
+        worktreePath,
+        currentBranch,
+        matchedBranch,
+        removal,
+      );
+      cleanupScheduled = true;
+      return result;
+    } finally {
+      if (!cleanupScheduled) removal.end();
+    }
+  }
+
+  private removeFromState(
+    input: WorkspaceRemoveInput,
+    workspaceId: string,
+    worktreePath: string,
+    currentBranch: string,
+    matchedBranch: string,
+    removal: WorktreeRemoval,
+  ): { ok: true } {
     const state = loadState();
     const project = state.projects.find((p) => p.name === input.project);
     if (!project) {
@@ -683,6 +712,7 @@ export class WorkspaceService {
     // ── Fast path: update state and emit immediately ──
     project.worktrees = project.worktrees.filter((wt) => wt.name !== input.name);
     saveState(state);
+    removal.commit();
 
     try {
       unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
@@ -845,9 +875,11 @@ export class WorkspaceService {
             // Branch may already be deleted
           }
         }
-      })().catch((err) => {
-        log.error({ err, workspaceId }, "background workspace cleanup failed");
-      });
+      })()
+        .catch((err) => {
+          log.error({ err, workspaceId }, "background workspace cleanup failed");
+        })
+        .finally(removal.end);
     });
 
     return { ok: true };
