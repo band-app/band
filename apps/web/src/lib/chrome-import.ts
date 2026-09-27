@@ -1,9 +1,10 @@
 /**
- * Desktop IPC calls for importing a Chrome profile into a Band browser
- * profile. Handlers live in `apps/desktop/src/browser/chrome-import/`.
+ * Desktop IPC calls for importing a Chrome profile's cookies and history.
+ * Handlers live in `apps/desktop/src/browser/chrome-import/`.
  *
- * Only call these after the user agreed to let Band read Chrome data.
- * Cookie values stay in the desktop process; the renderer gets counts.
+ * Only the import dialog calls the Chrome ones. Cookie values stay in the
+ * desktop process; the renderer gets counts. History entries come back so
+ * the dialog can store them with `history.import`.
  */
 
 import { invoke } from "./desktop-ipc";
@@ -11,9 +12,11 @@ import { invoke } from "./desktop-ipc";
 export interface ChromeProfile {
   directory: string;
   name: string;
+  hasCookies: boolean;
+  hasHistory: boolean;
 }
 
-export interface ChromeImportSummary {
+export interface ChromeCookieSummary {
   imported: number;
   rejected: number;
   skippedGoogle: number;
@@ -23,15 +26,46 @@ export interface ChromeImportSummary {
   total: number;
 }
 
-export function listChromeProfiles(): Promise<{ supported: boolean; profiles: ChromeProfile[] }> {
+export interface ChromeHistoryEntry {
+  url: string;
+  title: string | null;
+  visitCount: number;
+  lastVisitedAt: number;
+}
+
+export interface ChromeImportResult {
+  /** `null` when cookies weren't selected. */
+  cookies: ChromeCookieSummary | null;
+  /** `null` when history wasn't selected. */
+  history: ChromeHistoryEntry[] | null;
+}
+
+export interface ChromeImportOptions {
+  /** Band profile to import cookies into. */
+  profileId: string;
+  chromeProfileDirectory: string;
+  cookies: boolean;
+  history: boolean;
+}
+
+export function listChromeProfiles(): Promise<{
+  supported: boolean;
+  running: boolean;
+  profiles: ChromeProfile[];
+}> {
   return invoke("browser_chrome_profiles");
 }
 
-export function importChromeProfile(
-  profileId: string,
-  chromeProfileDirectory: string,
-): Promise<ChromeImportSummary> {
-  return invoke("browser_chrome_import", { profileId, chromeProfileDirectory });
+export function isChromeRunning(): Promise<{ running: boolean }> {
+  return invoke("browser_chrome_running");
+}
+
+/**
+ * Read every selected Chrome DB, then write the cookies into `profileId`'s
+ * partition. History entries come back for the caller to store.
+ */
+export function importChromeProfile(options: ChromeImportOptions): Promise<ChromeImportResult> {
+  return invoke("browser_chrome_import", { ...options });
 }
 
 export function clearBrowserProfileData(profileId: string): Promise<void> {

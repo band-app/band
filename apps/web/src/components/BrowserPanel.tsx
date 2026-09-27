@@ -738,6 +738,7 @@ export function BrowserPaneComponent({
           profiles={profiles}
           profileId={effectiveProfileId}
           onSelect={handleProfileSelect}
+          workspaceId={workspaceId || null}
           onImported={handleProfileImported}
         />
         {workspaceId ? (

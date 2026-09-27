@@ -23,6 +23,8 @@ import {
   clearHistory,
   deleteHistoryEntry,
   type HistoryEntry,
+  type ImportedVisit,
+  importVisits,
   type ListHistoryOptions,
   listHistory,
   type RecordVisitInput,
@@ -32,7 +34,14 @@ import {
   updateVisitMeta,
 } from "../infra/db/queries/browser-history";
 
-export type { ClearRange, HistoryEntry, ListHistoryOptions, RecordVisitInput, UpdateMetaInput };
+export type {
+  ClearRange,
+  HistoryEntry,
+  ImportedVisit,
+  ListHistoryOptions,
+  RecordVisitInput,
+  UpdateMetaInput,
+};
 
 /**
  * Infra adapter the service depends on. Default is the real query
@@ -45,6 +54,7 @@ export interface BrowserHistoryAdapter {
   searchHistory: typeof searchHistory;
   deleteHistoryEntry: typeof deleteHistoryEntry;
   clearHistory: typeof clearHistory;
+  importVisits: typeof importVisits;
 }
 
 const DEFAULT_ADAPTER: BrowserHistoryAdapter = {
@@ -54,7 +64,18 @@ const DEFAULT_ADAPTER: BrowserHistoryAdapter = {
   searchHistory,
   deleteHistoryEntry,
   clearHistory,
+  importVisits,
 };
+
+/** `<origin>/favicon.ico` for an http(s) URL, the guess `BrowserPanel` records too. */
+function guessFaviconUrl(url: string): string | null {
+  try {
+    const { protocol, origin } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? `${origin}/favicon.ico` : null;
+  } catch {
+    return null;
+  }
+}
 
 export class BrowserHistoryService {
   constructor(private readonly queries: BrowserHistoryAdapter = DEFAULT_ADAPTER) {}
@@ -81,6 +102,14 @@ export class BrowserHistoryService {
 
   clearHistory(workspaceId: string, range: ClearRange): number {
     return this.queries.clearHistory(workspaceId, range);
+  }
+
+  /** Import visits from another browser, each with the favicon `BrowserPanel` would record. */
+  importVisits(workspaceId: string, visits: Omit<ImportedVisit, "faviconUrl">[]): number {
+    return this.queries.importVisits(
+      workspaceId,
+      visits.map((v) => ({ ...v, faviconUrl: guessFaviconUrl(v.url) })),
+    );
   }
 }
 

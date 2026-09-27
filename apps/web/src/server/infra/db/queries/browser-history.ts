@@ -100,6 +100,57 @@ export function recordVisit(input: RecordVisitInput): boolean {
   return true;
 }
 
+export interface ImportedVisit {
+  url: string;
+  title: string | null;
+  faviconUrl: string | null;
+  visitCount: number;
+  lastVisitedAt: number;
+}
+
+/** Rows per upsert statement: 6 bound values each, well under SQLite's variable limit. */
+const IMPORT_CHUNK_SIZE = 500;
+
+/**
+ * Merge visits imported from another browser into a workspace's history,
+ * in one transaction. A URL already in the history keeps the larger visit
+ * count and the later visit time, and keeps its own title and favicon when
+ * it has them, so importing the same profile twice changes nothing.
+ *
+ * Returns how many visits were accepted (after `shouldRecord`).
+ */
+export function importVisits(workspaceId: string, visits: ImportedVisit[]): number {
+  const accepted = visits.filter((v) => shouldRecord(v.url));
+  if (accepted.length === 0) return 0;
+  const db = getDb();
+  db.transaction((tx) => {
+    for (let i = 0; i < accepted.length; i += IMPORT_CHUNK_SIZE) {
+      tx.insert(browserHistory)
+        .values(
+          accepted.slice(i, i + IMPORT_CHUNK_SIZE).map((v) => ({
+            workspaceId,
+            url: v.url,
+            title: v.title,
+            faviconUrl: v.faviconUrl,
+            lastVisitedAt: v.lastVisitedAt,
+            visitCount: v.visitCount,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [browserHistory.workspaceId, browserHistory.url],
+          set: {
+            lastVisitedAt: sql`MAX(${browserHistory.lastVisitedAt}, excluded.last_visited_at)`,
+            visitCount: sql`MAX(${browserHistory.visitCount}, excluded.visit_count)`,
+            title: sql`COALESCE(${browserHistory.title}, excluded.title)`,
+            faviconUrl: sql`COALESCE(${browserHistory.faviconUrl}, excluded.favicon_url)`,
+          },
+        })
+        .run();
+    }
+  });
+  return accepted.length;
+}
+
 export interface UpdateMetaInput {
   workspaceId: string;
   url: string;

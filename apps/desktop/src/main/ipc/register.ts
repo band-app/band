@@ -8,6 +8,7 @@
 
 import { type BrowserWindow, ipcMain } from "electron";
 import {
+  chromeRunningStatus,
   clearProfileData,
   importChromeProfile,
   listChromeImportProfiles,
@@ -150,9 +151,11 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserGetOverriddenHosts, () => browserHandlers.getOverriddenHosts(bm));
 
   // ---- Browser profiles ----
-  // Reads Chrome's profile list and cookie DB on this Mac. The renderer
-  // asks the user first; only counts come back over IPC.
+  // Reads Chrome's profile list, cookie DB and history DB on this Mac, from
+  // the import dialog only. Cookies come back as counts; history entries
+  // come back for the renderer to store in the workspace's history.
   handle(Channels.browserChromeProfiles, () => listChromeImportProfiles());
+  handle(Channels.browserChromeRunning, () => chromeRunningStatus());
   handle(Channels.browserChromeImport, (args: BrowserChromeImportArgs) =>
     importChromeProfile(args),
   );
