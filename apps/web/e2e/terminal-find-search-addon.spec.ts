@@ -1,11 +1,15 @@
 /**
- * Find-in-terminal over one very long wrapped line: minified JSON, base64, a
- * single huge log record. Unpatched, @xterm/addon-search rewound to the start
- * of a wrapped line by recursing once per wrapped row and re-summed the whole
- * line for every match, so a search over a line filling most of the 10,000-row
- * scrollback overflowed the stack or froze the renderer, and the find widget's
- * counter never updated. Fixed by patches/@xterm__addon-search (from orca,
- * upstream PR xtermjs/xterm.js#6149).
+ * Find-in-terminal fixes from patches/@xterm__addon-search (from orca,
+ * upstream PR xtermjs/xterm.js#6149):
+ *
+ * - One very long wrapped line (minified JSON, base64, a single huge log
+ *   record). Unpatched, the addon rewound to the start of a wrapped line by
+ *   recursing once per wrapped row and re-summed the whole line for every
+ *   match, so a search over a line filling most of the 10,000-row scrollback
+ *   overflowed the stack or froze the renderer, and the counter showed
+ *   "No results".
+ * - Whole word. Unpatched, a rejected first hit on a line ended the search of
+ *   that line, so `needle` in `needleX needle` was never found.
  *
  * Boots the real production server against a fresh tmp home and a real git
  * worktree, and drives a real Chromium through page objects. No tRPC mocking,
@@ -81,6 +85,9 @@ test.afterAll(async () => {
 });
 
 test("find counts every match inside one line that wraps across 8,000 rows", async ({ page }) => {
+  // Printing ~1 MB through the PTY and scanning it takes longer than the
+  // default 30 s budget on a slow runner.
+  test.setTimeout(90_000);
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   await workspacePage.goto(WORKSPACE);
   await workspacePage.waitForReady();
@@ -95,9 +102,33 @@ test("find counts every match inside one line that wraps across 8,000 rows", asy
   const find = workspacePage.terminalPaneFindWidget();
   await expect(find.input).toBeFocused();
   await find.type("needle");
-  await expect(find.count).toHaveText(new RegExp(`^\\d+/${MATCHES}$`));
+  await expect(find.count).toHaveText(`1/${MATCHES}`);
 
   // Stepping re-enters the line mid-way, which is where the recursion started.
   await find.press("Enter");
-  await expect(find.count).toHaveText(new RegExp(`^\\d+/${MATCHES}$`));
+  await expect(find.count).toHaveText(`2/${MATCHES}`);
+});
+
+test("whole-word find matches a word after a rejected hit on the same line", async ({ page }) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await workspacePage.goto(WORKSPACE);
+  await workspacePage.waitForReady();
+  await workspacePage.focusTerminal();
+  await workspacePage.waitForTerminalRenderedPrompt(WORKSPACE);
+  // The quotes keep the typed command's echo from holding a whole-word
+  // `needle`; only the executed output `needleX needle` does.
+  await workspacePage.runInTerminalUntilRendered(
+    WORKSPACE,
+    "echo needleX' 'nee''dle",
+    /needleX needle/,
+  );
+
+  await workspacePage.pressFindShortcut();
+  const find = workspacePage.terminalPaneFindWidget();
+  await expect(find.input).toBeFocused();
+  await find.wholeWordToggle.click();
+  await find.type("needle");
+  // Only the output's second word. The echo holds no whole-word `needle`, and
+  // neither does the long line the previous test may have left in this terminal.
+  await expect(find.count).toHaveText("1/1");
 });

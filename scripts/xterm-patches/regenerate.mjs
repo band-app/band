@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Vendored from orca (https://github.com/stablyai/orca, MIT, Copyright (c) 2026
 // Lovecast Inc.), config/scripts/regenerate-xterm-patches.mjs at c263f5d0. Band changes: the
-// manifest and patches live under patches/, and docs point at patches/README.md.
+// manifest and patches live under patches/, docs point at patches/README.md, the
+// lockfile regex also reads pnpm 10's two-line entry, and the work dir must be private.
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -440,6 +441,25 @@ function regeneratePackage(packageEntry, manifest, context) {
   return { patch, source }
 }
 
+/**
+ * The work dir is reused between runs, and the generator runs git and npm
+ * scripts from whatever it finds there. On Linux the default sits in the
+ * world-writable /tmp, so a directory another user created in advance could
+ * plant a hostile .git/config or node_modules/.bin. Band addition.
+ */
+function assertPrivateWorkDir(workDir) {
+  if (process.platform === 'win32') {
+    return
+  }
+  const stats = statSync(workDir)
+  if (stats.uid !== process.getuid() || (stats.mode & 0o022) !== 0) {
+    throw new Error(
+      `${workDir} must be owned by you and not group- or world-writable. ` +
+        'Remove it, or pass --work-dir=<path> to a private directory.'
+    )
+  }
+}
+
 export function regenerateXtermPatches({
   mode,
   repoRoot = DEFAULT_REPO_ROOT,
@@ -450,6 +470,7 @@ export function regenerateXtermPatches({
   assertBuildStepsAllowed(manifest)
   assertSourcemapPolicy(manifest)
   mkdirSync(workDir, { recursive: true })
+  assertPrivateWorkDir(workDir)
 
   const lockfilePath = path.join(repoRoot, 'pnpm-lock.yaml')
   let lockfile = readFileSync(lockfilePath, 'utf8')

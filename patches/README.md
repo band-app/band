@@ -10,8 +10,12 @@ same xterm.js commit.
 | `@xterm/addon-serialize@0.15.0-beta.300` | The server replays a terminal on reconnect with `serialize()`. Unpatched, it loses bold after dim text (`\e[1;22m` clears the bold it just set), drops OSC 8 hyperlinks, writes `\e[0C`/`\e[0D` (which move one column, not zero) at some wrapped-row boundaries, and does not reproduce empty cells with inverse video. |
 | `@xterm/addon-search@0.17.0-beta.300` | The find bar overflows the stack or freezes on one very long wrapped line, and whole-word or regex search can stop at the first rejected match on a line. Submitted upstream as [xtermjs/xterm.js#6149](https://github.com/xtermjs/xterm.js/pull/6149); drop the patch once a release includes it. |
 
-Tests: `apps/web/tests/terminal-ws.test.ts` (serialized replay keeps bold and
-OSC 8 links) and `apps/web/e2e/terminal-find-long-line.spec.ts`.
+Tests: `apps/web/tests/terminal-ws.test.ts` (the serialized replay keeps bold
+after dim, OSC 8 links, and an inverse wide-glyph padding cell) and
+`apps/web/e2e/terminal-find-search-addon.spec.ts` (a line wrapped across 8,000
+rows, and whole word). The zero-count cursor move has no test: it needs a
+wrapped row made only of empty cells ahead of a specific next-row glyph, and no
+shell output reaches it reliably.
 
 ## Layout
 
@@ -44,21 +48,20 @@ git -C /tmp/xterm/upstream/addons/addon-search diff --relative -- src/ \
 node scripts/xterm-patches/regenerate.mjs --write --work-dir=/tmp/xterm
 
 # 3. Reinstall, then confirm the patches and lockfile agree.
-pnpm install
+npx pnpm@10 install --lockfile-only && pnpm install
 node scripts/xterm-patches/regenerate.mjs --check --work-dir=/tmp/xterm
 ```
 
 Keep the work dir outside this repository. Inside it, upstream's `tsgo` walks up
 into Band's `node_modules` and fails with `TS2300: Duplicate identifier`.
 
-### Lockfile shape
+### Lockfile
 
-CI runs pnpm 10, which only reads a `patchedDependencies` lockfile entry written
-as a `hash:` and a `path:` line under the package key. pnpm 11 writes
-`'<pkg>@<version>': <hash>` on one line whenever the patch set changes, and pnpm
-10 then fails `--frozen-lockfile` with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. pnpm
-11 reads both shapes and keeps the two-line one on later installs. After a pnpm
-11 install that changes a patch, put the entry back in the two-line shape:
+Update `pnpm-lock.yaml` with pnpm 10, which CI pins:
+`npx pnpm@10 install --lockfile-only`. pnpm 11 writes a `patchedDependencies`
+entry as `'<pkg>@<version>': <hash>` on one line, and pnpm 10 then fails
+`--frozen-lockfile` with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`; it only reads the
+two-line shape:
 
 ```yaml
 patchedDependencies:
@@ -67,8 +70,10 @@ patchedDependencies:
     path: patches/@xterm__addon-search@0.17.0-beta.300.patch
 ```
 
-`--check` accepts either shape. `npx pnpm@10 install --frozen-lockfile
---lockfile-only` confirms that CI will accept the lockfile.
+pnpm 11 also re-resolves unrelated peers (for example `@anthropic-ai/sdk`)
+when it rewrites the lockfile, which pnpm 10 leaves alone. pnpm 11 reads the
+two-line shape, so a local `pnpm install` with either version works afterwards.
+`--check` accepts both shapes.
 
 ## Bumping xterm.js
 
@@ -85,8 +90,8 @@ commit`), not by the version string. Keep every `@xterm/*` package in
    `package-lock.json` resolves.
 4. Run `--write`. A `git apply` failure here is a real conflict with upstream:
    resolve it in the checkout and re-diff. `--write` leaves a new package out of
-   the lockfile and tells you to run `pnpm install`.
-5. `pnpm install`, fix the lockfile shape as above, then `--check`.
+   the lockfile and tells you to install.
+5. `npx pnpm@10 install --lockfile-only`, `pnpm install`, then `--check`.
 
 When a release includes a fix, delete its patch files and its entries in
 `xterm-upstream.json` and `pnpm-workspace.yaml`.

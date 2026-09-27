@@ -1009,6 +1009,48 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     expect(await renderedIntensity(replay, "BOLDRUN")).toEqual({ bold: true, dim: false });
   }, 30_000);
 
+  // patches/@xterm__addon-serialize: a wide glyph that doesn't fit in the last
+  // column wraps and leaves an empty padding cell in the pen it was printed
+  // with. Unpatched, the serializer skipped that cell with a cursor move, so
+  // an inverse-video padding cell (a TUI's highlighted bar) came back with
+  // the default background after a reconnect.
+  it("keeps the inverse video of an empty wide-glyph padding cell", async () => {
+    const terminalId = "serialize-replay-inverse-padding";
+    const fill = "x".repeat(79);
+
+    // Clear, print 79 inverse cells plus a wide glyph (U+4E2D, as UTF-8 octal
+    // bytes) that wraps and leaves column 79 as inverse padding, then redraw
+    // the wrapped glyph without inverse so the padding is the only empty
+    // inverse cell.
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033[2J\\033[H\\033[7m${fill}\\344\\270\\255\\033[0m\\033[2;1H\\344\\270\\255\\033[5;1HPAD""DONE\\n"'\r`,
+      "PADDONE",
+    );
+
+    const replay = await captureReplayFrame(terminalId);
+    const headlessNs = (await import("@xterm/headless")) as
+      | typeof import("@xterm/headless")
+      | { default: typeof import("@xterm/headless") };
+    const { Terminal } = "Terminal" in headlessNs ? headlessNs : headlessNs.default;
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    try {
+      await new Promise<void>((resolve) => term.write(new Uint8Array(replay), resolve));
+      const buf = term.buffer.active;
+      let row = -1;
+      for (let i = 0; i < buf.length; i++) {
+        // trimEnd: the patched serializer writes the padding as an inverse space.
+        if (buf.getLine(i)?.translateToString(true).trimEnd() === fill) row = i;
+      }
+      // Positive anchor: the inverse row replayed, and its content is inverse.
+      expect(row).toBeGreaterThanOrEqual(0);
+      expect(buf.getLine(row)?.getCell(0)?.isInverse()).not.toBe(0);
+      expect(buf.getLine(row)?.getCell(79)?.isInverse()).not.toBe(0);
+    } finally {
+      term.dispose();
+    }
+  }, 30_000);
+
   // patches/@xterm__addon-serialize: an OSC 8 hyperlink used to come back as
   // plain styled text after a reconnect, so a link an agent printed was no
   // longer clickable.
