@@ -752,6 +752,11 @@ export class WorkspacePage {
     return this.page.getByTestId(`center-file-tab--${path}`);
   }
 
+  /** The close button on the `file` leaf tab for `path`. */
+  fileTabCloseButton(path: string): Locator {
+    return this.page.getByTestId(`center-file-tab__close--${path}`);
+  }
+
   /** The active file leaf's "View changes" button in the group header
    *  (`center-file-leaf__view-diff`). It only renders while that file has
    *  changes against the workspace's diff target. */

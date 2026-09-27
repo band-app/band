@@ -114,6 +114,7 @@ import {
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
+import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
 import { isDesktop } from "../lib/is-desktop";
 import {
   markBrowserFresh,
@@ -2798,6 +2799,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const touchTabsDisposerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // VS Code-style preview tabs: at most one previewing file leaf and one
   // previewing diff leaf per dockview. A single-click in the sidepanel opens
@@ -3530,6 +3532,12 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         });
       }
 
+      // Touch: a drag along the tab strip scrolls it; only a tap switches tabs.
+      touchTabsDisposerRef.current?.();
+      if (containerRef.current) {
+        touchTabsDisposerRef.current = attachTouchTabActivation(containerRef.current, api);
+      }
+
       // Persistence + focus reporting. Structural changes (add/remove leaf or
       // group) flush immediately so a close survives an instant reload; the
       // high-frequency layout stream (resize/move) is debounced.
@@ -3876,6 +3884,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           workspaceLeafActions.delete(workspaceId);
         }
       }
+      touchTabsDisposerRef.current?.();
+      touchTabsDisposerRef.current = null;
       // Flush a pending debounced save rather than dropping it, so a layout
       // tweak right before a workspace switch / unmount still persists.
       if (saveTimerRef.current && api) {
@@ -3915,6 +3925,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           rightHeaderActionsComponent={RightHeaderActions}
           // Mobile: no drag→split. Every leaf stays a tab in a single group.
           disableDnd={mobile}
+          // No "N hidden tabs" dropdown: the strip scrolls sideways instead
+          // (wheel, trackpad, touch — see `.dockview-center-tabs` in
+          // dockview-theme.css).
+          disableTabsOverflowList
           onReady={onReady}
         />
       </PanelVisibilityContext.Provider>
