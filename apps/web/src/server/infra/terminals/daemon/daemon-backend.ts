@@ -25,6 +25,11 @@ const log = createLogger("terminal-daemon-backend");
 /** Retries for a daemon that published its socket a moment before its token file. */
 const CONNECT_RETRIES = 5;
 const CONNECT_RETRY_DELAY_MS = 100;
+/** Launch attempts before giving up and falling back to in-process terminals. */
+const LAUNCH_ATTEMPTS = 2;
+/** How long `restartDaemon` waits for the current daemon's connection to drop. */
+const RESTART_WAIT_MS = 5_000;
+const RESTART_POLL_INTERVAL_MS = 50;
 
 /**
  * The daemon could not be reached or started. `TerminalService` falls back to
@@ -159,8 +164,15 @@ export class DaemonTerminalBackend implements TerminalBackend {
 
   async kill(terminalId: string): Promise<TerminalListEntry | null> {
     const found = await this.find(terminalId);
-    if (!found) return null;
-    return found.client.request("kill", { terminalId });
+    if (found) return found.client.request("kill", { terminalId });
+    // No live session anywhere, but the tab is still being explicitly
+    // closed: broadcast the kill anyway so whichever daemon (if any) still
+    // holds an on-disk history checkpoint for an already-exited terminalId
+    // prunes it (see `TerminalPool.kill`'s "already exited" branch). A
+    // "kill" for an id a daemon doesn't have, live or in its history, is a
+    // harmless no-op there.
+    await this.onEach((client) => client.request("kill", { terminalId }), null);
+    return null;
   }
 
   async killWorkspace(workspaceId: string): Promise<void> {
@@ -235,6 +247,48 @@ export class DaemonTerminalBackend implements TerminalBackend {
     return () => {
       this.exitListeners.delete(listener);
     };
+  }
+
+  /**
+   * End every terminal in the current-build daemon and let the next spawn
+   * launch a fresh one. Only ever signals `this.current`: a daemon of another
+   * build, or one already draining after being superseded, is left alone —
+   * its shells stay reachable exactly as they do today.
+   *
+   * SIGTERMs the daemon process directly rather than sending it a request:
+   * the daemon's own SIGTERM handler already kills every PTY and exits (see
+   * `runDaemon`'s `shutdown`), and losing the connection already makes
+   * {@link handleDisconnect} report each of its sessions as exited — the same
+   * path a crash takes today, so no new wire message is needed. Sessions'
+   * on-disk checkpoints are left in place (only an explicit `kill` /
+   * `killWorkspace` removes them), so a pane reopened after this looks like
+   * one reopened after a crash: a fresh shell with its scrollback restored.
+   */
+  async restartDaemon(): Promise<{ killedCount: number }> {
+    const client = this.current;
+    if (!client || client.isClosed) return { killedCount: 0 };
+    const killedCount = [...this.known.values()].filter(
+      (session) => session.client === client,
+    ).length;
+    const { pid } = client;
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
+    }
+    // Wait for the process itself, not just its socket, to close: `shutdown`
+    // destroys the connection before its per-session final history
+    // checkpoints (async, driven by each PTY's own exit event) finish
+    // writing, so returning on socket-close alone could race a reopen against
+    // a checkpoint that hasn't landed on disk yet.
+    await waitForExit(pid, RESTART_WAIT_MS);
+    if (isProcessAlive(pid)) {
+      log.warn(
+        { pid },
+        "terminal daemon did not exit within the restart grace period; it may still be shutting down",
+      );
+    }
+    return { killedCount };
   }
 
   /** Disconnect only. The daemons and every shell in them keep running. */
@@ -358,37 +412,50 @@ export class DaemonTerminalBackend implements TerminalBackend {
     if (this.needsDiscovery || this.clients().length === 0) await this.discover();
     if (this.current || !launch) return this.current;
     const { buildId } = this.options;
-    try {
-      await retireOlderDaemons(this.options.runDir, buildId);
-      // `occupied` means another server's daemon won the race; either way a
-      // daemon now serves the endpoint.
-      const outcome = await launchDaemon({
-        ...this.options,
-        paths: this.paths,
-        supersede: this.stale?.identity,
-      });
-      log.info(
-        { outcome, socket: this.paths.socket, superseded: this.stale?.client.pid },
-        "terminal daemon launched",
-      );
-      const client = await connectWithRetry(this.paths, buildId);
-      if (this.clients().some((other) => other.pid === client.pid) || !this.isOwnBuild(client)) {
-        client.close();
-        throw new Error("a terminal daemon of another build still serves the endpoint");
+    let lastErr: unknown;
+    // One retry: a launch can fail for a one-off reason (a supersede race, a
+    // daemon that failed to load node-pty and exited fast — see
+    // `EXIT_NODE_PTY_UNAVAILABLE`). A fresh attempt spawns a fresh process,
+    // which is worth trying once before giving up and falling back to
+    // in-process terminals for the rest of this server's life. A failed
+    // attempt never publishes an endpoint (see `runDaemon`), so it never
+    // creates or touches retired-daemon files; `this.stale`, if any, is
+    // untouched either way.
+    for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt++) {
+      try {
+        await retireOlderDaemons(this.options.runDir, buildId);
+        // `occupied` means another server's daemon won the race; either way a
+        // daemon now serves the endpoint.
+        const outcome = await launchDaemon({
+          ...this.options,
+          paths: this.paths,
+          supersede: this.stale?.identity,
+        });
+        log.info(
+          { outcome, socket: this.paths.socket, superseded: this.stale?.client.pid },
+          "terminal daemon launched",
+        );
+        const client = await connectWithRetry(this.paths, buildId);
+        if (this.clients().some((other) => other.pid === client.pid) || !this.isOwnBuild(client)) {
+          client.close();
+          throw new Error("a terminal daemon of another build still serves the endpoint");
+        }
+        this.adopt(client);
+        this.current = client;
+        this.stale = null;
+        this.endpoint = entryIdentity(this.paths.socket, lstatSync);
+        return client;
+      } catch (err) {
+        lastErr = err;
+        log.warn({ err, attempt }, "terminal daemon launch attempt failed");
       }
-      this.adopt(client);
-      this.current = client;
-      this.stale = null;
-      this.endpoint = entryIdentity(this.paths.socket, lstatSync);
-      return client;
-    } catch (err) {
-      // Whatever serves the endpoint now, the next spawn must look again
-      // (and read its entry afresh for `--supersede`) rather than repeat this.
-      this.needsDiscovery = true;
-      throw new TerminalDaemonUnavailableError(`Cannot start the terminal daemon: ${err}`, {
-        cause: err,
-      });
     }
+    // Whatever serves the endpoint now, the next spawn must look again (and
+    // read its entry afresh for `--supersede`) rather than repeat this.
+    this.needsDiscovery = true;
+    throw new TerminalDaemonUnavailableError(`Cannot start the terminal daemon: ${lastErr}`, {
+      cause: lastErr,
+    });
   }
 
   /**
@@ -578,6 +645,23 @@ function readPidRecord(path: string): PidRecord | null {
     return JSON.parse(readFileSync(path, "utf8")) as PidRecord;
   } catch {
     return null;
+  }
+}
+
+/** Poll for a process to exit, e.g. after signalling it. */
+async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_INTERVAL_MS));
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 

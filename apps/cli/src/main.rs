@@ -334,6 +334,8 @@ enum TerminalsCmd {
         /// Terminal ID (defaults to the cwd workspace's first terminal)
         terminal_id: Option<String>,
     },
+    /// Restart the terminal daemon, ending every terminal it hosts
+    RestartDaemon,
 }
 
 #[derive(Subcommand)]
@@ -574,6 +576,7 @@ fn main() {
             } => cmd_terminal_output(terminal_id.as_deref(), lines),
             TerminalsCmd::Output { .. } | TerminalsCmd::Attach { .. } => unreachable!(),
             TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(terminal_id.as_deref()),
+            TerminalsCmd::RestartDaemon => cmd_terminal_restart_daemon(),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -1769,6 +1772,22 @@ fn cmd_terminal_kill(terminal_id: Option<&str>) -> Result<CommandResult, String>
     Ok(CommandResult {
         text: format!("Terminal {terminal_id} killed\n"),
         json: serde_json::json!({"ok": true, "terminalId": terminal_id}),
+    })
+}
+
+fn cmd_terminal_restart_daemon() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let result = client.trpc_mutate("terminal.restartDaemon", &serde_json::json!({}))?;
+    let killed_count = result
+        .get("killedCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    Ok(CommandResult {
+        text: format!(
+            "Terminal daemon restarted; ended {killed_count} terminal session(s). Sessions from a previous version of Band are kept.\n"
+        ),
+        json: serde_json::json!({"ok": true, "killedCount": killed_count}),
     })
 }
 
@@ -2988,6 +3007,12 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
+        }),
+        serde_json::json!({
+            "name": "terminals restart-daemon",
+            "description": "Restart the terminal daemon, ending every terminal it hosts",
+            "parameters": [],
+            "notes": "Ends every terminal hosted by the current-build terminal daemon; panes show the process exited and can be reopened, with their scrollback and working directory restored. Sessions from a previous version of Band, on a retired daemon, are left running."
         }),
         serde_json::json!({
             "name": "open",

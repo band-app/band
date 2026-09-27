@@ -26,10 +26,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
 import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
+import { RestartTerminalDaemonDialog } from "./RestartTerminalDaemonDialog";
 import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsSection } from "./settings/SettingsSection";
@@ -99,6 +101,8 @@ function formatLastRefreshed(epochMs: number): string {
 export function SettingsPage({ open, onOpenChange }: Props) {
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
+  const restartTerminalDaemonMutation = useRestartTerminalDaemon();
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const capabilities = useCapabilities();
 
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
@@ -1012,9 +1016,27 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   onCheckedChange={setUseWebGLTerminalRenderer}
                 />
               </SettingsRow>
+              <SettingsRow
+                label="Terminal service"
+                description="Recover from a frozen or misbehaving terminal daemon by restarting it. Every terminal ends and can be reopened."
+              >
+                <Button variant="destructive" onClick={() => setRestartDialogOpen(true)}>
+                  Restart terminal service
+                </Button>
+              </SettingsRow>
             </SettingsSection>
           </div>
         </div>
+        <RestartTerminalDaemonDialog
+          open={restartDialogOpen}
+          onOpenChange={setRestartDialogOpen}
+          busy={restartTerminalDaemonMutation.isPending}
+          onConfirm={() => {
+            restartTerminalDaemonMutation.mutate(undefined, {
+              onSettled: () => setRestartDialogOpen(false),
+            });
+          }}
+        />
         {/* The footer sits on the bottom screen edge in the mobile drawer, so it
             clears the home indicator. The wide-layout card floats off the edge. */}
         <DialogFooter

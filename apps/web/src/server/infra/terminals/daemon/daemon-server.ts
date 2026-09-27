@@ -1,8 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, lstatSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { createLogger } from "@band-app/logger";
+import { preloadNodePty } from "../node-pty-loader";
 import { TerminalPool } from "../terminal-pool";
 import {
   type EndpointIdentity,
@@ -23,6 +24,7 @@ import {
   ENDPOINT_LOST_ERROR,
   EXIT_ENDPOINT_OCCUPIED,
   EXIT_ENDPOINT_UNAVAILABLE,
+  EXIT_NODE_PTY_UNAVAILABLE,
   type HelloMessage,
   type HelloReply,
   type PidRecord,
@@ -106,14 +108,30 @@ export interface DaemonOptions {
  *     has; exit once they are gone. Same drain as orca's daemon. This is also
  *     what a daemon superseded by a newer build does.
  *   - Run dir removed: kill every shell and exit; nothing can reach them.
+ *
+ * Loads node-pty before doing anything else. Node's ESM loader caches a
+ * failed CommonJS evaluation for the rest of the process, so a daemon that
+ * served spawn requests after a failed load would fail every one of them the
+ * same way forever, even once the underlying problem (a broken install, a
+ * transient race) is gone. Failing fast here instead means the next spawn
+ * launches a fresh process with a fresh module cache.
  */
 export async function runDaemon(options: DaemonOptions): Promise<number> {
   const { paths, buildId, supersede } = options;
+  try {
+    await preloadNodePty();
+  } catch (err) {
+    log.error({ err }, "terminal daemon could not load its native module (node-pty); exiting");
+    return EXIT_NODE_PTY_UNAVAILABLE;
+  }
   ensurePrivateDir(paths.runDir);
   ensurePrivateDir(dirname(paths.socket));
 
   const token = randomBytes(32).toString("hex");
-  const pool = new TerminalPool();
+  // `paths.runDir` is `<bandHome>/run`; history lives beside it under
+  // `<bandHome>/terminal-history` so a cold restore survives the daemon
+  // itself dying, not just the web server (see `terminal-history.ts`).
+  const pool = new TerminalPool({ historyDir: join(dirname(paths.runDir), "terminal-history") });
   const clients = new Map<string, Client>();
   let shuttingDown = false;
   /** Sockets accepted and not yet closed, including ones still in hello. */
@@ -279,9 +297,13 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     // The endpoint is deliberately left in place; the next daemon replaces it.
     // Exit once the shells are gone (bounded), so whoever waits for this
     // process knows its shells have finished writing (history files, etc.).
+    // Also waits for any history checkpoint `onExit` just kicked off
+    // (`checkpointHistoryNow`'s writes are async, so they don't finish before
+    // this function returns) — otherwise a fast-exiting daemon could beat its
+    // own last checkpoint to disk.
     const deadline = Date.now() + SHUTDOWN_GRACE_MS;
     const waitForShells = setInterval(() => {
-      if (Date.now() < deadline && shells.some(isAlive)) return;
+      if (Date.now() < deadline && (shells.some(isAlive) || pool.hasPendingHistoryWrites())) return;
       clearInterval(waitForShells);
       process.exit(0);
     }, 50);

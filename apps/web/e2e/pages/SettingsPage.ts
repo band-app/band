@@ -183,6 +183,30 @@ export class SettingsPage {
     return this.dialog.getByRole("switch", { name: "GPU-accelerated rendering" });
   }
 
+  /** "Restart terminal service" button in the Terminal section. */
+  restartTerminalServiceButton(): Locator {
+    return this.dialog.getByRole("button", { name: "Restart terminal service" });
+  }
+
+  /** The confirm dialog opened by {@link restartTerminalServiceButton}. */
+  restartTerminalServiceDialog(): Locator {
+    return this.page.getByRole("dialog", { name: "Restart the terminal service?" });
+  }
+
+  /**
+   * Click "Restart terminal service", confirm the dialog, and wait for it to
+   * close (the mutation settling, per `SettingsPage.tsx`'s `onSettled`).
+   */
+  async restartTerminalService(): Promise<void> {
+    await test.step("Restart the terminal service from Settings", async () => {
+      await this.restartTerminalServiceButton().click();
+      const dialog = this.restartTerminalServiceDialog();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Restart" }).click();
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+    });
+  }
+
   /** Per-agent enable switch. The button's `aria-label="Enable <Agent>"`
    *  is set explicitly in `SettingsPage.tsx` (the agent label appears in
    *  two other places, so a unique aria-label disambiguates). */

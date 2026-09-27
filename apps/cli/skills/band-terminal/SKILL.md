@@ -1,9 +1,9 @@
 ---
 name: band-terminal
 version: 0.1.0
-description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band workspace. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane".
+description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band workspace, or restart the terminal daemon. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane", "restart terminal daemon", "terminal frozen".
 allowed-tools: Bash
-argument-hint: terminals [list|create|send|output|kill|attach] [args...]
+argument-hint: terminals [list|create|send|output|kill|attach|restart-daemon] [args...]
 ---
 
 # Band Terminal Sessions
@@ -81,6 +81,15 @@ band terminals attach [terminal_id]
 
 Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.
 Press Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that).
+
+### Restart the terminal daemon
+
+```sh
+band terminals restart-daemon
+```
+
+Ends every terminal hosted by the current-build terminal daemon and lets the next one spawn a fresh daemon. Panes show that the process exited and can be reopened — a reopened pane's scrollback and working directory are restored, and a Claude Code session running in it resumes automatically. Sessions from a previous version of Band, on a retired daemon, are left running. Use this to recover from a frozen or misbehaving terminal daemon (e.g. after a native-module load failure); it takes no arguments and doesn't need a workspace or terminal ID.
+JSON output: `{"ok": true, "killedCount": N}`
 
 ## Default workspace and terminal resolution
 

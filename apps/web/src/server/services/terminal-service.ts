@@ -291,6 +291,15 @@ export class TerminalService {
     return this.backend.close();
   }
 
+  /**
+   * End every terminal in the current terminal daemon and let the next spawn
+   * start a fresh one — see `TerminalBackend.restartDaemon`. A no-op when the
+   * backend has no separate daemon process.
+   */
+  restartDaemon(): Promise<{ killedCount: number }> {
+    return this.backend.restartDaemon();
+  }
+
   // -------------------------------------------------------------------------
   // Per-terminal accessors
   // -------------------------------------------------------------------------

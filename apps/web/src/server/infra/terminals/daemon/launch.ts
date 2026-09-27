@@ -6,6 +6,7 @@ import {
   type DaemonPaths,
   daemonPaths,
   EXIT_ENDPOINT_OCCUPIED,
+  EXIT_NODE_PTY_UNAVAILABLE,
   PROTOCOL_VERSION,
 } from "./protocol";
 
@@ -92,7 +93,11 @@ export async function launchDaemon(options: LaunchOptions): Promise<"launched" |
       finish(
         code === EXIT_ENDPOINT_OCCUPIED
           ? "occupied"
-          : new Error(`Terminal daemon exited during startup with code ${code}`),
+          : new Error(
+              code === EXIT_NODE_PTY_UNAVAILABLE
+                ? "Terminal daemon could not load its native module (node-pty)"
+                : `Terminal daemon exited during startup with code ${code}`,
+            ),
       );
     };
     const onError = (err: Error) => finish(err);

@@ -26,6 +26,13 @@ export const PROTOCOL_VERSION = 1;
 export const EXIT_ENDPOINT_OCCUPIED = 20;
 /** Daemon exit code for "could not publish the endpoint" (lost the race, or can't tell). */
 export const EXIT_ENDPOINT_UNAVAILABLE = 21;
+/**
+ * Daemon exit code for "could not load node-pty at startup". Failing fast
+ * here (rather than serving spawn requests that would all fail the same way)
+ * matters because Node's ESM loader caches a failed CommonJS evaluation for
+ * the life of the process — only a fresh process gets a fresh chance.
+ */
+export const EXIT_NODE_PTY_UNAVAILABLE = 22;
 
 /**
  * The error a daemon answers `spawn` with once another daemon has replaced

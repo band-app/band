@@ -14,6 +14,8 @@ export class TerminalSocket {
   /** Bytes of output received. */
   bytes = 0;
   attached = false;
+  /** Set once the server closes the socket (e.g. the PTY exited). `null` while still open. */
+  closeCode: number | null = null;
   private constructor(
     private readonly ws: WebSocket,
     maxOutputChars: number,
@@ -27,6 +29,9 @@ export class TerminalSocket {
       }
       const frame = JSON.parse(data.toString()) as { type: string };
       if (frame.type === "attached") this.attached = true;
+    });
+    ws.on("close", (code: number) => {
+      this.closeCode = code;
     });
   }
 
@@ -69,6 +74,16 @@ export class TerminalSocket {
       label: `terminal output ${text}`,
       timeoutMs,
     });
+  }
+
+  /** Wait for the server to close the socket (e.g. the PTY exited) and return the close code. */
+  async waitForClose(timeoutMs?: number): Promise<number> {
+    await waitFor(async () => (this.closeCode === null ? undefined : true), {
+      label: "socket closed",
+      timeoutMs,
+    });
+    // Non-null, checked above.
+    return this.closeCode as number;
   }
 
   close(): Promise<void> {

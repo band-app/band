@@ -7,6 +7,18 @@ import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Terminal as HeadlessTerminal } from "@xterm/headless";
 import type { IPty } from "node-pty";
 import { defaultShell, shellPath } from "../process/path";
+import {
+  buildClaudeResumeCommand,
+  findLatestClaudeSessionId,
+  isResumableClaudeCommand,
+} from "./claude-resume";
+import { preloadNodePty } from "./node-pty-loader";
+import { hintForPtySpawnError } from "./pty-error-hints";
+import {
+  type TerminalHistoryCheckpoint,
+  TerminalHistoryManager,
+  type TerminalHistoryMeta,
+} from "./terminal-history";
 
 const log = createLogger("terminal-pool");
 
@@ -36,6 +48,15 @@ const HEADLESS_SCROLLBACK_LINES = 10_000;
  */
 const MAX_COLS = 1_000;
 const MAX_ROWS = 1_000;
+
+/**
+ * Minimum time between on-disk history checkpoints for one terminal, driven
+ * by output arriving (see `maybeCheckpointHistory`) rather than a timer, so a
+ * quiet terminal never wakes up just to re-checkpoint. Bounds how much output
+ * a cold restore can lose to a daemon crash (a clean exit or restart writes
+ * one last checkpoint regardless — see `TerminalPool`'s `onExit`).
+ */
+const HISTORY_CHECKPOINT_INTERVAL_MS = 10_000;
 
 /**
  * The last `max` characters of a terminal's output, for the plain-text read
@@ -184,6 +205,16 @@ export interface TerminalSession {
    * the session so cleanup doesn't depend on the command ever running.
    */
   autoRunFile?: string;
+  /**
+   * Bookkeeping for on-disk history checkpoints (see `terminal-history.ts`).
+   * Absent when the pool has no `historyDir` (e.g. `InProcessTerminalBackend`).
+   */
+  history?: {
+    cwd: string;
+    startedAt: string;
+    sessionCommand?: string;
+    lastCheckpointAt: number;
+  };
 }
 
 /**
@@ -200,6 +231,17 @@ export interface TerminalListEntry {
   cleanupOnExit: boolean;
 }
 
+export interface TerminalPoolOptions {
+  /**
+   * Enables on-disk scrollback/cwd checkpoints under this directory, so a
+   * terminal reopened after its host daemon died or was restarted can be
+   * cold-restored (see `terminal-history.ts`). Only the terminal daemon
+   * passes one; `InProcessTerminalBackend` doesn't — its terminals die with
+   * the process either way, so cold restore wouldn't help.
+   */
+  historyDir?: string;
+}
+
 /**
  * Stateful in-memory registry of PTY sessions.
  *
@@ -213,6 +255,23 @@ export interface TerminalListEntry {
  * the web server go through a `TerminalBackend`, never the pool directly.
  */
 export class TerminalPool {
+  private readonly historyStore: TerminalHistoryManager | null;
+  /**
+   * terminalIds whose next `onExit` should prune (not checkpoint) their
+   * history: set by an explicit `kill` / `killWorkspace`, i.e. the tab or
+   * workspace is actually being closed or deleted. `killAll` (daemon
+   * shutdown/restart) deliberately never adds to this set, so those sessions
+   * stay cold-restorable.
+   */
+  private readonly pruneHistoryOnExit = new Set<string>();
+  /**
+   * In-flight history checkpoint writes (see {@link checkpointHistoryNow}).
+   * `hasPendingHistoryWrites` lets the daemon's shutdown wait for these
+   * before exiting, since they are async and no longer complete before
+   * `onExit` returns.
+   */
+  private readonly pendingHistoryWrites = new Set<Promise<unknown>>();
+
   /** terminalId -> session */
   private readonly terminals = new Map<string, TerminalSession>();
 
@@ -243,6 +302,10 @@ export class TerminalPool {
   /** terminalIds with a shrink-and-restore nudge in flight (see
    *  {@link nudgeResize} for why concurrent nudges must not compound). */
   private readonly nudging = new Set<string>();
+
+  constructor(options?: TerminalPoolOptions) {
+    this.historyStore = options?.historyDir ? new TerminalHistoryManager(options.historyDir) : null;
+  }
 
   /**
    * Spawn (or return the already-spawning/spawned) PTY for a terminalId.
@@ -285,6 +348,24 @@ export class TerminalPool {
   ): Promise<TerminalSession> {
     const shell = defaultShell();
     const resolvedPath = await shellPath();
+
+    // A saved checkpoint means this terminalId's PTY was here before and is
+    // gone now — its daemon crashed or was restarted, or it exited on its
+    // own (see `terminal-history.ts` for which of those prune it instead).
+    // Either way this is a fresh PTY for an id the caller already knows, so
+    // restoring what's on disk is the cold-restore path; nothing here
+    // distinguishes "first ever spawn" from "reopened" beyond that.
+    //
+    // Guarded by the saved `workspaceId`: the tRPC `terminal.create` input is
+    // UUID-constrained, but the `/terminal` WebSocket's spawn-on-miss path
+    // takes `terminalId` straight from a query string with no such
+    // constraint, so a caller could otherwise collide a fresh terminalId in
+    // one workspace with a stale checkpoint left by another.
+    const historyMeta = this.historyStore?.readMeta(terminalId) ?? null;
+    const checkpoint =
+      historyMeta?.workspaceId === workspaceId
+        ? (this.historyStore?.readCheckpoint(terminalId) ?? null)
+        : null;
 
     // Filter env to only string values — posix_spawnp fails on undefined/null
     const env: Record<string, string> = {};
@@ -334,25 +415,21 @@ export class TerminalPool {
     // pane to `chat` dispatch.
     env.BAND_DISPATCH = "terminal";
 
-    // Resolve cwd: options.cwd is relative to workspace root
+    // Resolve cwd: options.cwd is relative to workspace root; a saved
+    // checkpoint's cwd (used only when the caller didn't ask for one — the
+    // normal reopen path) is already absolute.
     let cwd = workspaceRoot;
     if (options?.cwd) {
-      const resolved = join(workspaceRoot, options.cwd);
-      // Security: ensure the resolved path stays within the workspace.
-      // Append `sep` (with an equality carve-out for cwd === root) so a
-      // sibling like `<root>-evil` can't pass the prefix check — same
-      // shape as `serveWorkspaceFile` in start-server.ts.
-      if (resolved !== workspaceRoot && !resolved.startsWith(workspaceRoot + sep)) {
-        log.warn(
-          "Ignoring cwd %s — resolves outside workspace root %s",
-          options.cwd,
+      cwd =
+        resolveSafeCwd(join(workspaceRoot, options.cwd), workspaceRoot, "cwd", options.cwd) ?? cwd;
+    } else if (checkpoint?.cwd) {
+      cwd =
+        resolveSafeCwd(
+          checkpoint.cwd,
           workspaceRoot,
-        );
-      } else if (existsSync(resolved)) {
-        cwd = resolved;
-      } else {
-        log.warn("Ignoring cwd %s — directory does not exist", options.cwd);
-      }
+          "saved terminal history cwd",
+          checkpoint.cwd,
+        ) ?? cwd;
     }
 
     if (!existsSync(cwd)) {
@@ -381,9 +458,14 @@ export class TerminalPool {
     //     `__esModule` flag and exposes ONLY the namespace, leaving
     //     `.default` undefined.
     // Reaching for `.spawn` on the namespace works under both loaders.
-    const nodePty = await import("node-pty");
+    //
+    // `preloadNodePty` rather than a bare `import("node-pty")`: the daemon
+    // already preloaded it at startup (see `runDaemon`), so this normally
+    // just returns the cached module; `InProcessTerminalBackend`, which never
+    // preloads, loads it here on first use instead.
     let ptyProcess: IPty;
     try {
+      const nodePty = await preloadNodePty();
       ptyProcess = nodePty.spawn(shell, [], {
         name: "xterm-256color",
         cols: 80,
@@ -394,7 +476,7 @@ export class TerminalPool {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error("pty.spawn failed: %s (shell=%s, cwd=%s)", msg, shell, cwd);
-      throw err;
+      throw new Error(hintForPtySpawnError(err));
     }
 
     // Headless xterm mirror for replay-on-reconnect (see `serialize`).
@@ -458,14 +540,34 @@ export class TerminalPool {
       seq: 0,
       holds: 0,
       cleanupOnExit: extras?.cleanupOnExit ?? false,
+      history: this.historyStore
+        ? {
+            cwd,
+            startedAt: historyMeta?.startedAt ?? new Date().toISOString(),
+            sessionCommand: options?.command ?? historyMeta?.sessionCommand,
+            lastCheckpointAt: 0,
+          }
+        : undefined,
     };
     this.terminals.set(terminalId, session);
 
-    // Auto-run initial command if provided. Robust against the cold-PTY
-    // race — see autoRunCommand for why a naive `pty.write` truncates and
-    // mangles long prompt-as-argv command lines.
-    if (options?.command) {
-      this.autoRunCommand(session, options.command);
+    // Cold restore: write the saved screen into the fresh mirror/tail before
+    // any live output, so the first `attach()` snapshot already contains it
+    // followed by whatever this new shell has printed since. No wire-protocol
+    // change needed — this reuses the existing snapshot/attach machinery.
+    if (checkpoint) {
+      const restored = `${checkpoint.scrollback}\r\n\x1b[90m--- session restored ---\x1b[0m\r\n`;
+      session.scrollback.append(restored);
+      session.headless.write(restored);
+    }
+
+    // Auto-run initial command if provided, or — with no explicit command and
+    // a saved Claude Code session for this cwd — its resume command. Any
+    // other saved command is deliberately NOT re-run automatically; a cold
+    // restore only shows the saved scrollback for those.
+    const commandToRun = options?.command ?? this.claudeResumeCommand(checkpoint, historyMeta, cwd);
+    if (commandToRun) {
+      this.autoRunCommand(session, commandToRun);
     }
 
     // Register in reverse index
@@ -493,6 +595,7 @@ export class TerminalPool {
           }
         }
       }
+      this.maybeCheckpointHistory(terminalId, session);
     });
 
     ptyProcess.onExit(({ exitCode }) => {
@@ -521,6 +624,28 @@ export class TerminalPool {
           // Already gone / never written — nothing to clean up.
         }
       }
+      // History: an explicit `kill` / `killWorkspace` means the tab or
+      // workspace is actually gone, so drop its saved history too. Any other
+      // exit (a natural shell exit, or `killAll` during a daemon
+      // restart/shutdown) writes one last checkpoint instead, so a later
+      // reopen of this terminalId can still cold-restore it. Must run before
+      // `headless.dispose()` below — the checkpoint serializes it.
+      if (this.historyStore) {
+        if (this.pruneHistoryOnExit.delete(terminalId)) {
+          this.historyStore.removeSession(terminalId);
+        } else if (session.history) {
+          // Unlike `maybeCheckpointHistory`'s periodic call, this can't be
+          // deferred via `setImmediate` — it must run before
+          // `headless.dispose()` just below, so `serialize()`'s CPU cost (up
+          // to tens of ms for a full scrollback) is paid inline here. A
+          // one-time per-terminal-exit cost, not a per-chunk one; on a daemon
+          // restart that ends many terminals at once this can add up across
+          // their exit events, but restructuring to avoid it would mean
+          // extracting the serialized string before `pty.kill()` instead,
+          // which only the explicit-kill paths could do safely.
+          this.checkpointHistoryNow(terminalId, session);
+        }
+      }
       // Tear down the headless mirror with the PTY. This handler fires for
       // explicit `kill()` paths too (pty.kill → onExit), so it is the single
       // dispose site; also disposes the loaded SerializeAddon.
@@ -546,6 +671,89 @@ export class TerminalPool {
     });
 
     return session;
+  }
+
+  /**
+   * A resumable Claude Code command for a cold-restored terminal, or
+   * `undefined` if this isn't one: the checkpoint's saved command must look
+   * like a plain `claude` invocation (see `claude-resume.ts`) and there must
+   * be a Claude Code session transcript for `cwd`. Scoped to Claude Code
+   * only — its on-disk session layout is documented and stable; other
+   * agents' formats weren't verified for this feature.
+   *
+   * Takes the already boundary-checked `cwd` the new shell is actually
+   * spawning in, not the checkpoint's raw saved cwd: if that saved cwd fell
+   * outside the workspace root and `cwd` fell back to `workspaceRoot`, the
+   * resume lookup must follow, not probe a directory the spawn itself
+   * decided not to trust.
+   */
+  private claudeResumeCommand(
+    checkpoint: TerminalHistoryCheckpoint | null,
+    meta: TerminalHistoryMeta | null,
+    cwd: string,
+  ): string | undefined {
+    const command = meta?.sessionCommand;
+    if (!checkpoint || !command || !isResumableClaudeCommand(command)) return undefined;
+    const sessionId = findLatestClaudeSessionId(cwd);
+    return sessionId ? buildClaudeResumeCommand(command, sessionId) : undefined;
+  }
+
+  /**
+   * Checkpoint at most every `HISTORY_CHECKPOINT_INTERVAL_MS`, driven by
+   * output arriving. Deferred off the PTY-output hot path via `setImmediate`:
+   * `serialize()` is synchronous CPU work proportional to the scrollback
+   * size, and running it inline in `onData` would delay delivering this (and
+   * every other terminal's already-pending) output on the daemon's single
+   * event loop — the class of regression issue #676 fixed for a different
+   * code path.
+   */
+  private maybeCheckpointHistory(terminalId: string, session: TerminalSession): void {
+    if (!this.historyStore || !session.history) return;
+    const now = Date.now();
+    if (now - session.history.lastCheckpointAt < HISTORY_CHECKPOINT_INTERVAL_MS) return;
+    session.history.lastCheckpointAt = now;
+    setImmediate(() => {
+      // The terminal may have exited (and disposed its headless mirror)
+      // between scheduling this and it actually running.
+      if (this.terminals.get(terminalId) === session) {
+        this.checkpointHistoryNow(terminalId, session);
+      }
+    });
+  }
+
+  /**
+   * Serializes the current screen synchronously — the only part of a
+   * checkpoint that must be, since it must run before `headless.dispose()` on
+   * exit — then hands the actual write off to `TerminalHistoryManager`'s async,
+   * non-blocking I/O. The write is tracked in {@link pendingHistoryWrites} so
+   * a daemon shutdown can wait for it rather than exiting mid-write and
+   * losing a session's last checkpoint; `TerminalHistoryManager` logs its own
+   * failures and never rejects, so there is nothing for this method's caller
+   * to await or catch.
+   */
+  private checkpointHistoryNow(terminalId: string, session: TerminalSession): void {
+    if (!this.historyStore || !session.history) return;
+    const { cols, rows } = session.headless;
+    const { cwd, startedAt, sessionCommand } = session.history;
+    const pending = Promise.all([
+      this.historyStore.writeCheckpoint(terminalId, {
+        scrollback: session.serializeAddon.serialize(),
+        cwd,
+        cols,
+        rows,
+      }),
+      this.historyStore.writeMeta(terminalId, {
+        workspaceId: session.workspaceId,
+        cwd,
+        cols,
+        rows,
+        startedAt,
+        checkpointedAt: new Date().toISOString(),
+        sessionCommand,
+      }),
+    ]);
+    this.pendingHistoryWrites.add(pending);
+    void pending.finally(() => this.pendingHistoryWrites.delete(pending));
   }
 
   /**
@@ -998,6 +1206,10 @@ export class TerminalPool {
   kill(terminalId: string): void {
     const session = this.terminals.get(terminalId);
     if (session) {
+      // The tab is actually being closed: prune its saved history too,
+      // rather than leaving it to be cold-restored under a future terminalId
+      // reuse that will never happen. See `onExit`'s `pruneHistoryOnExit` check.
+      this.pruneHistoryOnExit.add(terminalId);
       // `pty.kill()` triggers the `onExit` handler registered in `spawn`,
       // which is what unlinks `session.autoRunFile` — cleanup is delegated
       // there rather than duplicated in every kill path.
@@ -1010,6 +1222,11 @@ export class TerminalPool {
           this.workspaceTerminals.delete(session.workspaceId);
         }
       }
+    } else {
+      // Already exited (or never existed here): no PTY to kill and no
+      // `onExit` will ever fire for it, but the tab is still being closed,
+      // so prune any saved history for it directly.
+      this.historyStore?.removeSession(terminalId);
     }
   }
 
@@ -1018,15 +1235,22 @@ export class TerminalPool {
    */
   killWorkspace(workspaceId: string): void {
     const ids = this.workspaceTerminals.get(workspaceId);
-    if (!ids) return;
-    for (const terminalId of ids) {
-      const session = this.terminals.get(terminalId);
-      if (session) {
-        session.pty.kill();
-        this.terminals.delete(terminalId);
+    if (ids) {
+      for (const terminalId of ids) {
+        const session = this.terminals.get(terminalId);
+        if (session) {
+          // The workspace is actually being deleted: prune saved history too.
+          this.pruneHistoryOnExit.add(terminalId);
+          session.pty.kill();
+          this.terminals.delete(terminalId);
+        }
       }
+      this.workspaceTerminals.delete(workspaceId);
     }
-    this.workspaceTerminals.delete(workspaceId);
+    // Also sweep for history left by terminals of this workspace that had
+    // already exited (and so are no longer in the reverse index above) —
+    // the on-disk `workspaceId` is the only record of them left.
+    this.historyStore?.removeSessionsForWorkspace(workspaceId);
   }
 
   /**
@@ -1042,4 +1266,40 @@ export class TerminalPool {
     // kills above still report their exits through them.
     this.outputListeners.clear();
   }
+
+  /**
+   * True while a history checkpoint write is still in flight. The daemon's
+   * shutdown polls this alongside its shells' liveness so it never exits
+   * mid-write and loses the last checkpoint a dying session's `onExit`
+   * kicked off (see {@link checkpointHistoryNow}).
+   */
+  hasPendingHistoryWrites(): boolean {
+    return this.pendingHistoryWrites.size > 0;
+  }
+}
+
+/**
+ * A candidate cwd, valid only if it stays within `workspaceRoot` and exists.
+ * `label`/`original` are for the warning log only, so a caller can attribute
+ * one shared check to either the request's `options.cwd` or a saved
+ * checkpoint's cwd. Appends `sep` to the containment check (with an equality
+ * carve-out for `candidate === workspaceRoot`) so a sibling like
+ * `<root>-evil` can't pass the prefix check — same shape as
+ * `serveWorkspaceFile` in start-server.ts.
+ */
+function resolveSafeCwd(
+  candidate: string,
+  workspaceRoot: string,
+  label: string,
+  original: string,
+): string | null {
+  if (candidate !== workspaceRoot && !candidate.startsWith(workspaceRoot + sep)) {
+    log.warn("Ignoring %s %s — resolves outside workspace root %s", label, original, workspaceRoot);
+    return null;
+  }
+  if (!existsSync(candidate)) {
+    log.warn("Ignoring %s %s — directory does not exist", label, original);
+    return null;
+  }
+  return candidate;
 }
