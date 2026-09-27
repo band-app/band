@@ -307,7 +307,8 @@ enum AgentsCmd {
         #[arg(long)]
         agent: Option<String>,
         /// `gui` (chat) or `tui` (terminal); `chat` / `terminal` also accepted.
-        /// Omit to use the server's `agents.defaultMode`.
+        /// Falls back to `$BAND_DISPATCH`, the repo's `.band/config.json`
+        /// `workspace.defaultVia`, then the server's `agents.defaultMode`.
         #[arg(long)]
         mode: Option<String>,
         /// First prompt for the agent
@@ -1685,7 +1686,7 @@ fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {
         "gui" | "chat" => Ok("gui"),
         "tui" | "terminal" => Ok("tui"),
         other => Err(format!(
-            "Invalid --mode '{other}': expected gui, tui, chat or terminal"
+            "Invalid agent mode '{other}': expected gui, tui, chat or terminal"
         )),
     }
 }
@@ -1747,13 +1748,38 @@ fn cmd_agents_list(workspace_id: Option<&str>) -> Result<CommandResult, String> 
     })
 }
 
+/// Resolve `band agents launch`'s mode, highest first: `--mode`, then
+/// `$BAND_DISPATCH` (so an agent running in a Band terminal or chat starts
+/// its agents the same way), then the repo's `.band/config.json`
+/// `workspace.defaultVia`. `None` leaves the choice to the server's
+/// `agents.defaultMode`, which also covers the older `cli.defaultVia`.
+fn resolve_agent_mode(flag: Option<&str>) -> Result<Option<&'static str>, String> {
+    if let Some(m) = flag {
+        return parse_agent_mode(m).map(Some);
+    }
+    if let Ok(env) = std::env::var("BAND_DISPATCH") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return parse_agent_mode(trimmed)
+                .map(Some)
+                .map_err(|e| format!("{e} (from BAND_DISPATCH env var)"));
+        }
+    }
+    if let Some(v) = read_repo_default_via() {
+        return parse_agent_mode(&v)
+            .map(Some)
+            .map_err(|e| format!("{e} (from .band/config.json workspace.defaultVia)"));
+    }
+    Ok(None)
+}
+
 fn cmd_agents_launch(
     workspace_id: Option<&str>,
     agent: Option<&str>,
     mode: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<CommandResult, String> {
-    let mode = mode.map(parse_agent_mode).transpose()?;
+    let mode = resolve_agent_mode(mode)?;
     let client = api::ApiClient::from_settings()?;
     let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
@@ -3117,10 +3143,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID from settings (default agent if omitted)"},
-                {"name": "--mode", "type": "string", "required": false, "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Omit to use the server's agents.defaultMode"},
+                {"name": "--mode", "type": "string", "required": false, "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Falls back to BAND_DISPATCH, then .band/config.json workspace.defaultVia, then the server's agents.defaultMode"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "First prompt for the agent"},
             ],
-            "notes": "`gui` opens a chat pane and submits the prompt to the agent. `tui` opens a terminal running the agent's CLI (`claude \"<prompt>\"`, `codex \"<prompt>\"`, ...). Without --mode the server's `agents.defaultMode` setting decides. An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.\nText output: `<mode>\\t<chat or terminal ID>`, plus a `note:` line after a fallback.\nJSON output: `{\"agentSession\": {...}, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\", \"terminalId\": \"...\", \"notice\": \"...\"}` (chatId for gui, terminalId for tui, notice only after a fallback).\nExample: band agents launch --agent codex --mode tui --prompt \"Fix the failing test\""
+            "notes": "`gui` opens a chat pane and submits the prompt to the agent. `tui` opens a terminal running the agent's CLI (`claude \"<prompt>\"`, `codex \"<prompt>\"`, ...). Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting. An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.\nText output: `<mode>\\t<chat or terminal ID>`, plus a `note:` line after a fallback.\nJSON output: `{\"agentSession\": {...}, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\", \"terminalId\": \"...\", \"notice\": \"...\"}` (chatId for gui, terminalId for tui, notice only after a fallback).\nExample: band agents launch --agent codex --mode tui --prompt \"Fix the failing test\""
         }),
         serde_json::json!({
             "name": "terminals list",

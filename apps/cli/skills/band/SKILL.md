@@ -125,7 +125,7 @@ Runs the `.band/config.json` `teardown` command in a terminal tab of the workspa
 band agents launch [workspace_id] [--agent <string>] [--mode <string>] [--prompt <string>]
 ```
 
-Starts an agent session. `--mode gui` opens a chat pane and submits the prompt to the agent. `--mode tui` opens a terminal running the agent's CLI with the prompt pre-loaded (`claude "<prompt>"`, `codex "<prompt>"`, ...). `chat` and `terminal` are accepted as aliases. Without `--mode`, the server's `agents.defaultMode` setting decides (Settings > Coding Agents > "Open programmatically created agents in"). `--agent` picks a coding agent ID from settings; the default agent is used when omitted. The workspace is auto-detected from the cwd when `workspace_id` is omitted.
+Starts an agent session. `--mode gui` opens a chat pane and submits the prompt to the agent. `--mode tui` opens a terminal running the agent's CLI with the prompt pre-loaded (`claude "<prompt>"`, `codex "<prompt>"`, ...). `chat` and `terminal` are accepted as aliases. Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent, so an agent starts new agents the way it runs itself) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting (Settings > Coding Agents > "Open programmatically created agents in"). `--agent` picks a coding agent ID from settings; the default agent is used when omitted. The workspace is auto-detected from the cwd when `workspace_id` is omitted.
 
 An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.
 
