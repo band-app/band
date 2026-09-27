@@ -54,6 +54,12 @@ export class MobileLayoutPage {
   readonly sidebar: Locator;
   /** The action bar at the foot of the wide-layout project-list sidebar. */
   readonly sidebarActionBar: Locator;
+  /** The wide-layout column right of the sidebar (tabs, chat, side panel). */
+  readonly appShellMain: Locator;
+  /** The wide-layout sidebar toggle and back / forward buttons. */
+  readonly navOverlay: Locator;
+  /** The notice asking to add an outdated iOS home-screen app again. */
+  readonly reinstallNotice: Locator;
   readonly explorerSheetBody: Locator;
   readonly changesSheetBody: Locator;
   readonly composer: Locator;
@@ -87,6 +93,9 @@ export class MobileLayoutPage {
       .getByTestId("app-shell__sidebar")
       .getByTestId("project-list__action-bar")
       .filter({ visible: true });
+    this.appShellMain = page.getByTestId("app-shell__main");
+    this.navOverlay = page.getByTestId("app-shell__nav-overlay");
+    this.reinstallNotice = page.getByTestId("reinstall-home-screen-notice");
     this.explorerSheetBody = page.getByTestId("mobile-workspace__explorer-body");
     this.changesSheetBody = page.getByTestId("mobile-workspace__changes-body");
     this.composer = page.getByTestId("chat-pane__composer").filter({ visible: true });
@@ -115,6 +124,14 @@ export class MobileLayoutPage {
       await (sheet === "explorer" ? this.explorerButton : this.changesButton).click();
       const body = sheet === "explorer" ? this.explorerSheetBody : this.changesSheetBody;
       await expect(body).toBeVisible();
+    });
+  }
+
+  /** Dismiss the add-to-Home-Screen-again notice. */
+  async dismissReinstallNotice(): Promise<void> {
+    await test.step("Dismiss the reinstall notice", async () => {
+      await this.reinstallNotice.getByRole("button", { name: "Close" }).click();
+      await expect(this.reinstallNotice).toHaveCount(0);
     });
   }
 

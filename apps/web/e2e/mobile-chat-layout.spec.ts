@@ -18,7 +18,9 @@
  *
  * The page must not ask for the `black-translucent` status bar: on iOS 26 that
  * style sizes a home-screen app one status bar short (WebKit bug 301108), which
- * no inset in the page can correct. Keyboard behaviour (the composer resting on
+ * no inset in the page can correct. An iOS home-screen app that still has
+ * that style (iOS reads it only when the app is added) shows a notice asking
+ * the user to add it again. Keyboard behaviour (the composer resting on
  * the software keyboard) needs a real iPhone and is checked by hand.
  *
  * Standalone mode can't be emulated in Playwright's headless shell
@@ -156,23 +158,29 @@ test.afterAll(async () => {
   if (tmpHome) cleanupTmpHome(tmpHome);
 });
 
-/** Launch Chromium as an app window (display-mode: standalone) with a
- *  home-indicator inset. */
-async function launchStandalone(viewport: {
-  width: number;
-  height: number;
-}): Promise<{ context: BrowserContext; page: Page }> {
+/** Launch Chromium as an app window (display-mode: standalone) with the
+ *  status-bar and home-indicator insets. `ios` also sets
+ *  `navigator.standalone`, the property only an iOS home-screen app has. */
+async function launchStandalone(
+  viewport: { width: number; height: number },
+  opts: { insetTop?: number; ios?: boolean } = {},
+): Promise<{ context: BrowserContext; page: Page }> {
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
     viewport,
     args: [`--app=${MobileLayoutPage.dashboardUrl(server.url, TOKEN)}`],
   });
+  if (opts.ios) {
+    await context.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, "standalone", { get: () => true });
+    });
+  }
   const page = context.pages()[0] ?? (await context.newPage());
   const cdp = await context.newCDPSession(page);
   // Not in Playwright's bundled protocol types yet.
   await cdp.send(
     "Emulation.setSafeAreaInsetsOverride" as never,
-    { insets: { top: SAFE_AREA_TOP, bottom: SAFE_AREA_BOTTOM } } as never,
+    { insets: { top: opts.insetTop ?? SAFE_AREA_TOP, bottom: SAFE_AREA_BOTTOM } } as never,
   );
   return { context, page };
 }
@@ -307,6 +315,17 @@ test.describe("safe-area insets in a wide home-screen app", () => {
     const viewport = await layout.readViewport();
     expect(viewport.standalone).toBe(true);
 
+    // Both columns and the nav buttons over them start below the status bar,
+    // so the title bars and the tab strip are not drawn under it.
+    const sidebarTop = await layout.readLayout(layout.sidebar);
+    expect(sidebarTop.top).toBe(0);
+    expect(sidebarTop.paddingTop).toBe(SAFE_AREA_TOP);
+    const mainColumn = await layout.readLayout(layout.appShellMain);
+    expect(mainColumn.top).toBe(0);
+    expect(mainColumn.paddingTop).toBe(SAFE_AREA_TOP);
+    const nav = await layout.readLayout(layout.navOverlay);
+    expect(nav.top).toBe(SAFE_AREA_TOP);
+
     // The sidebar column pads the inset itself, so the gap under its action
     // bar is painted in the sidebar colour rather than the app background.
     const sidebar = await layout.readLayout(layout.sidebar);
@@ -331,6 +350,46 @@ test.describe("safe-area insets in a wide home-screen app", () => {
 
     const footer = await layout.readLayout(settings.footer);
     expect(footer.paddingBottom).toBe(SETTINGS_CARD_FOOTER_PADDING);
+  });
+});
+
+test.describe("an iOS home-screen app added with the old status bar", () => {
+  let context: BrowserContext;
+  let page: Page;
+
+  test.afterEach(async () => {
+    await context?.close();
+  });
+
+  test("asks the user to add the app again, and stays dismissed", async () => {
+    // A top inset in an iOS home-screen app means the translucent status bar
+    // iOS froze at install time; the current opaque one reports none.
+    ({ context, page } = await launchStandalone(PHONE, { ios: true }));
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
+
+    await expect(layout.reinstallNotice).toBeVisible();
+    const notice = await layout.readLayout(layout.reinstallNotice);
+    expect(notice.bottom).toBeLessThanOrEqual(PHONE.height - SAFE_AREA_BOTTOM);
+
+    await layout.dismissReinstallNotice();
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
+    await expect(layout.reinstallNotice).toHaveCount(0);
+  });
+
+  test("stays hidden in an app added with the opaque status bar", async () => {
+    ({ context, page } = await launchStandalone(PHONE, { ios: true, insetTop: 0 }));
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
+
+    const header = await layout.readLayout(layout.header);
+    expect(header.paddingTop).toBe(0);
+    await expect(layout.reinstallNotice).toHaveCount(0);
   });
 });
 
@@ -382,6 +441,7 @@ test.describe("in a phone browser tab", () => {
     expect(composer.bottom).toBe(viewport.height);
 
     await expectNoKeyboardSuggestions(chat.promptInput);
+    await expect(chat.promptInput).toHaveAttribute("writingsuggestions", "false");
     await expect(chat.promptForm).toHaveAttribute("autocomplete", "off");
   });
 
