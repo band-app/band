@@ -928,6 +928,39 @@ export class WorkspacePage {
     });
   }
 
+  /** Type `text` at the end of the visible file leaf's editor. The caller
+   *  activates the tab first (a click on desktop, a tap on a touch screen). */
+  async appendToActiveFileEditor(text: string): Promise<void> {
+    await test.step(`Type "${text}" at the end of the visible file editor`, async () => {
+      const marker = this.fileLeafVisibilityMarker(true).first();
+      await marker.waitFor({ state: "visible", timeout: 20_000 });
+      await marker.getByRole("textbox").first().click();
+      await this.pressEditorToDocEnd();
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** The visible file leaf's banner saying another device changed this file's
+   *  unsaved edits while this device had edits of its own. */
+  get remoteEditBanner(): Locator {
+    return this.page.getByTestId("center-file-leaf__remote-edit").filter({ visible: true });
+  }
+
+  async loadRemoteEdit(): Promise<void> {
+    await test.step("Load the other device's unsaved edits", async () => {
+      await this.remoteEditBanner.getByTestId("center-file-leaf__remote-edit-load").click();
+    });
+  }
+
+  /** Open a new untitled scratch buffer, as ⌘N does (`band:new-untitled-tab`). */
+  async openUntitledTab(): Promise<void> {
+    await test.step("Open a new untitled buffer", async () => {
+      await this.page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
+      });
+    });
+  }
+
   /** Move the editor cursor to the end of the document (which also scrolls the
    *  editor to the bottom), so a reload/reopen can be shown to restore the
    *  cursor + scroll position. Editor must be focused first. */

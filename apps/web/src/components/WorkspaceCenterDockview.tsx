@@ -113,7 +113,6 @@ import {
   centerTabsFromApi,
   centerTabsKey,
   diffCenterTabs,
-  isSharedTab,
   keepHiddenTabs,
   parseCenterTabs,
   readCenterTabs,
@@ -342,16 +341,22 @@ function usePublishHeaderActions(
   }, [panelId, ...deps]);
 }
 
-// Per-workspace monotonic counter for untitled scratch buffers, mirroring
-// `useFileTabs`'s `untitledCounterRef` — the file leaf isn't backed by
-// `useFileTabs` (dockview owns the tab list), so the shell mints the
-// `untitled:N` path itself. In-memory only: a reload restarts at 1, which is
-// acceptable since untitled buffers aren't persisted across reloads here.
+// Per-workspace counter for untitled scratch buffers — the file leaf isn't
+// backed by `useFileTabs` (dockview owns the tab list), so the shell mints the
+// `untitled:N` path itself. An untitled buffer's text is kept on the server
+// under its path and its tab is shared with other devices, so N must not reuse
+// a number another device (or an earlier page load) still has open: it starts
+// above every `untitled:N` in the shared tab list.
 const untitledCounters = new Map<string, number>();
 
-/** Mint the next `untitled:N` path for a workspace (1-based, monotonic). */
+/** Mint the next `untitled:N` path for a workspace (1-based, never reused while open). */
 export function nextUntitledPath(workspaceId: string): string {
-  const n = (untitledCounters.get(workspaceId) ?? 0) + 1;
+  let n = untitledCounters.get(workspaceId) ?? 0;
+  for (const tab of readCenterTabs(workspaceId)?.tabs ?? []) {
+    const m = /^file:untitled:(\d+)$/.exec(tab.id);
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  n += 1;
   untitledCounters.set(workspaceId, n);
   return `${UNTITLED_PREFIX}${n}`;
 }
@@ -906,15 +911,27 @@ function readTabStates(ws: string): Record<string, TabFileState> {
 // `migrateLegacyTabStates` does the same eagerly for EVERY workspace's blob
 // once per page load, so file text viewed in a workspace the user never
 // reopens doesn't sit in browser storage indefinitely.
+//
+// Unsaved edits (`editedContent`) used to live in this blob too. They now have
+// a key per file (`band-unsaved:<ws>:<path>`, see "Unsaved edits" below), so
+// they're moved out on first read.
 type LegacyTabFileState = TabFileState & { editorState?: unknown };
 function dropLegacyEditorState(
   ws: string,
   states: Record<string, LegacyTabFileState>,
 ): Record<string, TabFileState> {
   let changed = false;
-  for (const state of Object.values(states)) {
-    if (state && typeof state === "object" && "editorState" in state) {
+  for (const [path, state] of Object.entries(states)) {
+    if (!state || typeof state !== "object") continue;
+    if ("editorState" in state) {
       delete state.editorState;
+      changed = true;
+    }
+    if ("editedContent" in state) {
+      if (typeof state.editedContent === "string" && getUnsavedContent(ws, path) === null) {
+        setUnsavedContent(ws, path, state.editedContent);
+      }
+      delete state.editedContent;
       changed = true;
     }
   }
@@ -934,8 +951,9 @@ function migrateLegacyTabStates(): void {
       if (key?.startsWith(prefix)) keys.push(key);
     }
     for (const key of keys) {
-      // Cheap pre-check: only parse (and rewrite) blobs that carry the field.
-      if (!localStorage.getItem(key)?.includes('"editorState"')) continue;
+      // Cheap pre-check: only parse (and rewrite) blobs that carry a field to move.
+      const raw = localStorage.getItem(key);
+      if (!raw?.includes('"editorState"') && !raw?.includes('"editedContent"')) continue;
       readTabStates(key.slice(prefix.length));
     }
   } catch {
@@ -961,8 +979,29 @@ function updateFileTabState(ws: string, path: string, patch: Partial<TabFileStat
   writeTabStates(ws, states);
 }
 
+// ---------------------------------------------------------------------------
+// Unsaved edits (`band-unsaved:<ws>:<path>`, client state shared by every
+// device). A file's unsaved text, or an untitled buffer's whole text, is kept
+// on the server so it's there on the phone too. Last save wins: a device that
+// types after another device's save writes over it, and the file leaf warns
+// when another device's copy arrives while this one has edits of its own.
+// ---------------------------------------------------------------------------
+
+const UNSAVED_PREFIX = "band-unsaved:";
+const unsavedKey = (ws: string, path: string): string => `${UNSAVED_PREFIX}${ws}:${path}`;
+
+function getUnsavedContent(ws: string, path: string): string | null {
+  return clientStorage.getItem(unsavedKey(ws, path));
+}
+
+function setUnsavedContent(ws: string, path: string, content: string | null): void {
+  if (content === null) clientStorage.removeItem(unsavedKey(ws, path));
+  else clientStorage.setItem(unsavedKey(ws, path), content);
+}
+
 function isFileDirty(ws: string, path: string): boolean {
-  return getFileTabState(ws, path)?.editedContent != null;
+  readTabStates(ws); // moves a legacy `editedContent` out of the blob first
+  return getUnsavedContent(ws, path) !== null;
 }
 
 // File leaves closed by the user. `doCloseLeaf` drops the leaf's tab state
@@ -978,6 +1017,7 @@ function removeFileTabState(ws: string, path: string): void {
     delete states[path];
     writeTabStates(ws, states);
   }
+  if (getUnsavedContent(ws, path) !== null) setUnsavedContent(ws, path, null);
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1284,23 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     showMarkdownToggle: boolean;
   } | null>(null);
 
+  // Another device's copy of this file's unsaved text (last save wins). With
+  // no edits here the leaf just reloads it; with edits of its own it asks.
+  // `bufferKey` remounts FileViewer so it reads the new copy.
+  const [bufferKey, setBufferKey] = useState(0);
+  const [remoteEdit, setRemoteEdit] = useState(false);
+  const isDirtyRef = useRef(false);
+  isDirtyRef.current = fileActions?.isDirty ?? false;
+  useEffect(() => {
+    if (!workspaceIdRaw || !filePathRaw) return;
+    const key = unsavedKey(workspaceIdRaw, filePathRaw);
+    return subscribeClientState((change) => {
+      if (change.key !== key) return;
+      if (isDirtyRef.current) setRemoteEdit(true);
+      else setBufferKey((k) => k + 1);
+    });
+  }, [workspaceIdRaw, filePathRaw]);
+
   // Hold the live EditorView so we can serialize its cursor selection + scroll
   // offset on unmount/pagehide and restore it next open (see `persistEditorState`).
   // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped
@@ -1432,7 +1489,43 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
       className="flex h-full w-full flex-col overflow-hidden outline-none"
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
+      {remoteEdit && (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-xs"
+          data-testid="center-file-leaf__remote-edit"
+        >
+          <span className="min-w-0 flex-1">
+            Another device changed the unsaved edits to this file.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="center-file-leaf__remote-edit-load"
+            onClick={() => {
+              setRemoteEdit(false);
+              setBufferKey((k) => k + 1);
+              window.dispatchEvent(new CustomEvent("band:dirty-change"));
+            }}
+          >
+            Load theirs
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="center-file-leaf__remote-edit-keep"
+            onClick={() => {
+              setRemoteEdit(false);
+              const view = editorViewRef.current;
+              if (view) setUnsavedContent(workspaceId, filePath, view.state.doc.toString());
+              window.dispatchEvent(new CustomEvent("band:dirty-change"));
+            }}
+          >
+            Keep mine
+          </Button>
+        </div>
+      )}
       <FileViewer
+        key={bufferKey}
         workspaceId={workspaceId}
         filePath={filePath}
         line={params.line}
@@ -1484,11 +1577,12 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
         // `band:dirty-change` event after every call, which lets the tab header
         // (a separate React tree) re-check its dirty dot; dispatching it here
         // too would double the per-keystroke re-checks.
-        initialEditedContent={persisted?.editedContent ?? null}
+        initialEditedContent={getUnsavedContent(workspaceId, filePath)}
         onEditedContentChange={(content) => {
-          updateFileTabState(workspaceId, filePath, {
-            editedContent: content ?? undefined,
-          });
+          // Typing after another device's copy arrived keeps this device's
+          // text: it is now the last save.
+          setRemoteEdit(false);
+          setUnsavedContent(workspaceId, filePath, content);
         }}
         viewMode={viewMode}
         onViewModeChange={(mode) => {
@@ -2925,7 +3019,7 @@ function applyCenterTabMembership(
     changed = true;
   }
   for (const tab of added) {
-    if (!isViewTab(tab) || !isSharedTab(tab) || api.getPanel(tab.id)) continue;
+    if (!isViewTab(tab) || api.getPanel(tab.id)) continue;
     const i = target.tabs.findIndex((t) => t.id === tab.id);
     let afterId: string | null = null;
     for (let j = i - 1; j >= 0; j--) {
@@ -2943,14 +3037,14 @@ function applyCenterTabMembership(
 /**
  * Make the dockview show the shared tab list: its file and diff tabs, in its
  * order, with its active tab. Tabs this device has and the list doesn't
- * (untitled buffers, a terminal whose record the list hasn't caught up with)
+ * (a terminal whose record the list hasn't caught up with)
  * keep their place after the listed ones. Returns whether anything changed.
  */
 function applyCenterTabsFull(api: DockviewApi, workspaceId: string, target: CenterTabs): boolean {
   const listed = new Set(target.tabs.map((t) => t.id));
   const extra = api.panels
     .map((p) => ({ id: p.id, kind: p.api.component as CenterTab["kind"] }))
-    .filter((t) => isViewTab(t) && isSharedTab(t) && !listed.has(t.id));
+    .filter((t) => isViewTab(t) && !listed.has(t.id));
   const onPanel = new Set(api.panels.map((p) => p.id));
   let changed = applyCenterTabMembership(
     api,
@@ -3559,6 +3653,11 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           delete states[filePath];
           statesChanged = true;
         }
+        const unsaved = getUnsavedContent(workspaceId, filePath);
+        if (unsaved !== null) {
+          setUnsavedContent(workspaceId, nextPath, unsaved);
+          setUnsavedContent(workspaceId, filePath, null);
+        }
         closedFileLeaves.add(closedFileLeafKey(workspaceId, filePath));
       }
       if (statesChanged) writeTabStates(workspaceId, states);
@@ -3998,6 +4097,15 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (changed || change.source === "conflict") flushPersist();
     });
   }, [workspaceId, flushPersist]);
+
+  // Another device changed a file's unsaved edits: tab headers re-check their
+  // dirty dot (a background file tab has no mounted leaf to do it).
+  useEffect(() => {
+    const prefix = unsavedKey(workspaceId, "");
+    return subscribeClientState((change) => {
+      if (change.key.startsWith(prefix)) window.dispatchEvent(new CustomEvent("band:dirty-change"));
+    });
+  }, [workspaceId]);
 
   // Shown again: apply the order and active tab another device set meanwhile.
   useEffect(() => {

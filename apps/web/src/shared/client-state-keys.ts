@@ -7,8 +7,7 @@
  * A key's scope is `all` (one value shared by every device) or `device` (one
  * value per device type: desktop or mobile). A key can map to several server
  * entries: `band-tab-state:<ws>` shares each file's view mode and language
- * with every device but keeps scroll position per device type, and keeps the
- * unsaved buffer on this device only.
+ * with every device but keeps scroll position per device type.
  *
  * Keys not listed here stay on the device: the agent mode (`band.agent-mode`,
  * per device on purpose, #685), experimental flags, and sessionStorage caches.
@@ -149,6 +148,8 @@ const RULES: KeyRule[] = [
   perWorkspaceLeaf("band:term-split:", [jsonPart("all")]),
   perWorkspace("band:diff-compare-branch:", [rawPart("all")]),
   perWorkspace("band-draft:", [rawPart("all")]),
+  // A file's unsaved text, or an untitled buffer's (`<prefix><ws>:<path>`).
+  perWorkspaceLeaf("band-unsaved:", [rawPart("all")]),
   perWorkspace("band-tab-state:", [
     perFileFieldsPart("all", ["viewMode", "language"]),
     perFileFieldsPart("device", ["scrollTop", "selection"]),

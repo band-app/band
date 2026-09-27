@@ -32,11 +32,6 @@ export function centerTabsKey(workspaceId: string): string {
   return `${CENTER_TABS_PREFIX}${workspaceId}`;
 }
 
-/** Untitled scratch buffers hold their text on this device only, so they aren't shared. */
-export function isSharedTab(tab: CenterTab): boolean {
-  return !(tab.kind === "file" && tab.id.startsWith("file:untitled:"));
-}
-
 export function parseCenterTabs(value: unknown): CenterTabs | null {
   if (!value || typeof value !== "object") return null;
   const v = value as { tabs?: unknown; active?: unknown };
@@ -70,7 +65,7 @@ export function centerTabsFromApi(api: DockviewApi): CenterTabs {
       if (KINDS.has(kind)) tabs.push({ id: panel.id, kind: kind as CenterTabKind });
     }
   }
-  return { tabs: tabs.filter(isSharedTab), active: api.activePanel?.id ?? null };
+  return { tabs, active: api.activePanel?.id ?? null };
 }
 
 /**

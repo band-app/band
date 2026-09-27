@@ -322,20 +322,21 @@ class ClientStateStore {
 
     const oldRaw = readLocal(entry.key);
     const newRaw = part.merge(oldRaw, entry.value);
-    if (newRaw !== oldRaw) {
-      writeLocal(entry.key, newRaw);
-      try {
-        window.dispatchEvent(
-          new StorageEvent("storage", {
-            key: entry.key,
-            oldValue: oldRaw,
-            newValue: newRaw,
-            storageArea: localStorage,
-            url: location.href,
-          }),
-        );
-      } catch {}
-    }
+    // Nothing to tell anyone when this device already had the value (a
+    // re-read after a reconnect, or a change to another part of the key).
+    if (newRaw === oldRaw) return;
+    writeLocal(entry.key, newRaw);
+    try {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: entry.key,
+          oldValue: oldRaw,
+          newValue: newRaw,
+          storageArea: localStorage,
+          url: location.href,
+        }),
+      );
+    } catch {}
     const change: ClientStateChange = {
       key: entry.key,
       scope: entry.scope,
