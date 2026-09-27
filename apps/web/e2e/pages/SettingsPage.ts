@@ -317,19 +317,44 @@ export class SettingsPage {
     return this.dialog.getByRole("button", { name: `Delete browser profile ${profileName}` });
   }
 
-  /** Per-project default profile dropdown. `aria-label="Browser profile for
-   *  <project label>"` is set explicitly in `BrowserProfilesSettings.tsx`.
-   *  Tests assert its shown value by option name ("Default" or a seeded
-   *  profile name), under the same carve-out as the theme names above:
-   *  "Default" is the fixed name of the built-in profile, not product copy. */
-  projectBrowserProfileSelect(projectLabel: string): Locator {
-    return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectLabel}` });
+  /** Trigger of the "Project defaults" accordion in the Browser section,
+   *  collapsed by default. `data-testid` set in `BrowserProfilesSettings.tsx`. */
+  projectDefaultsTrigger(): Locator {
+    return this.dialog.getByTestId("settings__project-defaults-trigger");
   }
 
-  /** Pick a project's default browser profile. Applies immediately. */
-  async selectProjectBrowserProfile(projectLabel: string, profileName: string): Promise<void> {
-    await test.step(`Set ${projectLabel}'s browser profile to "${profileName}"`, async () => {
-      const trigger = this.projectBrowserProfileSelect(projectLabel);
+  /** One row per project inside the "Project defaults" accordion.
+   *  `data-testid` set in `BrowserProfilesSettings.tsx`. */
+  projectBrowserProfileRows(): Locator {
+    return this.dialog.getByTestId("settings__project-browser-profile");
+  }
+
+  /** Per-project default profile dropdown, inside the "Project defaults"
+   *  accordion. `aria-label="Browser profile for <project name>"` is set
+   *  explicitly in `BrowserProfilesSettings.tsx`. Tests assert its shown
+   *  value by option name ("Default" or a seeded profile name), under the
+   *  same carve-out as the theme names above: "Default" is the fixed name
+   *  of the built-in profile, not product copy. */
+  projectBrowserProfileSelect(projectName: string): Locator {
+    return this.dialog.getByRole("combobox", { name: `Browser profile for ${projectName}` });
+  }
+
+  /** Open the "Project defaults" accordion and wait for its rows to show. */
+  async expandProjectDefaults(): Promise<void> {
+    await test.step("Expand Project defaults", async () => {
+      const trigger = this.projectDefaultsTrigger();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(this.projectBrowserProfileRows().first()).toBeVisible();
+    });
+  }
+
+  /** Pick a project's default browser profile. Applies immediately. The
+   *  "Project defaults" accordion must be expanded first. */
+  async selectProjectBrowserProfile(projectName: string, profileName: string): Promise<void> {
+    await test.step(`Set ${projectName}'s browser profile to "${profileName}"`, async () => {
+      const trigger = this.projectBrowserProfileSelect(projectName);
       await trigger.scrollIntoViewIfNeeded();
       await trigger.click();
       await this.page.getByRole("option", { name: profileName }).click();

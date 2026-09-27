@@ -1,4 +1,8 @@
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Button,
   Select,
   SelectContent,
@@ -25,8 +29,9 @@ function sourceLabel(source: string | null): string {
 
 /**
  * Rows for the Settings dialog's Browser section: the browser profiles,
- * and which profile each project's new browser tabs open with. Changes
- * apply immediately; they are not part of the dialog's Save.
+ * then a collapsed "Project defaults" accordion with the profile each
+ * project's new browser tabs open with. Changes apply immediately; they
+ * are not part of the dialog's Save.
  */
 export function BrowserProfilesSettings() {
   const { profiles } = useBrowserProfiles();
@@ -72,43 +77,62 @@ export function BrowserProfilesSettings() {
         </ul>
       </SettingsRow>
 
-      {projects.map((project) => {
-        const label = project.label || project.name;
-        const current = projectDefaults[project.name] ?? DEFAULT_VALUE;
-        return (
-          <SettingsRow
-            key={project.name}
-            variant="responsive"
-            label={`Browser profile for ${label}`}
-            description="New browser tabs in any workspace of this project open with this profile."
-          >
-            <Select
-              value={current}
-              onValueChange={(value: string) =>
-                setProjectProfile.mutate({
-                  projectName: project.name,
-                  profileId: value === DEFAULT_VALUE ? null : value,
-                })
-              }
+      {projects.length > 0 && (
+        <Accordion type="single" collapsible>
+          <AccordionItem value="project-defaults" className="border-b-0">
+            <AccordionTrigger
+              className="px-4 py-3 hover:no-underline"
+              data-testid="settings__project-defaults-trigger"
             >
-              <SelectTrigger
-                className="h-8 w-full text-sm sm:w-48"
-                aria-label={`Browser profile for ${label}`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={DEFAULT_VALUE}>Default</SelectItem>
-                {profiles.map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </SelectItem>
+              <div className="min-w-0 space-y-1">
+                <div className="text-sm font-medium leading-tight text-foreground">
+                  Project defaults
+                </div>
+                <p className="text-xs font-normal leading-snug text-muted-foreground">
+                  New browser tabs in any workspace of a project open with its profile.
+                </p>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <ul className="divide-y divide-border border-t border-border">
+                {projects.map((project) => (
+                  <li
+                    key={project.name}
+                    className="flex flex-col gap-2 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4"
+                    data-testid="settings__project-browser-profile"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm">{project.name}</span>
+                    <Select
+                      value={projectDefaults[project.name] ?? DEFAULT_VALUE}
+                      onValueChange={(value: string) =>
+                        setProjectProfile.mutate({
+                          projectName: project.name,
+                          profileId: value === DEFAULT_VALUE ? null : value,
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        className="h-8 w-full text-sm sm:w-48"
+                        aria-label={`Browser profile for ${project.name}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DEFAULT_VALUE}>Default</SelectItem>
+                        {profiles.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            {profile.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </li>
                 ))}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
-        );
-      })}
+              </ul>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      )}
     </>
   );
 }
