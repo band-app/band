@@ -9,7 +9,7 @@ import {
 import { Columns2, Rows2, X } from "lucide-react";
 import type React from "react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { isMacPlatform } from "../dashboard/lib/command-registry";
+import { isMacPlatform } from "@/dashboard";
 import {
   cycleGridGroups,
   selectNeighbourBeforeRemove,
