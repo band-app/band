@@ -88,7 +88,7 @@ A browser profile is a separate cookie jar for browser-pane tabs: one Electron s
 An agent session is one run of a coding agent (issue #682). Its mode is how it is displayed: `gui` runs in a chat pane over ACP, `tui` runs the agent's CLI in a terminal. A session keeps its mode for its whole life.
 
 - Rows live in the `agent_sessions` table. `services/agent-session-registry-service.ts` owns them and emits `agent-session-created`, `agent-session-updated` and `agent-session-ended`. A chat's `activeSessionId` is its session's `providerSessionId`. A session ends when its chat or terminal is removed. `services/agent-session-service.ts` is a different thing: it runs the ACP process behind a chat.
-- `services/agent-launch-service.ts` starts agents (`agentSessions.launch`, `workspaces.create` with a prompt). An agent with no TUI invocation (cursor-cli) falls back to `gui`, and the response carries a `notice`.
+- `services/agent-launch-service.ts` starts agents (`agentSessions.launch`, `workspaces.create` with a prompt). The CLI reaches it through `band agents launch` and `band agents list`. An agent with no TUI invocation (cursor-cli) falls back to `gui`, and the response carries a `notice`.
 - Each browser stores its own mode in localStorage (`band.agent-mode`, `dashboard/lib/agent-mode.ts`) and sends it on every launch. With no mode sent, the server uses `agents.defaultMode` from `~/.band/settings.json`. Boot copies the older `cli.defaultVia` into it once and leaves the old key, because the CLI still reads it.
 
 ## Architecture: Web Server vs Terminal Daemon
@@ -112,7 +112,7 @@ Terminal PTYs do not live in the web server. They live in the **terminal daemon*
 
 The Band CLI ships **six domain-specific skills**, each authored directly as `apps/cli/skills/<name>/SKILL.md` — that file is the single source of truth and is baked into the Rust binary via `include_str!`:
 
-- `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, skills install.
+- `band/SKILL.md` — workspaces, projects, agents, cronjobs, tunnel, settings, schema, notify, skills install.
 - `band-chat/SKILL.md` — chat panes (`band chats ...`).
 - `band-terminal/SKILL.md` — terminal sessions (`band terminals ...`).
 - `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
