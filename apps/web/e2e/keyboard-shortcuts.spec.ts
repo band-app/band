@@ -106,7 +106,9 @@ test("the new-chat chord opens a chat tab and ⌘T a terminal tab, whatever tab 
   await expect(workspacePage.tabContainer("chat")).toHaveClass(/\bdv-active-tab\b/);
 
   // The new chat is now the active tab. ⌘T used to duplicate the active tab's
-  // kind and would have opened a second chat here.
+  // kind and would have opened a second chat here. Clicking its tab moves focus
+  // out of the terminal, which would otherwise keep Ctrl+T for the shell.
+  await workspacePage.activateTab("chat");
   await workspacePage.pressNewTerminalShortcut();
   await expect(workspacePage.terminalTabs()).toHaveCount(2);
   await expect(workspacePage.chatTabs()).toHaveCount(1);

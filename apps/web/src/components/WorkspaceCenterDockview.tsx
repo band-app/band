@@ -76,10 +76,12 @@ import {
   DiffFileContent,
   DiffOverviewRuler,
   FileViewer,
+  formatShortcut,
   getFileIcon,
   getFilePreviewType,
   getLspLanguageId,
   getStoredViewMode,
+  isMacPlatform,
   readAgentMode,
   releaseLspClient,
   SearchBar,
@@ -95,7 +97,6 @@ import {
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
-import { formatShortcut, isMacPlatform } from "../dashboard/lib/command-registry";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import {
