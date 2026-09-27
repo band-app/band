@@ -26,11 +26,13 @@ export class TerminalTouchSurface {
     private readonly page: Page,
     private readonly workspaceId: string,
   ) {
+    // Only the shown workspace has a visible terminal pane; parked wrappers
+    // sit outside any pane.
     this.wrapper = page
-      .getByTestId("terminal-wrapper")
-      .and(page.locator(`[data-workspace-id="${workspaceId}"]`))
+      .getByTestId(/^term-pane__/)
       .filter({ visible: true })
-      .first();
+      .first()
+      .getByTestId("terminal-wrapper");
     this.input = this.wrapper.getByRole("textbox", { name: "Terminal input" });
   }
 

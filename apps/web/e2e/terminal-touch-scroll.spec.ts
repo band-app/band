@@ -87,15 +87,16 @@ function readInputLog(path: string): string {
   }
 }
 
-/** Poll until the log is non-empty and unchanged between two reads 500 ms
- *  apart, i.e. every swipe and its momentum has finished sending. */
-async function waitForInputToSettle(path: string): Promise<string> {
+/** Poll until the log has grown past `baseline` characters and is unchanged
+ *  between two reads 500 ms apart, i.e. the latest swipe and its momentum
+ *  have finished sending. */
+async function waitForInputToSettle(path: string, baseline = 0): Promise<string> {
   let previous: string | null = null;
   await expect
     .poll(
       () => {
         const current = readInputLog(path);
-        const settled = current.length > 0 && current === previous;
+        const settled = current.length > baseline && current === previous;
         previous = current;
         return settled;
       },
@@ -172,7 +173,7 @@ test.describe("Terminal touch scrolling", () => {
     await terminal.swipe(300);
     const afterSwipeUp = await waitForInputToSettle(inputLog);
     await terminal.swipe(-300);
-    const received = await waitForInputToSettle(inputLog);
+    const received = await waitForInputToSettle(inputLog, afterSwipeUp.length);
 
     const size = await terminal.readSize();
     if (!size) throw new Error("terminal not loaded");
@@ -224,6 +225,9 @@ test.describe("Terminal touch scrolling", () => {
       .poll(async () => (await terminal.readScrollPosition())?.viewportY ?? before.viewportY)
       .toBeLessThan(before.viewportY - 5);
 
+    // The swipe itself must not have focused the terminal, or the tap below
+    // would prove nothing.
+    await expect(terminal.input).not.toBeFocused();
     await terminal.tap();
     await expect(terminal.input).toBeFocused();
 

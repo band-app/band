@@ -35,6 +35,11 @@ const MAX_LINES_PER_STEP = 32;
 const MOMENTUM_FRICTION = 0.972;
 const MOMENTUM_MIN_VELOCITY = 0.012;
 const FRAME_MS = 16;
+/** Fastest fling momentum starts from (px/ms). Without a cap a hard flick
+ *  glides for seconds, sending ~1,000 wheel reports a second to the program. */
+const MOMENTUM_MAX_VELOCITY = 5;
+/** Moves closer together than this give a noisy speed and are left out of it. */
+const MIN_VELOCITY_SAMPLE_MS = 4;
 /** A finger that rests this long before lifting launches no momentum. */
 const MOMENTUM_STALE_MS = 100;
 
@@ -118,17 +123,17 @@ export function attachTerminalTouchScroll(
     }),
   ];
 
-  const screenEl = (): HTMLElement | null => wrapper.querySelector(".xterm-screen");
+  // `.xterm-screen` is created once by `term.open()`; renderer switches only
+  // rebuild the canvas inside it, so it's cached rather than looked up on
+  // every ~60 Hz step.
+  const screenEl = wrapper.querySelector(".xterm-screen") as HTMLElement | null;
 
-  const cellHeight = (): number => {
-    const rect = screenEl()?.getBoundingClientRect();
-    return rect && rect.height > 0 && term.rows > 0 ? rect.height / term.rows : 0;
-  };
+  const cellHeight = (rect: DOMRect): number =>
+    rect.height > 0 && term.rows > 0 ? rect.height / term.rows : 0;
 
-  const screenPoint = (clientX: number, clientY: number): ScreenPoint | null => {
-    const el = screenEl();
+  const screenPoint = (clientX: number, clientY: number, rect: DOMRect): ScreenPoint | null => {
+    const el = screenEl;
     if (!el || term.cols <= 0 || term.rows <= 0) return null;
-    const rect = el.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return null;
     if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
     const fx = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1 - 1e-9);
@@ -151,10 +156,15 @@ export function attachTerminalTouchScroll(
   /** Scroll `lines` rows (positive = toward the bottom) as xterm would for a
    *  wheel at (`clientX`, `clientY`). Returns false when nothing could move,
    *  so momentum stops at the end of the scrollback. */
-  const routeScrollLines = (lines: number, clientX: number, clientY: number): boolean => {
+  const routeScrollLines = (
+    lines: number,
+    clientX: number,
+    clientY: number,
+    rect: DOMRect,
+  ): boolean => {
     if (lines === 0) return true;
     if (hasWheelMouseTracking(term)) {
-      const point = screenPoint(clientX, clientY);
+      const point = screenPoint(clientX, clientY, rect);
       const report = point ? wheelSequence(lines, point, encoding) : "";
       sendRepeated(report || arrowSequence(term, lines), lines);
       return true;
@@ -173,6 +183,9 @@ export function attachTerminalTouchScroll(
   let lastX = 0;
   let lastY = 0;
   let lastTime = 0;
+  /** Where the current velocity sample started. */
+  let sampleY = 0;
+  let sampleTime = 0;
   let velocityY = 0;
   let accumulated = 0;
   let tracking = false;
@@ -188,13 +201,15 @@ export function attachTerminalTouchScroll(
   /** Add `deltaY` px of finger travel (positive = finger moved up) and scroll
    *  the whole lines it adds up to. */
   const applyDelta = (deltaY: number): boolean => {
-    const cellH = cellHeight();
+    if (!screenEl) return false;
+    const rect = screenEl.getBoundingClientRect();
+    const cellH = cellHeight(rect);
     if (cellH <= 0) return false;
     accumulated += deltaY;
     const lines = Math.trunc(accumulated / cellH);
     if (lines === 0) return true;
     accumulated -= lines * cellH;
-    return routeScrollLines(lines, lastX, lastY);
+    return routeScrollLines(lines, lastX, lastY, rect);
   };
 
   const onTouchStart = (e: TouchEvent) => {
@@ -204,6 +219,8 @@ export function attachTerminalTouchScroll(
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
     lastTime = e.timeStamp;
+    sampleY = lastY;
+    sampleTime = lastTime;
     velocityY = 0;
     accumulated = 0;
   };
@@ -217,14 +234,17 @@ export function attachTerminalTouchScroll(
     const x = e.touches[0].clientX;
     const y = e.touches[0].clientY;
     const deltaY = lastY - y;
-    const dt = e.timeStamp - lastTime;
-    if (dt > 0) {
-      const instant = deltaY / dt;
+    const dt = e.timeStamp - sampleTime;
+    if (dt >= MIN_VELOCITY_SAMPLE_MS) {
+      const instant = (sampleY - y) / dt;
       // touchmove cadence is uneven; blend samples so one spiky frame
       // doesn't decide the momentum.
       if (Number.isFinite(instant)) {
-        velocityY = velocityY === 0 ? instant : velocityY * 0.55 + instant * 0.45;
+        const blended = velocityY === 0 ? instant : velocityY * 0.55 + instant * 0.45;
+        velocityY = Math.min(Math.max(blended, -MOMENTUM_MAX_VELOCITY), MOMENTUM_MAX_VELOCITY);
       }
+      sampleY = y;
+      sampleTime = e.timeStamp;
     }
     lastX = x;
     lastY = y;
@@ -238,9 +258,14 @@ export function attachTerminalTouchScroll(
     tracking = false;
     let velocity = e.timeStamp - lastTime > MOMENTUM_STALE_MS ? 0 : velocityY;
     if (Math.abs(velocity) <= MOMENTUM_MIN_VELOCITY) return;
-    const step = () => {
-      velocity *= MOMENTUM_FRICTION;
-      if (Math.abs(velocity) < MOMENTUM_MIN_VELOCITY || !applyDelta(velocity * FRAME_MS)) {
+    let prevFrame: number | null = null;
+    // Friction and travel scale with the real frame time, so a fling lasts
+    // as long on a 120 Hz screen as on a 60 Hz one.
+    const step = (now: number) => {
+      const dt = prevFrame === null ? FRAME_MS : Math.min(now - prevFrame, 4 * FRAME_MS);
+      prevFrame = now;
+      velocity *= MOMENTUM_FRICTION ** (dt / FRAME_MS);
+      if (Math.abs(velocity) < MOMENTUM_MIN_VELOCITY || !applyDelta(velocity * dt)) {
         momentumId = null;
         return;
       }
