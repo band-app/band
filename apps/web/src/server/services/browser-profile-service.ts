@@ -29,6 +29,11 @@ export type BrowserProfile = BrowserProfileRow;
  */
 export const BROWSER_PROFILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** Two profile names clash when they match ignoring case and surrounding whitespace. */
+function profileNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export class BrowserProfileService {
   constructor(
     private readonly queries: BrowserProfileQueries = new BrowserProfileQueries(),
@@ -44,9 +49,18 @@ export class BrowserProfileService {
     return this.queries.find(id);
   }
 
-  /** Throws `BrowserProfileExistsError` when `input.id` is taken. */
+  /**
+   * Throws `BrowserProfileExistsError` when `input.id` is taken, or when
+   * another profile has the same name, ignoring case.
+   */
   create(input: { id?: string; name: string; source?: string | null }): BrowserProfile {
-    if (input.id && this.queries.find(input.id)) throw new BrowserProfileExistsError(input.id);
+    if (input.id && this.queries.find(input.id)) {
+      throw new BrowserProfileExistsError(`Browser profile already exists: ${input.id}`);
+    }
+    const key = profileNameKey(input.name);
+    if (this.queries.findAll().some((p) => profileNameKey(p.name) === key)) {
+      throw new BrowserProfileExistsError(`A browser profile named "${input.name}" already exists`);
+    }
     const profile: BrowserProfile = {
       id: input.id ?? `profile_${crypto.randomUUID()}`,
       name: input.name,

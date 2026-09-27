@@ -5,13 +5,16 @@
  * Chrome's `Local State`) and whether Chrome is running. Nothing else is
  * read until the user picks what to bring over and clicks Import:
  *
- * - Cookies go into a new Band browser profile. The macOS Keychain dialog
- *   for "Chrome Safe Storage" appears during the import; denying it ends
- *   the import with an error here.
+ * - Cookies go into a Band browser profile named "<Chrome name> (Chrome)".
+ *   Importing the same Chrome profile again writes into that profile
+ *   instead of adding a second one; that adds and updates cookies, and ones
+ *   deleted in Chrome since stay. The macOS Keychain dialog for "Chrome
+ *   Safe Storage" appears during the import; denying it ends the import
+ *   with an error here.
  * - Browsing history goes into this workspace's history (`history.import`).
  *
  * The desktop reads every selected Chrome DB before writing anything, so a
- * DB Chrome has locked fails the import as a whole. The server's profile
+ * DB Chrome has locked fails the import as a whole. A new profile's server
  * row is created last, so a failed import never leaves an empty profile.
  *
  * Saved passwords aren't offered: Band's browser has no password store or
@@ -62,6 +65,8 @@ type Step =
   | {
       kind: "done";
       profileName: string | null;
+      /** True when the cookies went into a profile imported before. */
+      updated: boolean;
       cookies: ChromeCookieSummary | null;
       historyCount: number | null;
     }
@@ -72,7 +77,7 @@ export interface ChromeImportDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Workspace whose history receives imported history. History is off without one. */
   workspaceId: string | null;
-  /** Called with the new Band profile's id once its cookies are imported. */
+  /** Called with the Band profile's id once its cookies are imported. */
   onImported: (profileId: string) => void;
 }
 
@@ -149,8 +154,21 @@ export function ChromeImportDialog({
     const chrome = profiles.find((p) => p.directory === selection.profile);
     if (!chrome) return;
     setStep({ kind: "importing", profiles });
-    const profileId = `profile_${crypto.randomUUID()}`;
     const profileName = `${chrome.name} (Chrome)`;
+    let existingId: string | undefined;
+    if (wantCookies) {
+      try {
+        const { profiles: bandProfiles } = await trpc.browserProfiles.list.query();
+        // Same comparison `BrowserProfileService.create` uses to refuse a duplicate name.
+        existingId = bandProfiles.find(
+          (p) => p.name.trim().toLowerCase() === profileName.trim().toLowerCase(),
+        )?.id;
+      } catch (err) {
+        setStep({ kind: "form", profiles, error: ipcErrorMessage(err) });
+        return;
+      }
+    }
+    const profileId = existingId ?? `profile_${crypto.randomUUID()}`;
     try {
       const result = await importChromeProfile({
         profileId,
@@ -166,23 +184,32 @@ export function ChromeImportDialog({
         });
         historyCount = imported;
       }
-      if (result.cookies) {
+      if (result.cookies && !existingId) {
         await trpc.browserProfiles.create.mutate({
           id: profileId,
           name: profileName,
           source: "chrome",
         });
+      } else if (result.cookies) {
+        // The profile may have been deleted while its cookies were importing.
+        const { profiles: bandProfiles } = await trpc.browserProfiles.list.query();
+        if (!bandProfiles.some((p) => p.id === existingId)) {
+          clearBrowserProfileData(profileId).catch(() => {});
+          throw new Error(`"${profileName}" was deleted during the import. Import it again.`);
+        }
       }
       setStep({
         kind: "done",
         profileName: result.cookies ? profileName : null,
+        updated: !!existingId,
         cookies: result.cookies,
         historyCount,
       });
       if (result.cookies) onImported(profileId);
     } catch (err) {
       // Don't leave imported cookies in a partition no profile points at.
-      if (wantCookies) clearBrowserProfileData(profileId).catch(() => {});
+      // An existing profile keeps its data.
+      if (wantCookies && !existingId) clearBrowserProfileData(profileId).catch(() => {});
       setStep({ kind: "form", profiles, error: ipcErrorMessage(err) });
     }
   };
@@ -267,8 +294,9 @@ export function ChromeImportDialog({
             {wantCookies ? (
               <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
                 <li>
-                  Cookies go into a new browser profile, so sites you're signed in to in Chrome are
-                  signed in here too. That includes tabs coding agents drive.
+                  Cookies go into a browser profile named after this Chrome profile, the same one if
+                  you imported it before, so sites you're signed in to in Chrome are signed in here
+                  too. That includes tabs coding agents drive.
                 </li>
                 <li>
                   macOS will ask to allow access to "Chrome Safe Storage". Band uses it only to
@@ -305,8 +333,9 @@ export function ChromeImportDialog({
           <div className="space-y-1 text-sm" data-testid="chrome-import__summary">
             {step.cookies && step.profileName ? (
               <p>
-                Imported {step.cookies.imported} cookies into "{step.profileName}". This tab now
-                uses it, and so will new browser tabs in this project.
+                {step.updated ? "Updated" : "Imported"} {step.cookies.imported} cookies{" "}
+                {step.updated ? "in" : "into"} "{step.profileName}". This tab now uses it, and so
+                will new browser tabs in this project.
               </p>
             ) : null}
             {step.historyCount !== null ? (

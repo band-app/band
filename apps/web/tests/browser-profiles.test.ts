@@ -61,6 +61,7 @@ interface Profile {
   id: string;
   name: string;
   source: string | null;
+  createdAt: number;
 }
 
 interface Browser {
@@ -293,6 +294,29 @@ describe("browser profiles — per-project default", () => {
       name: "Again",
     });
     expect(dup.status).toBe(409);
+  });
+
+  it("refuses a second profile with the same name, ignoring case (409)", async () => {
+    const first = await createProfile(server.url, "xa.example.com (Chrome)");
+    const dup = await trpcMutate(server.url, "browserProfiles.create", {
+      name: "  XA.example.com (chrome) ",
+      source: "chrome",
+    });
+    expect(dup.status).toBe(409);
+
+    const listRes = await trpcQuery(server.url, "browserProfiles.list");
+    const { profiles } = await trpcData<{ profiles: Profile[] }>(listRes);
+    const sameName = profiles.filter(
+      (p) => p.name.trim().toLowerCase() === "xa.example.com (chrome)",
+    );
+    expect(sameName).toEqual([first]);
+
+    await createProfile(server.url, "Émile (Chrome)");
+    const accented = await trpcMutate(server.url, "browserProfiles.create", {
+      name: "émile (chrome)",
+      source: "chrome",
+    });
+    expect(accented.status).toBe(409);
   });
 
   it("removing a project forgets its default profile", async () => {
