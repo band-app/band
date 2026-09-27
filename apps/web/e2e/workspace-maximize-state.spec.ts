@@ -29,6 +29,7 @@ import { toWorkspaceId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -81,6 +82,10 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN });
   server = await startServer({ tmpHome });
 });
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   await server.close();

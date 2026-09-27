@@ -107,6 +107,20 @@ import {
   useWorkspaceChanges,
 } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
+import {
+  type CenterTab,
+  type CenterTabs,
+  centerTabsFromApi,
+  centerTabsKey,
+  diffCenterTabs,
+  isSharedTab,
+  keepHiddenTabs,
+  parseCenterTabs,
+  readCenterTabs,
+  withLocalMembership,
+  writeCenterTabs,
+} from "../lib/center-tabs";
+import { clientStorage, hydrateWorkspace, subscribeClientState } from "../lib/client-state";
 import { writeClipboardText } from "../lib/clipboard";
 import { listen as desktopListen } from "../lib/desktop-ipc";
 import {
@@ -343,8 +357,13 @@ export function nextUntitledPath(workspaceId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Per-workspace layout persistence (localStorage)
+// Per-workspace layout persistence (localStorage, kept on the server per
+// device type through `lib/client-state.ts`)
 // ---------------------------------------------------------------------------
+//
+// The layout holds splits and sizes, so a phone and a desktop each keep their
+// own. Which tabs are open, their order and the active tab are shared by every
+// device through `band:center-tabs:<ws>` (see "Shared tab list" below).
 //
 // Bumped v8 → v9 for Phase 2: v8 layouts (written during Phase 1) held `files`
 // / `changes` singleton panels whose component types no longer exist, so
@@ -504,23 +523,30 @@ function reinjectParams(
         // Same as `addBrowserLeaf`; layouts saved before browser tabs were
         // `<webview>`s carry no renderer.
         panel.renderer = "always";
-      }
-      // `"file:".length === 5` and `"diff:".length === 5` — strip the prefix
-      // back into the filePath param. Line/column are transient (jump targets)
-      // and intentionally not persisted.
-      else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
-      else if (comp === "diff") {
-        const commit = COMMIT_DIFF_ID.exec(id);
-        const allOf = SECTION_DIFFS_ID.exec(id);
-        panel.params = commit
-          ? { workspaceId, filePath: commit[2], commit: commit[1] }
-          : allOf
-            ? { workspaceId, filePath: "", allOf: allOf[1] }
-            : { workspaceId, filePath: id.slice(5) };
+      } else if (comp === "file" || comp === "diff") {
+        panel.params = viewLeafParams(comp, id, workspaceId);
       } else panel.params = { workspaceId };
     }
   }
   return clone;
+}
+
+/** Params of a file / diff leaf, rebuilt from its id. `"file:".length === 5`
+ *  and `"diff:".length === 5` — strip the prefix back into the filePath param.
+ *  Line/column are transient (jump targets) and intentionally not persisted. */
+function viewLeafParams(
+  kind: "file" | "diff",
+  id: string,
+  workspaceId: string,
+): FileLeafParams | DiffLeafParams {
+  if (kind === "file") return { workspaceId, filePath: id.slice(5) };
+  const commit = COMMIT_DIFF_ID.exec(id);
+  const allOf = SECTION_DIFFS_ID.exec(id);
+  return commit
+    ? { workspaceId, filePath: commit[2], commit: commit[1] }
+    : allOf
+      ? { workspaceId, filePath: "", allOf: allOf[1] as ChangeSection }
+      : { workspaceId, filePath: id.slice(5) };
 }
 
 /** Pin a new panel to a grid group rather than whatever `activeGroup` is (which
@@ -919,7 +945,7 @@ function migrateLegacyTabStates(): void {
 
 function writeTabStates(ws: string, states: Record<string, TabFileState>): void {
   try {
-    localStorage.setItem(TAB_STATE_KEY(ws), JSON.stringify(states));
+    clientStorage.setItem(TAB_STATE_KEY(ws), JSON.stringify(states));
   } catch {
     // storage unavailable — best-effort
   }
@@ -2826,6 +2852,149 @@ function addBrowserLeaf(
 }
 
 // ---------------------------------------------------------------------------
+// Shared tab list (`band:center-tabs:<ws>`, see lib/center-tabs.ts)
+// ---------------------------------------------------------------------------
+
+/** Browser tabs exist only in the desktop app. */
+function isShownHere(tab: CenterTab): boolean {
+  return tab.kind !== "browser" || isDesktop;
+}
+
+/**
+ * Write the dockview's tabs to the shared list. With `keepOrder` (another
+ * device's order or active tab is waiting to be applied) only this device's
+ * opened and closed tabs are written, on top of the shared order.
+ */
+function persistCenterTabs(api: DockviewApi, workspaceId: string, keepOrder: boolean): void {
+  const shared = readCenterTabs(workspaceId);
+  const local = centerTabsFromApi(api);
+  writeCenterTabs(
+    workspaceId,
+    keepOrder && shared
+      ? withLocalMembership(shared, local, isShownHere)
+      : keepHiddenTabs(local, shared, isShownHere),
+  );
+}
+
+/** Open a file or diff tab another device opened, next to the tab it follows. */
+function addSharedViewLeaf(
+  api: DockviewApi,
+  workspaceId: string,
+  tab: CenterTab & { kind: "file" | "diff" },
+  afterId: string | null,
+): void {
+  const params = viewLeafParams(tab.kind, tab.id, workspaceId);
+  const allOf = (params as DiffLeafParams).allOf;
+  api.addPanel({
+    id: tab.id,
+    component: tab.kind,
+    tabComponent: tab.kind,
+    title: allOf ? SECTION_LABELS[allOf] : basename(params.filePath),
+    params,
+    position:
+      afterId && api.getPanel(afterId)
+        ? { referencePanel: afterId, direction: "within" }
+        : centralPanelPosition(api),
+    inactive: true,
+  } as AddPanelOptions);
+}
+
+function isViewTab(tab: CenterTab): tab is CenterTab & { kind: "file" | "diff" } {
+  return tab.kind === "file" || tab.kind === "diff";
+}
+
+/**
+ * Open and close file and diff tabs to match another device's changes.
+ * Chats, terminals and browser tabs aren't touched: they open and close with
+ * their server records (`chat-created`, `terminal-killed`, …). A file with
+ * unsaved edits on this device stays open. Returns whether anything changed.
+ */
+function applyCenterTabMembership(
+  api: DockviewApi,
+  workspaceId: string,
+  target: CenterTabs,
+  added: CenterTab[],
+  removed: CenterTab[],
+): boolean {
+  let changed = false;
+  for (const tab of removed) {
+    if (!isViewTab(tab)) continue;
+    const panel = api.getPanel(tab.id);
+    if (!panel || (tab.kind === "file" && isFileDirty(workspaceId, tab.id.slice(5)))) continue;
+    api.removePanel(panel);
+    changed = true;
+  }
+  for (const tab of added) {
+    if (!isViewTab(tab) || !isSharedTab(tab) || api.getPanel(tab.id)) continue;
+    const i = target.tabs.findIndex((t) => t.id === tab.id);
+    let afterId: string | null = null;
+    for (let j = i - 1; j >= 0; j--) {
+      if (api.getPanel(target.tabs[j].id)) {
+        afterId = target.tabs[j].id;
+        break;
+      }
+    }
+    addSharedViewLeaf(api, workspaceId, tab, afterId);
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Make the dockview show the shared tab list: its file and diff tabs, in its
+ * order, with its active tab. Tabs this device has and the list doesn't
+ * (untitled buffers, a terminal whose record the list hasn't caught up with)
+ * keep their place after the listed ones. Returns whether anything changed.
+ */
+function applyCenterTabsFull(api: DockviewApi, workspaceId: string, target: CenterTabs): boolean {
+  const listed = new Set(target.tabs.map((t) => t.id));
+  const extra = api.panels
+    .map((p) => ({ id: p.id, kind: p.api.component as CenterTab["kind"] }))
+    .filter((t) => isViewTab(t) && isSharedTab(t) && !listed.has(t.id));
+  const onPanel = new Set(api.panels.map((p) => p.id));
+  let changed = applyCenterTabMembership(
+    api,
+    workspaceId,
+    target,
+    target.tabs.filter((t) => !onPanel.has(t.id)),
+    extra,
+  );
+
+  const rank = new Map(target.tabs.map((t, i) => [t.id, i]));
+  for (const group of api.groups) {
+    if (group.api.location.type !== "grid") continue;
+    const desired = [...group.panels].sort(
+      (a, b) =>
+        (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+    desired.forEach((panel, index) => {
+      if (group.panels.indexOf(panel) === index) return;
+      try {
+        panel.api.moveTo({ group, index, skipSetActive: true });
+        changed = true;
+      } catch {}
+    });
+  }
+
+  const active = target.active ? api.getPanel(target.active) : undefined;
+  if (active && api.activePanel?.id !== active.id) {
+    active.api.setActive();
+    changed = true;
+  }
+  return changed;
+}
+
+/** Whether two tab lists differ in the order of shared tabs or the active tab. */
+function orderOrActiveDiffers(a: CenterTabs, b: CenterTabs): boolean {
+  if (a.active !== b.active) return true;
+  const inB = new Set(b.tabs.map((t) => t.id));
+  const inA = new Set(a.tabs.map((t) => t.id));
+  const orderA = a.tabs.filter((t) => inB.has(t.id)).map((t) => t.id);
+  const orderB = b.tabs.filter((t) => inA.has(t.id)).map((t) => t.id);
+  return orderA.join("\n") !== orderB.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -2857,6 +3026,13 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   // maximized view, firing onDidMaximizedGroupChange mid-write — this flag stops
   // that from re-triggering a persist (which would loop forever).
   const isPersistingRef = useRef(false);
+  // True while another device's tab changes are being applied, so the
+  // dockview events they fire don't write the half-applied tabs back.
+  const applyingSharedRef = useRef(false);
+  // Another device changed the tab order or active tab while this workspace
+  // was on screen. Applied the next time the workspace is shown, unless the
+  // user rearranges tabs here first (their arrangement then wins).
+  const pendingSharedOrderRef = useRef(false);
   const wsActiveRef = useRef(wsActive);
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
@@ -2888,6 +3064,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   const { data: initialData } = useQuery<CenterLayoutData>({
     queryKey: centerLayoutKey(workspaceId),
     queryFn: async () => {
+      // The saved layout, shared tab list and split blobs are read from
+      // localStorage in onReady: bring them up to date from the server first.
       const [chatsRes, terminalsRes, browsersRes] = await Promise.all([
         trpc.chats.list.query({ workspaceId }).catch(() => ({ chats: [] as { id: string }[] })),
         trpc.terminal.list
@@ -2898,6 +3076,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
               .query({ workspaceId })
               .catch(() => ({ browsers: [] as { id: string; url?: string }[] }))
           : Promise.resolve({ browsers: [] as { id: string; url?: string }[] }),
+        hydrateWorkspace(workspaceId),
       ]);
       const urls = new Map<string, string>();
       for (const b of browsersRes.browsers) {
@@ -2933,7 +3112,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       isPersistingRef.current = true;
       const json = stripParams(api.toJSON() as unknown as Record<string, unknown>);
       if (maximizedId) json.maximizedGroup = maximizedId;
-      localStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
+      clientStorage.setItem(layoutKey(workspaceId), JSON.stringify(json));
+      persistCenterTabs(api, workspaceId, pendingSharedOrderRef.current);
     } catch {
       // best-effort
     } finally {
@@ -2944,7 +3124,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   // Debounced save — used for the high-frequency `onDidLayoutChange` (drag /
   // resize / move) so we don't write on every pixel.
   const schedulePersist = useCallback(() => {
-    if (isRestoringRef.current || !apiRef.current) return;
+    if (isRestoringRef.current || applyingSharedRef.current || !apiRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
@@ -2957,7 +3137,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   // write can be lost to a fast reload, an unmount, or a continuous stream of
   // layout events resetting the timer. Cancels any pending debounce first.
   const flushPersist = useCallback(() => {
-    if (isRestoringRef.current || !apiRef.current) return;
+    if (isRestoringRef.current || applyingSharedRef.current || !apiRef.current) return;
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -3583,6 +3763,9 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
 
       isRestoringRef.current = true;
       const saved = loadSavedLayout(workspaceId);
+      // The tab list shared with other devices (the phone and the desktop
+      // show the same tabs; this device's own layout keeps splits and sizes).
+      const shared = readCenterTabs(workspaceId);
       // Track whether we BUILT a fresh default (vs restored a persisted layout).
       // Only a freshly-built default needs the one-shot persist below — a
       // restored layout is already durable, and re-flushing it on mount would
@@ -3601,6 +3784,11 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           buildDefaultLayout(api, data);
           builtDefault = true;
         }
+      } else if (shared) {
+        // First open on this device type: start from the shared tabs (added
+        // below) plus the live instances, not a fabricated terminal.
+        reconcile(api, data);
+        builtDefault = true;
       } else {
         buildDefaultLayout(api, data);
         builtDefault = true;
@@ -3609,6 +3797,9 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       // Mobile is tabs-only: collapse any split (default or a restored desktop
       // layout) into a single group.
       if (mobile) flattenToSingleGroup(api);
+
+      // Take another device's tab changes made since this layout was saved.
+      if (shared && applyCenterTabsFull(api, workspaceId, shared)) builtDefault = true;
 
       // Restore a persisted maximized group (issue #490): dockview's fromJSON
       // preserves group ids, so re-maximize the one writeLayout recorded. Skip
@@ -3657,8 +3848,16 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         flushPersist();
       });
       api.onDidActivePanelChange(() => {
+        if (!applyingSharedRef.current && !isRestoringRef.current) {
+          pendingSharedOrderRef.current = false;
+        }
         schedulePersist();
         reportFocus();
+      });
+      api.onDidMovePanel(() => {
+        if (!applyingSharedRef.current && !isRestoringRef.current) {
+          pendingSharedOrderRef.current = false;
+        }
       });
 
       setTimeout(() => {
@@ -3759,6 +3958,55 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       }
     });
   }, [adapter, workspaceId]);
+
+  // Another device changed the shared tab list. Off screen, take it whole;
+  // on screen, only open and close tabs, and leave the order and active tab
+  // for the next time the workspace is shown.
+  useEffect(() => {
+    const key = centerTabsKey(workspaceId);
+    return subscribeClientState((change) => {
+      if (change.key !== key) return;
+      const api = apiRef.current;
+      const next = parseCenterTabs(change.value);
+      if (!api || !next || isRestoringRef.current) return;
+      applyingSharedRef.current = true;
+      let changed: boolean;
+      try {
+        if (!visibleRef.current) {
+          pendingSharedOrderRef.current = false;
+          changed = applyCenterTabsFull(api, workspaceId, next);
+        } else {
+          if (orderOrActiveDiffers(centerTabsFromApi(api), next)) {
+            pendingSharedOrderRef.current = true;
+          }
+          const { added, removed } = diffCenterTabs(parseCenterTabs(change.previous), next);
+          changed = applyCenterTabMembership(api, workspaceId, next, added, removed);
+        }
+      } finally {
+        applyingSharedRef.current = false;
+      }
+      // A refused write means this device's tabs aren't saved yet: write them
+      // again on top of the other device's list.
+      if (changed || change.source === "conflict") flushPersist();
+    });
+  }, [workspaceId, flushPersist]);
+
+  // Shown again: apply the order and active tab another device set meanwhile.
+  useEffect(() => {
+    if (!visible || !pendingSharedOrderRef.current) return;
+    pendingSharedOrderRef.current = false;
+    const api = apiRef.current;
+    const shared = readCenterTabs(workspaceId);
+    if (!api || !shared) return;
+    applyingSharedRef.current = true;
+    let changed: boolean;
+    try {
+      changed = applyCenterTabsFull(api, workspaceId, shared);
+    } finally {
+      applyingSharedRef.current = false;
+    }
+    if (changed) flushPersist();
+  }, [visible, workspaceId, flushPersist]);
 
   // Page popups (window.open, target="_blank", middle-click) reach us as a
   // request for a new Band tab; the main process has already denied the OS
@@ -3983,10 +4231,11 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
         try {
-          localStorage.setItem(
+          clientStorage.setItem(
             layoutKey(workspaceId),
             JSON.stringify(stripParams(api.toJSON() as unknown as Record<string, unknown>)),
           );
+          persistCenterTabs(api, workspaceId, pendingSharedOrderRef.current);
         } catch {
           // best-effort
         }

@@ -25,6 +25,7 @@ import { createTsLspRepo } from "../tests/fixtures/ts-lsp-repo";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -118,6 +119,10 @@ function bootServer(theme: "light" | "dark"): ServerContext {
     seedSettings(ctx.tmpHome, { tokenSecret: TOKEN, enableLSP: true, theme });
     ctx.server = await startServer({ tmpHome: ctx.tmpHome });
   });
+  // UI state lives on the server now: start each test from none, like the
+  // fresh localStorage each test's browser context used to give it.
+  test.beforeEach(() => resetClientState(ctx.tmpHome));
+
   test.afterAll(async () => {
     if (ctx.server) await ctx.server.close();
     if (ctx.tmpHome) cleanupTmpHome(ctx.tmpHome);

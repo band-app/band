@@ -100,6 +100,25 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
   sqlite.close();
 }
 
+/**
+ * Delete every client-state row (the UI state the dashboard keeps on the
+ * server: center tabs, panel widths, label memory, …). Before client state
+ * moved to the server it lived in each browser context's localStorage, so a
+ * spec whose tests share one server got fresh UI state per test for free.
+ * Call this in `beforeEach` to keep that: one test's collapsed sidebar or
+ * open tabs must not show up in the next test's new browser context. Safe
+ * while the server runs, which reads the table on every request.
+ */
+export function resetClientState(tmpHome: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite.exec("DELETE FROM client_state");
+  } finally {
+    sqlite.close();
+  }
+}
+
 export function seedSettings(tmpHome: string, settings: object): void {
   const bandDir = join(tmpHome, ".band");
   mkdirSync(bandDir, { recursive: true });

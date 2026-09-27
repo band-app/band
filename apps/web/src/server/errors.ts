@@ -72,3 +72,15 @@ export class BrowserProfileExistsError extends Error {
     this.name = "BrowserProfileExistsError";
   }
 }
+
+/**
+ * Thrown by `ClientStateService.set` when a value's JSON is over
+ * `CLIENT_STATE_MAX_VALUE_BYTES`. `api/client-state/router.ts` maps it to 413
+ * `PAYLOAD_TOO_LARGE`.
+ */
+export class ClientStateValueTooLargeError extends Error {
+  constructor(bytes: number, limit: number) {
+    super(`Client state value is ${bytes} bytes; the limit is ${limit}`);
+    this.name = "ClientStateValueTooLargeError";
+  }
+}

@@ -1,3 +1,5 @@
+import { clientStorage } from "../../lib/client-state";
+
 const STORAGE_KEY = "band-recent-workspaces";
 const MAX_ENTRIES = 50;
 
@@ -11,7 +13,7 @@ export function recordWorkspaceAccess(workspaceId: string): void {
   filtered.unshift(workspaceId);
   if (filtered.length > MAX_ENTRIES) filtered.length = MAX_ENTRIES;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    clientStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
   } catch {
     // localStorage full or unavailable — ignore
   }

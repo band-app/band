@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { clientStorage } from "../../lib/client-state";
 
 /**
  * Tracks which items in a collection are collapsed, persisting the set to
@@ -43,7 +44,7 @@ function read(key: string): Set<string> {
 function write(key: string, set: Set<string>): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(key, JSON.stringify([...set]));
+    clientStorage.setItem(key, JSON.stringify([...set]));
   } catch {
     // localStorage full or unavailable — ignore
   }

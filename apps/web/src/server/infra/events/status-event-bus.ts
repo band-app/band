@@ -16,6 +16,7 @@
  */
 
 import type { AgentSessionRecord } from "../../../shared/agent-sessions";
+import type { ClientStateEntry } from "../../../shared/client-state";
 
 /**
  * Per-workspace agent info embedded in a `WorkspaceStatusSnapshot`. The
@@ -78,6 +79,7 @@ export interface StatusEvent {
     | "agent-session-created"
     | "agent-session-updated"
     | "agent-session-ended"
+    | "client-state-changed"
     | "open-file";
   status?: WorkspaceStatusSnapshot;
   statuses?: WorkspaceStatusSnapshot[];
@@ -96,6 +98,13 @@ export interface StatusEvent {
   chatId?: string;
   /** For the `agent-session-*` kinds: the session's current record (issue #682). */
   agentSession?: AgentSessionRecord;
+  /** For `kind: "client-state-changed"`: the entry as stored after the write. */
+  clientState?: ClientStateEntry;
+  /**
+   * For `kind: "client-state-changed"`: the page instance that made the write,
+   * so it can skip its own echo (it already has the result from the mutation).
+   */
+  clientId?: string;
   /**
    * For `kind: "open-file"`: workspace-relative file path with optional
    * line / column suffix in the standard `path:line[:column]` /

@@ -122,6 +122,25 @@ export class WorkspacePage {
     });
   }
 
+  /** The active tab id of the center tab list the server shares between
+   *  devices (`clientState.list`, key `band:center-tabs:<ws>`), or null when
+   *  nothing is stored yet. Lets a test wait until one device's tabs reached
+   *  the server before another device loads them. */
+  async readSharedActiveTab(workspaceId: string): Promise<string | null> {
+    const res = await this.page.request.get(
+      `${this.baseUrl}/trpc/clientState.list?input=${encodeURIComponent(
+        JSON.stringify({ workspaceId, deviceType: "desktop" }),
+      )}`,
+      { headers: { Cookie: `band_token=${this.token}` } },
+    );
+    if (!res.ok()) throw new Error(`clientState.list failed: ${res.status()} ${await res.text()}`);
+    const body = (await res.json()) as {
+      result: { data: { entries: { key: string; value: { active?: string } | null }[] } };
+    };
+    const entry = body.result.data.entries.find((e) => e.key === `band:center-tabs:${workspaceId}`);
+    return entry?.value?.active ?? null;
+  }
+
   /** Locate the mounted entry div for the given workspaceId (issue #508).
    *  The single `MultiWorkspacePanelHost` renders exactly one of these per
    *  mounted workspace; tests assert on their presence / absence to verify

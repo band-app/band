@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { clientStorage } from "../../lib/client-state";
 
 /**
  * Tracks the currently-selected project-list label filter and shares it across
@@ -32,9 +33,9 @@ function write(value: string | null): void {
   if (typeof window === "undefined") return;
   try {
     if (value == null) {
-      window.localStorage.removeItem(LABEL_FILTER_KEY);
+      clientStorage.removeItem(LABEL_FILTER_KEY);
     } else {
-      window.localStorage.setItem(LABEL_FILTER_KEY, value);
+      clientStorage.setItem(LABEL_FILTER_KEY, value);
     }
   } catch {
     // localStorage full or unavailable — ignore

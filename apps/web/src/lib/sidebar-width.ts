@@ -1,3 +1,5 @@
+import { clientStorage } from "./client-state";
+
 const SIDEBAR_WIDTH_KEY = "band:sidebar-width";
 
 /**
@@ -19,7 +21,7 @@ export function loadSidebarWidth(): number | null {
 
 export function saveSidebarWidth(width: number): void {
   try {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+    clientStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
   } catch {}
 }
 
@@ -39,7 +41,7 @@ export function loadSidebarCollapsed(): boolean {
 
 export function saveSidebarCollapsed(collapsed: boolean): void {
   try {
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+    clientStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {}
 }
 
@@ -74,7 +76,7 @@ export function loadRightPanelWidth(): number | null {
 
 export function saveRightPanelWidth(width: number): void {
   try {
-    localStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(width));
+    clientStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(width));
   } catch {}
 }
 
@@ -94,7 +96,7 @@ export function loadRightPanelCollapsed(): boolean {
 
 export function saveRightPanelCollapsed(collapsed: boolean): void {
   try {
-    localStorage.setItem(RIGHT_PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
+    clientStorage.setItem(RIGHT_PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {}
 }
 

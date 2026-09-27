@@ -17,6 +17,7 @@ import { git, gitCommit } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -109,6 +110,10 @@ test.beforeAll(async () => {
   graphWorkspace = toWorkspaceId(GRAPH_REPO, BRANCH);
   longWorkspace = toWorkspaceId(LONG_REPO, BRANCH);
 });
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   await server.close();

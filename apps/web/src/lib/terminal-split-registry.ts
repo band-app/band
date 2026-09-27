@@ -1,4 +1,5 @@
 import type { DockviewApi } from "dockview";
+import { clientStorage } from "./client-state";
 
 /**
  * Registry + persistence helpers for **nested terminal panes** — the tmux-style
@@ -171,14 +172,14 @@ export function readNestedLayout(workspaceId: string, leafId: string): unknown |
 /** Persist a nested split layout (a dockview `toJSON()` blob). */
 export function writeNestedLayout(workspaceId: string, leafId: string, layout: unknown): void {
   try {
-    localStorage.setItem(nestedLayoutKey(workspaceId, leafId), JSON.stringify(layout));
+    clientStorage.setItem(nestedLayoutKey(workspaceId, leafId), JSON.stringify(layout));
   } catch {}
 }
 
 /** Delete a leaf's saved nested layout (on outer leaf close). */
 export function deleteNestedLayout(workspaceId: string, leafId: string): void {
   try {
-    localStorage.removeItem(nestedLayoutKey(workspaceId, leafId));
+    clientStorage.removeItem(nestedLayoutKey(workspaceId, leafId));
   } catch {}
 }
 

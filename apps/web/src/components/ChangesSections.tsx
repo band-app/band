@@ -37,6 +37,7 @@ import {
   invalidateWorkspaceChanges,
   SECTION_LABELS,
 } from "../hooks/useWorkspaceChanges";
+import { clientStorage } from "../lib/client-state";
 import { trpc } from "../lib/trpc-client";
 
 const COLLAPSED_KEY = "band:changes-collapsed-sections";
@@ -54,7 +55,7 @@ function readCollapsed(): Set<ChangeSection> {
 
 function writeCollapsed(collapsed: Set<ChangeSection>): void {
   try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+    clientStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
   } catch {}
 }
 

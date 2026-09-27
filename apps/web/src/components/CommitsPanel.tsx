@@ -10,6 +10,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileStatus } from "@/dashboard";
 import { FileStatusBadge } from "../dashboard/components/FileStatusBadge";
 import { getFileIcon } from "../dashboard/lib/file-icon";
+import { clientStorage } from "../lib/client-state";
 import {
   buildGraphRows,
   commitLaneIndex,
@@ -50,7 +51,7 @@ function readStorage(key: string): string | null {
 
 function writeStorage(key: string, value: string): void {
   try {
-    localStorage.setItem(key, value);
+    clientStorage.setItem(key, value);
   } catch {}
 }
 

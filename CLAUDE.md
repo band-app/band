@@ -91,6 +91,16 @@ An agent session is one run of a coding agent (issue #682). Its mode is how it i
 - `services/agent-launch-service.ts` starts agents (`agentSessions.launch`, `workspaces.create` with a prompt). The CLI reaches it through `band agents launch` and `band agents list`. An agent with no TUI invocation (cursor-cli) falls back to `gui`, and the response carries a `notice`.
 - Each browser stores its own mode in localStorage (`band.agent-mode`, `dashboard/lib/agent-mode.ts`) and sends it on every launch. With no mode sent, the server uses `agents.defaultMode` from `~/.band/settings.json`. Boot copies the older `cli.defaultVia` into it once and leaves the old key, because the CLI still reads it.
 
+## Architecture: client state
+
+Small UI state (center tabs, drafts, panel widths, collapsed projects) lives on the web server so the phone and the desktop show the same thing. localStorage stays the synchronous read cache.
+
+- The server keeps rows in `client_state`, keyed by `(key, scope)`. Scope `all` is one value for every device; `desktop` and `mobile` hold one value per device type (viewport of at least 1024 px, or the desktop app, counts as desktop). `services/client-state-service.ts` and the `clientState.*` router own them. A write names the version it was based on, and a stale one is refused and answered with the current row. A delete leaves a tombstone. Accepted writes go out as `client-state-changed` on the status stream. Deleting a workspace removes its rows.
+- The dashboard writes through `clientStorage` (`lib/client-state.ts`), which writes localStorage and pushes the key 500 ms later. `lib/client-state-keys.ts` lists the synced keys and their scope; any other key stays on the device (for example `band.agent-mode`, per device on purpose). A synced key can split into several entries: `band-tab-state:<ws>` shares view mode and language, keeps scroll per device type, and keeps unsaved text local.
+- Hydration runs before first read: `ClientStateGate` in `__root.tsx` waits for the global keys, and the center dockview's data query waits for its workspace's keys (both give up after 1.5 s so an offline load still renders). A local value the server doesn't have is uploaded, which migrates existing localStorage.
+- The center dockview shares only which tabs are open, their order and the active tab (`band:center-tabs:<ws>`, `lib/center-tabs.ts`). Its full layout, with splits and sizes, is per device type. While a workspace is on screen, another device's change only opens and closes tabs; order and active tab apply the next time it is shown.
+- e2e specs whose tests share one server call `resetClientState(tmpHome)` in `beforeEach`, because UI state no longer resets with each new browser context.
+
 ## Architecture: Web Server vs Terminal Daemon
 
 Terminal PTYs do not live in the web server. They live in the **terminal daemon** (`apps/web/terminal-daemon.ts`, bundled to `dist/terminal-daemon.mjs`), a detached process the server launches on the first terminal spawn, so shells survive a server restart (desktop relaunch, auto-update, `pnpm dev` reload, crash). The restarted server reattaches to the same shells, and the browser replays their screens over the unchanged `/terminal` WebSocket.
