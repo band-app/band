@@ -720,7 +720,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
               </SettingsRow>
               <SettingsRow
                 variant="responsive"
-                label="Open agents started without a device as"
+                label="Open programmatically created agents in"
                 description="Used by the CLI, cronjobs and MCP, and by a device with no mode set."
               >
                 <Select
