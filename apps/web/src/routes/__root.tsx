@@ -13,13 +13,13 @@ import { Group, Panel, type PanelSize, Separator, usePanelRef } from "react-resi
 import {
   DashboardProvider,
   DashboardShell,
+  isMacPlatform,
   useDashboardStore,
   useSettingsQuery,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { UpdateToast } from "@/dashboard/components/UpdateToast";
-import { isMacPlatform } from "@/dashboard/lib/command-registry";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {

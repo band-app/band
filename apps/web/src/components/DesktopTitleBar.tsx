@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { ChevronLeft, ChevronRight, PanelLeft, PanelRight } from "lucide-react";
 import { createContext, useContext } from "react";
-import { formatShortcut } from "../dashboard/lib/command-registry";
+import { formatShortcut } from "@/dashboard";
 import { isDesktop } from "../lib/is-desktop";
 import { EditorPicker } from "./EditorPicker";
 

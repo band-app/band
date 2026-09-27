@@ -433,8 +433,9 @@ export function SharedDockviewLayout() {
       // use for Ctrl+Shift+N / B / P or Ctrl+Alt+I, so new chat, new browser,
       // the command palette and show chat still work there.
       const shellFreeChord =
-        (e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p")) ||
-        (e.altKey && !e.shiftKey && e.code === "KeyI");
+        !isMacPlatform() &&
+        ((e.shiftKey && !e.altKey && (key === "n" || key === "b" || key === "p")) ||
+          (e.altKey && !e.shiftKey && e.code === "KeyI"));
       if (terminalFocused && !e.metaKey && !shellFreeChord) return;
 
       // New-tab chords copied from Orca: ⌘T terminal, ⌥⌘T chat with the
