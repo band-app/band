@@ -34,10 +34,8 @@
   --dv-drag-over-background-color: oklch(0.5 0.1 250 / 0.25);
   --dv-drag-over-border-color: var(--ring);
 
-  /* Tab sizing — controls the main-axis dimension of every
-   *  .dv-tabs-and-actions-container in the band-themed dockview:
-   *  height for top/bottom-header (horizontal) strips, width for
-   *  left/right-header (vertical edge) strips. */
+  /* Tab sizing — the height of every .dv-tabs-and-actions-container in the
+   *  band-themed dockview. */
   --dv-tabs-and-actions-container-height: 36px;
   --dv-tabs-and-actions-container-font-size: 13px;
 
@@ -81,42 +79,13 @@
   box-shadow: none;
 }
 
-/* Allow the panel content container to shrink below its intrinsic content
- * width. Dockview-core sets min-height:0 on .dv-content-container (correct
- * for top-header groups whose main axis is vertical) but not min-width:0.
- * In edge groups with header on the left/right (flex-direction: row), the
- * main axis is horizontal — without min-width:0 a flex item defaults to
- * min-width:auto and refuses to shrink below intrinsic child width, which
- * lets long project names / file paths push the panel wider than its
- * allocated edge slot and clip past the right boundary. */
-.dockview-theme-band .dv-content-container {
-  min-width: 0;
-}
-
-/* Border between the tabs container and the panel content. The default
- * rule below targets the most common case (header on top → border on the
- * bottom of the strip). The three overrides below cover the other header
- * positions used by edge groups (left edge → vertical strip on the left;
- * right edge → vertical strip on the right; bottom edge → horizontal
- * strip at the bottom). Without these the strip blurs into the content. */
+/* Border between the tabs container and the panel content. */
 .dockview-theme-band .dv-tabs-and-actions-container {
   border-bottom: 1px solid var(--border);
 }
-.dockview-theme-band .dv-groupview.dv-groupview-header-bottom > .dv-tabs-and-actions-container {
-  border-bottom: none;
-  border-top: 1px solid var(--border);
-}
-.dockview-theme-band .dv-groupview.dv-groupview-header-left > .dv-tabs-and-actions-container {
-  border-bottom: none;
-  border-right: 1px solid var(--border);
-}
-.dockview-theme-band .dv-groupview.dv-groupview-header-right > .dv-tabs-and-actions-container {
-  border-bottom: none;
-  border-left: 1px solid var(--border);
-}
 
 /* Suppress the inter-view separator when the preceding view is hidden
- * (e.g. an empty edge group with setEdgeGroupVisible(false)).
+ * (e.g. a sibling of a maximized group).
  * Without this, the ::before pseudo-element on a non-first .dv-view
  * still renders at left:0 of itself, and when the previous view has
  * size 0 it lands at the very edge of the dockview component, producing
@@ -501,47 +470,4 @@
 .dockview-terminal-split--dragging .term-pane-header__actions {
   opacity: 0;
   pointer-events: none;
-}
-
-/* Scoped edge-collapse animation for tab maximize/restore. The class is
-   added by applyMaximizeEdgeVisibility for the duration of the toggle only,
-   so sash dragging (which writes width per pointermove) is never affected.
-   Three splitview layers move during a maximize toggle and all must tween
-   with the same curve or the layout tears (issue: maximizing the right
-   group snapped while maximizing the left felt smooth):
-   - the shell's outer splitview (edge panels sliding away),
-   - the shell's middle column (bottom edge),
-   - the gridview branch splitviews (the maximized group swallowing its
-     siblings — dockview resizes them via inline width/left, so without a
-     transition the grid part of the movement is an instant jump). */
-.dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
-.dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view,
-.dv-edge-anim .dv-branch-node > .dv-split-view-container > .dv-view-container > .dv-view {
-  transition:
-    width 200ms cubic-bezier(0.77, 0, 0.175, 1),
-    left 200ms cubic-bezier(0.77, 0, 0.175, 1),
-    height 200ms cubic-bezier(0.77, 0, 0.175, 1),
-    top 200ms cubic-bezier(0.77, 0, 0.175, 1);
-  /* .dv-view is overflow:auto by default — hide it during the tween so a
-     shrinking wrapper never flashes scrollbars over the clipped content. */
-  overflow: hidden;
-}
-
-/* Inner dockviews nested inside panel content (chat tabs, terminal
-   sections, browser tabs) are full shells + grids, so the rules above
-   match their splitviews too. They re-layout via a ResizeObserver while
-   the OUTER tween runs, and each of those per-frame inline-style writes
-   would start its own 200ms transition — the inner content then visibly
-   chases its wrapper and settles a beat late. Let them track instantly
-   instead; same order in the cascade wins over the grant above. */
-.dv-edge-anim .dv-content-container .dv-split-view-container > .dv-view-container > .dv-view {
-  transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dv-edge-anim .dv-shell > .dv-split-view-container > .dv-view-container > .dv-view,
-  .dv-edge-anim .dv-shell-middle-column > .dv-split-view-container > .dv-view-container > .dv-view,
-  .dv-edge-anim .dv-branch-node > .dv-split-view-container > .dv-view-container > .dv-view {
-    transition: none;
-  }
 }

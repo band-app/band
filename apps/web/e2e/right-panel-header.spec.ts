@@ -6,7 +6,7 @@
  * sidepanel runs the full window height, and its header row (tabs, open in
  * editor, collapse) sits level with the title bar. The collapse button lives
  * in that header; once the sidepanel is collapsed, the expand button appears
- * at the title bar's right edge instead.
+ * at the title bar's right edge instead. ⌥⌘B toggles the sidepanel too.
  *
  * The open-in-editor picker renders only in the desktop build (it calls
  * native IPC), and this harness boots the web build in plain Chromium, so its
@@ -130,4 +130,19 @@ test("collapsing moves the toggle to the title bar, and expanding moves it back"
   await wp.expandRightPanelViaTitleBar();
   await expect(wp.rightPanelToggleInHeader).toBeVisible();
   await expect(wp.rightPanelToggleInTitleBar).toHaveCount(0);
+});
+
+test("⌥⌘B collapses and expands the right sidepanel", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+  await wp.revealRightPanel();
+
+  await wp.toggleRightPanelViaShortcut();
+  await expect(wp.rightPanel).toHaveAttribute("data-visible", "false");
+  await expect(wp.rightPanelToggleInTitleBar).toBeVisible();
+
+  await wp.toggleRightPanelViaShortcut();
+  await expect(wp.rightPanel).toHaveAttribute("data-visible", "true");
+  await expect(wp.rightPanelToggleInHeader).toBeVisible();
 });

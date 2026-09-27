@@ -97,13 +97,6 @@ import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
 import { listen as desktopListen } from "../lib/desktop-ipc";
 import {
-  attachEdgeGroupDragVisibility,
-  centralPanelPosition,
-  ensureEdgeGroups,
-  prepareMaximizeRestoreAnimation,
-  registerInnerDockview,
-} from "../lib/dockview-edge-groups";
-import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
@@ -232,8 +225,8 @@ const bandTheme: DockviewTheme = {
 //
 // The shell (`SharedDockviewLayout`) owns global keyboard shortcuts + dialogs
 // but no longer owns a dockview. It resolves the ACTIVE workspace's dockview
-// api from this registry to route panel-activation / maximize / edge-toggle
-// shortcuts. Registered on `onReady`, cleared on unmount.
+// api from this registry to route panel-activation / maximize shortcuts.
+// Registered on `onReady`, cleared on unmount.
 // ---------------------------------------------------------------------------
 
 const workspaceDockviewApis = new Map<string, DockviewApi>();
@@ -345,24 +338,89 @@ function isDockviewLayout(obj: unknown): boolean {
   return typeof o.grid === "object" && typeof o.panels === "object";
 }
 
-/** Recursively strip a set of view ids from a dockview grid branch. */
+/** Recursively strip a set of view ids from a dockview grid branch. dockview
+ *  serializes a leaf's group as an object in `data` and a branch's children as
+ *  an array in `data`. */
 function pruneGridViews(node: unknown, removed: Set<string>): void {
   if (!node || typeof node !== "object") return;
   const n = node as Record<string, unknown>;
+  if (Array.isArray(n.data)) {
+    for (const child of n.data) pruneGridViews(child, removed);
+    return;
+  }
   const data = n.data as { views?: string[]; activeView?: string } | undefined;
   if (data && Array.isArray(data.views)) {
     data.views = data.views.filter((v) => !removed.has(v));
     if (data.activeView && removed.has(data.activeView)) data.activeView = data.views[0];
   }
-  if (Array.isArray(n.children)) {
-    for (const child of n.children) pruneGridViews(child, removed);
+}
+
+/** First leaf of a dockview grid branch, depth-first. */
+function firstGridLeaf(node: unknown): { views: string[]; activeView?: string } | undefined {
+  if (!node || typeof node !== "object") return undefined;
+  const n = node as { type?: string; data?: unknown };
+  if (n.type === "leaf") {
+    const data = n.data as { views?: unknown } | undefined;
+    if (data && Array.isArray(data.views)) return data as { views: string[] };
+    return undefined;
+  }
+  if (n.type === "branch" && Array.isArray(n.data)) {
+    for (const child of n.data) {
+      const leaf = firstGridLeaf(child);
+      if (leaf) return leaf;
+    }
+  }
+  return undefined;
+}
+
+/** Move the panels of any dockview edge groups (left / right / bottom docked
+ *  areas, written by layouts saved before edge panels were removed) into the
+ *  first grid group as tabs, then drop `edgeGroups` so `fromJSON` never
+ *  recreates an edge group. dockview only builds panels a group references, so
+ *  deleting `edgeGroups` alone would silently lose those panels. */
+function moveEdgePanelsIntoGrid(layout: Record<string, unknown>): void {
+  const edgeGroups = layout.edgeGroups as
+    | Record<string, { group?: { views?: unknown } } | undefined>
+    | undefined;
+  delete layout.edgeGroups;
+  if (!edgeGroups || typeof edgeGroups !== "object") return;
+  // Only move views that have a panel entry. dockview's edge restore skipped a
+  // view with no entry, but its grid restore throws on one, which would make
+  // `fromJSON` fail and reset the whole layout to the default.
+  const panels = (layout.panels ?? {}) as Record<string, unknown>;
+  const moved: string[] = [];
+  for (const edge of Object.values(edgeGroups)) {
+    const views = edge?.group?.views;
+    if (Array.isArray(views)) {
+      for (const v of views) if (typeof v === "string" && panels[v]) moved.push(v);
+    }
+  }
+  if (moved.length === 0) return;
+  const grid = layout.grid as { root?: unknown } | undefined;
+  const leaf = firstGridLeaf(grid?.root);
+  if (leaf) {
+    leaf.views.push(...moved.filter((v) => !leaf.views.includes(v)));
+    if (!leaf.activeView) leaf.activeView = leaf.views[0];
+  } else if (grid?.root && typeof grid.root === "object") {
+    // A grid with no leaf at all (every grid group closed, panels only at the
+    // edges): give the root branch a single leaf holding the moved panels.
+    const root = grid.root as { data?: unknown; size?: number };
+    root.data = [
+      {
+        type: "leaf",
+        data: { views: moved, activeView: moved[0], id: "edge-panels" },
+        size: root.size ?? 0,
+      },
+    ];
   }
 }
 
 /** Drop panels whose `component` isn't a renderable leaf kind (e.g. a stale
  *  `files`/`changes` singleton from an older layout) so `fromJSON` can't mount
- *  an unregistered component. Mutates + returns the layout clone. */
+ *  an unregistered component, and fold any legacy edge-group panels into the
+ *  grid. Mutates + returns the layout clone. */
 function sanitizeSavedLayout(layout: Record<string, unknown>): Record<string, unknown> {
+  moveEdgePanelsIntoGrid(layout);
   const panels = layout.panels as Record<string, { contentComponent?: string }> | undefined;
   if (!panels) return layout;
   const removed = new Set<string>();
@@ -430,6 +488,17 @@ function reinjectParams(
     }
   }
   return clone;
+}
+
+/** Pin a new panel to a grid group rather than whatever `activeGroup` is (which
+ *  can be a floating group). With no grid group left, `{ direction: "within" }`
+ *  without a reference makes dockview create a fresh central group. */
+function centralPanelPosition(
+  api: DockviewApi,
+): { referenceGroup: string } | { direction: "within" } {
+  const central = api.groups.find((g) => g.api.location.type === "grid");
+  if (central) return { referenceGroup: central.id };
+  return { direction: "within" };
 }
 
 /** Where a newly-opened file/diff leaf should go: the group the user is
@@ -2153,9 +2222,8 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
 // ---------------------------------------------------------------------------
 
 const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
-  // Only grid groups get the "+" new-tab menu. Edge groups (the ⌘B/⌘J side
-  // panels) are collapsed to zero size when empty, so adding a leaf there would
-  // drop it into an invisible 0-px group — mirror RightHeaderActions' guard.
+  // Only grid groups get the "+" new-tab menu, not floating groups — mirror
+  // RightHeaderActions' guard.
   if ((props.location?.type ?? "grid") !== "grid") return null;
   return (
     <div className="flex h-full items-center px-0.5">
@@ -2191,7 +2259,7 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
     };
   }, [props.containerApi, props.group]);
 
-  // Edge groups don't maximize — the add menu (left slot) is enough there.
+  // Floating groups don't maximize.
   if (!isGridGroup) return null;
 
   // The active tab's own action buttons (view toggle, save, revert…).
@@ -2234,9 +2302,8 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
           <button
             type="button"
             aria-label={maxLabel}
-            onClick={(e) => {
+            onClick={() => {
               if (props.api.isMaximized()) {
-                prepareMaximizeRestoreAnimation(e.currentTarget.closest<HTMLElement>(".dv-shell"));
                 props.api.exitMaximized();
               } else {
                 props.api.maximize();
@@ -2420,8 +2487,6 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   wsActiveRef.current = wsActive;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const edgeDragDisposerRef = useRef<(() => void) | null>(null);
-  const innerRegisterDisposerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // VS Code-style preview tabs: at most one previewing file leaf and one
   // previewing diff leaf per dockview. A single-click in the sidepanel opens
@@ -3093,15 +3158,6 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         });
       }
 
-      // Edge groups + drag visibility + shortcut registry.
-      ensureEdgeGroups(api);
-      edgeDragDisposerRef.current?.();
-      edgeDragDisposerRef.current = attachEdgeGroupDragVisibility(api);
-      innerRegisterDisposerRef.current?.();
-      if (containerRef.current) {
-        innerRegisterDisposerRef.current = registerInnerDockview(containerRef.current, api);
-      }
-
       // Persistence + focus reporting. Structural changes (add/remove leaf or
       // group) flush immediately so a close survives an instant reload; the
       // high-frequency layout stream (resize/move) is debounced.
@@ -3446,10 +3502,6 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           workspaceLeafActions.delete(workspaceId);
         }
       }
-      edgeDragDisposerRef.current?.();
-      edgeDragDisposerRef.current = null;
-      innerRegisterDisposerRef.current?.();
-      innerRegisterDisposerRef.current = null;
       // Flush a pending debounced save rather than dropping it, so a layout
       // tweak right before a workspace switch / unmount still persists.
       if (saveTimerRef.current && api) {

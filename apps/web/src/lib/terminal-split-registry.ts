@@ -21,18 +21,15 @@ import type { DockviewApi } from "dockview";
  *   2. **Focus routing** (`registerTerminalSplitDockview` /
  *      `findFocusedTerminalSplitDockview`) — so the OUTER keydown handler can
  *      DEFER ⌘D / ⌘⇧D / ⌘[ / ⌘] to a terminal leaf's nested dockview when focus
- *      is inside it. Kept separate from `registerInnerDockview` in
- *      `dockview-edge-groups.ts` (which drives the ⌘B/⌥⌘B/⌘J edge toggles) so the
- *      split semantics don't tangle with the edge-toggle semantics.
+ *      is inside it.
  *
  *   3. **Nested layout persistence** — the split geometry per leaf, in
  *      localStorage (`band:term-split:<workspaceId>:<leafId>`). This is
  *      deliberately client-only: the server-side `terminalLayout` router was
  *      retired in #643 and must not be reintroduced.
  *
- * Everything here is a per-module-instance singleton (not per React tree),
- * mirroring the registries in `dockview-edge-groups.ts` — one entry per mounted
- * nested dockview.
+ * Everything here is a per-module-instance singleton (not per React tree) —
+ * one entry per mounted nested dockview.
  */
 
 // ---------------------------------------------------------------------------
