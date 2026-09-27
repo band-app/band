@@ -1,14 +1,16 @@
 /**
- * Component object for the editable table the markdown preview renders in
- * place of a GFM table (`markdown-table-widget.ts`). Scoped to one rendered
- * table block inside a `FileViewerPage`'s preview.
+ * Component object for the editable grids the markdown preview renders in
+ * place of a GFM table or the YAML frontmatter (`markdown-table-widget.ts`).
+ * Scoped to one rendered block inside a `FileViewerPage`'s preview. The
+ * frontmatter grid calls its rows properties, so its row grips and "+" bar
+ * are named "Property 1 options" and "Add property".
  *
  * Cells carry `data-testid="markdown-table__cell--r<row>-c<col>"`, where row 0
  * is the header and rows 1.. are body rows. The grips, "+" bars and menu items
  * are located by the ARIA names the widget sets in code.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { type Download, type Locator, type Page, test } from "@playwright/test";
 
 export class MarkdownTableEditor {
   readonly addRowButton: Locator;
@@ -21,8 +23,9 @@ export class MarkdownTableEditor {
     private readonly page: Page,
     readonly root: Locator,
     preview: Locator,
+    private readonly noun: "Row" | "Property" = "Row",
   ) {
-    this.addRowButton = root.getByRole("button", { name: "Add row" });
+    this.addRowButton = root.getByRole("button", { name: `Add ${noun.toLowerCase()}` });
     this.addColumnButton = root.getByRole("button", { name: "Add column" });
     this.menu = preview.getByTestId("markdown-table__menu");
   }
@@ -83,7 +86,7 @@ export class MarkdownTableEditor {
   async openRowMenu(row: number): Promise<void> {
     await test.step(`Open the menu of row ${row}`, async () => {
       await this.cell(row, 0).hover();
-      await this.root.getByRole("button", { name: `Row ${row} options` }).click();
+      await this.root.getByRole("button", { name: `${this.noun} ${row} options` }).click();
     });
   }
 
@@ -100,8 +103,26 @@ export class MarkdownTableEditor {
     });
   }
 
+  /** Copy the grid's data from the frame's Copy menu. */
+  async copyAs(format: "Markdown" | "CSV" | "TSV"): Promise<void> {
+    await test.step(`Copy the table as ${format}`, async () => {
+      await this.root.getByRole("button", { name: "Copy table" }).click();
+      await this.menuItem(`Copy as ${format}`).click();
+    });
+  }
+
+  /** Download the grid's data from the frame's Download menu. */
+  async downloadAs(format: "CSV" | "Markdown"): Promise<Download> {
+    return await test.step(`Download the table as ${format}`, async () => {
+      await this.root.getByRole("button", { name: "Download table" }).click();
+      const download = this.page.waitForEvent("download");
+      await this.menuItem(`Download as ${format}`).click();
+      return await download;
+    });
+  }
+
   async addRow(): Promise<void> {
-    await test.step("Add a row with the bottom + bar", async () => {
+    await test.step(`Add a ${this.noun.toLowerCase()} with the bottom + bar`, async () => {
       await this.root.hover();
       await this.addRowButton.click();
     });

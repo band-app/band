@@ -157,6 +157,16 @@ export class FileViewerPage {
     );
   }
 
+  /** The editable Key / Value grid the preview renders for the frontmatter. */
+  previewFrontmatterEditor(): MarkdownTableEditor {
+    return new MarkdownTableEditor(
+      this.page,
+      this.previewRenderedBlock("frontmatter"),
+      this.markdownPreview,
+      "Property",
+    );
+  }
+
   /** A control Streamdown renders in the corner of a rendered block, by the
    *  `title` Streamdown gives it ("Copy Code", "View fullscreen", ...). */
   previewBlockControl(kind: "table" | "frontmatter" | "mermaid", name: string): Locator {

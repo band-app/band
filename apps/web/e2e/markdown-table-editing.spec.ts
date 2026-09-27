@@ -2,7 +2,9 @@
  * Tables in the markdown preview are edited in place: cell text, rows,
  * columns and alignment change through the rendered grid, and saving writes
  * GFM table markdown that keeps the bytes of every cell the user did not
- * touch (padding, pipe style, alignment markers).
+ * touch (padding, pipe style, alignment markers). The YAML frontmatter is a
+ * Key / Value grid edited the same way, and each grid's frame copies and
+ * downloads its data.
  *
  * Drives a real Band server against an on-disk worktree; each test edits its
  * own file and compares the saved bytes exactly.
@@ -34,7 +36,18 @@ const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
 const TABLE = ["| Name | Role |", "|------|:----:|", "| Ada   | **eng** |", "| Bob | pm |"];
 const FILE = (table: string[]) => ["# Team", "", ...table, "", "After.", ""].join("\n");
 
-const FILES = ["CELLS.md", "KEYS.md", "STRUCTURE.md"];
+const FILES = ["CELLS.md", "KEYS.md", "STRUCTURE.md", "EXPORT.md"];
+// A quoted value and a list value, which spans lines and stays read-only.
+const FRONTMATTER = [
+  "---",
+  "title: Notes",
+  'owner: "team a"',
+  "tags:",
+  "  - one",
+  "  - two",
+  "---",
+];
+
 // No padding around the cells, so nothing separates cell text from its pipe.
 const COMPACT = ["|Name|Role|", "|-|-|", "|Ada|eng|"];
 
@@ -51,6 +64,7 @@ test.beforeAll(async () => {
   git(repo, ["init", "-b", BRANCH]);
   for (const name of FILES) writeFileSync(join(repo, name), FILE(TABLE));
   writeFileSync(join(repo, "COMPACT.md"), FILE(COMPACT));
+  writeFileSync(join(repo, "FRONTMATTER.md"), [...FRONTMATTER, "", "# Team", ""].join("\n"));
   git(repo, ["add", "."]);
   git(repo, ["commit", "-m", "initial"]);
   seedState(tmpHome, {
@@ -241,5 +255,85 @@ test("row and column menus insert, delete and align, and the cell menu shows the
         "|  | Cat |  |  |",
         "|  | Dee |  |  |",
       ]),
+    );
+});
+
+test.describe("frame toolbar", () => {
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+
+  test("the table frame copies the data as Markdown, CSV and TSV and downloads it", async ({
+    page,
+  }) => {
+    const { viewer, table } = await openTable(page, "EXPORT.md");
+
+    await table.copyAs("Markdown");
+    await expect.poll(() => viewer.readClipboard()).toBe(TABLE.join("\n"));
+    // CSV and TSV hold the cells' text, formatting markers stripped.
+    await table.copyAs("CSV");
+    await expect.poll(() => viewer.readClipboard()).toBe("Name,Role\nAda,eng\nBob,pm");
+    await table.copyAs("TSV");
+    await expect.poll(() => viewer.readClipboard()).toBe("Name\tRole\nAda\teng\nBob\tpm");
+
+    const csv = await table.downloadAs("CSV");
+    expect(csv.suggestedFilename()).toBe("table.csv");
+    expect(readFileSync(await csv.path(), "utf8")).toBe("Name,Role\nAda,eng\nBob,pm");
+    const md = await table.downloadAs("Markdown");
+    expect(md.suggestedFilename()).toBe("table.md");
+    expect(readFileSync(await md.path(), "utf8")).toBe(TABLE.join("\n"));
+
+    // The toolbar never switched the table to its source.
+    await expect(viewer.previewRenderedBlock("table")).toBeVisible();
+    expect(readFile("EXPORT.md")).toBe(FILE(TABLE));
+  });
+});
+
+test("frontmatter is a Key / Value grid edited in place, keeping each value's quoting", async ({
+  page,
+}) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const viewer = new FileViewerPage(page);
+  await workspacePage.goto(WORKSPACE);
+  await workspacePage.waitForReady();
+  await workspacePage.openFileLeaf("FRONTMATTER.md");
+  await expect(viewer.previewHeading(1, "Team")).toBeVisible({ timeout: 20_000 });
+  const fm = viewer.previewFrontmatterEditor();
+  await expect(fm.cell(1, 0)).toHaveText("title");
+
+  // A list value shows its items and is edited as markdown, not here.
+  await expect(fm.cell(3, 1)).toHaveText("one, two");
+  await expect(fm.cell(3, 1)).not.toHaveRole("textbox");
+
+  await fm.replaceCell(1, 1, "Plans");
+  // The quoted value is shown without its quotes and stays quoted.
+  await expect(fm.cell(2, 1)).toHaveText("team a");
+  await fm.replaceCell(2, 1, "team b");
+
+  // Tab skips the read-only value and, past the last cell, adds a property
+  // with its placeholder key selected.
+  await fm.clickCell(3, 0);
+  await fm.press("Tab");
+  await expect(fm.cell(4, 0)).toBeFocused();
+  // A key the frontmatter cannot hold is marked and not written.
+  await fm.type("bad key");
+  await expect(fm.cell(4, 0)).toHaveAttribute("aria-invalid", "true");
+  await fm.press("ControlOrMeta+a");
+  await fm.type("status");
+  await expect(fm.cell(4, 0)).not.toHaveAttribute("aria-invalid");
+  await fm.press("Tab");
+  await expect(fm.cell(4, 1)).toBeFocused();
+  await fm.type("draft");
+
+  // Deleting a property removes its continuation lines too.
+  await fm.openRowMenu(3);
+  await fm.chooseMenuItem("Delete property");
+  await expect(fm.cell(3, 0)).toHaveText("status");
+
+  await viewer.saveWithShortcut();
+  await expect
+    .poll(() => readFile("FRONTMATTER.md"), { timeout: 10_000 })
+    .toBe(
+      ["---", "title: Plans", 'owner: "team b"', "status: draft", "---", "", "# Team", ""].join(
+        "\n",
+      ),
     );
 });

@@ -4,8 +4,8 @@
  * The markdown source stays the CodeMirror document. Formatting is painted on
  * top of it with decorations: heading lines get heading styles, the `**` /
  * `_` / backtick / `#` / `>` markers are hidden, bullets become `•`, task
- * markers become checkboxes, frontmatter and mermaid fences are swapped for a
- * rendered block, and tables for an editable grid (`markdown-table-widget.ts`).
+ * markers become checkboxes, mermaid fences are swapped for a rendered block,
+ * and tables and frontmatter for an editable grid (`markdown-table-widget.ts`).
  * Wherever the selection touches a construct, its raw markers come back so
  * the user can edit them.
  *
@@ -53,7 +53,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { loadLanguage } from "./codemirror-setup";
-import { type SyntaxNode, tableWidget } from "./markdown-table-widget";
+import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
 
 /** Blocks the live preview swaps for a rendered version while the cursor is elsewhere. */
 export type RenderedBlockKind = "table" | "frontmatter" | "mermaid";
@@ -69,7 +69,10 @@ export type RenderMarkdownBlock = (
 ) => () => void;
 
 export interface MarkdownLivePreviewOptions {
-  /** Renders tables, frontmatter and mermaid fences. Without it they stay as source. */
+  /**
+   * Renders mermaid fences. Without it tables, frontmatter and mermaid fences
+   * all stay as source; with it tables and frontmatter become editable grids.
+   */
   renderBlock?: RenderMarkdownBlock;
   /** Maps an image `src` from the document to a loadable URL (relative paths). */
   resolveImageUrl?: (src: string) => string | undefined;
@@ -346,7 +349,9 @@ function buildBlockDecorations(
     const widget =
       kind === "table" && node
         ? tableWidget(state, node, from, to, { onSave })
-        : new RenderedBlockWidget(kind, state.doc.sliceString(from, to), render);
+        : kind === "frontmatter"
+          ? frontmatterWidget(state, from, to, { onSave })
+          : new RenderedBlockWidget(kind, state.doc.sliceString(from, to), render);
     decos.push(Decoration.replace({ widget, block: true }).range(from, to));
   };
   const fm = state.field(frontmatterField);
@@ -774,9 +779,39 @@ function livePreviewTheme(isDark: boolean): Extension {
       ".cm-md-image": { maxWidth: "100%" },
       ".cm-md-block": { padding: "0.4em 0", cursor: "text" },
 
-      ".cm-md-block--table": { padding: "0" },
+      ".cm-md-grid": {
+        position: "relative",
+        margin: "0.5em 0",
+        padding: "0",
+        border: `1px solid ${border}`,
+        borderRadius: "8px",
+      },
+      ".cm-md-table-toolbar": {
+        display: "flex",
+        justifyContent: "flex-end",
+        gap: "2px",
+        padding: "4px 6px 0",
+      },
+      ".cm-md-table-tool": {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "24px",
+        height: "24px",
+        padding: "0",
+        border: "none",
+        borderRadius: "4px",
+        background: "none",
+        color: muted,
+        cursor: "pointer",
+      },
+      ".cm-md-table-tool:hover, .cm-md-table-tool:focus-visible": {
+        color: "var(--foreground)",
+        backgroundColor: "var(--accent)",
+        outline: "none",
+      },
       // Room around the table for the row / column grips and the "+" bars.
-      ".cm-md-table-scroll": { overflowX: "auto", padding: "14px 22px 22px 20px" },
+      ".cm-md-table-scroll": { overflowX: "auto", padding: "8px 22px 22px 20px" },
       ".cm-md-table-frame": { position: "relative", display: "inline-block", minWidth: "40%" },
       ".cm-md-table": { borderCollapse: "collapse", width: "100%", fontSize: "0.95em" },
       ".cm-md-table th, .cm-md-table td": {
@@ -800,6 +835,7 @@ function livePreviewTheme(isDark: boolean): Extension {
         fontFamily: "var(--font-mono, ui-monospace, monospace)",
         fontSize: "0.92em",
       },
+      ".cm-md-table-cell[aria-invalid=true]": { boxShadow: "inset 0 0 0 2px #e5484d" },
       ".cm-md-table-strong": { fontWeight: "700" },
       ".cm-md-table-em": { fontStyle: "italic" },
       ".cm-md-table-del": { textDecoration: "line-through" },
