@@ -18,9 +18,10 @@
  * convention of primary page objects.
  */
 
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { type Download, expect, type Locator, type Page, test } from "@playwright/test";
 import { CodeSymbolLinks } from "./CodeSymbolLinks";
 import { FindWidget } from "./FindWidget";
+import { MarkdownTableEditor } from "./MarkdownTableEditor";
 
 /** Test id on the `FileViewer` root element (set in FileViewer.tsx).
  *  Exported so other page objects that need to wait for the viewer to mount
@@ -147,6 +148,61 @@ export class FileViewerPage {
     return this.previewRenderedBlock("table").getByRole("table");
   }
 
+  /** The editable table the preview renders for the `index`th table. */
+  previewTableEditor(index = 0): MarkdownTableEditor {
+    return new MarkdownTableEditor(
+      this.page,
+      this.previewRenderedBlock("table").nth(index),
+      this.markdownPreview,
+    );
+  }
+
+  /** A control Streamdown renders in the corner of a rendered block, by the
+   *  `title` Streamdown gives it ("Copy Code", "View fullscreen", ...). */
+  previewBlockControl(kind: "table" | "frontmatter" | "mermaid", name: string): Locator {
+    return this.previewRenderedBlock(kind).getByRole("button", { name, exact: true });
+  }
+
+  /** The close button of Streamdown's fullscreen diagram view. Streamdown
+   *  portals that view to `document.body`, outside the file viewer. */
+  get fullscreenExitButton(): Locator {
+    return this.page.getByRole("button", { name: "Exit fullscreen", exact: true });
+  }
+
+  /** Click a rendered block's corner control. */
+  async clickPreviewBlockControl(
+    kind: "table" | "frontmatter" | "mermaid",
+    name: string,
+  ): Promise<void> {
+    await test.step(`Click "${name}" on the rendered ${kind} block`, async () => {
+      await this.previewBlockControl(kind, name).click();
+    });
+  }
+
+  /** Open a mermaid block's download menu and download the diagram source. */
+  async downloadMermaidSource(): Promise<Download> {
+    return await test.step("Download the mermaid diagram as MMD", async () => {
+      await this.clickPreviewBlockControl("mermaid", "Download diagram");
+      const download = this.page.waitForEvent("download");
+      // The menu item's text ("MMD") is its accessible name; its title only
+      // describes it.
+      await this.previewBlockControl("mermaid", "MMD").click();
+      return await download;
+    });
+  }
+
+  /** Close Streamdown's fullscreen diagram view. */
+  async exitFullscreen(): Promise<void> {
+    await test.step("Exit the fullscreen diagram", async () => {
+      await this.fullscreenExitButton.click();
+    });
+  }
+
+  /** The system clipboard's text. Needs the clipboard-read permission. */
+  async readClipboard(): Promise<string> {
+    return await this.page.evaluate(() => navigator.clipboard.readText());
+  }
+
   /** The checkbox the preview renders for the task-list item `text`. */
   taskCheckbox(text: string): Locator {
     return this.previewFormatted("listitem", text).getByRole("checkbox");
@@ -157,7 +213,9 @@ export class FileViewerPage {
    *  doc-end binding: Cmd+Down on macOS, Ctrl+End elsewhere. */
   async focusPreviewEnd(): Promise<void> {
     await test.step("Put the cursor at the end of the markdown preview", async () => {
-      await this.markdownPreview.getByRole("textbox").click();
+      // Table cells are textboxes too; the editor's own content element
+      // contains them, so it comes first in document order.
+      await this.markdownPreview.getByRole("textbox").first().click();
       await this.page.keyboard.press(
         process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
       );
