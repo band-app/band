@@ -547,6 +547,9 @@ export const PromptInputTextarea = ({
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck={false}
+        // Turns off the inline word completions iOS 17+ types ahead of the
+        // cursor; the attributes above don't cover them.
+        writingsuggestions="false"
         className={cn(
           "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
           className,

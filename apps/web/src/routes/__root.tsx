@@ -19,6 +19,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
+import { ReinstallHomeScreenNotice } from "@/dashboard/components/ReinstallHomeScreenNotice";
 import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
@@ -792,10 +793,10 @@ function AppShell() {
                   distinct panel from the workspace layout to its right. With
                   the translucent sidebar on (macOS desktop), the surface is a
                   light tint over the window's vibrancy layer instead. */}
-                {/* Each column pads the home-indicator inset itself, so the
-                  padding takes that column's surface colour. */}
+                {/* Each column pads the status-bar and home-indicator insets
+                  itself, so the padding takes that column's surface colour. */}
                 <div
-                  className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar translucent-sidebar:bg-(--sidebar-translucent) pb-[env(safe-area-inset-bottom)]"
+                  className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar translucent-sidebar:bg-(--sidebar-translucent) pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
                   data-testid="app-shell__sidebar"
                 >
                   {/* Pure drag/paint surface — the sidebar toggle + back/forward
@@ -822,7 +823,10 @@ function AppShell() {
                   sidepanel's own header row (tabs, open in editor, collapse).
                   With no workspace active there is no tab strip, so a plain
                   drag bar takes its place. */}
-                <div className="h-full min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
+                <div
+                  className="h-full min-w-0 overflow-hidden bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+                  data-testid="app-shell__main"
+                >
                   <Group
                     orientation="horizontal"
                     defaultLayout={centerDefaultLayout}
@@ -895,11 +899,12 @@ function AppShell() {
             order, unioning `app-region: drag` rects and subtracting `no-drag`
             rects as it goes — z-index is irrelevant. If this overlay renders
             before them, their drag rects re-cover the buttons and
-            every click on them starts a window drag in the desktop app. */}
+            every click on them starts a window drag in the desktop app.
+            It sits below the status-bar inset, like the top row. */}
           <div
             ref={navOverlayRef}
             data-testid="app-shell__nav-overlay"
-            className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
+            className={`pointer-events-none absolute top-[env(safe-area-inset-top)] left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
           >
             <NavControls {...navControlProps} />
           </div>
@@ -930,6 +935,7 @@ function RootLayout() {
           <TooltipProvider>
             <AppShell />
             <UpdateToast />
+            <ReinstallHomeScreenNotice />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />
