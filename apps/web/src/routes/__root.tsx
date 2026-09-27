@@ -654,7 +654,8 @@ function AppShell() {
     };
   }, [toggleSidebar, sidebarPanelRef, animateSidebarToggle]);
 
-  // ⇧⌘E / ⇧⌘G (and the title-bar switcher) toggle / reveal the right sidepanel.
+  // ⌥⌘B toggles the right sidepanel; ⇧⌘E / ⇧⌘G (and the title-bar switcher)
+  // reveal it.
   useEffect(() => {
     const onToggle = () => toggleRightPanel();
     const onShow = () => {

@@ -660,6 +660,18 @@ export class WorkspacePage {
     });
   }
 
+  /** Toggle the right sidepanel via the ⌥⌘B keyboard shortcut. The keydown is
+   *  caught by the window listener in `SharedDockviewLayout.tsx` and
+   *  re-dispatched as `band:toggle-right-panel`, which `AppShell`
+   *  (`__root.tsx`) handles. Anchored on the always-present sidebar toggle
+   *  button so the key press has a stable, non-editable focus target. */
+  async toggleRightPanelViaShortcut(): Promise<void> {
+    await test.step("Toggle the right sidepanel via ⌥⌘B", async () => {
+      await this.sidebarToggle.focus();
+      await this.page.keyboard.press("Meta+Alt+KeyB");
+    });
+  }
+
   /** Read the persisted sidebar-collapsed flag (`band:sidebar-collapsed`)
    *  from localStorage. */
   async readSidebarCollapsed(): Promise<boolean> {
@@ -1282,7 +1294,7 @@ export class WorkspacePage {
   // Add-tab / split helpers below are scoped to a workspace's cached panel
   // host so they target the active workspace's toolbar, not another mounted
   // workspace's. `.filter({ visible: true })` picks the visible grid group's
-  // toolbar (edge groups render a "+"-only, hidden row).
+  // toolbar.
   // ──────────────────────────────────────────────────────────────────────
 
   /** The visible "+" new-tab menu button for a workspace's center dockview. */
@@ -1646,9 +1658,9 @@ export class WorkspacePage {
   }
 
   /** The mobile terminal container's grid-group toolbar (`RightHeaderActions`
-   *  tags only grid groups with `dockview-terminal__toolbar`; the mobile layout
-   *  has no edge groups). One per rendered terminal group — its count is the
-   *  observable "how many split groups" signal. */
+   *  tags only grid groups with `dockview-terminal__toolbar`). One per
+   *  rendered terminal group — its count is the observable "how many split
+   *  groups" signal. */
   get mobileTerminalToolbar(): Locator {
     return this.page.getByTestId("dockview-terminal__toolbar");
   }
@@ -2834,22 +2846,13 @@ export class WorkspacePage {
     await this.seedGlobalLayout(workspaceId, layout);
   }
 
-  /** The dockview bottom edge-group container that is currently on-screen.
-   *
-   *  dockview tags every edge-group shell element with a library-provided
-   *  `data-testid` (`dv-edge-group-edge-<direction>`), and renders the
-   *  bottom slot in more than one shell position — only the populated one
-   *  is laid out at a non-zero size. Filtering to `visible` collapses that
-   *  to the single on-screen instance, so the test can assert
-   *  `toHaveCount(1)` (edge shown) vs `toHaveCount(0)` (edge collapsed to
-   *  zero size while a group is maximized).
-   *
-   *  Using dockview's own testid here mirrors how the maximize spec already
-   *  asserts on dockview-owned chrome (e.g. the `dv-active-tab` class on
-   *  `.dv-tab`): the edge shell is third-party markup we don't render, so
-   *  there's no BEM `data-testid` of our own to key off. */
-  bottomEdgeGroup(): Locator {
-    return this.page.getByTestId("dv-edge-group-edge-bottom").filter({ visible: true });
+  /** Every dockview edge group (the left / right / bottom docked areas that
+   *  used to sit around the grid). dockview tags each edge-group element with
+   *  a library-provided `data-testid` (`dv-edge-group-<groupId>`); it is
+   *  third-party markup, so there is no BEM testid of our own to key off.
+   *  Edge groups were removed, so this should always resolve to nothing. */
+  edgeGroups(): Locator {
+    return this.page.getByTestId(/^dv-edge-group-/);
   }
 
   /** Reset the per-workspace shared-dockview state entry in
@@ -2876,43 +2879,6 @@ export class WorkspacePage {
         [ACTIVE_STATE_KEY_PREFIX, workspaceId] as const,
       );
     });
-  }
-
-  /** Fetch the persisted server-side dockview layout for the given
-   *  inner container (`chat`, `terminal`, or `browser`). Each container
-   *  has its own tRPC namespace (`chatLayout.get`, `terminalLayout.get`,
-   *  `browserLayout.get`) that returns `{ tree }`; this helper unwraps
-   *  the response and returns the parsed tree (or `null` when no layout
-   *  has been persisted yet).
-   *
-   *  Used by the panel-default-position regression test to verify that
-   *  newly-added panels end up in a central (grid-located) leaf instead
-   *  of being appended into one of the three collapsed edge groups
-   *  (`edge-left`, `edge-right`, `edge-bottom`) that `ensureEdgeGroups`
-   *  adds in `onReady`. The return type narrows the response into the
-   *  dockview-toJSON shape the test traverses — keeps dockview
-   *  knowledge inside the page object so test bodies can skip casts. */
-  async readInnerLayout(
-    container: "chat" | "terminal" | "browser",
-    workspaceId: string,
-  ): Promise<DockviewLayoutSnapshot | null> {
-    const procedure =
-      container === "chat"
-        ? "chatLayout.get"
-        : container === "terminal"
-          ? "terminalLayout.get"
-          : "browserLayout.get";
-    const input = encodeURIComponent(JSON.stringify({ workspaceId }));
-    const res = await this.page.request.get(
-      `${this.baseUrl}/trpc/${procedure}?input=${input}&token=${this.token}`,
-    );
-    if (!res.ok()) {
-      throw new Error(`readInnerLayout(${container}) failed: ${res.status()} ${await res.text()}`);
-    }
-    const body = (await res.json()) as {
-      result: { data: { tree: DockviewLayoutSnapshot | null } };
-    };
-    return body.result.data.tree;
   }
 
   /** Fire the `workspaces.create` mutation over HTTP with `via:
@@ -3819,19 +3785,3 @@ export class WorkspacePage {
     return rect!;
   }
 }
-
-/** Narrowed shape for what `*.Layout.get` returns. Mirrors the parts of
- *  `dockview.toJSON()` the regression test traverses (`grid.root` walk
- *  + `panels` lookup); other fields are ignored. Lives at the bottom of
- *  the page-object file so callers get a typed return from
- *  `readInnerLayout` without re-deriving the shape inline. */
-export interface DockviewLayoutSnapshot {
-  grid?: {
-    root?: DockviewGridNode;
-  };
-  panels: Record<string, unknown>;
-}
-
-export type DockviewGridNode =
-  | { type: "leaf"; data: { id: string; views: string[]; activeView?: string } }
-  | { type: "branch"; data: DockviewGridNode[] };

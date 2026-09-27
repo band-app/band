@@ -15,11 +15,6 @@ import {
   WorkspacePickerDialog,
 } from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
-import {
-  findFocusedInnerDockview,
-  prepareMaximizeRestoreAnimation,
-  toggleEdgeGroup,
-} from "../lib/dockview-edge-groups";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
@@ -417,25 +412,13 @@ export function SharedDockviewLayout() {
         activateLeafOfKind(ws, "browser");
         queueMicrotask(() => window.dispatchEvent(new CustomEvent("band:focus-browser")));
       } else if (key === "b" && !e.shiftKey && !e.altKey) {
-        // ⌘B → toggle inner-dockview left edge, else the project sidebar.
+        // ⌘B → toggle the project sidebar.
         e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "left")) return;
         window.dispatchEvent(new CustomEvent("band:toggle-sidebar"));
       } else if (e.code === "KeyB" && e.altKey && !e.shiftKey) {
-        // ⌥⌘B → toggle right edge of the focused / active dockview.
+        // ⌥⌘B → toggle the right sidepanel (Explorer / Changes).
         e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "right")) return;
-        const api = getWorkspaceDockviewApi(ws);
-        if (api) toggleEdgeGroup(api, "right");
-      } else if (key === "j" && !e.shiftKey && !e.altKey) {
-        // ⌘J → toggle bottom edge.
-        e.preventDefault();
-        const inner = findFocusedInnerDockview();
-        if (inner && toggleEdgeGroup(inner, "bottom")) return;
-        const api = getWorkspaceDockviewApi(ws);
-        if (api) toggleEdgeGroup(api, "bottom");
+        window.dispatchEvent(new CustomEvent("band:toggle-right-panel"));
       } else if (key === "m" && e.shiftKey) {
         // ⇧⌘M → maximize / restore the active group.
         e.preventDefault();
@@ -443,7 +426,6 @@ export function SharedDockviewLayout() {
         const active = api?.activeGroup;
         if (!api || !active) return;
         if (active.api.isMaximized()) {
-          prepareMaximizeRestoreAnimation(document.querySelector<HTMLElement>(".dv-shell"));
           active.api.exitMaximized();
         } else {
           active.api.maximize();

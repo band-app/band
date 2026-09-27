@@ -278,7 +278,7 @@ export function DashboardShell({
   }, []);
 
   // Listen for ⌃0 (Focus Side Bar) — the keyboard handler in the workspace
-  // layout expands the left edge group and dispatches this event; we move
+  // layout reveals the project sidebar and dispatches this event; we move
   // keyboard focus into the project list so arrow keys can navigate it.
   // Multi-workspace note: every DashboardShell instance receives the
   // event, but each focuses only its own subtree via rootRef. Inactive
