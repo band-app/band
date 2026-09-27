@@ -53,7 +53,9 @@ function AgentItems({
   return agents.map((agent) => (
     <DropdownMenuItem
       key={agent.id}
-      onClick={() => onPick(agent.id)}
+      // The default agent goes as "no pick", so it follows the default-agent
+      // path (e.g. a chat pane still opens if its launch fails).
+      onClick={() => onPick(agent.id === defaultAgentId ? undefined : agent.id)}
       data-testid={`workspace-center__new-agent--${agent.id}`}
     >
       <AgentIcon type={agent.type} className="size-4" />
