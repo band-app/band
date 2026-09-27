@@ -574,23 +574,25 @@ export class WorkspacePage {
     return this.page.getByTestId("app-shell__nav-overlay");
   }
 
-  /** Whether the nav-cluster overlay renders AFTER every title-bar drag
-   *  surface in DOM order. Load-bearing in the desktop shell: Chromium
-   *  computes the window's draggable region by walking the layout tree in
-   *  document order — unioning `app-region: drag` rects and subtracting
+  /** Whether the nav-cluster overlay renders AFTER every top-row drag
+   *  surface in DOM order (the sidebar's title bar, the center tab strip's
+   *  toolbar, the sidebar gutter the strip reserves while collapsed, and the
+   *  drag bar that replaces the strip when there are no tabs).
+   *  Load-bearing in the desktop shell: Chromium computes the window's
+   *  draggable region by walking the layout tree in document order — unioning `app-region: drag` rects and subtracting
    *  `no-drag` rects as it goes, z-index irrelevant. If the overlay renders
    *  before the bars, the bars' drag rects re-cover the buttons and every
    *  click on them starts a window drag (PR #634). True drag-region
    *  hit-testing only exists in Electron, so DOM order is the assertable
    *  projection of the invariant in this browser harness. Throws when either
    *  side is missing so a renamed testid can't produce a vacuous pass. */
-  async navOverlayFollowsTitleBars(): Promise<boolean> {
+  async navOverlayFollowsDragSurfaces(): Promise<boolean> {
     return await this.navOverlay.evaluate((overlay) => {
       const bars = document.querySelectorAll(
-        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="desktop-title-bar__workspace-surface"]',
+        '[data-testid="desktop-title-bar__sidebar-surface"], [data-testid="workspace-center__toolbar"], [data-testid="workspace-center__sidebar-gutter"], [data-testid="workspace-center__drag-bar"]',
       );
       if (bars.length === 0) {
-        throw new Error("no title-bar drag surfaces found — testids renamed?");
+        throw new Error("no top-row drag surfaces found — testids renamed?");
       }
       return Array.from(bars).every(
         (bar) => (bar.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
@@ -1644,14 +1646,50 @@ export class WorkspacePage {
     });
   }
 
-  /** The workspace title bar over the center (dockview) column
-   *  (`WorkspaceTitleBar` in `DesktopTitleBar.tsx`). */
-  get workspaceTitleBar(): Locator {
-    return this.page.getByTestId("desktop-title-bar__workspace-surface");
+  /** The sidebar's title bar (a pure drag surface over the project list,
+   *  `SidebarTitleBar` in `DesktopTitleBar.tsx`). */
+  get sidebarTitleBar(): Locator {
+    return this.page.getByTestId("desktop-title-bar__sidebar-surface");
+  }
+
+  /** The action slot at the right end of the active workspace's center tab
+   *  strip (`RightHeaderActions` in `WorkspaceCenterDockview.tsx`). The seeded
+   *  workspaces have a single dockview group, so this is the top-right group,
+   *  and on desktop the tab strip is the window's top row. */
+  get centerToolbar(): Locator {
+    return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true }).first();
+  }
+
+  /** Every visible center-toolbar action slot, one per top-level tab group. */
+  get centerToolbars(): Locator {
+    return this.page.getByTestId("workspace-center__toolbar").filter({ visible: true });
+  }
+
+  /** Every right-sidepanel expand button hosted in a center tab strip. */
+  get rightPanelTogglesInTabStrips(): Locator {
+    return this.centerToolbars.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  }
+
+  /** The draggable space the top-left tab group reserves under the nav-cluster
+   *  overlay while the sidebar is collapsed (`SidebarGutter`). */
+  get sidebarGutter(): Locator {
+    return this.page.getByTestId("workspace-center__sidebar-gutter").filter({ visible: true });
+  }
+
+  /** The draggable top row the center column shows in place of the tab strip
+   *  when there is none: no active workspace, or every tab closed
+   *  (`CenterDragBar`). */
+  get centerDragBar(): Locator {
+    return this.page.getByTestId("workspace-center__drag-bar").filter({ visible: true });
+  }
+
+  /** The right-sidepanel expand button hosted in `centerDragBar`. */
+  get rightPanelToggleInDragBar(): Locator {
+    return this.centerDragBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
   }
 
   /** The right sidepanel's header row (tabs + open-in-editor + collapse), level
-   *  with the workspace title bar. */
+   *  with the center tab strip. */
   get rightPanelHeader(): Locator {
     return this.page.getByTestId("right-sidepanel__header");
   }
@@ -1661,10 +1699,10 @@ export class WorkspacePage {
     return this.rightPanelHeader.getByRole("button", { name: "Toggle Explorer / Changes panel" });
   }
 
-  /** The right-sidepanel toggle hosted in the workspace title bar (expand).
-   *  Rendered only while the sidepanel is collapsed. */
-  get rightPanelToggleInTitleBar(): Locator {
-    return this.workspaceTitleBar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
+  /** The right-sidepanel toggle hosted at the right end of the center tab
+   *  strip (expand). Rendered only while the sidepanel is collapsed. */
+  get rightPanelToggleInTabStrip(): Locator {
+    return this.centerToolbar.getByRole("button", { name: "Toggle Explorer / Changes panel" });
   }
 
   /** Collapse the right sidepanel with the button in its own header. */
@@ -1675,10 +1713,10 @@ export class WorkspacePage {
     });
   }
 
-  /** Expand the collapsed right sidepanel with the button in the title bar. */
-  async expandRightPanelViaTitleBar(): Promise<void> {
-    await test.step("Expand the right sidepanel from the title bar", async () => {
-      await this.rightPanelToggleInTitleBar.click();
+  /** Expand the collapsed right sidepanel with the button in the tab strip. */
+  async expandRightPanelViaTabStrip(): Promise<void> {
+    await test.step("Expand the right sidepanel from the center tab strip", async () => {
+      await this.rightPanelToggleInTabStrip.click();
       await expect(this.rightPanel).toHaveAttribute("data-visible", "true");
     });
   }
@@ -1963,31 +2001,12 @@ export class WorkspacePage {
     });
   }
 
-  /** The desktop title-bar workspace-name button. On a wide viewport
-   *  `useDesktopLayout` is true, so __root.tsx mounts the WorkspaceTitleBar
-   *  (in `DesktopTitleBar.tsx`) with `onWorkspaceNameClick` wired — the name
-   *  renders as a button that opens the same picker as ⌘K. Targeted by its
-   *  BEM testid rather than the shared "Switch workspace" aria-label so it
-   *  never collides with the mobile header button of the same name. */
+  /** The workspace-name button the desktop title bar used to show (testid
+   *  `desktop-title-bar__workspace-name`). The desktop layout no longer has a
+   *  title bar over the center column, so this should never render; retained
+   *  so specs can assert its absence. */
   get desktopTitleWorkspaceNameButton(): Locator {
     return this.page.getByTestId("desktop-title-bar__workspace-name");
-  }
-
-  /** Assert the desktop title-bar workspace-name button is visible — the
-   *  desktop affordance that opens the picker. Routed through a page-object
-   *  method so the test body never touches the raw locator. */
-  async assertTitleBarWorkspaceNameVisible(): Promise<void> {
-    await test.step("Assert the desktop title-bar workspace name is visible", async () => {
-      await expect(this.desktopTitleWorkspaceNameButton).toBeVisible();
-    });
-  }
-
-  /** Open the workspace picker by clicking the desktop title-bar workspace
-   *  name (mirrors the mobile header's tap-to-switch). */
-  async openWorkspacePickerViaTitleBar(): Promise<void> {
-    await test.step("Click the desktop title-bar workspace name", async () => {
-      await this.desktopTitleWorkspaceNameButton.click();
-    });
   }
 
   /** The active workspace card, identified by the `data-active` attribute

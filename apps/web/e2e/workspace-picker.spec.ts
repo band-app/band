@@ -123,19 +123,6 @@ test.describe("Workspace picker — open affordances", () => {
     await workspacePage.openWorkspacePickerViaCtrlShortcut();
     await picker.waitVisible();
   });
-
-  test("clicking the desktop title-bar workspace name opens the picker", async ({ page }) => {
-    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-    const picker = new WorkspacePicker(page);
-
-    await workspacePage.goto(WS_ALPHA);
-    await workspacePage.waitForReady();
-
-    // The title-bar name is the desktop analogue of the mobile header tap.
-    await workspacePage.assertTitleBarWorkspaceNameVisible();
-    await workspacePage.openWorkspacePickerViaTitleBar();
-    await picker.waitVisible();
-  });
 });
 
 test.describe("Workspace picker — pin is separate from select", () => {

@@ -23,10 +23,11 @@ import { UpdateToast } from "@/dashboard/components/UpdateToast";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
+  CenterDragBar,
   NavControls,
   RightPanelHeaderActions,
   SidebarTitleBar,
-  WorkspaceTitleBar,
+  WorkspaceChromeContext,
 } from "../components/DesktopTitleBar";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
@@ -426,14 +427,6 @@ function AppShell() {
     navigator.clipboard.writeText(workspacePath).catch(() => {});
   }, [workspacePath]);
 
-  // Clicking the title-bar workspace name opens the same picker as ⌘K. The
-  // picker state lives in SharedDockviewLayout (a sibling), so we signal it via
-  // the window event it listens for. Stable identity so the title bar can
-  // bail out of re-renders if ever memoized.
-  const handleWorkspaceNameClick = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("band:open-workspace-picker"));
-  }, []);
-
   // ──────────────────────────────────────────────────────────────────────
   // Project-list sidebar (separate from the dockview). Collapsing/expanding
   // the sidebar Panel via its imperative handle hides/shows the list WITHOUT
@@ -738,10 +731,32 @@ function AppShell() {
 
   // Single source for the macOS traffic-light gutter: the offset is applied
   // to the stationary nav-cluster overlay below so the sidebar-toggle /
-  // back-forward buttons clear the traffic lights; the title bars themselves
-  // no longer take an offset prop.
+  // back-forward buttons clear the traffic lights; the top-row drag surfaces
+  // themselves take no offset prop.
   const isFullscreen = useIsFullscreen();
   const titleBarOffset = isDesktop && !isFullscreen ? "pl-[80px]" : "pl-2";
+
+  // The center tab strip reserves the overlay's width at its left edge while
+  // the sidebar is collapsed (`SidebarGutter`), so it tracks the rendered
+  // width: it changes with the traffic-light offset (fullscreen) and with
+  // whether the back/forward arrows render.
+  const [navOverlayWidth, setNavOverlayWidth] = useState(0);
+  const navOverlayRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const ro = new ResizeObserver(() => setNavOverlayWidth(el.offsetWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const workspaceChrome = useMemo(
+    () => ({
+      sidebarVisible,
+      navOverlayWidth,
+      rightPanelVisible: rightVisible,
+      onToggleRightPanel: activeWorkspaceId ? toggleRightPanel : undefined,
+    }),
+    [sidebarVisible, navOverlayWidth, rightVisible, activeWorkspaceId, toggleRightPanel],
+  );
 
   if (!useDesktopLayout) {
     return <Outlet />;
@@ -749,147 +764,147 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      {/* With the translucent sidebar on, this root is transparent so the
+      <WorkspaceChromeContext.Provider value={workspaceChrome}>
+        {/* With the translucent sidebar on, this root is transparent so the
           window's vibrancy layer reaches the sidebar column; the main panel
           below paints its own solid background. */}
-      <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground translucent-sidebar:bg-transparent">
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <Group
-            orientation="horizontal"
-            defaultLayout={sidebarDefaultLayout}
-            onLayoutChanged={handleSidebarLayoutChanged}
-            className="h-full w-full"
-          >
-            <Panel
-              id="sidebar"
-              panelRef={sidebarPanelRef}
-              elementRef={sidebarElRef}
-              defaultSize={SIDEBAR_MIN_SIZE}
-              minSize={SIDEBAR_MIN_SIZE}
-              maxSize={SIDEBAR_MAX_SIZE}
-              collapsible
-              collapsedSize="0%"
-              onResize={handleSidebarResize}
+        <div className="relative flex flex-col h-full w-full overflow-hidden bg-background text-foreground translucent-sidebar:bg-transparent">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <Group
+              orientation="horizontal"
+              defaultLayout={sidebarDefaultLayout}
+              onLayoutChanged={handleSidebarLayoutChanged}
+              className="h-full w-full"
             >
-              {/* The whole sidebar column (its title-bar half + the project
+              <Panel
+                id="sidebar"
+                panelRef={sidebarPanelRef}
+                elementRef={sidebarElRef}
+                defaultSize={SIDEBAR_MIN_SIZE}
+                minSize={SIDEBAR_MIN_SIZE}
+                maxSize={SIDEBAR_MAX_SIZE}
+                collapsible
+                collapsedSize="0%"
+                onResize={handleSidebarResize}
+              >
+                {/* The whole sidebar column (its title-bar half + the project
                   list) is painted with the `--sidebar` surface so it reads as a
                   distinct panel from the workspace layout to its right. With
                   the translucent sidebar on (macOS desktop), the surface is a
                   light tint over the window's vibrancy layer instead. */}
-              {/* Each column pads the home-indicator inset itself, so the
+                {/* Each column pads the home-indicator inset itself, so the
                   padding takes that column's surface colour. */}
-              <div
-                className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar translucent-sidebar:bg-(--sidebar-translucent) pb-[env(safe-area-inset-bottom)]"
-                data-testid="app-shell__sidebar"
-              >
-                {/* Pure drag/paint surface — the sidebar toggle + back/forward
+                <div
+                  className="h-full flex flex-col overflow-hidden border-r border-border bg-sidebar translucent-sidebar:bg-(--sidebar-translucent) pb-[env(safe-area-inset-bottom)]"
+                  data-testid="app-shell__sidebar"
+                >
+                  {/* Pure drag/paint surface — the sidebar toggle + back/forward
                     arrows live in the stationary overlay above; the overflow
                     actions live in DashboardShell's bottom action bar below. */}
-                <SidebarTitleBar />
-                <div className="flex-1 min-h-0">
-                  <DashboardShell hideTitleBar bottomActions={<ToolbarActionBar />} />
+                  <SidebarTitleBar />
+                  <div className="flex-1 min-h-0">
+                    <DashboardShell hideTitleBar bottomActions={<ToolbarActionBar />} />
+                  </div>
                 </div>
-              </div>
-            </Panel>
-            {/* Opaque in every state, hover and drag included: under the
+              </Panel>
+              {/* Opaque in every state, hover and drag included: under the
                 translucent sidebar the root behind it is transparent, so a
                 see-through tint would let the vibrancy layer through past the
                 sidebar's border. The colours equal the other separator's
                 accent tints over `--background`. */}
-            <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
-            <Panel id="main" elementRef={mainElRef} minSize="20%">
-              {/* Stays mounted across sidebar toggles — never unmount this
+              <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
+              <Panel id="main" elementRef={mainElRef} minSize="20%">
+                {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
-              {/* The dockview column and the right sidepanel share one
-                  full-height row. The workspace title bar sits at the top of
-                  the dockview column only; the sidepanel's own header row
-                  (tabs, open in editor, collapse) fills the title-bar row
-                  above it. */}
-              <div className="h-full min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
-                <Group
-                  orientation="horizontal"
-                  defaultLayout={centerDefaultLayout}
-                  onLayoutChanged={handleCenterLayoutChanged}
-                  className="h-full w-full"
-                >
-                  <Panel id="center" elementRef={centerElRef} minSize="30%">
-                    <div className="h-full flex flex-col min-w-0 overflow-hidden">
-                      <WorkspaceTitleBar
-                        workspaceName={activeWorkspaceId ?? undefined}
-                        onWorkspaceNameClick={
-                          activeWorkspaceId ? handleWorkspaceNameClick : undefined
-                        }
-                        onToggleRightPanel={activeWorkspaceId ? toggleRightPanel : undefined}
-                        rightPanelVisible={rightVisible}
-                      />
-                      {/* `relative` anchors SharedDockviewLayout's `absolute
-                          inset-0` overlay to the dockview area. */}
-                      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
-                        <Outlet />
-                        <SharedDockviewLayout />
-                        <BrowserHostBridge />
-                        <BrowserProfileSweeper />
-                      </div>
-                    </div>
-                  </Panel>
-                  <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-                  <Panel
-                    id="rightpanel"
-                    panelRef={rightPanelRef}
-                    elementRef={rightPanelElRef}
-                    defaultSize={RIGHT_PANEL_MIN_SIZE}
-                    minSize={RIGHT_PANEL_MIN_SIZE}
-                    maxSize={RIGHT_PANEL_MAX_SIZE}
-                    collapsible
-                    collapsedSize="0%"
-                    onResize={handleRightResize}
+                {/* The dockview column and the right sidepanel share one
+                  full-height row. There is no title bar over the dockview
+                  column: its tab strip is the top row, level with the
+                  sidepanel's own header row (tabs, open in editor, collapse).
+                  With no workspace active there is no tab strip, so a plain
+                  drag bar takes its place. */}
+                <div className="h-full min-w-0 overflow-hidden bg-background pb-[env(safe-area-inset-bottom)]">
+                  <Group
+                    orientation="horizontal"
+                    defaultLayout={centerDefaultLayout}
+                    onLayoutChanged={handleCenterLayoutChanged}
+                    className="h-full w-full"
                   >
-                    <div
-                      className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
-                      data-testid="app-shell__right-panel"
-                      data-visible={rightVisible ? "true" : "false"}
+                    <Panel id="center" elementRef={centerElRef} minSize="30%">
+                      <div className="h-full flex flex-col min-w-0 overflow-hidden">
+                        {!activeWorkspaceId && <CenterDragBar />}
+                        {/* `relative` anchors SharedDockviewLayout's `absolute
+                          inset-0` overlay to the dockview area. */}
+                        <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative">
+                          <Outlet />
+                          <SharedDockviewLayout />
+                          <BrowserHostBridge />
+                          <BrowserProfileSweeper />
+                        </div>
+                      </div>
+                    </Panel>
+                    <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+                    <Panel
+                      id="rightpanel"
+                      panelRef={rightPanelRef}
+                      elementRef={rightPanelElRef}
+                      defaultSize={RIGHT_PANEL_MIN_SIZE}
+                      minSize={RIGHT_PANEL_MIN_SIZE}
+                      maxSize={RIGHT_PANEL_MAX_SIZE}
+                      collapsible
+                      collapsedSize="0%"
+                      onResize={handleRightResize}
                     >
-                      <RightSidepanel
-                        visible={rightVisible}
-                        headerActions={
-                          <RightPanelHeaderActions
-                            workspacePath={activeWorkspaceId ? workspacePath : undefined}
-                            onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-                            onToggleRightPanel={
-                              activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
-                            }
-                          />
-                        }
-                      />
-                    </div>
-                  </Panel>
-                </Group>
-              </div>
-            </Panel>
-          </Group>
-        </div>
-        {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
-            this stationary overlay pinned over the title-bar row's left edge, floating above
-            both title bars. Hosting it inside either bar means remounting it
+                      <div
+                        className="h-full flex flex-col overflow-hidden border-l border-border bg-background"
+                        data-testid="app-shell__right-panel"
+                        data-visible={rightVisible ? "true" : "false"}
+                      >
+                        <RightSidepanel
+                          visible={rightVisible}
+                          headerActions={
+                            <RightPanelHeaderActions
+                              workspacePath={activeWorkspaceId ? workspacePath : undefined}
+                              onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+                              onToggleRightPanel={
+                                activeWorkspaceId && rightVisible ? toggleRightPanel : undefined
+                              }
+                            />
+                          }
+                        />
+                      </div>
+                    </Panel>
+                  </Group>
+                </div>
+              </Panel>
+            </Group>
+          </div>
+          {/* The nav cluster (sidebar toggle + back/forward) is hosted ONCE in
+            this stationary overlay pinned over the top row's left edge,
+            floating above the sidebar's title bar and the center column's tab
+            strip. Hosting it inside either means remounting it
             on every sidebar toggle inside an overflow-clipped, animating
             panel — the buttons visibly flickered mid-tween. Here the panels
             slide beneath it and it never moves or remounts. The container is
             pointer-events-none so the drag regions beneath stay draggable;
             NavControls re-enables pointer events on itself.
 
-            MUST come after the title bars in DOM order: Chromium computes the
+            MUST come after every top-row drag surface in DOM order (the
+            sidebar's title bar, the center tab strip, its sidebar gutter, and
+            the center drag bar): Chromium computes the
             window's draggable region by walking the layout tree in document
             order, unioning `app-region: drag` rects and subtracting `no-drag`
             rects as it goes — z-index is irrelevant. If this overlay renders
-            before the bars, the bars' drag rects re-cover the buttons and
+            before them, their drag rects re-cover the buttons and
             every click on them starts a window drag in the desktop app. */}
-        <div
-          data-testid="app-shell__nav-overlay"
-          className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
-        >
-          <NavControls {...navControlProps} />
+          <div
+            ref={navOverlayRef}
+            data-testid="app-shell__nav-overlay"
+            className={`pointer-events-none absolute top-0 left-0 z-10 flex h-[38px] items-center ${titleBarOffset}`}
+          >
+            <NavControls {...navControlProps} />
+          </div>
         </div>
-      </div>
+      </WorkspaceChromeContext.Provider>
     </ToolbarOverflowProvider>
   );
 }

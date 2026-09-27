@@ -127,7 +127,7 @@ describe("tasks.submit — legacy maxTurns is silently stripped", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("submits successfully without a maxTurns field (baseline)", async () => {
@@ -270,7 +270,7 @@ describe("workspaces.create — legacy maxTurns is silently stripped", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("dispatches a chat task without a maxTurns field (baseline)", async () => {

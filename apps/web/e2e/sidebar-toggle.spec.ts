@@ -40,7 +40,7 @@ const PROJECT = "alpha-sidebar";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
 // Wide viewport so `useIsDesktop()` reports true and the desktop layout
-// (title bar + sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
+// (sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
@@ -178,7 +178,9 @@ test("the toggle and back/forward stay put (no relocation, no jump) when the sid
   await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
 });
 
-test("the nav-cluster overlay renders after the title bars in DOM order", async ({ page }) => {
+test("the nav-cluster overlay renders after the top-row drag surfaces in DOM order", async ({
+  page,
+}) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
@@ -188,18 +190,47 @@ test("the nav-cluster overlay renders after the title bars in DOM order", async 
 
   // Drag-region invariant (PR #634): in the Electron shell, Chromium builds
   // the window's draggable region in DOCUMENT order — the overlay's `no-drag`
-  // carve-out only wins if it comes after the title bars' `drag` rects. An
+  // carve-out only wins if it comes after the top row's `drag` rects. An
   // earlier-in-DOM overlay leaves the nav buttons covered by the drag region
   // (clicks start a window drag instead). Real drag-region hit-testing isn't
   // reachable from this browser harness, so DOM order is the assertable
   // projection; the page-object probe throws if either side goes missing.
-  expect(await wp.navOverlayFollowsTitleBars()).toBe(true);
+  expect(await wp.navOverlayFollowsDragSurfaces()).toBe(true);
 
-  // The invariant must hold in the collapsed state too — the workspace title
-  // bar is the only drag surface then.
+  // The invariant must hold in the collapsed state too, when the overlay sits
+  // over the tab strip's sidebar gutter.
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
-  expect(await wp.navOverlayFollowsTitleBars()).toBe(true);
+  await expect(wp.sidebarGutter).toBeVisible();
+  expect(await wp.navOverlayFollowsDragSurfaces()).toBe(true);
+});
+
+test("the tab strip reserves room for the nav cluster only while the sidebar is collapsed", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Visible sidebar: the nav cluster sits over the sidebar's title bar, so
+  // the tab strip reserves nothing.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.tab("terminal")).toBeVisible();
+  await expect(wp.sidebarGutter).toHaveCount(0);
+
+  // Collapsed: the cluster now floats over the tab strip, and the strip's
+  // top-left group starts its tabs to the right of it.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarGutter).toBeVisible();
+  const overlay = await wp.boxOf(wp.navOverlay);
+  await expect
+    .poll(async () => (await wp.boxOf(wp.tab("terminal"))).x)
+    .toBeGreaterThanOrEqual(overlay.x + overlay.width);
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarGutter).toHaveCount(0);
 });
 
 test("the collapsed state persists across a reload", async ({ page }) => {
