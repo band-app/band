@@ -376,6 +376,25 @@
   display: none;
 }
 
+/* The center strip (`dockview-center-tabs`) has no overflow dropdown (`disableTabsOverflowList`), so it
+ * must scroll by every input. dockview's custom scrollbar sets the list to
+ * `overflow: hidden` and only maps vertical wheel deltas, so a finger drag or a
+ * horizontal trackpad swipe did nothing. Let the list scroll natively on the x
+ * axis; the custom scrollbar still handles the mouse wheel and follows native
+ * scrolls through its `scroll` listener. Its own 4px bar stays the only visible
+ * bar. `overscroll-behavior-x` keeps a swipe at the end of the strip from
+ * turning into browser back/forward navigation. Placed after the
+ * `.dockview-terminal-split` rules because it is more specific. */
+.dockview-center-tabs .dv-scrollable > .dv-tabs-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.dockview-center-tabs .dv-scrollable > .dv-tabs-container::-webkit-scrollbar {
+  display: none;
+}
+
 /* The header strip = dockview's drag source. Transparent by default; a faint
    bar appears on hover so the user can see the grabbable handle.
    `min-width: 100%` is what actually stretches the tab to the pane's full width:
