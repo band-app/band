@@ -8,7 +8,6 @@ import type {
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileListResult,
   FormatFileResult,
   GitStatus,
@@ -411,20 +410,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return await this.trpc.workspace.listBranches.query({ workspaceId, ...options });
   }
 
-  async getFileDiff(
-    workspaceId: string,
-    filePath: string,
-    mergeBase: string,
-    contextLines?: number,
-  ): Promise<FileDiffResult> {
-    return (await this.trpc.workspace.getFileDiff.query({
-      workspaceId,
-      filePath,
-      mergeBase,
-      contextLines,
-    })) as FileDiffResult;
-  }
-
   async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
     return (await this.trpc.workspace.listFiles.query({ workspaceId, path })) as FileListResult;
   }
@@ -513,20 +498,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
       fromPath,
       toPath,
     })) as { kind: "file" | "directory" };
-  }
-
-  async revertFile(
-    workspaceId: string,
-    filePath: string,
-    diffMode: DiffMode,
-    compareBranch?: string,
-  ): Promise<void> {
-    await this.trpc.workspace.revertFile.mutate({
-      workspaceId,
-      filePath,
-      diffMode,
-      compareBranch,
-    });
   }
 
   getWorkspaceFileUrl(workspaceId: string, path: string): string {

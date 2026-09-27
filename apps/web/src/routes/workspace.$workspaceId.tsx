@@ -4,10 +4,10 @@ import { ChevronsUpDown, FolderOpen, GitCompare, Menu } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
-  ChangesFileTree,
+  type ChangeEntry,
+  type ChangeSection,
   DashboardShell,
   FileBrowser,
-  type FileStatus,
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
@@ -15,18 +15,16 @@ import {
   useWorkspacePath,
   WorkspacePickerDialog,
 } from "@/dashboard";
+import { ChangesSections } from "../components/ChangesSections";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import {
   getWorkspaceLeafActions,
   WorkspaceCenterDockview,
 } from "../components/WorkspaceCenterDockview";
-import { useDiffSummary } from "../hooks/useDiffSummary";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { isDesktop } from "../lib/is-desktop";
-
-/** Stable empty fileStatuses reference so a "no changes" render doesn't churn. */
-const EMPTY_STATUSES: Record<string, FileStatus> = {};
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
   component: WorkspaceLayout,
@@ -91,18 +89,12 @@ function useAppHeight() {
   return { height, offsetTop, keyboardOpen };
 }
 
-/** Live changes summary for the mobile Changes sheet + header badge. Tracks the
- *  same diff target (mode + compare branch) the user picked, mirroring the
- *  desktop RightSidepanel query so the badge count matches the tree. */
+/** Live Changes sections for the mobile Changes sheet + header badge. Tracks
+ *  the same compare branch the user picked, mirroring the desktop
+ *  RightSidepanel query so the badge count matches the lists. */
 function useChangesSummary(workspaceId: string) {
-  const summaryQuery = useDiffSummary(workspaceId, { refetchInterval: 15_000 });
-  // The server types `fileStatuses` values as plain `string`; the tree wants
-  // the `FileStatus` union. Same runtime values — cast at this single seam.
-  const fileStatuses = (summaryQuery.data?.fileStatuses ?? EMPTY_STATUSES) as Record<
-    string,
-    FileStatus
-  >;
-  return { fileStatuses, changeCount: Object.keys(fileStatuses).length };
+  const changesQuery = useWorkspaceChanges(workspaceId, { refetchInterval: 15_000 });
+  return { changes: changesQuery.data, changeCount: countChangedPaths(changesQuery.data) };
 }
 
 // Which mobile view is showing. "editor" is the dockview; "explorer" /
@@ -213,7 +205,7 @@ function MobileHeaderButton({
 function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   const { height: appHeight, offsetTop: appOffsetTop, keyboardOpen } = useAppHeight();
   const workspacePath = useWorkspacePath(workspaceId);
-  const { fileStatuses, changeCount } = useChangesSummary(workspaceId);
+  const { changes, changeCount } = useChangesSummary(workspaceId);
 
   // The dockview (WorkspaceCenterDockview, mobile mode) is always the main
   // editor surface. The header's Explorer / Changes buttons open a bottom
@@ -232,8 +224,11 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
 
   // Open a diff leaf in the center dockview, then close the tree sheet.
   const openDiffLeaf = useCallback(
-    (filePath: string) => {
-      getWorkspaceLeafActions(workspaceId)?.openDiff(filePath);
+    (section: ChangeSection, entry: ChangeEntry) => {
+      getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+        section,
+        oldPath: entry.oldPath,
+      });
       setView("editor");
     },
     [workspaceId],
@@ -430,16 +425,12 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
             data-testid="mobile-workspace__changes-body"
             className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom)]"
           >
-            {changeCount === 0 ? (
-              <p className="px-3 py-2 text-xs text-muted-foreground">No changes</p>
-            ) : (
-              <ChangesFileTree
-                fileStatuses={fileStatuses}
-                onSelectFile={openDiffLeaf}
-                onSelectFilePinned={openDiffLeaf}
-                workspacePath={workspacePath}
-              />
-            )}
+            <ChangesSections
+              workspaceId={workspaceId}
+              changes={changes}
+              onOpen={openDiffLeaf}
+              workspacePath={workspacePath}
+            />
           </div>
         </SheetContent>
       </Sheet>

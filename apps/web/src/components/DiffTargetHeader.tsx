@@ -1,7 +1,8 @@
 /**
  * Header of the Changes tab: the workspace's current branch, and below it
- * the target the changes are compared against ("Uncommitted" or a branch).
- * Clicking the target opens a branch picker.
+ * the branch the "Committed on Branch" section compares against. Clicking
+ * the target opens a branch picker. Uncommitted work has its own sections
+ * (Changes, Staged Changes, Untracked Files), so it isn't a target here.
  *
  * Repos can have thousands of branches, so the picker never loads them all.
  * It sends the typed query to `workspace.listBranches`, which filters and
@@ -9,8 +10,8 @@
  * `BRANCH_LIMIT`. The "Default branch" button resets the target to the
  * project's default branch in one click.
  *
- * Picking a branch only changes the diff base (`useDiffTarget`, persisted per
- * workspace). Nothing is checked out.
+ * Picking a branch only changes the compare base (`useDiffTarget`, persisted
+ * per workspace). Nothing is checked out.
  */
 
 import {
@@ -27,10 +28,8 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Check, ChevronDown, GitBranch } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type DiffMode, useAdapter } from "@/dashboard";
+import { useAdapter } from "@/dashboard";
 
-/** cmdk item value of the "Uncommitted" entry; branch items use their name. */
-const UNCOMMITTED_VALUE = "__uncommitted__";
 const BRANCH_LIMIT = 50;
 const SEARCH_DEBOUNCE_MS = 150;
 
@@ -40,9 +39,8 @@ export interface DiffTargetHeaderProps {
   headBranch: string | undefined;
   /** The project's default branch; undefined until the first summary loads. */
   defaultBranch: string | undefined;
-  diffMode: DiffMode;
+  /** The picked compare branch; null means the default branch. */
   compareBranch: string | null;
-  onSelectUncommitted: () => void;
   onSelectBranch: (branch: string) => void;
 }
 
@@ -50,9 +48,7 @@ export function DiffTargetHeader({
   workspaceId,
   headBranch,
   defaultBranch,
-  diffMode,
   compareBranch,
-  onSelectUncommitted,
   onSelectBranch,
 }: DiffTargetHeaderProps) {
   const adapter = useAdapter();
@@ -89,10 +85,9 @@ export function DiffTargetHeader({
   });
 
   const branches = branchesQuery.data?.branches ?? [];
-  const targetBranch = diffMode === "branch" ? (compareBranch ?? defaultBranch) : undefined;
-  const selectedValue = targetBranch ?? UNCOMMITTED_VALUE;
-  // "Uncommitted" is a mode, not a branch; offer it only when not searching.
-  const showUncommitted = query.trim() === "";
+  const targetBranch = compareBranch ?? defaultBranch;
+  const selectedValue = targetBranch ?? "";
+  const searching = query.trim() !== "";
 
   // Open with the cursor on the current target.
   useEffect(() => {
@@ -109,20 +104,19 @@ export function DiffTargetHeader({
   // early Enter can't pick a branch that doesn't match the typed text.
   const results = branchesQuery.data;
   useEffect(() => {
-    if (pending && !showUncommitted) {
+    if (pending && searching) {
       setActiveValue("");
       return;
     }
     if (!results) return;
-    const values = showUncommitted ? [UNCOMMITTED_VALUE, ...results.branches] : results.branches;
+    const values = results.branches;
     setActiveValue((current) =>
-      !showUncommitted || !values.includes(current) ? (values[0] ?? "") : current,
+      searching || !values.includes(current) ? (values[0] ?? "") : current,
     );
-  }, [results, showUncommitted, pending]);
+  }, [results, searching, pending]);
 
   const pick = (value: string) => {
-    if (value === UNCOMMITTED_VALUE) onSelectUncommitted();
-    else onSelectBranch(value);
+    onSelectBranch(value);
     setOpen(false);
   };
 
@@ -145,11 +139,11 @@ export function DiffTargetHeader({
           <button
             type="button"
             data-testid="right-sidepanel__diff-target-select"
-            title={targetBranch ?? "Uncommitted"}
+            title={targetBranch ? `Compare with ${targetBranch}` : undefined}
             className="flex h-6 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <ArrowRight className="size-3.5 shrink-0" />
-            <span className="truncate">{targetBranch ?? "Uncommitted"}</span>
+            <span className="truncate">{targetBranch ?? ""}</span>
             <ChevronDown className="ml-auto size-3.5 shrink-0" />
           </button>
         </PopoverTrigger>
@@ -191,17 +185,6 @@ export function DiffTargetHeader({
                 </CommandEmpty>
               )}
               <div className="p-1">
-                {showUncommitted && (
-                  <CommandItem
-                    value={UNCOMMITTED_VALUE}
-                    onSelect={pick}
-                    data-testid="right-sidepanel__diff-target-option-uncommitted"
-                    className="text-xs"
-                  >
-                    <CheckMark visible={selectedValue === UNCOMMITTED_VALUE} />
-                    Uncommitted
-                  </CommandItem>
-                )}
                 {branches.map((branch) => (
                   <CommandItem
                     key={branch}

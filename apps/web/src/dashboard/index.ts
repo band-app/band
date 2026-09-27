@@ -6,7 +6,7 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
-export { ChangesFileTree } from "./components/ChangesFileTree";
+export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
@@ -154,16 +154,19 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
+  BranchCompareStatus,
   BrowserProfileInfo,
+  ChangeEntry,
+  ChangeSection,
   CIState,
   CIStatus,
   CodingAgentConfig,
   CodingAgentDefinition,
   CodingAgentType,
+  ConflictKind,
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileEntry,
   FileListResult,
   FileStatus,
@@ -183,8 +186,8 @@ export type {
   TerminalLayoutNode,
   TerminalPaneConfig,
   WorkspaceBranchStatus,
+  WorkspaceChanges,
   WorkspaceDiff,
-  WorkspaceDiffSummary,
   WorkspaceStatus,
   WorkspaceTerminalConfig,
   WorktreeInfo,

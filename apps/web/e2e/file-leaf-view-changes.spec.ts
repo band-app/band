@@ -1,7 +1,7 @@
 /**
  * The file leaf's "View changes" header button only renders while that file
- * has changes against the workspace's diff target (default: uncommitted). It
- * reads the same changes summary the Changes panel uses, and a save refetches
+ * is listed in one of the Changes sections (here: unstaged changes). It
+ * reads the same Changes result the Changes panel uses, and a save refetches
  * it, so the button appears when a save makes the file differ from HEAD and
  * disappears when a save makes it match again.
  */

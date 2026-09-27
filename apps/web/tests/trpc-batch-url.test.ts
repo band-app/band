@@ -232,19 +232,16 @@ describe("tRPC — batch URL splitting (#430)", () => {
     // convention change doesn't silently fail this test with a misleading
     // "workspace not found" error instead of the batch-URL assertion.
     workspaceId = toWorkspaceId(project, branch);
-    // `getDiffSummary` is the procedure the former DiffView used to discover
-    // the merge-base + per-file statuses before fanning out a
-    // `getFileDiff` query per expanded file, so use it here too.
-    const diffRes = await client.workspace.getDiffSummary.query({
-      workspaceId,
-      diffMode: "branch",
-    });
-    mergeBase = diffRes.mergeBase;
+    // `getChanges` is what the Changes view reads to discover the merge-base
+    // + per-file entries before fanning out a `getFileDiff` query per file
+    // (the "View all" tab does exactly that), so use it here too.
+    const changes = await client.workspace.getChanges.query({ workspaceId });
+    mergeBase = changes.mergeBase ?? "";
 
     // Sanity check the fixture: every file we plan to query must actually
-    // show up in the diff, otherwise the test wouldn't be reproducing the
-    // former DiffView scenario at all.
-    expect(Object.keys(diffRes.fileStatuses).length).toBeGreaterThanOrEqual(FILE_COUNT);
+    // show up in the branch section, otherwise the test wouldn't be
+    // reproducing the fan-out scenario at all.
+    expect(changes.branch.length).toBeGreaterThanOrEqual(FILE_COUNT);
   });
 
   afterAll(async () => {
@@ -263,6 +260,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
         client.workspace.getFileDiff.query({
           workspaceId,
           filePath: buildFilePath(i),
+          section: "branch",
           mergeBase,
         }),
       ),

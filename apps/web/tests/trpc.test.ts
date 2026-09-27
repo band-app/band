@@ -1599,84 +1599,18 @@ describe("tRPC — workspace operations", () => {
     expect(res.status).toBe(400);
   });
 
-  // -- workspace.getDiffSummary respects diffMode + compareBranch --
+  // -- workspace.getChanges routes compareBranch into the branch section --
   //
-  // Regression coverage for issue #396 ("Changes tab — out of sync"). The
-  // workspace tab badge was always querying getDiffSummary with no diffMode
-  // or compareBranch, so it always reflected the branch comparison against
-  // `defaultBranch` — even when the user had picked "Uncommitted" or a
-  // different branch in the Changes tab dropdown. The summary endpoint now
-  // backs both the Changes tab and the badge, so we lock in the behavior
-  // that the count varies with the selected target.
+  // Regression coverage for issue #396 ("Changes tab — out of sync"): the
+  // badge and the Changes tab read the same procedure, so the compare branch
+  // the user picked must reach it. The sections themselves are covered in
+  // `workspace-changes.test.ts`.
 
-  it("workspace.getDiffSummary returns full branch diff when no diffMode is passed", async () => {
-    // No diffMode → server defaults to "branch" against the project default.
-    // feature-cmp has one committed file (feature-only.txt) on top of main.
-    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
-      workspaceId: "repo-feature-cmp",
-    });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{
-      stats: { filesChanged: number };
-      compareBranch: string;
-      defaultBranch: string;
-      headBranch: string;
-      fileStatuses: Record<string, string>;
-    }>(res);
-    expect(data.compareBranch).toBe("main");
-    expect(data.headBranch).toBe("feature-cmp");
-    // Committed change against main shows up.
-    expect(data.fileStatuses["feature-only.txt"]).toBe("A");
-    expect(data.stats.filesChanged).toBeGreaterThanOrEqual(1);
-  });
-
-  it("workspace.getDiffSummary in uncommitted mode hides committed changes", async () => {
-    // This test (like several others in this describe block) chains on the
-    // worktree state left by the earlier "workspace.getDiff with non-default
-    // compareBranch ..." case, which creates `repo-feature-cmp` and commits
-    // `feature-only.txt` on it. The test runner processes `it` blocks within
-    // a file in source order, so the chain is deterministic. With
-    // diffMode="uncommitted"
-    // we diff against HEAD, so a clean working tree should report zero files
-    // changed regardless of what's committed on the branch.
-    //
-    // Sanity-check the fixture explicitly before the actual assertion so a
-    // missing prerequisite (earlier test skipped, fixture rewritten, etc.)
-    // fails loudly here instead of silently passing because the worktree
-    // happens to also be empty in that scenario.
-    const branchCheck = await trpcQuery(server.url, "workspace.getDiffSummary", {
-      workspaceId: "repo-feature-cmp",
-      diffMode: "branch",
-    });
-    const branchCheckData = await trpcData<{
-      fileStatuses: Record<string, string>;
-    }>(branchCheck);
-    expect(branchCheckData.fileStatuses["feature-only.txt"]).toBe("A");
-
-    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
-      workspaceId: "repo-feature-cmp",
-      diffMode: "uncommitted",
-    });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{
-      stats: { filesChanged: number };
-      fileStatuses: Record<string, string>;
-    }>(res);
-    expect(data.stats.filesChanged).toBe(0);
-    expect(data.fileStatuses["feature-only.txt"]).toBeUndefined();
-  });
-
-  it("workspace.getDiffSummary picks up uncommitted edits in uncommitted mode", async () => {
-    // Find the feature-cmp worktree and drop an uncommitted file. The branch
-    // comparison shouldn't change (no new commit), but uncommitted mode must
-    // surface the new file in the count.
+  it("workspace.getChanges lists the branch's commits and not its uncommitted work", async () => {
     const listRes = await trpcQuery(server.url, "projects.list");
     const listData = await trpcData<{
       projects: Array<{ worktrees: Array<{ branch: string; path: string }> }>;
     }>(listRes);
-    // Search across every project's worktrees rather than indexing into the
-    // first project — robust to fixtures gaining additional projects or to
-    // the server returning them in a different order.
     const featureCmp = listData.projects
       .flatMap((p) => p.worktrees)
       .find((wt) => wt.branch === "feature-cmp");
@@ -1684,118 +1618,45 @@ describe("tRPC — workspace operations", () => {
     writeFileSync(join(featureCmp!.path, "wip.txt"), "work in progress\n");
 
     try {
-      const uncommittedRes = await trpcQuery(server.url, "workspace.getDiffSummary", {
+      const res = await trpcQuery(server.url, "workspace.getChanges", {
         workspaceId: "repo-feature-cmp",
-        diffMode: "uncommitted",
       });
-      expect(uncommittedRes.status).toBe(200);
-      const uncommittedData = await trpcData<{
-        stats: { filesChanged: number };
-        fileStatuses: Record<string, string>;
-      }>(uncommittedRes);
-      expect(uncommittedData.stats.filesChanged).toBe(1);
-      // Untracked files surface as "U" (untracked) in fileStatuses.
-      expect(uncommittedData.fileStatuses["wip.txt"]).toBe("U");
-      // The committed file on the branch is not part of the uncommitted set.
-      expect(uncommittedData.fileStatuses["feature-only.txt"]).toBeUndefined();
-
-      // Branch mode against `main` still sees both the committed feature file
-      // AND the untracked file (untracked files are always counted).
-      const branchRes = await trpcQuery(server.url, "workspace.getDiffSummary", {
-        workspaceId: "repo-feature-cmp",
-        diffMode: "branch",
-        compareBranch: "main",
-      });
-      expect(branchRes.status).toBe(200);
-      const branchData = await trpcData<{
-        stats: { filesChanged: number };
+      expect(res.status).toBe(200);
+      const data = await trpcData<{
         compareBranch: string;
-        fileStatuses: Record<string, string>;
-      }>(branchRes);
-      expect(branchData.compareBranch).toBe("main");
-      expect(branchData.fileStatuses["feature-only.txt"]).toBe("A");
-      expect(branchData.fileStatuses["wip.txt"]).toBe("U");
-      // Branch mode should include strictly more files than uncommitted mode
-      // here (the committed feature file is extra).
-      expect(branchData.stats.filesChanged).toBeGreaterThan(uncommittedData.stats.filesChanged);
+        headBranch: string;
+        branchStatus: string;
+        untracked: Array<{ path: string }>;
+        branch: Array<{ path: string; status: string }>;
+      }>(res);
+      expect(data.compareBranch).toBe("main");
+      expect(data.headBranch).toBe("feature-cmp");
+      expect(data.branchStatus).toBe("ready");
+      expect(data.branch.map((e) => e.path)).toEqual(["feature-only.txt"]);
+      expect(data.branch[0].status).toBe("A");
+      expect(data.untracked.map((e) => e.path)).toEqual(["wip.txt"]);
     } finally {
-      // Clean up so later tests in this describe see a tidy worktree.
       rmSync(join(featureCmp!.path, "wip.txt"), { force: true });
     }
   });
 
-  it("workspace.getDiffSummary varies with compareBranch when in branch mode", async () => {
-    // This test verifies *routing* of the `compareBranch` parameter — that
-    // the server accepts it and echoes it back as the resolved target. It
-    // does NOT verify count divergence between branches because in this
-    // fixture `develop` was forked from the same commit as `feature-cmp`'s
-    // base on `main` (see the setup in the earlier `workspace.getDiff with
-    // non-default compareBranch …` test), so both targets resolve to the
-    // same merge-base and the file counts coincide — the existing `getDiff`
-    // test calls this out in its closing comment. Count-divergence is
-    // already covered by the uncommitted-vs-branch test above, where the two
-    // modes produce strictly different counts and so prove that the
-    // parameter changes actually flow through to the underlying git
-    // commands.
-    const mainRes = await trpcQuery(server.url, "workspace.getDiffSummary", {
+  it("workspace.getChanges echoes the compareBranch it compared against", async () => {
+    const developRes = await trpcQuery(server.url, "workspace.getChanges", {
       workspaceId: "repo-feature-cmp",
-      diffMode: "branch",
-      compareBranch: "main",
-    });
-    expect(mainRes.status).toBe(200);
-    const mainData = await trpcData<{ compareBranch: string; stats: { filesChanged: number } }>(
-      mainRes,
-    );
-    expect(mainData.compareBranch).toBe("main");
-
-    const developRes = await trpcQuery(server.url, "workspace.getDiffSummary", {
-      workspaceId: "repo-feature-cmp",
-      diffMode: "branch",
       compareBranch: "develop",
     });
     expect(developRes.status).toBe(200);
-    const developData = await trpcData<{ compareBranch: string; stats: { filesChanged: number } }>(
-      developRes,
-    );
+    const developData = await trpcData<{ compareBranch: string; branchStatus: string }>(developRes);
     expect(developData.compareBranch).toBe("develop");
+    expect(developData.branchStatus).toBe("ready");
   });
 
-  // -- workspace.revertFile with compareBranch --
-
-  it("workspace.revertFile uses compareBranch when in branch mode", async () => {
-    // Use the feature-cmp workspace from the previous test. Modify a file
-    // that exists on the merge-base of `develop`/HEAD, then revert in
-    // branch mode against `develop` — it should restore the file.
-    const listRes = await trpcQuery(server.url, "projects.list");
-    const listData = await trpcData<{
-      projects: Array<{ worktrees: Array<{ branch: string; path: string }> }>;
-    }>(listRes);
-    const featureCmp = listData.projects[0].worktrees.find((wt) => wt.branch === "feature-cmp");
-    expect(featureCmp).toBeDefined();
-
-    // Modify README.md (which exists at the merge-base).
-    writeFileSync(join(featureCmp!.path, "README.md"), "# Modified\n");
-    git(featureCmp!.path, ["add", "README.md"]);
-    git(featureCmp!.path, ["commit", "-m", "modify readme"]);
-
-    const revertRes = await trpcMutate(server.url, "workspace.revertFile", {
+  it("workspace.getChanges rejects compareBranch starting with '-'", async () => {
+    const res = await trpcQuery(server.url, "workspace.getChanges", {
       workspaceId: "repo-feature-cmp",
-      filePath: "README.md",
-      diffMode: "branch",
-      compareBranch: "develop",
+      compareBranch: "--exec=bad",
     });
-    expect(revertRes.status).toBe(200);
-    const revertData = await trpcData<{ ok: boolean }>(revertRes);
-    expect(revertData.ok).toBe(true);
-
-    // After revert, the working tree should match the merge-base content.
-    const fileRes = await trpcQuery(server.url, "workspace.getFile", {
-      workspaceId: "repo-feature-cmp",
-      path: "README.md",
-    });
-    expect(fileRes.status).toBe(200);
-    const fileData = await trpcData<{ content: string }>(fileRes);
-    expect(fileData.content).toBe("# My Project\n");
+    expect(res.status).toBe(400);
   });
 
   // -- workspaces.runScript --

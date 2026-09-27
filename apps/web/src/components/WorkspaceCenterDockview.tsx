@@ -19,7 +19,7 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import type { Extension } from "@codemirror/state";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
   DockviewReact,
@@ -32,6 +32,8 @@ import {
 } from "dockview";
 import {
   AlignJustify,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Code,
   Columns2,
@@ -65,6 +67,8 @@ import {
 import {
   AgentIcon,
   buildLspWsUrl,
+  type ChangeEntry,
+  type ChangeSection,
   type ChatInsertDetail,
   createDiffLspNavigation,
   createLspExtension,
@@ -84,15 +88,19 @@ import {
   toLspServerLang,
   useAdapter,
   useCapabilities,
-  useDiffTarget,
   useSearch,
   useSettingsQuery,
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
-import { useDiffSummary } from "../hooks/useDiffSummary";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
+import {
+  findChange,
+  invalidateWorkspaceChanges,
+  SECTION_LABELS,
+  useWorkspaceChanges,
+} from "../hooks/useWorkspaceChanges";
 import { useWorkspaceColdParked } from "../hooks/useWorkspaceColdParked";
 import { writeClipboardText } from "../lib/clipboard";
 import { listen as desktopListen } from "../lib/desktop-ipc";
@@ -423,9 +431,12 @@ function reinjectParams(
       else if (comp === "file") panel.params = { workspaceId, filePath: id.slice(5) };
       else if (comp === "diff") {
         const commit = COMMIT_DIFF_ID.exec(id);
+        const allOf = SECTION_DIFFS_ID.exec(id);
         panel.params = commit
           ? { workspaceId, filePath: commit[2], commit: commit[1] }
-          : { workspaceId, filePath: id.slice(5) };
+          : allOf
+            ? { workspaceId, filePath: "", allOf: allOf[1] }
+            : { workspaceId, filePath: id.slice(5) };
       } else panel.params = { workspaceId };
     }
   }
@@ -550,15 +561,30 @@ interface DiffLeafParams {
   /** Set for a diff opened from the Commits panel: the file's change in
    *  this commit (vs its first parent) instead of the working-tree diff. */
   commit?: string;
+  /** Which Changes section's diff to show (staged, unstaged, committed on
+   *  the branch, …). Unset for a diff restored from a saved layout or opened
+   *  with "View changes": the leaf uses the first section listing the file. */
+  section?: ChangeSection;
+  /** The path before a rename, so the diff pairs both sides. */
+  oldPath?: string;
+  /** Set for a section's "View all" tab: every file of that section, stacked
+   *  (`filePath` is empty). */
+  allOf?: ChangeSection;
 }
 
-// Diff leaves are keyed `diff:<path>`; a commit's file diff is keyed
-// `diff@<sha>:<path>`, so renames/deletes in the Explorer (which match on
-// the `diff:` prefix) leave it alone.
+// Diff leaves are keyed `diff:<path>` — one tab per path, whichever section it
+// was opened from. A commit's file diff is keyed `diff@<sha>:<path>` and a
+// section's "View all" tab `diffs:<section>`, so renames/deletes in the
+// Explorer (which match on the `diff:` prefix) leave them alone.
 const COMMIT_DIFF_ID = /^diff@([0-9a-f]{7,40}):(.+)$/i;
+const SECTION_DIFFS_ID = /^diffs:(conflicts|unstaged|staged|untracked|branch)$/;
 
 function commitDiffId(sha: string, filePath: string): string {
   return `diff@${sha}:${filePath}`;
+}
+
+function sectionDiffsId(section: ChangeSection): string {
+  return `diffs:${section}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1180,19 +1206,17 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
     [pickSaveFile, workspacePath, workspaceIdRaw, filePathRaw],
   );
 
-  // "View changes" only shows while this file has changes against the diff
-  // target, read from the same cached summary the Changes panel uses (a
-  // renamed file is keyed by its new path). Untitled and external files are
+  // "View changes" only shows while this file is in one of the Changes
+  // sections, read from the same cached result the Changes panel uses (a
+  // renamed file is listed under its new path). Untitled and external files are
   // never in it. The poll runs only while the leaf is visible; a save
   // refetches at once so the button appears without waiting for the next poll.
   const diffSummaryEnabled = !untitled && !external;
-  const diffSummaryQuery = useDiffSummary(workspaceIdRaw, {
+  const diffSummaryQuery = useWorkspaceChanges(workspaceIdRaw, {
     enabled: diffSummaryEnabled && visible,
     refetchInterval: visible ? 15_000 : false,
   });
-  const fileStatuses = diffSummaryQuery.data?.fileStatuses;
-  const canViewDiff =
-    diffSummaryEnabled && !!fileStatuses && Object.hasOwn(fileStatuses, filePathRaw);
+  const canViewDiff = diffSummaryEnabled && !!findChange(diffSummaryQuery.data, filePathRaw);
   const refetchDiffSummary = diffSummaryQuery.refetch;
   const wasDirtyRef = useRef(false);
   const isDirty = fileActions?.isDirty ?? false;
@@ -1372,28 +1396,60 @@ const FULL_FILE_CONTEXT = 99999;
 // keeps no direct @codemirror/view dependency.
 type DiffEditorViews = React.ComponentProps<typeof DiffOverviewRuler>["views"];
 
-function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
+function DiffLeaf(props: IDockviewPanelProps<DiffLeafParams>) {
+  // A panel's id never changes, so neither does which of the two it renders.
+  return props.params.allOf ? (
+    <SectionDiffsLeaf {...props} section={props.params.allOf} />
+  ) : (
+    <FileDiffLeaf {...props} />
+  );
+}
+
+/** Sections whose changes live in the working tree or index, so the diff
+ *  leaf's revert button can discard them. */
+function discardableSection(
+  section: ChangeSection | undefined,
+): "unstaged" | "staged" | "untracked" | null {
+  return section === "unstaged" || section === "staged" || section === "untracked" ? section : null;
+}
+
+function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
   // On desktop the diff selection tooltip offers only "Copy reference"; the
   // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
   // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath, commit } = params;
-  const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const { containerRef, setViews, searchBar } = useLeafFind(workspaceId ?? "", visible);
+
+  // A commit's diff doesn't compare against the working tree, so it never
+  // reads the workspace's Changes sections.
+  const changesQuery = useWorkspaceChanges(workspaceId ?? "", {
+    enabled: !!filePath && !commit,
+    // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
+    // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
+    // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const section = params.section ?? findChange(changesQuery.data, filePath)?.section;
+  const oldPath =
+    params.oldPath ??
+    (section ? changesQuery.data?.[section].find((e) => e.path === filePath)?.oldPath : undefined);
+  // Only the `branch` section diffs against the merge base.
+  const mergeBase = section === "branch" ? (changesQuery.data?.mergeBase ?? undefined) : undefined;
   // A commit's diff is history, not the worktree file: it doesn't mark a row
   // in the Explorer / Changes trees as the open file.
   useActiveFileTracking(api, workspaceId ?? "", commit ? "" : (filePath ?? ""), visible);
   // Go-to-definition on the working-tree side (see `createDiffLspNavigation`).
-  // Off for a commit's diff: its text is that commit's file, which the
-  // language server doesn't have.
+  // Off where the new side isn't the file on disk: a commit's diff, a staged
+  // diff (the index) and a branch diff (HEAD).
   const lspNavigation = useLeafLsp(
     workspaceId ?? "",
     filePath ?? "",
-    !!commit,
+    !!commit || section === "staged" || section === "branch",
     createDiffLspNavigation,
   );
-  const { diffMode, compareBranch } = useDiffTarget(workspaceId ?? "");
   const [viewMode, setViewMode] = useState<ViewMode>(() => getStoredViewMode());
   const [revertOpen, setRevertOpen] = useState(false);
   // The diff's editors also feed the overview ruler, which measures where each
@@ -1413,30 +1469,21 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
     storeViewMode(mode);
   }, []);
 
-  // A commit's diff doesn't compare against the diff target, so it never
-  // reads the workspace's changes summary.
-  const summaryQuery = useDiffSummary(workspaceId ?? "", {
-    enabled: !!filePath && !commit,
-    // Keep an open diff reasonably fresh while it's the visible leaf, mirroring
-    // the sidepanel's visibility-gated poll — a hidden/cached leaf never polls.
-    // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
-    refetchInterval: visible ? 15_000 : false,
-  });
-
-  const mergeBase = summaryQuery.data?.mergeBase;
-
   const fileDiffQuery = useQuery({
-    queryKey: ["diffLeafFile", workspaceId, filePath, mergeBase],
+    queryKey: ["diffLeafFile", workspaceId, filePath, section, mergeBase, oldPath],
     queryFn: () =>
       trpc.workspace.getFileDiff.query({
         workspaceId,
         filePath,
-        mergeBase: mergeBase ?? "",
+        section: section ?? "unstaged",
+        mergeBase,
+        oldPath,
         // Show the full file, with the diff in place — clicking a changed file
         // opens its whole contents, not just the changed hunks.
         contextLines: FULL_FILE_CONTEXT,
       }),
-    enabled: !!workspaceId && !!filePath && !!mergeBase && !commit,
+    enabled:
+      !!workspaceId && !!filePath && !!section && (section !== "branch" || !!mergeBase) && !commit,
     refetchInterval: visible ? 10_000 : false,
   });
 
@@ -1456,8 +1503,10 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
 
   // Publish this diff leaf's actions (view toggle, open-for-edit, revert) to the
   // group header — the tab content itself carries no toolbar (#643).
-  // A commit's diff is history: there is nothing to revert in the worktree.
-  const canRevert = !!adapter.revertFile && !commit;
+  // A commit's diff is history, and so is a branch diff: there is nothing to
+  // revert in the worktree. A conflict is resolved, not reverted.
+  const revertSection = commit ? null : discardableSection(section);
+  const canRevert = revertSection !== null;
   usePublishHeaderActions(
     api.id,
     workspaceId && filePath
@@ -1529,7 +1578,7 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
   const diff = commit ? commitDiffQuery.data?.diff : fileDiffQuery.data?.diff;
   const loading = commit
     ? commitDiffQuery.isLoading
-    : summaryQuery.isLoading || fileDiffQuery.isLoading;
+    : changesQuery.isLoading || fileDiffQuery.isLoading;
 
   return (
     <div
@@ -1587,12 +1636,17 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
             <Button
               variant="destructive"
               onClick={() => {
-                void adapter.revertFile
-                  ?.call(adapter, workspaceId, filePath, diffMode, compareBranch ?? undefined)
+                if (!revertSection) return;
+                trpc.workspace.discardChanges
+                  .mutate({
+                    workspaceId,
+                    section: revertSection,
+                    paths: revertSection === "staged" && oldPath ? [filePath, oldPath] : [filePath],
+                  })
                   .then(() => {
                     setRevertOpen(false);
                     fileDiffQuery.refetch();
-                    summaryQuery.refetch();
+                    void invalidateWorkspaceChanges(queryClient, workspaceId);
                   })
                   .catch((err) => console.error("[DiffLeaf] revert failed:", err));
               }}
@@ -1602,6 +1656,155 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * A Changes section's "View all" tab: every file of the section as a diff,
+ * one under the other, like orca's combined diff. Each file fetches its diff
+ * only once it scrolls near the viewport, so a section of hundreds of
+ * untracked files doesn't start hundreds of requests at once.
+ */
+function SectionDiffsLeaf({
+  params,
+  section,
+}: IDockviewPanelProps<DiffLeafParams> & { section: ChangeSection }) {
+  const { workspaceId } = params;
+  const { visible } = usePanelVisibility();
+  const changesQuery = useWorkspaceChanges(workspaceId, {
+    refetchInterval: visible ? 15_000 : false,
+  });
+  const entries = changesQuery.data?.[section] ?? [];
+  const mergeBase = changesQuery.data?.mergeBase ?? undefined;
+
+  return (
+    <div className="h-full w-full overflow-auto" data-testid={`center-section-diffs--${section}`}>
+      {entries.length === 0 ? (
+        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          {changesQuery.isLoading ? "Loading diff…" : "No changes"}
+        </div>
+      ) : (
+        entries.map((entry) => (
+          <SectionDiffFile
+            key={entry.path}
+            workspaceId={workspaceId}
+            section={section}
+            entry={entry}
+            mergeBase={mergeBase}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function SectionDiffFile({
+  workspaceId,
+  section,
+  entry,
+  mergeBase,
+}: {
+  workspaceId: string;
+  section: ChangeSection;
+  entry: ChangeEntry;
+  mergeBase: string | undefined;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [nearViewport, setNearViewport] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || nearViewport) return;
+    const observer = new IntersectionObserver(
+      (records) => {
+        if (records.some((r) => r.isIntersecting)) setNearViewport(true);
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [nearViewport]);
+
+  const diffQuery = useQuery({
+    // The line counts change whenever the file does, so they refresh the diff
+    // on the section's poll without a poll of their own.
+    queryKey: [
+      "sectionDiffFile",
+      workspaceId,
+      section,
+      entry.path,
+      entry.oldPath,
+      mergeBase,
+      entry.additions,
+      entry.deletions,
+    ],
+    queryFn: () =>
+      trpc.workspace.getFileDiff.query({
+        workspaceId,
+        filePath: entry.path,
+        section,
+        mergeBase: section === "branch" ? mergeBase : undefined,
+        oldPath: entry.oldPath,
+      }),
+    enabled: nearViewport && (section !== "branch" || !!mergeBase),
+  });
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+
+  return (
+    <div
+      ref={ref}
+      className="border-b border-border"
+      data-testid={`center-section-diffs__file--${entry.path}`}
+    >
+      <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-border bg-background px-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium" title={entry.path}>
+            {entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
+          </span>
+          {!!entry.additions && (
+            <span className="shrink-0 text-green-600 dark:text-green-400">+{entry.additions}</span>
+          )}
+          {!!entry.deletions && (
+            <span className="shrink-0 text-red-600 dark:text-red-400">-{entry.deletions}</span>
+          )}
+        </button>
+        <button
+          type="button"
+          title="Open diff"
+          data-testid="center-section-diffs__open"
+          onClick={() =>
+            getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+              preview: false,
+              section,
+              oldPath: entry.oldPath,
+            })
+          }
+          className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <GitCompare className="size-3.5" />
+        </button>
+      </div>
+      {!collapsed &&
+        (diffQuery.data?.diff ? (
+          <DiffFileContent
+            hunks={diffQuery.data.diff}
+            filename={entry.path}
+            viewMode="unified"
+            copyReferenceOnly
+          />
+        ) : (
+          <div className="px-3 py-2 text-xs text-muted-foreground">
+            {diffQuery.data ? "No textual changes" : "Loading diff…"}
+          </div>
+        ))}
     </div>
   );
 }
@@ -1618,6 +1821,13 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
 // into the props), reading the latest closures via the ref holder.
 // ---------------------------------------------------------------------------
 
+interface OpenDiffOptions {
+  preview?: boolean;
+  /** The Changes section the diff comes from; see `DiffLeafParams.section`. */
+  section?: ChangeSection;
+  oldPath?: string;
+}
+
 interface LeafActions {
   onAdd: (kind: LeafKind, groupId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
@@ -1633,7 +1843,9 @@ interface LeafActions {
       fromHistory?: boolean;
     },
   ) => void;
-  openDiff: (filePath: string, opts?: { preview?: boolean }) => void;
+  openDiff: (filePath: string, opts?: OpenDiffOptions) => void;
+  /** Open every file of a Changes section in one tab ("View all"). */
+  openSectionDiffs: (section: ChangeSection) => void;
   /** Open `filePath`'s change in commit `sha` (Commits panel). */
   openCommitDiff: (sha: string, filePath: string, opts?: { preview?: boolean }) => void;
   /** Retarget file / diff leaves at or under `oldPath` after the Explorer
@@ -2102,12 +2314,18 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
 }
 
 function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
-  const { workspaceId, filePath, commit } = props.params;
+  const { workspaceId, filePath, commit, section, allOf } = props.params;
   const containerApi = props.containerApi;
   const panelId = props.api.id;
   const isActive = useTabActive(props.api);
   const isPreview = useTabPreview(props.api, props.params.preview);
-  const title = commit ? `${basename(filePath)} @ ${commit.slice(0, 7)}` : basename(filePath);
+  const title = commit
+    ? `${basename(filePath)} @ ${commit.slice(0, 7)}`
+    : section === "staged"
+      ? `${basename(filePath)} (Staged)`
+      : section === "branch"
+        ? `${basename(filePath)} (Committed)`
+        : basename(filePath);
 
   const handleClose = useCallback(
     (e: React.MouseEvent) => {
@@ -2116,6 +2334,25 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
     },
     [containerApi, panelId],
   );
+
+  if (allOf) {
+    return (
+      <div className={TAB_ROOT_CLASS} data-testid={`center-section-diffs-tab--${allOf}`}>
+        <div className={TAB_CONTENT_WRAP}>
+          <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className={TAB_TITLE_CLASS}>{SECTION_LABELS[allOf]}</span>
+        </div>
+        <button
+          type="button"
+          className={closeButtonClass(isActive)}
+          onClick={handleClose}
+          title="Close diff"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <TabPathContextMenu
@@ -2753,7 +2990,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   // Working-tree diffs (`diff:<path>`) and commit diffs (`diff@<sha>:<path>`)
   // share one preview slot, so browsing either reuses the same italic tab.
   const openDiffLeaf = useCallback(
-    (filePath: string, commit: string | undefined, opts?: { preview?: boolean }) => {
+    (filePath: string, commit: string | undefined, opts?: OpenDiffOptions) => {
       const api = apiRef.current;
       if (!api) return;
       const preview = opts?.preview ?? false;
@@ -2761,9 +2998,19 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       const existing = api.getPanel(id);
       if (existing) {
         if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
-        if (!preview) {
-          const cur = existing.api.getParameters<DiffLeafParams>();
-          existing.api.updateParameters({ ...cur, preview: false });
+        // One tab per path: opening the file from another section switches
+        // the tab to that section's diff.
+        const cur = existing.api.getParameters<DiffLeafParams>();
+        const sectionChanged =
+          (opts?.section ?? cur.section) !== cur.section ||
+          (opts?.oldPath ?? cur.oldPath) !== cur.oldPath;
+        if (!preview || sectionChanged) {
+          existing.api.updateParameters({
+            ...cur,
+            ...(preview ? {} : { preview: false }),
+            section: opts?.section ?? cur.section,
+            oldPath: opts?.oldPath ?? cur.oldPath,
+          });
         }
         existing.api.setActive();
         return;
@@ -2782,7 +3029,14 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         component: "diff",
         tabComponent: "diff",
         title: basename(filePath),
-        params: { workspaceId, filePath, preview, commit },
+        params: {
+          workspaceId,
+          filePath,
+          preview,
+          commit,
+          section: opts?.section,
+          oldPath: opts?.oldPath,
+        },
         position,
       } as AddPanelOptions);
       if (previewToRemove) api.removePanel(previewToRemove);
@@ -2792,8 +3046,30 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   );
 
   const handleOpenDiff = useCallback(
-    (filePath: string, opts?: { preview?: boolean }) => openDiffLeaf(filePath, undefined, opts),
+    (filePath: string, opts?: OpenDiffOptions) => openDiffLeaf(filePath, undefined, opts),
     [openDiffLeaf],
+  );
+
+  const handleOpenSectionDiffs = useCallback(
+    (section: ChangeSection) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const id = sectionDiffsId(section);
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      api.addPanel({
+        id,
+        component: "diff",
+        tabComponent: "diff",
+        title: SECTION_LABELS[section],
+        params: { workspaceId, filePath: "", allOf: section },
+        position: activeOrCentralPosition(api),
+      } as AddPanelOptions);
+    },
+    [workspaceId],
   );
 
   const handleOpenCommitDiff = useCallback(
@@ -2904,6 +3180,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: () => {},
     openFile: () => {},
     openDiff: () => {},
+    openSectionDiffs: () => {},
     openCommitDiff: () => {},
     onPathMoved: () => {},
     onPathRemoved: () => {},
@@ -2914,6 +3191,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     onClose: handleClose,
     openFile: handleOpenFile,
     openDiff: handleOpenDiff,
+    openSectionDiffs: handleOpenSectionDiffs,
     openCommitDiff: handleOpenCommitDiff,
     onPathMoved: handlePathMoved,
     onPathRemoved: handlePathRemoved,

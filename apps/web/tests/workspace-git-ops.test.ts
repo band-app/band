@@ -668,7 +668,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
   });
 
   // `getFileDiff` accepts a `mergeBase` SHA the client gets from
-  // `getDiffSummary`. The router pins it to a 40-char hex regex so a
+  // `getChanges`. The router pins it to a 40-char hex regex so a
   // client can't sneak in a leading-dash arg (`--exec=…`, `--output=…`)
   // or a symbolic ref (`HEAD`, `main`) that desyncs from the summary.
   // These tests pin that validation contract — tRPC must reject the
@@ -681,6 +681,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       {
         workspaceId: "alpha-main",
         filePath: "README.md",
+        section: "branch",
         mergeBase: "--exec=touch /tmp/pwned",
       },
       DEFAULT_TOKEN,
@@ -697,6 +698,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       {
         workspaceId: "alpha-main",
         filePath: "README.md",
+        section: "branch",
         mergeBase: "HEAD",
       },
       DEFAULT_TOKEN,
@@ -713,6 +715,7 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
       {
         workspaceId: "alpha-main",
         filePath: "README.md",
+        section: "branch",
         mergeBase: "0123456789abcdef0123456789abcdef0123456",
       },
       DEFAULT_TOKEN,
