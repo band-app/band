@@ -2,12 +2,12 @@
  * Mobile layout of the chat and the screen-edge bars.
  *
  * Safe-area insets: an iOS home-screen app (display-mode: standalone,
- * `viewport-fit=cover`) reports a non-zero `env(safe-area-inset-bottom)` for
- * the home indicator. Each inset must be padded once, by the element that
- * touches that screen edge. On a mobile workspace that is the bottom bar; the
- * chat composer sits above it and must keep its own 16 px bottom padding.
- * The composer used to swap that padding for the inset in standalone mode,
- * so the home indicator gap appeared twice. The dashboard action bar clears
+ * `viewport-fit=cover`) reports non-zero `env(safe-area-inset-*)` values for
+ * the status bar and the home indicator. Each inset must be padded once, by
+ * the element that touches that screen edge. On a mobile workspace the header
+ * pads the top inset and the editor area pads the bottom one; there is no
+ * bottom tab bar (Explorer / Changes are header buttons), so the chat
+ * composer sits directly on the home-indicator inset. The dashboard action bar clears
  * the inset itself full screen and in the mobile fly-out; in the wide layout
  * the AppShell below the sidebar pads it. The Explorer / Changes sheets and
  * the Settings drawer footer reach the bottom edge and pad it too.
@@ -15,6 +15,11 @@
  * Horizontal fit: on a 375 or 390 px screen, long model / mode / config names
  * and long plan entries must truncate or wrap inside the composer, never push
  * the send button or the page past the screen edge.
+ *
+ * The page must not ask for the `black-translucent` status bar: on iOS 26 that
+ * style sizes a home-screen app one status bar short (WebKit bug 301108), which
+ * no inset in the page can correct. Keyboard behaviour (the composer resting on
+ * the software keyboard) needs a real iPhone and is checked by hand.
  *
  * Standalone mode can't be emulated in Playwright's headless shell
  * (`Emulation.setEmulatedMedia` ignores `display-mode`), so the standalone
@@ -25,11 +30,12 @@
  * Real server, no tRPC mocking; the ACP stub agent is the only stub.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type BrowserContext, chromium, expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
+import { git, gitCommit } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -59,7 +65,9 @@ const NARROW_SCREENS = [
 /** One project per narrow screen, so each test's chat starts empty and the
  *  plan it measures is its own. */
 const narrowProject = (width: number) => `narrow${width}`;
-// `pb-4` on the composer wrapper in ChatView.
+// `pb-2 lg:pb-4` on the composer wrapper in ChatView: a small gap on a phone,
+// where the composer rests on the inset, the original 16 px on a wide screen.
+const PHONE_COMPOSER_PADDING_BOTTOM = 8;
 const COMPOSER_PADDING_BOTTOM = 16;
 // `lg:pb-3` on the Settings DialogFooter, where the dialog is a floating card.
 const SETTINGS_CARD_FOOTER_PADDING = 12;
@@ -86,6 +94,12 @@ test.beforeAll(async () => {
       worktrees: [{ branch: "main", path: repoDir }],
     };
   });
+  // One uncommitted file in the main project, for the Changes badge.
+  const mainRepo = join(tmpHome, PROJECT);
+  git(mainRepo, ["init", "-b", "main"]);
+  writeFileSync(join(mainRepo, "README.md"), "# Mobile layout\n");
+  gitCommit(mainRepo, "initial commit");
+  writeFileSync(join(mainRepo, "notes.md"), "draft\n");
   seedState(tmpHome, { projects });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -173,7 +187,7 @@ test.describe("safe-area insets in a home-screen app", () => {
     await context?.close();
   });
 
-  test("the bottom bar pads the home indicator once and the chat composer keeps its own padding", async () => {
+  test("the header clears the status bar and the chat composer rests on the home indicator", async () => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
     const chat = new ChatPanePage(page, server.url, TOKEN);
     await chat.goto(WORKSPACE);
@@ -181,14 +195,24 @@ test.describe("safe-area insets in a home-screen app", () => {
 
     const viewport = await layout.readViewport();
     expect(viewport.standalone).toBe(true);
+    expect(await layout.readStatusBarStyle()).not.toBe("black-translucent");
 
-    const bar = await layout.readLayout(layout.bottomBar);
-    expect(bar.bottom).toBe(viewport.height);
-    expect(bar.paddingBottom).toBe(SAFE_AREA_BOTTOM);
+    const header = await layout.readLayout(layout.header);
+    expect(header.top).toBe(0);
+    expect(header.paddingTop).toBe(SAFE_AREA_TOP);
+    const title = await layout.readLayout(layout.workspaceSwitcher);
+    expect(title.top).toBeGreaterThanOrEqual(SAFE_AREA_TOP);
+
+    // No bottom tab bar: the editor area reaches the bottom edge and pads
+    // the inset once, and the composer sits right on it.
+    await expect(layout.legacyBottomBar).toHaveCount(0);
+    const main = await layout.readLayout(layout.main);
+    expect(main.bottom).toBe(viewport.height);
+    expect(main.paddingBottom).toBe(SAFE_AREA_BOTTOM);
 
     const composer = await layout.readLayout(layout.composer);
-    expect(composer.bottom).toBe(bar.top);
-    expect(composer.paddingBottom).toBe(COMPOSER_PADDING_BOTTOM);
+    expect(composer.bottom).toBe(viewport.height - SAFE_AREA_BOTTOM);
+    expect(composer.paddingBottom).toBe(PHONE_COMPOSER_PADDING_BOTTOM);
   });
 
   test("the dashboard action bar clears the home indicator", async () => {
@@ -310,6 +334,54 @@ test.describe("safe-area insets in a wide home-screen app", () => {
 
 test.describe("in a phone browser tab", () => {
   test.use({ viewport: PHONE });
+
+  test("Explorer and Changes are header buttons that open their sheet and return to the editor", async ({
+    page,
+  }) => {
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    const workspace = new WorkspacePage(page, server.url, TOKEN);
+    await workspace.goto(WORKSPACE);
+    await workspace.waitForMobileReady();
+
+    await expect(layout.legacyBottomBar).toHaveCount(0);
+    const header = await layout.readLayout(layout.header);
+    const title = await layout.readLayout(layout.workspaceSwitcher);
+    for (const button of [layout.explorerButton, layout.changesButton]) {
+      const box = await layout.readLayout(button);
+      expect(box.top).toBeGreaterThanOrEqual(header.top);
+      expect(box.bottom).toBeLessThanOrEqual(header.bottom);
+      expect(box.left).toBeGreaterThanOrEqual(title.right);
+      expect(box.right).toBeLessThanOrEqual(PHONE.width);
+    }
+    await expect(layout.changesBadge).toHaveText("1");
+
+    // The modal sheet hides the header from the accessibility tree while open.
+    await layout.openSheet("changes");
+    await layout.closeSheet();
+    await expect(layout.changesButton).toHaveAttribute("aria-pressed", "false");
+
+    await layout.openSheet("explorer");
+    await layout.closeSheet();
+    await expect(layout.explorerButton).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("the chat composer fills to the bottom edge and turns off keyboard suggestions", async ({
+    page,
+  }) => {
+    const layout = new MobileLayoutPage(page, server.url, TOKEN);
+    const chat = new ChatPanePage(page, server.url, TOKEN);
+    await chat.goto(WORKSPACE);
+    await chat.waitForReady();
+
+    const viewport = await layout.readViewport();
+    const composer = await layout.readLayout(layout.composer);
+    expect(composer.bottom).toBe(viewport.height);
+
+    await expect(chat.promptInput).toHaveAttribute("autocomplete", "off");
+    await expect(chat.promptInput).toHaveAttribute("autocorrect", "off");
+    await expect(chat.promptInput).toHaveAttribute("autocapitalize", "off");
+    await expect(chat.promptInput).toHaveAttribute("spellcheck", "false");
+  });
 
   test("the dashboard action bar keeps its gap above the bottom edge", async ({ page }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);

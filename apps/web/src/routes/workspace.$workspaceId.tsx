@@ -1,6 +1,6 @@
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@band-app/ui";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { ChevronsUpDown, FolderOpen, GitCompare, Menu, SquareTerminal } from "lucide-react";
+import { ChevronsUpDown, FolderOpen, GitCompare, Menu } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
@@ -53,14 +53,26 @@ function WorkspaceNotFoundRedirect() {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** How much shorter than the layout viewport the visual viewport must be
+ *  before we treat the gap as a software keyboard (px). Larger than any
+ *  browser toolbar, smaller than any keyboard. */
+const KEYBOARD_MIN_HEIGHT_PX = 120;
+
+/** The visible area of the page. iOS Safari ignores
+ *  `interactive-widget=resizes-content`: the keyboard shrinks only the visual
+ *  viewport and may pan it, so the mobile layout sizes and positions itself
+ *  from this rather than from `100dvh`. `keyboardOpen` tells the layout to
+ *  drop the home-indicator inset, which the keyboard covers. */
 function useAppHeight() {
   const [height, setHeight] = useState<number | null>(null);
   const [offsetTop, setOffsetTop] = useState(0);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   useLayoutEffect(() => {
     const vv = window.visualViewport;
     const update = () => {
       setHeight(vv ? vv.height : window.innerHeight);
       setOffsetTop(vv ? vv.offsetTop : 0);
+      setKeyboardOpen(vv ? window.innerHeight - vv.height > KEYBOARD_MIN_HEIGHT_PX : false);
     };
     update();
     if (vv) {
@@ -76,10 +88,10 @@ function useAppHeight() {
       window.removeEventListener("resize", update);
     };
   }, []);
-  return { height, offsetTop };
+  return { height, offsetTop, keyboardOpen };
 }
 
-/** Live changes summary for the mobile Changes sheet + bar badge. Tracks the
+/** Live changes summary for the mobile Changes sheet + header badge. Tracks the
  *  same diff target (mode + compare branch) the user picked, mirroring the
  *  desktop RightSidepanel query so the badge count matches the tree. */
 function useChangesSummary(workspaceId: string) {
@@ -93,9 +105,9 @@ function useChangesSummary(workspaceId: string) {
   return { fileStatuses, changeCount: Object.keys(fileStatuses).length };
 }
 
-// Which mobile view the bottom bar is showing. "editor" is the dockview;
-// "explorer" / "changes" open a bottom sheet holding the tree and, on select,
-// return the bar to "editor" (the opened file/diff leaf is now the active tab).
+// Which mobile view is showing. "editor" is the dockview; "explorer" /
+// "changes" open a bottom sheet holding the tree and, on select or dismiss,
+// return to "editor" (the opened file/diff leaf is now the active tab).
 type MobileView = "editor" | "explorer" | "changes";
 
 // ---------------------------------------------------------------------------
@@ -155,8 +167,9 @@ function WorkspaceLayout() {
 // Mobile layout
 // ---------------------------------------------------------------------------
 
-/** One entry in the mobile bottom bar (icon + label + optional count badge). */
-function MobileBarButton({
+/** An icon button at the right of the mobile header (Explorer / Changes),
+ *  with an optional count badge. The label is its accessible name. */
+function MobileHeaderButton({
   label,
   icon: Icon,
   active,
@@ -175,36 +188,38 @@ function MobileBarButton({
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
       aria-pressed={active}
+      aria-haspopup="dialog"
       data-testid={testid}
-      className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
-        active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+      className={`relative inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent active:bg-accent ${
+        active ? "text-foreground" : "text-muted-foreground"
       }`}
     >
-      <span className="relative">
-        <Icon className="size-5" />
-        {badge != null && badge > 0 && (
-          <span className="absolute -top-1.5 -right-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[9px] font-medium text-blue-600 dark:text-blue-400">
-            {badge}
-          </span>
-        )}
-      </span>
-      {label}
+      <Icon className="size-[18px]" />
+      {badge != null && badge > 0 && (
+        <span
+          data-testid={`${testid}-badge`}
+          className="absolute top-0 right-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500/20 px-1 text-[9px] font-medium text-blue-600 dark:text-blue-400"
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
 
 function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
-  const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
+  const { height: appHeight, offsetTop: appOffsetTop, keyboardOpen } = useAppHeight();
   const workspacePath = useWorkspacePath(workspaceId);
   const { fileStatuses, changeCount } = useChangesSummary(workspaceId);
 
   // The dockview (WorkspaceCenterDockview, mobile mode) is always the main
-  // editor surface. The bottom bar's "Editor" entry just closes any open
-  // tree sheet; "Explorer" / "Changes" open a bottom sheet with the tree.
+  // editor surface. The header's Explorer / Changes buttons open a bottom
+  // sheet with the tree; closing the sheet returns to the editor.
   const [view, setView] = useState<MobileView>("editor");
 
-  // Open a file leaf in the center dockview, then return the bar to Editor.
+  // Open a file leaf in the center dockview, then close the tree sheet.
   // Used by the Explorer sheet + the file-link / Quick Open flows.
   const openFileLeaf = useCallback(
     (filePath: string, opts?: { line?: number; column?: number }) => {
@@ -214,7 +229,7 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
     [workspaceId],
   );
 
-  // Open a diff leaf in the center dockview, then return the bar to Editor.
+  // Open a diff leaf in the center dockview, then close the tree sheet.
   const openDiffLeaf = useCallback(
     (filePath: string) => {
       getWorkspaceLeafActions(workspaceId)?.openDiff(filePath);
@@ -290,15 +305,20 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   }, []);
 
   return (
+    // Fixed, so a document scroll iOS makes to reveal the focused input can't
+    // move it; `offsetTop` then follows the visual viewport as it pans.
     <div
-      className="flex flex-col overflow-hidden"
+      className="fixed inset-x-0 top-0 flex flex-col overflow-hidden"
       style={{
         height: appHeight ? `${appHeight}px` : "100dvh",
         transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
       }}
     >
       {isDesktop && <DesktopDragRegion />}
-      <header className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]">
+      <header
+        data-testid="mobile-workspace__header"
+        className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]"
+      >
         {/* Hamburger — opens the project list as a left fly-out drawer over
             this workspace. Purely local state; the route never changes. */}
         <button
@@ -324,46 +344,41 @@ function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
           <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
           <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
         </button>
-        <div aria-hidden="true" className="size-7 shrink-0" />
+        {/* Explorer / Changes open their tree as a bottom sheet over the
+            editor; picking a file or closing the sheet returns to it. */}
+        <div className="flex shrink-0 items-center">
+          <MobileHeaderButton
+            label="Explorer"
+            icon={FolderOpen}
+            active={view === "explorer"}
+            onClick={() => setView("explorer")}
+            testid="mobile-workspace__header-explorer"
+          />
+          <MobileHeaderButton
+            label="Changes"
+            icon={GitCompare}
+            active={view === "changes"}
+            badge={changeCount}
+            onClick={() => setView("changes")}
+            testid="mobile-workspace__header-changes"
+          />
+        </div>
       </header>
       {/* The unified center dockview is the ONLY editor surface on mobile —
        *  chat / terminal / browser leaves plus per-path file / diff leaves,
        *  all as tabs (mobile mode disables drag→split and the maximize
-       *  toggle). It stays mounted regardless of the bottom-bar view; the
-       *  Explorer / Changes sheets float over it and open leaves into it. */}
-      <main className="flex min-h-0 flex-1 flex-col">
+       *  toggle). It stays mounted while the Explorer / Changes sheets float
+       *  over it and open leaves into it. It reaches the bottom screen edge,
+       *  so it pads the home-indicator inset, except while the keyboard
+       *  covers that edge: then the chat composer sits right on the keyboard. */}
+      <main
+        data-testid="mobile-workspace__main"
+        className={`flex min-h-0 flex-1 flex-col ${
+          keyboardOpen ? "" : "pb-[env(safe-area-inset-bottom)]"
+        }`}
+      >
         <WorkspaceCenterDockview workspaceId={workspaceId} visible wsActive mobile />
       </main>
-      {/* Bottom bar: Editor | Explorer | Changes. Editor closes any open tree
-       *  sheet; the other two open a bottom sheet with the corresponding tree.
-       *  Changes carries a badge with the live changed-file count. */}
-      <nav
-        className="flex h-[calc(3rem+env(safe-area-inset-bottom))] shrink-0 items-stretch border-t border-border/50 pb-[env(safe-area-inset-bottom)]"
-        data-testid="mobile-workspace__bottom-bar"
-      >
-        <MobileBarButton
-          label="Editor"
-          icon={SquareTerminal}
-          active={view === "editor"}
-          onClick={() => setView("editor")}
-          testid="mobile-workspace__bar--editor"
-        />
-        <MobileBarButton
-          label="Explorer"
-          icon={FolderOpen}
-          active={view === "explorer"}
-          onClick={() => setView("explorer")}
-          testid="mobile-workspace__bar--explorer"
-        />
-        <MobileBarButton
-          label="Changes"
-          icon={GitCompare}
-          active={view === "changes"}
-          badge={changeCount}
-          onClick={() => setView("changes")}
-          testid="mobile-workspace__bar--changes"
-        />
-      </nav>
       {/* Explorer sheet — the file tree. Selecting a file opens it as a leaf in
        *  the dockview and closes the sheet (openFileLeaf resets view to
        *  "editor"). Single vs pinned map to preview vs pinned leaves. */}

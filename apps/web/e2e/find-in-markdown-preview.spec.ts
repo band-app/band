@@ -107,15 +107,14 @@ test.afterAll(async () => {
 async function openMarkdownPreview(page: Page): Promise<void> {
   await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
 
-  // The mobile layout (`MobileWorkspaceLayout`) is ready once its bottom bar
-  // (Editor | Explorer | Changes) renders (#643 replaced the old WorkspaceTabNav).
-  await page
-    .getByTestId("mobile-workspace__bottom-bar")
-    .waitFor({ state: "visible", timeout: 20_000 });
+  // The mobile layout (`MobileWorkspaceLayout`) is ready once its header's
+  // Explorer button renders.
+  const explorer = page.getByTestId("mobile-workspace__header-explorer");
+  await explorer.waitFor({ state: "visible", timeout: 20_000 });
 
   // Open the Explorer sheet and tap the markdown file — it opens as a `file`
   // leaf in the center dockview (markdown files default to the rendered preview).
-  await page.getByTestId("mobile-workspace__bar--explorer").click();
+  await explorer.click();
   await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
 
   // The markdown renders into a sticky heading — when it appears, the

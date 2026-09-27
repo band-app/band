@@ -1612,13 +1612,11 @@ export class WorkspacePage {
   /** Wait for the mobile workspace layout to be interactive. The mobile route
    *  (`MobileWorkspaceLayout`) doesn't render the dockview's header Maximize
    *  buttons, so `waitForReady` won't work — instead we anchor on the mobile
-   *  bottom bar (`mobile-workspace__bottom-bar`, Editor | Explorer | Changes),
-   *  which is always present once the mobile layout has mounted. (#643 Phase 4
-   *  replaced the old per-app `WorkspaceTabNav` — whose "Files" button this used
-   *  to key off — with `<WorkspaceCenterDockview mobile>` + this bottom bar.) */
+   *  header's Explorer button (`mobile-workspace__header-explorer`), which is
+   *  always present once the mobile layout has mounted. */
   async waitForMobileReady(): Promise<void> {
     await this.page
-      .getByTestId("mobile-workspace__bottom-bar")
+      .getByTestId("mobile-workspace__header-explorer")
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 

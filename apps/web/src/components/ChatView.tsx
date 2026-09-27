@@ -780,9 +780,11 @@ export function ChatView({
           <ConversationScrollButton />
         </Conversation>
 
+        {/* On a phone the composer sits right on the home-indicator inset (or
+            the keyboard), so it keeps only a small gap below the input. */}
         <div
           data-testid="chat-pane__composer"
-          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4"
+          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-2 lg:pb-4"
         >
           <TaskListWidget plan={plan} workspaceId={workspaceId} />
           <PromptInput
