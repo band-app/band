@@ -964,6 +964,115 @@ describe("terminal WebSocket — serialized replay on reconnect", () => {
     expect(rows[0]).not.toContain("SCATTERZEBRA");
     expect(rows[0]).toContain("AB ");
   }, 30_000);
+
+  /** Intensity of the first cell of `marker` once `snapshot` is rendered the
+   *  way the browser renders it. */
+  async function renderedIntensity(
+    snapshot: Buffer,
+    marker: string,
+  ): Promise<{ bold: boolean; dim: boolean }> {
+    const headlessNs = (await import("@xterm/headless")) as
+      | typeof import("@xterm/headless")
+      | { default: typeof import("@xterm/headless") };
+    const { Terminal } = "Terminal" in headlessNs ? headlessNs : headlessNs.default;
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    try {
+      await new Promise<void>((resolve) => term.write(new Uint8Array(snapshot), resolve));
+      const buf = term.buffer.active;
+      for (let i = 0; i < buf.length; i++) {
+        const col = buf.getLine(i)?.translateToString(true).indexOf(marker) ?? -1;
+        if (col === -1) continue;
+        const cell = buf.getLine(i)?.getCell(col);
+        return { bold: cell?.isBold() !== 0, dim: cell?.isDim() !== 0 };
+      }
+      throw new Error(`"${marker}" is not in the rendered snapshot`);
+    } finally {
+      term.dispose();
+    }
+  }
+
+  // patches/@xterm__addon-serialize: bold (SGR 1) and dim (SGR 2) share the
+  // reset SGR 22. Unpatched, a bold cell after a dim one serialized as
+  // `\e[1;22m`, so the 22 cleared the bold it had just set and a reconnect
+  // showed claude-code's bold text at normal weight.
+  it("keeps bold text bold when it follows dim text", async () => {
+    const terminalId = "serialize-replay-bold-after-dim";
+
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033[2mDIM""RUN\\033[22m\\033[1mBOLD""RUN\\033[0m\\n"'\r`,
+      "BOLDRUN",
+    );
+
+    const replay = await captureReplayFrame(terminalId);
+    expect(await renderedIntensity(replay, "DIMRUN")).toEqual({ bold: false, dim: true });
+    expect(await renderedIntensity(replay, "BOLDRUN")).toEqual({ bold: true, dim: false });
+  }, 30_000);
+
+  // patches/@xterm__addon-serialize: a wide glyph that doesn't fit in the last
+  // column wraps and leaves an empty padding cell in the pen it was printed
+  // with. Unpatched, the serializer skipped that cell with a cursor move, so
+  // an inverse-video padding cell (a TUI's highlighted bar) came back with
+  // the default background after a reconnect.
+  it("keeps the inverse video of an empty wide-glyph padding cell", async () => {
+    const terminalId = "serialize-replay-inverse-padding";
+    const fill = "x".repeat(79);
+
+    // Clear, print 79 inverse cells plus a wide glyph (U+4E2D, as UTF-8 octal
+    // bytes) that wraps and leaves column 79 as inverse padding, then redraw
+    // the wrapped glyph without inverse so the padding is the only empty
+    // inverse cell.
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033[2J\\033[H\\033[7m${fill}\\344\\270\\255\\033[0m\\033[2;1H\\344\\270\\255\\033[5;1HPAD""DONE\\n"'\r`,
+      "PADDONE",
+    );
+
+    const replay = await captureReplayFrame(terminalId);
+    const headlessNs = (await import("@xterm/headless")) as
+      | typeof import("@xterm/headless")
+      | { default: typeof import("@xterm/headless") };
+    const { Terminal } = "Terminal" in headlessNs ? headlessNs : headlessNs.default;
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    try {
+      await new Promise<void>((resolve) => term.write(new Uint8Array(replay), resolve));
+      const buf = term.buffer.active;
+      let row = -1;
+      for (let i = 0; i < buf.length; i++) {
+        // trimEnd: the patched serializer writes the padding as an inverse space.
+        if (buf.getLine(i)?.translateToString(true).trimEnd() === fill) row = i;
+      }
+      // Positive anchor: the inverse row replayed, and its content is inverse.
+      expect(row).toBeGreaterThanOrEqual(0);
+      expect(buf.getLine(row)?.getCell(0)?.isInverse()).not.toBe(0);
+      expect(buf.getLine(row)?.getCell(79)?.isInverse()).not.toBe(0);
+    } finally {
+      term.dispose();
+    }
+  }, 30_000);
+
+  // patches/@xterm__addon-serialize: an OSC 8 hyperlink used to come back as
+  // plain styled text after a reconnect, so a link an agent printed was no
+  // longer clickable.
+  it("restores OSC 8 hyperlinks in the replay", async () => {
+    const terminalId = "serialize-replay-osc8";
+
+    await runAndDisconnect(
+      terminalId,
+      `/bin/bash -c 'printf "\\033]8;;https://example.com/band\\033\\\\LINK""TEXT\\033]8;;\\033\\\\"'\r`,
+      "LINKTEXT",
+    );
+
+    const text = (await captureReplayFrame(terminalId)).toString();
+    // Positive anchor: the link text itself replayed.
+    expect(text).toContain("LINKTEXT");
+    // The OSC 8 opener, the text (SGR styling may sit on either side of it),
+    // then the closer.
+    expect(text).toMatch(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real OSC 8 and SGR sequences
+      /\x1b\]8;;https:\/\/example\.com\/band\x1b\\(?:\x1b\[[0-9;]*m)*LINKTEXT(?:\x1b\[[0-9;]*m)*\x1b\]8;;\x1b\\/,
+    );
+  }, 30_000);
 });
 
 // The pool strips color-disabling vars (NO_COLOR / FORCE_COLOR / CLICOLOR)
