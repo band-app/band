@@ -131,12 +131,19 @@ export function ChromeImportDialog({
   const handleOpenChange = (next: boolean) => {
     // Don't let a stray click close the dialog mid-import.
     if (!next && step.kind === "importing") return;
+    // Reset now, so reopening doesn't paint the last session for a frame.
+    if (!next) setStep({ kind: "loading" });
     onOpenChange(next);
   };
 
-  const historyAvailable = workspaceId !== null;
+  const profiles = step.kind === "form" || step.kind === "importing" ? step.profiles : null;
+  const busy = step.kind === "importing";
+  const chosen = profiles?.find((p) => p.directory === selection.profile);
+  const cookiesAvailable = chosen?.hasCookies ?? false;
+  const historyAvailable = workspaceId !== null && (chosen?.hasHistory ?? false);
+  const wantCookies = selection.cookies && cookiesAvailable;
   const wantHistory = selection.history && historyAvailable;
-  const canImport = step.kind === "form" && (selection.cookies || wantHistory);
+  const canImport = step.kind === "form" && (wantCookies || wantHistory);
 
   const runImport = async (profiles: ChromeProfile[]) => {
     const chrome = profiles.find((p) => p.directory === selection.profile);
@@ -148,7 +155,7 @@ export function ChromeImportDialog({
       const result = await importChromeProfile({
         profileId,
         chromeProfileDirectory: chrome.directory,
-        cookies: selection.cookies,
+        cookies: wantCookies,
         history: wantHistory,
       });
       let historyCount: number | null = null;
@@ -175,13 +182,10 @@ export function ChromeImportDialog({
       if (result.cookies) onImported(profileId);
     } catch (err) {
       // Don't leave imported cookies in a partition no profile points at.
-      if (selection.cookies) clearBrowserProfileData(profileId).catch(() => {});
+      if (wantCookies) clearBrowserProfileData(profileId).catch(() => {});
       setStep({ kind: "form", profiles, error: ipcErrorMessage(err) });
     }
   };
-
-  const profiles = step.kind === "form" || step.kind === "importing" ? step.profiles : null;
-  const busy = step.kind === "importing";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -246,8 +250,8 @@ export function ChromeImportDialog({
                 id="chrome-import-cookies"
                 icon={<Cookie className="size-4" />}
                 label="Cookies"
-                checked={selection.cookies}
-                disabled={busy}
+                checked={wantCookies}
+                disabled={busy || !cookiesAvailable}
                 onCheckedChange={(cookies) => setSelection((s) => ({ ...s, cookies }))}
               />
               <ImportToggle
@@ -260,7 +264,7 @@ export function ChromeImportDialog({
               />
             </div>
 
-            {selection.cookies ? (
+            {wantCookies ? (
               <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
                 <li>
                   Cookies go into a new browser profile, so sites you're signed in to in Chrome are

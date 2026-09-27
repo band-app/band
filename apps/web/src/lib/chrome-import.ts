@@ -12,6 +12,8 @@ import { invoke } from "./desktop-ipc";
 export interface ChromeProfile {
   directory: string;
   name: string;
+  hasCookies: boolean;
+  hasHistory: boolean;
 }
 
 export interface ChromeCookieSummary {

@@ -41,7 +41,20 @@ const importedUrlSchema = z
   .string()
   .min(1)
   .max(MAX_URL_LENGTH)
-  .refine((val) => /^https?:\/\//i.test(val), { message: "url must be a http(s) URL" });
+  .refine((val) => /^https?:\/\//i.test(val), { message: "url must be a http(s) URL" })
+  // `https://user:pass@host/` would put a credential into history, which
+  // every client (tunnel sessions, agents) can list.
+  .refine(
+    (val) => {
+      try {
+        const { username, password } = new URL(val);
+        return !username && !password;
+      } catch {
+        return false;
+      }
+    },
+    { message: "url must not carry credentials" },
+  );
 
 // Whitelist of URL schemes accepted for `faviconUrl`. The rendered
 // `<img src={faviconUrl}>` in `HistoryPopover` /

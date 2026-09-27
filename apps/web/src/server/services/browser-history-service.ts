@@ -67,6 +67,16 @@ const DEFAULT_ADAPTER: BrowserHistoryAdapter = {
   importVisits,
 };
 
+/** `<origin>/favicon.ico` for an http(s) URL, the guess `BrowserPanel` records too. */
+function guessFaviconUrl(url: string): string | null {
+  try {
+    const { protocol, origin } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? `${origin}/favicon.ico` : null;
+  } catch {
+    return null;
+  }
+}
+
 export class BrowserHistoryService {
   constructor(private readonly queries: BrowserHistoryAdapter = DEFAULT_ADAPTER) {}
 
@@ -94,8 +104,12 @@ export class BrowserHistoryService {
     return this.queries.clearHistory(workspaceId, range);
   }
 
-  importVisits(workspaceId: string, visits: ImportedVisit[]): number {
-    return this.queries.importVisits(workspaceId, visits);
+  /** Import visits from another browser, each with the favicon `BrowserPanel` would record. */
+  importVisits(workspaceId: string, visits: Omit<ImportedVisit, "faviconUrl">[]): number {
+    return this.queries.importVisits(
+      workspaceId,
+      visits.map((v) => ({ ...v, faviconUrl: guessFaviconUrl(v.url) })),
+    );
   }
 }
 

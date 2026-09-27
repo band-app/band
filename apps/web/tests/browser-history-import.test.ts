@@ -79,13 +79,36 @@ describe("history.import", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects entries that aren't http(s) URLs", async () => {
+  it("rejects the whole batch when an entry isn't a plain http(s) URL", async () => {
+    const valid = {
+      url: "https://valid.example.com/",
+      title: null,
+      visitCount: 1,
+      lastVisitedAt: 1_000,
+    };
+    for (const url of ["javascript:alert(1)", "https://user:pass@creds.example.com/"]) {
+      const res = await trpcMutate(server.url, "history.import", {
+        workspaceId: "ws-invalid",
+        entries: [valid, { ...valid, url }],
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(await listHistory(server.url, "ws-invalid")).toEqual([]);
+  });
+
+  it("rejects more than 5000 entries", async () => {
+    const entries = Array.from({ length: 5001 }, (_, i) => ({
+      url: `https://too-many-${i}.example.com/`,
+      title: null,
+      visitCount: 1,
+      lastVisitedAt: 1_000,
+    }));
     const res = await trpcMutate(server.url, "history.import", {
-      workspaceId: "ws-invalid",
-      entries: [{ url: "javascript:alert(1)", title: null, visitCount: 1, lastVisitedAt: 1_000 }],
+      workspaceId: "ws-too-many",
+      entries,
     });
     expect(res.status).toBe(400);
-    expect(await listHistory(server.url, "ws-invalid")).toEqual([]);
+    expect(await listHistory(server.url, "ws-too-many")).toEqual([]);
   });
 
   it("adds imported visits to the workspace's history, newest first", async () => {
@@ -126,21 +149,31 @@ describe("history.import", () => {
 
   it("merges into existing rows and is a no-op when repeated", async () => {
     const workspaceId = "ws-merge";
-    const recorded = await trpcMutate(server.url, "history.record", {
-      workspaceId,
-      url: "https://app.example.com/",
-      title: "Title recorded in Band",
-    });
-    expect(recorded.status).toBe(200);
-    const [before] = await listHistory(server.url, workspaceId);
-    expect(before?.visitCount).toBe(1);
+    for (const input of [
+      { workspaceId, url: "https://kept.example.com/", title: "Title recorded in Band" },
+      { workspaceId, url: "https://filled.example.com/" },
+    ]) {
+      const res = await trpcMutate(server.url, "history.record", input);
+      expect(res.status).toBe(200);
+    }
+    const before = await listHistory(server.url, workspaceId);
+    const recordedAt = (url: string) => before.find((e) => e.url === url)?.lastVisitedAt;
+    const futureVisit = Date.now() + 86_400_000;
 
     const visits = [
       {
-        url: "https://app.example.com/",
+        // Older than Band's visit, so Band's time and title stay.
+        url: "https://kept.example.com/",
         title: "Title from Chrome",
         visitCount: 12,
         lastVisitedAt: 1_600_000_000_000,
+      },
+      {
+        // Newer than Band's visit, and Band has no title for it.
+        url: "https://filled.example.com/",
+        title: "Title only Chrome knows",
+        visitCount: 4,
+        lastVisitedAt: futureVisit,
       },
     ];
     await importHistory(server.url, workspaceId, visits);
@@ -148,12 +181,18 @@ describe("history.import", () => {
 
     expect(await listHistory(server.url, workspaceId)).toEqual([
       {
-        url: "https://app.example.com/",
-        // Band's own title and newer visit time win; the larger count wins.
-        title: "Title recorded in Band",
+        url: "https://filled.example.com/",
+        title: "Title only Chrome knows",
         // Band recorded no favicon, so the import fills in the guessed one.
-        faviconUrl: "https://app.example.com/favicon.ico",
-        lastVisitedAt: before?.lastVisitedAt,
+        faviconUrl: "https://filled.example.com/favicon.ico",
+        lastVisitedAt: futureVisit,
+        visitCount: 4,
+      },
+      {
+        url: "https://kept.example.com/",
+        title: "Title recorded in Band",
+        faviconUrl: "https://kept.example.com/favicon.ico",
+        lastVisitedAt: recordedAt("https://kept.example.com/"),
         visitCount: 12,
       },
     ]);

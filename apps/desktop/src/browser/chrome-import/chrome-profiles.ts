@@ -19,6 +19,10 @@ export interface ChromeProfile {
   directory: string;
   /** Display name from `Local State`, e.g. `Work`. */
   name: string;
+  /** The profile has a cookie DB to import. */
+  hasCookies: boolean;
+  /** The profile has a history DB to import. */
+  hasHistory: boolean;
 }
 
 /** Chrome's user-data dir. Band only imports on macOS today. */
@@ -105,21 +109,20 @@ export async function listChromeProfiles(userDataDir: string): Promise<ChromePro
     // Missing or corrupt Local State still leaves the Default profile usable.
   }
 
-  const candidates: ChromeProfile[] = Object.entries(infoCache).map(([directory, info]) => ({
+  const candidates = Object.entries(infoCache).map(([directory, info]) => ({
     directory,
     name: typeof info?.name === "string" && info.name ? info.name : directory,
   }));
   if (candidates.length === 0) candidates.push({ directory: "Default", name: "Default" });
 
-  const importable = await Promise.all(
-    candidates.map(async (p) => {
-      if (!isSafeProfileDirectory(p.directory)) return false;
+  const profiles = await Promise.all(
+    candidates.map(async (p): Promise<ChromeProfile | null> => {
+      if (!isSafeProfileDirectory(p.directory)) return null;
       const profileDir = join(userDataDir, p.directory);
-      return (
-        (await resolveCookiesPath(profileDir)) !== null ||
-        (await resolveHistoryPath(profileDir)) !== null
-      );
+      const hasCookies = (await resolveCookiesPath(profileDir)) !== null;
+      const hasHistory = (await resolveHistoryPath(profileDir)) !== null;
+      return hasCookies || hasHistory ? { ...p, hasCookies, hasHistory } : null;
     }),
   );
-  return candidates.filter((_, i) => importable[i]);
+  return profiles.filter((p) => p !== null);
 }

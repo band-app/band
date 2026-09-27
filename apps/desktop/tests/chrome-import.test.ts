@@ -199,9 +199,9 @@ describe("Chrome cookie import", () => {
 
   it("lists only profiles with a cookie or history DB and a safe directory name", async () => {
     assert.deepEqual(await listChromeProfiles(userDataDir), [
-      { directory: "Default", name: "Personal" },
-      { directory: "Profile 1", name: "Work" },
-      { directory: "Profile 3", name: "History only" },
+      { directory: "Default", name: "Personal", hasCookies: true, hasHistory: false },
+      { directory: "Profile 1", name: "Work", hasCookies: true, hasHistory: false },
+      { directory: "Profile 3", name: "History only", hasCookies: false, hasHistory: true },
     ]);
   });
 
@@ -313,7 +313,7 @@ describe("Chrome history import", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("reads visible http(s) URLs, newest first", async () => {
+  it("reads visible http(s) URLs without credentials, newest first", async () => {
     const path = join(dir, "History");
     writeHistoryDb(path, [
       {
@@ -333,6 +333,13 @@ describe("Chrome history import", () => {
       { url: "chrome://settings/", lastVisit: chromeTime(1_700_000_900) },
       { url: "file:///Users/someone/notes.txt", lastVisit: chromeTime(1_700_000_900) },
       { url: "https://never-visited.example/", lastVisit: 0n },
+      {
+        url: "https://typed-only.example/",
+        title: "Typed",
+        visitCount: 0,
+        lastVisit: chromeTime(1_700_000_050),
+      },
+      { url: "https://user:pass@creds.example/", lastVisit: chromeTime(1_700_000_900) },
       { url: `https://long.example/${"a".repeat(2100)}`, lastVisit: chromeTime(1_700_000_900) },
       {
         url: "https://long-title.example/",
@@ -353,6 +360,13 @@ describe("Chrome history import", () => {
         title: null,
         visitCount: 1,
         lastVisitedAt: 1_700_000_100_000,
+      },
+      {
+        // Chrome counts 0 visits for a URL typed but never loaded.
+        url: "https://typed-only.example/",
+        title: "Typed",
+        visitCount: 1,
+        lastVisitedAt: 1_700_000_050_000,
       },
       {
         url: "https://older.example/",

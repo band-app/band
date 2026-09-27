@@ -26,6 +26,15 @@ export const HISTORY_IMPORT_LIMIT = 5000;
 const MAX_URL_LENGTH = 2048;
 const MAX_TITLE_LENGTH = 1024;
 
+function hasCredentials(url: string): boolean {
+  try {
+    const { username, password } = new URL(url);
+    return Boolean(username || password);
+  } catch {
+    return true;
+  }
+}
+
 interface UrlRow {
   url: string;
   title: string | null;
@@ -36,7 +45,8 @@ interface UrlRow {
 /**
  * Return the profile's most recently visited http(s) URLs, newest first.
  * Hidden rows (subframe navigations Chrome keeps out of its own history
- * page) are skipped.
+ * page) are skipped, and so are URLs with a username or password in them,
+ * which the server refuses to store.
  */
 export async function readChromeHistory(
   historyPath: string,
@@ -59,12 +69,14 @@ export async function readChromeHistory(
 
   const entries: ChromeHistoryEntry[] = [];
   for (const row of rows) {
+    if (hasCredentials(row.url)) continue;
     const lastVisitSeconds = chromeTimeToUnixSeconds(row.last_visit_time);
     if (lastVisitSeconds === 0) continue;
     const title = row.title ? row.title.slice(0, MAX_TITLE_LENGTH) : null;
     entries.push({
       url: row.url,
       title,
+      // Typed-but-never-loaded URLs have a count of 0; the server wants 1+.
       visitCount: Math.max(1, Number(row.visit_count)),
       lastVisitedAt: lastVisitSeconds * 1000,
     });
