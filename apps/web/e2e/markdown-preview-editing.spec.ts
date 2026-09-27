@@ -52,6 +52,8 @@ const ORIGINAL = [
   "",
 ].join("\n");
 
+const MERMAID = "graph TD\n  A-->B";
+
 // A 1x1 PNG, so the image test can check the image actually loaded.
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -74,6 +76,7 @@ test.beforeAll(async () => {
     join(repo, "FIND.md"),
     "# Find\n\nOne needle here.\n\n| col |\n| --- |\n| needle cell |\n\n",
   );
+  writeFileSync(join(repo, "DIAGRAM.md"), `# Diagram\n\n\`\`\`mermaid\n${MERMAID}\n\`\`\`\n`);
   mkdirSync(join(repo, "assets"));
   mkdirSync(join(repo, "docs"));
   writeFileSync(join(repo, "assets", "logo.png"), PNG_1X1);
@@ -202,4 +205,40 @@ test("relative images load from the workspace and cannot climb out of it", async
   await expect.poll(() => viewer.previewImageNaturalWidth("logo")).toBe(1);
   // An encoded `..` that climbs above the workspace root is not turned into a URL.
   await expect(viewer.previewImage("escape")).toHaveCount(0);
+});
+
+test.describe("rendered block controls", () => {
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+
+  test("copy, download and fullscreen on a rendered block run without revealing its source", async ({
+    page,
+  }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const viewer = new FileViewerPage(page);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+    await workspacePage.openFileLeaf("DIAGRAM.md");
+    await expect(viewer.previewHeading(1, "Diagram")).toBeVisible({ timeout: 20_000 });
+    const diagram = viewer.previewRenderedBlock("mermaid");
+    await expect(viewer.previewBlockControl("mermaid", "Copy Code")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    await viewer.clickPreviewBlockControl("mermaid", "Copy Code");
+    // Streamdown copies the fence body, final newline included.
+    await expect.poll(() => viewer.readClipboard()).toBe(`${MERMAID}\n`);
+    await expect(diagram).toBeVisible();
+    await expect(viewer.markdownPreview).not.toContainText("```mermaid");
+
+    const download = await viewer.downloadMermaidSource();
+    expect(download.suggestedFilename()).toMatch(/\.mmd$/);
+    await expect(diagram).toBeVisible();
+
+    await viewer.clickPreviewBlockControl("mermaid", "View fullscreen");
+    await expect(viewer.fullscreenExitButton).toBeVisible();
+    await viewer.exitFullscreen();
+    await expect(viewer.fullscreenExitButton).toHaveCount(0);
+    await expect(diagram).toBeVisible();
+    await expect(viewer.markdownPreview).not.toContainText("```mermaid");
+  });
 });

@@ -4,9 +4,10 @@
  * The markdown source stays the CodeMirror document. Formatting is painted on
  * top of it with decorations: heading lines get heading styles, the `**` /
  * `_` / backtick / `#` / `>` markers are hidden, bullets become `•`, task
- * markers become checkboxes, and tables, frontmatter and mermaid fences are
- * swapped for a rendered block. Wherever the selection touches a construct,
- * its raw markers come back so the user can edit them.
+ * markers become checkboxes, mermaid fences are swapped for a rendered block,
+ * and tables and frontmatter for an editable grid (`markdown-table-widget.ts`).
+ * Wherever the selection touches a construct, its raw markers come back so
+ * the user can edit them.
  *
  * Because the document is the file's text, saving writes back exactly what is
  * in the buffer: nothing is re-serialised, so parts of the file the user did
@@ -52,6 +53,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { loadLanguage } from "./codemirror-setup";
+import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
 
 /** Blocks the live preview swaps for a rendered version while the cursor is elsewhere. */
 export type RenderedBlockKind = "table" | "frontmatter" | "mermaid";
@@ -67,7 +69,10 @@ export type RenderMarkdownBlock = (
 ) => () => void;
 
 export interface MarkdownLivePreviewOptions {
-  /** Renders tables, frontmatter and mermaid fences. Without it they stay as source. */
+  /**
+   * Renders mermaid fences. Without it tables, frontmatter and mermaid fences
+   * all stay as source; with it tables and frontmatter become editable grids.
+   */
   renderBlock?: RenderMarkdownBlock;
   /** Maps an image `src` from the document to a loadable URL (relative paths). */
   resolveImageUrl?: (src: string) => string | undefined;
@@ -252,6 +257,9 @@ class ImageWidget extends WidgetType {
 
 const blockCleanups = new WeakMap<HTMLElement, () => void>();
 
+/** Elements inside a rendered block that handle their own clicks. */
+const BLOCK_CONTROLS = "a, button, input, select, textarea, [role='button'], [role='menuitem']";
+
 class RenderedBlockWidget extends WidgetType {
   constructor(
     readonly kind: RenderedBlockKind,
@@ -268,8 +276,11 @@ class RenderedBlockWidget extends WidgetType {
     el.className = `cm-md-block cm-md-block--${this.kind}`;
     el.dataset.testid = `markdown-preview__block--${this.kind}`;
     // Clicking a rendered block puts the cursor in it, which reveals its source.
+    // Links and the block's own controls (Streamdown's copy, download and
+    // fullscreen buttons and the download menu) keep the click: revealing the
+    // source would destroy the button before its click handler runs.
     el.addEventListener("mousedown", (e) => {
-      if ((e.target as HTMLElement).closest("a")) return;
+      if ((e.target as HTMLElement).closest(BLOCK_CONTROLS)) return;
       e.preventDefault();
       view.dispatch({ selection: { anchor: view.posAtDOM(el) } });
       view.focus();
@@ -320,22 +331,28 @@ interface RenderedBlocksState {
   blocks: Array<{ from: number; to: number; rendered: boolean }>;
 }
 
+interface RenderedBlocksOptions {
+  render: RenderMarkdownBlock;
+  onSave?: () => void;
+}
+
 function buildBlockDecorations(
   state: EditorState,
-  render: RenderMarkdownBlock,
+  { render, onSave }: RenderedBlocksOptions,
 ): RenderedBlocksState {
   const decos: Range<Decoration>[] = [];
   const blocks: RenderedBlocksState["blocks"] = [];
-  const addBlock = (kind: RenderedBlockKind, from: number, to: number) => {
+  const addBlock = (kind: RenderedBlockKind, from: number, to: number, node?: SyntaxNode) => {
     const rendered = isBlockRendered(state, from, to);
     blocks.push({ from, to, rendered });
     if (!rendered) return;
-    decos.push(
-      Decoration.replace({
-        widget: new RenderedBlockWidget(kind, state.doc.sliceString(from, to), render),
-        block: true,
-      }).range(from, to),
-    );
+    const widget =
+      kind === "table" && node
+        ? tableWidget(state, node, from, to, { onSave })
+        : kind === "frontmatter"
+          ? frontmatterWidget(state, from, to, { onSave })
+          : new RenderedBlockWidget(kind, state.doc.sliceString(from, to), render);
+    decos.push(Decoration.replace({ widget, block: true }).range(from, to));
   };
   const fm = state.field(frontmatterField);
   if (fm) addBlock("frontmatter", fm.from, fm.to);
@@ -344,7 +361,7 @@ function buildBlockDecorations(
       if (inFrontmatter(state, node.name, node.to)) return false;
       const kind = renderedBlockKind(state, node.name, node.from);
       if (kind) {
-        addBlock(kind, node.from, state.doc.lineAt(node.to).to);
+        addBlock(kind, node.from, state.doc.lineAt(node.to).to, node.node);
         return false;
       }
       // Tables and fences never sit inside inline content.
@@ -354,12 +371,12 @@ function buildBlockDecorations(
   return { decorations: Decoration.set(decos, true), blocks };
 }
 
-function renderedBlocks(render: RenderMarkdownBlock): Extension {
+function renderedBlocks(opts: RenderedBlocksOptions): Extension {
   return StateField.define<RenderedBlocksState>({
-    create: (state) => buildBlockDecorations(state, render),
+    create: (state) => buildBlockDecorations(state, opts),
     update(value, tr) {
       if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
-        return buildBlockDecorations(tr.state, render);
+        return buildBlockDecorations(tr.state, opts);
       }
       if (!tr.selection && !tr.effects.some((e) => e.is(setFocused))) return value;
       // A cursor move only matters when it enters or leaves a block, so skip
@@ -367,7 +384,7 @@ function renderedBlocks(render: RenderMarkdownBlock): Extension {
       const changed = value.blocks.some(
         (b) => isBlockRendered(tr.state, b.from, b.to) !== b.rendered,
       );
-      return changed ? buildBlockDecorations(tr.state, render) : value;
+      return changed ? buildBlockDecorations(tr.state, opts) : value;
     },
     provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
   });
@@ -761,6 +778,153 @@ function livePreviewTheme(isDark: boolean): Extension {
       },
       ".cm-md-image": { maxWidth: "100%" },
       ".cm-md-block": { padding: "0.4em 0", cursor: "text" },
+
+      ".cm-md-grid": {
+        position: "relative",
+        margin: "0.5em 0",
+        padding: "0",
+        border: `1px solid ${border}`,
+        borderRadius: "8px",
+      },
+      ".cm-md-table-toolbar": {
+        display: "flex",
+        justifyContent: "flex-end",
+        gap: "2px",
+        padding: "4px 6px 0",
+      },
+      ".cm-md-table-tool": {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "24px",
+        height: "24px",
+        padding: "0",
+        border: "none",
+        borderRadius: "4px",
+        background: "none",
+        color: muted,
+        cursor: "pointer",
+      },
+      ".cm-md-table-tool:hover, .cm-md-table-tool:focus-visible": {
+        color: "var(--foreground)",
+        backgroundColor: "var(--accent)",
+        outline: "none",
+      },
+      // Room around the table for the row / column grips and the "+" bars.
+      ".cm-md-table-scroll": { overflowX: "auto", padding: "8px 22px 22px 20px" },
+      ".cm-md-table-frame": { position: "relative", display: "inline-block", minWidth: "40%" },
+      ".cm-md-table": { borderCollapse: "collapse", width: "100%", fontSize: "0.95em" },
+      ".cm-md-table th, .cm-md-table td": {
+        position: "relative",
+        border: `1px solid ${border}`,
+        padding: "0",
+        verticalAlign: "top",
+        minWidth: "4em",
+      },
+      ".cm-md-table th": { fontWeight: "600", backgroundColor: codeBg },
+      ".cm-md-table-cell": {
+        padding: "0.35em 0.7em",
+        minHeight: "1.65em",
+        outline: "none",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        cursor: "text",
+      },
+      ".cm-md-table-cell[data-editing=true]": {
+        boxShadow: "inset 0 0 0 2px var(--ring)",
+        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontSize: "0.92em",
+      },
+      ".cm-md-table-cell[aria-invalid=true]": { boxShadow: "inset 0 0 0 2px #e5484d" },
+      ".cm-md-table-strong": { fontWeight: "700" },
+      ".cm-md-table-em": { fontStyle: "italic" },
+      ".cm-md-table-del": { textDecoration: "line-through" },
+      ".cm-md-table-code": {
+        fontFamily: "var(--font-mono, ui-monospace, monospace)",
+        fontSize: "0.9em",
+        backgroundColor: codeBg,
+        borderRadius: "4px",
+        padding: "0.1em 0.3em",
+      },
+      ".cm-md-table-grip, .cm-md-table-add": {
+        position: "absolute",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "0",
+        border: `1px solid ${border}`,
+        borderRadius: "4px",
+        backgroundColor: "var(--background)",
+        color: muted,
+        fontSize: "12px",
+        lineHeight: "1",
+        cursor: "pointer",
+        opacity: "0",
+        transition: "opacity 120ms ease-out",
+      },
+      ".cm-md-table-grip:hover, .cm-md-table-add:hover": {
+        color: "var(--foreground)",
+        backgroundColor: "var(--accent)",
+      },
+      ".cm-md-table-grip--col": {
+        top: "-11px",
+        left: "50%",
+        width: "22px",
+        height: "14px",
+        transform: "translateX(-50%)",
+      },
+      ".cm-md-table-grip--row": {
+        left: "-19px",
+        top: "50%",
+        width: "14px",
+        height: "22px",
+        transform: "translateY(-50%)",
+      },
+      ".cm-md-table-add--col": { top: "0", bottom: "0", right: "-19px", width: "14px" },
+      ".cm-md-table-add--row": { left: "0", right: "0", bottom: "-19px", height: "14px" },
+      // Grips show for the hovered header / row and for the cell being edited;
+      // the "+" bars show while the pointer is over the table.
+      "th:hover > .cm-md-table-grip--col, th:focus-within > .cm-md-table-grip--col, tr:hover > td > .cm-md-table-grip--row, tr:focus-within > td > .cm-md-table-grip--row, .cm-md-table-frame:hover > .cm-md-table-add, .cm-md-table-grip:focus-visible, .cm-md-table-add:focus-visible":
+        { opacity: "1" },
+      ".cm-md-table-menu": {
+        position: "absolute",
+        zIndex: "50",
+        minWidth: "11rem",
+        padding: "4px",
+        display: "flex",
+        flexDirection: "column",
+        border: "1px solid var(--border)",
+        borderRadius: "6px",
+        backgroundColor: "var(--popover)",
+        color: "var(--popover-foreground)",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+        fontSize: "13px",
+      },
+      ".cm-md-table-menu-item": {
+        textAlign: "left",
+        padding: "5px 8px 5px 24px",
+        border: "none",
+        borderRadius: "4px",
+        background: "none",
+        color: "inherit",
+        cursor: "pointer",
+        position: "relative",
+      },
+      ".cm-md-table-menu-item:hover, .cm-md-table-menu-item:focus-visible": {
+        backgroundColor: "var(--accent)",
+        outline: "none",
+      },
+      ".cm-md-table-menu-item:disabled": { opacity: "0.45", cursor: "default" },
+      ".cm-md-table-menu-item[aria-checked=true]::before": {
+        content: '"✓"',
+        position: "absolute",
+        left: "8px",
+      },
+      ".cm-md-table-menu-separator": {
+        height: "1px",
+        margin: "4px 0",
+        backgroundColor: "var(--border)",
+      },
     },
     { dark: isDark },
   );
@@ -825,7 +989,9 @@ export function markdownLivePreviewExtensions(opts: MarkdownLivePreviewOptions):
     markdown({ base: markdownLanguage, codeLanguages }),
     syntaxHighlighting(codeHighlightStyle(opts.isDark)),
     inlineDecorations({ renderBlocks: !!opts.renderBlock, resolveImageUrl: opts.resolveImageUrl }),
-    ...(opts.renderBlock ? [renderedBlocks(opts.renderBlock)] : []),
+    ...(opts.renderBlock
+      ? [renderedBlocks({ render: opts.renderBlock, onSave: opts.onSave })]
+      : []),
     livePreviewTheme(opts.isDark),
     keymap.of([
       ...(opts.onSave
