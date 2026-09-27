@@ -296,10 +296,15 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
 
   const setConfigOption = useCallback(
     async (configId: string, value: string) => {
-      const { state: next } = await trpc.chats.setConfigOption.mutate({ chatId, configId, value });
+      const { state: next } = await trpc.chats.setConfigOption.mutate({
+        chatId,
+        configId,
+        value,
+        workspaceId,
+      });
       dispatch({ type: "session-state", state: next as SessionState, eventId: -1 });
     },
-    [chatId],
+    [chatId, workspaceId],
   );
 
   // Scroll-back pagination: fetch the turns before the oldest loaded event,

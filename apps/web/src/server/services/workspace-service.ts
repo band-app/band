@@ -19,7 +19,6 @@ import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { formatShellCommand } from "./_utils/format-shell-command";
-import { clearQueuedMessages } from "./_utils/queued-message-store";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
 // `workspaceService` directly from this file (the `services/workspace.ts`
 // shim that used to broker this hop was deleted in the #535 cleanup).
@@ -47,7 +46,6 @@ import {
   loadState,
   type ProjectState,
   saveState,
-  upsertWorkspaceStatus,
   type WorktreeState,
   worktreesDir,
 } from "./state";
@@ -1198,58 +1196,6 @@ export class WorkspaceService {
       body,
       agentLabel: agentDef.label,
     };
-  }
-
-  /**
-   * Switch the coding agent backing a chat pane to a different agent type
-   * (e.g. claude-code → codex). Aborts any running task, clears queued
-   * messages, replaces the pooled agent, updates the chat record, and
-   * re-emits the workspace status so the UI reflects the new agent.
-   *
-   * If `chatId` is omitted, the workspace's default chat pane is used.
-   */
-  async switchAgent(input: {
-    workspaceId: string;
-    agentId: string;
-    chatId?: string;
-  }): Promise<{ ok: true }> {
-    const workspace = this.resolve(input.workspaceId);
-    if (!workspace) {
-      throw new WorkspaceNotFoundError(input.workspaceId);
-    }
-
-    // Resolve the chat pane (use provided chatId or default)
-    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
-
-    // Abort any running task and clear queued messages so the new agent
-    // starts with a clean slate.
-    taskService.abortTask(chatId);
-    clearQueuedMessages(chatId);
-
-    // Stop the old agent's process. A session belongs to the agent that
-    // created it, so the chat starts a new one with the new agent.
-    agentSessionService.stop(chatId);
-    chatService.update(chatId, { agent: input.agentId, model: null, mode: null });
-    chatService.updateActiveSession(chatId, undefined);
-
-    // Update workspace status with the new coding agent ID. The upsert
-    // returns the final row state (project/branch/worktreePath + the
-    // agent merge), so we can `emit` it directly without a second
-    // SELECT round-trip — same pattern as
-    // `task-service.ts::abortTask` / `cancelTask`.
-    //
-    // This emit deliberately *supersedes* the abort event fired earlier
-    // from inside `abortTask` (when a task was running). The earlier
-    // event lacked the new `codingAgentId`; this one is authoritative.
-    // Do not eliminate as redundant — the abort emit happens before the
-    // agent switch and carries the old agent id.
-    const status = upsertWorkspaceStatus(input.workspaceId, {
-      status: "waiting",
-      codingAgentId: input.agentId,
-    });
-    emit({ kind: "update", status });
-
-    return { ok: true };
   }
 
   /**

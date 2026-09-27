@@ -167,6 +167,9 @@ test.describe("Panel visibility context (issue #469)", () => {
 
     await workspacePage.goto(WORKSPACE_A);
     await workspacePage.waitForReady();
+    // Open a terminal of our own so the test doesn't depend on what the
+    // restored layout contains (a saved chat replaces the terminal default).
+    await workspacePage.clickTerminalAddTab(WORKSPACE_A);
 
     // Activate the outer Terminal tab. The default layout starts with
     // Changes as the active tab in the right group; clicking Terminal
@@ -184,6 +187,8 @@ test.describe("Panel visibility context (issue #469)", () => {
     // workspaces), so both A's and B's terminal containers stay
     // mounted simultaneously.
     await workspacePage.switchWorkspace(WORKSPACE_B);
+    // Same for B.
+    await workspacePage.clickTerminalAddTab(WORKSPACE_B);
 
     // Positive anchor on B before asserting A is hidden.
     await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_B, true)).toBeVisible();

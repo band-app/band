@@ -108,8 +108,9 @@ test.beforeAll(async () => {
     codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
   });
 
-  // Option names as long as real agents report them, plus a third picker, so
-  // the composer toolbar has more to show than a phone screen fits.
+  // Option names as long as real agents report them, including a long effort
+  // name in the model menu trigger, so the composer toolbar has more to show
+  // than a phone screen fits.
   server = await startServer({
     tmpHome,
     env: acpStubEnv(tmpHome, {
@@ -409,19 +410,14 @@ for (const viewport of NARROW_SCREENS) {
       await chat.submit();
       await expect(chat.assistantMessage("Plan ready.")).toBeVisible();
       await expect(layout.taskListEntries).toHaveCount(2);
-      await expect(layout.configOptionMenu("effort")).toBeVisible();
+      await expect(layout.modelMenu).toContainText("Extra high reasoning effort");
 
       const composer = await layout.readLayout(layout.composer);
       expect(composer.left).toBeGreaterThanOrEqual(0);
       expect(composer.right).toBeLessThanOrEqual(viewport.width);
       expect(composer.horizontalOverflow).toBe(0);
 
-      const controls = [
-        layout.modelMenu,
-        layout.modeMenu,
-        layout.configOptionMenu("effort"),
-        layout.submitButton,
-      ];
+      const controls = [layout.modelMenu, layout.modeMenu, layout.submitButton];
       for (const control of controls) {
         const box = await layout.readLayout(control);
         expect(box.left).toBeGreaterThanOrEqual(composer.left);

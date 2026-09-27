@@ -1321,11 +1321,28 @@ export class WorkspacePage {
     // The menu is portalled to <body>, and with several workspaces cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
-    await this.page
-      .getByTestId(`workspace-center__new-tab--${kind}`)
+    if (kind !== "chat") {
+      await this.page
+        .getByTestId(`workspace-center__new-tab--${kind}`)
+        .filter({ visible: true })
+        .first()
+        .click();
+      return;
+    }
+    // One configured agent: a plain "New Chat" item. Several: a submenu with
+    // the default agent first.
+    const item = this.page
+      .getByTestId(/^workspace-center__new-tab--chat(-agents)?$/)
       .filter({ visible: true })
-      .first()
-      .click();
+      .first();
+    await item.click();
+    if ((await item.getAttribute("data-testid"))?.endsWith("-agents")) {
+      await this.page
+        .getByTestId("workspace-center__new-chat-agent-menu")
+        .getByTestId(/^workspace-center__new-chat-agent--/)
+        .first()
+        .click();
+    }
   }
 
   /** The visible "+" new-tab menu button for a workspace's chat host.

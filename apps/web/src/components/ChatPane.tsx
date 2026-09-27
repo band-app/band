@@ -4,9 +4,9 @@ import { consumeChatFresh } from "../lib/leaf-instance-ids";
 import { trpc } from "../lib/trpc-client";
 import { ChatView } from "./ChatView";
 
-// Query keys — kept in one place so the agent-switch handler can invalidate
-// the chats.get cache after a successful switch and refetches honour the
-// shared placeholderData policy.
+// Query keys — kept in one place so the session-switch handler can
+// invalidate the chats.get cache and refetches honour the shared
+// placeholderData policy.
 const settingsKey = () => ["settings.get"] as const;
 const chatKey = (chatId: string) => ["chats.get", chatId] as const;
 
@@ -46,9 +46,7 @@ export interface ChatPaneState {
   onSwitchSession: (sessionId: string | undefined, summary?: string) => Promise<void>;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
-  /** Switch to a different coding agent — triggers chat reload. */
-  onSwitchAgent: (agentId: string) => void;
-  /** Key that increments on agent switch / session switch to force ChatView remount. */
+  /** Key that increments on session switch to force ChatView remount. */
   paneKey: number;
 }
 
@@ -67,7 +65,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   // Check once at mount whether this is a freshly-split pane.
   const isFreshRef = useRef(consumeChatFresh(chatId));
   // One-shot guards. These prevent background refetches from clobbering
-  // user-driven state (session switches, agent switches) after the initial
+  // user-driven state (session switches) after the initial
   // hydration has already happened for this pane.
   const sessionInitRef = useRef(isFreshRef.current);
   const agentInitRef = useRef(false);
@@ -117,8 +115,8 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
 
   // --- Agent config: derived from settings + chat record ---
   // Runs on first arrival and on chatId change. Subsequent background
-  // refetches don't reapply because agentInitRef gates re-init; user-driven
-  // switches via onSwitchAgent invalidate the cache and reset the ref.
+  // refetches don't reapply because agentInitRef gates re-init. A chat's
+  // agent is fixed once it is created.
   useEffect(() => {
     const settings = settingsQuery.data;
     const chatResult = chatQuery.data;
@@ -238,31 +236,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     [workspaceId, chatId, queryClient],
   );
 
-  // Switch to a different coding agent — calls server, updates local state, increments paneKey.
-  const onSwitchAgent = useCallback(
-    (agentId: string) => {
-      if (agentId === codingAgentId) return;
-      trpc.workspace.switchAgent
-        .mutate({ workspaceId, agentId, chatId })
-        .then(() => {
-          setCodingAgentId(agentId);
-          const found = agents.find((a) => a.id === agentId);
-          if (found) {
-            setAgentType(found.type);
-            setAgentLabel(found.label);
-          }
-          setPaneKey((k) => k + 1);
-          // Server-side chat record now references a new agent — invalidate
-          // the cached chats.get so the next read reflects it.
-          queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
-        })
-        .catch((err) => {
-          console.error("[ChatPane] error switching agent:", err);
-        });
-    },
-    [workspaceId, chatId, codingAgentId, agents, queryClient],
-  );
-
   return {
     initialSessionId,
     sessionQueryDone,
@@ -277,7 +250,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     onSessionDiscovered,
     onSwitchSession,
     activeSessionSummary,
-    onSwitchAgent,
     paneKey,
   };
 }
@@ -311,7 +283,6 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
         onSwitchSession={state.onSwitchSession}
         agentType={state.agentType}
         codingAgentId={state.codingAgentId}
-        onSwitchAgent={state.onSwitchAgent}
         visible={visible}
         wsActive={wsActive}
       />

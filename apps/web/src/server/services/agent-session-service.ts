@@ -872,14 +872,16 @@ export class AgentSessionService {
 
   /**
    * Changes a session setting. Saved on the chat row (model and mode, so a
-   * later session starts with it) and applied to the live session, if any.
+   * later session starts with it) and applied to the agent's session. A
+   * chat with no live session gets one first (a new chat starts it, an idle
+   * one reattaches), except for a mode change: only the agent keeps options
+   * like effort and fast mode, and it reshapes the option list when the
+   * model changes (fast mode only exists on some models).
    */
   async setConfigOption(chatId: string, configId: string, value: string): Promise<SessionState> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const rt = runtimes.get(chatId);
-    const state = this.getSessionState(chatId);
-    const option = state.configOptions.find((o) => o.id === configId);
+    const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
     const category =
       option?.category === "model" || configId === "model"
         ? "model"
@@ -893,8 +895,23 @@ export class AgentSessionService {
     if (category === "model") chatService.update(chatId, { model: value });
     if (category === "mode") chatService.update(chatId, { mode: value });
 
+    const live = runtimes.get(chatId);
+    const attached =
+      live?.process?.alive && live.sessionId && live.sessionId === chat.activeSessionId;
+    if (!attached && category !== "mode") {
+      try {
+        await this.ensureSession(chatId, "prompt");
+      } catch (err) {
+        // A saved model choice still applies when the session starts.
+        if (category !== "model") throw err;
+        log.warn({ chatId, err }, "could not start a session to apply the model");
+      }
+    }
+    const rt = runtimes.get(chatId);
+
     const proc = rt?.process;
-    if (rt && proc?.alive && rt.sessionId && rt.sessionId === chat.activeSessionId) {
+    const activeSessionId = chatService.get(chatId)?.activeSessionId;
+    if (rt && proc?.alive && rt.sessionId && rt.sessionId === activeSessionId) {
       if (configId === "__legacy_model") {
         await proc.setModel(rt.sessionId, value);
         if (rt.live.models) rt.live.models = { ...rt.live.models, currentModelId: value };

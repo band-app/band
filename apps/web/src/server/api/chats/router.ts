@@ -90,8 +90,20 @@ export const chatsRouter = t.router({
    * config options (Gemini CLI, Cursor CLI).
    */
   setConfigOption: publicProcedure
-    .input(z.object({ chatId: z.string(), configId: z.string(), value: z.string() }))
+    .input(
+      z.object({
+        chatId: z.string(),
+        configId: z.string(),
+        value: z.string(),
+        // Lets a new pane's first settings change create its chat record,
+        // like its first message does.
+        workspaceId: z.string().optional(),
+      }),
+    )
     .mutation(async ({ input }) => {
+      if (input.workspaceId && !chatService.get(input.chatId)) {
+        chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+      }
       try {
         return {
           state: await agentSessionService.setConfigOption(

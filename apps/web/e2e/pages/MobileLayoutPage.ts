@@ -127,11 +127,6 @@ export class MobileLayoutPage {
     });
   }
 
-  /** A config-option picker in the composer toolbar, e.g. reasoning effort. */
-  configOptionMenu(optionId: string): Locator {
-    return this.page.getByTestId(`chat-pane__config-option--${optionId}`).filter({ visible: true });
-  }
-
   /** Measure an element once every running animation (sheet slide-ins) has
    *  settled, so the box is the resting position. */
   async readLayout(locator: Locator): Promise<LayoutBox> {

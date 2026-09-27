@@ -13,6 +13,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -1688,7 +1693,9 @@ function DiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafPar
 // ---------------------------------------------------------------------------
 
 interface LeafActions {
-  onAdd: (kind: LeafKind, groupId?: string) => void;
+  /** `agentId` picks the coding agent for a new chat; without it the chat
+   *  uses the default agent. */
+  onAdd: (kind: LeafKind, groupId?: string, agentId?: string) => void;
   onSplit: (kind: LeafKind, groupId: string, direction: "right" | "below") => void;
   onClose: (id: string, kind: LeafKind) => void;
   openFile: (
@@ -2326,7 +2333,26 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
 });
 
 function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
-  const add = (kind: LeafKind) => leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId);
+  const add = (kind: LeafKind, agentId?: string) =>
+    leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId, agentId);
+  const [agents, setAgents] = useState<CodingAgentDef[]>([]);
+  const [defaultAgentId, setDefaultAgentId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    getSharedSettings().then((settings) => {
+      if (cancelled) return;
+      const s = settings as Record<string, unknown> | null;
+      setAgents(Array.isArray(s?.codingAgents) ? (s.codingAgents as CodingAgentDef[]) : []);
+      setDefaultAgentId(s?.defaultCodingAgent as string | undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Default agent first.
+  const sortedAgents = [...agents].sort(
+    (a, b) => Number(b.id === defaultAgentId) - Number(a.id === defaultAgentId),
+  );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2344,10 +2370,41 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
           <TerminalIcon className="size-4" />
           New Terminal
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => add("chat")} data-testid="workspace-center__new-tab--chat">
-          <MessageSquare className="size-4" />
-          New Chat
-        </DropdownMenuItem>
+        {sortedAgents.length > 1 ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger data-testid="workspace-center__new-tab--chat-agents">
+              <MessageSquare className="size-4" />
+              New Chat
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent data-testid="workspace-center__new-chat-agent-menu">
+                {sortedAgents.map((agent) => (
+                  <DropdownMenuItem
+                    key={agent.id}
+                    onClick={() => add("chat", agent.id)}
+                    data-testid={`workspace-center__new-chat-agent--${agent.id}`}
+                  >
+                    <AgentIcon type={agent.type} className="size-4" />
+                    {agent.label}
+                    {agent.id === defaultAgentId && (
+                      <DropdownMenuShortcut className="tracking-normal">
+                        Default
+                      </DropdownMenuShortcut>
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
+        ) : (
+          <DropdownMenuItem
+            onClick={() => add("chat")}
+            data-testid="workspace-center__new-tab--chat"
+          >
+            <MessageSquare className="size-4" />
+            New Chat
+          </DropdownMenuItem>
+        )}
         {isDesktop && (
           <DropdownMenuItem
             onClick={() => add("browser")}
@@ -2389,6 +2446,11 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 // ---------------------------------------------------------------------------
 
 type AddPanelOptions = Parameters<DockviewApi["addPanel"]>[0];
+
+/** Chats this window is creating with a picked agent. Their leaf opens once
+ *  `chats.create` returns, in the group whose "+" was used, so the live-sync
+ *  handler ignores their `chat-created` event. */
+const creatingChats = new Set<string>();
 
 function addChatLeaf(
   api: DockviewApi,
@@ -2630,7 +2692,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
 
   // ---- add / split / close ----
   const handleAdd = useCallback(
-    (kind: LeafKind, groupId?: string) => {
+    (kind: LeafKind, groupId?: string, agentId?: string) => {
       const api = apiRef.current;
       if (!api) return;
       const position = groupId ? { referenceGroup: groupId } : undefined;
@@ -2643,7 +2705,26 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       } else if (kind === "chat") {
         const id = newChatId();
         markChatFresh(id);
-        addChatLeaf(api, workspaceId, id, position);
+        if (!agentId) {
+          addChatLeaf(api, workspaceId, id, position);
+          return;
+        }
+        // A chat keeps the agent it starts with, so create its row with the
+        // chosen agent before the pane mounts and reads it. The live-sync
+        // handler skips the `chat-created` echo so the leaf opens in this
+        // group. On failure no pane opens: it would fall back to the
+        // default agent.
+        creatingChats.add(id);
+        trpc.chats.create
+          .mutate({ workspaceId, id, agent: agentId })
+          .then(() => {
+            const current = apiRef.current;
+            if (current && !current.getPanel(id)) addChatLeaf(current, workspaceId, id, position);
+          })
+          .catch((err) => {
+            console.error("[WorkspaceCenterDockview] chat create failed:", err);
+          })
+          .finally(() => creatingChats.delete(id));
       } else if (kind === "browser") {
         if (!isDesktop) return;
         const id = newBrowserId();
@@ -3234,7 +3315,9 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (!api) return;
 
       if (event.kind === "chat-created" && typeof event.chatId === "string") {
-        if (!api.getPanel(event.chatId)) addChatLeaf(api, workspaceId, event.chatId);
+        if (!creatingChats.has(event.chatId) && !api.getPanel(event.chatId)) {
+          addChatLeaf(api, workspaceId, event.chatId);
+        }
       } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
         const panel = api.getPanel(event.chatId);
         if (panel) api.removePanel(panel);
