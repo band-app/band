@@ -157,6 +157,14 @@ export interface Settings {
     defaultMode?: "gui" | "tui";
     [key: string]: unknown;
   };
+  /**
+   * Bundled plugins (`plugins/<id>/`). A plugin whose id is in `disabled`
+   * never activates and its UI is hidden. Read once at boot.
+   */
+  plugins?: {
+    disabled?: string[];
+    [key: string]: unknown;
+  };
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

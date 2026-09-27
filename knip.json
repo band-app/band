@@ -73,6 +73,14 @@
     "packages/logger": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "packages/plugin-api": {
+      "entry": ["src/index.ts", "src/server.ts", "src/client.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "plugins/github": {
+      "entry": ["src/server/index.ts", "src/client/index.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     }
   }
 }

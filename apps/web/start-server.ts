@@ -41,6 +41,7 @@ import { branchStatusPoller } from "./src/server/services/branch-status-poller.t
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
@@ -1180,6 +1181,13 @@ async function main() {
       // `runFirstTimeSetup` applied (default-disable etc.) are visible
       // to the first scheduled load.
       cronjobService.start();
+
+      // Activate the bundled plugins that ask for `onStartup`. The rest
+      // activate lazily, e.g. the GitHub plugin on the first review lookup
+      // for a github.com project.
+      await pluginHost.start().catch((err) => {
+        console.error("Failed to start plugins:", err);
+      });
 
       // Auto-start tunnel if configured.
       const settings = loadSettings() as Record<string, unknown>;

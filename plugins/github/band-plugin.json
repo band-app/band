@@ -1,0 +1,17 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "version": "0.1.0",
+  "pluginApi": 1,
+  "activationEvents": [
+    "onProjectRemote:github.com",
+    "onProjectRemote:www.github.com",
+    "onProjectRemote:ssh.github.com",
+    "onProjectRemote:github.*",
+    "onProjectRemote:*.ghe.com"
+  ],
+  "contributes": {
+    "slots": ["workspace.sideTabs"]
+  },
+  "requires": ["gh"]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@band-app/plugin-github",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./band-plugin.json": "./band-plugin.json",
+    "./server": "./src/server/index.ts",
+    "./client": "./src/client/index.tsx"
+  },
+  "dependencies": {
+    "@band-app/plugin-api": "workspace:^",
+    "@band-app/ui": "workspace:^",
+    "lucide-react": "^0.576.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
