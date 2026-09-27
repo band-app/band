@@ -634,6 +634,15 @@ export class TerminalPool {
         if (this.pruneHistoryOnExit.delete(terminalId)) {
           this.historyStore.removeSession(terminalId);
         } else if (session.history) {
+          // Unlike `maybeCheckpointHistory`'s periodic call, this can't be
+          // deferred via `setImmediate` — it must run before
+          // `headless.dispose()` just below, so `serialize()`'s CPU cost (up
+          // to tens of ms for a full scrollback) is paid inline here. A
+          // one-time per-terminal-exit cost, not a per-chunk one; on a daemon
+          // restart that ends many terminals at once this can add up across
+          // their exit events, but restructuring to avoid it would mean
+          // extracting the serialized string before `pty.kill()` instead,
+          // which only the explicit-kill paths could do safely.
           this.checkpointHistoryNow(terminalId, session);
         }
       }

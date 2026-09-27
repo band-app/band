@@ -78,11 +78,9 @@ export class TerminalHistoryManager {
 
   async writeCheckpoint(terminalId: string, checkpoint: TerminalHistoryCheckpoint): Promise<void> {
     const serialized = JSON.stringify(checkpoint);
-    if (Buffer.byteLength(serialized) > CHECKPOINT_MAX_BYTES) {
-      log.warn(
-        { terminalId, bytes: Buffer.byteLength(serialized) },
-        "terminal history checkpoint too large; skipping this write",
-      );
+    const bytes = Buffer.byteLength(serialized);
+    if (bytes > CHECKPOINT_MAX_BYTES) {
+      log.warn({ terminalId, bytes }, "terminal history checkpoint too large; skipping this write");
       return;
     }
     await writeJson(this.sessionDir(terminalId), "checkpoint.json", checkpoint, serialized);

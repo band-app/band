@@ -282,6 +282,12 @@ export class DaemonTerminalBackend implements TerminalBackend {
     // writing, so returning on socket-close alone could race a reopen against
     // a checkpoint that hasn't landed on disk yet.
     await waitForExit(pid, RESTART_WAIT_MS);
+    if (isProcessAlive(pid)) {
+      log.warn(
+        { pid },
+        "terminal daemon did not exit within the restart grace period; it may still be shutting down",
+      );
+    }
     return { killedCount };
   }
 

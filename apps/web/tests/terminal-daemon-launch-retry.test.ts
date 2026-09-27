@@ -24,9 +24,14 @@ import { isAlive, startDaemonOfBuild, stopTerminalDaemon } from "./helpers/termi
 const DAEMON_ENTRY = resolve(import.meta.dirname, "../dist/terminal-daemon.mjs");
 
 describe("terminal daemon backend — launch retry", () => {
-  let tmpHome: string;
+  // Initialized to "" (not left `undefined` at runtime despite the `string`
+  // type) so a failure before a test's own `createTmpHome()` call can't make
+  // `afterEach` pass `undefined` to `rmSync`/`stopTerminalDaemon` and mask
+  // the real failure behind a teardown crash.
+  let tmpHome = "";
 
   afterEach(async () => {
+    if (!tmpHome) return;
     await stopTerminalDaemon(tmpHome);
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
