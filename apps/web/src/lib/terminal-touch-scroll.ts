@@ -23,12 +23,19 @@
  *    cursor keys mode;
  *  - otherwise: `term.scrollLines` through the scrollback.
  *
- * xterm doesn't expose the mouse report encoding (DECSET 1006 / 1016), so a
- * parser hook watches for it without consuming the sequence.
+ * Report encoding and coordinate validation live in terminal-mouse-report.ts,
+ * shared with desktop wheel scrolling.
  */
-import type { IDisposable, Terminal } from "@xterm/xterm";
+import type { Terminal } from "@xterm/xterm";
+import {
+  arrowSequence,
+  hasWheelMouseTracking,
+  isAlternateBuffer,
+  type MouseEncodingTracker,
+  screenPoint,
+  wheelSequence,
+} from "./terminal-mouse-report";
 
-const ESC = "\x1b";
 /** Upper bound on reports sent for one frame of scrolling, as in Orca. */
 const MAX_LINES_PER_STEP = 32;
 /** Momentum decay per animation frame and the speed (px/ms) where it stops. */
@@ -43,86 +50,15 @@ const MIN_VELOCITY_SAMPLE_MS = 4;
 /** A finger that rests this long before lifting launches no momentum. */
 const MOMENTUM_STALE_MS = 100;
 
-type MouseEncoding = "default" | "sgr" | "sgr-pixels";
-
-interface ScreenPoint {
-  /** 0-based viewport cell. */
-  col: number;
-  row: number;
-  /** 0-based CSS pixel inside the screen, for SGR pixel mode (1016). */
-  x: number;
-  y: number;
-}
-
 export interface TerminalTouchScroll {
-  /** Forget the tracked mouse encoding. Call after `term.reset()`, which
-   *  resets xterm's own encoding without going through the parser. */
-  resetModes(): void;
   dispose(): void;
-}
-
-function isSafeSgrMouseCoordinate(value: number): boolean {
-  return Number.isInteger(value) && value >= 0 && value <= 9999;
-}
-
-function hasWheelMouseTracking(term: Terminal): boolean {
-  const mode = term.modes.mouseTrackingMode;
-  return mode === "vt200" || mode === "drag" || mode === "any";
-}
-
-function isAlternateBuffer(term: Terminal): boolean {
-  return term.buffer.active.type === "alternate";
-}
-
-function arrowSequence(term: Terminal, lines: number): string {
-  const prefix = term.modes.applicationCursorKeysMode ? "O" : "[";
-  return ESC + prefix + (lines < 0 ? "A" : "B");
-}
-
-/** One wheel report for `point`, or "" when the encoding can't carry it. */
-function wheelSequence(lines: number, point: ScreenPoint, encoding: MouseEncoding): string {
-  const code = lines < 0 ? 64 : 65;
-  if (encoding === "sgr-pixels") {
-    if (!isSafeSgrMouseCoordinate(point.x) || !isSafeSgrMouseCoordinate(point.y)) return "";
-    return `${ESC}[<${code};${point.x};${point.y}M`;
-  }
-  // Reports are 1-based; the point is 0-based.
-  const col = point.col + 1;
-  const row = point.row + 1;
-  if (encoding === "sgr") {
-    if (!isSafeSgrMouseCoordinate(col) || !isSafeSgrMouseCoordinate(row)) return "";
-    return `${ESC}[<${code};${col};${row}M`;
-  }
-  // X10 bytes past ASCII turn into multi-byte UTF-8 on the socket, so a wide
-  // terminal falls back to arrow keys instead.
-  const bytes = [code + 32, col + 32, row + 32];
-  if (bytes.some((b) => !Number.isInteger(b) || b > 126)) return "";
-  return `${ESC}[M${String.fromCharCode(...bytes)}`;
 }
 
 export function attachTerminalTouchScroll(
   wrapper: HTMLElement,
   term: Terminal,
+  mouseEncoding: MouseEncodingTracker,
 ): TerminalTouchScroll {
-  let encoding: MouseEncoding = "default";
-  const onDecMode = (enabled: boolean) => (params: (number | number[])[]) => {
-    for (const param of params) {
-      if (param === 1006) encoding = enabled ? "sgr" : "default";
-      else if (param === 1016) encoding = enabled ? "sgr-pixels" : "default";
-    }
-    // Let xterm handle the sequence as usual.
-    return false;
-  };
-  const parserHooks: IDisposable[] = [
-    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, onDecMode(true)),
-    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, onDecMode(false)),
-    // RIS (ESC c) resets the encoding along with everything else.
-    term.parser.registerEscHandler({ final: "c" }, () => {
-      encoding = "default";
-      return false;
-    }),
-  ];
-
   // `.xterm-screen` is created once by `term.open()`; renderer switches only
   // rebuild the canvas inside it, so it's cached rather than looked up on
   // every ~60 Hz step.
@@ -130,23 +66,6 @@ export function attachTerminalTouchScroll(
 
   const cellHeight = (rect: DOMRect): number =>
     rect.height > 0 && term.rows > 0 ? rect.height / term.rows : 0;
-
-  const screenPoint = (clientX: number, clientY: number, rect: DOMRect): ScreenPoint | null => {
-    const el = screenEl;
-    if (!el || term.cols <= 0 || term.rows <= 0) return null;
-    if (!(rect.width > 0 && rect.height > 0)) return null;
-    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
-    const fx = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1 - 1e-9);
-    const fy = Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1 - 1e-9);
-    return {
-      col: Math.floor(fx * term.cols),
-      row: Math.floor(fy * term.rows),
-      // offsetWidth is the unzoomed layout size, which is what xterm reports
-      // in pixel mode.
-      x: Math.floor(fx * el.offsetWidth),
-      y: Math.floor(fy * el.offsetHeight),
-    };
-  };
 
   const sendRepeated = (sequence: string, lines: number) => {
     const count = Math.min(Math.abs(lines), MAX_LINES_PER_STEP);
@@ -164,8 +83,8 @@ export function attachTerminalTouchScroll(
   ): boolean => {
     if (lines === 0) return true;
     if (hasWheelMouseTracking(term)) {
-      const point = screenPoint(clientX, clientY, rect);
-      const report = point ? wheelSequence(lines, point, encoding) : "";
+      const point = screenPoint(term, screenEl, clientX, clientY, rect);
+      const report = point ? wheelSequence(lines, point, mouseEncoding.current()) : "";
       sendRepeated(report || arrowSequence(term, lines), lines);
       return true;
     }
@@ -284,12 +203,8 @@ export function attachTerminalTouchScroll(
   wrapper.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
 
   return {
-    resetModes() {
-      encoding = "default";
-    },
     dispose() {
       stopMomentum();
-      for (const hook of parserHooks) hook.dispose();
       wrapper.removeEventListener("touchstart", onTouchStart, { capture: true });
       wrapper.removeEventListener("touchmove", onTouchMove, { capture: true });
       wrapper.removeEventListener("touchend", onTouchEnd, { capture: true });

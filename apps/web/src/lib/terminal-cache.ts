@@ -6,6 +6,9 @@ import { listen as desktopListen } from "./desktop-ipc";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
+import { createTerminalInputQueue } from "./terminal-input-queue";
+import { trackMouseEncoding } from "./terminal-mouse-report";
+import { attachTerminalMouseWheel } from "./terminal-mouse-wheel";
 import { createTerminalOutputQueue } from "./terminal-output-queue";
 import {
   selectIdsBeyondHotRetain,
@@ -347,6 +350,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
   let searchAddon: SearchAddon | null = null;
   let webglAddon: WebglAddon | null = null;
   let ws: WebSocket | null = null;
+  // Every write to the socket's input side goes through here, so bursts of
+  // small writes become one message (terminal-input-queue.ts).
+  const inputQueue = createTerminalInputQueue((data) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(data);
+    return true;
+  });
 
   // Attach/parking state.
   let liveContainer: HTMLElement | null = null;
@@ -416,6 +426,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       macOptionIsMeta: true,
       scrollback: 10000,
       theme: getTerminalTheme(),
+      // Orca's scrollback wheel speed. Alt+wheel's 5x is xterm's default.
+      scrollSensitivity: 1.15,
     });
     terminal = term;
     // All output reaches xterm through this queue: straight through while the
@@ -548,7 +560,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // stops every touchmove in the capture phase so xterm's own gesture
     // handler never sees one, which is why the long-press move listener below
     // also runs in the capture phase.
-    const touchScroll = attachTerminalTouchScroll(wrapper, term);
+    const mouseEncoding = trackMouseEncoding(term);
+    const touchScroll = attachTerminalTouchScroll(wrapper, term, mouseEncoding);
+    attachTerminalMouseWheel(wrapper, term, mouseEncoding);
 
     let longPressTimer: number | null = null;
     let longPressStart: { x: number; y: number } | null = null;
@@ -726,7 +740,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           // previous connection would land on top of it.
           output.clear();
           term.reset();
-          touchScroll.resetModes();
+          mouseEncoding.reset();
         }
 
         // Are we already fitted to a visible live box? If so we can carry our
@@ -933,10 +947,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     connect();
 
     const disposeTypingLatency = registerTypingLatencyTerminal(terminalId, term, wrapper);
-    term.onData((data) => {
-      noteTypingLatencyDispatch(terminalId);
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
-    });
+    // The typing-latency dispatch stamp is taken when the data reaches the
+    // socket, which a coalesced write does a turn of the event loop later.
+    const noteDispatch = () => noteTypingLatencyDispatch(terminalId);
+    term.onData((data) => inputQueue.write(data, noteDispatch));
     term.onTitleChange((title) => emitTitle(title));
 
     // Re-apply the active selection after each xterm resize (xterm clears it on
@@ -1150,6 +1164,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       unsubscribeZoom();
       cancelLongPress();
       touchScroll.dispose();
+      mouseEncoding.dispose();
       ws?.close();
       term.dispose(); // cascades to loaded addons
     };
@@ -1302,7 +1317,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       terminal.blur();
     },
     sendInput(data) {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
+      inputQueue.write(data);
     },
     isSocketOpen: () => !!ws && ws.readyState === WebSocket.OPEN,
     focus() {
