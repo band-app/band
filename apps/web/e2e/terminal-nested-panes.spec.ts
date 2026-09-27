@@ -243,8 +243,6 @@ test("⌘D in a chat leaf still splits chat into a sibling group (regression)", 
   // tab strip can be intercepted by a dockview sash), then ⌘D → a second chat
   // leaf in a SIBLING group (terminals nest instead; chat/browser still split).
   await page.getByPlaceholder("Type a message...").first().click();
-  // Split is ⌘D on every platform (Ctrl+D is EOF / close pane), so send Meta
-  // even on the Linux CI runner.
-  await page.keyboard.press("Meta+d");
+  await workspacePage.pressSplitRight();
   await expect(chatTabs()).toHaveCount(2);
 });

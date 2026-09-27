@@ -16,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuPortal,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -1332,7 +1331,6 @@ function SessionHistoryMenu({
         <DropdownMenuItem onSelect={() => onNewSession()}>
           <Plus className="size-3.5" />
           New session
-          <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

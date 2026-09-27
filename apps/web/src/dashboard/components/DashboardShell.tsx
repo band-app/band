@@ -325,6 +325,13 @@ export function DashboardShell({
     return () => window.removeEventListener("keydown", handler);
   }, [labels, setLabelFilter]);
 
+  // The command palette's "Show All Projects" (the ⌘0 entry above).
+  useEffect(() => {
+    const handler = () => setLabelFilter(null);
+    window.addEventListener("band:show-all-projects", handler);
+    return () => window.removeEventListener("band:show-all-projects", handler);
+  }, [setLabelFilter]);
+
   return (
     <div
       ref={rootRef}

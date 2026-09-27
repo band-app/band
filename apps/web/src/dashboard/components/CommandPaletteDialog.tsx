@@ -37,6 +37,7 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
         variant="command-palette"
         className="overflow-hidden p-0 lg:max-w-[520px]"
         showCloseButton={false}
+        data-testid="command-palette"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Command Palette</DialogTitle>
@@ -48,10 +49,17 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
             <CommandEmpty>No commands found.</CommandEmpty>
             <CommandGroup>
               {commands.map((cmd) => (
-                <CommandItem key={cmd.id} value={cmd.label} onSelect={() => handleSelect(cmd)}>
+                <CommandItem
+                  key={cmd.id}
+                  value={cmd.label}
+                  onSelect={() => handleSelect(cmd)}
+                  data-testid={`command-palette__item--${cmd.id}`}
+                >
                   <span className="text-sm">{cmd.label}</span>
                   {cmd.shortcut && (
-                    <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>
+                    <CommandShortcut data-testid={`command-palette__shortcut--${cmd.id}`}>
+                      {formatShortcut(cmd.shortcut)}
+                    </CommandShortcut>
                   )}
                 </CommandItem>
               ))}

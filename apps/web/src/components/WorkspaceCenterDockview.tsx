@@ -13,6 +13,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -95,6 +96,7 @@ import {
   useWorkspacePath,
   type ViewMode,
 } from "@/dashboard";
+import { formatShortcut, isMacPlatform } from "../dashboard/lib/command-registry";
 import { isUntitledPath, UNTITLED_PREFIX } from "../hooks/useFileTabs";
 import type { TabFileState } from "../hooks/useTabState";
 import {
@@ -110,6 +112,7 @@ import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
+  splitDirectionForKey,
 } from "../lib/dockview-section-actions";
 import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
 import { isDesktop } from "../lib/is-desktop";
@@ -2712,6 +2715,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
         <DropdownMenuItem onClick={() => add("term")} data-testid="workspace-center__new-tab--term">
           <TerminalIcon className="size-4" />
           New terminal
+          <DropdownMenuShortcut>{formatShortcut("Cmd+T")}</DropdownMenuShortcut>
         </DropdownMenuItem>
         {isDesktop && (
           <DropdownMenuItem
@@ -2720,6 +2724,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
           >
             <Globe className="size-4" />
             New browser
+            <DropdownMenuShortcut>{formatShortcut("Cmd+Shift+B")}</DropdownMenuShortcut>
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -3841,14 +3846,6 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       )?.focus();
     };
 
-    const activeKind = (): LeafKind => {
-      const comp = apiRef.current?.activePanel?.api.component as LeafKind | undefined;
-      // ⌘T duplicates the active leaf's kind — but `file` / `diff` leaves are
-      // opened per-path from the sidepanel, not created blank, so fall back to
-      // a new terminal for those.
-      return comp === "chat" || comp === "term" || comp === "browser" ? comp : "term";
-    };
-
     const handler = (e: KeyboardEvent) => {
       if (!containerRef.current?.contains(document.activeElement)) return;
       const api = apiRef.current;
@@ -3864,13 +3861,27 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         return;
       }
 
+      // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) split chat / browser
+      // leaves into sibling groups. Terminals split INTO nested panes instead,
+      // so with a terminal focused the chord is left to its leaf's handler.
+      const split = splitDirectionForKey(e, isMacPlatform());
+      if (split) {
+        if (findFocusedTerminalSplitDockview()) return;
+        const groupId = api.activeGroup?.id;
+        const kind = api.activePanel?.api.component as LeafKind | undefined;
+        e.preventDefault();
+        e.stopPropagation();
+        if (groupId && (kind === "chat" || kind === "browser")) handleSplit(kind, groupId, split);
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
       // Defer the pane-level keys to a focused terminal leaf's nested dockview:
-      // it owns ⌘D / ⌘⇧D (split), plain ⌘[ / ⌘] (cycle panes), ⌘W / Ctrl+D
-      // (close pane). Bail WITHOUT preventDefault so the nested capture handler
-      // (registered later on the same window) still fires and acts.
+      // it owns plain ⌘[ / ⌘] (cycle panes), ⌘W / Ctrl+D (close pane). Bail
+      // WITHOUT preventDefault so the nested capture handler (registered later
+      // on the same window) still fires and acts.
       if (
         findFocusedTerminalSplitDockview() &&
         (key === "d" || key === "w" || ((key === "[" || key === "]") && !e.shiftKey))
@@ -3893,35 +3904,20 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         return;
       }
 
-      if (key === "t" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        handleAdd(activeKind(), api.activeGroup?.id);
-      } else if (key === "w" && !e.shiftKey) {
+      // ⌘T (new terminal) lives in the shell's global handler with the other
+      // new-tab chords (SharedDockviewLayout).
+      if (key === "w" && !e.shiftKey) {
         const active = api.activePanel;
         const kind = active?.api.component as LeafKind | undefined;
         if (!active || !kind) return;
         e.preventDefault();
         e.stopPropagation();
         handleClose(active.id, kind);
-      } else if (key === "d" && e.metaKey && !e.ctrlKey) {
-        // ⌘D / ⌘⇧D splits chat / browser leaves into sibling groups. Terminals
-        // split INTO nested panes instead (handled by the terminal leaf's own
-        // dockview, reached via the deferral above), so `term` is intentionally
-        // absent here.
-        const active = api.activePanel;
-        const groupId = api.activeGroup?.id;
-        const kind = active?.api.component as LeafKind | undefined;
-        e.preventDefault();
-        e.stopPropagation();
-        if (groupId && (kind === "chat" || kind === "browser")) {
-          handleSplit(kind, groupId, e.shiftKey ? "below" : "right");
-        }
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, handleAdd, handleClose, handleSplit]);
+  }, [visible, handleClose, handleSplit]);
 
   // Focus the active leaf when the workspace becomes visible.
   useEffect(() => {

@@ -331,7 +331,7 @@ export function BrowserPaneComponent({
 
   // ------- pane shortcuts typed inside the page -------
   // The page consumes its own keydowns. The main process swallows the pane
-  // shortcuts (find, new tab, close, split, cycle) and forwards them; replay
+  // shortcuts (find, new tabs, close, split, cycle) and forwards them; replay
   // each one as a `keydown` on the webview, where it bubbles through this
   // pane's `onKeyDown` and reaches the window listeners of
   // `WorkspaceCenterDockview` exactly like a key typed in Band's own UI.
@@ -346,6 +346,7 @@ export function BrowserPaneComponent({
       shift: boolean;
       control: boolean;
       meta: boolean;
+      alt: boolean;
     }>("browser-guest-shortcut", (event) => {
       const p = event.payload;
       if (p.browser_id !== browserIdRef.current) return;
@@ -356,6 +357,7 @@ export function BrowserPaneComponent({
           shiftKey: p.shift,
           ctrlKey: p.control,
           metaKey: p.meta,
+          altKey: p.alt,
           bubbles: true,
           cancelable: true,
           composed: true,

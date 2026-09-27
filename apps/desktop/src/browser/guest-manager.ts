@@ -726,7 +726,7 @@ export class BrowserGuestManager {
     // re-dispatches it on the tab's `<webview>` element, where the find
     // bar, tab and split handlers pick it up as if focus were in Band's UI.
     wc.on("before-input-event", (event, input) => {
-      if (input.type !== "keyDown" || input.alt) return;
+      if (input.type !== "keyDown") return;
       if (!isForwardedShortcut(input)) return;
       const key = this.keyByWebContentsId.get(wc.id);
       if (key === undefined) return;
@@ -738,6 +738,7 @@ export class BrowserGuestManager {
         shift: input.shift,
         control: input.control,
         meta: input.meta,
+        alt: input.alt,
       };
       this.emit(Events.browserGuestShortcut, payload);
     });
@@ -752,19 +753,34 @@ export class BrowserGuestManager {
 
 /**
  * The pane shortcuts a guest forwards: Ctrl+(Shift)+Tab, and with the
- * platform modifier F (find), T (new tab), W (close), D / Shift+D (split),
- * [ and ] with or without Shift (cycle groups / tabs). Everything else
- * (copy, paste, select-all, the page's own bindings) stays with the page.
+ * platform modifier F (find), T (new terminal), Shift+N (new chat), Shift+B
+ * (new browser), W (close), D / Shift+D (split; Shift+D only off macOS,
+ * where plain Ctrl+D is not a Band chord), [ and ] with or without
+ * Shift (cycle groups / tabs), Alt+Left / Alt+Right (workspace history), plus
+ * Cmd+Opt+T (new chat) on macOS and Alt+Shift+D (split down) elsewhere.
+ * Everything else (copy, paste, select-all, the page's own bindings) stays
+ * with the page.
  */
 function isForwardedShortcut(input: Input): boolean {
   const key = input.key.toLowerCase();
   // Ctrl, not the platform modifier: Cmd+Tab belongs to macOS.
-  if (input.control && !input.meta && key === "tab") return true;
-  const mod =
-    process.platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
-  if (!mod) return false;
-  if (key === "d" || key === "[" || key === "]") return true;
-  return !input.shift && (key === "f" || key === "t" || key === "w");
+  if (input.control && !input.meta && !input.alt && key === "tab") return true;
+  const mac = process.platform === "darwin";
+  const mod = mac ? input.meta && !input.control : input.control && !input.meta;
+  if (!mod) {
+    // Split down off macOS; plain Ctrl+D stays with the page.
+    return !mac && input.alt && input.shift && !input.control && !input.meta && key === "d";
+  }
+  if (input.alt) {
+    if (input.shift) return false;
+    if (input.key === "ArrowLeft" || input.key === "ArrowRight") return true;
+    // Option rewrites `key` on macOS, so match Cmd+Opt+T on the physical key.
+    return mac && input.code === "KeyT";
+  }
+  if (key === "d") return mac || input.shift;
+  if (key === "[" || key === "]") return true;
+  if (input.shift) return key === "b" || key === "n";
+  return key === "f" || key === "t" || key === "w";
 }
 
 const preparedSessions = new WeakSet<Session>();
