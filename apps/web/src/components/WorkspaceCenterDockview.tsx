@@ -2337,6 +2337,9 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
     leafActionsByApiId.get(apiId)?.current?.onAdd(kind, groupId, agentId);
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
   const [defaultAgentId, setDefaultAgentId] = useState<string | undefined>(undefined);
+  // Until the agents load, "New Chat" is disabled: it may still turn into
+  // the agent submenu, and a click in between would open the wrong thing.
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     getSharedSettings().then((settings) => {
@@ -2344,6 +2347,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
       const s = settings as Record<string, unknown> | null;
       setAgents(Array.isArray(s?.codingAgents) ? (s.codingAgents as CodingAgentDef[]) : []);
       setDefaultAgentId(s?.defaultCodingAgent as string | undefined);
+      setAgentsLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -2399,6 +2403,7 @@ function NewTabMenu({ apiId, groupId }: { apiId: string; groupId: string }) {
         ) : (
           <DropdownMenuItem
             onClick={() => add("chat")}
+            disabled={!agentsLoaded}
             data-testid="workspace-center__new-tab--chat"
           >
             <MessageSquare className="size-4" />
