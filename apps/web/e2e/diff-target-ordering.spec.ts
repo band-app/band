@@ -3,13 +3,12 @@
  * option ordering in the Changes tab of the right sidepanel (#643).
  *
  * Two behaviours are pinned here:
- *  1. A fresh workspace (no stored pick) defaults to "Uncommitted" — the
- *     picker trigger reads "Uncommitted" on first paint, and it is the
- *     first item in the dropdown.
- *  2. Below Uncommitted, the picker floats staging-style integration
- *     branches (develop, staging, …) to the top in priority order, then
- *     the project's default branch, then every other branch, most recent
- *     commit first.
+ *  1. A fresh workspace (no stored pick) compares against the project's
+ *     default branch.
+ *  2. The picker floats staging-style integration branches (develop,
+ *     staging, …) to the top in priority order, then the project's default
+ *     branch, then every other branch, most recent commit first. There is no
+ *     "Uncommitted" entry: uncommitted work has its own Changes sections.
  *
  * The ranking itself runs on the server (`DiffService.listBranches`), since
  * the picker searches there instead of loading every branch. Search, the
@@ -36,7 +35,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { ChangesPanelPage, UNCOMMITTED_OPTION_TESTID } from "./pages/ChangesPanelPage";
+import { BRANCH_OPTION_TESTID, ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the right sidepanel
 // renders beside the center dockview — matching the other diff e2e specs.
@@ -63,7 +62,7 @@ test.beforeAll(async () => {
 
   // Real repo: commit on `main`, branch out the staging-style + feature
   // branches, then check out `work` and leave an uncommitted modification so
-  // the default (Uncommitted) diff has content to render.
+  // the Changes tab has content to render.
   git(repoPath, ["init", "-b", DEFAULT_BRANCH]);
   writeFileSync(join(repoPath, FILE_PATH), "first line\nsecond line\n");
   git(repoPath, ["add", "."]);
@@ -112,18 +111,16 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Diff target defaults to Uncommitted on a fresh workspace", async ({ page }) => {
+test("Diff target defaults to the default branch on a fresh workspace", async ({ page }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   await changes.goto(workspaceId);
-  await expect(changes.diffTargetTrigger).toBeVisible({ timeout: 15_000 });
-  // Assert on the stable mode enum (read from persisted client state), not the
-  // localisable "Uncommitted" trigger copy. Poll so a one-tick gap between the
-  // trigger becoming visible and the state settling can't flake the assertion;
-  // the explicit timeout matches the other server-round-trip polls in this file.
-  await expect.poll(() => changes.diffMode(), { timeout: 15_000 }).toBe("uncommitted");
+  // The trigger shows the branch name (runtime data this spec seeded); no
+  // pick is stored yet.
+  await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH, { timeout: 15_000 });
+  await expect.poll(() => changes.compareBranch()).toBeNull();
 });
 
-test("Diff target dropdown pins Uncommitted, then staging branches, then default, then the most recent", async ({
+test("Diff target dropdown pins staging branches, then default, then the most recent", async ({
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
@@ -134,17 +131,10 @@ test("Diff target dropdown pins Uncommitted, then staging branches, then default
   // reorders, so poll the (re-rendering) open listbox rather than racing
   // the branch fetch. `main` is present because HEAD is `work`, so the
   // default branch isn't dropped as "comparing against yourself".
-  //
-  // The first option is Uncommitted — asserted via its stable testid rather
-  // than the localisable label. The remaining options are branch names
-  // (runtime data the test seeded), so their order is asserted by name.
   await changes.openDiffTargetDropdown();
-  await expect(changes.firstDiffTargetOption).toHaveAttribute(
-    "data-testid",
-    UNCOMMITTED_OPTION_TESTID,
-  );
+  await expect(changes.firstDiffTargetOption).toHaveAttribute("data-testid", BRANCH_OPTION_TESTID);
   await expect
-    .poll(async () => (await changes.visibleDiffTargetOptions()).slice(1).join(","), {
+    .poll(async () => (await changes.visibleDiffTargetOptions()).join(","), {
       timeout: 15_000,
     })
     .toBe(["develop", "stage", "staging", "main", "zebra", "apple"].join(","));

@@ -5,7 +5,6 @@ import type {
   ContentSearchMatch,
   DiffMode,
   FileContentResult,
-  FileDiffResult,
   FileListResult,
   FormatFileResult,
   GitStatus,
@@ -197,12 +196,6 @@ export interface DashboardAdapter {
     diffMode?: DiffMode,
     compareBranch?: string,
   ): Promise<WorkspaceDiff>;
-  getFileDiff?(
-    workspaceId: string,
-    filePath: string,
-    mergeBase: string,
-    contextLines?: number,
-  ): Promise<FileDiffResult>;
   /** Local and remote branches matching `query`, best matches first, at most
    *  `limit` of them. `truncated` is set when more matched. */
   listWorkspaceBranches?(
@@ -304,14 +297,6 @@ export interface DashboardAdapter {
     fromPath: string,
     toPath: string,
   ): Promise<{ kind: "file" | "directory" }>;
-
-  /** Revert a single file to its original state, discarding all changes. */
-  revertFile?(
-    workspaceId: string,
-    filePath: string,
-    diffMode: DiffMode,
-    compareBranch?: string,
-  ): Promise<void>;
 
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorkspaceFileUrl?(workspaceId: string, path: string): string;

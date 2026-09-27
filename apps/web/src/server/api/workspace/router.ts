@@ -18,7 +18,8 @@ import { publicProcedure, t } from "../trpc";
  *
  *   - `filesService`  → file CRUD + path-traversal / .git guards.
  *   - `searchService` → file-name fuzzy search and ripgrep content search.
- *   - `diffService`   → branch listing, diff, file diff, revert.
+ *   - `diffService`   → branch listing, Changes sections, file diff,
+ *     stage / unstage / discard.
  *   - `gitGraphService` → commit history, commit files, per-commit file diff.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
  *     generateCommitMessage.
@@ -46,18 +47,32 @@ const compareBranchSchema = z
   .optional();
 
 /**
- * `mergeBase` is the SHA returned by `getDiffSummary` and threaded
+ * `mergeBase` is the SHA returned by `getChanges` and threaded
  * back into `getFileDiff` as a revision argument to `git diff`. Pin to
  * a 40-character hex SHA: this closes the leading-dash injection
  * vector (`--exec=`, `--output=…`) AND enforces that `getFileDiff`
- * operates on the same revision shape `getDiffSummary` returned. Real
+ * operates on the same revision shape `getChanges` returned. Real
  * merge-base SHAs from git are always 40-char hex; symbolic refs like
  * `HEAD`, `main`, or `@{-1}` are rejected so a client can't accidentally
- * desync from the summary's view of the world.
+ * desync from the Changes list's view of the world.
  */
 const mergeBaseSchema = z
   .string()
   .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
+
+/** A section of the Changes view (see `DiffService.getChanges`). */
+const changeSectionSchema = z.enum(["conflicts", "unstaged", "staged", "untracked", "branch"]);
+
+/**
+ * A worktree-relative path handed to git as a pathspec. The leading-dash
+ * guard keeps it from being read as a flag; the service also checks it
+ * stays inside the worktree.
+ */
+const filePathSchema = z.string().min(1).regex(/^[^-]/, "path must not start with '-'");
+
+/** Paths for the stage / unstage / discard mutations. A header action sends
+ *  every file of its section; the service hands them to git in batches. */
+const pathListSchema = z.array(filePathSchema).min(1).max(50_000);
 
 /**
  * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
@@ -80,8 +95,8 @@ const commitShaSchema = z
  *
  *
  * TODO(#535-followup): the `WorkspaceNotFoundError` → 404 migration
- * should cover `listBranches`, `getDiff`, `getDiffSummary`, `getFile`,
- * `getFileDiff`, `revertFile`, the `git*` mutations, the `*Path` /
+ * should cover `listBranches`, `getDiff`, `getChanges`, `getFile`,
+ * `getFileDiff`, `stageFiles`, `discardChanges`, the `git*` mutations, the `*Path` /
  * `*File` / `*Directory` file CRUD, and the two search procedures —
  * any procedure that goes through `WorkspaceService.resolve` or its
  * `WorkspaceNotFoundError`-throwing siblings. When that lands, the
@@ -291,52 +306,55 @@ export const workspaceRouter = t.router({
       }),
     ),
 
-  getDiffSummary: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        diffMode: z.enum(["uncommitted", "branch"]).optional(),
-        compareBranch: compareBranchSchema,
-      }),
-    )
+  getChanges: publicProcedure
+    .input(z.object({ workspaceId: z.string(), compareBranch: compareBranchSchema }))
     .query(({ input }) =>
-      diffService.getDiffSummary(input.workspaceId, {
-        diffMode: input.diffMode,
-        compareBranch: input.compareBranch,
-      }),
+      diffService.getChanges(input.workspaceId, { compareBranch: input.compareBranch }),
     ),
 
   getFileDiff: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string().min(1),
-        mergeBase: mergeBaseSchema,
+        filePath: filePathSchema,
+        section: changeSectionSchema,
+        /** Required for the `branch` section. */
+        mergeBase: mergeBaseSchema.optional(),
+        /** The path before a rename, so git pairs the two sides. */
+        oldPath: filePathSchema.optional(),
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
     )
     .query(({ input }) =>
       diffService.getFileDiff(input.workspaceId, {
         filePath: input.filePath,
+        section: input.section,
         mergeBase: input.mergeBase,
+        oldPath: input.oldPath,
         contextLines: input.contextLines,
       }),
     ),
 
-  revertFile: publicProcedure
+  stageFiles: publicProcedure
+    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.stageFiles(input.workspaceId, input.paths)),
+
+  unstageFiles: publicProcedure
+    .input(z.object({ workspaceId: z.string(), paths: pathListSchema }))
+    .mutation(({ input }) => diffService.unstageFiles(input.workspaceId, input.paths)),
+
+  discardChanges: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string().min(1),
-        diffMode: z.enum(["uncommitted", "branch"]),
-        compareBranch: compareBranchSchema,
+        paths: pathListSchema,
+        section: z.enum(["unstaged", "staged", "untracked"]),
       }),
     )
     .mutation(({ input }) =>
-      diffService.revertFile(input.workspaceId, {
-        filePath: input.filePath,
-        diffMode: input.diffMode,
-        compareBranch: input.compareBranch,
+      diffService.discardChanges(input.workspaceId, {
+        paths: input.paths,
+        section: input.section,
       }),
     ),
 

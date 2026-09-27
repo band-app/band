@@ -91,7 +91,7 @@ apps/web/src/server/
     agent-service.ts         # thin pass-through over the agent-pool for routers
     files-service.ts         # workspace file CRUD (path-traversal + .git guards)
     search-service.ts        # workspace file-name fuzzy + ripgrep content search
-    diff-service.ts          # listBranches / getDiff / getDiffSummary / getFileDiff / revertFile
+    diff-service.ts          # listBranches / getDiff / getChanges / getFileDiff / stage / unstage / discard
     cli-service.ts           # band-CLI binary resolver + symlink installer
     cli-skills-service.ts    # render + install agent skill templates
     hooks-service.ts         # ~/.claude/settings.json read/write

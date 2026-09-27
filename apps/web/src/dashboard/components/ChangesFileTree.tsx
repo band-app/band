@@ -1,41 +1,45 @@
 import {
-  Button,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@band-app/ui";
-import { AlertTriangle, ChevronDown, ChevronRight, ClipboardCopy, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, ClipboardCopy } from "lucide-react";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { writeClipboardText } from "../../lib/clipboard";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";
 import { getFileIcon, getFolderIcon } from "../lib/file-icon";
 import { joinWorkspacePath } from "../lib/workspace-path";
-import type { FileStatus } from "../types";
+import type { ChangeEntry } from "../types";
 import { FileStatusBadge } from "./FileStatusBadge";
 
+/**
+ * A row action (stage, unstage, discard, …). It shows as a hover button on
+ * file and folder rows and as an item in the right-click menu. On a folder
+ * it runs on every file below it that it applies to.
+ */
+export interface ChangesTreeAction {
+  /** Stable id, used in the button's test id: `changes-tree__action--<id>`. */
+  id: string;
+  label: string;
+  icon: React.FC<{ className?: string }>;
+  destructive?: boolean;
+  /** Whether the action applies to `entry`; every entry when omitted. */
+  appliesTo?: (entry: ChangeEntry) => boolean;
+  run: (entries: ChangeEntry[]) => void;
+}
+
 interface ChangesFileTreeProps {
-  fileStatuses: Record<string, FileStatus>;
-  onSelectFile: (filePath: string) => void;
+  entries: ChangeEntry[];
+  onSelectFile: (entry: ChangeEntry) => void;
   /** Double-click a file — pins the diff (vs the single-click preview). When
    *  omitted, a double-click does nothing beyond the single-click select. */
-  onSelectFilePinned?: (filePath: string) => void;
+  onSelectFilePinned?: (entry: ChangeEntry) => void;
   activeFile?: string | null;
-  /**
-   * Revert every path in the list — used by the right-click "Reset
-   * changes" action. For a folder right-click the tree collects all
-   * descendant file paths and passes them all at once. Pass `undefined`
-   * (or leave the prop unset) to hide the menu item entirely.
-   */
-  onRevertPaths?: (paths: string[]) => void | Promise<void>;
+  actions?: ChangesTreeAction[];
   /**
    * Absolute filesystem path of the workspace root. When provided, the
    * right-click menu offers "Copy absolute path"; when omitted (e.g. still
@@ -49,23 +53,37 @@ interface ChangesTreeNodeProps {
   depth: number;
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
-  onSelectFile: (filePath: string) => void;
-  onSelectFilePinned?: (filePath: string) => void;
-  onRequestReset: (node: FileTreeNode) => void;
-  canReset: boolean;
+  onSelectFile: (entry: ChangeEntry) => void;
+  onSelectFilePinned?: (entry: ChangeEntry) => void;
+  actions: ChangesTreeAction[];
   workspacePath?: string;
   activeFile?: string | null;
 }
 
-/**
- * Collect every leaf (file) path inside this subtree. For a leaf node
- * the result is just the node's own path; for a directory it's a flat
- * list of all descendants. Used to expand a folder right-click into the
- * full set of files to revert.
- */
-function collectLeafPaths(node: FileTreeNode): string[] {
-  if (!node.children) return [node.path];
-  return node.children.flatMap(collectLeafPaths);
+/** Every change inside this subtree (just the node's own for a file). */
+function collectEntries(node: FileTreeNode): ChangeEntry[] {
+  if (!node.children) return node.entry ? [node.entry] : [];
+  return node.children.flatMap(collectEntries);
+}
+
+/** `+N -M` line counts; zero or unknown sides are left out. */
+function LineCounts({ entry }: { entry: ChangeEntry }) {
+  const { additions, deletions } = entry;
+  if (!additions && !deletions) return null;
+  return (
+    <span className="flex shrink-0 gap-1 text-[11px] tabular-nums">
+      {!!additions && (
+        <span className="text-green-600 dark:text-green-400" data-testid="changes-tree__additions">
+          +{additions}
+        </span>
+      )}
+      {!!deletions && (
+        <span className="text-red-600 dark:text-red-400" data-testid="changes-tree__deletions">
+          -{deletions}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function ChangesTreeNode({
@@ -75,8 +93,7 @@ function ChangesTreeNode({
   onToggle,
   onSelectFile,
   onSelectFilePinned,
-  onRequestReset,
-  canReset,
+  actions,
   workspacePath,
   activeFile,
 }: ChangesTreeNodeProps) {
@@ -86,7 +103,7 @@ function ChangesTreeNode({
   const btnRef = useRef<HTMLButtonElement>(null);
 
   // Defer the context-menu action until the menu finishes closing — see
-  // useDeferredMenuAction for the full reasoning. Without this the
+  // useDeferredMenuAction for the full reasoning. Without this a
   // confirmation dialog would mount while Radix's FocusScope is still
   // alive and lose focus management.
   const menu = useDeferredMenuAction();
@@ -98,75 +115,101 @@ function ChangesTreeNode({
     }
   }, [isActive]);
 
+  const entries = useMemo(() => collectEntries(node), [node]);
+  const applicable = actions
+    .map((action) => ({
+      action,
+      targets: action.appliesTo ? entries.filter(action.appliesTo) : entries,
+    }))
+    .filter(({ targets }) => targets.length > 0);
+
   const handleClick = () => {
-    if (isDir) {
-      onToggle(node.path);
-    } else {
-      onSelectFile(node.path);
-    }
+    if (isDir) onToggle(node.path);
+    else if (node.entry) onSelectFile(node.entry);
   };
 
   const handleDoubleClick = () => {
-    if (!isDir) onSelectFilePinned?.(node.path);
+    if (!isDir && node.entry) onSelectFilePinned?.(node.entry);
   };
 
-  const button = (
-    <button
-      ref={isActive ? btnRef : undefined}
-      type="button"
-      // data-band-active marks this button so the workspace-level
-      // ⇧⌘G "focus Changes" handler can target it from outside the
-      // file tree.
-      data-band-active={isActive ? "true" : undefined}
-      data-testid={`changes-tree__row--${node.path}`}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-      // Suppress the iOS text-selection / callout that fires on
-      // long-press alongside the Radix contextmenu event.
-      className={`flex h-[28px] w-full select-none items-center gap-1 pr-3 text-left text-[13px] hover:bg-accent/50 [-webkit-touch-callout:none] ${
+  const name = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
+  const Icon = isDir ? getFolderIcon(name, isExpanded) : getFileIcon(name);
+
+  const row = (
+    <div
+      data-testid={`changes-tree__item--${node.path}`}
+      className={`group flex h-[28px] w-full items-center pr-2 hover:bg-accent/50 ${
         isActive
           ? "bg-blue-500/30 text-foreground outline outline-1 -outline-offset-1 outline-blue-400/60 hover:bg-blue-500/30 dark:bg-blue-500/40 dark:outline-blue-400/70 dark:hover:bg-blue-500/40"
           : ""
       }`}
-      style={{ paddingLeft: `${depth * 12 + 4}px` }}
     >
-      {/* Chevron / spacer */}
-      {isDir ? (
-        isExpanded ? (
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70" />
+      <button
+        ref={isActive ? btnRef : undefined}
+        type="button"
+        // data-band-active marks this button so the workspace-level
+        // ⇧⌘G "focus Changes" handler can target it from outside the
+        // file tree.
+        data-band-active={isActive ? "true" : undefined}
+        data-testid={`changes-tree__row--${node.path}`}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        title={node.entry?.oldPath ? `${node.entry.oldPath} → ${node.path}` : node.path}
+        // Suppress the iOS text-selection / callout that fires on
+        // long-press alongside the Radix contextmenu event.
+        className="flex h-full min-w-0 flex-1 select-none items-center gap-1 pr-1 text-left text-[13px] [-webkit-touch-callout:none]"
+        style={{ paddingLeft: `${depth * 12 + 4}px` }}
+      >
+        {isDir ? (
+          isExpanded ? (
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70" />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/70" />
+          )
         ) : (
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/70" />
-        )
-      ) : (
-        <span className="size-3.5 shrink-0" />
+          <span className="size-3.5 shrink-0" />
+        )}
+        <Icon className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {isDir && (
+          <span
+            className="shrink-0 text-[11px] text-muted-foreground tabular-nums"
+            data-testid="changes-tree__file-count"
+          >
+            {node.fileCount}
+          </span>
+        )}
+        {!isDir && node.entry && <LineCounts entry={node.entry} />}
+        {!isDir && node.entry && (
+          <FileStatusBadge status={node.entry.status} conflict={node.entry.conflict} />
+        )}
+      </button>
+      {/* Hover actions, as in orca and VS Code; devices without hover always
+          show them. */}
+      {applicable.length > 0 && (
+        <div className="hidden shrink-0 items-center gap-0.5 group-focus-within:flex group-hover:flex [@media(hover:none)]:flex">
+          {applicable.map(({ action, targets }) => (
+            <button
+              key={action.id}
+              type="button"
+              title={action.label}
+              aria-label={action.label}
+              data-testid={`changes-tree__action--${action.id}`}
+              onClick={() => action.run(targets)}
+              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <action.icon className="size-3.5" />
+            </button>
+          ))}
+        </div>
       )}
-
-      {/* Icon */}
-      {isDir
-        ? (() => {
-            const folderName = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
-            const FolderIcon = getFolderIcon(folderName, isExpanded);
-            return <FolderIcon className="size-4 shrink-0" />;
-          })()
-        : (() => {
-            // Use the last segment of the node name for icon detection
-            const fileName = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
-            const FileIcon = getFileIcon(fileName);
-            return <FileIcon className="size-4 shrink-0" />;
-          })()}
-
-      {/* Name */}
-      <span className="min-w-0 flex-1 truncate">{node.name}</span>
-
-      {/* Status badge for files */}
-      {!isDir && node.status && <FileStatusBadge status={node.status} />}
-    </button>
+    </div>
   );
 
   return (
     <>
       <ContextMenu>
-        <ContextMenuTrigger asChild>{button}</ContextMenuTrigger>
+        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
         <ContextMenuContent onCloseAutoFocus={menu.flush}>
           <ContextMenuItem
             data-testid="changes-tree__copy-relative-path"
@@ -188,18 +231,18 @@ function ChangesTreeNode({
               Copy absolute path
             </ContextMenuItem>
           )}
-          {canReset && (
-            <>
-              <ContextMenuSeparator />
-              <ContextMenuItem
-                variant="destructive"
-                onSelect={() => menu.queue(() => onRequestReset(node))}
-              >
-                <RotateCcw className="size-4" />
-                Reset changes
-              </ContextMenuItem>
-            </>
-          )}
+          {applicable.length > 0 && <ContextMenuSeparator />}
+          {applicable.map(({ action, targets }) => (
+            <ContextMenuItem
+              key={action.id}
+              variant={action.destructive ? "destructive" : undefined}
+              data-testid={`changes-tree__menu--${action.id}`}
+              onSelect={() => menu.queue(() => action.run(targets))}
+            >
+              <action.icon className="size-4" />
+              {action.label}
+            </ContextMenuItem>
+          ))}
         </ContextMenuContent>
       </ContextMenu>
 
@@ -214,8 +257,7 @@ function ChangesTreeNode({
             onToggle={onToggle}
             onSelectFile={onSelectFile}
             onSelectFilePinned={onSelectFilePinned}
-            onRequestReset={onRequestReset}
-            canReset={canReset}
+            actions={actions}
             workspacePath={workspacePath}
             activeFile={activeFile}
           />
@@ -238,21 +280,23 @@ function collectDirPaths(nodes: FileTreeNode[]): string[] {
   return paths;
 }
 
+const NO_ACTIONS: ChangesTreeAction[] = [];
+
 export function ChangesFileTree({
-  fileStatuses,
+  entries,
   onSelectFile,
   onSelectFilePinned,
   activeFile,
-  onRevertPaths,
+  actions = NO_ACTIONS,
   workspacePath,
 }: ChangesFileTreeProps) {
-  const tree = useMemo(() => buildFileTree(fileStatuses), [fileStatuses]);
+  const tree = useMemo(() => buildFileTree(entries), [entries]);
 
   // Track every directory path we've ever seen. Used so newly-appearing
   // directories default to expanded, while preserving the user's explicit
   // collapses for paths that were already in the tree on a previous render
   // (including paths that temporarily disappeared, e.g. when switching the
-  // changes selector between branches with different file sets).
+  // compare branch between branches with different file sets).
   //
   // `useRef`'s initial value is only consumed on the first render; later
   // updates flow through the `useEffect` below. The `expandedPaths`
@@ -268,14 +312,9 @@ export function ChangesFileTree({
   // When the tree changes, expand any directories we haven't seen before
   // and remember them for future renders. Directories the user has
   // explicitly collapsed stay collapsed — we never overwrite an existing
-  // entry — so switching between branches (including one with no changes
-  // at all) doesn't reset the expansion state.
-  // `seenDirPathsRef` accumulates every directory path observed during the
-  // workspace session and is intentionally never pruned — that's how user
-  // collapses survive paths that disappear from the tree (e.g. switching
-  // selectors). Memory cost is negligible because changed-file sets are
-  // small; if a future "reset expansion to defaults" action is added it
-  // must clear this ref alongside `expandedPaths`.
+  // entry. `seenDirPathsRef` is intentionally never pruned — that's how
+  // user collapses survive paths that disappear from the tree. Memory cost
+  // is negligible because changed-file sets are small.
   useEffect(() => {
     const currentDirs = collectDirPaths(tree);
     const newDirs = currentDirs.filter((p) => !seenDirPathsRef.current.has(p));
@@ -300,61 +339,6 @@ export function ChangesFileTree({
     });
   };
 
-  // ---------- Reset-changes flow ----------
-  const [pendingReset, setPendingReset] = useState<{
-    /** Display label — file name for a leaf, folder path for a directory. */
-    label: string;
-    /** Whether the user right-clicked a folder (affects dialog copy). */
-    isFolder: boolean;
-    /** Every leaf path under the right-clicked node. */
-    paths: string[];
-    /** Status for single-file resets — drives the precise warning text. */
-    status?: FileStatus;
-  } | null>(null);
-  const [resetSubmitting, setResetSubmitting] = useState(false);
-
-  const handleRequestReset = useCallback((node: FileTreeNode) => {
-    const paths = collectLeafPaths(node);
-    if (paths.length === 0) return;
-    if (node.children) {
-      setPendingReset({
-        label: node.path,
-        isFolder: true,
-        paths,
-      });
-    } else {
-      setPendingReset({
-        label: node.path,
-        isFolder: false,
-        paths: [node.path],
-        status: node.status,
-      });
-    }
-  }, []);
-
-  const cancelReset = useCallback(() => {
-    if (resetSubmitting) return;
-    setPendingReset(null);
-  }, [resetSubmitting]);
-
-  const confirmReset = useCallback(async () => {
-    if (!pendingReset || !onRevertPaths) return;
-    setResetSubmitting(true);
-    try {
-      await onRevertPaths(pendingReset.paths);
-      setPendingReset(null);
-    } finally {
-      setResetSubmitting(false);
-    }
-  }, [pendingReset, onRevertPaths]);
-
-  const canReset = Boolean(onRevertPaths);
-
-  // When there are no changes the tree is empty — render nothing so the
-  // surrounding panel layout stays stable rather than collapsing or
-  // showing a placeholder that competes with the "No changes" message in
-  // the diff area.
-
   return (
     <>
       {tree.map((node) => (
@@ -366,77 +350,11 @@ export function ChangesFileTree({
           onToggle={handleToggle}
           onSelectFile={onSelectFile}
           onSelectFilePinned={onSelectFilePinned}
-          onRequestReset={handleRequestReset}
-          canReset={canReset}
+          actions={actions}
           workspacePath={workspacePath}
           activeFile={activeFile}
         />
       ))}
-
-      <Dialog
-        open={pendingReset !== null}
-        onOpenChange={(open) => {
-          if (!open) cancelReset();
-        }}
-      >
-        <DialogContent className="sm:max-w-[425px]" onClick={(e) => e.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle>Reset changes</DialogTitle>
-            <DialogDescription>
-              {pendingReset?.isFolder ? (
-                <>
-                  Reset changes for all {pendingReset.paths.length} file
-                  {pendingReset.paths.length === 1 ? "" : "s"} inside{" "}
-                  <strong className="break-all">{pendingReset.label}</strong>?
-                </>
-              ) : (
-                <>
-                  Reset changes to <strong className="break-all">{pendingReset?.label}</strong>?
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 text-sm">
-            <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-yellow-500" />
-              <span>
-                {pendingReset?.isFolder
-                  ? "Every change inside this folder will be discarded. Added files are deleted, deleted files are restored, modifications are reverted. This action cannot be undone."
-                  : resetDescriptionForFile(pendingReset?.status)}
-              </span>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={cancelReset} disabled={resetSubmitting}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void confirmReset()}
-              disabled={resetSubmitting}
-            >
-              {resetSubmitting ? "Resetting…" : "Reset"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
-}
-
-function resetDescriptionForFile(status: FileStatus | undefined): string {
-  switch (status) {
-    case "A":
-      return "This file was added and will be deleted. This action cannot be undone.";
-    case "U":
-      return "This file is untracked and will be deleted. This action cannot be undone.";
-    case "D":
-      return "This file was deleted and will be restored. This action cannot be undone.";
-    case "M":
-      return "All changes to this file will be discarded. This action cannot be undone.";
-    case "R":
-      return "This file was renamed and will be restored to its original path. This action cannot be undone.";
-    default:
-      return "All changes to this file will be discarded. This action cannot be undone.";
-  }
 }

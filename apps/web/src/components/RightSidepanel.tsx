@@ -10,16 +10,16 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ChangesFileTree,
+  type ChangeEntry,
+  type ChangeSection,
   FileBrowser,
   type FileBrowserHandle,
-  type FileStatus,
-  useAdapter,
   useDiffTarget,
   useWorkspacePath,
 } from "@/dashboard";
-import { useDiffSummary } from "../hooks/useDiffSummary";
+import { countChangedPaths, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { ChangesSections } from "./ChangesSections";
 import { CommitsPanel } from "./CommitsPanel";
 import { DRAG_STYLE, NO_DRAG_STYLE } from "./DesktopTitleBar";
 import { DiffTargetHeader } from "./DiffTargetHeader";
@@ -46,9 +46,6 @@ function saveActiveTab(tab: RightTab): void {
     localStorage.setItem(TAB_KEY, tab);
   } catch {}
 }
-
-/** Stable empty fileStatuses reference so a "no changes" render doesn't churn. */
-const EMPTY_STATUSES: Record<string, FileStatus> = {};
 
 // ---------------------------------------------------------------------------
 // Tab button (label + optional count badge)
@@ -271,24 +268,23 @@ function RightSidepanelInner({
       ?.replace(/[/\\]+$/, "")
       .split(/[/\\]/)
       .pop() || "Explorer";
-  const { diffMode, compareBranch, setDiffMode, setCompareBranch } = useDiffTarget(workspaceId);
-  const adapter = useAdapter();
+  const { compareBranch, setCompareBranch } = useDiffTarget(workspaceId);
 
   // The active file/diff leaf publishes its path here (see
   // WorkspaceCenterDockview's `useActiveFileTracking`); use it to highlight the
   // open file in the Explorer tree and the open diff in the Changes tree.
   const { currentFile } = usePerWorkspaceState(workspaceId);
 
-  // Fetch the changes summary for both the Changes tab badge and the tree.
+  // Fetch the Changes sections for both the Changes tab badge and the lists.
   // Poll only while the panel is visible — react-resizable-panels keeps this
   // subtree mounted when collapsed, and each poll shells out to `git`.
-  const summaryQuery = useDiffSummary(workspaceId, {
+  const changesQuery = useWorkspaceChanges(workspaceId, {
     enabled: visible,
     refetchInterval: visible ? 15_000 : false,
   });
 
-  // The header's branch names outlive the summary for one target: a new pick
-  // changes the summary's query key, and without this the current branch
+  // The header's branch names outlive the result for one target: a new pick
+  // changes the query key, and without this the current branch
   // would blank out until the new summary arrives.
   const [knownBranches, setKnownBranches] = useState<{
     workspaceId: string;
@@ -296,7 +292,7 @@ function RightSidepanelInner({
     defaultBranch: string;
   } | null>(null);
   useEffect(() => {
-    const data = summaryQuery.data;
+    const data = changesQuery.data;
     if (data) {
       setKnownBranches({
         workspaceId,
@@ -304,26 +300,11 @@ function RightSidepanelInner({
         defaultBranch: data.defaultBranch,
       });
     }
-  }, [summaryQuery.data, workspaceId]);
+  }, [changesQuery.data, workspaceId]);
   const branchInfo =
-    summaryQuery.data ?? (knownBranches?.workspaceId === workspaceId ? knownBranches : undefined);
+    changesQuery.data ?? (knownBranches?.workspaceId === workspaceId ? knownBranches : undefined);
 
-  // The server types `fileStatuses` values as plain `string`; the tree wants
-  // the `FileStatus` union. Same runtime values — cast at this single seam.
-  const fileStatuses = (summaryQuery.data?.fileStatuses ?? EMPTY_STATUSES) as Record<
-    string,
-    FileStatus
-  >;
-  const changeCount = Object.keys(fileStatuses).length;
-
-  const selectUncommitted = useCallback(() => setDiffMode("uncommitted"), [setDiffMode]);
-  const selectBranch = useCallback(
-    (branch: string) => {
-      setDiffMode("branch");
-      setCompareBranch(branch);
-    },
-    [setDiffMode, setCompareBranch],
-  );
+  const changeCount = countChangedPaths(changesQuery.data);
 
   // Single-click opens a preview (italic, reused) leaf; double-click pins it.
   const openFile = useCallback(
@@ -332,8 +313,16 @@ function RightSidepanelInner({
     [workspaceId],
   );
   const openDiff = useCallback(
-    (path: string, pinned: boolean) =>
-      getWorkspaceLeafActions(workspaceId)?.openDiff(path, { preview: !pinned }),
+    (section: ChangeSection, entry: ChangeEntry, pinned: boolean) =>
+      getWorkspaceLeafActions(workspaceId)?.openDiff(entry.path, {
+        preview: !pinned,
+        section,
+        oldPath: entry.oldPath,
+      }),
+    [workspaceId],
+  );
+  const openSectionDiffs = useCallback(
+    (section: ChangeSection) => getWorkspaceLeafActions(workspaceId)?.openSectionDiffs(section),
     [workspaceId],
   );
 
@@ -344,22 +333,6 @@ function RightSidepanelInner({
       getWorkspaceLeafActions(workspaceId)?.openCommitDiff(sha, path, { preview: !pinned }),
     [workspaceId],
   );
-
-  // "Reset changes" in the Changes tree right-click menu — revert each path to
-  // its diff-target baseline, then refresh the summary. Undefined when the
-  // adapter can't revert (hides the menu item).
-  const onRevertPaths = adapter.revertFile
-    ? async (paths: string[]) => {
-        const revert = adapter.revertFile;
-        if (!revert) return;
-        await Promise.allSettled(
-          paths.map((p) =>
-            revert.call(adapter, workspaceId, p, diffMode, compareBranch ?? undefined),
-          ),
-        );
-        summaryQuery.refetch();
-      }
-    : undefined;
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="right-sidepanel">
@@ -410,31 +383,26 @@ function RightSidepanelInner({
             className="flex h-full flex-col overflow-hidden"
             data-testid="right-sidepanel__changes"
           >
-            {/* Current branch and diff target. Picking a target updates the
-                shared diff target; the summary query above is keyed on
-                diffMode/compareBranch, so it refetches automatically. */}
+            {/* Current branch and compare branch. Picking a branch updates the
+                shared diff target; the changes query above is keyed on
+                compareBranch, so it refetches automatically. */}
             <DiffTargetHeader
               workspaceId={workspaceId}
               headBranch={branchInfo?.headBranch}
               defaultBranch={branchInfo?.defaultBranch}
-              diffMode={diffMode}
               compareBranch={compareBranch}
-              onSelectUncommitted={selectUncommitted}
-              onSelectBranch={selectBranch}
+              onSelectBranch={setCompareBranch}
             />
             <div className="min-h-0 flex-1 overflow-auto">
-              {changeCount === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground">No changes</p>
-              ) : (
-                <ChangesFileTree
-                  fileStatuses={fileStatuses}
-                  onSelectFile={(p) => openDiff(p, false)}
-                  onSelectFilePinned={(p) => openDiff(p, true)}
-                  onRevertPaths={onRevertPaths}
-                  workspacePath={workspacePath}
-                  activeFile={currentFile}
-                />
-              )}
+              <ChangesSections
+                workspaceId={workspaceId}
+                changes={changesQuery.data}
+                onOpen={openDiff}
+                onViewAll={openSectionDiffs}
+                editable
+                workspacePath={workspacePath}
+                activeFile={currentFile}
+              />
             </div>
             <CommitsPanel workspaceId={workspaceId} visible={visible} onOpenFile={openCommitDiff} />
           </div>

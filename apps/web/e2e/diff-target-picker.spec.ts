@@ -1,17 +1,18 @@
 /**
  * End-to-end coverage for the Changes tab header and its branch picker:
  *
- *  - The header shows the worktree's current branch, and below it the diff
- *    target ("Uncommitted" until something is picked).
+ *  - The header shows the worktree's current branch, and below it the branch
+ *    the "Committed on Branch" section compares against (the project default
+ *    until something is picked).
  *  - The picker searches branches on the server. With more branches than the
  *    picker lists, it shows the first page plus a "type to narrow" notice,
  *    and typing narrows the list to local AND remote-tracking matches.
- *  - Arrow keys + Enter pick a branch; the Changes tree then diffs against
- *    it, and the pick survives a reload (persisted per workspace).
+ *  - Arrow keys + Enter pick a branch; the branch section then compares
+ *    against it, and the pick survives a reload (persisted per workspace).
  *  - The "Default branch" button resets the target to the project default.
  *  - Escape closes the picker without changing the target.
- *  - "Uncommitted" switches back from a branch target, and is only offered
- *    while the search box is empty.
+ *  - The picker offers branches only: uncommitted work has its own sections
+ *    and never shows up in the branch section, whatever the target.
  *
  * The repo is real git in a temp dir: 60 filler branches (more than the
  * picker's 50-branch page), plus remote-tracking refs written with
@@ -31,7 +32,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { ChangesPanelPage } from "./pages/ChangesPanelPage";
+import { BRANCH_OPTION_TESTID, ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the right sidepanel
 // renders beside the center dockview.
@@ -43,10 +44,9 @@ const DEFAULT_BRANCH = "main";
 const HEAD_BRANCH = "work";
 const FILLER_BRANCH_COUNT = 60;
 const REMOTE_BRANCH = "origin/release-candidate";
-// Committed on `work` only: in the tree when diffing against a branch, absent
-// from the Uncommitted diff.
+// Committed on `work` only: in the "Committed on Branch" section.
 const COMMITTED_FILE = "committed.txt";
-// Modified but not committed: in the tree for every target.
+// Modified but not committed: in the Changes section, never the branch one.
 const EDITED_FILE = "file.txt";
 
 let server: ServerHandle;
@@ -95,14 +95,18 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("Header shows the current branch and the Uncommitted target", async ({ page }) => {
+test("Header shows the current branch and compares against the default branch", async ({
+  page,
+}) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   await changes.goto(workspaceId);
 
   await expect(changes.headBranch).toHaveText(HEAD_BRANCH, { timeout: 15_000 });
-  await expect.poll(() => changes.diffMode()).toBe("uncommitted");
-  await expect(changes.changesTreeRow(EDITED_FILE)).toBeVisible();
-  await expect(changes.changesTreeRow(COMMITTED_FILE)).toHaveCount(0);
+  await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH);
+  await expect.poll(() => changes.compareBranch()).toBeNull();
+  await expect(changes.sectionRow("branch", COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
+  await expect(changes.sectionRow("unstaged", EDITED_FILE)).toBeVisible();
+  await expect(changes.sectionRow("branch", EDITED_FILE)).toHaveCount(0);
 });
 
 test("Picker lists one page of branches and narrows to remote matches as you type", async ({
@@ -130,7 +134,7 @@ test("Picker lists one page of branches and narrows to remote matches as you typ
   await expect(changes.branchOptions).toHaveCount(0);
 });
 
-test("Keyboard picks a branch, the tree diffs against it, and the pick persists", async ({
+test("Keyboard picks a branch, the branch section compares against it, and the pick persists", async ({
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
@@ -148,14 +152,18 @@ test("Keyboard picks a branch, the tree diffs against it, and the pick persists"
 
   await expect(changes.diffTargetPicker).toHaveCount(0);
   await expect(changes.diffTargetTrigger).toContainText("feature/filler-01");
-  await expect.poll(() => changes.diffMode()).toBe("branch");
   await expect.poll(() => changes.compareBranch()).toBe("feature/filler-01");
-  // Diffing against a branch brings the work-only commit into the tree.
-  await expect(changes.changesTreeRow(COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
+  // The branch section's count names the branch it compared against.
+  await expect(changes.sectionCount("branch")).toHaveAttribute("title", /feature\/filler-01/, {
+    timeout: 15_000,
+  });
+  await expect(changes.sectionRow("branch", COMMITTED_FILE)).toBeVisible();
 
   await changes.reload();
   await expect(changes.diffTargetTrigger).toContainText("feature/filler-01");
-  await expect(changes.changesTreeRow(COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
+  await expect(changes.sectionCount("branch")).toHaveAttribute("title", /feature\/filler-01/, {
+    timeout: 15_000,
+  });
 });
 
 test("Default branch button resets the target, and Escape closes without a change", async ({
@@ -177,7 +185,6 @@ test("Default branch button resets the target, and Escape closes without a chang
   await expect(changes.diffTargetPicker).toHaveCount(0);
   await expect(changes.diffTargetTrigger).toContainText(DEFAULT_BRANCH);
   await expect.poll(() => changes.compareBranch()).toBe(DEFAULT_BRANCH);
-  await expect.poll(() => changes.diffMode()).toBe("branch");
 
   await changes.openDiffTargetDropdown();
   await changes.searchBranches("filler-59");
@@ -188,25 +195,18 @@ test("Default branch button resets the target, and Escape closes without a chang
   await expect.poll(() => changes.compareBranch()).toBe(DEFAULT_BRANCH);
 });
 
-test("Uncommitted switches back from a branch target and hides while searching", async ({
+test("The picker offers only branches, and uncommitted work stays out of the branch section", async ({
   page,
 }) => {
   const changes = new ChangesPanelPage(page, server.url, TOKEN);
   await changes.goto(workspaceId);
 
   await changes.openDiffTargetDropdown();
+  await expect(changes.firstDiffTargetOption).toHaveAttribute("data-testid", BRANCH_OPTION_TESTID);
   await changes.pickDefaultBranch();
-  await expect(changes.changesTreeRow(COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
 
-  await changes.openDiffTargetDropdown();
-  await changes.searchBranches("filler-1");
-  await expect(changes.branchOptions.first()).toBeVisible();
-  await expect(changes.uncommittedOption).toHaveCount(0);
-  await changes.searchBranches("");
-  await expect(changes.uncommittedOption).toBeVisible();
-  await changes.pickUncommitted();
-
-  await expect.poll(() => changes.diffMode()).toBe("uncommitted");
-  await expect(changes.changesTreeRow(EDITED_FILE)).toBeVisible();
-  await expect(changes.changesTreeRow(COMMITTED_FILE)).toHaveCount(0);
+  await expect(changes.sectionRow("branch", COMMITTED_FILE)).toBeVisible({ timeout: 15_000 });
+  await expect(changes.sectionCount("branch")).toHaveText("1");
+  await expect(changes.sectionRow("unstaged", EDITED_FILE)).toBeVisible();
+  await expect(changes.sectionRow("branch", EDITED_FILE)).toHaveCount(0);
 });
