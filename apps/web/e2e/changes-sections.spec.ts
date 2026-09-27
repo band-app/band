@@ -62,12 +62,17 @@ test.beforeAll(async () => {
 
   // `view`: one of each — a commit on the branch, a staged new file, an
   // unstaged edit and an untracked file. Only read, never changed.
-  const view = createRepo("view", { "keep.txt": "keep\n" });
+  const view = createRepo("view", { "keep.txt": "keep\n", "both.txt": "both\n" });
   writeFileSync(join(view, "committed.txt"), "one\ntwo\n");
   gitCommit(view, "add committed.txt");
   writeFileSync(join(view, "staged.txt"), "staged line\n");
   git(view, ["add", "staged.txt"]);
   writeFileSync(join(view, "keep.txt"), "keep\nunstaged line\n");
+  // both.txt: a staged edit with an unstaged edit on top, so it is listed in
+  // both Staged Changes and Changes.
+  writeFileSync(join(view, "both.txt"), "both\nstaged edit\n");
+  git(view, ["add", "both.txt"]);
+  writeFileSync(join(view, "both.txt"), "both\nstaged edit\nunstaged edit\n");
   mkdirSync(join(view, "notes"));
   writeFileSync(join(view, "notes/todo.md"), "todo line\n");
   writeFileSync(join(view, "notes/later.md"), "later line\n");
@@ -76,6 +81,10 @@ test.beforeAll(async () => {
   const staging = createRepo("staging", { "a.txt": "a\n" });
   writeFileSync(join(staging, "a.txt"), "a\nedited\n");
   writeFileSync(join(staging, "new.txt"), "new\n");
+
+  // `revert`: an edit reverted from its diff tab.
+  const revert = createRepo("revert", { "r.txt": "r\n" });
+  writeFileSync(join(revert, "r.txt"), "r\nreverted line\n");
 
   // `discard`: an edit and an untracked file the test throws away.
   const discard = createRepo("discard", { "b.txt": "b\n" });
@@ -118,13 +127,15 @@ test("Each kind of change gets its own section, and uncommitted work stays out o
   await changes.goto(workspaces.view);
 
   await expect(changes.sectionRow("branch", "committed.txt")).toBeVisible({ timeout: 15_000 });
-  expect(await changes.visibleSections()).toEqual(["unstaged", "staged", "untracked", "branch"]);
+  await expect
+    .poll(() => changes.visibleSections())
+    .toEqual(["unstaged", "staged", "untracked", "branch"]);
 
-  await expect(changes.sectionCount("unstaged")).toHaveText("1");
+  await expect(changes.sectionCount("unstaged")).toHaveText("2");
   await expect(changes.sectionRow("unstaged", "keep.txt")).toBeVisible();
   await expect(changes.rowAdditions("unstaged", "keep.txt")).toHaveText("+1");
 
-  await expect(changes.sectionCount("staged")).toHaveText("1");
+  await expect(changes.sectionCount("staged")).toHaveText("2");
   await expect(changes.sectionRow("staged", "staged.txt")).toBeVisible();
 
   // Untracked files show as a tree: the folder row carries its file count.
@@ -134,7 +145,7 @@ test("Each kind of change gets its own section, and uncommitted work stays out o
 
   await expect(changes.sectionCount("branch")).toHaveText("1");
   await expect(changes.rowAdditions("branch", "committed.txt")).toHaveText("+2");
-  for (const uncommitted of ["keep.txt", "staged.txt", "notes/todo.md"]) {
+  for (const uncommitted of ["keep.txt", "both.txt", "staged.txt", "notes/todo.md"]) {
     await expect(changes.sectionRow("branch", uncommitted)).toHaveCount(0);
   }
 });
@@ -158,6 +169,33 @@ test("A row opens that section's diff, and View all stacks the section's files i
   await expect(changes.sectionDiffsLine("untracked", "notes/todo.md", "todo line")).toBeVisible({
     timeout: 15_000,
   });
+});
+
+test("A file in Staged Changes and Changes shows each section's diff in one tab", async ({
+  page,
+}) => {
+  const changes = new ChangesPanelPage(page, server.url, TOKEN);
+  await changes.goto(workspaces.view);
+
+  await changes.openSectionFile("staged", "both.txt");
+  await expect(changes.diffLine("staged edit")).toBeVisible({ timeout: 15_000 });
+  await expect(changes.diffLine("unstaged edit")).toHaveCount(0);
+
+  await changes.openSectionFile("unstaged", "both.txt");
+  await expect(changes.diffLine("unstaged edit")).toBeVisible({ timeout: 15_000 });
+  await expect(changes.diffTab("both.txt")).toHaveCount(1);
+});
+
+test("Reverting an unstaged diff from its tab restores the file", async ({ page }) => {
+  const changes = new ChangesPanelPage(page, server.url, TOKEN);
+  await changes.goto(workspaces.revert);
+
+  await changes.openSectionFile("unstaged", "r.txt");
+  await expect(changes.diffLine("reverted line")).toBeVisible({ timeout: 15_000 });
+  await changes.revertVisibleDiff();
+
+  await expect(changes.section("unstaged")).toHaveCount(0, { timeout: 15_000 });
+  expect(readFileSync(join(repos.revert, "r.txt"), "utf-8")).toBe("r\n");
 });
 
 test("Stage and unstage move files between Changes, Staged Changes and Untracked Files", async ({
@@ -224,7 +262,7 @@ test("An unmerged file is listed under Conflicts until it is marked resolved", a
   await changes.goto(workspaces.conflict);
 
   await expect(changes.conflictBadge("c.txt")).toBeVisible({ timeout: 15_000 });
-  expect((await changes.visibleSections())[0]).toBe("conflicts");
+  await expect.poll(() => changes.visibleSections().then((s) => s[0])).toBe("conflicts");
   await expect(changes.section("unstaged")).toHaveCount(0);
 
   writeFileSync(join(repos.conflict, "c.txt"), "resolved\n");

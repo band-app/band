@@ -137,6 +137,7 @@ function ChangesTreeNode({
 
   const row = (
     <div
+      data-testid={`changes-tree__item--${node.path}`}
       className={`group flex h-[28px] w-full items-center pr-2 hover:bg-accent/50 ${
         isActive
           ? "bg-blue-500/30 text-foreground outline outline-1 -outline-offset-1 outline-blue-400/60 hover:bg-blue-500/30 dark:bg-blue-500/40 dark:outline-blue-400/70 dark:hover:bg-blue-500/40"

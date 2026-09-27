@@ -350,7 +350,7 @@ function splitFields(record: string, count: number): string[] {
  * An ordinary (`1`) or rename (`2`) record lands in `staged` when its X
  * column is set and in `unstaged` when its Y column is set.
  */
-export function parseStatusV2(output: string): {
+function parseStatusV2(output: string): {
   conflicts: ChangeEntry[];
   unstaged: ChangeEntry[];
   staged: ChangeEntry[];
@@ -401,9 +401,7 @@ export function parseStatusV2(output: string): {
  * is `added\tdeleted\t` followed by the old and new paths as their own
  * records; a binary file reports `-` for both counts.
  */
-export function parseNumstat(
-  output: string,
-): Map<string, { additions?: number; deletions?: number }> {
+function parseNumstat(output: string): Map<string, { additions?: number; deletions?: number }> {
   const counts = new Map<string, { additions?: number; deletions?: number }>();
   const records = output.split("\0");
   for (let i = 0; i < records.length; i++) {
@@ -528,6 +526,38 @@ function synthesizeAddedFileDiff(filePath: string, lines: string[]): string {
   diff += lines.map((l) => `+${l}`).join("\n");
   diff += "\n";
   return diff;
+}
+
+/**
+ * Paths per git invocation for the stage / unstage / discard mutations, so a
+ * "Stage all" on a section of thousands of files stays under the OS argv
+ * limit.
+ */
+const PATHS_PER_GIT_CALL = 500;
+
+/**
+ * Runs `git <args> -- <paths>` in batches. `--literal-pathspecs` makes git
+ * take each path as a file name, not a glob or magic pathspec: without it,
+ * `*` or `:/` would widen a single-file discard to the whole worktree, and a
+ * file named `app/[slug]/page.tsx` would also match `app/s/page.tsx`.
+ */
+async function execGitOnPaths(args: string[], paths: string[], cwd: string): Promise<void> {
+  for (let i = 0; i < paths.length; i += PATHS_PER_GIT_CALL) {
+    await execGit(
+      ["--literal-pathspecs", ...args, "--", ...paths.slice(i, i + PATHS_PER_GIT_CALL)],
+      cwd,
+    );
+  }
+}
+
+/** Whether the repo has a commit checked out (false before the first one). */
+async function hasHead(cwd: string): Promise<boolean> {
+  try {
+    await execGit(["rev-parse", "--verify", "--quiet", "HEAD"], cwd);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export class DiffService {
@@ -731,16 +761,18 @@ export class DiffService {
 
     // Every git call below is independent of the others except the branch
     // compare, which needs HEAD and the base resolved first. `--no-optional-
-    // locks` keeps this poll from taking `index.lock` (and failing a
-    // concurrent `git commit` in a terminal).
+    // locks` on the calls that read the index keeps this poll from taking
+    // `index.lock` (and failing a concurrent `git commit` in a terminal).
     const [statusOutput, unstagedNumstat, stagedNumstat, headBranch, branchCompare] =
       await Promise.all([
         execGit(
           ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all"],
           cwd,
         ),
-        execGit(["diff", "--numstat", "-z", "-M"], cwd),
-        execGit(["diff", "--cached", "--numstat", "-z", "-M"], cwd).catch(() => ""),
+        execGit(["--no-optional-locks", "diff", "--numstat", "-z", "-M"], cwd),
+        execGit(["--no-optional-locks", "diff", "--cached", "--numstat", "-z", "-M"], cwd).catch(
+          () => "",
+        ),
         execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
           .then((out) => out.trim())
           .catch(() => defaultBranch),
@@ -810,7 +842,8 @@ export class DiffService {
       return { diff: synthesizeAddedFileDiff(options.filePath, lines) };
     }
 
-    const args = ["diff"];
+    // Literal pathspecs: the path is a file name, not a glob.
+    const args = ["--literal-pathspecs", "diff"];
     if (options.contextLines !== undefined) args.push(`-U${options.contextLines}`);
     switch (options.section) {
       case "unstaged":
@@ -836,19 +869,19 @@ export class DiffService {
    *  file's changes (for a conflict this marks it resolved). */
   async stageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
     const cwd = this.worktreeFor(workspaceId, paths);
-    await execGit(["add", "-A", "--", ...paths], cwd);
+    await execGitOnPaths(["add", "-A"], paths, cwd);
     return { ok: true };
   }
 
   /** Move the paths' staged changes back to the working tree. */
   async unstageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
     const cwd = this.worktreeFor(workspaceId, paths);
-    try {
-      await execGit(["restore", "--staged", "--", ...paths], cwd);
-    } catch {
-      // No HEAD yet (first commit not made): there is nothing to restore
-      // from, so drop the paths from the index instead.
-      await execGit(["rm", "--cached", "-r", "-q", "--", ...paths], cwd);
+    if (await hasHead(cwd)) {
+      await execGitOnPaths(["restore", "--staged"], paths, cwd);
+    } else {
+      // No commits yet: there is nothing to restore from, so drop the paths
+      // from the index instead.
+      await execGitOnPaths(["rm", "--cached", "-r", "-q"], paths, cwd);
     }
     return { ok: true };
   }
@@ -866,25 +899,42 @@ export class DiffService {
     workspaceId: string,
     options: { paths: string[]; section: "unstaged" | "staged" | "untracked" },
   ): Promise<{ ok: true }> {
-    const cwd = this.worktreeFor(workspaceId, options.paths);
-    switch (options.section) {
+    const { paths, section } = options;
+    const cwd = this.worktreeFor(workspaceId, paths);
+    switch (section) {
       case "unstaged":
-        await execGit(["restore", "--worktree", "--", ...options.paths], cwd);
+        await execGitOnPaths(["restore", "--worktree"], paths, cwd);
         break;
       case "staged":
-        await execGit(
-          ["restore", "--staged", "--worktree", "--source=HEAD", "--", ...options.paths],
-          cwd,
-        );
+        if (await hasHead(cwd)) {
+          await execGitOnPaths(["restore", "--staged", "--worktree", "--source=HEAD"], paths, cwd);
+        } else {
+          // No commits yet, so every staged file is new: drop it from the
+          // index and delete it, as restoring from HEAD would.
+          await execGitOnPaths(["rm", "--cached", "-r", "-q"], paths, cwd);
+          await Promise.all(paths.map((p) => rm(assertWorktreeRelative(cwd, p), { force: true })));
+        }
         break;
       case "untracked": {
-        // Only delete what git itself reports as untracked, so a stale
-        // client list can never remove a tracked file.
-        const output = await execGit(
-          ["ls-files", "--others", "--exclude-standard", "-z", "--", ...options.paths],
-          cwd,
-        );
-        const untracked = output.split("\0").filter(Boolean);
+        // Only delete a requested path that git itself reports as untracked,
+        // so a stale client list can never remove a tracked file.
+        const requested = new Set(paths);
+        const untracked: string[] = [];
+        for (let i = 0; i < paths.length; i += PATHS_PER_GIT_CALL) {
+          const output = await execGit(
+            [
+              "--literal-pathspecs",
+              "ls-files",
+              "--others",
+              "--exclude-standard",
+              "-z",
+              "--",
+              ...paths.slice(i, i + PATHS_PER_GIT_CALL),
+            ],
+            cwd,
+          );
+          untracked.push(...output.split("\0").filter((p) => requested.has(p)));
+        }
         await Promise.all(
           untracked.map((p) => rm(assertWorktreeRelative(cwd, p), { force: true })),
         );

@@ -73,6 +73,7 @@ let tmpHome: string;
 let sectionsRepo: string;
 let opsRepo: string;
 let conflictRepo: string;
+let freshRepo: string;
 
 async function getChanges(workspaceId: string, compareBranch?: string): Promise<Changes> {
   const res = await trpcQuery(
@@ -122,11 +123,27 @@ beforeAll(async () => {
   writeFileSync(join(sectionsRepo, "notes/todo.md"), "line1\nline2\nline3\n");
   writeFileSync(join(sectionsRepo, "image.bin"), Buffer.from([0x89, 0x00, 0x01, 0x02]));
 
+  // A compare branch one commit behind `feature`, and one with no history
+  // in common with it.
+  git(sectionsRepo, ["branch", "mid", "feature~1"]);
+  const emptyTree = git(sectionsRepo, ["hash-object", "-t", "tree", "/dev/null"]).trim();
+  const orphan = git(sectionsRepo, ["commit-tree", emptyTree, "-m", "unrelated"]).trim();
+  git(sectionsRepo, ["branch", "unrelated", orphan]);
+
   // `ops`: a clean repo the stage / unstage / discard tests mutate.
+  // `[a].txt` is a glob to git unless pathspecs are literal.
   opsRepo = createRepo(join(tmpHome, "ops"), {
     "a.txt": "a\n",
     "b.txt": "b\n",
+    "[a].txt": "bracket\n",
   });
+
+  // `fresh`: no commits yet, one staged file.
+  freshRepo = join(tmpHome, "fresh");
+  mkdirSync(freshRepo);
+  git(freshRepo, ["init", "-b", "main"]);
+  writeFileSync(join(freshRepo, "first.txt"), "first\n");
+  git(freshRepo, ["add", "first.txt"]);
 
   // `conflict`: a merge stopped on a conflict in c.txt.
   conflictRepo = createRepo(join(tmpHome, "conflict"), { "c.txt": "base\n" });
@@ -152,6 +169,12 @@ beforeAll(async () => {
         path: opsRepo,
         defaultBranch: "main",
         worktrees: [{ branch: "main", path: opsRepo }],
+      },
+      {
+        name: "fresh",
+        path: freshRepo,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: freshRepo }],
       },
       {
         name: "conflict",
@@ -224,6 +247,18 @@ describe("workspace.getChanges", () => {
     expect(changes.branch).toEqual([]);
     // The uncommitted sections don't depend on the compare branch.
     expect(changes.untracked.map((e) => e.path)).toEqual(["image.bin", "notes/todo.md"]);
+  });
+
+  it("reports no-merge-base for a compare branch with no history in common", async () => {
+    const changes = await getChanges("sections-feature", "unrelated");
+    expect(changes.branchStatus).toBe("no-merge-base");
+    expect(changes.mergeBase).toBeNull();
+    expect(changes.branch).toEqual([]);
+  });
+
+  it("lists only the commits since the fork from the picked compare branch", async () => {
+    const changes = await getChanges("sections-feature", "mid");
+    expect(changes.branch.map((e) => e.path)).toEqual(["README.md"]);
   });
 
   it("lists an unmerged file under conflicts only", async () => {
@@ -388,6 +423,78 @@ describe("stage, unstage and discard", () => {
     expect(existsSync(join(opsRepo, "junk.txt"))).toBe(false);
     expect(readFileSync(join(opsRepo, "b.txt"), "utf-8")).toBe("b\n");
     expect((await getChanges("ops-main")).untracked).toEqual([]);
+  });
+
+  it("discards a staged edit and the unstaged edit on top of it", async () => {
+    writeFileSync(join(opsRepo, "b.txt"), "b\nstaged\n");
+    git(opsRepo, ["add", "b.txt"]);
+    writeFileSync(join(opsRepo, "b.txt"), "b\nstaged\nunstaged\n");
+
+    const res = await mutate("discardChanges", {
+      workspaceId: "ops-main",
+      section: "staged",
+      paths: ["b.txt"],
+    });
+    expect(res.status).toBe(200);
+
+    expect(readFileSync(join(opsRepo, "b.txt"), "utf-8")).toBe("b\n");
+    const changes = await getChanges("ops-main");
+    expect(changes.staged).toEqual([]);
+    expect(changes.unstaged).toEqual([]);
+  });
+
+  it("takes a path as a file name, not a glob", async () => {
+    // `[a].txt` as a glob matches `a.txt`; only the bracket file may change.
+    writeFileSync(join(opsRepo, "[a].txt"), "bracket\nedited\n");
+    writeFileSync(join(opsRepo, "a.txt"), "a\nkept\n");
+
+    const res = await mutate("discardChanges", {
+      workspaceId: "ops-main",
+      section: "unstaged",
+      paths: ["[a].txt"],
+    });
+    expect(res.status).toBe(200);
+
+    expect(readFileSync(join(opsRepo, "[a].txt"), "utf-8")).toBe("bracket\n");
+    expect(readFileSync(join(opsRepo, "a.txt"), "utf-8")).toBe("a\nkept\n");
+    git(opsRepo, ["checkout", "--", "a.txt"]);
+  });
+
+  it("never deletes untracked files that a glob path would match", async () => {
+    writeFileSync(join(opsRepo, "stray.txt"), "stray\n");
+
+    const res = await mutate("discardChanges", {
+      workspaceId: "ops-main",
+      section: "untracked",
+      paths: ["*"],
+    });
+    expect(res.status).toBe(200);
+
+    expect(existsSync(join(opsRepo, "stray.txt"))).toBe(true);
+    rmSync(join(opsRepo, "stray.txt"));
+  });
+
+  it("unstages and discards a staged file in a repo with no commits yet", async () => {
+    const unstage = await mutate("unstageFiles", {
+      workspaceId: "fresh-main",
+      paths: ["first.txt"],
+    });
+    expect(unstage.status).toBe(200);
+    let changes = await getChanges("fresh-main");
+    expect(changes.staged).toEqual([]);
+    expect(changes.untracked.map((e) => e.path)).toEqual(["first.txt"]);
+
+    git(freshRepo, ["add", "first.txt"]);
+    const discard = await mutate("discardChanges", {
+      workspaceId: "fresh-main",
+      section: "staged",
+      paths: ["first.txt"],
+    });
+    expect(discard.status).toBe(200);
+    expect(existsSync(join(freshRepo, "first.txt"))).toBe(false);
+    changes = await getChanges("fresh-main");
+    expect(changes.staged).toEqual([]);
+    expect(changes.untracked).toEqual([]);
   });
 
   it("marks a conflict resolved by staging it", async () => {

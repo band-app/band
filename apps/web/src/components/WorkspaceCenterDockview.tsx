@@ -140,6 +140,7 @@ import {
 } from "../lib/terminal-split-registry";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
+import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -1211,19 +1212,19 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
   // renamed file is listed under its new path). Untitled and external files are
   // never in it. The poll runs only while the leaf is visible; a save
   // refetches at once so the button appears without waiting for the next poll.
-  const diffSummaryEnabled = !untitled && !external;
-  const diffSummaryQuery = useWorkspaceChanges(workspaceIdRaw, {
-    enabled: diffSummaryEnabled && visible,
+  const changesEnabled = !untitled && !external;
+  const changesQuery = useWorkspaceChanges(workspaceIdRaw, {
+    enabled: changesEnabled && visible,
     refetchInterval: visible ? 15_000 : false,
   });
-  const canViewDiff = diffSummaryEnabled && !!findChange(diffSummaryQuery.data, filePathRaw);
-  const refetchDiffSummary = diffSummaryQuery.refetch;
+  const canViewDiff = changesEnabled && !!findChange(changesQuery.data, filePathRaw);
+  const refetchChanges = changesQuery.refetch;
   const wasDirtyRef = useRef(false);
   const isDirty = fileActions?.isDirty ?? false;
   useEffect(() => {
-    if (wasDirtyRef.current && !isDirty && diffSummaryEnabled) void refetchDiffSummary();
+    if (wasDirtyRef.current && !isDirty && changesEnabled) void refetchChanges();
     wasDirtyRef.current = isDirty;
-  }, [isDirty, diffSummaryEnabled, refetchDiffSummary]);
+  }, [isDirty, changesEnabled, refetchChanges]);
 
   // Publish this file leaf's actions (markdown toggle, Save, View changes) to
   // the group header — the FileViewer's own title bar is hidden (#643).
@@ -1432,9 +1433,14 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
     // Same 15 s as the sidepanel so their shared-key ticks de-duplicate.
     refetchInterval: visible ? 15_000 : false,
   });
-  const section = params.section ?? findChange(changesQuery.data, filePath)?.section;
+  // The section the tab was opened from, unless the file has since left it
+  // (staged, committed, …) for another one.
+  const found = findChange(changesQuery.data, filePath);
+  const inParamSection =
+    !!params.section && !!changesQuery.data?.[params.section].some((e) => e.path === filePath);
+  const section = inParamSection || !found ? params.section : found.section;
   const oldPath =
-    params.oldPath ??
+    (section === params.section ? params.oldPath : undefined) ??
     (section ? changesQuery.data?.[section].find((e) => e.path === filePath)?.oldPath : undefined);
   // Only the `branch` section diffs against the merge base.
   const mergeBase = section === "branch" ? (changesQuery.data?.mergeBase ?? undefined) : undefined;
@@ -1625,8 +1631,8 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
           <DialogHeader>
             <DialogTitle>Revert file</DialogTitle>
             <DialogDescription>
-              Discard all changes to <span className="font-mono">{basename(filePath)}</span>? This
-              cannot be undone.
+              Discard the changes to <span className="font-mono">{basename(filePath)}</span>?{" "}
+              {revertSection && discardWarning(revertSection)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1635,6 +1641,7 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
             </Button>
             <Button
               variant="destructive"
+              data-testid="center-diff-leaf__revert-confirm"
               onClick={() => {
                 if (!revertSection) return;
                 trpc.workspace.discardChanges
@@ -2999,18 +3006,19 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (existing) {
         if (!preview && previewDiffIdRef.current === id) previewDiffIdRef.current = null;
         // One tab per path: opening the file from another section switches
-        // the tab to that section's diff.
+        // the tab to that section's diff. An open without a section ("View
+        // changes") clears it, so the leaf picks the file's section afresh.
         const cur = existing.api.getParameters<DiffLeafParams>();
-        const sectionChanged =
-          (opts?.section ?? cur.section) !== cur.section ||
-          (opts?.oldPath ?? cur.oldPath) !== cur.oldPath;
-        if (!preview || sectionChanged) {
+        const sectionChanged = opts?.section !== cur.section || opts?.oldPath !== cur.oldPath;
+        if (!commit && (!preview || sectionChanged)) {
           existing.api.updateParameters({
             ...cur,
             ...(preview ? {} : { preview: false }),
-            section: opts?.section ?? cur.section,
-            oldPath: opts?.oldPath ?? cur.oldPath,
+            section: opts?.section,
+            oldPath: opts?.oldPath,
           });
+        } else if (!preview) {
+          existing.api.updateParameters({ ...cur, preview: false });
         }
         existing.api.setActive();
         return;

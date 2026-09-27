@@ -346,9 +346,9 @@ export class ChangesPanelPage {
     action: "discard" | "stage" | "unstage",
   ): Promise<void> {
     await test.step(`Run ${action} on ${path} in ${section}`, async () => {
-      const row = this.sectionRow(section, path);
-      await row.hover();
-      await row.locator("..").getByTestId(`changes-tree__action--${action}`).click();
+      const item = this.section(section).getByTestId(`changes-tree__item--${path}`);
+      await item.hover();
+      await item.getByTestId(`changes-tree__action--${action}`).click();
     });
   }
 
@@ -370,6 +370,14 @@ export class ChangesPanelPage {
     await test.step(`Open ${path} from ${section}`, async () => {
       await this.sectionRow(section, path).click();
       await expect(this.diffLeaf).toBeVisible({ timeout: 15_000 });
+    });
+  }
+
+  /** Revert the visible diff with its header button and confirm. */
+  async revertVisibleDiff(): Promise<void> {
+    await test.step("Revert the visible diff", async () => {
+      await this.page.getByTestId("center-diff-leaf__revert").click();
+      await this.page.getByTestId("center-diff-leaf__revert-confirm").click();
     });
   }
 

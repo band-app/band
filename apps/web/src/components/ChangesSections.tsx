@@ -408,7 +408,8 @@ function discardQuestion({ section, entries }: PendingDiscard): string {
   return `Discard the changes to ${what}?`;
 }
 
-function discardWarning(section: DiscardSection): string {
+/** What a discard in `section` throws away; shared with the diff leaf's revert. */
+export function discardWarning(section: DiscardSection): string {
   switch (section) {
     case "untracked":
       return "Untracked files are deleted from disk. This cannot be undone.";

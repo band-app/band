@@ -70,8 +70,9 @@ const changeSectionSchema = z.enum(["conflicts", "unstaged", "staged", "untracke
  */
 const filePathSchema = z.string().min(1).regex(/^[^-]/, "path must not start with '-'");
 
-/** Paths for the stage / unstage / discard mutations. */
-const pathListSchema = z.array(filePathSchema).min(1).max(5000);
+/** Paths for the stage / unstage / discard mutations. A header action sends
+ *  every file of its section; the service hands them to git in batches. */
+const pathListSchema = z.array(filePathSchema).min(1).max(50_000);
 
 /**
  * A commit SHA passed to the commit-history procedures. Pinned to 7–40 hex
