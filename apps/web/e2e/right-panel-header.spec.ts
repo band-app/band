@@ -1,16 +1,18 @@
 /**
- * End-to-end coverage for the title-bar row split between the workspace title
- * bar and the right sidepanel (Explorer / Changes).
+ * End-to-end coverage for the desktop layout's top row now that there is no
+ * title bar over the center column.
  *
- * The workspace title bar spans only the center (dockview) column. The right
- * sidepanel runs the full window height, and its header row (tabs, open in
- * editor, collapse) sits level with the title bar. The collapse button lives
- * in that header; once the sidepanel is collapsed, the expand button appears
- * at the title bar's right edge instead. ⌥⌘B toggles the sidepanel too.
+ * The center dockview's tab strip is the window's top row, level with the
+ * sidebar's title bar and the right sidepanel's header row (tabs, open in
+ * editor, collapse). The workspace name no longer shows on desktop (⌘K still
+ * opens the picker; the mobile header keeps its name). The sidepanel's
+ * collapse button lives in its header; once collapsed, the expand button
+ * appears at the right end of the tab strip instead. ⌥⌘B toggles it too.
  *
  * The open-in-editor picker renders only in the desktop build (it calls
  * native IPC), and this harness boots the web build in plain Chromium, so its
- * placement is not asserted here.
+ * placement is not asserted here. Nor is the tab strip's window-drag region,
+ * which only exists in Electron.
  *
  * Architecture (matches the repo's integration doctrine):
  *   - The real production server runs against a fresh tmp `~/.band/`.
@@ -37,7 +39,7 @@ const TOKEN = "e2e-right-panel-header-token";
 const PROJECT = "alpha-right-header";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 
-// Wide viewport so the desktop layout (title bar + sidebars + dockview)
+// Wide viewport so the desktop layout (sidebars + dockview)
 // renders (>= 1024px in useIsDesktop.ts).
 test.use({ viewport: { width: 1400, height: 800 } });
 
@@ -68,7 +70,7 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-test("the title bar stops at the right sidepanel, whose header sits level with it", async ({
+test("the center tab strip is the top row, level with the sidebar and sidepanel headers", async ({
   page,
 }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
@@ -77,20 +79,23 @@ test("the title bar stops at the right sidepanel, whose header sits level with i
   await wp.revealRightPanel();
 
   await expect(wp.rightPanelHeader).toBeVisible();
-  const titleBar = await wp.boxOf(wp.workspaceTitleBar);
-  const panel = await wp.boxOf(wp.rightPanel);
+  await expect(wp.sidebarTitleBar).toBeVisible();
+  const strip = await wp.boxOf(wp.centerToolbar);
+  const sidebarBar = await wp.boxOf(wp.sidebarTitleBar);
   const header = await wp.boxOf(wp.rightPanelHeader);
 
-  // The title bar ends before the sidepanel column begins.
-  expect(titleBar.x + titleBar.width).toBeLessThanOrEqual(panel.x);
-  // The sidepanel reaches the top of the window, and its header shares the
-  // title bar's row.
-  expect(panel.y).toBe(titleBar.y);
-  expect(header.y).toBe(titleBar.y);
-  expect(header.height).toBe(titleBar.height);
+  // No title bar above the tabs: the strip starts at the top of the window,
+  // on the same row as the other two columns' headers.
+  expect(strip.y).toBe(0);
+  expect(sidebarBar.y).toBe(0);
+  expect(header.y).toBe(0);
+  // The strip's action slot fills the 38px row less its 1px bottom border.
+  expect(Math.abs(strip.height - (header.height - 1))).toBeLessThanOrEqual(1);
+  // The desktop title bar's workspace name is gone.
+  await expect(wp.desktopTitleWorkspaceNameButton).toHaveCount(0);
 });
 
-test("the collapse button lives in the sidepanel header, not the title bar", async ({ page }) => {
+test("the collapse button lives in the sidepanel header, not the tab strip", async ({ page }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
   await wp.goto(WORKSPACE);
   await wp.waitForReady();
@@ -98,10 +103,10 @@ test("the collapse button lives in the sidepanel header, not the title bar", asy
 
   await expect(wp.rightPanelToggleInHeader).toBeVisible();
   await expect(wp.rightPanelToggleInHeader).toHaveAttribute("aria-pressed", "true");
-  await expect(wp.rightPanelToggleInTitleBar).toHaveCount(0);
+  await expect(wp.rightPanelToggleInTabStrip).toHaveCount(0);
 });
 
-test("collapsing moves the toggle to the title bar, and expanding moves it back", async ({
+test("collapsing moves the toggle to the tab strip, and expanding moves it back", async ({
   page,
 }) => {
   const wp = new WorkspacePage(page, server.url, TOKEN);
@@ -110,26 +115,22 @@ test("collapsing moves the toggle to the title bar, and expanding moves it back"
   await wp.revealRightPanel();
 
   await wp.collapseRightPanelViaHeader();
-  await expect(wp.rightPanelToggleInTitleBar).toBeVisible();
-  await expect(wp.rightPanelToggleInTitleBar).toHaveAttribute("aria-pressed", "false");
+  await expect(wp.rightPanelToggleInTabStrip).toBeVisible();
+  await expect(wp.rightPanelToggleInTabStrip).toHaveAttribute("aria-pressed", "false");
 
   // With the sidepanel collapsed, the expand button sits at the window's
-  // right edge (the title bar now spans the whole center column).
-  // The collapse runs a 200 ms width transition, so poll until the bar
-  // reaches the viewport edge (1400 px wide, less the 3 px separator).
+  // right edge. The collapse runs a 200 ms width transition, so poll until
+  // the toggle reaches the viewport edge (1400 px wide).
   await expect
     .poll(async () => {
-      const bar = await wp.boxOf(wp.workspaceTitleBar);
-      return bar.x + bar.width;
+      const toggle = await wp.boxOf(wp.rightPanelToggleInTabStrip);
+      return 1400 - (toggle.x + toggle.width);
     })
-    .toBeGreaterThan(1400 - 8);
-  const toggle = await wp.boxOf(wp.rightPanelToggleInTitleBar);
-  const titleBar = await wp.boxOf(wp.workspaceTitleBar);
-  expect(titleBar.x + titleBar.width - (toggle.x + toggle.width)).toBeLessThan(16);
+    .toBeLessThan(16);
 
-  await wp.expandRightPanelViaTitleBar();
+  await wp.expandRightPanelViaTabStrip();
   await expect(wp.rightPanelToggleInHeader).toBeVisible();
-  await expect(wp.rightPanelToggleInTitleBar).toHaveCount(0);
+  await expect(wp.rightPanelToggleInTabStrip).toHaveCount(0);
 });
 
 test("⌥⌘B collapses and expands the right sidepanel", async ({ page }) => {
@@ -140,7 +141,7 @@ test("⌥⌘B collapses and expands the right sidepanel", async ({ page }) => {
 
   await wp.toggleRightPanelViaShortcut();
   await expect(wp.rightPanel).toHaveAttribute("data-visible", "false");
-  await expect(wp.rightPanelToggleInTitleBar).toBeVisible();
+  await expect(wp.rightPanelToggleInTabStrip).toBeVisible();
 
   await wp.toggleRightPanelViaShortcut();
   await expect(wp.rightPanel).toHaveAttribute("data-visible", "true");

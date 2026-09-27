@@ -490,3 +490,19 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------------------
+ * Desktop layout (`dockview-center-desktop`, WorkspaceCenterDockview's theme
+ * when not mobile): there is no title bar over the center column, so the tab
+ * strip is the window's top row. It matches the 38px height of the sidebar's
+ * title bar and the right sidepanel's header, and the empty strip space of the
+ * top-row groups (marked `data-band-top-row` by `useGroupEdges`) drags the
+ * window in the desktop app. Both rules stop at the group's own header, so a
+ * nested dockview (TerminalSplitLeaf) keeps its own strip.
+ * --------------------------------------------------------------------------- */
+.dockview-theme-band.dockview-center-desktop {
+  --dv-tabs-and-actions-container-height: 38px;
+}
+.dockview-center-desktop [data-band-top-row] > .dv-tabs-and-actions-container .dv-void-container {
+  -webkit-app-region: drag;
+}

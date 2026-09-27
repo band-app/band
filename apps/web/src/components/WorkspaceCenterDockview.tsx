@@ -137,6 +137,12 @@ import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 import { discardWarning } from "./ChangesSections";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
+import {
+  CenterDragBar,
+  RightPanelToggle,
+  SidebarGutter,
+  useWorkspaceChrome,
+} from "./DesktopTitleBar";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -229,6 +235,13 @@ const bandTheme: DockviewTheme = {
   // width + active-tab bottom accent) so it never touches the legacy nested
   // chat/terminal tab strips still used by the mobile layout.
   className: "dockview-theme-band dockview-center-tabs",
+};
+
+// Desktop layout: the tab strip doubles as the window's top row (38px, drag
+// region). See `.dockview-center-desktop` in dockview-theme.css.
+const bandDesktopTheme: DockviewTheme = {
+  ...bandTheme,
+  className: `${bandTheme.className} dockview-center-desktop`,
 };
 
 // ---------------------------------------------------------------------------
@@ -2469,7 +2482,66 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
 // ---------------------------------------------------------------------------
 // Header actions: the "+" new-tab menu renders in the LEFT slot (right after
 // the last tab, browser-style); the maximize toggle stays in the RIGHT slot.
+// In the desktop layout the tab strip is also the window's top row (there is
+// no title bar over it), so the groups along the top edge carry window chrome:
+// the top-left group's PREFIX slot reserves space under `AppShell`'s nav
+// cluster while the sidebar is collapsed, and the top-right group's RIGHT slot
+// holds the right sidepanel's expand button while that panel is collapsed.
 // ---------------------------------------------------------------------------
+
+interface GroupEdges {
+  top: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+const NO_EDGES: GroupEdges = { top: false, left: false, right: false };
+
+/** Which edges of the dockview this group's rect touches. Re-measured when the
+ *  group resizes (which covers a hidden workspace being shown again) and on
+ *  every dockview layout change (a split, move, close or maximize). Also marks
+ *  top-row groups with `data-band-top-row`, which makes their empty tab-strip
+ *  space a window drag region (see `.dockview-center-desktop` in
+ *  dockview-theme.css). Measures nothing when `enabled` is false. */
+function useGroupEdges(props: IDockviewHeaderActionsProps, enabled: boolean): GroupEdges {
+  const [edges, setEdges] = useState(NO_EDGES);
+  useEffect(() => {
+    if (!enabled) return;
+    const el = props.group.element;
+    const measure = () => {
+      const root = el.closest(".dv-dockview");
+      if (!root) return;
+      const g = el.getBoundingClientRect();
+      const r = root.getBoundingClientRect();
+      const next = {
+        top: g.top - r.top < 2,
+        left: g.left - r.left < 2,
+        right: r.right - g.right < 2,
+      };
+      el.toggleAttribute("data-band-top-row", next.top);
+      setEdges((prev) =>
+        prev.top === next.top && prev.left === next.left && prev.right === next.right ? prev : next,
+      );
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const d = props.containerApi.onDidLayoutChange(measure);
+    return () => {
+      ro.disconnect();
+      d.dispose();
+    };
+  }, [props.group, props.containerApi, enabled]);
+  return edges;
+}
+
+const PrefixHeaderActions = memo(function PrefixHeaderActions(props: IDockviewHeaderActionsProps) {
+  const chrome = useWorkspaceChrome();
+  const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  const edges = useGroupEdges(props, !!chrome && isGridGroup);
+  if (!edges.top || !edges.left) return null;
+  return <SidebarGutter />;
+});
 
 const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   // Only grid groups get the "+" new-tab menu, not floating groups — mirror
@@ -2484,6 +2556,8 @@ const LeftHeaderActions = memo(function LeftHeaderActions(props: IDockviewHeader
 
 const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const isGridGroup = (props.location?.type ?? "grid") === "grid";
+  const chrome = useWorkspaceChrome();
+  const edges = useGroupEdges(props, !!chrome && isGridGroup);
 
   const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
   useEffect(() => {
@@ -2571,6 +2645,9 @@ const RightHeaderActions = memo(function RightHeaderActions(props: IDockviewHead
           </kbd>
         </TooltipContent>
       </Tooltip>
+      {edges.top && edges.right && chrome?.onToggleRightPanel && !chrome.rightPanelVisible && (
+        <RightPanelToggle onToggle={chrome.onToggleRightPanel} visible={false} />
+      )}
     </div>
   );
 });
@@ -3893,11 +3970,12 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     <div ref={containerRef} className="relative flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
-          theme={bandTheme}
+          theme={mobile ? bandTheme : bandDesktopTheme}
           className="h-full"
           components={components}
           tabComponents={tabComponents}
           defaultTabComponent={IconTab}
+          prefixHeaderActionsComponent={PrefixHeaderActions}
           leftHeaderActionsComponent={LeftHeaderActions}
           rightHeaderActionsComponent={RightHeaderActions}
           // Mobile: no drag→split. Every leaf stays a tab in a single group.
@@ -3919,6 +3997,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
           className="absolute inset-0 z-10 flex items-center justify-center"
           data-testid="workspace-center__empty-state"
         >
+          {/* Closing the last tab removes the tab strip, which is the
+              window's top row on desktop; the drag bar keeps the window
+              draggable and the sidepanel expand button reachable. */}
+          {!mobile && <CenterDragBar className="absolute inset-x-0 top-0" />}
           <div className="flex flex-col gap-2">
             <NewAgentButton
               className={EMPTY_STATE_BUTTON_CLASS}
