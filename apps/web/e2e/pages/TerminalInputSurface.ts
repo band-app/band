@@ -1,22 +1,5 @@
-import { type Locator, type Page, test } from "@playwright/test";
-
-/** The screen grid of a terminal, in CSS pixels, for aiming the pointer. */
-export interface TerminalGrid {
-  cols: number;
-  rows: number;
-  /** `.xterm-screen`'s bounding rect. */
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  /** Height of one row: `height / rows`. */
-  cellHeight: number;
-}
-
-interface CacheEntry {
-  workspaceId: string;
-  getTerminal(): unknown;
-}
+import { test } from "@playwright/test";
+import { TerminalSurface } from "./TerminalSurface";
 
 /**
  * The visible terminal on a desktop: pointer wheel input, key bursts, and the
@@ -25,24 +8,7 @@ interface CacheEntry {
  * Wheel input goes through CDP, so the page gets real `wheel` events at the
  * pointer's position from Chromium's input pipeline.
  */
-export class TerminalInputSurface {
-  /** The persistent wrapper the xterm opens into (`terminal-cache.ts`). */
-  readonly wrapper: Locator;
-  /** xterm's hidden input textarea. */
-  readonly input: Locator;
-
-  constructor(
-    private readonly page: Page,
-    private readonly workspaceId: string,
-  ) {
-    this.wrapper = page
-      .getByTestId(/^term-pane__/)
-      .filter({ visible: true })
-      .first()
-      .getByTestId("terminal-wrapper");
-    this.input = this.wrapper.getByRole("textbox", { name: "Terminal input" });
-  }
-
+export class TerminalInputSurface extends TerminalSurface {
   /**
    * Record every input message the page sends on a terminal WebSocket: text
    * frames that aren't JSON control messages (`{"type": ...}`). Call before
@@ -59,34 +25,6 @@ export class TerminalInputSurface {
       });
     });
     return () => [...messages];
-  }
-
-  /** Where the terminal's cells are on the page. */
-  async readGrid(): Promise<TerminalGrid> {
-    const grid = await this.page.evaluate((id) => {
-      type Term = { cols: number; rows: number; element?: HTMLElement };
-      const cache = (globalThis as unknown as { __bandTerminalCache__?: Map<string, CacheEntry> })
-        .__bandTerminalCache__;
-      for (const entry of cache?.values() ?? []) {
-        if (entry.workspaceId !== id) continue;
-        const term = entry.getTerminal() as Term | null;
-        const screen = term?.element?.querySelector(".xterm-screen");
-        if (!term || !screen) return null;
-        const rect = screen.getBoundingClientRect();
-        return {
-          cols: term.cols,
-          rows: term.rows,
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-          cellHeight: rect.height / term.rows,
-        };
-      }
-      return null;
-    }, this.workspaceId);
-    if (!grid) throw new Error("terminal not loaded");
-    return grid;
   }
 
   /** The page position of the middle of the 1-based cell (`col`, `row`). */
@@ -106,17 +44,22 @@ export class TerminalInputSurface {
     });
   }
 
-  /** Send `count` mouse wheel notches of `deltaY` pixels at the pointer.
-   *  Chromium gives these the legacy `wheelDelta` of ±120 a physical wheel
-   *  notch has. Positive `deltaY` scrolls toward the bottom. */
-  async wheel(deltaY: number, count = 1, { shift = false } = {}): Promise<void> {
-    const label = `${shift ? "Shift+" : ""}Wheel ${count} × ${deltaY}px`;
+  /** Send `count` mouse wheel notches of `deltaY` pixels at the pointer,
+   *  with `modifier` held. Chromium gives these the legacy `wheelDelta` of
+   *  ±120 a physical wheel notch has. Positive `deltaY` scrolls toward the
+   *  bottom. */
+  async wheel(
+    deltaY: number,
+    count = 1,
+    { modifier }: { modifier?: "Shift" | "Control" } = {},
+  ): Promise<void> {
+    const label = `${modifier ? `${modifier}+` : ""}Wheel ${count} × ${deltaY}px`;
     await test.step(label, async () => {
-      if (shift) await this.page.keyboard.down("Shift");
+      if (modifier) await this.page.keyboard.down(modifier);
       try {
         for (let i = 0; i < count; i++) await this.page.mouse.wheel(0, deltaY);
       } finally {
-        if (shift) await this.page.keyboard.up("Shift");
+        if (modifier) await this.page.keyboard.up(modifier);
       }
     });
   }
@@ -180,22 +123,5 @@ export class TerminalInputSurface {
       await this.input.focus();
       await this.page.keyboard.press(key);
     });
-  }
-
-  /** The terminal's scroll position, in buffer rows. */
-  async readScrollPosition(): Promise<{ viewportY: number; baseY: number } | null> {
-    return await this.page.evaluate((id) => {
-      type Term = { buffer: { active: { viewportY: number; baseY: number } } };
-      const cache = (globalThis as unknown as { __bandTerminalCache__?: Map<string, CacheEntry> })
-        .__bandTerminalCache__;
-      for (const entry of cache?.values() ?? []) {
-        if (entry.workspaceId !== id) continue;
-        const term = entry.getTerminal() as Term | null;
-        if (!term) return null;
-        const { viewportY, baseY } = term.buffer.active;
-        return { viewportY, baseY };
-      }
-      return null;
-    }, this.workspaceId);
   }
 }

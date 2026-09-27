@@ -27,10 +27,7 @@
  * renderer's rows.
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import {
@@ -41,6 +38,12 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import {
+  INPUT_PROBE_READY,
+  makeGitWorkdir,
+  waitForInputToSettle,
+  writeInputProbe,
+} from "./helpers/terminal-input-probe";
 import { TerminalTouchSurface } from "./pages/TerminalTouchSurface";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
@@ -50,7 +53,7 @@ const MOUSE_PROJECT = "alpha-touch-mouse";
 const SHELL_PROJECT = "alpha-touch-shell";
 const MOUSE_WORKSPACE = toWorkspaceId(MOUSE_PROJECT, "main");
 const SHELL_WORKSPACE = toWorkspaceId(SHELL_PROJECT, "main");
-// `readInputLog` shows ESC as `^[`, so a failure prints readable input.
+// The input log shows ESC as `^[`, so a failure prints readable input.
 const SGR_WHEEL_REPORT = /\^\[\[<(64|65);(\d+);(\d+)M/g;
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -59,52 +62,6 @@ let server: ServerHandle;
 let tmpHome: string;
 let mouseWorkdir: string;
 let shellWorkdir: string;
-
-function makeGitWorkdir(prefix: string, home: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@example.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@example.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
-  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env });
-  return dir;
-}
-
-/** The probe's input log with ESC written as `^[`, or "" before the first
- *  byte arrives. */
-function readInputLog(path: string): string {
-  try {
-    return readFileSync(path, "latin1").replaceAll("\x1b", "^[");
-  } catch {
-    return "";
-  }
-}
-
-/** Poll until the log has grown past `baseline` characters and is unchanged
- *  between two reads 500 ms apart, i.e. the latest swipe and its momentum
- *  have finished sending. */
-async function waitForInputToSettle(path: string, baseline = 0): Promise<string> {
-  let previous: string | null = null;
-  await expect
-    .poll(
-      () => {
-        const current = readInputLog(path);
-        const settled = current.length > baseline && current === previous;
-        previous = current;
-        return settled;
-      },
-      { intervals: [500], timeout: 20_000 },
-    )
-    .toBe(true);
-  return readInputLog(path);
-}
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -145,19 +102,8 @@ test.describe("Terminal touch scrolling", () => {
     const terminal = new TerminalTouchSurface(page, MOUSE_WORKSPACE);
 
     // Turns on wheel mouse tracking with SGR encoding and logs raw stdin.
-    const probe = join(mouseWorkdir, "mouse-probe.mjs");
-    const inputLog = join(mouseWorkdir, "mouse-probe-input.log");
-    writeFileSync(
-      probe,
-      [
-        'import { appendFileSync } from "node:fs";',
-        "process.stdin.setRawMode(true);",
-        'process.stdout.write("\\x1b[?1000h\\x1b[?1006h");',
-        'process.stdout.write("MOUSE_" + "PROBE_READY\\r\\n");',
-        `process.stdin.on("data", (chunk) => appendFileSync(${JSON.stringify(inputLog)}, chunk));`,
-      ].join("\n"),
-      "utf-8",
-    );
+    const probe = writeInputProbe(mouseWorkdir, "\x1b[?1000h\x1b[?1006h");
+    const inputLog = probe.logPath;
 
     await workspacePage.goto(MOUSE_WORKSPACE);
     await workspacePage.waitForMobileReady();
@@ -166,8 +112,8 @@ test.describe("Terminal touch scrolling", () => {
     await workspacePage.waitForTerminalRenderedPrompt(MOUSE_WORKSPACE);
     await workspacePage.runInTerminalUntilRendered(
       MOUSE_WORKSPACE,
-      `${process.execPath} ${probe}`,
-      /MOUSE_PROBE_READY/,
+      probe.command,
+      INPUT_PROBE_READY,
     );
 
     await terminal.swipe(300);

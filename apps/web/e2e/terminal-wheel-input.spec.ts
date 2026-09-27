@@ -9,23 +9,25 @@
  *  1. Trackpad-sized pixel deltas send one SGR report per row of travel, the
  *     fraction carried between events, at the cell under the pointer. Shift
  *     leaves the wheel to xterm, which sends nothing.
- *  2. Mouse wheel notches send between 1 and 9 reports each.
+ *  2. Mouse wheel notches send between 1 and 9 reports each. SGR pixel mode
+ *     reports the pointer's pixel, and X10 bytes carry the cell and the Ctrl
+ *     modifier bit.
  *  3. On the alternate screen without mouse tracking, the wheel still sends
  *     arrow keys; in a shell it still scrolls the scrollback.
  *
  * Input (`src/lib/terminal-input-queue.ts`): keys that queue up while the page
  * is busy go out in fewer WebSocket messages than keys, with the program
  * reading the same bytes in the same order. A lone keystroke still goes out
- * as its own message, and the typing-latency probe still stamps every key.
+ * as its own message, and the typing-latency probe still stamps every key
+ * typed at a normal pace. (The probe pairs each keystroke with one output
+ * frame, so it can't measure a burst whose echo comes back in one frame.)
  *
  * Renderer note: `useWebGLTerminalRenderer: false` so
  * `runInTerminalUntilRendered` can read the probes' ready markers from the DOM
  * renderer's rows.
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
@@ -37,6 +39,13 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import {
+  INPUT_PROBE_READY,
+  makeGitWorkdir,
+  readInputLog,
+  waitForInputToSettle,
+  writeInputProbe,
+} from "./helpers/terminal-input-probe";
 import { TerminalInputSurface } from "./pages/TerminalInputSurface";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
@@ -45,13 +54,15 @@ const TOKEN = "e2e-terminal-wheel-input-token";
 const PROJECTS = {
   trackpad: "wheel-trackpad",
   notches: "wheel-notches",
+  pixels: "wheel-sgr-pixels",
+  x10: "wheel-x10",
   altScreen: "wheel-alt-screen",
   shell: "wheel-shell",
   burst: "input-burst",
   latency: "input-latency",
 } as const;
 type ProbeName = keyof typeof PROJECTS;
-// `readInputLog` shows ESC as `^[`, so a failure prints readable input.
+// The input log shows ESC as `^[`, so a failure prints readable input.
 const SGR_WHEEL_REPORT = /\^\[\[<(\d+);(\d+);(\d+)M/g;
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -59,51 +70,6 @@ test.use({ viewport: { width: 1280, height: 800 } });
 let server: ServerHandle;
 let tmpHome: string;
 const workdirs = {} as Record<ProbeName, string>;
-
-function makeGitWorkdir(prefix: string, home: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    HOME: home,
-    GIT_AUTHOR_NAME: "Test",
-    GIT_AUTHOR_EMAIL: "test@example.com",
-    GIT_COMMITTER_NAME: "Test",
-    GIT_COMMITTER_EMAIL: "test@example.com",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_SYSTEM: "/dev/null",
-  };
-  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
-  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir, env });
-  return dir;
-}
-
-/** The probe's input log with ESC written as `^[`, or "" before the first
- *  byte arrives. */
-function readInputLog(path: string): string {
-  try {
-    return readFileSync(path, "latin1").replaceAll("\x1b", "^[");
-  } catch {
-    return "";
-  }
-}
-
-/** Poll until the log has grown past `baseline` characters and is unchanged
- *  between two reads 500 ms apart. */
-async function waitForInputToSettle(path: string, baseline = 0): Promise<string> {
-  let previous: string | null = null;
-  await expect
-    .poll(
-      () => {
-        const current = readInputLog(path);
-        const settled = current.length > baseline && current === previous;
-        previous = current;
-        return settled;
-      },
-      { intervals: [500], timeout: 20_000 },
-    )
-    .toBe(true);
-  return readInputLog(path);
-}
 
 function wheelReports(log: string): { code: number; col: number; row: number }[] {
   return [...log.matchAll(SGR_WHEEL_REPORT)].map(([, code, col, row]) => ({
@@ -124,30 +90,14 @@ async function startProbe(
   setup: string,
 ): Promise<string> {
   const workspaceId = toWorkspaceId(PROJECTS[name], "main");
-  const probe = join(workdirs[name], "input-probe.mjs");
-  const inputLog = join(workdirs[name], "input-probe.log");
-  writeFileSync(
-    probe,
-    [
-      'import { appendFileSync } from "node:fs";',
-      "process.stdin.setRawMode(true);",
-      `process.stdout.write(${JSON.stringify(setup)});`,
-      'process.stdout.write("INPUT_" + "PROBE_READY\\r\\n");',
-      `process.stdin.on("data", (chunk) => appendFileSync(${JSON.stringify(inputLog)}, chunk));`,
-    ].join("\n"),
-    "utf-8",
-  );
+  const probe = writeInputProbe(workdirs[name], setup);
   await workspacePage.goto(workspaceId);
   await workspacePage.waitForReady();
   await workspacePage.openTerminalTab();
   await workspacePage.waitForTerminalReady(20_000);
   await workspacePage.waitForTerminalRenderedPrompt(workspaceId);
-  await workspacePage.runInTerminalUntilRendered(
-    workspaceId,
-    `${process.execPath} ${probe}`,
-    /INPUT_PROBE_READY/,
-  );
-  return inputLog;
+  await workspacePage.runInTerminalUntilRendered(workspaceId, probe.command, INPUT_PROBE_READY);
+  return probe.logPath;
 }
 
 function openSurface(page: Page, name: ProbeName) {
@@ -206,7 +156,7 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 
     // Shift leaves the wheel to xterm, which drops shift+wheel in this mode.
     await terminal.hoverCell(12, 5);
-    await terminal.wheel(100, 3, { shift: true });
+    await terminal.wheel(100, 3, { modifier: "Shift" });
     await terminal.press("z");
     const afterShift = (await waitForInputToSettle(inputLog, down.length + up.length)).slice(
       down.length + up.length,
@@ -230,6 +180,43 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
     for (const report of reports) {
       expect(report).toEqual({ code: 65, col: 4, row: 2 });
     }
+  });
+
+  test("SGR pixel mode reports the pointer's pixel inside the screen", async ({ page }) => {
+    test.setTimeout(90_000);
+    const { workspacePage, terminal } = openSurface(page, "pixels");
+    // SGR pixel encoding (DECSET 1016).
+    const inputLog = await startProbe(workspacePage, "pixels", "\x1b[?1000h\x1b[?1016h");
+
+    const grid = await terminal.readGrid();
+    await terminal.hoverCell(10, 4);
+    await terminal.wheel(100);
+    const received = await waitForInputToSettle(inputLog);
+    expect(received.replace(SGR_WHEEL_REPORT, "")).toBe("");
+    const reports = wheelReports(received);
+    expect(reports.length).toBeGreaterThan(0);
+    // `hoverCell` aims at the middle of the cell, so the pixel is half a cell
+    // past the cell's corner, give or take rounding.
+    const cellWidth = grid.width / grid.cols;
+    for (const { code, col: x, row: y } of reports) {
+      expect(code).toBe(65);
+      expect(Math.abs(x - 9.5 * cellWidth)).toBeLessThanOrEqual(1);
+      expect(Math.abs(y - 3.5 * grid.cellHeight)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("X10 encoding carries the cell and the Ctrl bit", async ({ page }) => {
+    test.setTimeout(90_000);
+    const { workspacePage, terminal } = openSurface(page, "x10");
+    // Wheel tracking with no encoding mode: X10 bytes.
+    const inputLog = await startProbe(workspacePage, "x10", "\x1b[?1000h");
+
+    await terminal.hoverCell(4, 2);
+    await terminal.wheel(100, 1, { modifier: "Control" });
+    const received = await waitForInputToSettle(inputLog);
+    // Button 65 + Ctrl 16 + 32 is "q"; column 4 and row 2, each + 32, are
+    // "$" and '"'.
+    expect(received).toMatch(/^(\^\[\[Mq\$")+$/);
   });
 
   test("the alternate screen without mouse tracking still gets arrow keys", async ({ page }) => {
@@ -276,15 +263,15 @@ test.describe("Terminal wheel over mouse-tracking programs", () => {
 });
 
 test.describe("Terminal input coalescing", () => {
-  test("keys queued behind a busy page share messages; a lone key doesn't wait", async ({
-    page,
-  }) => {
+  test("keys queued behind a busy page share messages; a lone key is its own", async ({ page }) => {
     test.setTimeout(90_000);
     const { workspacePage, terminal } = openSurface(page, "burst");
     const inputMessages = terminal.trackInputMessages();
     const inputLog = await startProbe(workspacePage, "burst", "");
 
-    // A lone keystroke is one message of its own.
+    // A lone keystroke is one message of its own. (That it goes out without
+    // waiting a turn isn't observable at the WebSocket; the latency test below
+    // bounds it.)
     const sentBefore = inputMessages().length;
     await terminal.press("q");
     await expect.poll(() => readInputLog(inputLog)).toBe("q");
@@ -315,7 +302,8 @@ test.describe("Terminal input coalescing", () => {
     const report = await workspacePage.stopTypingLatencyProbe();
     expect(report.samples).toBe(20);
     expect(report.unmatched).toBe(0);
-    // Sent the moment xterm hands the key over, not a coalescing turn later.
+    // No multi-frame stall between keydown and the socket. A coalescing turn
+    // is well under a millisecond, so this can't tell one from none.
     expect(report.inputToDispatchMs.p90).toBeLessThan(50);
   });
 });
