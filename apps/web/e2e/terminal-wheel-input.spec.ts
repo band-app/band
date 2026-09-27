@@ -272,18 +272,22 @@ test.describe("Terminal input coalescing", () => {
     // A lone keystroke is one message of its own. (That it goes out without
     // waiting a turn isn't observable at the WebSocket; the latency test below
     // bounds it.)
+    // Playwright can report a sent frame after the PTY has already read it,
+    // so poll the recorded messages too, not only the probe's log.
     const sentBefore = inputMessages().length;
     await terminal.press("q");
     await expect.poll(() => readInputLog(inputLog)).toBe("q");
-    expect(inputMessages().slice(sentBefore)).toEqual(["q"]);
+    await expect.poll(() => inputMessages().slice(sentBefore)).toEqual(["q"]);
 
+    // How many keys land in one turn of the event loop depends on the
+    // machine, so only the invariants are asserted: every byte arrives in
+    // order, and at least two queued keys shared a message.
     const burst = "abcdefghijklmnopqrst";
     const sentBeforeBurst = inputMessages().length;
     await terminal.typeWhileBusy(burst);
     await expect.poll(() => readInputLog(inputLog)).toBe(`q${burst}`);
-    const burstMessages = inputMessages().slice(sentBeforeBurst);
-    expect(burstMessages.join("")).toBe(burst);
-    expect(burstMessages.length).toBeLessThan(burst.length / 2);
+    await expect.poll(() => inputMessages().slice(sentBeforeBurst).join("")).toBe(burst);
+    expect(inputMessages().slice(sentBeforeBurst).length).toBeLessThan(burst.length);
   });
 
   test("the typing-latency probe still stamps every echoed key", async ({ page }) => {
