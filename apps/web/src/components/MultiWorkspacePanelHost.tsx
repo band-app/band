@@ -1,5 +1,5 @@
 import { useRouterState } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toWorkspaceId, useProjects } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { reconcileTerminalWorkspaces } from "../lib/terminal-cache";
@@ -57,6 +57,9 @@ interface MultiWorkspacePanelHostProps {
  * or hidden. The inactive entries keep their React subtrees (chat
  * subscriptions, editor state, dockview layout), which is what makes the
  * switch instant.
+ *
+ * The swap is a hard cut on purpose. An opacity fade on the incoming entry
+ * made every terminal in it blink on each switch.
  */
 export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspacePanelHostProps) {
   // Insertion-ordered set of mounted workspace ids. Order only keeps the
@@ -70,9 +73,6 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   // change, eliminating the one-frame flash of the previous workspace.
   const activeWorkspaceId = parseWorkspaceFromPath(pathname);
 
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const prevWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
-
   // Synchronously mount the active workspace so it renders on the very first
   // paint. Calling setState during render (in response to a derived-value
   // change) is the React 18+ equivalent of getDerivedStateFromProps — React
@@ -85,28 +85,6 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
       return new Set(prev).add(activeWorkspaceId);
     });
   }
-
-  // Fade-in cue on workspace switch. Content-correctness is synchronous
-  // (activeWorkspaceId is derived during render); this only masks the
-  // hard cut with a 140ms opacity rise on the incoming content. A CSS
-  // transition (not keyframes) so rapid workspace hopping retargets
-  // mid-fade instead of restarting. Inactive entries stay
-  // content-visibility:hidden — a true two-layer crossfade would force
-  // both layers to paint.
-  useLayoutEffect(() => {
-    const prev = prevWorkspaceIdRef.current;
-    prevWorkspaceIdRef.current = activeWorkspaceId;
-    if (!prev || !activeWorkspaceId || prev === activeWorkspaceId) return;
-    const el = wrapperRef.current;
-    if (!el) return;
-    el.style.transition = "none";
-    el.style.opacity = "0.6";
-    const raf = requestAnimationFrame(() => {
-      el.style.transition = "opacity 140ms cubic-bezier(0.23, 1, 0.32, 1)";
-      el.style.opacity = "1";
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [activeWorkspaceId]);
 
   // Reconcile the mounted set against the projects query (issue #508). This is
   // the only way a workspace leaves the set. Without it a deleted workspace's
@@ -201,7 +179,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   // tree, hidden, under the empty state, so navigating back to one remains
   // instant.
   return (
-    <div ref={wrapperRef} className="relative h-full w-full">
+    <div className="relative h-full w-full">
       {!activeWorkspaceId && emptyState}
       {Array.from(mounted, (workspaceId) => {
         const isActive = workspaceId === activeWorkspaceId;

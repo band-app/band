@@ -240,6 +240,14 @@ async function bootstrap(): Promise<void> {
     app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
   }
 
+  // Chromium keeps at most 16 WebGL contexts per page and drops the oldest
+  // past that. Every warm terminal holds one (see the note in
+  // `apps/web/src/lib/terminal-cache.ts`), and a terminal that loses its
+  // context scrolls on the slow DOM renderer or rebuilds on reveal. 128 is
+  // orca's value: enough for large layouts, still bounded so a context leak
+  // shows up. Must be set before the app is ready.
+  app.commandLine.appendSwitch("max-active-webgl-contexts", "128");
+
   // Make `band-action://` a known scheme so Chromium handles it
   // internally instead of falling back to the OS external-protocol
   // handler (issue #444). Without this registration, clicking a

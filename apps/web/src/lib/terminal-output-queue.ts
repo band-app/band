@@ -104,7 +104,8 @@ export interface TerminalOutputQueue {
   /** The user typed into the terminal; a split frame is held only briefly now. */
   noteInput(): void;
   /**
-   * The terminal became visible: write everything parked now. Returns `false`
+   * The terminal became visible: move everything parked onto the visible
+   * drain, which writes the first part now and paces the rest. Returns `false`
    * when the queue overflowed and output was dropped, so the caller must
    * resync the terminal instead.
    */
@@ -386,10 +387,15 @@ export function createTerminalOutputQueue(
       if (state.overflowed) return false;
       // Nothing parked: visible output already queued keeps its pacing.
       if (!pending.delete(state)) return true;
-      const chunks = state.chunks;
-      state.chunks = [];
-      state.bytes = 0;
-      for (const chunk of chunks) writeChunk(state, chunk.data, chunk.callbacks);
+      // Hand the parked backlog to the visible drain: the first 128 KB now, in
+      // 16 KB writes, and the rest as xterm parses it. Writing all of it in
+      // one loop (up to the 2 MB cap) stalled the reveal and every keystroke
+      // echo behind it.
+      while (canWriteForeground(state)) writeForeground(state);
+      if (state.chunks.length > 0) {
+        foregroundPending.add(state);
+        scheduleForegroundDrain();
+      }
       return true;
     },
     clear() {
