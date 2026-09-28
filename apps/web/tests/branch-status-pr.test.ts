@@ -99,6 +99,35 @@ async function openStatusStream(serverUrl: string) {
   };
 }
 
+/**
+ * A git repo with a github.com `origin` and one worktree per branch, seeded
+ * as the project `PROJECT` with `main` as its default branch.
+ */
+function seedProject(tmpHome: string, branches: string[]): void {
+  const repo = join(tmpHome, PROJECT);
+  mkdirSync(repo, { recursive: true });
+  git(repo, ["init", "-b", "main"]);
+  writeFileSync(join(repo, "README.md"), "hello\n");
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-m", "init"]);
+  git(repo, ["remote", "add", "origin", `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`]);
+  const worktrees = branches.map((branch) => {
+    const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
+    git(repo, ["worktree", "add", "-b", branch, path]);
+    return { name: branch, branch, path };
+  });
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: PROJECT,
+        path: repo,
+        defaultBranch: "main",
+        worktrees: [{ name: "main", branch: "main", path: repo }, ...worktrees],
+      },
+    ],
+  });
+}
+
 // One worktree per case, keyed by its branch.
 const CASES = {
   failing: "feat/failing",
@@ -177,34 +206,7 @@ describe("branch-status events carry the branch's pull request", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-");
-    const repo = join(tmpHome, PROJECT);
-    mkdirSync(repo, { recursive: true });
-    git(repo, ["init", "-b", "main"]);
-    writeFileSync(join(repo, "README.md"), "hello\n");
-    git(repo, ["add", "."]);
-    git(repo, ["commit", "-m", "init"]);
-    git(repo, [
-      "remote",
-      "add",
-      "origin",
-      `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
-    ]);
-    const worktrees = Object.values(CASES).map((branch) => {
-      const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
-      git(repo, ["worktree", "add", "-b", branch, path]);
-      return { name: branch, branch, path };
-    });
-
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: PROJECT,
-          path: repo,
-          defaultBranch: "main",
-          worktrees: [{ name: "main", branch: "main", path: repo }, ...worktrees],
-        },
-      ],
-    });
+    seedProject(tmpHome, Object.values(CASES));
     seedSettings(tmpHome, { tokenSecret: TOKEN });
 
     stub = await ghStub.start();
@@ -340,34 +342,7 @@ describe("with the GitHub plugin disabled", () => {
 
   beforeAll(async () => {
     tmpHome = createTmpHome("band-branch-status-pr-disabled-");
-    const repo = join(tmpHome, PROJECT);
-    mkdirSync(repo, { recursive: true });
-    git(repo, ["init", "-b", "main"]);
-    writeFileSync(join(repo, "README.md"), "hello\n");
-    git(repo, ["add", "."]);
-    git(repo, ["commit", "-m", "init"]);
-    git(repo, [
-      "remote",
-      "add",
-      "origin",
-      `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
-    ]);
-    const path = join(tmpHome, "wt-feat-failing");
-    git(repo, ["worktree", "add", "-b", CASES.failing, path]);
-
-    seedState(tmpHome, {
-      projects: [
-        {
-          name: PROJECT,
-          path: repo,
-          defaultBranch: "main",
-          worktrees: [
-            { name: "main", branch: "main", path: repo },
-            { name: CASES.failing, branch: CASES.failing, path },
-          ],
-        },
-      ],
-    });
+    seedProject(tmpHome, [CASES.failing]);
     seedSettings(tmpHome, { tokenSecret: TOKEN, plugins: { disabled: ["github"] } });
 
     stub = await ghStub.start();
