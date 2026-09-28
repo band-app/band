@@ -42,8 +42,8 @@ const TONE_CLASS: Record<PullRequestTone, string> = {
 };
 
 // Compact enough that the tag stays shorter than the row's text line.
-const TAG_CLASS =
-  "inline-flex items-center rounded border px-1 py-px text-[11px] font-semibold leading-none tabular-nums";
+const TAG_CLASS = "inline-flex items-center rounded border px-1 py-px leading-none";
+const NUMBER_CLASS = `${TAG_CLASS} text-[11px] font-semibold tabular-nums`;
 
 function statusLabel(pr: PullRequestSummary, ciState: CIState): string {
   if (pr.state === "merged") return "Merged";
@@ -134,7 +134,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           aria-expanded={open}
           data-testid="workspace-card__pr-badge"
           data-tone={tone}
-          className={`shrink-0 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${TAG_CLASS} ${TONE_CLASS[tone]}`}
+          className={`shrink-0 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${NUMBER_CLASS} ${TONE_CLASS[tone]}`}
           onPointerEnter={(e) => {
             if (e.pointerType !== "touch") setOpenAfter(true, OPEN_DELAY_MS);
           }}
@@ -209,14 +209,14 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           <span
             data-testid="pr-popover__number"
             data-tone={tone}
-            className={`${TAG_CLASS} ${TONE_CLASS[tone]}`}
+            className={`${NUMBER_CLASS} ${TONE_CLASS[tone]}`}
           >
             #{pr.number}
           </span>
           {pr.isDraft && (
             <span
               data-testid="pr-popover__draft"
-              className="rounded-sm border border-border px-1 text-[10px] font-medium text-muted-foreground"
+              className={`${TAG_CLASS} border-border text-[10px] font-medium text-muted-foreground`}
             >
               Draft
             </span>
