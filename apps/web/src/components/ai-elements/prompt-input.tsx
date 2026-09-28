@@ -1,5 +1,5 @@
 import { cn } from "@band-app/ui";
-import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
+import { CornerDownLeft, FileIcon, Loader2, Plus, SquareIcon, X } from "lucide-react";
 import type {
   ComponentProps,
   DragEvent,
@@ -315,11 +315,7 @@ export const PromptInput = ({
       // keyboard for the message field.
       autoComplete="off"
       data-testid="prompt-input__form"
-      className={cn(
-        "relative flex w-full flex-col rounded-md border-2 border-white/20 bg-muted/50 p-2 shadow-sm",
-        isDragging && "border-primary/50 bg-primary/5",
-        className,
-      )}
+      className={cn("relative flex w-full flex-col gap-1", className)}
       onSubmit={handleSubmit}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -328,10 +324,12 @@ export const PromptInput = ({
       ref={formRef}
       {...props}
     >
-      {fileEntries.length > 0 && <PromptInputFiles entries={fileEntries} onRemove={removeFile} />}
       <PromptInputContext.Provider
         value={{
           addFiles,
+          fileEntries,
+          removeFile,
+          isDragging,
           hasContent: hasText || fileEntries.length > 0,
           onTextChange: handleInputChange,
           inputValue,
@@ -349,6 +347,9 @@ export const PromptInput = ({
 
 interface PromptInputContextValue {
   addFiles: (files: FileList | File[]) => void;
+  fileEntries: FileEntry[];
+  removeFile: (id: string) => void;
+  isDragging: boolean;
   hasContent: boolean;
   onTextChange: (value: string) => void;
   inputValue: string;
@@ -360,6 +361,9 @@ interface PromptInputContextValue {
 
 const PromptInputContext = createContext<PromptInputContextValue>({
   addFiles: () => {},
+  fileEntries: [],
+  removeFile: () => {},
+  isDragging: false,
   hasContent: false,
   onTextChange: () => {},
   inputValue: "",
@@ -373,6 +377,33 @@ export function usePromptInputContext() {
   return useContext(PromptInputContext);
 }
 
+/**
+ * The bordered field: attached files above a row holding the textarea and,
+ * in its bottom-right corner, the send button. The settings row
+ * (`PromptInputActions`) goes below it, outside the border.
+ */
+export const PromptInputBody = ({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => {
+  const { fileEntries, removeFile, isDragging } = useContext(PromptInputContext);
+  return (
+    <div
+      data-testid="prompt-input__body"
+      className={cn(
+        "flex w-full flex-col rounded-lg border border-border bg-muted/50 p-1 shadow-sm transition-colors focus-within:border-foreground/30",
+        isDragging && "border-primary/50 bg-primary/5",
+        className,
+      )}
+      {...props}
+    >
+      {fileEntries.length > 0 && <PromptInputFiles entries={fileEntries} onRemove={removeFile} />}
+      <div className="flex min-w-0 items-end gap-1">{children}</div>
+    </div>
+  );
+};
+
 // File preview chips
 function PromptInputFiles({
   entries,
@@ -382,7 +413,7 @@ function PromptInputFiles({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div className="mb-2 flex flex-wrap gap-2 px-1">
+    <div className="mb-1 flex flex-wrap gap-2 px-1 pt-1">
       {entries.map((entry) => (
         <FilePreview key={entry.id} file={entry.file} onRemove={() => onRemove(entry.id)} />
       ))}
@@ -427,12 +458,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Actions row (bottom bar with attach + send)
+// Settings row below the field (attach, mode, model, context)
 export type PromptInputActionsProps = HTMLAttributes<HTMLDivElement>;
 
 export const PromptInputActions = ({ className, ...props }: PromptInputActionsProps) => (
   <div
-    className={cn("flex w-full min-w-0 items-center justify-between gap-1", className)}
+    className={cn("flex w-full min-w-0 items-center justify-between gap-1 px-0.5", className)}
     {...props}
   />
 );
@@ -468,10 +499,11 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
           "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           className,
         )}
+        aria-label="Attach files"
         onClick={() => fileInputRef.current?.click()}
         {...props}
       >
-        <Paperclip className="size-4" />
+        <Plus className="size-4" />
       </button>
     </>
   );
@@ -564,7 +596,7 @@ export const PromptInputTextarea = ({
   }, [textareaRef]);
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 flex-1">
       <textarea
         ref={textareaRef}
         autoComplete="off"
@@ -575,10 +607,11 @@ export const PromptInputTextarea = ({
         // cursor; the attributes above don't cover them.
         writingsuggestions="false"
         className={cn(
-          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
+          "block min-h-[40px] lg:min-h-[32px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 lg:py-1.5 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
           className,
         )}
         name="message"
+        rows={1}
         onCompositionEnd={() => setIsComposing(false)}
         onCompositionStart={() => setIsComposing(true)}
         onInput={(e) => onTextChange(e.currentTarget.value)}
@@ -620,7 +653,7 @@ export const PromptInputSubmit = ({
           type="button"
           data-testid="prompt-input__stop-button"
           aria-label="Stop generation"
-          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
+          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
           onClick={onStop}
         >
           <SquareIcon className="size-4 lg:size-3.5 fill-current" />
@@ -629,7 +662,7 @@ export const PromptInputSubmit = ({
         <button
           type="button"
           className={cn(
-            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
+            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md bg-foreground/50 text-background transition-colors",
             className,
           )}
           disabled
@@ -641,19 +674,20 @@ export const PromptInputSubmit = ({
         <button
           type="submit"
           data-testid="prompt-input__submit-button"
+          aria-label="Send message"
           disabled={!hasContent}
           className={cn(
-            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md transition-colors",
             hasContent
               ? isBusy
                 ? "bg-primary text-primary-foreground hover:bg-primary/80"
                 : "bg-foreground text-background hover:bg-foreground/80"
-              : "bg-muted text-muted-foreground",
+              : "text-muted-foreground",
             className,
           )}
           {...props}
         >
-          <ArrowUpIcon className="size-5 lg:size-4" />
+          <CornerDownLeft className="size-4 lg:size-3.5" />
         </button>
       )}
     </div>

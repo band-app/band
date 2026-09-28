@@ -44,23 +44,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  Bot,
-  Brain,
-  Check,
-  ChevronDown,
-  Clock,
-  CodeXml,
-  GripHorizontal,
-  Loader2,
-  Plus,
-  ScrollText,
-  X,
-  Zap,
-} from "lucide-react";
+import { Bot, Brain, Check, Clock, GripHorizontal, Loader2, Plus, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
+import { AgentIcon, SearchBar } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
@@ -82,6 +69,7 @@ import {
   PromptInput,
   PromptInputActions,
   PromptInputAttach,
+  PromptInputBody,
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
@@ -92,8 +80,12 @@ import { withResolvedDefaults } from "./chat/claude-default-labels";
 import { MessageActions } from "./chat/MessageActions";
 import { groupEntries } from "./chat/tool-summary";
 import type { ChatMessage, Entry } from "./chat/transcript";
+import { CHAT_FIND_TEXT_ATTR, useChatFind } from "./chat/use-chat-find";
 import { useChatSubscription } from "./chat/use-chat-subscription";
-import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
+import {
+  VirtualizedMessageList,
+  type VirtualizedMessageListHandle,
+} from "./chat/VirtualizedMessageList";
 
 function ThinkingIndicator() {
   return (
@@ -279,7 +271,6 @@ export function ChatView({
   // keeps reporting the old session until the parent remounts us.
   const [initialSessionCleared, setInitialSessionCleared] = useState(false);
   const composerObstructionRef = useToastObstruction();
-  const [contextMeterEnabled] = useExperimentalContextMeter();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const prevVisibleRef = useRef(visible);
@@ -535,6 +526,20 @@ export function ChatView({
     [optimisticQueue, queue, workspaceId, chatId],
   );
 
+  const listRef = useRef<VirtualizedMessageListHandle>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stopStickToBottom = useCallback(() => stickyContextRef.current?.stopScroll?.(), []);
+  const focusComposer = useCallback(() => {
+    rootRef.current?.querySelector<HTMLElement>("[data-band-leaf-focus]")?.focus();
+  }, []);
+  const find = useChatFind({
+    messages,
+    scrollEl,
+    listRef,
+    onBeforeScroll: stopStickToBottom,
+    onClose: focusComposer,
+  });
+
   // Stable identity for the virtualizer's `getItemKey`.
   const getMessageKey = useCallback((message: ChatMessage) => message.id, []);
 
@@ -572,7 +577,9 @@ export function ChatView({
     switch (entry.kind) {
       case "text":
         return entry.text.trim() ? (
-          <MessageResponse key={entry.id}>{entry.text}</MessageResponse>
+          <div key={entry.id} {...{ [CHAT_FIND_TEXT_ATTR]: "" }}>
+            <MessageResponse>{entry.text}</MessageResponse>
+          </div>
         ) : null;
       case "thought":
         return (
@@ -657,7 +664,11 @@ export function ChatView({
               {message.files?.map((file) => (
                 <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
               ))}
-              {message.text.trim() && <MessageResponse>{message.text}</MessageResponse>}
+              {message.text.trim() && (
+                <div {...{ [CHAT_FIND_TEXT_ATTR]: "" }}>
+                  <MessageResponse>{message.text}</MessageResponse>
+                </div>
+              )}
             </MessageContent>
             {!message.pending && (
               <MessageActions
@@ -715,7 +726,31 @@ export function ChatView({
     // Scope every `band-file:` link clicked inside this chat to *this*
     // workspace (issue #539).
     <FileLinkWorkspaceProvider workspaceId={workspaceId}>
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Focusable so Cmd/Ctrl+F reaches the find bar after a click in the
+          conversation, not only from the composer. */}
+      <div
+        ref={rootRef}
+        data-chat-pane=""
+        data-testid="chat-pane"
+        tabIndex={-1}
+        onKeyDown={find.onKeyDown}
+        className="relative flex min-h-0 flex-1 flex-col outline-none"
+      >
+        {find.isOpen && (
+          <SearchBar
+            ref={find.searchBarRef}
+            variant="floating"
+            query={find.query}
+            onQueryChange={find.setQuery}
+            options={find.options}
+            onOptionsChange={find.setOptions}
+            placeholder="Find in chat"
+            matchInfo={find.matchInfo}
+            onNext={find.findNext}
+            onPrevious={find.findPrevious}
+            onClose={find.close}
+          />
+        )}
         <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
           {/* Absolutely positioned so it never shifts content while an older
               page loads (issue #572). */}
@@ -762,6 +797,7 @@ export function ChatView({
                 items={messages}
                 getKey={getMessageKey}
                 renderItem={renderMessageItem}
+                listRef={listRef}
               />
             )}
             {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
@@ -817,18 +853,26 @@ export function ChatView({
           >
             <SlashCommandSuggestions skills={skills} />
             <FileMentionSuggestions workspaceId={workspaceId} />
-            <PromptInputTextarea
-              placeholder="Type a message..."
-              // What a chat tab focuses when it's shown (lib/leaf-focus.ts).
-              data-band-leaf-focus=""
-              data-testid="chat__composer"
-              onEscape={handleEscape}
-              onPreviousMessage={getLastUserMessage}
-              onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
-            />
+            <PromptInputBody>
+              <PromptInputTextarea
+                placeholder="Type a message..."
+                // What a chat tab focuses when it's shown (lib/leaf-focus.ts).
+                data-band-leaf-focus=""
+                data-testid="chat__composer"
+                onEscape={handleEscape}
+                onPreviousMessage={getLastUserMessage}
+                onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
+              />
+              <PromptInputSubmit
+                status={
+                  status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
+                }
+                onStop={handleStop}
+              />
+            </PromptInputBody>
             <PromptInputActions>
               {/* min-w-0 lets the picker labels truncate on a narrow screen
-                  instead of pushing the send button out of the composer. */}
+                  instead of pushing the settings out of the composer. */}
               <div className="flex min-w-0 items-center gap-0.5">
                 <PromptInputAttach />
                 <SessionHistoryMenu
@@ -838,9 +882,6 @@ export function ChatView({
                   onSelectSession={handleSelectSession}
                   onNewSession={handleNewSession}
                 />
-                {contextMeterEnabled && (
-                  <ContextMeter usage={session?.usage ?? null} costUsd={session?.costUsd ?? null} />
-                )}
                 {pickers.modes.length > 0 && (
                   <ModeMenu
                     modes={pickers.modes}
@@ -868,12 +909,7 @@ export function ChatView({
                     pending={pendingConfig > 0}
                   />
                 )}
-                <PromptInputSubmit
-                  status={
-                    status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
-                  }
-                  onStop={handleStop}
-                />
+                <ContextMeter usage={session?.usage ?? null} />
               </div>
             </PromptInputActions>
           </PromptInput>
@@ -881,17 +917,6 @@ export function ChatView({
       </div>
     </FileLinkWorkspaceProvider>
   );
-}
-
-function ModeIcon({ modeId, className }: { modeId: string; className?: string }) {
-  switch (modeId) {
-    case "plan":
-      return <ScrollText className={className} />;
-    case "edit":
-      return <CodeXml className={className} />;
-    default:
-      return <ChevronDown className={className} />;
-  }
 }
 
 function ModeMenu({
@@ -914,7 +939,6 @@ function ModeMenu({
               data-testid="chat-pane__mode-menu"
               className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <ModeIcon modeId={current?.id ?? ""} className="size-3 shrink-0" />
               <span className="truncate">{current?.name ?? "Mode"}</span>
             </button>
           </DropdownMenuTrigger>
@@ -931,7 +955,6 @@ function ModeMenu({
               mode.id === (selected ?? modes[0]?.id) ? "bg-accent" : "",
             )}
           >
-            <ModeIcon modeId={mode.id} className="size-4 mt-0.5 shrink-0" />
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-medium">{mode.name}</span>
               {mode.description && (
@@ -1017,11 +1040,7 @@ function ModelSettingsMenu({
             </span>
           )}
           {fastOn && <Zap aria-label="Fast mode on" className="size-3 shrink-0" />}
-          {pending ? (
-            <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-          ) : (
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-          )}
+          {pending && <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -1296,19 +1315,21 @@ function formatTokens(n: number): string {
 const DONUT_RADIUS = 9;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 
+/** An ACP `Cost`: dollars as `$0.042`, other currencies by their code. */
+function formatCost(cost: { amount: number; currency: string }): string {
+  const digits = cost.amount < 1 ? 3 : 2;
+  return cost.currency === "USD"
+    ? `$${cost.amount.toFixed(digits)}`
+    : `${cost.amount.toFixed(digits)} ${cost.currency}`;
+}
+
 /**
- * Context-window pressure from the agent's ACP `usage_update` (tokens in
- * context out of the window size), plus the session's cost: the agent's
- * own figure, or Band's estimate from token counts for agents that report
- * none.
+ * Context-window pressure, as the agent reports it in its latest ACP
+ * `usage_update`: tokens in context out of the window size, and the
+ * session's cost when the agent includes one. Always shown; an empty ring
+ * until the agent's first report.
  */
-function ContextMeter({
-  usage,
-  costUsd,
-}: {
-  usage: SessionState["usage"];
-  costUsd: number | null;
-}) {
+function ContextMeter({ usage }: { usage: SessionState["usage"] }) {
   const pct = usage && usage.size > 0 ? Math.min(100, (usage.used / usage.size) * 100) : 0;
   const pctRounded = Math.round(pct);
   const danger = pct >= 85;
@@ -1343,7 +1364,7 @@ function ContextMeter({
             if (e.pointerType === "mouse") setOpen(false);
           }}
         >
-          <svg viewBox="0 0 24 24" className="size-5 -rotate-90 shrink-0" aria-hidden="true">
+          <svg viewBox="0 0 24 24" className="size-4 -rotate-90 shrink-0" aria-hidden="true">
             <circle
               cx="12"
               cy="12"
@@ -1377,7 +1398,7 @@ function ContextMeter({
         side="top"
         align="end"
       >
-        <div className="space-y-0.5 text-xs">
+        <div data-testid="chat-pane__context-meter-details" className="space-y-0.5 text-xs">
           {usage ? (
             <div>
               Context: {usage.used.toLocaleString()} / {usage.size.toLocaleString()} ({pctRounded}%)
@@ -1385,7 +1406,7 @@ function ContextMeter({
           ) : (
             <div>No usage reported yet</div>
           )}
-          {costUsd !== null && <div>Cost: ${costUsd.toFixed(costUsd < 1 ? 3 : 2)}</div>}
+          {usage?.cost && <div>Cost: {formatCost(usage.cost)}</div>}
         </div>
       </PopoverContent>
     </Popover>

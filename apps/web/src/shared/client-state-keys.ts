@@ -10,7 +10,7 @@
  * with every device but keeps scroll position per device type.
  *
  * Keys not listed here stay on the device: the agent mode (`band.agent-mode`,
- * per device on purpose, #685), experimental flags, and sessionStorage caches.
+ * per device on purpose, #685) and sessionStorage caches.
  */
 
 export type KeyScope = "all" | "device";

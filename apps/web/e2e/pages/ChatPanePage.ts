@@ -24,6 +24,35 @@
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { FindWidget } from "./FindWidget";
+
+/** Bounding boxes of the composer's parts, in CSS px. */
+export interface ComposerGeometry {
+  /** The bordered field around the textarea and the send button. */
+  body: Box;
+  prompt: Box;
+  submit: Box;
+  modeMenu: Box;
+  modelMenu: Box;
+  contextMeter: Box;
+}
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The chat find's painted highlights (CSS Custom Highlight API). */
+export interface ChatFindHighlights {
+  /** Matches highlighted in the mounted messages. */
+  total: number;
+  /** Text of the current match, or null when none is painted. */
+  current: string | null;
+  /** The current match lies inside the conversation's visible area. */
+  currentInView: boolean;
+}
 
 export class ChatPanePage {
   /** The prompt textarea — placeholder is stable, hard-coded in
@@ -57,6 +86,20 @@ export class ChatPanePage {
   /** Elicitation forms (ACP form `elicitation/create`, e.g. Claude Code's
    *  AskUserQuestion). Same `data-answered` attribute as the cards. */
   readonly elicitationForms: Locator;
+  /** The chat pane's root; the find widget opens inside it. */
+  readonly root: Locator;
+  /** The chat's find widget (Cmd/Ctrl+F). */
+  readonly find: FindWidget;
+  /** The bordered field holding the prompt and the send button. */
+  readonly promptBody: Locator;
+  /** The execution mode trigger in the settings row. */
+  readonly modeMenuButton: Locator;
+  /** The items of the open execution mode menu. */
+  readonly modeMenuItems: Locator;
+  /** The context window ring next to the model, always shown. */
+  readonly contextMeter: Locator;
+  /** The popover the ring opens on hover: context used and cost. */
+  readonly contextMeterDetails: Locator;
   /** The model settings trigger on the right of the composer: model name
    *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
@@ -130,6 +173,13 @@ export class ChatPanePage {
   ) {
     this.promptInput = page.getByPlaceholder("Type a message...");
     this.promptForm = page.getByTestId("prompt-input__form").filter({ visible: true });
+    this.root = page.getByTestId("chat-pane").filter({ visible: true });
+    this.find = new FindWidget(this.root);
+    this.promptBody = page.getByTestId("prompt-input__body").filter({ visible: true });
+    this.modeMenuButton = page.getByTestId("chat-pane__mode-menu").filter({ visible: true });
+    this.modeMenuItems = page.getByRole("menu").getByRole("menuitem");
+    this.contextMeter = page.getByTestId("chat-pane__context-meter").filter({ visible: true });
+    this.contextMeterDetails = page.getByTestId("chat-pane__context-meter-details");
     this.thinkingIndicator = page.getByTestId("chat-pane__thinking-indicator");
     // System-controlled aria-label set in `ChatView.tsx::SessionHistoryMenu` —
     // doctrine-preferred locator (role + name).
@@ -823,6 +873,82 @@ export class ChatPanePage {
       .getByTestId("slash-command-suggestions__name")
       .allTextContents()
       .then((names) => names.map((n) => n.trim()));
+  }
+
+  /** Open the execution mode menu. */
+  async openModeMenu(): Promise<void> {
+    await test.step("Open the execution mode menu", async () => {
+      await this.modeMenuButton.click();
+      await expect(this.modeMenuItems.first()).toBeVisible();
+    });
+  }
+
+  /** Number of icons (`svg`) inside `locator`. */
+  async iconCount(locator: Locator): Promise<number> {
+    return await locator.locator("svg").count();
+  }
+
+  /** Hover the context ring so its details popover opens. */
+  async hoverContextMeter(): Promise<void> {
+    await test.step("Hover the context window ring", async () => {
+      await this.contextMeter.hover();
+      await expect(this.contextMeterDetails).toBeVisible();
+    });
+  }
+
+  /** Where the composer's parts sit. */
+  async composerGeometry(): Promise<ComposerGeometry> {
+    const box = async (locator: Locator): Promise<Box> => {
+      const b = await locator.boundingBox();
+      if (!b) throw new Error("composer part has no bounding box");
+      return b;
+    };
+    return {
+      body: await box(this.promptBody),
+      prompt: await box(this.promptInput),
+      submit: await box(this.submitButton),
+      modeMenu: await box(this.modeMenuButton),
+      modelMenu: await box(this.modelMenuButton),
+      contextMeter: await box(this.contextMeter),
+    };
+  }
+
+  /** Type text with Shift+Enter line breaks, as a user writing several
+   *  lines would. */
+  async typeLines(lines: string[]): Promise<void> {
+    await test.step(`Type ${lines.length} lines into the prompt`, async () => {
+      await this.promptInput.click();
+      for (const [i, line] of lines.entries()) {
+        if (i > 0) await this.promptInput.press("Shift+Enter");
+        await this.promptInput.pressSequentially(line);
+      }
+    });
+  }
+
+  /** Press Cmd/Ctrl+F in the prompt to open the chat's find widget. */
+  async openFind(): Promise<void> {
+    await test.step("Open find in chat with Cmd/Ctrl+F", async () => {
+      await this.promptInput.click();
+      await this.promptInput.press("ControlOrMeta+f");
+      await expect(this.find.input).toBeFocused();
+    });
+  }
+
+  /** The highlights the chat find painted, read from `CSS.highlights`. */
+  async findHighlights(): Promise<ChatFindHighlights> {
+    const scroller = this.scroller.filter({ visible: true });
+    return await scroller.evaluate((el) => {
+      const all = CSS.highlights.get("chat-find");
+      const current = CSS.highlights.get("chat-find-current");
+      const range = current ? ([...current][0] as Range | undefined) : undefined;
+      let currentInView = false;
+      if (range) {
+        const box = range.getBoundingClientRect();
+        const view = el.getBoundingClientRect();
+        currentInView = box.height > 0 && box.top >= view.top && box.bottom <= view.bottom;
+      }
+      return { total: all?.size ?? 0, current: range?.toString() ?? null, currentInView };
+    });
   }
 
   /** Focus the prompt textarea so subsequent `pressKey()` calls land
