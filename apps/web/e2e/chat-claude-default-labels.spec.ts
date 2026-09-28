@@ -16,7 +16,7 @@
  * `$HOME/.claude/projects/<repo path slug>/<session id>.jsonl`.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
@@ -136,6 +136,14 @@ test.describe("Claude Code default model and effort labels", () => {
   test("names the model and effort the defaults run with, preferring what the session reports", async ({
     page,
   }) => {
+    // Managed Claude Code settings outrank the files this test writes.
+    test.skip(
+      [
+        "/Library/Application Support/ClaudeCode/managed-settings.json",
+        "/etc/claude-code/managed-settings.json",
+      ].some((path) => existsSync(path)),
+      "the host has managed Claude Code settings",
+    );
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     await chatPane.goto(toWorkspaceId("claudedefaults", "main"));
     await chatPane.waitForReady();

@@ -649,7 +649,7 @@ export class ChatPanePage {
 
   /** The first row of the open model settings menu: the selected model. */
   selectedModelRow(): Locator {
-    return this.modelMenuContent.getByRole("menuitem").first();
+    return this.page.getByTestId("chat-pane__model-menu-selected-model");
   }
 
   /** A level in the open "Effort" submenu, by display name. */

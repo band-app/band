@@ -319,6 +319,7 @@ function remember(def: CodingAgentDefinition, patch: Partial<CatalogEntry>): voi
     models: prev?.models ?? null,
     commands: prev?.commands ?? [],
     canList: prev?.canList ?? false,
+    learnedDefaults: prev?.learnedDefaults,
     ...patch,
     updatedAt: Date.now(),
   });
@@ -351,7 +352,7 @@ function claudeDefaults(
   if (def.type !== "claude-code") return undefined;
   const cwd = chat ? workspaceService.resolve(chat.workspaceId)?.worktree.path : undefined;
   const configured = configuredClaudeDefaults({
-    cwd: cwd ?? bandHome(),
+    cwd,
     env: process.env,
     cli: runtimes.get(chatId)?.claudeCli ?? undefined,
   });
@@ -890,7 +891,12 @@ export class AgentSessionService {
     } finally {
       rt.inTurn = false;
       if (rt.process) scheduleIdle(rt);
-      this.pushClaudeDefaults(chatId, true);
+      // Never let a failed push replace the turn's result.
+      try {
+        this.pushClaudeDefaults(chatId, true);
+      } catch (err) {
+        log.debug({ chatId, err }, "could not push Claude defaults");
+      }
     }
   }
 
@@ -898,15 +904,11 @@ export class AgentSessionService {
    *  its `default` choices ran with, or the CLI's flags are known. */
   private pushClaudeDefaults(chatId: string, learn: boolean): void {
     const chat = chatService.get(chatId);
-    if (!chat || definitionFor(chat).type !== "claude-code") return;
-    const state = this.baseSessionState(chatId);
-    const resolvedDefaults = claudeDefaults(
-      chatId,
-      chat,
-      definitionFor(chat),
-      state.configOptions,
-      learn,
-    );
+    if (!chat) return;
+    const def = definitionFor(chat);
+    if (def.type !== "claude-code") return;
+    const state = this.getSessionState(chatId, { resolveDefaults: false });
+    const resolvedDefaults = claudeDefaults(chatId, chat, def, state.configOptions, learn);
     broadcastTransient(chatId, { type: "session-state", state: { ...state, resolvedDefaults } });
   }
 
@@ -1023,7 +1025,9 @@ export class AgentSessionService {
       chatService.get(chatId) ??
       (workspaceId ? chatService.create(workspaceId, { id: chatId, name: "Chat" }) : undefined);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
+    const option = this.getSessionState(chatId, { resolveDefaults: false }).configOptions.find(
+      (o) => o.id === configId,
+    );
     const category =
       option?.category === "model" || configId === "model"
         ? "model"
@@ -1086,26 +1090,30 @@ export class AgentSessionService {
    * the chat's saved choices applied. A chat the server has no row for yet
    * (a new pane, created lazily on its first message) gets the default
    * agent's catalog entry. Claude Code chats also get what their `default`
-   * choices resolve to.
+   * choices resolve to, which reads Claude's settings files and transcript;
+   * callers that only need the options or the cost pass
+   * `resolveDefaults: false`.
    */
-  getSessionState(chatId: string): SessionState {
-    const state = this.baseSessionState(chatId);
-    const chat = chatService.get(chatId);
-    const def = definitionFor(chat ?? { agent: undefined as unknown as string });
-    const resolvedDefaults = claudeDefaults(chatId, chat, def, state.configOptions);
-    return resolvedDefaults ? { ...state, resolvedDefaults } : state;
-  }
-
-  private baseSessionState(chatId: string): SessionState {
-    const chat: Pick<ChatSession, "agent" | "activeSessionId" | "model" | "mode"> = chatService.get(
-      chatId,
-    ) ?? {
+  getSessionState(chatId: string, opts: { resolveDefaults?: boolean } = {}): SessionState {
+    const saved = chatService.get(chatId);
+    const chat: Pick<ChatSession, "agent" | "activeSessionId" | "model" | "mode"> = saved ?? {
       agent: undefined as unknown as string,
       activeSessionId: undefined,
       model: undefined,
       mode: undefined,
     };
     const def = definitionFor(chat);
+    const state = this.baseSessionState(chatId, chat, def);
+    if (opts.resolveDefaults === false) return state;
+    const resolvedDefaults = claudeDefaults(chatId, saved, def, state.configOptions);
+    return resolvedDefaults ? { ...state, resolvedDefaults } : state;
+  }
+
+  private baseSessionState(
+    chatId: string,
+    chat: Pick<ChatSession, "agent" | "activeSessionId" | "model" | "mode">,
+    def: CodingAgentDefinition,
+  ): SessionState {
     const rt = runtimes.get(chatId);
     const sessionId = chat.activeSessionId;
 
@@ -1280,6 +1288,7 @@ export class AgentSessionService {
 
   /** Stops the chat's agent. Used when the chat is removed or switches agent. */
   stop(chatId: string): void {
+    defaultsChangedAt.delete(chatId);
     const rt = runtimes.get(chatId);
     if (rt) stopRuntime(rt);
   }

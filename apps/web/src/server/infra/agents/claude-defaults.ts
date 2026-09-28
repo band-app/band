@@ -63,11 +63,11 @@ function managedSettingsPath(): string | null {
   return null;
 }
 
-function readSettings(source: string, cwd: string): ClaudeSettings | null {
+function readSettings(source: string, cwd: string | undefined): ClaudeSettings | null {
   try {
     const text = source.trimStart().startsWith("{")
       ? source
-      : readFileSync(resolvePath(cwd, source.replace(/^~(?=\/)/, homedir())), "utf8");
+      : readFileSync(resolvePath(cwd ?? homedir(), source.replace(/^~(?=\/)/, homedir())), "utf8");
     const parsed: unknown = JSON.parse(text);
     return parsed && typeof parsed === "object" ? (parsed as ClaudeSettings) : null;
   } catch {
@@ -76,12 +76,17 @@ function readSettings(source: string, cwd: string): ClaudeSettings | null {
 }
 
 /** Settings in the CLI's precedence order, lowest first, merged. `env` and
- *  `modelSettings` merge per key; everything else is replaced. */
-function mergedSettings(cwd: string, env: NodeJS.ProcessEnv, extra: string[]): ClaudeSettings {
+ *  `modelSettings` merge per key; everything else is replaced. Without a
+ *  `cwd` there are no project settings. */
+function mergedSettings(
+  cwd: string | undefined,
+  env: NodeJS.ProcessEnv,
+  extra: string[],
+): ClaudeSettings {
   const sources = [
     join(claudeConfigDir(env), "settings.json"),
-    join(cwd, ".claude", "settings.json"),
-    join(cwd, ".claude", "settings.local.json"),
+    cwd && join(cwd, ".claude", "settings.json"),
+    cwd && join(cwd, ".claude", "settings.local.json"),
     ...extra,
     managedSettingsPath(),
   ];
@@ -137,7 +142,7 @@ function perModelEffort(settings: ClaudeSettings, model: string | undefined): st
 
 /** What config says the defaults are, before any session reports them. */
 export function configuredClaudeDefaults(opts: {
-  cwd: string;
+  cwd?: string;
   env: NodeJS.ProcessEnv;
   cli?: ClaudeCliArgs;
 }): ResolvedDefaults {

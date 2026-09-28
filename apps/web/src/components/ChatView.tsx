@@ -1000,7 +1000,10 @@ function ModelSettingsMenu({
         data-testid="chat-pane__model-menu-content"
       >
         {current && (
-          <DropdownMenuItem className="flex items-start gap-2">
+          <DropdownMenuItem
+            className="flex items-start gap-2"
+            data-testid="chat-pane__model-menu-selected-model"
+          >
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="text-sm font-medium">{current.name}</span>
               {current.description && (

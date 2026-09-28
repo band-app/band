@@ -12,7 +12,7 @@
  * stand-in CLI process whose command line carries a wrapper's flags.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ResolvedDefaults } from "../src/shared/chat-events";
@@ -126,7 +126,14 @@ async function activeSessionId(url: string, chatId: string): Promise<string> {
 let seq = 0;
 const newChatId = () => `claude-defaults-${Date.now()}-${seq++}`;
 
-describe("Claude Code resolved defaults", () => {
+/** Managed Claude Code settings outrank every file a test writes, so a host
+ *  that has them resolves differently. */
+const HOST_HAS_MANAGED_SETTINGS = [
+  "/Library/Application Support/ClaudeCode/managed-settings.json",
+  "/etc/claude-code/managed-settings.json",
+].some((path) => existsSync(path));
+
+describe.skipIf(HOST_HAS_MANAGED_SETTINGS)("Claude Code resolved defaults", () => {
   it("refuses the session state without a token", async () => {
     const server = await boot(home());
     const input = encodeURIComponent(JSON.stringify({ chatId: newChatId() }));
@@ -251,6 +258,8 @@ describe("Claude Code resolved defaults", () => {
       { model: "claude-opus-5-5", effort: "medium", at: new Date() },
     ]);
     await runTurn(server.url, chatId, "second", maxId(first));
+    // Another chat starting a session rewrites the agent's catalog entry.
+    await runTurn(server.url, newChatId(), "third");
 
     const fresh = newChatId();
     await trpc(server.url, "chats.create", { workspaceId: WORKSPACE_ID, id: fresh });
