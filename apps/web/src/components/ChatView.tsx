@@ -61,7 +61,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
-import { useIsDesktop } from "../hooks/useIsDesktop";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { trpc } from "../lib/trpc-client";
 import type { SessionState } from "../shared/chat-events";
 import {
@@ -906,10 +906,13 @@ function ModeMenu({
   );
 }
 
-/** Width of the model settings menu (`w-64`). Below the desktop layout a
- *  submenu has no room beside the menu, so it opens over it instead: a side
- *  offset of minus this width puts it on top of the menu. */
+/** Width of the model settings menu. In a viewport too narrow for a
+ *  submenu beside the menu (a phone), the submenu opens over the menu
+ *  instead: a side offset of minus this width puts it on top of the menu. */
 const MODEL_MENU_WIDTH_PX = 256;
+/** Room for the menu and a submenu of the same width side by side, plus the
+ *  composer's margins. */
+const SUBMENU_BESIDE_QUERY = `(min-width: ${2 * MODEL_MENU_WIDTH_PX + 48}px)`;
 
 /**
  * Model, effort, fast mode and any other per-model settings behind one
@@ -943,7 +946,7 @@ function ModelSettingsMenu({
   const otherModels = models.filter((m) => m !== current);
   const effortChoice = effort && selectChoices(effort).find((c) => c.id === effort.currentValue);
   const fastOn = fast?.currentValue === "on";
-  const submenuOffset = useIsDesktop() ? undefined : -MODEL_MENU_WIDTH_PX;
+  const submenuOffset = useMediaQuery(SUBMENU_BESIDE_QUERY) ? undefined : -MODEL_MENU_WIDTH_PX;
 
   return (
     <DropdownMenu>
@@ -976,7 +979,7 @@ function ModelSettingsMenu({
       <DropdownMenuContent
         side="top"
         align="end"
-        className="w-64"
+        style={{ width: MODEL_MENU_WIDTH_PX }}
         data-testid="chat-pane__model-menu-content"
       >
         {current && (
@@ -1100,7 +1103,11 @@ function OptionSubmenu({
         {current && <span className="text-xs text-muted-foreground">{current.name}</span>}
       </DropdownMenuSubTrigger>
       <DropdownMenuPortal>
-        <DropdownMenuSubContent className="min-w-[180px]" sideOffset={sideOffset}>
+        <DropdownMenuSubContent
+          className="min-w-[180px]"
+          sideOffset={sideOffset}
+          data-testid={`${testId}-content`}
+        >
           {choices.map((choice) => (
             <DropdownMenuItem
               key={choice.id}

@@ -11,12 +11,12 @@
  * of hanging off the left edge.
  *
  * Real server, no tRPC mocking. The ACP stub agent is the only stub; it
- * advertises MODEL_COUNT models with long names.
+ * advertises MODEL_COUNT models with long names and an effort option.
  */
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
 import {
@@ -58,7 +58,22 @@ test.beforeAll(async () => {
   seedSettings(tmpHome, { tokenSecret: TOKEN, defaultCodingAgent: "claude-code" });
   server = await startServer({
     tmpHome,
-    env: acpStubEnv(tmpHome, { options: { models: MODELS } }),
+    env: acpStubEnv(tmpHome, {
+      options: {
+        models: MODELS,
+        extra: [
+          {
+            id: "effort",
+            name: "Effort",
+            category: "thought_level",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ],
+      },
+    }),
   });
 });
 
@@ -69,6 +84,18 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
+async function expectInsideViewport(
+  chatPane: ChatPanePage,
+  locator: Locator,
+  viewport: { width: number; height: number },
+): Promise<void> {
+  const box = await chatPane.readBox(locator);
+  expect(box.top).toBeGreaterThanOrEqual(0);
+  expect(box.bottom).toBeLessThanOrEqual(viewport.height);
+  expect(box.left).toBeGreaterThanOrEqual(0);
+  expect(box.right).toBeLessThanOrEqual(viewport.width);
+}
+
 async function expectEveryModelReachable(
   chatPane: ChatPanePage,
   viewport: { width: number; height: number },
@@ -78,19 +105,11 @@ async function expectEveryModelReachable(
   await expect(chatPane.assistantMessage(`Heard "first" on ${MODELS[0].value}.`)).toBeVisible();
 
   await chatPane.openModelMenu();
-  const menu = await chatPane.readBox(chatPane.modelMenuContent);
-  expect(menu.top).toBeGreaterThanOrEqual(0);
-  expect(menu.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(menu.left).toBeGreaterThanOrEqual(0);
-  expect(menu.right).toBeLessThanOrEqual(viewport.width);
+  await expectInsideViewport(chatPane, chatPane.modelMenuContent, viewport);
 
   await chatPane.openMoreModels();
   await expect(chatPane.moreModelsOption(MODELS[1].name)).toBeInViewport();
-  const submenu = await chatPane.readBox(chatPane.moreModelsContent);
-  expect(submenu.top).toBeGreaterThanOrEqual(0);
-  expect(submenu.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(submenu.left).toBeGreaterThanOrEqual(0);
-  expect(submenu.right).toBeLessThanOrEqual(viewport.width);
+  await expectInsideViewport(chatPane, chatPane.moreModelsContent, viewport);
 
   // Keyboard: End focuses the last model and scrolls it fully into view.
   const last = chatPane.moreModelsOption(LAST_MODEL);
@@ -98,11 +117,12 @@ async function expectEveryModelReachable(
   await expect(last).toBeFocused();
   await expect(last).toBeInViewport({ ratio: 1 });
 
-  // Pointer: from the top of the list, the last model can be scrolled to
-  // and clicked.
+  // Pointer: from the top of the list, the wheel scrolls to the last model
+  // and it can be clicked.
   await chatPane.scrollMoreModelsToTop();
   await expect(chatPane.moreModelsOption(MODELS[1].name)).toBeInViewport();
-  await chatPane.scrollToMoreModel(LAST_MODEL);
+  await expect(last).not.toBeInViewport();
+  await chatPane.wheelMoreModelsToEnd();
   await expect(last).toBeInViewport({ ratio: 1 });
   await chatPane.clickMoreModel(LAST_MODEL);
   await expect(chatPane.modelMenuButton).toContainText(LAST_MODEL);
@@ -112,6 +132,11 @@ async function expectEveryModelReachable(
   await expect(
     chatPane.assistantMessage(`Heard "second" on ${MODELS[MODEL_COUNT - 1].value}.`),
   ).toBeVisible();
+
+  // The other submenus follow the same rules.
+  await chatPane.openModelMenu();
+  await chatPane.openEffortSubmenu();
+  await expectInsideViewport(chatPane, chatPane.effortSubmenuContent, viewport);
 }
 
 test.describe("More models submenu on a short desktop window", () => {

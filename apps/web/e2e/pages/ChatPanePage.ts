@@ -75,6 +75,8 @@ export class ChatPanePage {
   readonly moreModelsSubmenu: Locator;
   /** The open "More models" submenu, listing the other models. */
   readonly moreModelsContent: Locator;
+  /** The open "Effort" submenu. */
+  readonly effortSubmenuContent: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
@@ -137,6 +139,7 @@ export class ChatPanePage {
     this.fastModeSwitch = this.fastModeItem.getByRole("switch", { includeHidden: true });
     this.moreModelsSubmenu = page.getByTestId("chat-pane__model-menu-more-models");
     this.moreModelsContent = page.getByTestId("chat-pane__model-menu-more-models-content");
+    this.effortSubmenuContent = page.getByTestId("chat-pane__model-menu-effort-submenu-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -289,11 +292,26 @@ export class ChatPanePage {
     });
   }
 
-  /** Scroll the open "More models" submenu until the named model is in
-   *  view, the way a wheel or a swipe would. */
-  async scrollToMoreModel(name: string): Promise<void> {
-    await test.step(`Scroll to model "${name}"`, async () => {
-      await this.moreModelsOption(name).scrollIntoViewIfNeeded();
+  /** Open the "Effort" submenu of the open model settings menu. */
+  async openEffortSubmenu(): Promise<void> {
+    await test.step("Open the Effort submenu", async () => {
+      await this.effortSubmenu.click();
+      await expect(this.effortSubmenuContent).toBeVisible();
+    });
+  }
+
+  /** Scroll the open "More models" submenu to its end with the mouse wheel. */
+  async wheelMoreModelsToEnd(): Promise<void> {
+    await test.step("Scroll the More models submenu with the wheel", async () => {
+      await this.moreModelsContent.hover();
+      const atEnd = () =>
+        this.moreModelsContent.evaluate(
+          (el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1,
+        );
+      for (let i = 0; i < 50 && !(await atEnd()); i++) {
+        await this.page.mouse.wheel(0, 200);
+      }
+      await expect.poll(atEnd).toBe(true);
     });
   }
 
@@ -307,15 +325,19 @@ export class ChatPanePage {
 
   /** Scroll the open "More models" submenu back to its top. */
   async scrollMoreModelsToTop(): Promise<void> {
-    await this.moreModelsContent.evaluate((el) => {
-      el.scrollTop = 0;
+    await test.step("Scroll the More models submenu to the top", async () => {
+      await this.moreModelsContent.evaluate((el) => {
+        el.scrollTop = 0;
+      });
     });
   }
 
-  /** The rendered box of an element, in viewport pixels. */
+  /** The rendered box of an element, in viewport pixels, once its open
+   *  animation (a zoom from 95%) has finished. */
   async readBox(
     locator: Locator,
   ): Promise<{ top: number; bottom: number; left: number; right: number }> {
+    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     const box = await locator.boundingBox();
     if (!box) throw new Error("element has no layout box");
     return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
@@ -607,9 +629,8 @@ export class ChatPanePage {
   async selectModel(modelName: string): Promise<void> {
     await test.step(`Select model "${modelName}"`, async () => {
       await this.openModelMenu();
-      await this.moreModelsSubmenu.click();
-      await this.page.getByRole("menuitem", { name: modelName }).click();
-      await expect(this.modelMenuContent).toBeHidden();
+      await this.openMoreModels();
+      await this.clickMoreModel(modelName);
     });
   }
 
