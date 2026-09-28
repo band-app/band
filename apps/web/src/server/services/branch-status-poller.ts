@@ -335,12 +335,21 @@ export async function getBatchedCIStatuses(
   return allResults;
 }
 
+let pollCount = 0;
+/** The newest poll started for each workspace (see `pollWorkspace`). */
+const latestPollByWorkspace = new Map<string, number>();
+
 /**
  * Poll one workspace's git status, store it with `newCI` (or the stored CI
  * status when `null`), and emit it to status stream listeners.
  */
 async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
+  const poll = ++pollCount;
+  latestPollByWorkspace.set(ws.workspaceId, poll);
   const git = await getGitStatus(ws.worktreePath);
+  // A poll of this workspace that started later (a selection refresh during a
+  // tick) read fresher state and writes it; this older result must not land last.
+  if (latestPollByWorkspace.get(ws.workspaceId) !== poll) return;
 
   const db = getDb();
   let ci: CIStatus = newCI ?? { state: "none" };

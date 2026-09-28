@@ -14,6 +14,7 @@ import { waitFor } from "./helpers/wait-for";
 
 const TOKEN = "branch-status-git-token";
 const PROJECT = "gitproj";
+const BRANCHES = ["main", "local", "dirty", "ahead", "behind", "diverged", "gone", "conflict"];
 
 const gitEnv = {
   ...process.env,
@@ -101,14 +102,13 @@ describe("branch status git fields", () => {
       // Expected: the merge stops on the conflict.
     }
 
-    const branches = ["main", "local", "dirty", "ahead", "behind", "diverged", "gone", "conflict"];
     seedState(tmpHome, {
       projects: [
         {
           name: PROJECT,
           path: repo,
           defaultBranch: "main",
-          worktrees: branches.map((branch) => ({ branch, path: paths[branch] })),
+          worktrees: BRANCHES.map((branch) => ({ branch, path: paths[branch] })),
         },
       ],
     });
@@ -136,7 +136,9 @@ describe("branch status git fields", () => {
     const stream = await StatusStream.open(server.url, TOKEN);
     const status = (branch: string) => stream.latest(toWorkspaceId(PROJECT, branch));
     try {
-      await waitFor(async () => stream.branchStatuses.size >= 8 || undefined, {
+      // The first tick's worktree sync also finds the `conflict-other` helper
+      // worktree, so wait for these workspaces by name, not by count.
+      await waitFor(async () => BRANCHES.every((branch) => status(branch)) || undefined, {
         timeoutMs: 20_000,
         label: "a branch status for every workspace",
       });
