@@ -130,8 +130,8 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   // A's tabs inherit its `visibility: hidden`. With a paint-retained browser
   // pane (desktop only) the entry drops its `content-visibility` skip, and a
   // tab that computed `visible` painted over B's strip.
-  expect(await wp.visibleTabTitlesIn(WORKSPACE_A)).toEqual([]);
-  expect(await wp.visibleTabTitlesIn(WORKSPACE_B)).toHaveLength(3);
+  expect(await wp.centerTabVisibilitiesIn(WORKSPACE_A)).toEqual(["hidden"]);
+  expect(await wp.centerTabVisibilitiesIn(WORKSPACE_B)).toEqual(["visible", "visible", "visible"]);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 

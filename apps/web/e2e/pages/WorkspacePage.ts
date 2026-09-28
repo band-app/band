@@ -204,19 +204,18 @@ export class WorkspacePage {
     );
   }
 
-  /** Titles of the center tab strip's tabs in a workspace's mounted entry
-   *  whose computed `visibility` is `visible`. Tabs of a strip nested inside a
-   *  panel (a terminal's split panes) don't count. A hidden entry's tabs must inherit its
-   *  `visibility: hidden`: when its `content-visibility` skip is dropped (a
-   *  paint-retained browser pane), visibility is all that keeps its tab strip
-   *  from painting over the shown workspace's. */
-  async visibleTabTitlesIn(workspaceId: string): Promise<string[]> {
+  /** The computed `visibility` of each tab in a workspace's center tab
+   *  strip, in strip order. Tabs of a strip nested inside a panel (a
+   *  terminal's split panes) don't count. A hidden entry's tabs must inherit
+   *  its `visibility: hidden`: when its `content-visibility` skip is dropped
+   *  (a paint-retained browser pane), visibility is all that keeps its tab
+   *  strip from painting over the shown workspace's. */
+  async centerTabVisibilitiesIn(workspaceId: string): Promise<string[]> {
     return await this.cachedPanelEntries(workspaceId).evaluate((entry) =>
       Array.from(
         entry.querySelectorAll('.dv-tab:has([data-testid^="center-"][data-testid*="-tab--"])'),
-      )
-        .filter((tab) => getComputedStyle(tab).visibility === "visible")
-        .map((tab) => (tab.textContent ?? "").trim()),
+        (tab) => getComputedStyle(tab).visibility,
+      ),
     );
   }
 
