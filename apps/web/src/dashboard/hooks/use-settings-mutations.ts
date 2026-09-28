@@ -15,7 +15,7 @@ export function useUpdateSettings() {
       queryClient.setQueryData(queryKeys.settings, settings);
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }

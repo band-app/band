@@ -18,7 +18,7 @@ export function useAddProject() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -34,7 +34,7 @@ export function useRemoveProject() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -61,7 +61,7 @@ export function useReorderProjects() {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.projects, context.previous);
       }
-      setError(String(err));
+      setError(err);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
@@ -81,7 +81,7 @@ export function useUpdateProjectLabel() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -93,7 +93,7 @@ export function useGitInit() {
   return useMutation({
     mutationFn: (path: string) => adapter.gitInit(path),
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -116,7 +116,7 @@ export function usePromoteProjectToGit() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -145,7 +145,7 @@ export function useCreateWorkspace() {
       openWorkspace(workspaceId);
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }
@@ -191,7 +191,7 @@ export function useRemoveWorkspace() {
       }
     },
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
     onSettled: (_data, _err, { project, name }) => {
       setDeleting(toWorkspaceId(project, name), false);

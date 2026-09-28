@@ -1,4 +1,5 @@
 import type { AgentMode } from "../shared/agent-sessions";
+import type { GitOpResult } from "../shared/git-op-result";
 import type {
   BrowserProfileInfo,
   CIStatus,
@@ -74,8 +75,8 @@ export interface DashboardAdapter {
   removeWorkspace(project: string, name: string): Promise<void>;
   setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
-  gitPull(project: string, name: string): Promise<void>;
-  gitPush(project: string, name: string): Promise<void>;
+  gitPull(project: string, name: string): Promise<GitOpResult>;
+  gitPush(project: string, name: string): Promise<GitOpResult>;
 
   // Browser profiles (optional). Profiles hold the browser pane's cookies;
   // each project remembers which one its new tabs open with.

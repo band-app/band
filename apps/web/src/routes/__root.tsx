@@ -19,8 +19,7 @@ import {
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
-import { ReinstallHomeScreenNotice } from "@/dashboard/components/ReinstallHomeScreenNotice";
-import { UpdateToast } from "@/dashboard/components/UpdateToast";
+import { ToastHost } from "@/dashboard/components/ToastHost";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
@@ -960,8 +959,7 @@ function RootLayout() {
             <ClientStateGate>
               <AppShell />
             </ClientStateGate>
-            <UpdateToast />
-            <ReinstallHomeScreenNotice />
+            <ToastHost />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />
