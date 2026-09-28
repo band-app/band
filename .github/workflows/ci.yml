@@ -14,9 +14,24 @@ on:
   pull_request:
     types: [opened, reopened, labeled, synchronize]
     branches: [main]
+  # GitHub's merge queue runs the required checks on each queued PR merged
+  # onto main (and onto the PRs queued ahead of it) before it lands.
+  merge_group:
+    types: [checks_requested]
 
+# Checkout: every job uses actions/checkout's default ref. For a pull request
+# that is refs/pull/N/merge, the PR merged onto main's current tip, so a PR is
+# tested with main's latest commits instead of on its own. (The explicit
+# `ref: head.sha` it replaced dates from when this workflow ran under
+# `pull_request_target`, whose default checkout is the BASE branch. Under
+# `pull_request` the merge ref is the fork's code in the same isolated,
+# secret-less context, so fork safety is unchanged.) A merge group checks out
+# the queue's temporary branch, a push checks out the pushed commit.
+#
+# One run per PR: a new push to the PR cancels the run for the old merge ref.
+# Pushes to main and merge groups are keyed by commit, so each is tested.
 concurrency:
-  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -37,6 +52,7 @@ jobs:
     # GitHub Actions account/org level, not in YAML the fork can edit.
     if: >
       github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'ci:approved')
 
@@ -46,8 +62,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -291,40 +305,47 @@ jobs:
         run: pnpm --filter @band-app/desktop test
 
   # ---------------------------------------------------------------------------
-  # macOS CLI integration tests.
+  # macOS jobs.
   #
-  # The main `check` job runs the CLI integration tests only on ubuntu-latest,
-  # but several Band paths behave differently on macOS — most notably the
-  # `/var/folders` → `/private/var/folders` symlink that canonicalize() and git
-  # resolve but a raw temp path does not. That mismatch silently dropped
-  # seeded worktrees during path-string reconciliation (the server reconciles
-  # worktrees by path equality since #606) and broke four CLI integration tests
-  # — a failure that passes on every Linux PR (no `/private` symlink) and only
-  # surfaced on the macos-latest release runner for v0.24.0 (harness fix: #608).
+  # The `check` job runs everything on ubuntu-latest, but several Band paths
+  # behave differently on macOS, and release.yml and nightly.yml run the tests
+  # on macos-latest. Two macOS jobs close that gap before merge:
   #
-  # This job closes that gap by exercising the CLI integration tests on macOS on
-  # every relevant change. It is a SEPARATE, CLI-only job — NOT a macOS clone of
-  # `check` — because macOS runners are slower and costlier, so we only pay for
-  # the surface that actually has a macOS-specific failure mode. The lightweight
-  # `cli-macos-changes` job below gates it: PRs that don't touch the
-  # CLI/worktree/sync surface skip the macOS runner entirely.
+  #   - `cli-macos` runs the CLI integration tests. The `/var/folders` →
+  #     `/private/var/folders` symlink that canonicalize() and git resolve but
+  #     a raw temp path does not silently dropped seeded worktrees during
+  #     path-string reconciliation (the server reconciles worktrees by path
+  #     equality since #606) and broke four CLI integration tests. That passed
+  #     on every Linux PR and only surfaced on the macos-latest release runner
+  #     for v0.24.0 (harness fix: #608).
+  #   - `web-macos` runs the web server's vitest suite, the same step as
+  #     release.yml and nightly.yml. Before it existed, macOS-only failures in
+  #     those tests first showed up in a release or a nightly run.
+  #
+  # They are not macOS clones of `check`: macOS runners are slower and
+  # costlier, so each runs only the suite with a macOS-specific failure mode
+  # (no lint, no e2e), and `macos-changes` below skips each one on PRs that
+  # don't touch its code. A skipped job counts as passed for a required check,
+  # so both job names can be required. Pushes to main always run both.
   # ---------------------------------------------------------------------------
-  cli-macos-changes:
-    name: Detect CLI-relevant changes
+  macos-changes:
+    name: Detect macOS-relevant changes
     runs-on: ubuntu-latest
-    # Mirror the `check` job's cost gate: run on push to main, on same-repo PRs
-    # (collaborators), and on fork PRs a maintainer labelled `ci:approved`.
+    # Mirror the `check` job's cost gate: run on push to main, in the merge
+    # queue, on same-repo PRs (collaborators), and on fork PRs a maintainer
+    # labelled `ci:approved`.
     if: >
       github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'ci:approved')
     outputs:
-      run: ${{ steps.filter.outputs.run }}
+      cli: ${{ steps.filter.outputs.cli }}
+      web: ${{ steps.filter.outputs.web }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # Full history so the base commit is reachable for the diff below.
           fetch-depth: 0
 
@@ -332,22 +353,34 @@ jobs:
       # step in deploy-docs, so we don't add a third-party action to a workflow
       # this security-conscious repo deliberately runs under `pull_request`
       # (no secrets, PR-scoped cache). Fails OPEN: any ambiguity about the base
-      # runs the macOS job rather than risk skipping a real regression.
-      - name: Detect CLI-relevant changes
+      # runs the macOS jobs rather than risk skipping a real regression.
+      - name: Detect macOS-relevant changes
         id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          QUEUE_HEAD: ${{ github.event.merge_group.head_sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-            HEAD="${{ github.event.pull_request.head.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-            HEAD="${{ github.sha }}"
-          fi
+          case "$EVENT_NAME" in
+            pull_request) BASE="$PR_BASE"; HEAD="$PR_HEAD" ;;
+            merge_group) BASE="$QUEUE_BASE"; HEAD="$QUEUE_HEAD" ;;
+            *) BASE="$PUSH_BASE"; HEAD="$PUSH_HEAD" ;;
+          esac
+
+          run_all() {
+            echo "cli=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
 
           # No usable base (first push, force-push, all-zero SHA): fail open.
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+            run_all
           fi
           # `fetch-depth: 0` above already pulls full history, so $BASE is
           # normally present. This shallow fetch is a belt-and-suspenders net
@@ -358,32 +391,45 @@ jobs:
           # unrelated commits that landed on main. Any git error → fail open.
           git fetch --no-tags --depth=1 origin "$BASE" 2>/dev/null || true
           if ! CHANGED=$(git diff --name-only "$BASE...$HEAD" 2>/dev/null); then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+            run_all
           fi
 
-          # Keep this list in sync with the surface that can trigger the
-          # macOS-only worktree path-reconciliation bug: the CLI + its test
-          # harness, the server sync/workspace services, the workspaces query
-          # layer, and this workflow file itself.
-          if printf '%s\n' "$CHANGED" | grep -qE '^(apps/cli/|apps/web/src/server/services/(sync-service|workspace-service)\.ts$|apps/web/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
+          # CLI: the surface that can trigger the macOS-only worktree
+          # path-reconciliation bug: the CLI + its test harness, the server
+          # sync/workspace services, the workspaces query layer, and this
+          # workflow file itself.
+          if grep -qE '^(apps/cli/|apps/web/src/server/services/(sync-service|workspace-service)\.ts$|apps/web/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+            echo "cli=true" >> "$GITHUB_OUTPUT"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "cli=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Web: what the vitest suite exercises beyond the React UI: the
+          # server (terminals, the terminal daemon, workspaces and git live
+          # under src/server/), the code it shares with the client, the tests
+          # and their build, the workspace packages and plugins the server
+          # loads, the CLI the tests shell out to, the lockfile and Node
+          # version, and this workflow file. A change only to the React UI
+          # (components, dashboard, routes) or to e2e specs stays Linux-only.
+          # Pushes to main always run it. (A here-string, not a pipe: under
+          # pipefail, `grep -q` exiting early would fail the pipe on a big diff.)
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/web/(src/(server|shared|lib)/|tests/|scripts/|start-server\.ts$|terminal-daemon\.ts$|package\.json$|vitest\.config\.ts$)|packages/|plugins/|apps/cli/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
           fi
 
   cli-macos:
     name: CLI Integration Tests (macOS)
     runs-on: macos-latest
-    needs: cli-macos-changes
-    if: needs.cli-macos-changes.outputs.run == 'true'
+    needs: macos-changes
+    if: needs.macos-changes.outputs.cli == 'true'
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -473,6 +519,124 @@ jobs:
         with:
           path: apps/cli/target
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
+  web-macos:
+    name: Web Tests (macOS)
+    runs-on: macos-latest
+    needs: macos-changes
+    if: needs.macos-changes.outputs.web == 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Same restore/save split and trust gate as the `check` job; keep each
+      # Restore/Save pair's path & key in lock-step. The CLI target cache has
+      # its own key: this job release-builds the CLI while `cli-macos` fills
+      # `cargo-cli-macOS-*` with a test-profile build, and whichever saved
+      # first would leave the other compiling from scratch every run. The
+      # fallback restore-key still reuses that cache's dependencies.
+      - name: Restore Cargo registry cache
+        id: cache-cargo-registry
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Restore CLI release target cache
+        id: cache-cargo-cli
+        uses: actions/cache/restore@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: |
+            cargo-cli-release-${{ runner.os }}-
+            cargo-cli-${{ runner.os }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
+      # job) no explicit `node-gyp` install is needed — matches release.yml.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Save pnpm store cache
+        if: |
+          steps.cache-pnpm-store.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Some web tests (e.g. `cli-skills.test.ts`) shell out to a real `band`
+      # binary, so build it first, as `check`, release.yml and nightly.yml do.
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Build web (needed by tests)
+        run: pnpm build:web
+
+      - name: Test (web)
+        run: pnpm --filter @band-app/server test
+
+      - name: Save Cargo registry cache
+        if: |
+          always() &&
+          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save CLI release target cache
+        if: |
+          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
   deploy-docs:
     name: Deploy Docs

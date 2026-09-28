@@ -44,6 +44,15 @@ export interface GhStub {
   ) => void;
   /** Fail the review query for `branch` the way `gh` does: stderr and exit 1. */
   setReviewQueryError: (repo: RepoCoords, branch: string, stderr: string) => void;
+  /**
+   * Answer the branch-status poller's batched CI query
+   * (`buildBatchedCIQuery`, one `ws_<n>: repository(...)` alias per
+   * workspace). One registration answers the whole query: each alias of
+   * `repo` gets `answer(branch)`, a `repository` object, and `null` when that
+   * returns undefined; aliases of any other repository get `null`. Called
+   * per request.
+   */
+  setBranchStatusQuery: (repo: RepoCoords, answer: (branch: string) => unknown) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
     number: number,
@@ -51,6 +60,13 @@ export interface GhStub {
   ) => void;
   stop: () => Promise<void>;
 }
+
+/**
+ * One alias of the poller's batched query:
+ * `ws_0: repository(owner: "o", name: "r") { owner { login } pullRequests(headRefName: "b"`.
+ */
+const BATCHED_ALIAS =
+  /(ws_\d+): repository\(owner: "([^"]*)", name: "([^"]*)"\) \{[^(]*pullRequests\(headRefName: "([^"]*)"/g;
 
 /** Whether a `gh api graphql` call is the review query for `branch` of `repo`. */
 function isReviewQuery(req: Request, repo: RepoCoords, branch: string): boolean {
@@ -97,6 +113,22 @@ export const ghStub = {
             return;
           }
           res.json({ stdout: "", stderr, exitCode: 1 });
+        });
+      },
+      setBranchStatusQuery(repo, answer) {
+        app.post("/api/graphql", (req, res, next) => {
+          const query = (req.body as GhInvocation).fields.query ?? "";
+          const aliases = [...query.matchAll(BATCHED_ALIAS)];
+          if (aliases.length === 0) {
+            next();
+            return;
+          }
+          const data: Record<string, unknown> = {};
+          for (const [, alias, owner, name, branch] of aliases) {
+            data[alias] =
+              owner === repo.owner && name === repo.name ? (answer(branch) ?? null) : null;
+          }
+          res.json({ stdout: JSON.stringify({ data }) });
         });
       },
       setPrMerge(number, opts) {

@@ -795,6 +795,9 @@ export function ChatView({
             <FileMentionSuggestions workspaceId={workspaceId} />
             <PromptInputTextarea
               placeholder="Type a message..."
+              // What a chat tab focuses when it's shown (lib/leaf-focus.ts).
+              data-band-leaf-focus=""
+              data-testid="chat__composer"
               onEscape={handleEscape}
               onPreviousMessage={getLastUserMessage}
               onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}

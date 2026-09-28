@@ -6,7 +6,8 @@ import { clientStorage } from "../../lib/client-state";
 import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
-import { selectionToChatExtension } from "../lib/selection-to-chat";
+import { selectionReferenceExtension } from "../lib/selection-to-chat";
+import { CodeSelectionContextMenu } from "./SelectionContextMenu";
 
 export type ViewMode = "unified" | "split";
 
@@ -242,7 +243,6 @@ export function DiffFileContent({
   viewMode,
   onEditorViews,
   onLoadMoreContext,
-  copyReferenceOnly = false,
   lspNavigation = null,
 }: {
   hunks: string;
@@ -250,9 +250,6 @@ export function DiffFileContent({
   viewMode: ViewMode;
   onEditorViews?: (views: EditorView[]) => void;
   onLoadMoreContext?: () => void;
-  /** When true, the selection tooltip shows only "Copy reference" (no Add to
-   *  Chat/Terminal) — used by the desktop diff leaf (#643). */
-  copyReferenceOnly?: boolean;
   /** Go-to-definition for the working-tree (new) side, from
    *  `createDiffLspNavigation`. Attached only while the diff shows the whole
    *  file, where a line in the view is the same line on disk. The old side
@@ -339,7 +336,7 @@ export function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(oldLineNumbers),
               hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, oldLineNumbers, { copyReferenceOnly }),
+              selectionReferenceExtension(filename, oldLineNumbers),
               EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--old" }),
               ...sharedExtensions,
             ],
@@ -350,7 +347,7 @@ export function DiffFileContent({
               ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(newLineNumbers),
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
-              selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
+              selectionReferenceExtension(filename, newLineNumbers),
               lspExtension,
               EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--new" }),
               ...sharedExtensions,
@@ -369,7 +366,7 @@ export function DiffFileContent({
           makeLineNumbers(newLineNumbers),
           hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
-          selectionToChatExtension(filename, newLineNumbers, { copyReferenceOnly }),
+          selectionReferenceExtension(filename, newLineNumbers),
           lspExtension,
           EditorView.editorAttributes.of({ "data-testid": "diff-file__editor--new" }),
           unifiedMergeView({
@@ -433,11 +430,15 @@ export function DiffFileContent({
       }
       onEditorViewsRef.current?.([]);
     };
-  }, [hunks, filename, viewMode, isDark, copyReferenceOnly, lspCompartment]);
+  }, [hunks, filename, viewMode, isDark, lspCompartment]);
 
   useEffect(() => {
     lspTargetRef.current?.dispatch({ effects: lspCompartment.reconfigure(lspNavigation ?? []) });
   }, [lspNavigation, lspCompartment]);
 
-  return <div ref={containerRef} />;
+  return (
+    <CodeSelectionContextMenu>
+      <div ref={containerRef} />
+    </CodeSelectionContextMenu>
+  );
 }

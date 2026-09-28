@@ -10,6 +10,7 @@ import {
   parseBatchedCIResponse,
 } from "./_utils/github-graphql";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
+import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
 import { syncService } from "./sync-service";
 import { emit } from "./watcher-service";
@@ -78,6 +79,12 @@ const pollerState = {
   /** A tick is running (see `runTick`). */
   ticking: false,
   activity: "active" as ActivityLevel,
+  /**
+   * Set by `startBranchStatusPoller`: the next tick asks GitHub too (without
+   * the fetch), so the PR badges are current as soon as a client connects
+   * instead of one CI period later. An activity change doesn't set it.
+   */
+  queryCIOnNextTick: false,
 };
 
 /**
@@ -338,6 +345,13 @@ export async function getBatchedCIStatuses(
 let pollCount = 0;
 /** The newest poll started for each workspace (see `pollWorkspace`). */
 const latestPollByWorkspace = new Map<string, number>();
+/**
+ * CI status a tick fetched for a workspace and hasn't stored yet. When a
+ * later poll supersedes the tick's (see `pollWorkspace`), the later poll
+ * stores this instead of the older row, so the GitHub result isn't lost
+ * until the next CI tick.
+ */
+const pendingCIByWorkspace = new Map<string, CIStatus>();
 
 /**
  * Poll one workspace's git status, store it with `newCI` (or the stored CI
@@ -346,22 +360,28 @@ const latestPollByWorkspace = new Map<string, number>();
 async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
   const poll = ++pollCount;
   latestPollByWorkspace.set(ws.workspaceId, poll);
+  if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
   const git = await getGitStatus(ws.worktreePath);
   // A poll of this workspace that started later (a selection refresh during a
   // tick) read fresher state and writes it; this older result must not land last.
   if (latestPollByWorkspace.get(ws.workspaceId) !== poll) return;
 
   const db = getDb();
-  let ci: CIStatus = newCI ?? { state: "none" };
-  if (!newCI) {
+  const pendingCI = pendingCIByWorkspace.get(ws.workspaceId);
+  let ci: CIStatus = newCI ?? pendingCI ?? { state: "none" };
+  if (!newCI && !pendingCI) {
     // Keep the stored CI status when this poll didn't query CI
     const existing = db
-      .select({ ciState: branchStatusesTable.ciState, ciUrl: branchStatusesTable.ciUrl })
+      .select({
+        ciState: branchStatusesTable.ciState,
+        ciUrl: branchStatusesTable.ciUrl,
+        ciPr: branchStatusesTable.ciPr,
+      })
       .from(branchStatusesTable)
       .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
       .get();
     if (existing) {
-      ci = { state: existing.ciState, url: existing.ciUrl };
+      ci = { state: existing.ciState, url: existing.ciUrl, pr: existing.ciPr };
     }
   }
 
@@ -378,6 +398,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
       gitSyncState: git.sync_state,
       ciState: ci.state,
       ciUrl: ci.url ?? null,
+      ciPr: ci.pr ?? null,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -390,10 +411,14 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
         gitSyncState: git.sync_state,
         ciState: ci.state,
         ciUrl: ci.url ?? null,
+        ciPr: ci.pr ?? null,
         updatedAt: now,
       },
     })
     .run();
+  if (pendingCIByWorkspace.get(ws.workspaceId) === ci) {
+    pendingCIByWorkspace.delete(ws.workspaceId);
+  }
 
   // Emit directly to SSE listeners
   emit({
@@ -427,6 +452,8 @@ export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boole
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
+  const queryCI = isCITick || pollerState.queryCIOnNextTick;
+  pollerState.queryCIOnNextTick = false;
 
   if (pollerState.tickCount === 1 || isCITick) {
     await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
@@ -454,8 +481,12 @@ async function pollTick() {
   // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
   // tick body just above; freshly-discovered origin changes land in the
   // map before this filter reads it.
+  //
+  // PR and CI state come from GitHub, so with the GitHub plugin disabled
+  // the poller never runs `gh`: a CI tick then stores no CI state and no
+  // PR, and the rows show neither the PR badge nor the CI icon.
   let ciStatuses = new Map<string, CIStatus>();
-  if (isCITick) {
+  if (queryCI && pluginHost.isEnabled("github")) {
     const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
     if (ciWorkspaces.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
@@ -463,7 +494,7 @@ async function pollTick() {
   }
 
   await forEachLimited(workspaces, (ws) =>
-    pollWorkspace(ws, isCITick ? (ciStatuses.get(ws.workspaceId) ?? { state: "none" }) : null),
+    pollWorkspace(ws, queryCI ? (ciStatuses.get(ws.workspaceId) ?? { state: "none" }) : null),
   );
 
   await fetches;
@@ -487,6 +518,7 @@ function runTick() {
 export function startBranchStatusPoller() {
   if (pollerState.timer) return;
   pollerState.tickCount = 0;
+  pollerState.queryCIOnNextTick = true;
 
   // Run first tick immediately
   runTick();

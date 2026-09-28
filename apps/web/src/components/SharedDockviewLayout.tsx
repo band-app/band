@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AddToChatDetail,
   type AddToTerminalDetail,
   buildCommands,
   type ChatInsertDetail,
@@ -11,7 +12,6 @@ import {
   QuickOpenDialog,
   recordWorkspaceAccess,
   SearchFilesDialog,
-  type SelectionToChatDetail,
   useCapabilities,
   WorkspacePickerDialog,
 } from "@/dashboard";
@@ -106,6 +106,14 @@ function toggleMaximizeActiveGroup(workspaceId: string | null): void {
   } else {
     active.api.maximize();
   }
+}
+
+/** Move focus into the active leaf of a workspace's dockview, after a palette
+ *  command activated it. `WorkspaceCenterDockview` listens for
+ *  `band:focus-active-leaf`. */
+function focusActiveLeaf(workspaceId: string | null): void {
+  if (!workspaceId) return;
+  window.dispatchEvent(new CustomEvent("band:focus-active-leaf", { detail: { workspaceId } }));
 }
 
 /** Reveal the right sidepanel and (optionally) select its Explorer/Changes tab.
@@ -344,13 +352,18 @@ export function SharedDockviewLayout() {
             getWorkspaceLeafActions(ws)?.onSplit(kind, groupId, direction);
           }
         },
-        cycleTabs: (direction) =>
-          cycleTabsInActiveGroup(
-            getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null,
-            direction,
-          ),
-        cycleGroups: (direction) =>
-          cycleGridGroups(getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null, direction),
+        cycleTabs: (direction) => {
+          const ws = activeWorkspaceIdRef.current;
+          cycleTabsInActiveGroup(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
+            focusActiveLeaf(ws),
+          );
+        },
+        cycleGroups: (direction) => {
+          const ws = activeWorkspaceIdRef.current;
+          cycleGridGroups(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
+            focusActiveLeaf(ws),
+          );
+        },
 
         toggleMaximize: () => toggleMaximizeActiveGroup(activeWorkspaceIdRef.current),
         openFileExternal: () => {
@@ -641,7 +654,7 @@ export function SharedDockviewLayout() {
   // "Add to Chat" — surface a chat leaf then dispatch the scoped insert.
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<SelectionToChatDetail>).detail;
+      const detail = (e as CustomEvent<AddToChatDetail>).detail;
       const workspaceId = activeWorkspaceIdRef.current;
       if (!detail || !workspaceId) return;
       activateLeafOfKind(workspaceId, "chat");
@@ -652,13 +665,16 @@ export function SharedDockviewLayout() {
         } catch {
           // best-effort — fall back to visible-chat delivery
         }
-        const insert: ChatInsertDetail = {
-          filePath: detail.filePath,
-          startLine: detail.startLine,
-          endLine: detail.endLine,
-          workspaceId,
-          chatId,
-        };
+        const insert: ChatInsertDetail =
+          "text" in detail
+            ? { text: detail.text, workspaceId, chatId }
+            : {
+                filePath: detail.filePath,
+                startLine: detail.startLine,
+                endLine: detail.endLine,
+                workspaceId,
+                chatId,
+              };
         window.dispatchEvent(new CustomEvent("band:chat-insert", { detail: insert }));
       })();
     };

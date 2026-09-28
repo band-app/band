@@ -16,7 +16,7 @@
  *                           Without it sessions live in memory.
  *   BAND_TEST_ACP_LOG       File to append one JSON line per request and
  *                           notification received ({ method, params, cwd,
- *                           env }), so a test can assert what Band sent.
+ *                           pid, env }), so a test can assert what Band sent.
  *   BAND_TEST_ACP_CAPS      JSON overriding advertised capabilities:
  *                           { "loadSession": false, "list": false,
  *                             "resume": false, "image": false }.
@@ -86,6 +86,7 @@ function logRequest(method, params) {
       method,
       params,
       cwd: process.cwd(),
+      pid: process.pid,
       env: { BAND_DISPATCH: env.BAND_DISPATCH, BAND_SERVER_URL: env.BAND_SERVER_URL },
     })}\n`,
   );

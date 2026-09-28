@@ -130,6 +130,7 @@ import {
 } from "../lib/dockview-section-actions";
 import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
 import { isDesktop } from "../lib/is-desktop";
+import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
   markBrowserFresh,
   markChatFresh,
@@ -161,6 +162,7 @@ import {
   SidebarGutter,
   useWorkspaceChrome,
 } from "./DesktopTitleBar";
+import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -761,7 +763,10 @@ function ChatLeafContent({
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the composer mounts (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-chat-leaf__visible-${visible ? "true" : "false"}`}
     >
       <ChatPane
@@ -816,7 +821,10 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the xterm attaches (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-term-leaf__visible-${visible ? "true" : "false"}`}
     >
       <TerminalSplitLeaf
@@ -854,7 +862,10 @@ function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the address bar mounts (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-browser-leaf__visible-${visible ? "true" : "false"}`}
     >
       <BrowserPaneComponent
@@ -1481,6 +1492,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
                 >
                   <Code className="size-3.5" />
                 </button>
+                {viewMode !== "source" && <MarkdownWidthToggle />}
               </>
             )}
             {fileActions?.canSave && fileActions.isDirty && (
@@ -1530,7 +1542,10 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
       // moves focus inside it. `useLeafFind` only opens on Cmd/Ctrl+F when
       // focus is within this container; without this a preview could never
       // open its find bar.
+      // It's also the focus fallback for a leaf with no editor (an image, a
+      // PDF) or one still loading (lib/leaf-focus.ts).
       tabIndex={-1}
+      data-band-leaf-root=""
       className="flex h-full w-full flex-col overflow-hidden outline-none"
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
@@ -1674,9 +1689,7 @@ function discardableSection(
 }
 
 function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
-  // On desktop the diff selection tooltip offers only "Copy reference"; the
-  // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
-  // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
+  // Mobile leaves (tagged in `mobileByApiId`) always show a unified diff.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath, commit } = params;
@@ -1848,7 +1861,10 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the diff loads (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
       <div className="relative min-h-0 flex-1">
@@ -1857,8 +1873,12 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
             so the native one is hidden and the content leaves room for it. */}
         <div
           ref={diffScrollerRef}
+          // Focused when the tab is shown, so the arrow keys scroll the diff
+          // (lib/leaf-focus.ts).
+          tabIndex={-1}
+          data-band-leaf-focus=""
           data-testid="center-diff-leaf__scroller"
-          className={`h-full overflow-auto ${diff ? "pr-3 [scrollbar-width:none]" : ""}`}
+          className={`h-full overflow-auto outline-none ${diff ? "pr-3 [scrollbar-width:none]" : ""}`}
         >
           {diff ? (
             <DiffFileContent
@@ -1867,7 +1887,6 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
               // Mobile is always unified — no room for a side-by-side split.
               viewMode={isMobile ? "unified" : viewMode}
               onEditorViews={handleEditorViews}
-              copyReferenceOnly={!isMobile}
               lspNavigation={lspNavigation}
             />
           ) : (
@@ -1945,7 +1964,14 @@ function SectionDiffsLeaf({
   const mergeBase = changesQuery.data?.mergeBase ?? undefined;
 
   return (
-    <div className="h-full w-full overflow-auto" data-testid={`center-section-diffs--${section}`}>
+    <div
+      className="h-full w-full overflow-auto outline-none"
+      // Focused when the tab is shown, so the arrow keys scroll the diffs
+      // (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-focus=""
+      data-testid={`center-section-diffs--${section}`}
+    >
       {entries.length === 0 ? (
         <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
           {changesQuery.isLoading ? "Loading diff…" : "No changes"}
@@ -2060,12 +2086,7 @@ function SectionDiffFile({
       </div>
       {!collapsed &&
         (diffQuery.data?.diff ? (
-          <DiffFileContent
-            hunks={diffQuery.data.diff}
-            filename={entry.path}
-            viewMode="unified"
-            copyReferenceOnly
-          />
+          <DiffFileContent hunks={diffQuery.data.diff} filename={entry.path} viewMode="unified" />
         ) : (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {diffQuery.data ? "No textual changes" : "Loading diff…"}
@@ -3899,6 +3920,35 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
+  // Move focus into the active leaf (lib/leaf-focus.ts). One attempt at a
+  // time: a newer tab switch cancels the previous one's retries.
+  const cancelLeafFocusRef = useRef<() => void>(() => {});
+  const focusLeaf = useCallback((force = false) => {
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    cancelLeafFocusRef.current();
+    cancelLeafFocusRef.current = focusActiveLeaf(api, {
+      container,
+      force,
+      isCurrent: () => visibleRef.current && wsActiveRef.current !== false,
+    });
+  }, []);
+
+  // `focusLeaf`, except that a phone only focuses a terminal or the address
+  // bar, as before: an editor or the chat composer would open the on-screen
+  // keyboard. `force` is for an explicit request (a workspace switch, a
+  // tab or pane cycling command), where focus may be anywhere: the sidebar,
+  // the workspace picker, the previous group's leaf.
+  const focusLeafOnDevice = useCallback(
+    (force: boolean) => {
+      const kind = apiRef.current?.activePanel?.api.component;
+      if (!kind) return;
+      if (!mobile || kind === "term" || kind === "browser") focusLeaf(force);
+    },
+    [mobile, focusLeaf],
+  );
+
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const api = event.api;
@@ -4013,6 +4063,13 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         }
         schedulePersist();
         reportFocus();
+        // Every tab switch (Ctrl+Tab, the palette, a click, a close) moves
+        // focus into the new leaf, or it stays behind on the tab strip or
+        // falls to <body> and the next Ctrl+Tab is lost. Not for a restore or
+        // another device's change.
+        if (visibleRef.current && !applyingSharedRef.current && !isRestoringRef.current) {
+          focusLeafOnDevice(false);
+        }
       });
       api.onDidMovePanel(() => {
         if (!applyingSharedRef.current && !isRestoringRef.current) {
@@ -4022,6 +4079,9 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
 
       setTimeout(() => {
         isRestoringRef.current = false;
+        // A workspace shown for the first time mounts its dockview after the
+        // visibility effect below ran with no leaves yet.
+        if (visibleRef.current) focusLeafOnDevice(true);
         // Persist a freshly-built DEFAULT layout once, immediately. It is
         // otherwise only written on the NEXT outer-layout change — but splitting
         // a terminal is a NESTED change that never touches the outer layout, so
@@ -4053,6 +4113,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       schedulePersist,
       flushPersist,
       reportFocus,
+      focusLeafOnDevice,
     ],
   );
 
@@ -4254,30 +4315,27 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   useEffect(() => {
     if (!visible) return;
 
-    const refocusActive = () => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      const el = panel.view.content.element;
-      (
-        el.querySelector<HTMLElement>(".xterm-helper-textarea") ??
-        el.querySelector<HTMLElement>("[data-band-address-input]")
-      )?.focus();
-    };
-
+    // The cycling shortcuts force focus into the leaf they activate: after
+    // ⌘[ / ⌘] it is still in the previous group's (visible) leaf, which the
+    // active-panel listener in `onReady` leaves alone.
+    const refocus = () => focusLeafOnDevice(true);
     const handler = (e: KeyboardEvent) => {
-      if (!containerRef.current?.contains(document.activeElement)) return;
       const api = apiRef.current;
       if (!api) return;
       const key = e.key.toLowerCase();
+      const active = document.activeElement;
 
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
+      // Ctrl+Tab also works with focus on <body>: a leaf that lost focus (its
+      // content unmounted, a dialog closed onto nothing) mustn't strand it.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && key === "tab") {
+        if (!containerRef.current?.contains(active) && active && active !== document.body) return;
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, () =>
-          requestAnimationFrame(refocusActive),
-        );
+        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, refocus);
         return;
       }
+
+      if (!containerRef.current?.contains(active)) return;
 
       // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) split chat / browser
       // leaves into sibling groups. Terminals split INTO nested panes instead,
@@ -4310,15 +4368,13 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1, () =>
-          requestAnimationFrame(refocusActive),
-        );
+        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1, refocus);
         return;
       }
       if (!e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGridGroups(api, key === "]" ? 1 : -1, () => requestAnimationFrame(refocusActive));
+        cycleGridGroups(api, key === "]" ? 1 : -1, refocus);
         return;
       }
 
@@ -4335,23 +4391,32 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, handleClose, handleSplit]);
+  }, [visible, handleClose, handleSplit, focusLeafOnDevice]);
 
   // Focus the active leaf when the workspace becomes visible.
   useEffect(() => {
     if (!visible) return;
     const id = requestAnimationFrame(() => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      const el = panel.view.content.element;
-      (
-        el.querySelector<HTMLElement>(".xterm-helper-textarea") ??
-        el.querySelector<HTMLElement>("[data-band-address-input]")
-      )?.focus();
+      focusLeafOnDevice(true);
       reportFocus();
     });
-    return () => cancelAnimationFrame(id);
-  }, [visible, reportFocus]);
+    return () => {
+      cancelAnimationFrame(id);
+      cancelLeafFocusRef.current();
+    };
+  }, [visible, reportFocus, focusLeafOnDevice]);
+
+  // The palette's Next / Previous Tab and Pane: focus the leaf they activated
+  // once the palette has closed (see `focusActiveLeaf`'s modal check).
+  useEffect(() => {
+    const onFocusActiveLeaf = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string }>).detail;
+      if (detail?.workspaceId !== workspaceId || !visibleRef.current) return;
+      focusLeafOnDevice(true);
+    };
+    window.addEventListener("band:focus-active-leaf", onFocusActiveLeaf);
+    return () => window.removeEventListener("band:focus-active-leaf", onFocusActiveLeaf);
+  }, [workspaceId, focusLeafOnDevice]);
 
   // Force a synchronous re-layout when this workspace's dockview becomes visible
   // (mirrors the legacy inner containers' reveal fix).

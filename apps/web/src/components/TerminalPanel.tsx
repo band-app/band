@@ -3,6 +3,7 @@ import {
   SearchBar,
   type SearchBarHandle,
   type TerminalInsertDetail,
+  TerminalSelectionContextMenu,
   useSettingsQuery,
 } from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
@@ -166,7 +167,7 @@ export function TerminalPanel({
 
   // Reserve space at the bottom for the floating iOS keyboard toolbar (0 on
   // desktop). The cache's ResizeObserver on the wrapper reflows xterm on change.
-  const { contentBottomInset } = useVirtualKeyboardToolbar();
+  const { enabled: touchScreen, contentBottomInset } = useVirtualKeyboardToolbar();
 
   const terminal = entry.getTerminal();
 
@@ -192,11 +193,13 @@ export function TerminalPanel({
             counter-zoom and hosts xterm) is appended here on `attach` and moved
             to the parking container on `detach`. `absolute` makes it the
             positioned containing block for the wrapper's `inset: 0`. */}
-        <div
-          ref={liveRef}
-          className="absolute inset-x-2 top-2 overflow-hidden"
-          style={{ bottom: 8 + contentBottomInset }}
-        />
+        <TerminalSelectionContextMenu getTerminal={entry.getTerminal} disabled={touchScreen}>
+          <div
+            ref={liveRef}
+            className="absolute inset-x-2 top-2 overflow-hidden"
+            style={{ bottom: 8 + contentBottomInset }}
+          />
+        </TerminalSelectionContextMenu>
       </div>
       {state.ready && terminal && (
         <TerminalToolbar

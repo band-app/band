@@ -52,6 +52,19 @@ export interface RepoInfo {
 }
 
 /**
+ * The pull request the sidebar's PR badge shows (`PullRequestBadge`). A
+ * workspace has at most one: its branch's open PR, else the most recently
+ * updated merged one, else the most recently updated closed one.
+ */
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+}
+
+/**
  * Prefix used by `detachedShaLabel`. Exported so callers that need to
  * recognise the synthetic label (e.g. `workspaces.remove` skipping
  * `git branch -D` for a non-real ref) can do so without re-spelling
@@ -221,13 +234,29 @@ async function execOffThread(
 export function execGh(args: string[], cwd: string): Promise<string> {
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
-  return execOffThread("gh", args, { cwd, env, maxBuffer: MAX_BUFFER });
+  // `BAND_GH_BIN` overrides the binary, read on every call, the same way the
+  // GitHub plugin's `runGh` does (tests point it at their `gh` stub).
+  const bin = process.env.BAND_GH_BIN || "gh";
+  return execOffThread(bin, args, { cwd, env, maxBuffer: MAX_BUFFER });
+}
+
+/**
+ * `git worktree add` writes an all-zero `HEAD` into the new worktree before it
+ * points `HEAD` at the branch, so a listing taken meanwhile shows the worktree
+ * detached at this placeholder. No commit has an all-zero id.
+ */
+function isPlaceholderHead(head: string): boolean {
+  return /^0+$/.test(head);
 }
 
 /**
  * Parse `git worktree list --porcelain` into structured `WorktreeInfo`
  * records. Applies the detached-HEAD → `detached-<short-sha>` fallback so
  * every non-bare worktree has a non-empty, collision-safe branch label.
+ *
+ * Leaves out a worktree `git worktree add` is still creating (detached at the
+ * placeholder `HEAD`). Listed, it would be labelled `detached-0000000`, and a
+ * sync would save that as the immutable `name` of the workspace being created.
  */
 export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   const output = await execGit(["worktree", "list", "--porcelain"], repoPath);
@@ -236,6 +265,19 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   let currentHead = "";
   let currentBranch = "";
   let isBare = false;
+
+  const pushCurrent = async () => {
+    if (!currentBranch && !isBare) {
+      if (isPlaceholderHead(currentHead)) return;
+      currentBranch = (await resolveDetachedBranch(currentPath)) || detachedShaLabel(currentHead);
+    }
+    worktrees.push({
+      branch: currentBranch,
+      path: currentPath,
+      head: currentHead,
+      isBare,
+    });
+  };
 
   for (const line of output.split("\n")) {
     if (line.startsWith("worktree ")) {
@@ -250,15 +292,7 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
     } else if (line === "bare") {
       isBare = true;
     } else if (line === "" && currentPath) {
-      if (!currentBranch && !isBare) {
-        currentBranch = (await resolveDetachedBranch(currentPath)) || detachedShaLabel(currentHead);
-      }
-      worktrees.push({
-        branch: currentBranch,
-        path: currentPath,
-        head: currentHead,
-        isBare,
-      });
+      await pushCurrent();
       currentPath = "";
       currentHead = "";
       currentBranch = "";
@@ -267,17 +301,7 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   }
 
   // Push last entry
-  if (currentPath) {
-    if (!currentBranch && !isBare) {
-      currentBranch = (await resolveDetachedBranch(currentPath)) || detachedShaLabel(currentHead);
-    }
-    worktrees.push({
-      branch: currentBranch,
-      path: currentPath,
-      head: currentHead,
-      isBare,
-    });
-  }
+  if (currentPath) await pushCurrent();
 
   return worktrees;
 }

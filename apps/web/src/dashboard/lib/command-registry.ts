@@ -305,7 +305,9 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.splitActiveTab("below"),
     },
     {
-      // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs too.
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs too, in the desktop app and in the
+      // web build opened as an installed app window. A regular Chrome tab keeps
+      // Ctrl+Tab for its own tab switching and never passes it to the page.
       id: "next-tab",
       label: "Next Tab",
       shortcut: "Cmd+Shift+]",
