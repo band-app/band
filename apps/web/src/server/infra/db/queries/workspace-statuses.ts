@@ -11,10 +11,13 @@
  * SQL leaves `services/state.ts` too.
  */
 
-import { eq, or } from "drizzle-orm";
+import { and, eq, notInArray, or } from "drizzle-orm";
 import type { WorkspaceStatusSnapshot } from "../../events/status-event-bus";
 import { getDb } from "../connection";
-import { workspaceStatuses as workspaceStatusesTable } from "../schema";
+import {
+  workspaceStatuses as workspaceStatusesTable,
+  workspaceStatusSources as workspaceStatusSourcesTable,
+} from "../schema";
 
 function rowToSnapshot(row: typeof workspaceStatusesTable.$inferSelect): WorkspaceStatusSnapshot {
   return {
@@ -148,5 +151,95 @@ export class WorkspaceStatusQueries {
       )
       .run();
     return Number(result.changes);
+  }
+}
+
+/** One agent's status within a workspace (see `workspaceStatusSources`). */
+export interface WorkspaceStatusSourceRow {
+  workspaceId: string;
+  sourceId: string;
+  status: string;
+  terminalId: string | null;
+  updatedAt: number;
+}
+
+export class WorkspaceStatusSourceQueries {
+  /** Insert or replace one source's status. */
+  upsert(row: WorkspaceStatusSourceRow): void {
+    const db = getDb();
+    db.insert(workspaceStatusSourcesTable)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [workspaceStatusSourcesTable.workspaceId, workspaceStatusSourcesTable.sourceId],
+        set: { status: row.status, terminalId: row.terminalId, updatedAt: row.updatedAt },
+      })
+      .run();
+  }
+
+  /** Statuses of every source in the workspace. */
+  statusesForWorkspace(workspaceId: string): string[] {
+    const db = getDb();
+    return db
+      .select({ status: workspaceStatusSourcesTable.status })
+      .from(workspaceStatusSourcesTable)
+      .where(eq(workspaceStatusSourcesTable.workspaceId, workspaceId))
+      .all()
+      .map((r) => r.status);
+  }
+
+  /** Delete one source; returns whether a row existed. */
+  remove(workspaceId: string, sourceId: string): boolean {
+    const db = getDb();
+    const result = db
+      .delete(workspaceStatusSourcesTable)
+      .where(
+        and(
+          eq(workspaceStatusSourcesTable.workspaceId, workspaceId),
+          eq(workspaceStatusSourcesTable.sourceId, sourceId),
+        ),
+      )
+      .run();
+    return Number(result.changes) > 0;
+  }
+
+  /** Delete every source reported from a terminal; returns their workspaces. */
+  removeForTerminal(terminalId: string): string[] {
+    const db = getDb();
+    const rows = db
+      .delete(workspaceStatusSourcesTable)
+      .where(eq(workspaceStatusSourcesTable.terminalId, terminalId))
+      .returning({ workspaceId: workspaceStatusSourcesTable.workspaceId })
+      .all();
+    return [...new Set(rows.map((r) => r.workspaceId))];
+  }
+
+  /** Delete every source of a workspace. */
+  removeForWorkspace(workspaceId: string): void {
+    const db = getDb();
+    db.delete(workspaceStatusSourcesTable)
+      .where(eq(workspaceStatusSourcesTable.workspaceId, workspaceId))
+      .run();
+  }
+
+  /** Delete every source. Used at server startup: no agent state survives it. */
+  removeAll(): void {
+    getDb().delete(workspaceStatusSourcesTable).run();
+  }
+
+  /**
+   * Set the workspace's `needs_attention` sources to `waiting`, except the
+   * ones in `keep`.
+   */
+  acknowledge(workspaceId: string, keep: string[], now: number): void {
+    const db = getDb();
+    const conditions = [
+      eq(workspaceStatusSourcesTable.workspaceId, workspaceId),
+      eq(workspaceStatusSourcesTable.status, "needs_attention"),
+    ];
+    if (keep.length > 0) conditions.push(notInArray(workspaceStatusSourcesTable.sourceId, keep));
+    db.update(workspaceStatusSourcesTable)
+      .set({ status: "waiting", updatedAt: now })
+      .where(and(...conditions))
+      .run();
   }
 }

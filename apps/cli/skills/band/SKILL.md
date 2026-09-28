@@ -245,10 +245,10 @@ band open ~/Downloads/v3.js
 ### Receive coding-agent hook notifications (reads JSON from stdin)
 
 ```sh
-band notify
+band notify [--agent <type>]
 ```
 
-Not called directly — registered as a coding-agent hook by the Band dashboard. Forwards the raw payload to the server, which dispatches to the agent's adapter to derive the workspace status.
+Not called directly — registered as a coding-agent hook by the Band dashboard (`band notify --agent claude-code`). Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status.
 
 ### Show command schemas as JSON
 

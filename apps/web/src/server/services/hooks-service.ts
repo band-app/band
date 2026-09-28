@@ -3,7 +3,15 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { systemService } from "./system-service";
 
-const HOOK_EVENTS = ["PreToolUse", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "Stop"];
+// `SessionEnd` drops the session's status source when Claude Code exits.
+const HOOK_EVENTS = [
+  "PreToolUse",
+  "PermissionRequest",
+  "UserPromptSubmit",
+  "PostToolUse",
+  "Stop",
+  "SessionEnd",
+];
 
 function claudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
@@ -113,9 +121,10 @@ export async function installHooks(): Promise<void> {
       return !e.hooks.some((h) => h.type === "command" && h.command && isBandHook(h.command));
     });
 
-    // Add fresh band hook
+    // Add fresh band hook. `--agent` tells the server which agent's rules
+    // read the payload, whatever agent the workspace is configured for.
     filtered.push({
-      hooks: [{ type: "command", command: `${bandPath} notify` }],
+      hooks: [{ type: "command", command: `${bandPath} notify --agent claude-code` }],
     });
 
     hooks[event] = filtered;

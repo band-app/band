@@ -1,9 +1,12 @@
 import { z } from "zod";
 import {
+  acknowledgeWorkspaceAttention,
   applyHookNotification,
+  chatStatusSource,
   getWorkspaceStatus,
+  MANUAL_STATUS_SOURCE,
   resolveWorkspaceIdByCwd,
-  upsertWorkspaceStatus,
+  setWorkspaceSourceStatus,
 } from "../../services/state";
 import { taskService } from "../../services/task-service";
 import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
@@ -46,7 +49,7 @@ export const statusesRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const status = upsertWorkspaceStatus(input.workspaceId, input.agent);
+      const status = setWorkspaceSourceStatus(input.workspaceId, MANUAL_STATUS_SOURCE, input.agent);
 
       // Emit update directly to SSE listeners
       emit({ kind: "update", status });
@@ -64,17 +67,15 @@ export const statusesRouter = t.router({
         }
         return { ok: true };
       }
-      // The agent is still blocked on an AskUserQuestion / ExitPlanMode
-      // prompt — the user hasn't answered yet. Don't clear the indicator
-      // just because they navigated to the workspace; the indicator must
-      // stay on until the user actually answers (which calls
-      // resolvePendingInput, and onUserInputNeeded then flips the status
-      // back to "working").
-      if (taskService.hasPendingInputForWorkspace(input.workspaceId)) {
-        emit({ kind: "update", status: existing });
-        return { ok: true };
-      }
-      const status = upsertWorkspaceStatus(input.workspaceId, { status: "waiting" });
+      // Every agent asking for attention is acknowledged, except a chat
+      // whose agent is still blocked on a permission or elicitation request:
+      // the user hasn't answered yet, so navigating to the workspace doesn't
+      // clear it. Answering does (task-service flips that chat back to
+      // "working").
+      const keep = taskService
+        .chatsWithPendingInput(input.workspaceId)
+        .map((chatId) => chatStatusSource(chatId));
+      const status = acknowledgeWorkspaceAttention(input.workspaceId, keep);
       emit({ kind: "update", status });
       return { ok: true };
     }),
@@ -86,18 +87,28 @@ export const statusesRouter = t.router({
   /**
    * Agent-agnostic entry point for coding-agent lifecycle notifications
    * (e.g. Claude Code hooks piped through `band notify`). The CLI forwards
-   * the raw payload plus the agent's cwd; the server resolves the workspace,
-   * looks up its configured agent, and dispatches to that agent's adapter to
-   * translate the payload into a status. Keeping the mapping in the adapter
-   * means adding hook support for a new agent never touches the CLI.
+   * the raw payload plus the agent's cwd, the agent type the hook command
+   * names (`--agent`), and its `BAND_DISPATCH` / `BAND_TERMINAL_ID`. The
+   * server resolves the workspace and the sending agent, and dispatches to
+   * that agent's adapter to translate the payload into a status. Keeping the
+   * mapping in the adapter means adding hook support for a new agent never
+   * touches the CLI.
    *
    * Fire-and-forget semantics: unknown cwd → no-op `{ ok: true }` (matches the
    * CLI hook contract, which must never fail and break the agent).
    */
   notify: publicProcedure
-    .input(z.object({ cwd: z.string(), payload: z.record(z.string(), z.unknown()) }))
+    .input(
+      z.object({
+        cwd: z.string(),
+        payload: z.record(z.string(), z.unknown()),
+        agent: z.string().max(64).optional(),
+        dispatch: z.string().max(64).optional(),
+        terminalId: z.string().max(256).optional(),
+      }),
+    )
     .mutation(async ({ input }) => {
-      const status = await applyHookNotification(input.cwd, input.payload);
+      const status = await applyHookNotification(input);
       if (status) emit({ kind: "update", status });
       return { ok: true };
     }),

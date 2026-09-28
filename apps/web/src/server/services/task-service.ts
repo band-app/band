@@ -11,7 +11,7 @@ import { mimeTypeFromFilename } from "./_utils/mime-types";
 import { shiftQueuedMessage } from "./_utils/queued-message-store";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { bandHome, upsertWorkspaceStatus } from "./state";
+import { bandHome, chatStatusSource, setWorkspaceSourceStatus } from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
 // FRAGILE: ESM cycle leg — `workspace-service` imports `taskService` back
 // from this file. The cycle is safe only because every `workspaceService`
@@ -111,13 +111,10 @@ let observingPending = false;
 function observePending(): void {
   if (observingPending) return;
   observingPending = true;
-  agentSessionService.observePending((workspaceId) => {
-    const waiting = agentSessionService.hasPendingRequest(workspaceId);
-    const running = [...tasks.values()].some(
-      (t) => t.workspaceId === workspaceId && t.status === "running",
-    );
-    if (!running) return;
-    const updated = upsertWorkspaceStatus(workspaceId, {
+  agentSessionService.observePending((chatId, workspaceId) => {
+    if (tasks.get(chatId)?.status !== "running") return;
+    const waiting = agentSessionService.hasPendingRequest(chatId);
+    const updated = setWorkspaceSourceStatus(workspaceId, chatStatusSource(chatId), {
       status: waiting ? "needs_attention" : "working",
     });
     emitStatusEvent({ kind: "update", status: updated });
@@ -306,7 +303,9 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
 async function runTask(task: InternalTask): Promise<void> {
   const { chatId } = task;
   chatService.updateStatus(chatId, "running");
-  const working = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
+  const working = setWorkspaceSourceStatus(task.workspaceId, chatStatusSource(chatId), {
+    status: "working",
+  });
   emitStatusEvent({ kind: "update", status: working });
 
   // Prepare the chat: switch agent or session when this task asks for it.
@@ -417,7 +416,7 @@ async function runTask(task: InternalTask): Promise<void> {
       durationMs: Date.now() - task.startedAt,
       usage: turnUsage(chatId, res, previousCost),
     });
-    finishTask(task, res.stopReason === "cancelled" ? "failed" : "completed");
+    finishTask(task, res.stopReason === "cancelled" ? "cancelled" : "completed");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     agentSessionService.record(chatId, {
@@ -446,10 +445,13 @@ async function applyTurnChoice(chatId: string, category: "model" | "mode", value
 
 /**
  * Settles a task: records its status, then either starts the next queued
- * message or hands the workspace back to the user.
+ * message or hands the workspace back to the user. A turn that completed or
+ * failed asks for the user's attention; one the user stopped (or that ended
+ * while a stop was pending) doesn't, since the user already knows.
  */
-function finishTask(task: InternalTask, status: "completed" | "failed"): void {
+function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cancelled"): void {
   if (task.status !== "running") return;
+  const status = outcome === "completed" ? "completed" : "failed";
   task.status = status;
   task.completedAt = Date.now();
   persistTask(task);
@@ -458,8 +460,10 @@ function finishTask(task: InternalTask, status: "completed" | "failed"): void {
   if (status === "completed" && drainQueue(task)) return;
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
-  const endStatus = status === "completed" ? "needs_attention" : "waiting";
-  const updated = upsertWorkspaceStatus(task.workspaceId, { status: endStatus });
+  const stopped = outcome === "cancelled" || task.cancelRequested === true;
+  const updated = setWorkspaceSourceStatus(task.workspaceId, chatStatusSource(task.chatId), {
+    status: stopped ? "waiting" : "needs_attention",
+  });
   emitStatusEvent({ kind: "update", status: updated });
 }
 
@@ -514,8 +518,15 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   // (orphaned by a server restart).
   const record = taskQueries.markFailed(taskId);
   if (record) {
-    const updated = upsertWorkspaceStatus(record.workspaceId, { status: "waiting" });
-    emitStatusEvent({ kind: "update", status: updated });
+    // Tasks saved before chats existed have no chatId, and so no source.
+    if (record.chatId) {
+      const updated = setWorkspaceSourceStatus(
+        record.workspaceId,
+        chatStatusSource(record.chatId),
+        { status: "waiting" },
+      );
+      emitStatusEvent({ kind: "update", status: updated });
+    }
     log.info({ taskId, workspaceId: record.workspaceId }, "orphaned task cancelled");
     return { cancelled: true, workspaceId: record.workspaceId };
   }
@@ -550,10 +561,10 @@ export class TaskService {
     return getTask(chatId);
   }
 
-  /** True while the agent in any of the workspace's chats waits on the user
-   *  (a permission or elicitation request). */
-  hasPendingInputForWorkspace(workspaceId: string): boolean {
-    return agentSessionService.hasPendingRequest(workspaceId);
+  /** Chats of the workspace whose agent waits on the user (a permission or
+   *  elicitation request). */
+  chatsWithPendingInput(workspaceId: string): string[] {
+    return agentSessionService.chatsWithPendingRequest(workspaceId);
   }
 
   listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {
