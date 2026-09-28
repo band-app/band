@@ -28,14 +28,22 @@ export function pullRequestTone(pr: PullRequestSummary, ciState: CIState): PullR
   }
 }
 
+// Text, border and a faint fill in one hue, so the number reads as a tag.
 const TONE_CLASS: Record<PullRequestTone, string> = {
-  failure: "text-red-600 dark:text-red-400",
-  pending: "text-yellow-700 dark:text-yellow-400",
-  success: "text-green-700 dark:text-green-400",
-  neutral: "text-muted-foreground",
-  merged: "text-violet-600 dark:text-violet-400",
-  closed: "text-muted-foreground line-through",
+  failure: "text-red-600 border-red-600/40 bg-red-500/10 dark:text-red-400 dark:border-red-400/40",
+  pending:
+    "text-yellow-700 border-yellow-600/50 bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-400/40",
+  success:
+    "text-green-700 border-green-600/40 bg-green-500/10 dark:text-green-400 dark:border-green-400/40",
+  neutral: "text-muted-foreground border-border bg-muted/50",
+  merged:
+    "text-violet-600 border-violet-600/40 bg-violet-500/10 dark:text-violet-400 dark:border-violet-400/40",
+  closed: "text-muted-foreground border-border bg-muted/50 line-through",
 };
+
+// Compact enough that the tag stays shorter than the row's text line.
+const TAG_CLASS =
+  "inline-flex items-center rounded border px-1 py-px text-[11px] font-semibold leading-none tabular-nums";
 
 function statusLabel(pr: PullRequestSummary, ciState: CIState): string {
   if (pr.state === "merged") return "Merged";
@@ -69,7 +77,7 @@ interface Props {
 }
 
 /**
- * The PR number in a workspace row, colored by CI state. Hovering it, or
+ * The PR number in a workspace row, as a tag colored by CI state. Hovering it, or
  * focusing it from the keyboard, opens a popover with the PR's title and
  * status and actions to open it on GitHub or copy its link; ArrowDown moves
  * focus into the popover. Clicking it shows the Checks tab.
@@ -126,7 +134,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
           aria-expanded={open}
           data-testid="workspace-card__pr-badge"
           data-tone={tone}
-          className={`shrink-0 rounded-sm px-0.5 text-[11px] font-semibold leading-none tabular-nums outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${TONE_CLASS[tone]}`}
+          className={`shrink-0 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring ${TAG_CLASS} ${TONE_CLASS[tone]}`}
           onPointerEnter={(e) => {
             if (e.pointerType !== "touch") setOpenAfter(true, OPEN_DELAY_MS);
           }}
@@ -200,7 +208,8 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
         <div className="flex items-center gap-2 text-xs">
           <span
             data-testid="pr-popover__number"
-            className={`font-semibold tabular-nums ${TONE_CLASS[tone]}`}
+            data-tone={tone}
+            className={`${TAG_CLASS} ${TONE_CLASS[tone]}`}
           >
             #{pr.number}
           </span>

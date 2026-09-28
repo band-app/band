@@ -177,6 +177,36 @@ test("a workspace with a PR shows its number, colored by CI state", async ({ pag
   await expect(badges.badge(wsId("main"))).toHaveCount(0);
 });
 
+test("the badge is an outlined tag in its state's color, and the row keeps its height", async ({
+  page,
+}) => {
+  const badges = new PullRequestBadgePage(page, server.url, TOKEN);
+  await badges.goto(wsId("main"));
+
+  const tagged = [FAILING, DRAFT, PASSING, MERGED, NO_CHECKS, CLOSED];
+  for (const branch of tagged) {
+    await expect(badges.badge(wsId(branch))).toBeVisible();
+    const outline = await badges.badgeOutline(wsId(branch));
+    expect(outline, branch).toMatchObject({ width: "1px", style: "solid" });
+    expect(outline.radius, branch).not.toBe("0px");
+  }
+
+  // Failing, pending and passing outline in three different colors.
+  const borders = new Set([
+    (await badges.badgeOutline(wsId(FAILING))).color,
+    (await badges.badgeOutline(wsId(DRAFT))).color,
+    (await badges.badgeOutline(wsId(PASSING))).color,
+  ]);
+  expect(borders.size).toBe(3);
+
+  // A row with a tag is as tall as one with only the CI icon.
+  await expect(badges.ciIcon(wsId(NO_PR))).toBeVisible();
+  const plainRow = await badges.rowHeight(wsId(NO_PR));
+  for (const branch of tagged) {
+    expect(await badges.rowHeight(wsId(branch)), branch).toBe(plainRow);
+  }
+});
+
 test("hovering the badge shows the PR's number, title and status", async ({ page }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
   await badges.goto(wsId("main"));

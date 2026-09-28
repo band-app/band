@@ -77,6 +77,31 @@ export class PullRequestBadgePage {
     return this.badge(workspaceId).evaluate((el) => getComputedStyle(el).color);
   }
 
+  /**
+   * The badge's tag outline as the browser computed it: border width, style
+   * and color, and corner radius.
+   */
+  async badgeOutline(
+    workspaceId: string,
+  ): Promise<{ width: string; style: string; color: string; radius: string }> {
+    return this.badge(workspaceId).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        width: s.borderTopWidth,
+        style: s.borderTopStyle,
+        color: s.borderTopColor,
+        radius: s.borderTopLeftRadius,
+      };
+    });
+  }
+
+  /** The rendered height of `workspaceId`'s sidebar row, in CSS pixels. */
+  async rowHeight(workspaceId: string): Promise<number> {
+    const box = await this.workspace.workspaceCard(workspaceId).boundingBox();
+    if (!box) throw new Error(`workspace row ${workspaceId} is not rendered`);
+    return box.height;
+  }
+
   async hoverBadge(workspaceId: string): Promise<void> {
     await test.step(`Hover the PR badge of ${workspaceId}`, async () => {
       await this.badge(workspaceId).hover();
