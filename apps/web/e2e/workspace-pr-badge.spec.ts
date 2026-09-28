@@ -53,6 +53,8 @@ const FAILING = "feat/failing";
 const DRAFT = "feat/draft";
 const PASSING = "feat/passing";
 const MERGED = "feat/merged";
+const NO_CHECKS = "feat/no-checks";
+const CLOSED = "feat/closed";
 const NO_PR = "feat/no-pr";
 const FAILING_TITLE = "fix(web): stop terminal input stalls";
 
@@ -75,7 +77,7 @@ test.beforeAll(async () => {
     "origin",
     `https://github.com/${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
   ]);
-  const worktrees = [FAILING, DRAFT, PASSING, MERGED, NO_PR].map((branch) => {
+  const worktrees = [FAILING, DRAFT, PASSING, MERGED, NO_CHECKS, CLOSED, NO_PR].map((branch) => {
     const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
     git(repo, ["worktree", "add", "-b", branch, path]);
     return { name: branch, branch, path };
@@ -109,6 +111,8 @@ test.beforeAll(async () => {
     [MERGED]: branchRepository({
       pullRequests: [prNode({ number: 700, state: "MERGED" })],
     }),
+    [NO_CHECKS]: branchRepository({ pullRequests: [prNode({ number: 708 })] }),
+    [CLOSED]: branchRepository({ pullRequests: [prNode({ number: 690, state: "CLOSED" })] }),
     [NO_PR]: branchRepository({
       suites: [workflowSuite({ workflow: "CI", conclusion: "SUCCESS" })],
     }),
@@ -153,6 +157,10 @@ test("a workspace with a PR shows its number, colored by CI state", async ({ pag
   await expect(badges.badge(wsId(PASSING))).toHaveAttribute("data-tone", "success");
   await expect(badges.badge(wsId(MERGED))).toHaveText("#700");
   await expect(badges.badge(wsId(MERGED))).toHaveAttribute("data-tone", "merged");
+  await expect(badges.badge(wsId(NO_CHECKS))).toHaveText("#708");
+  await expect(badges.badge(wsId(NO_CHECKS))).toHaveAttribute("data-tone", "neutral");
+  await expect(badges.badge(wsId(CLOSED))).toHaveText("#690");
+  await expect(badges.badge(wsId(CLOSED))).toHaveAttribute("data-tone", "closed");
 
   // Red, yellow and green render as three different colors.
   const colors = new Set([
@@ -162,8 +170,10 @@ test("a workspace with a PR shows its number, colored by CI state", async ({ pag
   ]);
   expect(colors.size).toBe(3);
 
-  // No PR, no badge; neither on the default branch.
+  // No PR, no badge: the branch's CI icon instead. Nothing on the default
+  // branch, which has neither a PR nor checks.
   await expect(badges.badge(wsId(NO_PR))).toHaveCount(0);
+  await expect(badges.ciIcon(wsId(NO_PR))).toHaveAttribute("data-ci-state", "success");
   await expect(badges.badge(wsId("main"))).toHaveCount(0);
 });
 
@@ -174,7 +184,7 @@ test("hovering the badge shows the PR's number, title and status", async ({ page
   await badges.hoverBadge(wsId(FAILING));
   await expect(badges.popoverNumber).toHaveText("#705");
   await expect(badges.popoverTitle).toHaveText(FAILING_TITLE);
-  await expect(badges.popoverStatus).toHaveText("Checks failing");
+  await expect(badges.popoverStatus).toHaveAttribute("data-status", "failure");
   await expect(badges.popoverDraft).toHaveCount(0);
 
   await badges.moveMouseAway();
@@ -182,7 +192,7 @@ test("hovering the badge shows the PR's number, title and status", async ({ page
 
   await badges.hoverBadge(wsId(DRAFT));
   await expect(badges.popoverNumber).toHaveText("#706");
-  await expect(badges.popoverStatus).toHaveText("Checks running");
+  await expect(badges.popoverStatus).toHaveAttribute("data-status", "running");
   await expect(badges.popoverDraft).toBeVisible();
 });
 
@@ -204,7 +214,7 @@ test("the popover opens on keyboard focus and its copy action copies the PR link
   await expect(badges.copyButton).toBeFocused();
   await badges.pressKey("Enter");
   await expect.poll(() => badges.workspace.readCopied()).toEqual([prUrl(705)]);
-  await expect(badges.copyButton).toHaveText("Copied");
+  await expect(badges.copyButton).toHaveAttribute("data-copied", "true");
 
   // Escape closes the popover and returns focus to the badge.
   await badges.pressKey("Escape");
@@ -212,11 +222,9 @@ test("the popover opens on keyboard focus and its copy action copies the PR link
   await expect(badges.badge(wsId(FAILING))).toBeFocused();
 });
 
-test("Open on GitHub opens the PR's page", async ({ page, context }) => {
-  await context.route("https://github.com/**", (route) =>
-    route.fulfill({ contentType: "text/html", body: "<title>GitHub</title>" }),
-  );
+test("Open on GitHub opens the PR's page", async ({ page }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
+  await badges.stubGitHubPages();
   await badges.goto(wsId("main"));
 
   await badges.hoverBadge(wsId(FAILING));

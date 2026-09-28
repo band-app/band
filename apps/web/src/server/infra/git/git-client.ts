@@ -52,6 +52,19 @@ export interface RepoInfo {
 }
 
 /**
+ * The pull request the sidebar's PR badge shows (`PullRequestBadge`). A
+ * workspace has at most one: its branch's open PR, else the most recently
+ * updated merged one, else the most recently updated closed one.
+ */
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+}
+
+/**
  * Prefix used by `detachedShaLabel`. Exported so callers that need to
  * recognise the synthetic label (e.g. `workspaces.remove` skipping
  * `git branch -D` for a non-real ref) can do so without re-spelling

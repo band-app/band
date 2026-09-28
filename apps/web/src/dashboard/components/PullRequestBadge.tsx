@@ -212,7 +212,11 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
               Draft
             </span>
           )}
-          <span data-testid="pr-popover__status" className="text-muted-foreground">
+          <span
+            data-testid="pr-popover__status"
+            data-status={pr.state === "open" ? ciState : pr.state}
+            className="text-muted-foreground"
+          >
             {statusLabel(pr, ciState)}
           </span>
         </div>
@@ -241,6 +245,7 @@ export function PullRequestBadge({ pr, ciState, onOpenChecks }: Props) {
             variant="ghost"
             size="xs"
             data-testid="pr-popover__copy"
+            data-copied={copied || undefined}
             onClick={() => {
               void writeClipboardText(pr.url).then((ok) => setCopied(ok));
             }}

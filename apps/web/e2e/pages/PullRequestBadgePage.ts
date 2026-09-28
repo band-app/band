@@ -4,7 +4,10 @@
  * `workspace-card__pr-badge` (its `data-tone` is the CI color: `failure`,
  * `pending`, `success`, `neutral`, `merged` or `closed`) and its popover
  * `pr-popover`, with `pr-popover__number`, `__status`, `__draft`, `__title`,
- * `__open` and `__copy`.
+ * `__open` and `__copy`. The status element's `data-status` is the CI state
+ * (or `merged` / `closed`), and the copy button has `data-copied` while it
+ * shows its confirmation. A row without a PR shows the CI icon
+ * `workspace-card__ci-icon` instead.
  *
  * Navigation, the workspace card and clipboard capture are delegated to
  * `WorkspacePage`.
@@ -48,6 +51,25 @@ export class PullRequestBadgePage {
   /** The PR badge in `workspaceId`'s sidebar row. */
   badge(workspaceId: string): Locator {
     return this.workspace.workspaceCard(workspaceId).getByTestId("workspace-card__pr-badge");
+  }
+
+  /** The CI icon in `workspaceId`'s row, shown when its branch has no PR. */
+  ciIcon(workspaceId: string): Locator {
+    return this.workspace.workspaceCard(workspaceId).getByTestId("workspace-card__ci-icon");
+  }
+
+  /**
+   * Answer github.com page loads with an empty page. "Open on GitHub" opens a
+   * top-level popup on github.com, a site the server never calls, so there
+   * is no env-var stub for it; routing the browser is the only hermetic way
+   * to let the popup load.
+   */
+  async stubGitHubPages(): Promise<void> {
+    await this.page
+      .context()
+      .route("https://github.com/**", (route) =>
+        route.fulfill({ contentType: "text/html", body: "<title>GitHub</title>" }),
+      );
   }
 
   /** The badge's rendered text color, as the browser computed it. */

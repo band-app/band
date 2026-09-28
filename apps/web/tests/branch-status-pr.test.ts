@@ -83,6 +83,11 @@ async function openStatusStream(serverUrl: string) {
     });
   });
   return {
+    /** The first `ci` received for `workspaceId`. */
+    async firstCI(workspaceId: string): Promise<CIEvent> {
+      await waitFor(() => (ci.get(workspaceId)?.length ?? 0) > 0, { timeoutMs: 20_000 });
+      return ci.get(workspaceId)?.[0] as CIEvent;
+    },
     /** The newest `ci` for `workspaceId`, once one has a `pr` field. */
     async latestCI(workspaceId: string): Promise<CIEvent> {
       await waitFor(() => ci.get(workspaceId)?.some((e) => e.pr !== undefined) ?? false, {
@@ -104,7 +109,16 @@ const CASES = {
   closed: "feat/closed",
   reopened: "feat/reopened",
   noPr: "feat/no-pr",
+  fork: "feat/fork",
+  oddUrl: "feat/odd-url",
 } as const;
+
+const RUN_URL = workflowSuite({ workflow: "CI" }).workflowRun.url;
+
+/** The `pr` an open, non-draft PR seeded with `prNode` is reported as. */
+function openPr(number: number, title: string) {
+  return { number, title, url: prUrl(number), state: "open", isDraft: false };
+}
 
 const REPOSITORIES: Record<string, ReturnType<typeof branchRepository>> = {
   [CASES.failing]: branchRepository({
@@ -138,6 +152,13 @@ const REPOSITORIES: Record<string, ReturnType<typeof branchRepository>> = {
   }),
   [CASES.noPr]: branchRepository({
     suites: [workflowSuite({ workflow: "CI", conclusion: "SUCCESS" })],
+  }),
+  [CASES.fork]: branchRepository({
+    pullRequests: [prNode({ number: 650, headOwner: "someone-else" })],
+    suites: [workflowSuite({ workflow: "CI", conclusion: "SUCCESS" })],
+  }),
+  [CASES.oddUrl]: branchRepository({
+    pullRequests: [prNode({ number: 651, url: "file:///etc/passwd" })],
   }),
   // A merged PR whose head is `main` came from a merge into another branch.
   main: branchRepository({
@@ -203,65 +224,86 @@ describe("branch-status events carry the branch's pull request", () => {
     expect(await stream.latestCI(wsId(CASES.failing))).toEqual({
       state: "failure",
       url: prUrl(705),
-      pr: {
-        number: 705,
-        title: "fix(web): stop terminal input stalls",
-        url: prUrl(705),
-        state: "open",
-        isDraft: false,
-      },
+      pr: openPr(705, "fix(web): stop terminal input stalls"),
     });
   });
 
   it("a draft PR with a running check", async () => {
-    const ci = await stream.latestCI(wsId(CASES.draft));
-    expect(ci.state).toBe("running");
-    expect(ci.pr).toMatchObject({ number: 706, state: "open", isDraft: true });
+    expect(await stream.latestCI(wsId(CASES.draft))).toEqual({
+      state: "running",
+      url: prUrl(706),
+      pr: { ...openPr(706, "wip: the badge"), isDraft: true },
+    });
   });
 
   it("an open PR with passing checks, and one with no checks", async () => {
-    const passing = await stream.latestCI(wsId(CASES.passing));
-    expect(passing.state).toBe("success");
-    expect(passing.pr).toMatchObject({ number: 707, state: "open" });
-
-    const noChecks = await stream.latestCI(wsId(CASES.noChecks));
-    expect(noChecks.state).toBe("none");
-    expect(noChecks.pr).toMatchObject({ number: 708, state: "open" });
+    expect(await stream.latestCI(wsId(CASES.passing))).toEqual({
+      state: "success",
+      url: prUrl(707),
+      pr: openPr(707, "Pull request 707"),
+    });
+    expect(await stream.latestCI(wsId(CASES.noChecks))).toEqual({
+      state: "none",
+      url: prUrl(708),
+      pr: openPr(708, "Pull request 708"),
+    });
   });
 
   it("a merged PR is reported as merged, whatever its checks said", async () => {
-    const ci = await stream.latestCI(wsId(CASES.merged));
-    expect(ci.state).toBe("merged");
-    expect(ci.pr).toMatchObject({ number: 700, title: "feat: shipped", state: "merged" });
+    expect(await stream.latestCI(wsId(CASES.merged))).toEqual({
+      state: "merged",
+      url: prUrl(700),
+      pr: { ...openPr(700, "feat: shipped"), state: "merged" },
+    });
   });
 
-  it("a closed PR is reported as closed", async () => {
-    const ci = await stream.latestCI(wsId(CASES.closed));
-    expect(ci.pr).toMatchObject({ number: 690, title: "abandoned", state: "closed" });
+  it("a closed PR is reported as closed; the CI state and link come from the branch", async () => {
+    expect(await stream.latestCI(wsId(CASES.closed))).toEqual({
+      state: "none",
+      url: null,
+      pr: { ...openPr(690, "abandoned"), state: "closed" },
+    });
   });
 
   it("an open PR wins over a more recently updated closed one", async () => {
-    const ci = await stream.latestCI(wsId(CASES.reopened));
-    expect(ci.state).toBe("success");
-    expect(ci.pr).toMatchObject({ number: 681, state: "open" });
+    expect(await stream.latestCI(wsId(CASES.reopened))).toEqual({
+      state: "success",
+      url: prUrl(681),
+      pr: openPr(681, "Pull request 681"),
+    });
   });
 
   it("a branch without a PR, and the default branch's merged PR, report no PR", async () => {
-    const noPr = await stream.latestCI(wsId(CASES.noPr));
-    expect(noPr.state).toBe("success");
-    expect(noPr.pr).toBeNull();
-
-    const main = await stream.latestCI(wsId("main"));
-    expect(main.state).toBe("success");
-    expect(main.pr).toBeNull();
+    expect(await stream.latestCI(wsId(CASES.noPr))).toEqual({
+      state: "success",
+      url: RUN_URL,
+      pr: null,
+    });
+    expect(await stream.latestCI(wsId("main"))).toEqual({
+      state: "success",
+      url: RUN_URL,
+      pr: null,
+    });
   });
 
-  it("asks GitHub once for every workspace, in the first poll", async () => {
+  it("a fork's PR with the same branch name, or one without a web URL, is not the branch's PR", async () => {
+    expect(await stream.latestCI(wsId(CASES.fork))).toEqual({
+      state: "success",
+      url: RUN_URL,
+      pr: null,
+    });
+    expect(await stream.latestCI(wsId(CASES.oddUrl))).toEqual({
+      state: "none",
+      url: null,
+      pr: null,
+    });
+  });
+
+  it("asks GitHub for every workspace in one query, in the first poll", async () => {
     await stream.latestCI(wsId(CASES.failing));
-    const batched = stub.requests.filter((r) => r.fields.query?.includes("ws_0: repository("));
-    expect(batched).toHaveLength(1);
+    const first = stub.requests.find((r) => r.fields.query?.includes("ws_0: repository("));
     for (const branch of [...Object.values(CASES), "main"]) {
-      expect(batched[0].fields.query).toContain(`pullRequests(headRefName: "${branch}"`);
+      expect(first?.fields.query).toContain(`pullRequests(headRefName: "${branch}"`);
     }
   });
 
@@ -269,10 +311,23 @@ describe("branch-status events carry the branch's pull request", () => {
     await stream.latestCI(wsId(CASES.failing));
     const second = await openStatusStream(server.url);
     try {
-      const ci = await second.latestCI(wsId(CASES.failing));
-      expect(ci.pr).toMatchObject({ number: 705, state: "open" });
+      expect(await second.firstCI(wsId(CASES.failing))).toEqual({
+        state: "failure",
+        url: prUrl(705),
+        pr: openPr(705, "fix(web): stop terminal input stalls"),
+      });
     } finally {
       second.close();
     }
+  });
+
+  it("refuses a status stream without the session cookie", async () => {
+    const ws = new WebSocket(`${server.url.replace(/^http/, "ws")}/trpc`);
+    const outcome = await new Promise<string>((resolve) => {
+      ws.once("open", () => resolve("open"));
+      ws.once("error", () => resolve("refused"));
+    });
+    ws.close();
+    expect(outcome).toBe("refused");
   });
 });

@@ -47,8 +47,10 @@ export interface GhStub {
   /**
    * Answer the branch-status poller's batched CI query
    * (`buildBatchedCIQuery`, one `ws_<n>: repository(...)` alias per
-   * workspace) for `repo`: each alias gets `answer(branch)`, a `repository`
-   * object, and `null` when that returns undefined. Called per request.
+   * workspace). One registration answers the whole query: each alias of
+   * `repo` gets `answer(branch)`, a `repository` object, and `null` when that
+   * returns undefined; aliases of any other repository get `null`. Called
+   * per request.
    */
   setBranchStatusQuery: (repo: RepoCoords, answer: (branch: string) => unknown) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
@@ -59,9 +61,12 @@ export interface GhStub {
   stop: () => Promise<void>;
 }
 
-/** One alias of the poller's batched query: `ws_0: repository(owner: "o", name: "r") { pullRequests(headRefName: "b"`. */
+/**
+ * One alias of the poller's batched query:
+ * `ws_0: repository(owner: "o", name: "r") { owner { login } pullRequests(headRefName: "b"`.
+ */
 const BATCHED_ALIAS =
-  /(ws_\d+): repository\(owner: "([^"]*)", name: "([^"]*)"\) \{\s*pullRequests\(headRefName: "([^"]*)"/g;
+  /(ws_\d+): repository\(owner: "([^"]*)", name: "([^"]*)"\) \{[^(]*pullRequests\(headRefName: "([^"]*)"/g;
 
 /** Whether a `gh api graphql` call is the review query for `branch` of `repo`. */
 function isReviewQuery(req: Request, repo: RepoCoords, branch: string): boolean {

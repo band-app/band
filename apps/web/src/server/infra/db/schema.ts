@@ -7,7 +7,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import type { PullRequestSummary } from "../../services/_utils/github-graphql";
+import type { PullRequestSummary } from "../git/git-client";
 
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),

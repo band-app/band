@@ -13,6 +13,9 @@ interface PullRequestInput {
   title?: string;
   state?: "OPEN" | "MERGED" | "CLOSED";
   isDraft?: boolean;
+  /** The owner of the head repository; a fork's owner makes it a fork PR. */
+  headOwner?: string;
+  url?: string;
 }
 
 export function prNode(input: PullRequestInput) {
@@ -20,8 +23,9 @@ export function prNode(input: PullRequestInput) {
     number: input.number,
     title: input.title ?? `Pull request ${input.number}`,
     state: input.state ?? "OPEN",
-    url: prUrl(input.number),
+    url: input.url ?? prUrl(input.number),
     isDraft: input.isDraft ?? false,
+    headRepositoryOwner: { login: input.headOwner ?? FAKE_REPO.owner },
   };
 }
 
@@ -52,6 +56,7 @@ export function branchRepository(input: {
   suites?: ReturnType<typeof workflowSuite>[];
 }) {
   return {
+    owner: { login: FAKE_REPO.owner },
     pullRequests: { nodes: input.pullRequests ?? [] },
     ref: { target: { checkSuites: { nodes: input.suites ?? [] } } },
   };

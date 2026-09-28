@@ -109,7 +109,9 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain(
       'pullRequests(headRefName: "feature-branch", first: 5, states: [OPEN, MERGED, CLOSED]',
     );
-    expect(query).toContain("nodes { number title state url isDraft }");
+    expect(query).toContain(
+      "nodes { number title state url isDraft headRepositoryOwner { login } }",
+    );
     expect(query).toContain('ref(qualifiedName: "refs/heads/feature-branch")');
     expect(query).toContain("checkSuites(first: 20)");
     expect(query).toContain("workflowRun {");
@@ -183,6 +185,7 @@ describe("parseBatchedCIResponse", () => {
   it("returns merged status when PR is merged on a feature branch", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
@@ -190,6 +193,7 @@ describe("parseBatchedCIResponse", () => {
               title: "Shipped",
               state: "MERGED",
               url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
               isDraft: false,
             },
           ],
@@ -215,11 +219,13 @@ describe("parseBatchedCIResponse", () => {
   it("ignores merged PR on default branch", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
               state: "MERGED",
               url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
             },
           ],
         },
@@ -267,6 +273,7 @@ describe("parseBatchedCIResponse", () => {
   it("returns none with PR URL when PR exists but no workflow runs", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
@@ -274,6 +281,7 @@ describe("parseBatchedCIResponse", () => {
               title: "Draft work",
               state: "OPEN",
               url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
               isDraft: true,
             },
           ],
@@ -455,8 +463,18 @@ describe("parseBatchedCIResponse", () => {
   it("prefers PR URL over workflow run URL", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
-          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/42" }],
+          nodes: [
+            {
+              number: 42,
+              title: "Ready",
+              state: "OPEN",
+              url: "https://github.com/o/r/pull/42",
+              isDraft: false,
+              headRepositoryOwner: { login: "o" },
+            },
+          ],
         },
         ref: {
           target: {
@@ -545,11 +563,13 @@ describe("parseBatchedCIResponse", () => {
         },
       },
       ws_1: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
               state: "MERGED",
               url: "https://github.com/o/r/pull/5",
+              headRepositoryOwner: { login: "o" },
             },
           ],
         },

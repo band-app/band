@@ -75,6 +75,12 @@ const pollerState = {
   timer: null as ReturnType<typeof setInterval> | null,
   tickCount: 0,
   activity: "active" as ActivityLevel,
+  /**
+   * Set by `startBranchStatusPoller`: the next tick asks GitHub too (without
+   * the fetch), so the PR badges are current as soon as a client connects
+   * instead of one CI period later. An activity change doesn't set it.
+   */
+  queryCIOnNextTick: false,
 };
 
 /**
@@ -332,9 +338,8 @@ export async function getBatchedCIStatuses(
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
-  // The first tick asks GitHub too (without the fetch), so the PR badges are
-  // current as soon as a client connects instead of one CI period later.
-  const queryCI = isCITick || pollerState.tickCount === 1;
+  const queryCI = isCITick || pollerState.queryCIOnNextTick;
+  pollerState.queryCIOnNextTick = false;
 
   if (pollerState.tickCount === 1 || isCITick) {
     await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
@@ -440,6 +445,7 @@ async function pollTick() {
 export function startBranchStatusPoller() {
   if (pollerState.timer) return;
   pollerState.tickCount = 0;
+  pollerState.queryCIOnNextTick = true;
 
   // Run first tick immediately
   pollTick().catch((err) => console.error("Branch status poll error:", err));

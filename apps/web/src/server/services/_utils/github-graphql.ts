@@ -1,17 +1,4 @@
-import type { RepoInfo } from "../../infra/git/git-client";
-
-/**
- * The pull request the sidebar's PR badge shows (`PullRequestBadge`). A
- * workspace has at most one: its branch's open PR, else the most recently
- * updated merged one, else the most recently updated closed one.
- */
-export interface PullRequestSummary {
-  number: number;
-  title: string;
-  url: string;
-  state: "open" | "merged" | "closed";
-  isDraft: boolean;
-}
+import type { PullRequestSummary, RepoInfo } from "../../infra/git/git-client";
 
 export interface CIStatus {
   state: string;
@@ -41,9 +28,12 @@ interface PullRequestNode {
   state: string;
   url: string;
   isDraft: boolean;
+  /** Null when the fork the PR came from has been deleted. */
+  headRepositoryOwner: { login: string } | null;
 }
 
 interface GraphQLRepoResponse {
+  owner?: { login: string };
   pullRequests: {
     nodes: PullRequestNode[];
   };
@@ -70,8 +60,9 @@ export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
     const branch = escapeGraphQL(input.branch);
 
     return `${input.alias}: repository(owner: "${owner}", name: "${repo}") {
+    owner { login }
     pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { number title state url isDraft }
+      nodes { number title state url isDraft headRepositoryOwner { login } }
     }
     ref(qualifiedName: "refs/heads/${branch}") {
       target {
@@ -98,14 +89,24 @@ export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
 
 /**
  * The branch's PR: open first, then merged, then closed, each the most
- * recently updated (the query orders by `UPDATED_AT`). On the default
- * branch only an open PR counts: a merged or closed PR whose head is `main`
- * came from some other fork or a merge of main into another branch.
+ * recently updated (the query orders by `UPDATED_AT`). `headRefName` also
+ * matches PRs from forks with a branch of the same name, so only PRs whose
+ * head is in the repository itself count, and only ones with a web URL (the
+ * badge hands it to the system's URL handler). On the default branch only
+ * an open PR counts: a merged or closed PR whose head is `main` came from a
+ * merge of main into another branch.
  */
 function pickPullRequest(
-  nodes: PullRequestNode[],
+  allNodes: PullRequestNode[],
+  repoOwner: string | undefined,
   isDefaultBranch: boolean,
 ): PullRequestSummary | null {
+  const nodes = allNodes.filter(
+    (n) =>
+      repoOwner !== undefined &&
+      n.headRepositoryOwner?.login.toLowerCase() === repoOwner.toLowerCase() &&
+      isWebUrl(n.url),
+  );
   const node =
     nodes.find((n) => n.state === "OPEN") ??
     (isDefaultBranch
@@ -119,6 +120,15 @@ function pickPullRequest(
     state: node.state === "OPEN" ? "open" : node.state === "MERGED" ? "merged" : "closed",
     isDraft: node.isDraft,
   };
+}
+
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 function escapeGraphQL(value: string): string {
@@ -165,7 +175,7 @@ export function parseBatchedCIResponse(
 
     // Check PR status
     const isDefaultBranch = defaultBranches?.get(alias) !== undefined;
-    const pr = pickPullRequest(repo.pullRequests?.nodes ?? [], isDefaultBranch);
+    const pr = pickPullRequest(repo.pullRequests?.nodes ?? [], repo.owner?.login, isDefaultBranch);
     if (pr?.state === "merged") {
       results.set(alias, { state: "merged", url: pr.url, pr });
       continue;
