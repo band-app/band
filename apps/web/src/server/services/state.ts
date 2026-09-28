@@ -297,7 +297,16 @@ export function resolveWorkspaceIdByCwd(cwd: string): string | null {
 // keeps its own row in `workspace_status_sources`, and the workspace's
 // `agent_status` is derived from all of them, so one agent finishing never
 // overwrites another that is still working or waiting on the user.
+//
+// A hook session can vanish without saying so: Claude Code runs no hook when
+// the user interrupts a turn, and one killed or running outside a Band
+// terminal sends no `SessionEnd`. So a hook source that has said `working`
+// and then gone quiet for `STALE_HOOK_WORKING_MS` stops counting. A live
+// Claude Code reports every tool call, and its longest tool call (a Bash
+// command) times out after 10 minutes.
 // -----------------------------------------------------------------------------
+
+const STALE_HOOK_WORKING_MS = 15 * 60_000;
 
 /** Higher wins when sources disagree; statuses not listed rank lowest. */
 const STATUS_PRIORITY: Record<string, number> = { needs_attention: 3, working: 2, waiting: 1 };
@@ -311,8 +320,10 @@ export function chatStatusSource(chatId: string): string {
 export const MANUAL_STATUS_SOURCE = "manual";
 
 function deriveWorkspaceStatus(workspaceId: string): string {
+  const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
   let best: string | null = null;
-  for (const status of statusSourceQueries.statusesForWorkspace(workspaceId)) {
+  for (const { sourceId, status, updatedAt } of statusSourceQueries.listForWorkspace(workspaceId)) {
+    if (sourceId.startsWith("hook:") && status === "working" && updatedAt < staleBefore) continue;
     if (best === null || (STATUS_PRIORITY[status] ?? 0) > (STATUS_PRIORITY[best] ?? 0)) {
       best = status;
     }
@@ -362,14 +373,17 @@ export function removeWorkspaceSource(
 
 /**
  * The user has seen the workspace: every source asking for attention goes
- * back to `waiting`, except those in `keep` (a chat whose agent still waits
- * on a permission or elicitation answer).
+ * back to `waiting`, except the chats in `pendingChatIds`, whose agent still
+ * waits on a permission or elicitation answer (answering it clears them).
+ * Returns the workspace snapshot to broadcast, or `null` when it has none.
  */
 export function acknowledgeWorkspaceAttention(
   workspaceId: string,
-  keep: string[],
-): WorkspaceStatus {
-  statusSourceQueries.acknowledge(workspaceId, keep, Date.now());
+  pendingChatIds: string[],
+): WorkspaceStatus | null {
+  const existing = getWorkspaceStatus(workspaceId);
+  if (existing?.agent?.status !== "needs_attention") return existing;
+  statusSourceQueries.acknowledge(workspaceId, pendingChatIds.map(chatStatusSource), Date.now());
   return upsertWorkspaceStatus(workspaceId, { status: deriveWorkspaceStatus(workspaceId) });
 }
 

@@ -11,7 +11,13 @@ import { mimeTypeFromFilename } from "./_utils/mime-types";
 import { shiftQueuedMessage } from "./_utils/queued-message-store";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
-import { bandHome, chatStatusSource, setWorkspaceSourceStatus } from "./state";
+import {
+  acknowledgeWorkspaceAttention,
+  bandHome,
+  chatStatusSource,
+  setWorkspaceSourceStatus,
+  type WorkspaceStatus,
+} from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
 // FRAGILE: ESM cycle leg — `workspace-service` imports `taskService` back
 // from this file. The cycle is safe only because every `workspaceService`
@@ -561,10 +567,13 @@ export class TaskService {
     return getTask(chatId);
   }
 
-  /** Chats of the workspace whose agent waits on the user (a permission or
-   *  elicitation request). */
-  chatsWithPendingInput(workspaceId: string): string[] {
-    return agentSessionService.chatsWithPendingRequest(workspaceId);
+  /** Clears the workspace's attention status, except for chats whose agent
+   *  still waits on the user (a permission or elicitation request). */
+  acknowledgeAttention(workspaceId: string): WorkspaceStatus | null {
+    return acknowledgeWorkspaceAttention(
+      workspaceId,
+      agentSessionService.chatsWithPendingRequest(workspaceId),
+    );
   }
 
   listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {

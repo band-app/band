@@ -1,8 +1,6 @@
 import { z } from "zod";
 import {
-  acknowledgeWorkspaceAttention,
   applyHookNotification,
-  chatStatusSource,
   getWorkspaceStatus,
   MANUAL_STATUS_SOURCE,
   resolveWorkspaceIdByCwd,
@@ -60,23 +58,8 @@ export const statusesRouter = t.router({
   clearNeedsAttention: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .mutation(({ input }) => {
-      const existing = getWorkspaceStatus(input.workspaceId);
-      if (existing?.agent?.status !== "needs_attention") {
-        if (existing) {
-          emit({ kind: "update", status: existing });
-        }
-        return { ok: true };
-      }
-      // Every agent asking for attention is acknowledged, except a chat
-      // whose agent is still blocked on a permission or elicitation request:
-      // the user hasn't answered yet, so navigating to the workspace doesn't
-      // clear it. Answering does (task-service flips that chat back to
-      // "working").
-      const keep = taskService
-        .chatsWithPendingInput(input.workspaceId)
-        .map((chatId) => chatStatusSource(chatId));
-      const status = acknowledgeWorkspaceAttention(input.workspaceId, keep);
-      emit({ kind: "update", status });
+      const status = taskService.acknowledgeAttention(input.workspaceId);
+      if (status) emit({ kind: "update", status });
       return { ok: true };
     }),
 

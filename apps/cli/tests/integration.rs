@@ -1071,12 +1071,14 @@ fn notify_silently_succeeds_when_server_unreachable() {
 /// `BAND_TERMINAL_ID`) are cleared and only `extra_env` is set.
 fn band_notify_with_env(
     env: &TestEnv,
+    args: &[&str],
     payload: &serde_json::Value,
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
     use std::io::Write;
     let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
-        .args(["notify"])
+        .arg("notify")
+        .args(args)
         .env("BAND_HOME", &env.band_dir)
         .env_remove("BAND_SERVER_URL")
         .env_remove("BAND_DISPATCH")
@@ -1094,7 +1096,7 @@ fn band_notify_with_env(
 }
 
 fn band_notify(env: &TestEnv, payload: &serde_json::Value) -> std::process::Output {
-    band_notify_with_env(env, payload, &[])
+    band_notify_with_env(env, &[], payload, &[])
 }
 
 /// Helper: query workspace status from the SQLite database.
@@ -1173,6 +1175,68 @@ fn notify_forwards_payload_to_server() {
     );
 }
 
+/// Query the terminal a hook source was reported from.
+fn query_source_terminal(band_dir: &Path, source_id: &str) -> Option<String> {
+    let db_path = band_dir.join("band.db");
+    let script = format!(
+        r#"
+        const {{ DatabaseSync }} = await import("node:sqlite");
+        const db = new DatabaseSync("{db}");
+        const row = db.prepare(
+            "SELECT terminal_id FROM workspace_status_sources WHERE source_id = ?"
+        ).get("{source}");
+        console.log(JSON.stringify({{ terminal: row ? row.terminal_id : null }}));
+        db.close();
+        "#,
+        db = db_path.to_string_lossy().replace('\\', "/"),
+        source = source_id,
+    );
+    let output = Command::new("node")
+        .args(["--input-type=module", "-e", &script])
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
+        .output()
+        .expect("query_source_terminal failed");
+    assert!(
+        output.status.success(),
+        "query_source_terminal failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("parse json");
+    json["terminal"].as_str().map(String::from)
+}
+
+/// The installed hook passes `--agent claude-code`, and a hook inside a Band
+/// terminal forwards `BAND_TERMINAL_ID` so closing the terminal can drop the
+/// session's status.
+#[test]
+fn notify_forwards_agent_and_terminal_id() {
+    let env = TestEnv::new();
+
+    let output = band_notify_with_env(
+        &env,
+        &["--agent", "claude-code"],
+        &serde_json::json!({
+            "hook_event_name": "Stop",
+            "session_id": "cli-session",
+            "cwd": env.repo_path.to_string_lossy()
+        }),
+        &[
+            ("BAND_DISPATCH", "terminal"),
+            ("BAND_TERMINAL_ID", "term-123"),
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(
+        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        Some("needs_attention"),
+    );
+    assert_eq!(
+        query_source_terminal(&env.band_dir, "hook:cli-session").as_deref(),
+        Some("term-123"),
+    );
+}
+
 /// A hook from a chat pane's agent (`BAND_DISPATCH=chat`) is forwarded with
 /// that dispatch, and the server leaves the status to the chat's own turn.
 #[test]
@@ -1195,6 +1259,7 @@ fn notify_forwards_chat_dispatch() {
     // Would map to `working` if the server applied it.
     let output = band_notify_with_env(
         &env,
+        &[],
         &serde_json::json!({
             "hook_event_name": "PreToolUse",
             "tool_name": "Read",

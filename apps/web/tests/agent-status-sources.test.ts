@@ -253,6 +253,30 @@ describe("workspace status from chats and hook sessions", () => {
     await expect.poll(() => workspaceStatus(server.url)).toBe("waiting");
   });
 
+  it("a Band terminal tells its agents which terminal they run in", async () => {
+    const terminalId = randomUUID();
+    mkdirSync(repo, { recursive: true });
+    await trpc(server.url, "terminal.create", {
+      workspaceId: WORKSPACE_ID,
+      id: terminalId,
+      command: `printf 'TERMINAL_ID:%s|\\n' "$BAND_TERMINAL_ID"`,
+    });
+
+    await expect
+      .poll(async () => {
+        const { output } = await trpc<{ output: string }>(
+          server.url,
+          "terminal.output",
+          { terminalId },
+          "query",
+        );
+        return output;
+      })
+      .toContain(`TERMINAL_ID:${terminalId}|`);
+
+    await trpc(server.url, "terminal.kill", { terminalId });
+  });
+
   it("ignores hooks from a chat pane's agent, whose turn already reports its status", async () => {
     await notify(server.url, {
       cwd: repo,
@@ -275,11 +299,12 @@ describe("workspace status from chats and hook sessions", () => {
 
 describe("hooks are read with the sending agent's rules", () => {
   let server: ServerHandle;
+  let home: string;
   let repo: string;
 
   beforeAll(async () => {
     // The workspace's agent is Codex; the hooks come from Claude Code.
-    const home = seedAcpHome("band-status-codex-");
+    home = seedAcpHome("band-status-codex-");
     seedSettings(home, {
       tokenSecret: TEST_TOKEN,
       codingAgents: [
@@ -290,15 +315,11 @@ describe("hooks are read with the sending agent's rules", () => {
     });
     repo = join(home, "repo");
     server = await startAcpServer({ home });
-    const close = server.close;
-    server.close = async () => {
-      await close();
-      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    };
   });
 
   afterAll(async () => {
     await server?.close();
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("a Claude Code Stop hook from an installed `--agent claude-code` hook asks for attention", async () => {
@@ -343,5 +364,40 @@ describe("hooks are read with the sending agent's rules", () => {
       payload: { session_id: "unknown-sender", cwd: repo, hook_event_name: "Stop" },
     });
     expect(await workspaceStatus(server.url)).toBe("working");
+  });
+});
+
+describe("server restart", () => {
+  it("drops every agent's status, so a later hook can't bring back an old one", async () => {
+    const home = seedAcpHome("band-status-restart-");
+    const repo = join(home, "repo");
+    try {
+      let server = await startAcpServer({ home });
+      await notify(server.url, {
+        cwd: repo,
+        agent: "claude-code",
+        payload: claudeHook(repo, "before-restart", { hook_event_name: "Stop" }),
+      });
+      expect(await workspaceStatus(server.url)).toBe("needs_attention");
+      await server.close();
+
+      server = await startAcpServer({ home });
+      try {
+        await expect.poll(() => workspaceStatus(server.url)).toBe("waiting");
+        await notify(server.url, {
+          cwd: repo,
+          agent: "claude-code",
+          payload: claudeHook(repo, "after-restart", {
+            hook_event_name: "PreToolUse",
+            tool_name: "Read",
+          }),
+        });
+        expect(await workspaceStatus(server.url)).toBe("working");
+      } finally {
+        await server.close();
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
   });
 });
