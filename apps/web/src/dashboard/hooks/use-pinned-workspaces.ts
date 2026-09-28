@@ -79,7 +79,7 @@ export function usePinnedWorkspaces() {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.projects, context.previous);
       }
-      setError(String(err));
+      setError(err);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });

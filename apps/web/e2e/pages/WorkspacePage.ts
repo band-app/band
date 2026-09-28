@@ -54,6 +54,8 @@ export class WorkspacePage {
    *  menu (right-click). Only present for non-default branches of git
    *  projects. Used by the cache-eviction regression test (issue #508). */
   readonly deleteWorkspaceMenuItem: Locator;
+  /** "Git pull" menu item inside the WorkspaceCard's context menu. */
+  readonly gitPullMenuItem: Locator;
 
   constructor(
     private readonly page: Page,
@@ -65,6 +67,7 @@ export class WorkspacePage {
     this.terminalInput = page.getByRole("textbox", { name: "Terminal input" });
     this.changesHeading = page.getByRole("heading", { name: "Files changed" });
     this.deleteWorkspaceMenuItem = page.getByRole("menuitem", { name: "Delete workspace" });
+    this.gitPullMenuItem = page.getByRole("menuitem", { name: "Git pull" });
   }
 
   /** Locate a workspace card in the project-list sidebar by its canonical
@@ -233,6 +236,15 @@ export class WorkspacePage {
   async clickDisabledWorkspaceCard(workspaceId: string): Promise<void> {
     await test.step(`Click disabled workspace card ${workspaceId}`, async () => {
       await this.workspaceCard(workspaceId).click({ force: true });
+    });
+  }
+
+  /** Right-click the workspace card and click "Git pull", the sidebar's
+   *  pull (`workspaces.gitPull`). */
+  async pullWorkspaceFromSidebar(workspaceId: string): Promise<void> {
+    await test.step(`Git pull ${workspaceId} via sidebar context menu`, async () => {
+      await this.workspaceCard(workspaceId).click({ button: "right" });
+      await this.gitPullMenuItem.click();
     });
   }
 
@@ -575,6 +587,21 @@ export class WorkspacePage {
    *  (`AppShell`). */
   get sidebar(): Locator {
     return this.page.getByTestId("app-shell__sidebar");
+  }
+
+  /** Drag the separator between the sidebar and the center column by `dx`
+   *  pixels (positive widens the sidebar). */
+  async dragSidebarEdgeBy(dx: number): Promise<void> {
+    await test.step(`Drag the sidebar edge by ${dx}px`, async () => {
+      const box = await this.page.getByTestId("app-shell__sidebar-separator").boundingBox();
+      if (!box) throw new Error("sidebar separator not visible");
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + dx, y, { steps: 10 });
+      await this.page.mouse.up();
+    });
   }
 
   /** The header button that toggles the sidebar (⌘B). Rendered by
@@ -1501,6 +1528,13 @@ export class WorkspacePage {
     return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
+  /** The dockview `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
+   *  `dv-active-tab` while that file is the active view in its group. See
+   *  `tabContainer`. */
+  fileTabContainer(path: string): Locator {
+    return this.page.locator(`.dv-tab:has([data-testid="center-file-tab--${path}"])`);
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
   // close (×).
@@ -1764,6 +1798,14 @@ export class WorkspacePage {
     });
   }
 
+  /** Open the app at `/`, the URL the desktop shell loads on every launch
+   *  (and a phone's home-screen icon opens). */
+  async launch(): Promise<void> {
+    await test.step("Launch the app at /", async () => {
+      await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
+    });
+  }
+
   /** Hard-reload the current page (preserves `localStorage`). */
   async reload(): Promise<void> {
     await test.step("Reload the dashboard", async () => {
@@ -1803,6 +1845,20 @@ export class WorkspacePage {
    *  the Changes section is expanded AND there is at least one change. */
   get changesSection(): Locator {
     return this.page.getByTestId("right-sidepanel__changes");
+  }
+
+  /** A tab button in the right sidepanel's header (`TabButton` in
+   *  `RightSidepanel.tsx`), carrying `aria-selected`. */
+  rightSidepanelTab(tab: "explorer" | "changes"): Locator {
+    return this.page.getByTestId(`right-sidepanel__tab--${tab}`);
+  }
+
+  /** Click a right-sidepanel tab and wait until it is the selected one. */
+  async selectRightSidepanelTab(tab: "explorer" | "changes"): Promise<void> {
+    await test.step(`Select the ${tab} tab in the right sidepanel`, async () => {
+      await this.rightSidepanelTab(tab).click();
+      await expect(this.rightSidepanelTab(tab)).toHaveAttribute("aria-selected", "true");
+    });
   }
 
   /** Reveal the right sidepanel by dispatching the same `band:show-right-panel`

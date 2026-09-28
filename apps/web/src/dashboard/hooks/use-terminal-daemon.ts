@@ -13,7 +13,7 @@ export function useRestartTerminalDaemon() {
   return useMutation({
     mutationFn: () => trpc.terminal.restartDaemon.mutate(),
     onError: (err) => {
-      setError(String(err));
+      setError(err);
     },
   });
 }

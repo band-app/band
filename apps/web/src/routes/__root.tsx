@@ -15,12 +15,13 @@ import {
   DashboardShell,
   isMacPlatform,
   useDashboardStore,
+  useRecordLabelLastWorkspace,
   useSettingsQuery,
 } from "@/dashboard";
 import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
-import { ReinstallHomeScreenNotice } from "@/dashboard/components/ReinstallHomeScreenNotice";
-import { UpdateToast } from "@/dashboard/components/UpdateToast";
+import { ToastHost } from "@/dashboard/components/ToastHost";
+import { queryClient, queryKeys } from "@/dashboard/query-client";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { BrowserProfileSweeper } from "../components/BrowserProfileSweeper";
 import {
@@ -39,9 +40,14 @@ import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { activateBrowserGuestWorkspace } from "../lib/browser-guest-retention";
 import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../lib/browser-webview";
-import { hydrateGlobal, startClientStateSync } from "../lib/client-state";
+import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/client-state";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
+import {
+  keepLastWorkspaceOnce,
+  pickStartWorkspace,
+  recordLastWorkspace,
+} from "../lib/last-workspace";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   loadRightPanelCollapsed,
@@ -324,17 +330,47 @@ function ZoomSync() {
  */
 function ClientStateGate({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const router = useRouter();
   useEffect(() => {
     startClientStateSync((handler) => adapter.subscribeStatusEvents(handler));
     let cancelled = false;
-    void hydrateGlobal().then(() => {
+    // The project list tells which workspaces still exist. Fetching it into
+    // the query cache here also saves the sidebar its own first fetch.
+    const projects = queryClient
+      .fetchQuery({ queryKey: queryKeys.projects, queryFn: () => adapter.listProjects() })
+      .catch(() => null);
+    void (async () => {
+      await hydrateGlobal();
+      // A load on `/` (every desktop launch) reopens the workspace this
+      // device type last showed. A URL that names a workspace is kept.
+      if (router.state.location.pathname === "/") {
+        const list = await withTimeout(projects, HYDRATE_WAIT_MS);
+        if (!list) keepLastWorkspaceOnce();
+        const target = list ? pickStartWorkspace(list) : null;
+        if (target && !cancelled) {
+          await router.navigate({
+            to: "/workspace/$workspaceId",
+            params: { workspaceId: target },
+            replace: true,
+          });
+        }
+      }
       if (!cancelled) setReady(true);
-    });
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
   return ready ? children : null;
+}
+
+/** `promise`'s value, or null when it takes longer than `ms`. */
+function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((r) => {
+    timer = setTimeout(() => r(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function AppShell() {
@@ -394,11 +430,14 @@ function AppShell() {
   // Tell the memory policies which workspace is on screen, on both layouts:
   // `workspace-cold-park.ts` stamps when each workspace was hidden (terminals,
   // LSP clients and file watchers of a cold workspace release), and the
-  // browser guest budget orders workspaces by activation.
+  // browser guest budget orders workspaces by activation. It is also the
+  // workspace the next launch reopens (`last-workspace.ts`).
   useEffect(() => {
     setActiveWorkspace(activeWorkspaceId);
     activateBrowserGuestWorkspace(activeWorkspaceId);
+    recordLastWorkspace(activeWorkspaceId);
   }, [activeWorkspaceId]);
+  useRecordLabelLastWorkspace(activeWorkspaceId);
 
   // Get the workspace path from the statuses store (for Finder / copy path)
   const workspacePath = useDashboardStore((s) =>
@@ -837,7 +876,11 @@ function AppShell() {
                 see-through tint would let the vibrancy layer through past the
                 sidebar's border. The colours equal the other separator's
                 accent tints over `--background`. */}
-              <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
+              {/* react-resizable-panels writes `id` into `data-testid`. */}
+              <Separator
+                id="app-shell__sidebar-separator"
+                className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize"
+              />
               <Panel id="main" elementRef={mainElRef} minSize="20%">
                 {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}
@@ -960,8 +1003,7 @@ function RootLayout() {
             <ClientStateGate>
               <AppShell />
             </ClientStateGate>
-            <UpdateToast />
-            <ReinstallHomeScreenNotice />
+            <ToastHost />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />

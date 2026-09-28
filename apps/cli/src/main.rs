@@ -77,7 +77,12 @@ enum Commands {
         no_focus: bool,
     },
     /// Receive coding-agent hook notifications (reads JSON from stdin)
-    Notify,
+    Notify {
+        /// Agent type that sent the hook (e.g. `claude-code`). Omit to let
+        /// the server work it out from the payload or the workspace.
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Show command schemas as JSON
     Schema {
         /// Command name (omit to list all commands)
@@ -676,7 +681,7 @@ fn main() {
             workspace,
             no_focus,
         } => cmd_open(&file_path, workspace.as_deref(), !no_focus),
-        Commands::Notify => cmd_notify(),
+        Commands::Notify { agent } => cmd_notify(agent.as_deref()),
         Commands::Schema { .. } => unreachable!(),
         Commands::Skills { cmd } => match cmd {
             SkillsCmd::Install { home, filter } => {
@@ -2773,7 +2778,7 @@ fn cmd_open(
 
 // --- Notify command ---
 
-fn cmd_notify() -> Result<CommandResult, String> {
+fn cmd_notify(agent: Option<&str>) -> Result<CommandResult, String> {
     use std::io::Read;
 
     // The CLI is intentionally agent-agnostic: it forwards the raw hook
@@ -2816,13 +2821,29 @@ fn cmd_notify() -> Result<CommandResult, String> {
         return ok();
     };
 
-    let _ = client.trpc_mutate(
-        "statuses.notify",
-        &serde_json::json!({
-            "cwd": cwd,
-            "payload": payload,
-        }),
-    );
+    let mut body = serde_json::json!({
+        "cwd": cwd,
+        "payload": payload,
+    });
+    // Who sent the hook, so the server reads it with that agent's rules and
+    // keeps one status per agent session. `BAND_DISPATCH` is `chat` inside a
+    // chat pane's agent and `terminal` inside a Band terminal, which also
+    // sets `BAND_TERMINAL_ID`.
+    if let Some(agent) = agent {
+        body["agent"] = serde_json::json!(agent);
+    }
+    for (env_var, field) in [
+        ("BAND_DISPATCH", "dispatch"),
+        ("BAND_TERMINAL_ID", "terminalId"),
+    ] {
+        if let Ok(value) = std::env::var(env_var) {
+            if !value.is_empty() {
+                body[field] = serde_json::json!(value);
+            }
+        }
+    }
+
+    let _ = client.trpc_mutate("statuses.notify", &body);
 
     ok()
 }
@@ -3220,8 +3241,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         serde_json::json!({
             "name": "notify",
             "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
-            "parameters": [],
-            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard. Forwards the raw payload to the server, which dispatches to the agent's adapter to derive the workspace status."
+            "parameters": [
+                {"name": "--agent", "type": "string", "required": false, "description": "Agent type that sent the hook (e.g. `claude-code`). Omit to let the server work it out from the payload or the workspace."},
+            ],
+            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard (`band notify --agent claude-code`). Forwards the raw payload, plus `BAND_DISPATCH` and `BAND_TERMINAL_ID` from the environment, to the server, which reads it with the sending agent's rules to derive that agent session's status."
         }),
         serde_json::json!({
             "name": "schema",

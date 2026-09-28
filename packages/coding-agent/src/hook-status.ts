@@ -72,3 +72,31 @@ export async function mapHookPayloadToStatus(
       return "working";
   }
 }
+
+/**
+ * Identify the agent that sent a hook payload from the payload alone, or
+ * `null` when it can't tell. Used when the hook command didn't name its
+ * agent (`band notify` without `--agent`, as installed before that flag
+ * existed). Several agents share Claude Code's hook payload shape
+ * (`hook_event_name`, `session_id`), so the fingerprint is Claude Code's
+ * transcript location, `~/.claude/projects/…`.
+ */
+export function detectHookAgentType(payload: Record<string, unknown>): string | null {
+  const transcript = typeof payload.transcript_path === "string" ? payload.transcript_path : "";
+  if (/[/\\]\.claude[/\\]projects[/\\]/.test(transcript)) return "claude-code";
+  return null;
+}
+
+/**
+ * The agent session behind this hook is over (Claude Code's `SessionEnd`:
+ * exit, `/clear`, logout). Its status should stop counting toward the
+ * workspace's.
+ */
+export function isHookSessionEnd(agentType: string, payload: Record<string, unknown>): boolean {
+  return agentType === "claude-code" && payload.hook_event_name === "SessionEnd";
+}
+
+/** The session a hook payload belongs to, when the agent reports one. */
+export function hookSessionId(payload: Record<string, unknown>): string | null {
+  return typeof payload.session_id === "string" && payload.session_id ? payload.session_id : null;
+}

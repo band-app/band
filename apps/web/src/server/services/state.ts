@@ -1,4 +1,9 @@
-import { mapHookPayloadToStatus } from "@band-app/coding-agent";
+import {
+  detectHookAgentType,
+  hookSessionId,
+  isHookSessionEnd,
+  mapHookPayloadToStatus,
+} from "@band-app/coding-agent";
 import { toWorkspaceId } from "@/dashboard";
 import {
   type ProjectKind,
@@ -14,12 +19,21 @@ import {
   type NotificationSettings,
   type Settings,
 } from "../infra/db/queries/settings";
-import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
+import {
+  WorkspaceStatusQueries,
+  WorkspaceStatusSourceQueries,
+} from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
-import type { WorkspaceAgentInfo, WorkspaceStatusSnapshot } from "../infra/events/status-event-bus";
+import {
+  emit,
+  subscribe,
+  type WorkspaceAgentInfo,
+  type WorkspaceStatusSnapshot,
+} from "../infra/events/status-event-bus";
 import { SettingsService, settingsService } from "./settings-service";
 
 const workspaceStatusQueries = new WorkspaceStatusQueries();
+const statusSourceQueries = new WorkspaceStatusSourceQueries();
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
 // Phase 3 of the 3-tier refactor). The legacy private helper below
@@ -275,41 +289,186 @@ export function resolveWorkspaceIdByCwd(cwd: string): string | null {
   return null;
 }
 
+// -----------------------------------------------------------------------------
+// Status sources.
+//
+// Several agents can report into one workspace: every chat pane's ACP turns,
+// and every hook-reporting CLI session (a Claude Code in a terminal). Each
+// keeps its own row in `workspace_status_sources`, and the workspace's
+// `agent_status` is derived from all of them, so one agent finishing never
+// overwrites another that is still working or waiting on the user.
+//
+// A hook session can vanish without saying so: Claude Code runs no hook when
+// the user interrupts a turn, and one killed or running outside a Band
+// terminal sends no `SessionEnd`. So a hook source that has said `working`
+// and then gone quiet for `STALE_HOOK_WORKING_MS` stops counting. A live
+// Claude Code reports every tool call, and its longest tool call (a Bash
+// command) times out after 10 minutes.
+// -----------------------------------------------------------------------------
+
+const STALE_HOOK_WORKING_MS = 15 * 60_000;
+
+/** Higher wins when sources disagree; statuses not listed rank lowest. */
+const STATUS_PRIORITY: Record<string, number> = { needs_attention: 3, working: 2, waiting: 1 };
+
+/** Source id of a chat pane's ACP turns. */
+export function chatStatusSource(chatId: string): string {
+  return `chat:${chatId}`;
+}
+
+/** Source id of `statuses.update`, which sets a status by hand. */
+export const MANUAL_STATUS_SOURCE = "manual";
+
+function deriveWorkspaceStatus(workspaceId: string): string {
+  const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
+  let best: string | null = null;
+  for (const { sourceId, status, updatedAt } of statusSourceQueries.listForWorkspace(workspaceId)) {
+    if (sourceId.startsWith("hook:") && status === "working" && updatedAt < staleBefore) continue;
+    if (best === null || (STATUS_PRIORITY[status] ?? 0) > (STATUS_PRIORITY[best] ?? 0)) {
+      best = status;
+    }
+  }
+  return best ?? "waiting";
+}
+
+/**
+ * Record one source's status and write the workspace status derived from
+ * every source. Returns the workspace snapshot to broadcast.
+ */
+export function setWorkspaceSourceStatus(
+  workspaceId: string,
+  sourceId: string,
+  agent: { status: string; lastActivity?: string; terminalId?: string },
+): WorkspaceStatus {
+  statusSourceQueries.upsert({
+    workspaceId,
+    sourceId,
+    status: agent.status,
+    terminalId: agent.terminalId ?? null,
+    updatedAt: Date.now(),
+  });
+  return upsertWorkspaceStatus(workspaceId, {
+    status: deriveWorkspaceStatus(workspaceId),
+    lastActivity: agent.lastActivity,
+  });
+}
+
+/** Re-derive a workspace's status after sources went away. `null` when it has no row. */
+function rederiveWorkspaceStatus(workspaceId: string): WorkspaceStatus | null {
+  if (!workspaceStatusQueries.findRow(workspaceId)) return null;
+  return upsertWorkspaceStatus(workspaceId, { status: deriveWorkspaceStatus(workspaceId) });
+}
+
+/**
+ * Drop one source (its chat was removed, its session ended). Returns the
+ * re-derived workspace snapshot, or `null` when nothing changed.
+ */
+export function removeWorkspaceSource(
+  workspaceId: string,
+  sourceId: string,
+): WorkspaceStatus | null {
+  if (!statusSourceQueries.remove(workspaceId, sourceId)) return null;
+  return rederiveWorkspaceStatus(workspaceId);
+}
+
+/**
+ * The user has seen the workspace: every source asking for attention goes
+ * back to `waiting`, except the chats in `pendingChatIds`, whose agent still
+ * waits on a permission or elicitation answer (answering it clears them).
+ * Returns the workspace snapshot to broadcast, or `null` when it has none.
+ */
+export function acknowledgeWorkspaceAttention(
+  workspaceId: string,
+  pendingChatIds: string[],
+): WorkspaceStatus | null {
+  const existing = getWorkspaceStatus(workspaceId);
+  if (existing?.agent?.status !== "needs_attention") return existing;
+  statusSourceQueries.acknowledge(workspaceId, pendingChatIds.map(chatStatusSource), Date.now());
+  return upsertWorkspaceStatus(workspaceId, { status: deriveWorkspaceStatus(workspaceId) });
+}
+
+/**
+ * Drop sources whose chat or terminal goes away, and broadcast the
+ * re-derived workspace status. Called once at boot.
+ */
+export function startStatusSourceCleanup(): () => void {
+  return subscribe((event) => {
+    const changed: WorkspaceStatus[] = [];
+    if (event.kind === "chat-removed" && event.chatId && event.workspaceId) {
+      const status = removeWorkspaceSource(event.workspaceId, chatStatusSource(event.chatId));
+      if (status) changed.push(status);
+    } else if (event.kind === "terminal-killed" && event.terminalId) {
+      for (const workspaceId of statusSourceQueries.removeForTerminal(event.terminalId)) {
+        const status = rederiveWorkspaceStatus(workspaceId);
+        if (status) changed.push(status);
+      }
+    }
+    for (const status of changed) emit({ kind: "update", status });
+  });
+}
+
+/** A coding-agent hook forwarded by `band notify`. */
+export interface HookNotification {
+  /** Where the agent runs; picks the workspace. */
+  cwd: string;
+  /** The raw hook payload. */
+  payload: Record<string, unknown>;
+  /** Agent type named by the hook command (`band notify --agent <type>`). */
+  agent?: string;
+  /** `BAND_DISPATCH` of the agent's process: `chat` or `terminal`. */
+  dispatch?: string;
+  /** The Band terminal the agent runs in (`BAND_TERMINAL_ID`). */
+  terminalId?: string;
+}
+
 /**
  * Apply a coding-agent lifecycle notification (e.g. a Claude Code hook piped
  * through `band notify`) to the workspace that owns `cwd`.
  *
- * Resolves the workspace, looks up its configured coding agent, and dispatches
- * to that agent's adapter (`mapHookPayloadToStatus`) to translate the raw hook
- * payload into a status — keeping the per-agent mapping in the adapter so the
- * CLI stays agent-agnostic. Returns the updated status snapshot, or `null` when
- * `cwd` maps to no known workspace (a no-op, matching the fire-and-forget hook
- * contract). The caller is responsible for broadcasting the returned snapshot.
+ * The hook is read with the rules of the agent that sent it: the one the
+ * hook command names, else the one its payload identifies, else the
+ * workspace's configured agent. Each agent session is its own status source
+ * (`hook:<session id>`). Returns the updated status snapshot, or `null` when
+ * nothing changed: `cwd` maps to no known workspace (matching the
+ * fire-and-forget hook contract), or the hook came from a chat pane's agent,
+ * whose status its ACP turn already reports. The caller broadcasts the
+ * returned snapshot.
  */
 export async function applyHookNotification(
-  cwd: string,
-  payload: Record<string, unknown>,
+  notification: HookNotification,
 ): Promise<WorkspaceStatus | null> {
-  const workspaceId = resolveWorkspaceIdByCwd(cwd);
+  const { payload } = notification;
+  if (notification.dispatch === "chat") return null;
+  const workspaceId = resolveWorkspaceIdByCwd(notification.cwd);
   if (!workspaceId) return null;
 
-  const existing = getWorkspaceStatus(workspaceId);
-  const agentDef = settingsService.getAgentDefinition(existing?.agent?.codingAgentId);
-  const status = await mapHookPayloadToStatus(agentDef.type, payload);
+  const agentType =
+    notification.agent ||
+    detectHookAgentType(payload) ||
+    settingsService.getAgentDefinition(getWorkspaceStatus(workspaceId)?.agent?.codingAgentId).type;
+  const sourceId = `hook:${hookSessionId(payload) ?? agentType}`;
 
-  return upsertWorkspaceStatus(workspaceId, {
+  if (isHookSessionEnd(agentType, payload)) {
+    return removeWorkspaceSource(workspaceId, sourceId);
+  }
+
+  const status = await mapHookPayloadToStatus(agentType, payload);
+  return setWorkspaceSourceStatus(workspaceId, sourceId, {
     status,
     lastActivity: new Date().toISOString(),
+    terminalId: notification.terminalId,
   });
 }
 
 /**
- * Reset stale agent statuses to "waiting".
+ * Reset stale agent statuses to "waiting" and drop every status source.
  * Called on server startup — no agent can be running if the server just
  * started, and any pending input requests are lost so "needs_attention"
- * is also stale.
+ * is also stale. A CLI session that outlived the restart reports again
+ * with its next hook.
  */
 export function resetAgentStatuses(): number {
+  statusSourceQueries.removeAll();
   return workspaceStatusQueries.resetActiveToWaiting(Date.now());
 }
 
@@ -323,4 +482,5 @@ function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null
 
 export function deleteWorkspaceStatus(workspaceId: string): void {
   workspaceStatusQueries.remove(workspaceId);
+  statusSourceQueries.removeForWorkspace(workspaceId);
 }

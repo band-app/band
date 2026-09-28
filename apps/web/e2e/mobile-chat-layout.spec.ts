@@ -381,6 +381,17 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
     const viewport = await layout.readViewport();
     const notice = await layout.readLayout(layout.reinstallNotice);
     expect(notice.bottom).toBeLessThanOrEqual(viewport.height - SAFE_AREA_BOTTOM);
+    // The toast stack moves above the composer instead of covering it. It
+    // measures on the next frame, so wait for it to settle.
+    await expect
+      .poll(async () => {
+        const [toast, composer] = await Promise.all([
+          layout.readLayout(layout.reinstallNotice),
+          layout.readLayout(layout.composer),
+        ]);
+        return toast.bottom - composer.top;
+      })
+      .toBeLessThanOrEqual(0);
 
     // Turning the device doesn't bring a dismissed notice back.
     await layout.dismissReinstallNotice();

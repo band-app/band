@@ -1,5 +1,6 @@
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
 import type { AgentMode } from "../../shared/agent-sessions";
+import type { GitOpResult } from "../../shared/git-op-result";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
@@ -109,12 +110,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }
 
-  async gitPull(project: string, name: string): Promise<void> {
-    await this.trpc.workspaces.gitPull.mutate({ project, name });
+  gitPull(project: string, name: string): Promise<GitOpResult> {
+    return this.trpc.workspaces.gitPull.mutate({ project, name });
   }
 
-  async gitPush(project: string, name: string): Promise<void> {
-    await this.trpc.workspaces.gitPush.mutate({ project, name });
+  gitPush(project: string, name: string): Promise<GitOpResult> {
+    return this.trpc.workspaces.gitPush.mutate({ project, name });
   }
 
   async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {
