@@ -679,6 +679,77 @@ export class WorkspacePage {
     });
   }
 
+  /** The controls a user can see in the top row (center tabs, their close
+   *  buttons, the tab strips' header buttons, the nav cluster's buttons)
+   *  that the desktop window's drag region covers. A covered control never
+   *  gets its click in the desktop app: the mousedown starts a window drag.
+   *  Replays Chromium's computation: walk every element in document order,
+   *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
+   *  z-index, `inert` and `pointer-events` irrelevant, so a hidden but still
+   *  laid-out workspace counts. Only Electron hit-tests that region, so this
+   *  is the DOM-level projection of it; each control is sampled on a 3px
+   *  grid. Returns a label per covered control (testid, aria-label, title or
+   *  text), and throws when there is no drag rect or no tab, so a renamed
+   *  class can't pass vacuously. */
+  async controlsUnderWindowDragRegion(): Promise<string[]> {
+    return await this.page.evaluate(() => {
+      const regionOf = (el: Element) => {
+        const style = getComputedStyle(el);
+        return style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
+      };
+      const ops: { drag: boolean; rect: DOMRect }[] = [];
+      for (const el of document.querySelectorAll("*")) {
+        const region = regionOf(el);
+        if (region !== "drag" && region !== "no-drag") continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) ops.push({ drag: region === "drag", rect });
+      }
+      if (!ops.some((op) => op.drag)) throw new Error("no app-region: drag rect on the page");
+      const inDragRegion = (x: number, y: number) => {
+        let drag = false;
+        for (const { drag: isDrag, rect } of ops) {
+          if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) drag = isDrag;
+        }
+        return drag;
+      };
+      const controls = Array.from(
+        document.querySelectorAll(
+          '.dv-tab, .dv-tabs-and-actions-container button, [data-testid="app-shell__nav-overlay"] button',
+        ),
+      ).filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          el.checkVisibility({ visibilityProperty: true }) &&
+          !el.closest("[inert]")
+        );
+      });
+      if (!controls.some((el) => el.classList.contains("dv-tab"))) {
+        throw new Error("no visible .dv-tab on the page");
+      }
+      const covered: string[] = [];
+      for (const el of controls) {
+        const rect = el.getBoundingClientRect();
+        let hit = false;
+        for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
+          for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
+            hit = inDragRegion(x, y);
+          }
+        }
+        if (!hit) continue;
+        const named = el.matches("[data-testid]") ? el : el.querySelector("[data-testid]");
+        covered.push(
+          named?.getAttribute("data-testid") ??
+            el.getAttribute("aria-label") ??
+            el.getAttribute("title") ??
+            (el.textContent ?? "").trim(),
+        );
+      }
+      return covered;
+    });
+  }
+
   /** The sidebar-toggle button's viewport x-position. The nav cluster lives
    *  in a stationary overlay, so this must not change when the sidebar collapses
    *  or expands — the geometric signal that the toggle neither relocates nor
@@ -1511,16 +1582,25 @@ export class WorkspacePage {
     // button's centre in the hit-test, so a coordinate click lands on the sash
     // (a real user click on the button body still works). Enter on the focused
     // trigger opens the menu with no hit-test.
-    await this.newTabButton(workspaceId).first().focus();
-    await this.page.keyboard.press("Enter");
+    //
     // The menu is portalled to <body>, and with several workspaces cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
-    await this.page
+    const item = this.page
       .getByTestId(`workspace-center__new-tab--${kind}`)
       .filter({ visible: true })
-      .first()
-      .click();
+      .first();
+    // A new terminal grabs focus when its socket first connects. On a slow
+    // runner that can land after the trigger is focused and before Enter, so
+    // Enter goes to the shell and the menu never opens. Reopen the menu
+    // whenever it isn't open instead of waiting on an item that never shows.
+    await expect(async () => {
+      if (!(await item.isVisible())) {
+        await this.newTabButton(workspaceId).first().focus();
+        await this.page.keyboard.press("Enter");
+      }
+      await item.click({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   }
 
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
@@ -1908,6 +1988,16 @@ export class WorkspacePage {
     await test.step(`Select the right sidepanel ${tab} tab`, async () => {
       await this.rightPanelTab(tab).click();
     });
+  }
+
+  /** Wait until `workspaceId` is the shown workspace: its mounted entry is no
+   *  longer `inert` and its "+" new-tab button is visible. `waitForReady`
+   *  alone can pass on the previous workspace's toolbar right after a switch. */
+  async waitForWorkspaceReady(workspaceId: string): Promise<void> {
+    await expect(this.cachedPanelEntries(workspaceId)).not.toHaveAttribute("inert", {
+      timeout: 15_000,
+    });
+    await expect(this.newTabButton(workspaceId).first()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Wait for the shared dockview to render its header. The app boot is

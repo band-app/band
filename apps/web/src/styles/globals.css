@@ -312,6 +312,24 @@ html[data-translucent-sidebar] {
 }
 
 /*
+ * A hidden workspace entry contributes no window drag region in the desktop
+ * app. Hidden entries stay mounted and laid out at the same place as the
+ * active one, and dockview re-asserts `visibility: visible` inside them, so
+ * without this their tab strips' drag areas (`.dv-void-container`, the
+ * sidebar gutter, the center drag bar) stay in Chromium's draggable region
+ * and cover the visible workspace's tabs: a click on a tab starts a window
+ * drag instead. `initial` (no region at all), not `no-drag`: a `no-drag` rect
+ * would cut into the active entry's drag areas, and Chromium parses the
+ * `none` keyword as `no-drag`. `!important` beats the inline
+ * `-webkit-app-region` of the React-rendered drag surfaces.
+ */
+.band-workspace-entry[inert],
+.band-workspace-entry[inert] * {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat inline -webkit-app-region styles. */
+  -webkit-app-region: initial !important;
+}
+
+/*
  * Paint retention for the CDP screencast experiment. Chromium stops painting
  * a <webview> guest inside a display:none, visibility:hidden or
  * content-visibility:hidden subtree, which is how inactive dockview tabs and
