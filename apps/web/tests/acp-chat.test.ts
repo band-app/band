@@ -8,7 +8,8 @@
  * stream and the stub's own request log (what Band sent over ACP).
  */
 
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agentText,
@@ -593,6 +594,39 @@ describe("chat over ACP: sessions", () => {
       until: (e) => e.type === "history-meta",
     });
     expect(reconnect[0]).toMatchObject({ type: "subscription-opened", reset: true, revision: 1 });
+  });
+
+  it("lists only the sessions started in the workspace's directory", async () => {
+    // The Claude adapter lists sessions from every git worktree of the repo.
+    const home = seedAcpHome();
+    homes.push(home);
+    const stateDir = join(home, "acp-stub-state");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "other-worktree-session.json"),
+      JSON.stringify({
+        cwd: join(home, "worktrees", "other"),
+        title: "from another worktree",
+        updatedAt: new Date().toISOString(),
+        model: "stub-small",
+        mode: "default",
+        history: [],
+      }),
+    );
+    const server = await boot({ home, env: { BAND_TEST_ACP_LIST_ALL_CWDS: "1" } });
+    const chatId = newChatId();
+    const turn = await runTurn(server.url, chatId, "mine");
+    const attached = turn.find((e) => e.type === "session-attached");
+    const listed = await trpc<{ sessions: { sessionId: string }[] }>(
+      server.url,
+      "sessions.list",
+      { workspaceId: WORKSPACE_ID, chatId },
+      "query",
+    );
+    expect(stubRequests(home, "session/list").length).toBeGreaterThan(0);
+    expect(listed.sessions.map((s) => s.sessionId)).toEqual([
+      attached?.type === "session-attached" ? attached.sessionId : "",
+    ]);
   });
 
   it("lists sessions from Band's log when the agent can't list them", async () => {

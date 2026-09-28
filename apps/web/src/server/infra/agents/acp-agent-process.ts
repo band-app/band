@@ -14,12 +14,23 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { createLogger } from "@band-app/logger";
 import type { AcpLaunch } from "./acp-launch";
 
 const log = createLogger("acp-agent");
+
+/** Resolves symlinks so `/tmp/x` and `/private/tmp/x` compare equal. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 /** How long an agent gets to answer `initialize`, `session/new` and the like. */
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -290,6 +301,20 @@ export class AcpAgentProcess {
    * the page cap bounds that walk.
    */
   async listSessions(cwd: string, limit = 200): Promise<acp.SessionInfo[]> {
+    // The Claude adapter lists sessions from every git worktree of the repo
+    // (the Agent SDK's `includeWorktrees` defaults on), and every Band
+    // workspace is a worktree, so keep only the ones started in `cwd`.
+    const dir = canonicalPath(cwd);
+    // Sessions share a few worktree paths; resolve each one once.
+    const resolved = new Map<string, string>();
+    const inDir = (s: acp.SessionInfo) => {
+      let path = resolved.get(s.cwd);
+      if (path === undefined) {
+        path = canonicalPath(s.cwd);
+        resolved.set(s.cwd, path);
+      }
+      return path === dir;
+    };
     const sessions: acp.SessionInfo[] = [];
     let cursor: string | null | undefined;
     for (let page = 0; page < 10 && sessions.length < limit; page++) {
@@ -299,7 +324,7 @@ export class AcpAgentProcess {
           this.label,
         ),
       );
-      sessions.push(...res.sessions);
+      sessions.push(...res.sessions.filter(inDir));
       cursor = res.nextCursor;
       if (!cursor) break;
     }
