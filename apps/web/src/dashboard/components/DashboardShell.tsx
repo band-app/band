@@ -143,50 +143,14 @@ export function DashboardShell({
     [projects],
   );
 
-  // Per-label "last workspace" tracking for issue #505. Two write sites
-  // cooperate so the user's selection is captured whether they click a
-  // workspace card (effect below) or switch label without clicking
-  // anything (`setLabelFilter` further down):
-  //
-  //   - The effect records each fresh `activeWorkspaceId` under the
-  //     currently-active label. The `lastSeenActiveRef` guard skips
-  //     reruns triggered by `labelFilter` changing without
-  //     `activeWorkspaceId` changing — i.e. immediately after a label
-  //     switch, before the restore-driven navigation has propagated. If
-  //     we didn't skip, the effect would briefly stamp the *incoming*
-  //     label with the *outgoing* label's workspace and undo the
-  //     restoration we just initiated.
-  //
-  //   - `setLabelFilter` does an imperative save of the outgoing label
-  //     so the user's most recent selection is captured even when they
-  //     never explicitly clicked the workspace card after navigating to
-  //     it (e.g. direct URL / ⌘K picker / page reload).
-  const lastSeenActiveRef = useRef<string | null>(activeWorkspaceId);
-  useEffect(() => {
-    if (!activeWorkspaceId) {
-      lastSeenActiveRef.current = null;
-      return;
-    }
-    if (!labelFilter) {
-      // ALL has no per-label memory, but we still update the ref so a
-      // subsequent label switch correctly recognises the workspace as
-      // unchanged (and skips the cross-label stamp).
-      lastSeenActiveRef.current = activeWorkspaceId;
-      return;
-    }
-    if (lastSeenActiveRef.current === activeWorkspaceId) return;
-    lastSeenActiveRef.current = activeWorkspaceId;
-    // Only save when the active workspace's project is actually labelled
-    // with the current filter — see the comment block on the
-    // `setLabelFilter` invariants below for the rationale.
-    const project = findProjectForWorkspace(activeWorkspaceId);
-    if (!project || project.label !== labelFilter) return;
-    setLastWorkspace(labelFilter, activeWorkspaceId);
-  }, [labelFilter, activeWorkspaceId, setLastWorkspace, findProjectForWorkspace]);
-
-  // Per-label "last workspace" plumbing for issue #505. The orchestration
-  // lives in `setLabelFilter` below; the helper here keeps the bookkeeping
-  // out of the keyboard / dropdown handlers.
+  // Per-label "last workspace" for issue #505. Two write sites cooperate:
+  // `useRecordLabelLastWorkspace`, run by the app shell, records each
+  // workspace opened under a label (the app shell also sees a pick on the
+  // phone's full-screen dashboard, which unmounts this shell), and
+  // `setLabelFilter` below saves the outgoing label's workspace on a label
+  // switch, so a workspace reached by direct URL, the ⌘K picker or a reload
+  // is captured too. `setLabelFilter` also restores the incoming label's
+  // workspace.
   //
   // Invariants enforced by the caller:
   //   1. Saves only happen when the outgoing label is non-null (ALL has no

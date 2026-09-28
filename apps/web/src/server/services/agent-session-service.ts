@@ -148,7 +148,7 @@ const catalog = g[CATALOG_KEY] as Map<string, CatalogEntry>;
  *  a client's gap-fill cursor. */
 let transientId = -1_000_000_000;
 
-let pendingObserver: ((workspaceId: string) => void) | null = null;
+let pendingObserver: ((chatId: string, workspaceId: string) => void) | null = null;
 
 function emptyLive(): LiveState {
   return { configOptions: [], modes: null, models: null, commands: [], usage: null, title: null };
@@ -376,7 +376,7 @@ function openRequest(
     settled = true;
     rt.pending.delete(requestId);
     record(rt, { type: "request-resolved", requestId, answer });
-    pendingObserver?.(rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.workspaceId);
   };
   const handlers = make(done);
   const cancel = () => {
@@ -408,7 +408,7 @@ function requestPermission(
       () => resolve({ outcome: "cancelled" }),
     );
     record(rt, { type: "permission", requestId, request });
-    pendingObserver?.(rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.workspaceId);
   });
 }
 
@@ -431,7 +431,7 @@ function requestElicitation(
       () => resolve({ action: "cancel" }),
     );
     record(rt, { type: "elicitation", requestId, request });
-    pendingObserver?.(rt.workspaceId);
+    pendingObserver?.(rt.chatId, rt.workspaceId);
   });
 }
 
@@ -733,8 +733,8 @@ export class AgentSessionService {
   }
 
   /** Called whenever a permission or elicitation request opens or closes,
-   *  so task-service can flip the workspace's attention status. */
-  observePending(observer: (workspaceId: string) => void): void {
+   *  so task-service can flip the chat's attention status. */
+  observePending(observer: (chatId: string, workspaceId: string) => void): void {
     pendingObserver = observer;
   }
 
@@ -857,12 +857,23 @@ export class AgentSessionService {
     return true;
   }
 
-  /** True while any chat in the workspace waits on the user. */
-  hasPendingRequest(workspaceId: string): boolean {
+  /** True while the chat's agent waits on the user. */
+  hasPendingRequest(chatId: string): boolean {
+    return (runtimes.get(chatId)?.pending.size ?? 0) > 0;
+  }
+
+  /** Chats of the workspace whose agent waits on the user. */
+  chatsWithPendingRequest(workspaceId: string): string[] {
+    const chatIds: string[] = [];
     for (const rt of runtimes.values()) {
-      for (const p of rt.pending.values()) if (p.workspaceId === workspaceId) return true;
+      for (const p of rt.pending.values()) {
+        if (p.workspaceId === workspaceId) {
+          chatIds.push(rt.chatId);
+          break;
+        }
+      }
     }
-    return false;
+    return chatIds;
   }
 
   /** True while the chat's agent runs a turn. */

@@ -49,6 +49,7 @@ import {
   getOrCreateToken,
   loadSettings,
   resetAgentStatuses,
+  startStatusSourceCleanup,
 } from "./src/server/services/state.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
@@ -1135,6 +1136,8 @@ async function main() {
 
     // End agent sessions when their chat or terminal goes away (issue #682).
     agentSessionRegistry.start();
+    // Drop a chat's or terminal's agent status when it goes away.
+    startStatusSourceCleanup();
 
     // Reset any "working" agent statuses — no agent is active on a
     // fresh server start.

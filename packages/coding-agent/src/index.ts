@@ -5,7 +5,13 @@ export {
   cliInvocation,
   resumeCliInvocation,
 } from "./cli-invocation.ts";
-export { mapClaudeCodeHookStatus, mapHookPayloadToStatus } from "./hook-status.ts";
+export {
+  detectHookAgentType,
+  hookSessionId,
+  isHookSessionEnd,
+  mapClaudeCodeHookStatus,
+  mapHookPayloadToStatus,
+} from "./hook-status.ts";
 export {
   CLAUDE_CODE_DEFAULT_BINARY,
   CODEX_DEFAULT_BINARY,

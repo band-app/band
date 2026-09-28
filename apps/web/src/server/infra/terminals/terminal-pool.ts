@@ -414,6 +414,9 @@ export class TerminalPool {
     // caller can't accidentally (or deliberately) downgrade a terminal
     // pane to `chat` dispatch.
     env.BAND_DISPATCH = "terminal";
+    // Lets a coding agent's hook (`band notify`) say which terminal it runs
+    // in, so closing the terminal drops that agent's status source.
+    env.BAND_TERMINAL_ID = terminalId;
 
     // Resolve cwd: options.cwd is relative to workspace root; a saved
     // checkpoint's cwd (used only when the caller didn't ask for one — the

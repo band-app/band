@@ -166,6 +166,8 @@ const RULES: KeyRule[] = [
   exact("band:changes-collapsed-sections", [jsonPart("device")]),
   exact("band:diff-view-mode", [rawPart("device")]),
   exact("band:zoom-level", [rawPart("device")]),
+  // The workspace a restart opens (`lib/last-workspace.ts`).
+  exact("band:last-workspace", [rawPart("device")]),
   perWorkspace("band:dockview-layout-v9:", [jsonPart("device")]),
 ];
 

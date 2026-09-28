@@ -96,6 +96,12 @@ export class WorkspacePage {
     return this.workspaceCard(workspaceId).getByTestId("workspace-card__home-icon");
   }
 
+  /** The "uncommitted changes" mark of a workspace card's git status
+   *  (`GitStatusIndicator`). Scoped to the card. */
+  gitDirtyMark(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).getByTestId("workspace-card__git-dirty");
+  }
+
   /** The agent status dot inside a workspace card. `data-testid` set on the
    *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
    *  is "working" / "needs_attention". Scoped to the card. */
@@ -589,6 +595,21 @@ export class WorkspacePage {
     return this.page.getByTestId("app-shell__sidebar");
   }
 
+  /** Drag the separator between the sidebar and the center column by `dx`
+   *  pixels (positive widens the sidebar). */
+  async dragSidebarEdgeBy(dx: number): Promise<void> {
+    await test.step(`Drag the sidebar edge by ${dx}px`, async () => {
+      const box = await this.page.getByTestId("app-shell__sidebar-separator").boundingBox();
+      if (!box) throw new Error("sidebar separator not visible");
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + dx, y, { steps: 10 });
+      await this.page.mouse.up();
+    });
+  }
+
   /** The header button that toggles the sidebar (⌘B). Rendered by
    *  `NavControls` in `DesktopTitleBar.tsx`, hosted once in `AppShell`'s
    *  stationary overlay pinned over the title-bar row's left edge — it stays put in both
@@ -655,6 +676,77 @@ export class WorkspacePage {
       return Array.from(bars).every(
         (bar) => (bar.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
       );
+    });
+  }
+
+  /** The controls a user can see in the top row (center tabs, their close
+   *  buttons, the tab strips' header buttons, the nav cluster's buttons)
+   *  that the desktop window's drag region covers. A covered control never
+   *  gets its click in the desktop app: the mousedown starts a window drag.
+   *  Replays Chromium's computation: walk every element in document order,
+   *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
+   *  z-index, `inert` and `pointer-events` irrelevant, so a hidden but still
+   *  laid-out workspace counts. Only Electron hit-tests that region, so this
+   *  is the DOM-level projection of it; each control is sampled on a 3px
+   *  grid. Returns a label per covered control (testid, aria-label, title or
+   *  text), and throws when there is no drag rect or no tab, so a renamed
+   *  class can't pass vacuously. */
+  async controlsUnderWindowDragRegion(): Promise<string[]> {
+    return await this.page.evaluate(() => {
+      const regionOf = (el: Element) => {
+        const style = getComputedStyle(el);
+        return style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
+      };
+      const ops: { drag: boolean; rect: DOMRect }[] = [];
+      for (const el of document.querySelectorAll("*")) {
+        const region = regionOf(el);
+        if (region !== "drag" && region !== "no-drag") continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) ops.push({ drag: region === "drag", rect });
+      }
+      if (!ops.some((op) => op.drag)) throw new Error("no app-region: drag rect on the page");
+      const inDragRegion = (x: number, y: number) => {
+        let drag = false;
+        for (const { drag: isDrag, rect } of ops) {
+          if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) drag = isDrag;
+        }
+        return drag;
+      };
+      const controls = Array.from(
+        document.querySelectorAll(
+          '.dv-tab, .dv-tabs-and-actions-container button, [data-testid="app-shell__nav-overlay"] button',
+        ),
+      ).filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          el.checkVisibility({ visibilityProperty: true }) &&
+          !el.closest("[inert]")
+        );
+      });
+      if (!controls.some((el) => el.classList.contains("dv-tab"))) {
+        throw new Error("no visible .dv-tab on the page");
+      }
+      const covered: string[] = [];
+      for (const el of controls) {
+        const rect = el.getBoundingClientRect();
+        let hit = false;
+        for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
+          for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
+            hit = inDragRegion(x, y);
+          }
+        }
+        if (!hit) continue;
+        const named = el.matches("[data-testid]") ? el : el.querySelector("[data-testid]");
+        covered.push(
+          named?.getAttribute("data-testid") ??
+            el.getAttribute("aria-label") ??
+            el.getAttribute("title") ??
+            (el.textContent ?? "").trim(),
+        );
+      }
+      return covered;
     });
   }
 
@@ -1442,6 +1534,13 @@ export class WorkspacePage {
     return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
+  /** The dockview `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
+   *  `dv-active-tab` while that file is the active view in its group. See
+   *  `tabContainer`. */
+  fileTabContainer(path: string): Locator {
+    return this.page.locator(`.dv-tab:has([data-testid="center-file-tab--${path}"])`);
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
   // close (×).
@@ -1483,16 +1582,25 @@ export class WorkspacePage {
     // button's centre in the hit-test, so a coordinate click lands on the sash
     // (a real user click on the button body still works). Enter on the focused
     // trigger opens the menu with no hit-test.
-    await this.newTabButton(workspaceId).first().focus();
-    await this.page.keyboard.press("Enter");
+    //
     // The menu is portalled to <body>, and with several workspaces cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
-    await this.page
+    const item = this.page
       .getByTestId(`workspace-center__new-tab--${kind}`)
       .filter({ visible: true })
-      .first()
-      .click();
+      .first();
+    // A new terminal grabs focus when its socket first connects. On a slow
+    // runner that can land after the trigger is focused and before Enter, so
+    // Enter goes to the shell and the menu never opens. Reopen the menu
+    // whenever it isn't open instead of waiting on an item that never shows.
+    await expect(async () => {
+      if (!(await item.isVisible())) {
+        await this.newTabButton(workspaceId).first().focus();
+        await this.page.keyboard.press("Enter");
+      }
+      await item.click({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   }
 
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
@@ -1696,6 +1804,14 @@ export class WorkspacePage {
     });
   }
 
+  /** Open the app at `/`, the URL the desktop shell loads on every launch
+   *  (and a phone's home-screen icon opens). */
+  async launch(): Promise<void> {
+    await test.step("Launch the app at /", async () => {
+      await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
+    });
+  }
+
   /** Hard-reload the current page (preserves `localStorage`). */
   async reload(): Promise<void> {
     await test.step("Reload the dashboard", async () => {
@@ -1735,6 +1851,20 @@ export class WorkspacePage {
    *  the Changes section is expanded AND there is at least one change. */
   get changesSection(): Locator {
     return this.page.getByTestId("right-sidepanel__changes");
+  }
+
+  /** A tab button in the right sidepanel's header (`TabButton` in
+   *  `RightSidepanel.tsx`), carrying `aria-selected`. */
+  rightSidepanelTab(tab: "explorer" | "changes"): Locator {
+    return this.page.getByTestId(`right-sidepanel__tab--${tab}`);
+  }
+
+  /** Click a right-sidepanel tab and wait until it is the selected one. */
+  async selectRightSidepanelTab(tab: "explorer" | "changes"): Promise<void> {
+    await test.step(`Select the ${tab} tab in the right sidepanel`, async () => {
+      await this.rightSidepanelTab(tab).click();
+      await expect(this.rightSidepanelTab(tab)).toHaveAttribute("aria-selected", "true");
+    });
   }
 
   /** Reveal the right sidepanel by dispatching the same `band:show-right-panel`
@@ -1858,6 +1988,16 @@ export class WorkspacePage {
     await test.step(`Select the right sidepanel ${tab} tab`, async () => {
       await this.rightPanelTab(tab).click();
     });
+  }
+
+  /** Wait until `workspaceId` is the shown workspace: its mounted entry is no
+   *  longer `inert` and its "+" new-tab button is visible. `waitForReady`
+   *  alone can pass on the previous workspace's toolbar right after a switch. */
+  async waitForWorkspaceReady(workspaceId: string): Promise<void> {
+    await expect(this.cachedPanelEntries(workspaceId)).not.toHaveAttribute("inert", {
+      timeout: 15_000,
+    });
+    await expect(this.newTabButton(workspaceId).first()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Wait for the shared dockview to render its header. The app boot is

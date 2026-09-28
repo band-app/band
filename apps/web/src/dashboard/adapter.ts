@@ -198,6 +198,8 @@ export interface DashboardAdapter {
 
   // Agent status (optional)
   clearNeedsAttention?(workspaceId: string): Promise<void>;
+  /** Re-read the workspace's git status now; the result arrives on the status stream. */
+  refreshBranchStatus?(workspaceId: string): Promise<void>;
 
   // Code browsing (optional)
   getWorkspaceDiff?(

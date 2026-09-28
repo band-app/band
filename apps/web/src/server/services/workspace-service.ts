@@ -461,13 +461,16 @@ export class WorkspaceService {
 
     // `name` == `branch` at creation and is frozen from here on — sync will
     // update `branch` to track git but never `name`, keeping the id stable.
-    project.worktrees.push({
-      name: input.branch,
-      branch: input.branch,
-      path: worktreePath,
-      pinned: false,
-    });
-    saveState(state);
+    const row = { name: input.branch, branch: input.branch, path: worktreePath, pinned: false };
+    // Re-read state: `git worktree add` took a while, and a sync or another
+    // create may have saved since `state` was loaded.
+    const fresh = loadState();
+    const freshProject = fresh.projects.find((p) => p.name === input.project);
+    if (freshProject && !freshProject.worktrees.some((wt) => wt.path === worktreePath)) {
+      freshProject.worktrees.push(row);
+      saveState(fresh);
+    }
+    syncService.commitWorktreeAdd(input.project, row);
 
     const workspaceId = toWorkspaceId(input.project, input.branch);
 
