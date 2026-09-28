@@ -31,6 +31,7 @@ import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -50,6 +51,8 @@ const BRANCH = "main";
 const FILE_PATH = "src/notes.txt";
 const REPOS = ["sel-menu-editor", "sel-menu-split", "sel-menu-unified", "sel-menu-terminal"];
 const COPY_SHORTCUT = process.platform === "darwin" ? "⌘C" : "Ctrl+C";
+// Longer than the old tooltip's 500 ms show delay.
+const POPUP_WINDOW_MS = 1_000;
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -81,6 +84,9 @@ test.beforeAll(async () => {
   server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
 });
 
+// UI state lives on the server, so it doesn't reset with each browser context.
+test.beforeEach(() => resetClientState(tmpHome));
+
 test.afterAll(async () => {
   await server.close();
   cleanupTmpHome(tmpHome);
@@ -102,9 +108,8 @@ test("file editor: a selection shows no popup, and right-click offers the file a
   const editor = workspace.fileLeafVisibilityMarker(true).first();
 
   await menu.selectWordInEditor(editor, "gamma");
-  // Anchor: the word is selected (Copy puts exactly it on the clipboard below),
-  // and nothing opened on the selection alone.
-  await expect(menu.root).toHaveCount(0);
+  await expect.poll(() => menu.readEditorSelection(editor)).toBe("gamma");
+  expect(await menu.countPopupsDuring(POPUP_WINDOW_MS)).toBe(0);
 
   await menu.openOnEditorWord(editor, "gamma");
   await expect(menu.root).toBeVisible();
@@ -133,9 +138,21 @@ test("file editor: a selection shows no popup, and right-click offers the file a
   await menu.choose("add-to-chat");
   await expect.poll(async () => await chat.promptValue()).toBe(`\`${FILE_PATH}:2\` `);
 
-  // Nothing selected: only the general items. Add to Chat showed the chat, so
-  // bring the file back first.
+  // Add to Chat showed the chat, so bring the file back.
   await workspace.focusFileEditor(FILE_PATH);
+  await menu.selectWordInEditor(editor, "gamma");
+  await menu.openOnEditorWord(editor, "gamma");
+  await menu.choose("cut");
+  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("gamma");
+  await expect.poll(() => menu.readEditorSelection(editor)).toBe("");
+
+  await menu.openOnEditorWord(editor, "alpha");
+  await menu.choose("select-all");
+  await menu.openOnEditorWord(editor, "alpha");
+  await menu.choose("copy");
+  await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("alpha\n\nbeta\n");
+
+  // Nothing selected: only the general items.
   await menu.openOnEditorBlank(editor, "alpha");
   await expect(menu.item("select-all")).toBeVisible();
   await expect(menu.item("paste")).toBeVisible();
@@ -163,7 +180,8 @@ test("split diff: each side's reference uses that side's line numbers", async ({
 
   const oldSide = changes.diffEditor("old");
   await menu.selectWordInEditor(oldSide, "beta");
-  await expect(menu.root).toHaveCount(0);
+  await expect.poll(() => menu.readEditorSelection(oldSide)).toBe("beta");
+  expect(await menu.countPopupsDuring(POPUP_WINDOW_MS)).toBe(0);
   await menu.openOnEditorWord(oldSide, "beta");
   // Read-only: Copy but no Cut or Paste.
   await expect(menu.item("copy")).toBeVisible();
@@ -192,7 +210,8 @@ test("unified diff: Add to Chat appends the reference to the chat input", async 
   const editor = changes.diffEditor("new");
 
   await menu.selectWordInEditor(editor, "gamma");
-  await expect(menu.root).toHaveCount(0);
+  await expect.poll(() => menu.readEditorSelection(editor)).toBe("gamma");
+  expect(await menu.countPopupsDuring(POPUP_WINDOW_MS)).toBe(0);
   await menu.openOnEditorWord(editor, "gamma");
   await expect(menu.item("add-to-terminal")).toBeVisible();
   await expect(menu.item("copy-reference")).toBeVisible();
@@ -218,7 +237,7 @@ test("terminal: right-click offers Add to Chat, Copy, Paste and Select All", asy
 
   await terminal.selectWord("selmark42");
   await expect.poll(() => terminal.readSelection()).toBe("selmark42");
-  await expect(menu.root).toHaveCount(0);
+  expect(await menu.countPopupsDuring(POPUP_WINDOW_MS)).toBe(0);
 
   await terminal.rightClickWord("selmark42");
   await expect(menu.item("add-to-chat")).toBeVisible();
@@ -231,6 +250,15 @@ test("terminal: right-click offers Add to Chat, Copy, Paste and Select All", asy
   await menu.choose("copy");
   await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("selmark42");
 
+  // Nothing selected: Paste and Select All only.
+  await terminal.rightClickBlankRow();
+  await expect(menu.item("select-all")).toBeVisible();
+  await expect(menu.item("paste")).toBeVisible();
+  await expect(menu.item("add-to-chat")).toHaveCount(0);
+  await expect(menu.item("copy")).toHaveCount(0);
+  await menu.close();
+
+  await terminal.selectWord("selmark42");
   await terminal.rightClickWord("selmark42");
   await menu.choose("add-to-chat");
   await expect.poll(async () => await chat.promptValue()).toBe("```\nselmark42\n```\n");

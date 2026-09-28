@@ -8,7 +8,6 @@ import { writeClipboardText } from "../../lib/clipboard";
  */
 export interface SelectionToChatDetail {
   filePath: string;
-  selectedText: string;
   /** 1-based start line of the selection */
   startLine: number;
   /** 1-based end line of the selection */
@@ -157,7 +156,6 @@ export function readSelectionReference(view: EditorView): SelectionToChatDetail 
 
   return {
     filePath,
-    selectedText: view.state.sliceDoc(from, to),
     startLine: mapLine(view.state.doc.lineAt(from).number),
     endLine: mapLine(view.state.doc.lineAt(to).number),
   };

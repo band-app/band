@@ -77,6 +77,53 @@ export class SelectionMenu {
     });
   }
 
+  /** The text selected in the CodeMirror view inside `editor`, read from the
+   *  page's DOM selection (CodeMirror mirrors its selection into it). */
+  async readEditorSelection(editor: Locator): Promise<string> {
+    return await editor.evaluate((el) => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return "";
+      return el.contains(sel.anchorNode) ? sel.toString() : "";
+    });
+  }
+
+  /** How many popups (a CodeMirror tooltip, or this menu) appeared on the page
+   *  during the next `ms` milliseconds. The old selection tooltip showed 500 ms
+   *  after a selection settled, so a window longer than that catches it
+   *  coming back. `.cm-tooltip` is CodeMirror-owned DOM (see the header). */
+  async countPopupsDuring(ms: number): Promise<number> {
+    return await this.page.evaluate(
+      (windowMs) =>
+        new Promise<number>((resolve) => {
+          const selector = '.cm-tooltip, [data-testid="selection-menu"]';
+          let count = document.querySelectorAll(selector).length;
+          const observer = new MutationObserver((records) => {
+            for (const record of records) {
+              for (const node of record.addedNodes) {
+                if (!(node instanceof Element)) continue;
+                if (node.matches(selector)) count++;
+                count += node.querySelectorAll(selector).length;
+              }
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          setTimeout(() => {
+            observer.disconnect();
+            resolve(count);
+          }, windowMs);
+        }),
+      ms,
+    );
+  }
+
+  /** Dismiss the open menu without choosing anything. */
+  async close(): Promise<void> {
+    await test.step("Close the selection menu", async () => {
+      await this.page.keyboard.press("Escape");
+      await this.root.waitFor({ state: "hidden" });
+    });
+  }
+
   async choose(name: SelectionMenuItem): Promise<void> {
     await test.step(`Choose "${name}" in the selection menu`, async () => {
       await this.item(name).click();

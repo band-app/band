@@ -50,7 +50,7 @@ function MenuAction({
   onSelect: () => void;
 }) {
   return (
-    <ContextMenuItem onClick={onSelect} data-testid={`selection-menu__${testId}`}>
+    <ContextMenuItem onSelect={onSelect} data-testid={`selection-menu__${testId}`}>
       <Icon className="size-4" />
       {label}
       {shortcut && (
@@ -63,12 +63,28 @@ function MenuAction({
 }
 
 /**
- * Keep a right-click from moving the caret: CodeMirror ignores non-left
- * buttons, but the browser's own mousedown would collapse the selection on
- * Windows and Linux before the menu reads it.
+ * Where focus goes once the menu has closed. Radix's `FocusScope` keeps focus
+ * inside the menu until its close animation ends, so a `focus()` call from an
+ * item's handler would be pulled back and then lost. Items queue the element
+ * here; `onCloseAutoFocus` (fired when the menu is gone) focuses it instead of
+ * the trigger.
  */
-function keepSelectionOnRightClick(e: React.MouseEvent) {
-  if (e.button === 2) e.preventDefault();
+function useFocusAfterClose() {
+  const pendingRef = useRef<{ focus(): void } | null>(null);
+  const queue = (el: { focus(): void }) => {
+    pendingRef.current = el;
+  };
+  const flush = (e: Event) => {
+    e.preventDefault();
+    pendingRef.current?.focus();
+    pendingRef.current = null;
+  };
+  return { queue, flush };
+}
+
+function viewAt(el: EventTarget | null): EditorView | null {
+  const editorDom = el instanceof Element ? el.closest<HTMLElement>(".cm-editor") : null;
+  return editorDom ? EditorView.findFromDOM(editorDom) : null;
 }
 
 /** What the code menu acts on, captured when it opens. */
@@ -99,10 +115,21 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
   // after a touch long-press (Radix's timer, no `contextmenu`), so the target
   // is resolved when it opens, from whichever of the two events came last.
   const pointerTargetRef = useRef<Element | null>(null);
+  const focusAfterClose = useFocusAfterClose();
 
-  const viewAt = (el: EventTarget | null) => {
-    const editorDom = el instanceof Element ? el.closest<HTMLElement>(".cm-editor") : null;
-    return editorDom ? EditorView.findFromDOM(editorDom) : null;
+  // A right-click inside the selection must keep it: CodeMirror ignores
+  // non-left buttons, but the browser's own mousedown would collapse it on
+  // Windows and Linux before the menu reads it. Outside the selection the
+  // browser moves the caret as usual, so Paste lands where the user clicked.
+  const onMouseDownCapture = (e: React.MouseEvent) => {
+    if (e.button !== 2) return;
+    const view = viewAt(e.target);
+    const pos = view?.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos == null || !view) return;
+    const inSelection = view.state.selection.ranges.some(
+      (r) => !r.empty && r.from <= pos && pos <= r.to,
+    );
+    if (inSelection) e.preventDefault();
   };
 
   const onContextMenu = (e: React.MouseEvent) => {
@@ -133,28 +160,28 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
     if (!view || !target) return;
     void writeClipboardText(target.selectedText);
     view.dispatch(view.state.replaceSelection(""), { userEvent: "delete.cut" });
-    view.focus();
+    focusAfterClose.queue(view);
   };
   const copy = () => {
     if (!view || !target) return;
     void writeClipboardText(target.selectedText);
-    view.focus();
+    focusAfterClose.queue(view);
   };
   const paste = () => {
     if (!view) return;
+    focusAfterClose.queue(view);
     void readClipboardText().then((text) => {
       if (!text) return;
       view.dispatch(view.state.replaceSelection(text), {
         userEvent: "input.paste",
         scrollIntoView: true,
       });
-      view.focus();
     });
   };
   const selectAll = () => {
     if (!view) return;
     view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
-    view.focus();
+    focusAfterClose.queue(view);
   };
 
   return (
@@ -165,16 +192,20 @@ export function CodeSelectionContextMenu({ children }: { children: React.ReactEl
         onPointerDown={(e) => {
           pointerTargetRef.current = e.target as Element;
         }}
-        onMouseDownCapture={keepSelectionOnRightClick}
+        onMouseDownCapture={onMouseDownCapture}
       >
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent
         data-testid="selection-menu"
-        // Each action focuses what it acts on (the editor, or the chat or
-        // terminal it hands the reference to); restoring focus to the wrapper
-        // would undo that.
-        onCloseAutoFocus={(e) => e.preventDefault()}
+        // Focus goes to what the action queued (the editor), or stays where
+        // Add to Chat / Add to Terminal moved it, never to the wrapper. The
+        // menu is gone by now, so drop the target: it holds the view and a
+        // copy of the selected text.
+        onCloseAutoFocus={(e) => {
+          focusAfterClose.flush(e);
+          setTarget(null);
+        }}
       >
         {reference && (
           <>
@@ -249,6 +280,7 @@ export function TerminalSelectionContextMenu({
   // ⌘C / ⌘V are the terminal's copy and paste only on macOS. Elsewhere Ctrl+C
   // and Ctrl+V go to the shell, so there is no shortcut to show.
   const mac = isMacPlatform();
+  const focusAfterClose = useFocusAfterClose();
 
   // xterm's own contextmenu listener runs first (it sits deeper in the DOM), so
   // on macOS a right-click outside the selection has already selected the word
@@ -265,7 +297,7 @@ export function TerminalSelectionContextMenu({
       <ContextMenuTrigger asChild disabled={disabled} onContextMenu={onContextMenu}>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent data-testid="selection-menu" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <ContextMenuContent data-testid="selection-menu" onCloseAutoFocus={focusAfterClose.flush}>
         {selectedText && (
           <>
             <MenuAction
@@ -282,7 +314,7 @@ export function TerminalSelectionContextMenu({
               shortcut={mac ? "Cmd+C" : undefined}
               onSelect={withTerminal((term) => {
                 void writeClipboardText(selectedText);
-                term.focus();
+                focusAfterClose.queue(term);
               })}
             />
           </>
@@ -293,11 +325,11 @@ export function TerminalSelectionContextMenu({
           label="Paste"
           shortcut={mac ? "Cmd+V" : undefined}
           onSelect={withTerminal((term) => {
+            focusAfterClose.queue(term);
             void readClipboardText().then((text) => {
               // `paste` wraps the text in bracketed-paste markers when the
               // running program asked for them, like a real ⌘V.
               if (text) term.paste(text);
-              term.focus();
             });
           })}
         />
@@ -306,7 +338,10 @@ export function TerminalSelectionContextMenu({
           testId="select-all"
           icon={TextSelect}
           label="Select All"
-          onSelect={withTerminal((term) => term.selectAll())}
+          onSelect={withTerminal((term) => {
+            term.selectAll();
+            focusAfterClose.queue(term);
+          })}
         />
       </ContextMenuContent>
     </ContextMenu>

@@ -272,9 +272,12 @@ export const PromptInput = ({
       let reference: string;
       if ("text" in detail) {
         // Terminal text has no file behind it, so it goes in as a fenced block
-        // on its own lines.
+        // on its own lines. The fence is one backtick longer than any run in
+        // the text, so a ``` line in agent output can't close it early.
         const lead = current === "" || current.endsWith("\n") ? "" : "\n";
-        reference = `${lead}\`\`\`\n${detail.text.replace(/\n+$/, "")}\n\`\`\`\n`;
+        const longestRun = Math.max(0, ...(detail.text.match(/`+/g) ?? []).map((r) => r.length));
+        const fence = "`".repeat(Math.max(3, longestRun + 1));
+        reference = `${lead}${fence}\n${detail.text.replace(/\n+$/, "")}\n${fence}\n`;
       } else {
         // Wrap the shared bare reference in a markdown code span so the chat
         // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`

@@ -86,6 +86,17 @@ export class TerminalInputSurface extends TerminalSurface {
     });
   }
 
+  /** Click the first cell of the bottom row, below the prompt, where there is
+   *  no text, to drop any selection, then right-click it. */
+  async rightClickBlankRow(): Promise<void> {
+    await test.step("Right-click an empty terminal row with nothing selected", async () => {
+      const { rows } = await this.readGrid();
+      const { x, y } = await this.cellCenter(1, rows);
+      await this.page.mouse.click(x, y);
+      await this.page.mouse.click(x, y, { button: "right" });
+    });
+  }
+
   /** The text xterm has selected. */
   async readSelection(): Promise<string> {
     return await this.page.evaluate((id) => {
