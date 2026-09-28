@@ -233,6 +233,68 @@ export class SettingsPage {
     return this.dialog.getByRole("combobox", { name: "Default coding agent" });
   }
 
+  /** The open list of a select (Radix renders it as a `listbox` in a
+   *  portal, outside the dialog). */
+  get openSelectList(): Locator {
+    return this.page.getByRole("listbox");
+  }
+
+  /** An option in the open select list, by its name (agent labels are test
+   *  data). Not an exact match: an agent option's name starts with its icon's
+   *  title ("Claude Agent 01"). */
+  selectOption(name: string): Locator {
+    return this.openSelectList.getByRole("option", { name });
+  }
+
+  /** Scroll the Default agent select into view inside the dialog and open
+   *  it. */
+  async openDefaultAgentSelect(): Promise<void> {
+    await test.step("Open the Default agent select", async () => {
+      const trigger = this.defaultAgentSelect();
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await expect(this.openSelectList).toBeVisible();
+    });
+  }
+
+  /** Move focus to the last option of the open select with End. */
+  async focusLastSelectOption(): Promise<void> {
+    await test.step("Focus the last option with the keyboard", async () => {
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Scroll the open select list back to its top. The scroll box is Radix's
+   *  viewport element inside the listbox. */
+  async scrollSelectListToTop(): Promise<void> {
+    await test.step("Scroll the select list to the top", async () => {
+      await this.openSelectList.evaluate((el) => {
+        const viewport = el.querySelector("[data-radix-select-viewport]");
+        if (!viewport) throw new Error("select list has no viewport");
+        viewport.scrollTop = 0;
+      });
+    });
+  }
+
+  /** Click an option in the open select list. The list closes. */
+  async clickSelectOption(name: string): Promise<void> {
+    await test.step(`Click option "${name}"`, async () => {
+      await this.selectOption(name).click();
+      await expect(this.openSelectList).toBeHidden();
+    });
+  }
+
+  /** The rendered box of an element in viewport pixels, once its open
+   *  animation has finished. */
+  async readSettledBox(
+    locator: Locator,
+  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
+    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no layout box");
+    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
+  }
+
   /**
    * "Refresh" button next to the per-agent model list inside the Coding
    * Agents accordion. Anchored via `aria-label="Refresh models for

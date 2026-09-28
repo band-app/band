@@ -472,7 +472,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
         // variant caps height with env(safe-area-inset-top)). Desktop (sm+):
         // the centered, capped-width card — unchanged.
         variant="bottom-sheet"
-        className="flex flex-col gap-0 overflow-hidden p-0 lg:h-[80vh] lg:max-w-2xl"
+        className="flex flex-col gap-0 overflow-hidden p-0 lg:h-[calc(80vh/var(--app-zoom,1))] lg:max-w-2xl"
       >
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
           <DialogTitle>Settings</DialogTitle>

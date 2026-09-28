@@ -10,8 +10,15 @@
  * main menu, so the submenu also has to narrow to the space it gets instead
  * of hanging off the left edge.
  *
+ * The same has to hold under the app zoom (CSS `zoom` on <html>, set with
+ * Ctrl+=). Radix reports the room beside the trigger in viewport pixels, and
+ * before the fix the zoom scaled that room again: at 130% every submenu came
+ * out 30% taller than the window allowed. OpenCode's provider submenus
+ * (#717) are checked at that zoom too.
+ *
  * Real server, no tRPC mocking. The ACP stub agent is the only stub; it
- * advertises MODEL_COUNT models with long names and an effort option.
+ * advertises MODELS (long names, one provider with many models and many
+ * providers with one) and an effort option.
  */
 
 import { mkdirSync } from "node:fs";
@@ -29,15 +36,27 @@ import {
   startServer,
 } from "./helpers/server";
 import { ChatPanePage } from "./pages/ChatPanePage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-chat-model-submenu-overflow-token";
-const PROJECTS = ["submenudesktop", "submenumobile"] as const;
-const MODEL_COUNT = 40;
-const MODELS = Array.from({ length: MODEL_COUNT }, (_, i) => ({
-  value: `stub-model-${i + 1}`,
-  name: `Stub Provider/Stub Model ${String(i + 1).padStart(2, "0")} Long Name`,
-}));
-const LAST_MODEL = MODELS[MODEL_COUNT - 1].name;
+const PROJECTS = ["submenudesktop", "submenumobile", "submenuzoom", "submenuopencode"] as const;
+const pad = (n: number) => String(n).padStart(2, "0");
+// Thirty models from one provider, then one model from each of twenty more.
+// Claude Code lists them flat; OpenCode lists 21 providers under "More
+// models", and the first provider's submenu holds 30 models.
+const MODELS = [
+  ...Array.from({ length: 30 }, (_, i) => ({
+    value: `stub/stub-model-${i + 1}`,
+    name: `Stub Provider/Stub Model ${pad(i + 1)} Long Name`,
+  })),
+  ...Array.from({ length: 20 }, (_, i) => ({
+    value: `extra-${pad(i + 1)}/model`,
+    name: `Extra Provider ${pad(i + 1)}/Extra Model ${pad(i + 1)}`,
+  })),
+];
+const LAST = MODELS[MODELS.length - 1];
+const LAST_MODEL = LAST.name;
+const APP_ZOOM_STEPS = 3;
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -55,7 +74,14 @@ test.beforeAll(async () => {
     };
   });
   seedState(tmpHome, { projects });
-  seedSettings(tmpHome, { tokenSecret: TOKEN, defaultCodingAgent: "claude-code" });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code" },
+      { id: "opencode", type: "opencode", label: "OpenCode" },
+    ],
+  });
   server = await startServer({
     tmpHome,
     env: acpStubEnv(tmpHome, {
@@ -129,9 +155,7 @@ async function expectEveryModelReachable(
 
   await chatPane.typeMessage("second");
   await chatPane.submit();
-  await expect(
-    chatPane.assistantMessage(`Heard "second" on ${MODELS[MODEL_COUNT - 1].value}.`),
-  ).toBeVisible();
+  await expect(chatPane.assistantMessage(`Heard "second" on ${LAST.value}.`)).toBeVisible();
 
   // The other submenus follow the same rules.
   await chatPane.openModelMenu();
@@ -160,5 +184,80 @@ test.describe("More models submenu on a phone", () => {
     await chatPane.goto(toWorkspaceId("submenumobile", "main"));
     await chatPane.waitForReady();
     await expectEveryModelReachable(chatPane, viewport);
+  });
+});
+
+/** Zoom the app in APP_ZOOM_STEPS steps with Ctrl+=, the way a user does. */
+async function zoomIn(workspacePage: WorkspacePage): Promise<void> {
+  for (let i = 0; i < APP_ZOOM_STEPS; i++) await workspacePage.zoomInViaShortcut();
+  await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(1 + APP_ZOOM_STEPS / 10, 5);
+}
+
+test.describe("Model submenus on a short window at 130% zoom", () => {
+  const viewport = { width: 1280, height: 420 };
+  test.use({ viewport });
+
+  test("the flat model list stays inside the window and scrolls to its last model", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId("submenuzoom", "main"));
+    await chatPane.waitForReady();
+    await zoomIn(workspacePage);
+    await expectEveryModelReachable(chatPane, viewport);
+  });
+
+  test("OpenCode's provider submenus stay inside the window and scroll to their last model", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId("submenuopencode", "main"));
+    await chatPane.openNewTabMenu();
+    await chatPane.openNewChatAgentMenu();
+    await chatPane.startChatWithAgent("opencode");
+    await zoomIn(workspacePage);
+
+    await chatPane.typeMessage("first");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage(`Heard "first" on ${MODELS[0].value}.`)).toBeVisible();
+
+    await chatPane.openModelMenu();
+    await expectInsideViewport(chatPane, chatPane.modelMenuContent, viewport);
+    await chatPane.openMoreModels();
+    await expectInsideViewport(chatPane, chatPane.moreModelsContent, viewport);
+
+    // The provider list scrolls to its last provider, whose submenu opens
+    // inside the window.
+    const lastProvider = chatPane.providerSubmenu("extra-20");
+    await chatPane.focusLastMoreModel();
+    await expect(lastProvider).toBeFocused();
+    await expect(lastProvider).toBeInViewport({ ratio: 1 });
+    await chatPane.openProvider("extra-20");
+    await expectInsideViewport(chatPane, chatPane.providerModelsContent("extra-20"), viewport);
+    await expect(chatPane.providerModelOption("extra-20", "Extra Model 20")).toBeInViewport({
+      ratio: 1,
+    });
+
+    // The long provider's submenu reaches its last model by keyboard and by
+    // wheel, and the model can be picked.
+    await chatPane.scrollMoreModelsToTop();
+    await chatPane.openProvider("stub");
+    await expectInsideViewport(chatPane, chatPane.providerModelsContent("stub"), viewport);
+    const lastStub = chatPane.providerModelOption("stub", "Stub Model 30 Long Name");
+    await chatPane.focusLastProviderModel("stub");
+    await expect(lastStub).toBeFocused();
+    await expect(lastStub).toBeInViewport({ ratio: 1 });
+    await chatPane.scrollProviderModelsToTop("stub");
+    await expect(lastStub).not.toBeInViewport();
+    await chatPane.wheelProviderModelsToEnd("stub");
+    await expect(lastStub).toBeInViewport({ ratio: 1 });
+    await chatPane.clickProviderModel("stub", "Stub Model 30 Long Name");
+    await expect(chatPane.modelMenuModel).toHaveText("Stub Model 30 Long Name");
+
+    await chatPane.typeMessage("second");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage('Heard "second" on stub/stub-model-30.')).toBeVisible();
   });
 });

@@ -38,7 +38,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
         <DialogPrimitive.Content
           className={cn(
             "fixed inset-0 z-50 flex flex-col outline-none",
-            "h-[100dvh] w-screen",
+            "h-[calc(100dvh/var(--app-zoom,1))] w-[calc(100vw/var(--app-zoom,1))]",
             "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0",
           )}

@@ -464,6 +464,66 @@ export class WorkspacePage {
     });
   }
 
+  /** The "Set label" row in an open project menu (opens a submenu). */
+  get setLabelMenuItem(): Locator {
+    return this.page.getByTestId("project-list__action--set-label");
+  }
+
+  /** The open "Set label" submenu, listing "None" and every label. */
+  get labelSubmenu(): Locator {
+    return this.page.getByTestId("project-list__label-submenu");
+  }
+
+  /** A row in the open "Set label" submenu, by label name (test data). */
+  labelSubmenuOption(name: string): Locator {
+    return this.labelSubmenu.getByRole("menuitem", { name, exact: true });
+  }
+
+  /** Open the "Set label" submenu of the open project menu. */
+  async openSetLabelSubmenu(): Promise<void> {
+    await test.step("Open the Set label submenu", async () => {
+      await this.setLabelMenuItem.click();
+      await expect(this.labelSubmenu).toBeVisible();
+    });
+  }
+
+  /** Move keyboard focus to the last row of the open "Set label" submenu:
+   *  into the submenu, then End. */
+  async focusLastLabelSubmenuOption(): Promise<void> {
+    await test.step("Focus the last label with the keyboard", async () => {
+      await this.labelSubmenu.getByRole("menuitem").first().focus();
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Scroll the open "Set label" submenu back to its top. */
+  async scrollLabelSubmenuToTop(): Promise<void> {
+    await test.step("Scroll the Set label submenu to the top", async () => {
+      await this.labelSubmenu.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+    });
+  }
+
+  /** Click a label in the open "Set label" submenu. The menu closes. */
+  async clickLabelSubmenuOption(name: string): Promise<void> {
+    await test.step(`Click label "${name}"`, async () => {
+      await this.labelSubmenuOption(name).click();
+      await expect(this.contextMenu).toHaveCount(0);
+    });
+  }
+
+  /** The rendered box of an element in viewport pixels, once its open
+   *  animation has finished. */
+  async readSettledBox(
+    locator: Locator,
+  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
+    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no layout box");
+    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
+  }
+
   /** Click a workspace card to switch to that workspace via the dashboard
    *  sidebar's client-side navigation. Unlike `goto()`, which does a full
    *  browser navigation that resets React state (including the

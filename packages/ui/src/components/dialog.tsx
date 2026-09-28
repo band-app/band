@@ -70,6 +70,10 @@ function DialogOverlay({
 // animation mobile-only; the `command-palette` variant has NO desktop
 // animation at all (a keyboard-summoned surface must appear instantly).
 //
+// Viewport units are divided by `--app-zoom`: the web app zooms its UI with
+// CSS `zoom` on `<html>`, which multiplies `vh` like any other length, so at
+// 130% a `70vh` dialog would be 91% of the window tall and run off its bottom.
+//
 // Every variant sets `border-border` explicitly: in Tailwind v4 a bare
 // `border` falls back to currentColor, which draws a bright white edge in
 // the dark theme.
@@ -82,10 +86,10 @@ const DIALOG_CONTENT_VARIANTS = {
     "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
     // Mobile (< lg): bottom drawer
     "inset-x-0 bottom-0 w-full max-w-none rounded-t-2xl border border-b-0 p-6",
-    "max-h-[calc(100dvh-env(safe-area-inset-top)-1.5rem)]",
+    "max-h-[calc(100dvh/var(--app-zoom,1)-env(safe-area-inset-top)-1.5rem)]",
     "max-lg:data-[state=open]:slide-in-from-bottom max-lg:data-[state=closed]:slide-out-to-bottom",
     // Desktop (lg+): revert to the centred modal
-    "lg:inset-auto lg:top-[50%] lg:left-[50%] lg:bottom-auto lg:w-full lg:max-w-lg lg:max-h-[85vh] lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-lg lg:border-b",
+    "lg:inset-auto lg:top-[50%] lg:left-[50%] lg:bottom-auto lg:w-full lg:max-w-lg lg:max-h-[calc(85vh/var(--app-zoom,1))] lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-lg lg:border-b",
     "lg:data-[state=open]:zoom-in-95 lg:data-[state=closed]:zoom-out-95",
   ].join(" "),
   "command-palette": [
@@ -101,13 +105,13 @@ const DIALOG_CONTENT_VARIANTS = {
     // floats at `bottom: var(--kb-inset)` (keyboard height; 0 when closed) so
     // the input clears the on-screen keyboard — see `useKeyboardInset`.
     "inset-x-0 bottom-[var(--kb-inset,0px)] w-full max-w-none rounded-t-2xl border border-b-0",
-    "max-h-[calc(100dvh-var(--kb-inset,0px)-env(safe-area-inset-top)-1.5rem)]",
+    "max-h-[calc(100dvh/var(--app-zoom,1)-var(--kb-inset,0px)-env(safe-area-inset-top)-1.5rem)]",
     "max-lg:[&_[data-slot=command]]:flex-col-reverse",
     "max-lg:[&_[cmdk-input-wrapper]]:border-t max-lg:[&_[cmdk-input-wrapper]]:border-b-0",
     "max-lg:data-[state=open]:slide-in-from-bottom max-lg:data-[state=closed]:slide-out-to-bottom",
     // Desktop (lg+): anchored in the upper third by its TOP edge — no
     // `translate-y`, so the input never moves as the list grows downward.
-    "lg:inset-x-auto lg:bottom-auto lg:top-[12vh] lg:left-1/2 lg:w-full lg:max-w-lg lg:max-h-[70vh] lg:-translate-x-1/2 lg:rounded-lg lg:border",
+    "lg:inset-x-auto lg:bottom-auto lg:top-[calc(12vh/var(--app-zoom,1))] lg:left-1/2 lg:w-full lg:max-w-lg lg:max-h-[calc(70vh/var(--app-zoom,1))] lg:-translate-x-1/2 lg:rounded-lg lg:border",
   ].join(" "),
 } as const;
 

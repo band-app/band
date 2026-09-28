@@ -304,12 +304,12 @@ function SortableProject({
         )}
         {labels.length > 0 && (
           <Sub>
-            <SubTrigger>
+            <SubTrigger data-testid="project-list__action--set-label">
               <Tag />
               Set label
             </SubTrigger>
             <Portal>
-              <SubContent>
+              <SubContent data-testid="project-list__label-submenu">
                 <Item onClick={() => updateProjectLabel(project.name, null)}>
                   <span className="flex-1">None</span>
                   {!project.label && <Check className="size-3" />}

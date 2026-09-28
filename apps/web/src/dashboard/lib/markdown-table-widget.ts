@@ -1132,10 +1132,15 @@ class TableEditor {
 
     host.appendChild(menu);
     const hostRect = host.getBoundingClientRect();
+    // Rects are in viewport pixels and `left` / `top` in CSS pixels, which
+    // the app zoom (CSS `zoom` on <html>) scales; convert between the two.
+    const scale = host.offsetWidth > 0 ? hostRect.width / host.offsetWidth : 1;
+    const hostWidth = host.offsetWidth;
     const width = menu.offsetWidth;
-    let left = (alignEnd ? anchor.right - width : anchor.left) - hostRect.left;
-    const top = anchor.bottom - hostRect.top + 4;
-    if (left + width > hostRect.width - 8) left = Math.max(8, hostRect.width - width - 8);
+    let left = ((alignEnd ? anchor.right : anchor.left) - hostRect.left) / scale;
+    if (alignEnd) left -= width;
+    const top = (anchor.bottom - hostRect.top) / scale + 4;
+    if (left + width > hostWidth - 8) left = Math.max(8, hostWidth - width - 8);
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
     buttons.find((b) => !b.disabled)?.focus();
