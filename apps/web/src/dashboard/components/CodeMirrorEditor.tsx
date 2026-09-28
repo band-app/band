@@ -1,6 +1,6 @@
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseEditorExtensions,
@@ -112,7 +112,7 @@ export function CodeMirrorEditor({
   const markdownPreviewRef = useRef(markdownPreview);
   markdownPreviewRef.current = markdownPreview;
   const isMarkdownPreview = markdownPreview != null;
-  const widthCompartmentRef = useRef(new Compartment());
+  const [widthCompartment] = useState(() => new Compartment());
   const markdownPreviewWidthRef = useRef(markdownPreviewWidth);
   markdownPreviewWidthRef.current = markdownPreviewWidth;
   /** The width the current view was built or last reconfigured with. */
@@ -173,9 +173,7 @@ export function CodeMirrorEditor({
         ...(preview
           ? [
               ...markdownLivePreviewExtensions({ ...preview, isDark, onSave }),
-              widthCompartmentRef.current.of(
-                markdownPreviewWidthTheme(markdownPreviewWidthRef.current),
-              ),
+              widthCompartment.of(markdownPreviewWidthTheme(markdownPreviewWidthRef.current)),
             ]
           : baseEditorExtensions(isDark, onSave)),
         searchHighlightOnly(),
@@ -293,7 +291,7 @@ export function CodeMirrorEditor({
         onEditorViewRef.current?.(null);
       }
     };
-  }, [language, isDark, filePath, isMarkdownPreview, readOnly]);
+  }, [language, isDark, filePath, isMarkdownPreview, readOnly, widthCompartment]);
 
   // Width changes swap only the width theme, so the view keeps its document,
   // selection and history, and CodeMirror's scroll anchor keeps the same text
@@ -303,11 +301,9 @@ export function CodeMirrorEditor({
     if (!view || !isMarkdownPreview || appliedWidthRef.current === markdownPreviewWidth) return;
     appliedWidthRef.current = markdownPreviewWidth;
     view.dispatch({
-      effects: widthCompartmentRef.current.reconfigure(
-        markdownPreviewWidthTheme(markdownPreviewWidth),
-      ),
+      effects: widthCompartment.reconfigure(markdownPreviewWidthTheme(markdownPreviewWidth)),
     });
-  }, [markdownPreviewWidth, isMarkdownPreview]);
+  }, [markdownPreviewWidth, isMarkdownPreview, widthCompartment]);
 
   // Handle line/lineEnd/column changes without recreating the editor
   useEffect(() => {

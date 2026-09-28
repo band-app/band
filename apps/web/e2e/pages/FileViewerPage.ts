@@ -12,6 +12,8 @@
  * stable hook of its own for its content surface, and a CodeMirror major
  * upgrade that renamed it would flow through this one place. We scope it
  * under our own `file-viewer__root` test id so the brittle part is bounded.
+ * `.cm-scroller` (CodeMirror's scroll container, `previewScroller`) has the
+ * same caveat and is scoped under `file-viewer__markdown-preview`.
  *
  * This is a SECONDARY page object — it owns no routes and constructs no
  * URLs, so it does NOT follow the `(page, baseUrl, …)` + `goto()`
@@ -121,14 +123,27 @@ export class FileViewerPage {
     });
   }
 
+  /** The markdown preview's scroll container (third-party class, see the
+   *  header note). */
+  private get previewScroller(): Locator {
+    return this.markdownPreview.locator(".cm-scroller");
+  }
+
   /** Widths in px of the preview pane and of its text column (CodeMirror's
-   *  `.cm-content`, see the `editor` note above). */
-  async previewWidths(): Promise<{ pane: number; column: number }> {
+   *  `.cm-content`, see the `editor` note above), and the column's side
+   *  padding. The column width includes its padding. */
+  async previewWidths(): Promise<{ pane: number; column: number; sidePadding: string }> {
     const pane = await this.markdownPreview.evaluate((el) => el.getBoundingClientRect().width);
-    const column = await this.markdownPreview
+    const { column, sidePadding } = await this.markdownPreview
       .locator(".cm-content")
-      .evaluate((el) => el.getBoundingClientRect().width);
-    return { pane, column };
+      .evaluate((el) => {
+        const style = getComputedStyle(el);
+        return {
+          column: el.getBoundingClientRect().width,
+          sidePadding: `${style.paddingLeft} ${style.paddingRight}`,
+        };
+      });
+    return { pane, column, sidePadding };
   }
 
   /** Scroll the preview until the heading `name` (fixture text) is at the
@@ -169,15 +184,13 @@ export class FileViewerPage {
   async previewHeadingOffset(name: string): Promise<number> {
     const heading = this.markdownPreview.getByRole("heading", { name, exact: true });
     const top = await heading.evaluate((el) => el.getBoundingClientRect().top);
-    const scrollerTop = await this.markdownPreview
-      .locator(".cm-scroller")
-      .evaluate((el) => el.getBoundingClientRect().top);
+    const scrollerTop = await this.previewScroller.evaluate((el) => el.getBoundingClientRect().top);
     return top - scrollerTop;
   }
 
   /** The preview scroller's scrollTop in px. */
   async previewScrollTop(): Promise<number> {
-    return this.markdownPreview.locator(".cm-scroller").evaluate((el) => el.scrollTop);
+    return this.previewScroller.evaluate((el) => el.scrollTop);
   }
 
   /** A heading rendered in the markdown preview. Heading lines carry

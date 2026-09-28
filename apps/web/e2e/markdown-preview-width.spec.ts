@@ -51,6 +51,18 @@ const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile:
 
 test.use(DESKTOP);
 
+/** Full width: the column (border-box, so padding included) fills the pane,
+ *  short of at most a scrollbar, and keeps its 32px side padding. */
+async function expectFullWidth(viewer: FileViewerPage): Promise<void> {
+  await expect
+    .poll(async () => {
+      const { pane, column } = await viewer.previewWidths();
+      return pane - column;
+    })
+    .toBeLessThan(20);
+  expect((await viewer.previewWidths()).sidePadding).toBe("32px 32px");
+}
+
 let server: ServerHandle;
 let tmpHome: string;
 
@@ -85,6 +97,7 @@ test.afterAll(async () => {
 
 test("full width sticks across a reload and a restart, and toggling keeps edits and scroll", async ({
   page,
+  browser,
 }) => {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   const viewer = new FileViewerPage(page);
@@ -107,10 +120,7 @@ test("full width sticks across a reload and a restart, and toggling keeps edits 
 
   await viewer.togglePreviewWidth();
   await expect(viewer.previewWidthToggle).toHaveAttribute("aria-pressed", "true");
-  // The column spans the pane, less the 32px side padding on each side.
-  await expect
-    .poll(async () => (await viewer.previewWidths()).column)
-    .toBeGreaterThan(narrow.pane - 70);
+  await expectFullWidth(viewer);
   // The lines rewrapped, and the heading the user was reading is still at
   // the top of the view: the editor kept its place instead of restarting.
   expect(await viewer.previewScrollTop()).toBeGreaterThan(0);
@@ -131,27 +141,34 @@ test("full width sticks across a reload and a restart, and toggling keeps edits 
   await workspacePage.waitForReady();
   await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
   await expect(viewer.previewWidthToggle).toHaveAttribute("aria-pressed", "true");
-  const afterReload = await viewer.previewWidths();
-  expect(afterReload.column).toBeGreaterThan(afterReload.pane - 70);
+  await expectFullWidth(viewer);
 
+  // After a restart, a browser with empty localStorage gets the choice from
+  // the server alone (this page's localStorage would otherwise re-upload it).
   server = await server.restart();
-  await workspacePage.goto(WORKSPACE);
-  await workspacePage.waitForReady();
-  await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
-  await expect(viewer.previewWidthToggle).toHaveAttribute("aria-pressed", "true");
-  const afterRestart = await viewer.previewWidths();
-  expect(afterRestart.column).toBeGreaterThan(afterRestart.pane - 70);
+  const context = await browser.newContext(DESKTOP);
+  try {
+    const freshPage = await context.newPage();
+    const fresh = new WorkspacePage(freshPage, server.url, TOKEN);
+    const freshViewer = new FileViewerPage(freshPage);
+    await fresh.goto(WORKSPACE);
+    await fresh.waitForReady();
+    await fresh.openFileLeaf(FILE);
+    await expect(freshViewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
+    await expect(freshViewer.previewWidthToggle).toHaveAttribute("aria-pressed", "true");
+    await expectFullWidth(freshViewer);
 
-  // And back to narrow.
-  await viewer.togglePreviewWidth();
-  await expect(viewer.previewWidthToggle).toHaveAttribute("aria-pressed", "false");
-  await expect.poll(async () => (await viewer.previewWidths()).column).toBe(NARROW_PX);
-  await expect
-    .poll(() => workspacePage.readServerClientState(null, WIDTH_KEY, "desktop"))
-    .toBe("narrow");
+    // And back to narrow.
+    await freshViewer.togglePreviewWidth();
+    await expect(freshViewer.previewWidthToggle).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(async () => (await freshViewer.previewWidths()).column).toBe(NARROW_PX);
+    await expect.poll(() => fresh.readServerClientState(null, WIDTH_KEY, "desktop")).toBe("narrow");
+  } finally {
+    await context.close();
+  }
 });
 
-test("a phone shows the preview full width, without the toggle", async ({ browser }) => {
+test("a phone shows the preview without the width toggle", async ({ browser }) => {
   const context = await browser.newContext(PHONE);
   try {
     const page = await context.newPage();
@@ -161,8 +178,6 @@ test("a phone shows the preview full width, without the toggle", async ({ browse
     await workspacePage.waitForMobileReady();
     await workspacePage.openFileLeaf(FILE);
     await expect(viewer.previewHeading(1, "Long document")).toBeVisible({ timeout: 20_000 });
-    const widths = await viewer.previewWidths();
-    expect(widths.column).toBeGreaterThan(widths.pane - 70);
     await expect(viewer.previewWidthToggle).toHaveCount(0);
   } finally {
     await context.close();
