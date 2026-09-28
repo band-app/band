@@ -284,17 +284,6 @@ export class SettingsPage {
     });
   }
 
-  /** The rendered box of an element in viewport pixels, once its open
-   *  animation has finished. */
-  async readSettledBox(
-    locator: Locator,
-  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
-    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    const box = await locator.boundingBox();
-    if (!box) throw new Error("element has no layout box");
-    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
-  }
-
   /**
    * "Refresh" button next to the per-agent model list inside the Coding
    * Agents accordion. Anchored via `aria-label="Refresh models for

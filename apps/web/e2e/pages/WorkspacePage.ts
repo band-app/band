@@ -377,6 +377,13 @@ export class WorkspacePage {
     });
   }
 
+  /** Zoom the app in `steps` steps with Ctrl+=, then wait until the zoom
+   *  (`--app-zoom`) is 1 + steps / 10. */
+  async zoomInBy(steps: number): Promise<void> {
+    for (let i = 0; i < steps; i++) await this.zoomInViaShortcut();
+    await expect.poll(() => this.readAppZoom()).toBeCloseTo(1 + steps / 10, 5);
+  }
+
   /** Zoom the app out by one step via the real Ctrl/Cmd+- shortcut. Mirror
    *  of `zoomInViaShortcut`; "Minus" so `e.key` resolves to "-". */
   async zoomOutViaShortcut(): Promise<void> {
@@ -511,17 +518,6 @@ export class WorkspacePage {
       await this.labelSubmenuOption(name).click();
       await expect(this.contextMenu).toHaveCount(0);
     });
-  }
-
-  /** The rendered box of an element in viewport pixels, once its open
-   *  animation has finished. */
-  async readSettledBox(
-    locator: Locator,
-  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
-    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    const box = await locator.boundingBox();
-    if (!box) throw new Error("element has no layout box");
-    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
   }
 
   /** Click a workspace card to switch to that workspace via the dashboard

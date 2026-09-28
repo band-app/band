@@ -447,17 +447,6 @@ export class ChatPanePage {
     });
   }
 
-  /** The rendered box of an element, in viewport pixels, once its open
-   *  animation (a zoom from 95%) has finished. */
-  async readBox(
-    locator: Locator,
-  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
-    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    const box = await locator.boundingBox();
-    if (!box) throw new Error("element has no layout box");
-    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
-  }
-
   /** Close an open menu with Escape. */
   async closeMenu(): Promise<void> {
     await test.step("Close the menu", async () => {

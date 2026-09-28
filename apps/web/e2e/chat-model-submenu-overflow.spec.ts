@@ -23,9 +23,10 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
+import { expectInsideViewport } from "./helpers/geometry";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -56,7 +57,6 @@ const MODELS = [
 ];
 const LAST = MODELS[MODELS.length - 1];
 const LAST_MODEL = LAST.name;
-const APP_ZOOM_STEPS = 3;
 
 let server: ServerHandle;
 let tmpHome: string;
@@ -110,18 +110,6 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-async function expectInsideViewport(
-  chatPane: ChatPanePage,
-  locator: Locator,
-  viewport: { width: number; height: number },
-): Promise<void> {
-  const box = await chatPane.readBox(locator);
-  expect(box.top).toBeGreaterThanOrEqual(0);
-  expect(box.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(box.left).toBeGreaterThanOrEqual(0);
-  expect(box.right).toBeLessThanOrEqual(viewport.width);
-}
-
 async function expectEveryModelReachable(
   chatPane: ChatPanePage,
   viewport: { width: number; height: number },
@@ -131,11 +119,11 @@ async function expectEveryModelReachable(
   await expect(chatPane.assistantMessage(`Heard "first" on ${MODELS[0].value}.`)).toBeVisible();
 
   await chatPane.openModelMenu();
-  await expectInsideViewport(chatPane, chatPane.modelMenuContent, viewport);
+  await expectInsideViewport(chatPane.modelMenuContent, viewport);
 
   await chatPane.openMoreModels();
   await expect(chatPane.moreModelsOption(MODELS[1].name)).toBeInViewport();
-  await expectInsideViewport(chatPane, chatPane.moreModelsContent, viewport);
+  await expectInsideViewport(chatPane.moreModelsContent, viewport);
 
   // Keyboard: End focuses the last model and scrolls it fully into view.
   const last = chatPane.moreModelsOption(LAST_MODEL);
@@ -160,7 +148,7 @@ async function expectEveryModelReachable(
   // The other submenus follow the same rules.
   await chatPane.openModelMenu();
   await chatPane.openEffortSubmenu();
-  await expectInsideViewport(chatPane, chatPane.effortSubmenuContent, viewport);
+  await expectInsideViewport(chatPane.effortSubmenuContent, viewport);
 }
 
 test.describe("More models submenu on a short desktop window", () => {
@@ -187,12 +175,6 @@ test.describe("More models submenu on a phone", () => {
   });
 });
 
-/** Zoom the app in APP_ZOOM_STEPS steps with Ctrl+=, the way a user does. */
-async function zoomIn(workspacePage: WorkspacePage): Promise<void> {
-  for (let i = 0; i < APP_ZOOM_STEPS; i++) await workspacePage.zoomInViaShortcut();
-  await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(1 + APP_ZOOM_STEPS / 10, 5);
-}
-
 test.describe("Model submenus on a short window at 130% zoom", () => {
   const viewport = { width: 1280, height: 420 };
   test.use({ viewport });
@@ -204,7 +186,7 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await chatPane.goto(toWorkspaceId("submenuzoom", "main"));
     await chatPane.waitForReady();
-    await zoomIn(workspacePage);
+    await workspacePage.zoomInBy(3);
     await expectEveryModelReachable(chatPane, viewport);
   });
 
@@ -217,16 +199,16 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     await chatPane.openNewTabMenu();
     await chatPane.openNewChatAgentMenu();
     await chatPane.startChatWithAgent("opencode");
-    await zoomIn(workspacePage);
+    await workspacePage.zoomInBy(3);
 
     await chatPane.typeMessage("first");
     await chatPane.submit();
     await expect(chatPane.assistantMessage(`Heard "first" on ${MODELS[0].value}.`)).toBeVisible();
 
     await chatPane.openModelMenu();
-    await expectInsideViewport(chatPane, chatPane.modelMenuContent, viewport);
+    await expectInsideViewport(chatPane.modelMenuContent, viewport);
     await chatPane.openMoreModels();
-    await expectInsideViewport(chatPane, chatPane.moreModelsContent, viewport);
+    await expectInsideViewport(chatPane.moreModelsContent, viewport);
 
     // The provider list scrolls to its last provider, whose submenu opens
     // inside the window.
@@ -235,7 +217,7 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     await expect(lastProvider).toBeFocused();
     await expect(lastProvider).toBeInViewport({ ratio: 1 });
     await chatPane.openProvider("extra-20");
-    await expectInsideViewport(chatPane, chatPane.providerModelsContent("extra-20"), viewport);
+    await expectInsideViewport(chatPane.providerModelsContent("extra-20"), viewport);
     await expect(chatPane.providerModelOption("extra-20", "Extra Model 20")).toBeInViewport({
       ratio: 1,
     });
@@ -244,12 +226,13 @@ test.describe("Model submenus on a short window at 130% zoom", () => {
     // wheel, and the model can be picked.
     await chatPane.scrollMoreModelsToTop();
     await chatPane.openProvider("stub");
-    await expectInsideViewport(chatPane, chatPane.providerModelsContent("stub"), viewport);
+    await expectInsideViewport(chatPane.providerModelsContent("stub"), viewport);
     const lastStub = chatPane.providerModelOption("stub", "Stub Model 30 Long Name");
     await chatPane.focusLastProviderModel("stub");
     await expect(lastStub).toBeFocused();
     await expect(lastStub).toBeInViewport({ ratio: 1 });
     await chatPane.scrollProviderModelsToTop("stub");
+    await expect(chatPane.providerModelOption("stub", "Stub Model 01 Long Name")).toBeInViewport();
     await expect(lastStub).not.toBeInViewport();
     await chatPane.wheelProviderModelsToEnd("stub");
     await expect(lastStub).toBeInViewport({ ratio: 1 });

@@ -20,6 +20,6 @@ export const POPPER_MAX_HEIGHT =
 export const POPPER_MAX_WIDTH =
   "max-w-[calc(var(--radix-popper-available-width)/var(--app-zoom,1))]";
 
-/** The trigger's size, for a select list at least as wide as its trigger. */
+/** The trigger's width, so a select list is at least as wide as its trigger. */
 export const POPPER_TRIGGER_WIDTH =
   "min-w-[calc(var(--radix-popper-anchor-width)/var(--app-zoom,1))]";

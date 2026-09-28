@@ -13,7 +13,7 @@
  * so it takes only `page`.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 export class CommandPalette {
   readonly dialog: Locator;
@@ -39,6 +39,14 @@ export class CommandPalette {
   }
 
   /** Run a command by clicking its row. */
+  /** Close the palette with Escape. */
+  async close(): Promise<void> {
+    await test.step("Close the command palette", async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.dialog).toBeHidden();
+    });
+  }
+
   async run(commandId: string): Promise<void> {
     await test.step(`Run palette command ${commandId}`, async () => {
       await this.item(commandId).click();

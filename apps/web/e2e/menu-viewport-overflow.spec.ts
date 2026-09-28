@@ -1,6 +1,6 @@
 /**
- * A context submenu and a select list, taller than a short window, at 130%
- * app zoom.
+ * A context submenu, a select list, the command palette and a toolbar
+ * dialog in a short window at 130% app zoom.
  *
  * Every Radix menu, submenu, select and popover caps its height at the room
  * Radix reports between its trigger and the window edge, and scrolls. That
@@ -8,7 +8,9 @@
  * with Ctrl+=) scales every CSS pixel inside the menu. Before the fix a
  * 130% menu came out 30% taller than the room it was given and ran off the
  * window, and the project menu's "Set label" submenu had no cap at all. The
- * chat's model submenus are covered in chat-model-submenu-overflow.spec.ts.
+ * zoom also scaled `vh`, so the 70vh command palette and the 80vh toolbar
+ * dialogs ran past the bottom edge. The chat's model submenus are covered in
+ * chat-model-submenu-overflow.spec.ts.
  *
  * Real server, no tRPC mocking, no stubs: the labels and coding agents are
  * seeded into settings.json.
@@ -16,9 +18,10 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { acpStubEnv } from "./helpers/acp-stub";
+import { expectInsideViewport } from "./helpers/geometry";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -28,6 +31,8 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { CommandPalette } from "./pages/CommandPalette";
+import { ReportsDialog } from "./pages/ReportsDialog";
 import { SettingsPage } from "./pages/SettingsPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
@@ -46,7 +51,6 @@ const AGENTS = Array.from({ length: 30 }, (_, i) => ({
   label: `Agent ${pad(i + 1)}`,
 }));
 const LAST_AGENT = AGENTS[AGENTS.length - 1];
-const APP_ZOOM_STEPS = 3;
 const viewport = { width: 1280, height: 420 };
 
 test.use({ viewport });
@@ -86,40 +90,17 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-/** Zoom the app in APP_ZOOM_STEPS steps with Ctrl+=, the way a user does. */
-async function zoomIn(workspacePage: WorkspacePage): Promise<void> {
-  for (let i = 0; i < APP_ZOOM_STEPS; i++) await workspacePage.zoomInViaShortcut();
-  await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(1 + APP_ZOOM_STEPS / 10, 5);
-}
-
-async function expectInsideViewport(
-  readBox: (locator: Locator) => Promise<{
-    top: number;
-    bottom: number;
-    left: number;
-    right: number;
-  }>,
-  locator: Locator,
-): Promise<void> {
-  const box = await readBox(locator);
-  expect(box.top).toBeGreaterThanOrEqual(0);
-  expect(box.bottom).toBeLessThanOrEqual(viewport.height);
-  expect(box.left).toBeGreaterThanOrEqual(0);
-  expect(box.right).toBeLessThanOrEqual(viewport.width);
-}
-
 test("the project menu's Set label submenu stays inside the window and scrolls to its last label", async ({
   page,
 }) => {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  const readBox = (locator: Locator) => workspacePage.readSettledBox(locator);
   await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
-  await zoomIn(workspacePage);
+  await workspacePage.zoomInBy(3);
 
   await workspacePage.openProjectContextMenu(PROJECT);
   await expect(workspacePage.contextMenu.first()).toBeVisible();
   await workspacePage.openSetLabelSubmenu();
-  await expectInsideViewport(readBox, workspacePage.labelSubmenu);
+  await expectInsideViewport(workspacePage.labelSubmenu, viewport);
 
   const last = workspacePage.labelSubmenuOption(LAST_LABEL.name);
   await workspacePage.focusLastLabelSubmenuOption();
@@ -127,6 +108,7 @@ test("the project menu's Set label submenu stays inside the window and scrolls t
   await expect(last).toBeInViewport({ ratio: 1 });
 
   await workspacePage.scrollLabelSubmenuToTop();
+  await expect(workspacePage.labelSubmenuOption(LABELS[0].name)).toBeInViewport();
   await expect(last).not.toBeInViewport();
   await workspacePage.clickLabelSubmenuOption(LAST_LABEL.name);
 
@@ -140,14 +122,13 @@ test("the Default agent select stays inside the window and scrolls to its last a
 }) => {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
-  const readBox = (locator: Locator) => settingsPage.readSettledBox(locator);
   await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
-  await zoomIn(workspacePage);
+  await workspacePage.zoomInBy(3);
 
   await settingsPage.openDialog();
-  await expectInsideViewport(readBox, settingsPage.dialog);
+  await expectInsideViewport(settingsPage.dialog, viewport);
   await settingsPage.openDefaultAgentSelect();
-  await expectInsideViewport(readBox, settingsPage.openSelectList);
+  await expectInsideViewport(settingsPage.openSelectList, viewport);
 
   const last = settingsPage.selectOption(LAST_AGENT.label);
   await settingsPage.focusLastSelectOption();
@@ -155,7 +136,26 @@ test("the Default agent select stays inside the window and scrolls to its last a
   await expect(last).toBeInViewport({ ratio: 1 });
 
   await settingsPage.scrollSelectListToTop();
+  await expect(settingsPage.selectOption(AGENTS[0].label)).toBeInViewport();
   await expect(last).not.toBeInViewport();
   await settingsPage.clickSelectOption(LAST_AGENT.label);
   await expect(settingsPage.defaultAgentSelect()).toContainText(LAST_AGENT.label);
+});
+
+test("the command palette and a toolbar dialog stay inside the window", async ({ page }) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const palette = new CommandPalette(page);
+  const reports = new ReportsDialog(page, server.url, TOKEN);
+  await workspacePage.goto(toWorkspaceId(PROJECT, "main"));
+  await workspacePage.zoomInBy(3);
+
+  await palette.open();
+  await expect(palette.dialog).toBeVisible();
+  await expectInsideViewport(palette.dialog, viewport);
+  await palette.close();
+
+  // Reopening the dashboard keeps the zoom, which lives in client state.
+  await reports.open();
+  await expect.poll(() => workspacePage.readAppZoom()).toBeCloseTo(1.3, 5);
+  await expectInsideViewport(reports.dialog, viewport);
 });

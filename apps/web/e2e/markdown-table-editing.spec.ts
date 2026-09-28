@@ -14,6 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { readSettledBox } from "./helpers/geometry";
 import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
@@ -37,7 +38,7 @@ const WORKSPACE = toWorkspaceId(PROJECT, BRANCH);
 const TABLE = ["| Name | Role |", "|------|:----:|", "| Ada   | **eng** |", "| Bob | pm |"];
 const FILE = (table: string[]) => ["# Team", "", ...table, "", "After.", ""].join("\n");
 
-const FILES = ["CELLS.md", "KEYS.md", "STRUCTURE.md", "EXPORT.md"];
+const FILES = ["CELLS.md", "KEYS.md", "STRUCTURE.md", "EXPORT.md", "ZOOM.md"];
 // A trailing comment, double- and single-quoted values, and a list and a
 // block scalar, which span lines and stay read-only.
 const FRONTMATTER = [
@@ -426,4 +427,31 @@ test("frontmatter is a Key / Value grid edited in place, keeping quoting and com
         "---",
       ]),
     );
+});
+
+test("under app zoom a table menu opens just below the button that opened it", async ({ page }) => {
+  const { table } = await openTable(page, "ZOOM.md");
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  // 130%: the widget places its menu in CSS pixels, which the zoom scales.
+  await workspacePage.zoomInBy(3);
+
+  // A grip menu starts at its grip's left edge.
+  await table.openColumnMenu(1);
+  await expect(table.menu).toBeVisible();
+  const grip = await readSettledBox(table.columnGrip(1));
+  let menu = await readSettledBox(table.menu);
+  expect(Math.abs(menu.left - grip.left)).toBeLessThanOrEqual(2);
+  expect(menu.top).toBeGreaterThanOrEqual(grip.bottom);
+  expect(menu.top).toBeLessThanOrEqual(grip.bottom + 8);
+  await table.press("Escape");
+  await expect(table.menu).toBeHidden();
+
+  // The Copy menu ends at its button's right edge.
+  await table.openCopyMenu();
+  await expect(table.menu).toBeVisible();
+  const copy = await readSettledBox(table.copyButton);
+  menu = await readSettledBox(table.menu);
+  expect(Math.abs(menu.right - copy.right)).toBeLessThanOrEqual(2);
+  expect(menu.top).toBeGreaterThanOrEqual(copy.bottom);
+  expect(menu.top).toBeLessThanOrEqual(copy.bottom + 8);
 });
