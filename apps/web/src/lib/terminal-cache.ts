@@ -796,7 +796,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           // `finishReplay` is a no-op once `awaitingReplay` has cleared, so
           // later live frames fall straight through to the write below.
           finishReplay();
-          output.push(new Uint8Array(event.data), attached, noteTypingLatencyOutput(terminalId));
+          const bytes = new Uint8Array(event.data);
+          output.push(bytes, attached, noteTypingLatencyOutput(terminalId, bytes));
         } else {
           try {
             const msg = JSON.parse(event.data as string);

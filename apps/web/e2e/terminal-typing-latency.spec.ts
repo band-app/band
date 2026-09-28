@@ -7,6 +7,9 @@
  *   idle    nothing else running
  *   split   a visible split pane next to the typing pane streams output
  *   parked  terminals in three other (parked) workspaces stream output
+ *   visible the typing terminal itself streams output (a TUI redrawing
+ *           while you type into it); keystrokes are matched with the frame
+ *           that carries their echo
  *
  *   BAND_TYPING_BENCH=1 pnpm --filter @band-app/server test:e2e \
  *     terminal-typing-latency --headed --reporter=list
@@ -36,7 +39,7 @@ test.skip(process.env.BAND_TYPING_BENCH !== "1", "benchmark; set BAND_TYPING_BEN
 
 const TOKEN = "e2e-typing-latency-token";
 const PROJECT = "typing-bench";
-const BRANCHES = ["idle", "split", "parked", "flood-1", "flood-2", "flood-3"];
+const BRANCHES = ["idle", "split", "parked", "visible", "flood-1", "flood-2", "flood-3"];
 const WS = Object.fromEntries(BRANCHES.map((b) => [b, toWorkspaceId(PROJECT, b)]));
 const KEYS = Number(process.env.BENCH_KEYS ?? 150);
 const KEY_INTERVAL_MS = 40;
@@ -46,6 +49,13 @@ const FLOODS: Record<string, string> = {
   saturate: `perl -e '$|=1; my $l = "\\e[32m" . ("x" x 150) . "\\e[0m\\n"; print $l while 1'`,
 };
 const FLOOD = FLOODS[process.env.BENCH_FLOOD ?? "tui"];
+// The same floods without lowercase letters (no SGR colours), so the only
+// lowercase bytes in the stream are the echoes of the typed keys.
+const ECHO_SAFE_FLOODS: Record<string, string> = {
+  tui: `perl -e '$|=1; while(1){ my $f="e[H"; for my $r (1..40){ $f .= ("=" x 150) . "e[K\n" } print $f; select(undef,undef,undef,0.016) }'`,
+  saturate: `perl -e '$|=1; my $l = ("=" x 150) . "\n"; print $l while 1'`,
+};
+const ECHO_SAFE_FLOOD = ECHO_SAFE_FLOODS[process.env.BENCH_FLOOD ?? "tui"];
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -94,11 +104,15 @@ async function openTerminal(workspacePage: WorkspacePage, workspaceId: string): 
   await workspacePage.waitForTypingEcho();
 }
 
-async function measure(workspacePage: WorkspacePage, label: string): Promise<void> {
+async function measure(
+  workspacePage: WorkspacePage,
+  label: string,
+  options: { matchEcho?: boolean } = {},
+): Promise<void> {
   await workspacePage.startFrameAttribution();
   const stopProfile =
     process.env.BENCH_PROFILE === "1" ? await workspacePage.profileMainThread() : null;
-  await workspacePage.startTypingLatencyProbe();
+  await workspacePage.startTypingLatencyProbe(options);
   await workspacePage.typeKeysPaced(KEYS, KEY_INTERVAL_MS);
   const report = await workspacePage.stopTypingLatencyProbe();
   const frames = await workspacePage.stopFrameAttribution();
@@ -154,6 +168,17 @@ test.describe("Terminal typing latency (benchmark)", () => {
     await workspacePage.typeInPane(1, FLOOD);
     await workspacePage.focusPane(0);
     await measure(workspacePage, "split");
+  });
+
+  test("visible: the typing terminal itself streams output", async ({ page }) => {
+    test.setTimeout(120_000);
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WS.visible);
+    await workspacePage.waitForReady();
+    await openTerminal(workspacePage, WS.visible);
+    await workspacePage.typeInPane(0, ECHO_SAFE_FLOOD);
+    await workspacePage.focusPane(0);
+    await measure(workspacePage, "visible", { matchEcho: true });
   });
 
   test("parked: three hidden workspaces stream output", async ({ page }) => {

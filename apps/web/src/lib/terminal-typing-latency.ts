@@ -15,7 +15,10 @@ import type { Terminal } from "@xterm/xterm";
 //   parsed   xterm finished parsing that frame
 //   paint    xterm's next render after the parse
 // A keystroke is matched with the first output frame that arrives after it
-// was dispatched. Nothing on the keystroke or output path does any work until
+// was dispatched. `start({ matchEcho: true })` instead matches it with the
+// first frame after dispatch that contains the typed character, for measuring
+// a terminal whose own output never stops (its flood must not contain the
+// typed characters). Nothing on the keystroke or output path does any work until
 // `start()`; the hooks below check `active` first.
 // ---------------------------------------------------------------------------
 
@@ -25,6 +28,8 @@ const PENDING_TIMEOUT_MS = 2_000;
 const MAX_SAMPLES = 5_000;
 
 interface Keystroke {
+  /** The typed character's UTF-8 byte (printable ASCII); 0 for anything else. */
+  byte: number;
   inputAt: number;
   dispatchAt: number | null;
   arrivalAt: number | null;
@@ -58,6 +63,7 @@ export interface TypingLatencyReport {
 }
 
 let active = false;
+let matchEcho = false;
 let samples: Sample[] = [];
 let unmatched = 0;
 /** terminalId -> keystrokes not yet painted, oldest first. */
@@ -95,27 +101,39 @@ export function registerTypingLatencyTerminal(
     if (event.key.length !== 1 || event.metaKey || event.ctrlKey || event.altKey) return;
     const pending = pendingFor(terminalId);
     dropStale(pending, performance.now());
-    pending.push({ inputAt: event.timeStamp, dispatchAt: null, arrivalAt: null, parsedAt: null });
+    const code = event.key.charCodeAt(0);
+    pending.push({
+      byte: code < 0x80 ? code : 0,
+      inputAt: event.timeStamp,
+      dispatchAt: null,
+      arrivalAt: null,
+      parsedAt: null,
+    });
   };
   wrapper.addEventListener("keydown", onKeyDown, true);
   const render = term.onRender(() => {
     if (!active) return;
     const pending = pendingByTerminal.get(terminalId);
-    if (!pending || pending.length === 0 || pending[0].parsedAt === null) return;
-    const done = pending.shift() as Keystroke & {
-      dispatchAt: number;
-      arrivalAt: number;
-      parsedAt: number;
-    };
+    if (!pending || !pending.some((k) => k.parsedAt !== null)) return;
     const paintAt = performance.now();
-    samples.push({
-      inputToDispatch: done.dispatchAt - done.inputAt,
-      dispatchToArrival: done.arrivalAt - done.dispatchAt,
-      arrivalToParsed: done.parsedAt - done.arrivalAt,
-      parsedToPaint: paintAt - done.parsedAt,
-      inputToPaint: paintAt - done.inputAt,
-    });
-    if (samples.length > MAX_SAMPLES) samples.shift();
+    // Every parsed keystroke was painted by this render. One echo frame can
+    // carry several, and with `matchEcho` a later key's echo can overtake an
+    // earlier one's.
+    for (const done of pending) {
+      if (done.dispatchAt === null || done.arrivalAt === null || done.parsedAt === null) continue;
+      samples.push({
+        inputToDispatch: done.dispatchAt - done.inputAt,
+        dispatchToArrival: done.arrivalAt - done.dispatchAt,
+        arrivalToParsed: done.parsedAt - done.arrivalAt,
+        parsedToPaint: paintAt - done.parsedAt,
+        inputToPaint: paintAt - done.inputAt,
+      });
+      if (samples.length > MAX_SAMPLES) samples.shift();
+    }
+    pendingByTerminal.set(
+      terminalId,
+      pending.filter((k) => k.parsedAt === null),
+    );
   });
   return () => {
     wrapper.removeEventListener("keydown", onKeyDown, true);
@@ -136,15 +154,24 @@ export function noteTypingLatencyDispatch(terminalId: string): void {
  * a callback to pass to `term.write` when that frame is the echo of a pending
  * keystroke, `undefined` otherwise.
  */
-export function noteTypingLatencyOutput(terminalId: string): (() => void) | undefined {
+export function noteTypingLatencyOutput(
+  terminalId: string,
+  data: Uint8Array,
+): (() => void) | undefined {
   if (!active) return undefined;
-  const keystroke = pendingByTerminal
-    .get(terminalId)
-    ?.find((k) => k.dispatchAt !== null && k.arrivalAt === null);
-  if (!keystroke) return undefined;
-  keystroke.arrivalAt = performance.now();
+  const waiting =
+    pendingByTerminal
+      .get(terminalId)
+      ?.filter((k) => k.dispatchAt !== null && k.arrivalAt === null) ?? [];
+  const matched = matchEcho
+    ? waiting.filter((k) => k.byte !== 0 && data.includes(k.byte))
+    : waiting.slice(0, 1);
+  if (matched.length === 0) return undefined;
+  const arrivalAt = performance.now();
+  for (const keystroke of matched) keystroke.arrivalAt = arrivalAt;
   return () => {
-    keystroke.parsedAt = performance.now();
+    const parsedAt = performance.now();
+    for (const keystroke of matched) keystroke.parsedAt = parsedAt;
   };
 }
 
@@ -171,7 +198,8 @@ function typingLatencyReport(): TypingLatencyReport {
 }
 
 const api = {
-  start(): void {
+  start(options?: { matchEcho?: boolean }): void {
+    matchEcho = options?.matchEcho === true;
     samples = [];
     unmatched = 0;
     pendingByTerminal.clear();
