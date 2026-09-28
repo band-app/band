@@ -1,3 +1,4 @@
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
@@ -353,37 +354,62 @@ const latestPollByWorkspace = new Map<string, number>();
  */
 const pendingCIByWorkspace = new Map<string, CIStatus>();
 
+/** Whether a stored `branch_statuses` row already holds `git` and `ci`. */
+function isSameStatus(
+  row: typeof branchStatusesTable.$inferSelect,
+  git: GitStatus,
+  ci: CIStatus,
+): boolean {
+  return (
+    row.gitDirty === git.dirty &&
+    row.gitConflict === git.conflict &&
+    row.gitAhead === git.ahead &&
+    row.gitBehind === git.behind &&
+    row.gitSyncState === git.sync_state &&
+    row.ciState === ci.state &&
+    row.ciUrl === (ci.url ?? null) &&
+    JSON.stringify(row.ciPr ?? null) === JSON.stringify(ci.pr ?? null)
+  );
+}
+
 /**
- * Poll one workspace's git status, store it with `newCI` (or the stored CI
- * status when `null`), and emit it to status stream listeners.
+ * Poll one workspace's git status and, when it or the CI status changed,
+ * store it with `newCI` (or the stored CI status when `null`) and emit it to
+ * status stream listeners.
  */
 async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
   const poll = ++pollCount;
   latestPollByWorkspace.set(ws.workspaceId, poll);
   if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
   const git = await getGitStatus(ws.worktreePath);
+  // Store and emit in an event-loop turn of its own. Git replies from the
+  // exec-file worker arrive in batches, and handling a batch in one turn
+  // held off terminal I/O on a slow host.
+  await yieldToEventLoop();
   // A poll of this workspace that started later (a selection refresh during a
   // tick) read fresher state and writes it; this older result must not land last.
   if (latestPollByWorkspace.get(ws.workspaceId) !== poll) return;
 
   const db = getDb();
+  const existing = db
+    .select()
+    .from(branchStatusesTable)
+    .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
+    .get();
   const pendingCI = pendingCIByWorkspace.get(ws.workspaceId);
   let ci: CIStatus = newCI ?? pendingCI ?? { state: "none" };
-  if (!newCI && !pendingCI) {
+  if (!newCI && !pendingCI && existing) {
     // Keep the stored CI status when this poll didn't query CI
-    const existing = db
-      .select({
-        ciState: branchStatusesTable.ciState,
-        ciUrl: branchStatusesTable.ciUrl,
-        ciPr: branchStatusesTable.ciPr,
-      })
-      .from(branchStatusesTable)
-      .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
-      .get();
-    if (existing) {
-      ci = { state: existing.ciState, url: existing.ciUrl, pr: existing.ciPr };
-    }
+    ci = { state: existing.ciState, url: existing.ciUrl, pr: existing.ciPr };
   }
+  if (pendingCIByWorkspace.get(ws.workspaceId) === ci) {
+    pendingCIByWorkspace.delete(ws.workspaceId);
+  }
+
+  // Most polls find nothing changed. Writing and emitting all of them anyway
+  // cost the event loop 100-300 ms per tick on a macOS CI runner (73
+  // workspaces), enough to hold up terminal echo.
+  if (existing && isSameStatus(existing, git, ci)) return;
 
   const now = Date.now();
 
@@ -416,16 +442,14 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
       },
     })
     .run();
-  if (pendingCIByWorkspace.get(ws.workspaceId) === ci) {
-    pendingCIByWorkspace.delete(ws.workspaceId);
-  }
 
-  // Emit directly to SSE listeners
+  // Emit directly to SSE listeners, in the shape the row stores: a status that
+  // doesn't change isn't sent again, so the first one must be complete.
   emit({
     kind: "branch-status",
     workspaceId: ws.workspaceId,
     git,
-    ci,
+    ci: { state: ci.state, url: ci.url ?? null, pr: ci.pr ?? null },
   });
 }
 

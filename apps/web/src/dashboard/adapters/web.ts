@@ -212,10 +212,25 @@ export class WebDashboardAdapter implements DashboardAdapter {
   private statusHandlers = new Set<(data: SSEEvent) => void>();
   private statusSubscription: { unsubscribe: () => void } | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The newest `branch-status` event per workspace. The server sends each
+   * status once (in the on-connect snapshot, then only when it changes), and
+   * the stream is shared: a handler added after the snapshot arrived gets
+   * these replayed instead.
+   */
+  private latestBranchStatuses = new Map<string, SSEEvent>();
 
   private createStatusSubscription() {
+    // The on-connect snapshot refills it. A workspace removed while the
+    // stream was down sent no `remove` event, so its entry would stay.
+    this.latestBranchStatuses.clear();
     this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
       onData: (data: SSEEvent) => {
+        if (data.kind === "branch-status" && data.workspaceId) {
+          this.latestBranchStatuses.set(data.workspaceId, data);
+        } else if (data.kind === "remove" && data.workspaceId) {
+          this.latestBranchStatuses.delete(data.workspaceId);
+        }
         for (const h of this.statusHandlers) {
           h(data);
         }
@@ -256,6 +271,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
           this.statusSubscription.unsubscribe();
           this.statusSubscription = null;
         }
+        this.latestBranchStatuses.clear();
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
@@ -309,12 +325,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
     onGit: (workspaceId: string, git: GitStatus) => void,
     onCI: (workspaceId: string, ci: CIStatus) => void,
   ): Unsubscribe {
-    return this.subscribeStatusStream((data) => {
+    const handle = (data: SSEEvent) => {
       if (data.kind === "branch-status" && data.workspaceId) {
         if (data.git) onGit(data.workspaceId, data.git);
         if (data.ci) onCI(data.workspaceId, data.ci);
       }
-    });
+    };
+    for (const data of this.latestBranchStatuses.values()) handle(data);
+    return this.subscribeStatusStream(handle);
   }
 
   subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {

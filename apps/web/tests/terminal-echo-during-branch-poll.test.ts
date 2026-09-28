@@ -14,26 +14,31 @@ import { waitFor } from "./helpers/wait-for";
 // runs. The poller used to start git for every workspace at once; each
 // `child_process` spawn blocks the server's event loop for a few ms, so with
 // dozens of workspaces the loop froze for 300-800 ms every 5 s tick and the
-// echo arrived in bursts (`services/_utils/map-limited.ts`). Spawns cost the
-// most on macOS, where this reproduced; a Linux host may stay under the limit
-// even without the fix.
+// echo arrived in bursts (`services/_utils/map-limited.ts`). Later, with the
+// spawns on a worker thread, storing and emitting every workspace's status
+// each tick still held the loop for 100-300 ms on the macOS CI runner.
+//
+// A shared CI host also stalls on its own now and then, so the test holds the
+// key twice on the same server, first before the poller starts and then while
+// it runs, and allows the second hold only a few more slow keys than the first.
+// A stall at every tick delays 10+ keys per hold.
 
 const TOKEN = "terminal-echo-branch-poll-token";
 const PROJECT = "echoproj";
 const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
-/** Enough workspaces that one tick's git spawns block the loop for ~300 ms+. */
+/** Enough workspaces that one tick's work used to block the loop for ~300 ms+. */
 const EXTRA_WORKSPACES = 72;
 /** macOS key auto-repeat is ~30 keys/s. */
 const REPEAT_MS = 33;
 /** Longer than two 5 s poll ticks, so the hold overlaps at least one. */
 const HOLD_MS = 11_000;
-/** Slowest acceptable echo. A tick's burst of spawns took 300-800 ms. */
+/** Slowest acceptable echo. A tick's stall took 300-800 ms. */
 const MAX_ECHO_MS = 150;
 /**
- * Keys allowed over `MAX_ECHO_MS`, for a stray GC pause or a busy CI host. A
- * blocked loop delays every key sent during the block, 10+ at 30 keys/s.
+ * Keys over `MAX_ECHO_MS` the poller hold may have beyond the idle hold: one
+ * ~250 ms host stall delays about three.
  */
-const SLOW_ECHOES_ALLOWED = 2;
+const EXTRA_SLOW_ECHOES_ALLOWED = 3;
 
 const gitEnv = {
   ...process.env,
@@ -88,7 +93,7 @@ describe("terminal echo while the branch-status poller runs", () => {
     expect(res.status).toBe(401);
   });
 
-  it("echoes a held key within 150 ms", { timeout: 60_000 }, async () => {
+  it("echoes a held key within 150 ms", { timeout: 90_000 }, async () => {
     const terminalId = randomUUID();
     const res = await trpcMutate(
       server.url,
@@ -104,22 +109,11 @@ describe("terminal echo while the branch-status poller runs", () => {
       flow: true,
     });
     socket.onOutput((text) => socket.ack(Buffer.byteLength(text)));
-    let status: StatusStream | undefined;
-    const echoes: number[] = [];
-    const sent: number[] = [];
-    try {
-      // `cat` in canonical mode: the tty echoes each key exactly once.
-      socket.type("echo READY-$((20+22)); cat\r");
-      await socket.waitForOutput("READY-42", 20_000);
-      // The dashboard's status stream is what keeps the poller running. Hold
-      // the key once its first tick has reached every workspace.
-      const stream = await StatusStream.open(server.url, TOKEN);
-      status = stream;
-      await waitFor(async () => stream.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
-        timeoutMs: 20_000,
-        label: "first poll tick",
-      });
 
+    /** Hold "a" for `HOLD_MS` and return each key's echo delay in ms. */
+    const holdKey = async (): Promise<number[]> => {
+      const echoes: number[] = [];
+      const sent: number[] = [];
       const stopCounting = socket.onOutput((text) => {
         const at = performance.now();
         for (const char of text) if (char === "a") echoes.push(at);
@@ -134,19 +128,53 @@ describe("terminal echo while the branch-status poller runs", () => {
       await waitFor(async () => echoes.length >= sent.length || undefined, {
         label: "every held key echoed",
       });
-      // What the shell prints after the Ctrl-C isn't an echo: with `SHELL`
-      // set to bash, which ignores `.zshrc`, its prompt `bash-3.2$ ` has an "a".
+      expect(echoes).toHaveLength(sent.length);
+      const delays = sent.map((at, i) => Math.round(echoes[i] - at));
+      // End the line: macOS caps a canonical-mode tty line at 1024 bytes.
+      // `cat` prints it back; wait for that too, so the next hold doesn't
+      // count its "a"s as echoes.
+      socket.type("\r");
+      await waitFor(async () => echoes.length >= 2 * sent.length || undefined, {
+        label: "held line printed back",
+      });
       stopCounting();
+      return delays;
+    };
+    const slowKeys = (delays: number[]) => delays.filter((ms) => ms >= MAX_ECHO_MS);
+
+    let status: StatusStream | undefined;
+    let idleSlow: number[];
+    let pollerSlow: number[];
+    try {
+      // `cat` in canonical mode: the tty echoes each key exactly once.
+      socket.type("echo READY-$((20+22)); cat\r");
+      await socket.waitForOutput("READY-42", 20_000);
+      // No status stream has connected yet, so the poller hasn't started. It
+      // starts with the first status-stream subscription, so the idle hold has
+      // to come before the stream opens.
+      idleSlow = slowKeys(await holdKey());
+      // The dashboard's status stream is what starts the poller. Hold the key
+      // once its first tick has reached every workspace.
+      const stream = await StatusStream.open(server.url, TOKEN);
+      status = stream;
+      await waitFor(async () => stream.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
+        timeoutMs: 20_000,
+        label: "first poll tick",
+      });
+      pollerSlow = slowKeys(await holdKey());
+      // What the shell prints after the Ctrl-C isn't an echo either: with
+      // `SHELL` set to bash, which ignores `.zshrc`, its prompt `bash-3.2$ `
+      // has an "a". Nothing counts echoes any more at this point.
       socket.type("\x03");
     } finally {
       status?.close();
       await socket.close();
     }
 
-    expect(echoes).toHaveLength(sent.length);
-    const slow = sent.map((at, i) => Math.round(echoes[i] - at)).filter((ms) => ms >= MAX_ECHO_MS);
-    expect(slow.length, `echoes over ${MAX_ECHO_MS} ms: ${slow.join(", ")}`).toBeLessThanOrEqual(
-      SLOW_ECHOES_ALLOWED,
-    );
+    expect(
+      pollerSlow.length,
+      `echoes over ${MAX_ECHO_MS} ms with the poller running: ${pollerSlow.join(", ")}; ` +
+        `before it started: ${idleSlow.join(", ")}`,
+    ).toBeLessThanOrEqual(idleSlow.length + EXTRA_SLOW_ECHOES_ALLOWED);
   });
 });
