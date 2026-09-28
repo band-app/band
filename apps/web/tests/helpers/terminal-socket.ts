@@ -42,12 +42,19 @@ export class TerminalSocket {
       terminalId,
       token,
       maxOutputChars = Number.POSITIVE_INFINITY,
+      flow = false,
     }: {
       workspaceId: string;
       terminalId: string;
       token: string;
       /** Keep only this much of the output, for terminals that print a flood. */
       maxOutputChars?: number;
+      /**
+       * Opt into parse-acknowledged backpressure, as the browser does. The
+       * server then pauses the PTY once too much output is unacknowledged;
+       * acknowledge with {@link ack}.
+       */
+      flow?: boolean;
     },
   ): Promise<TerminalSocket> {
     const url = new URL(server.url);
@@ -60,13 +67,27 @@ export class TerminalSocket {
       ws.once("open", () => resolve());
       ws.once("error", reject);
     });
-    ws.send(JSON.stringify({ type: "attach", cols: 100, rows: 30 }));
+    ws.send(JSON.stringify({ type: "attach", cols: 100, rows: 30, flow }));
     await waitFor(async () => (socket.attached ? true : undefined), { label: "attach ack" });
     return socket;
   }
 
   type(input: string): void {
     this.ws.send(input);
+  }
+
+  /** Stop reading the socket, like a client whose main thread is busy. */
+  pause(): void {
+    this.ws.pause();
+  }
+
+  resume(): void {
+    this.ws.resume();
+  }
+
+  /** Acknowledge output bytes as parsed (a `flow` socket). */
+  ack(bytes: number): void {
+    this.ws.send(JSON.stringify({ type: "ack", bytes }));
   }
 
   async waitForOutput(text: string, timeoutMs?: number): Promise<void> {
