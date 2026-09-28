@@ -7,7 +7,8 @@
  * consecutive text chunks of one kind and one `messageId` into a single
  * event carrying the run's last row id. Merging only ever happens inside
  * the range being sent, so a client resuming from a cursor never gets text
- * it already has.
+ * it already has. Each event carries its row's `createdAt` (a merged run,
+ * its first row's), which the chat pane shows as the message time.
  */
 
 import type { ChatEvent, SessionUpdate } from "../../../shared/chat-events";
@@ -35,7 +36,7 @@ function textChunk(row: ChatEventRow): ChunkUpdate | null {
 
 export function rowsToEvents(rows: ChatEventRow[]): ChatEvent[] {
   const out: ChatEvent[] = [];
-  let run: { update: ChunkUpdate; text: string; lastId: number } | null = null;
+  let run: { update: ChunkUpdate; text: string; lastId: number; createdAt: number } | null = null;
 
   const flush = () => {
     if (!run) return;
@@ -43,6 +44,7 @@ export function rowsToEvents(rows: ChatEventRow[]): ChatEvent[] {
       type: "update",
       update: { ...run.update, content: { type: "text", text: run.text } },
       eventId: run.lastId,
+      createdAt: run.createdAt,
     });
     run = null;
   };
@@ -65,10 +67,11 @@ export function rowsToEvents(rows: ChatEventRow[]): ChatEvent[] {
         update: chunk,
         text: chunk.content.type === "text" ? chunk.content.text : "",
         lastId: row.id,
+        createdAt: row.createdAt,
       };
       continue;
     }
-    out.push({ ...row.event, eventId: row.id } as ChatEvent);
+    out.push({ ...row.event, eventId: row.id, createdAt: row.createdAt } as ChatEvent);
   }
   flush();
   return out;

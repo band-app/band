@@ -35,6 +35,8 @@ export interface AppendChatEvent {
   event: LoggedChatEvent;
   /** First row of a turn: a prompt, or a replayed user message. */
   turnStart?: boolean;
+  /** Epoch ms; defaults to now. */
+  createdAt?: number;
 }
 
 /** A session Band has a log for, as the history dropdown lists it. */
@@ -102,7 +104,7 @@ export class ChatEventQueries {
         ...indexFields(input.event),
         turnStart: input.turnStart ?? false,
         payload: JSON.stringify(input.event),
-        createdAt: Date.now(),
+        createdAt: input.createdAt ?? Date.now(),
       })
       .returning({ id: chatEvents.id })
       .get();
