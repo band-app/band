@@ -15,6 +15,7 @@ import { useCallback, useMemo } from "react";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import type { ArrowDirection } from "../lib/terminal-selection";
+import { useToastObstruction } from "../lib/toast-obstructions";
 
 /**
  * Floating accessory toolbar rendered above the iOS virtual keyboard inside the
@@ -107,6 +108,7 @@ export function TerminalToolbar({
   onSelectAll,
 }: TerminalToolbarProps) {
   const { enabled, bottomOffset } = useVirtualKeyboardToolbar();
+  const toolbarObstructionRef = useToastObstruction();
 
   const handleCopy = useCallback(async () => {
     if (!terminal.hasSelection()) return;
@@ -177,6 +179,7 @@ export function TerminalToolbar({
   // arrows mean something different right now.
   return (
     <div
+      ref={toolbarObstructionRef}
       data-testid="terminal-toolbar"
       data-mode={selectionMode ? "selection" : "idle"}
       role="toolbar"

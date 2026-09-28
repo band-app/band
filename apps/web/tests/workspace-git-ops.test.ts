@@ -386,6 +386,193 @@ describe("tRPC — workspace.gitCommit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Expected git refusals come back as `ok: false`, not as a 500
+// ---------------------------------------------------------------------------
+//
+// Git declining a pull because of local changes, a push the remote rejects as
+// non-fast-forward, or a commit with nothing in it is a normal outcome. The
+// server returns `{ ok: false, reason, message }` with a plain-words message
+// (which the dashboard shows as an info notice) and leaves the repo alone.
+// Genuine failures still reject with git's own message.
+
+/** Push one commit to `originPath` from a throwaway clone, so every other
+ *  clone of it is one commit behind. */
+function pushCommitFromElsewhere(tmpHome: string, originPath: string, file: string): void {
+  const seederPath = createWorkingClone(tmpHome, `seeder-${file}`, originPath);
+  writeFileSync(join(seederPath, file), `# ${file}\n`);
+  git(seederPath, ["add", "."]);
+  git(seederPath, ["commit", "-m", `add ${file}`]);
+  git(seederPath, ["push", "origin", "main"]);
+  rmSync(seederPath, { recursive: true, force: true });
+}
+
+describe("tRPC — git refusals", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let dirtyPath: string;
+  let aheadPath: string;
+  let cleanPath: string;
+  let lonePath: string;
+  let brokenPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-workspace-git-refusals-");
+    const originPath = createBareOrigin(tmpHome, "origin");
+
+    // "dirty": behind origin by one commit, with an uncommitted edit.
+    dirtyPath = createWorkingClone(tmpHome, "dirty", originPath);
+    // "ahead": a local commit, while origin moves on without it.
+    aheadPath = createWorkingClone(tmpHome, "ahead", originPath);
+    writeFileSync(join(aheadPath, "local.md"), "# Local commit\n");
+    git(aheadPath, ["add", "."]);
+    git(aheadPath, ["commit", "-m", "local change"]);
+    // "clean": nothing to commit.
+    cleanPath = createWorkingClone(tmpHome, "clean", originPath);
+    pushCommitFromElsewhere(tmpHome, originPath, "from-seeder.md");
+    writeFileSync(join(dirtyPath, "README.md"), "# Edited locally\n");
+
+    // "lone": a branch with no upstream.
+    lonePath = createWorkingClone(tmpHome, "lone", originPath);
+    git(lonePath, ["checkout", "-b", "lone-branch"]);
+    // "broken": its origin no longer exists.
+    const brokenOrigin = createBareOrigin(tmpHome, "gone");
+    brokenPath = createWorkingClone(tmpHome, "broken", brokenOrigin);
+    rmSync(brokenOrigin, { recursive: true, force: true });
+
+    const project = (name: string, path: string, branch = "main") => ({
+      name,
+      path,
+      defaultBranch: "main",
+      worktrees: [{ branch, path }],
+    });
+    seedState(tmpHome, {
+      projects: [
+        project("dirty", dirtyPath),
+        project("ahead", aheadPath),
+        project("clean", cleanPath),
+        project("lone", lonePath, "lone-branch"),
+        project("broken", brokenPath),
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+
+    seedGitIdentity(tmpHome);
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  const LOCAL_CHANGES = {
+    ok: false,
+    reason: "local-changes",
+    message: "Pull skipped: commit or stash your local changes first (README.md).",
+  };
+
+  it("workspace.gitPull reports local changes and leaves the worktree untouched", async () => {
+    const headBefore = git(dirtyPath, ["rev-parse", "HEAD"]).trim();
+
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPull",
+      { workspaceId: "dirty-main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual(LOCAL_CHANGES);
+
+    expect(git(dirtyPath, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+    expect(git(dirtyPath, ["status", "--porcelain"])).toBe(" M README.md\n");
+  });
+
+  it("workspaces.gitPull (the sidebar's pull) reports the same refusal", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.gitPull",
+      { project: "dirty", name: "main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual(LOCAL_CHANGES);
+  });
+
+  it("workspace.gitPull reports a branch with no upstream", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPull",
+      { workspaceId: "lone-lone-branch" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual({
+      ok: false,
+      reason: "no-upstream",
+      message: "Pull skipped: this branch has no upstream branch yet. Push it first.",
+    });
+  });
+
+  const BEHIND_REMOTE = {
+    ok: false,
+    reason: "behind-remote",
+    message: "Push rejected: the remote branch has commits you don't have. Pull first.",
+  };
+
+  it("workspaces.gitPush reports a non-fast-forward rejection", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.gitPush",
+      { project: "ahead", name: "main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
+  });
+
+  it("workspace.gitPush reports the same rejection", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPush",
+      { workspaceId: "ahead-main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
+  });
+
+  it("workspace.gitCommit reports a clean working tree", async () => {
+    const headBefore = git(cleanPath, ["rev-parse", "HEAD"]).trim();
+
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitCommit",
+      { workspaceId: "clean-main", message: "noop" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual({
+      ok: false,
+      reason: "nothing-to-commit",
+      message: "Nothing to commit: the working tree has no changes.",
+    });
+    expect(git(cleanPath, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+  });
+
+  it("a genuine pull failure still fails, with git's message", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPull",
+      { workspaceId: "broken-main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/^fatal: .*does not appear to be a git repository/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // workspace.generateCommitMessage — pre-flight branch only
 // ---------------------------------------------------------------------------
 //

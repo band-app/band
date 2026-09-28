@@ -1,4 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+import type { GitOpResult } from "../../shared/git-op-result";
 import type { DashboardAdapter } from "../adapter";
 import type {
   CIStatus,
@@ -8,10 +9,35 @@ import type {
   WorkspaceStatus,
 } from "../types";
 
+/**
+ * A message shown in the bottom-right toast stack. `info` is an expected
+ * outcome the user should know about (a pull git refused because of local
+ * changes) and closes itself; `error` is a failure and stays until closed.
+ */
+export interface Notice {
+  id: number;
+  tone: "info" | "error";
+  message: string;
+}
+
+/** How long an `info` notice stays on screen. */
+export const INFO_NOTICE_MS = 6000;
+/** The most notices shown at once; a new one pushes out the oldest. */
+const MAX_NOTICES = 3;
+
+/**
+ * The text to show for a thrown value: an `Error`'s own message, so a tRPC
+ * failure reads as the server's message instead of "TRPCClientError: …".
+ */
+export function describeError(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  return text.trim() || "Something went wrong.";
+}
+
 export interface DashboardState {
   statuses: Map<string, WorkspaceStatus>;
   activeWorkspaceId: string | null;
-  error: string | null;
+  notices: Notice[];
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
   /** Workspaces this dashboard asked the server to remove, until the removal settles. */
@@ -21,8 +47,10 @@ export interface DashboardState {
   clearNeedsAttention: (workspaceId: string) => void;
   /** Ask the server to re-read the workspace's git status now (badge refresh). */
   refreshBranchStatus: (workspaceId: string) => void;
-  clearError: () => void;
-  setError: (error: string) => void;
+  /** Show `err` as an error notice. */
+  setError: (err: unknown) => void;
+  notify: (tone: Notice["tone"], message: string) => void;
+  dismissNotice: (id: number) => void;
   replaceAllStatuses: (statuses: WorkspaceStatus[]) => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
@@ -54,14 +82,21 @@ export function isWorkspaceDeleting(
   return setup?.script === "teardown" && setup.state === "running";
 }
 
+/** Show a git refusal (local changes, nothing to push onto) as an info notice. */
+function reportRefusal(result: GitOpResult, notify: DashboardState["notify"]): void {
+  if (!result.ok) notify("info", result.message);
+}
+
 export function createDashboardStore(adapter: DashboardAdapter): DashboardStore {
+  let nextNoticeId = 1;
+
   return create<DashboardState>((set, get) => ({
     statuses: new Map(),
     branchStatuses: new Map(),
     setupStatuses: new Map(),
     deletingWorkspaces: new Set(),
     activeWorkspaceId: null,
-    error: null,
+    notices: [],
 
     openWorkspace: (workspaceId: string) => {
       set({ activeWorkspaceId: workspaceId });
@@ -76,9 +111,16 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       adapter.refreshBranchStatus?.(workspaceId).catch(() => {});
     },
 
-    clearError: () => set({ error: null }),
+    setError: (err: unknown) => get().notify("error", describeError(err)),
 
-    setError: (error: string) => set({ error }),
+    notify: (tone: Notice["tone"], message: string) => {
+      const notice = { id: nextNoticeId++, tone, message };
+      set((state) => ({ notices: [...state.notices, notice].slice(-MAX_NOTICES) }));
+    },
+
+    dismissNotice: (id: number) => {
+      set((state) => ({ notices: state.notices.filter((n) => n.id !== id) }));
+    },
 
     replaceAllStatuses: (list: WorkspaceStatus[]) => {
       const statuses = new Map(list.map((s) => [s.workspaceId, s]));
@@ -120,23 +162,23 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       try {
         await adapter.runScript(path, scriptType);
       } catch (e) {
-        set({ error: String(e) });
+        get().setError(e);
       }
     },
 
     gitPull: async (project: string, name: string) => {
       try {
-        await adapter.gitPull(project, name);
+        reportRefusal(await adapter.gitPull(project, name), get().notify);
       } catch (e) {
-        set({ error: String(e) });
+        get().setError(e);
       }
     },
 
     gitPush: async (project: string, name: string) => {
       try {
-        await adapter.gitPush(project, name);
+        reportRefusal(await adapter.gitPush(project, name), get().notify);
       } catch (e) {
-        set({ error: String(e) });
+        get().setError(e);
       }
     },
 
