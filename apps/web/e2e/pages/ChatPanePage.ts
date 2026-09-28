@@ -195,7 +195,20 @@ export class ChatPanePage {
     // just-created / surfaced chat sits behind the active terminal tab.
     await chatTab.click();
 
+    await this.focusPromptAfterMenuCloses();
+  }
+
+  /** Wait for the "+" new-tab menu to finish closing, then put focus in the
+   *  prompt. Radix returns focus to the "+" button when the menu's 150 ms exit
+   *  animation ends. If that lands after a test fills the prompt, its Enter
+   *  reopens the menu instead of sending the message. The menu unmounts only
+   *  after its exit animation, so once it is gone focus has been returned and
+   *  nothing moves it again. */
+  private async focusPromptAfterMenuCloses(): Promise<void> {
+    await expect(this.page.getByTestId("workspace-center__new-tab-menu")).toHaveCount(0);
     await this.promptInput.waitFor({ state: "visible", timeout: 15_000 });
+    await this.promptInput.focus();
+    await expect(this.promptInput).toBeFocused();
   }
 
   /** Open the "+" new-tab menu of the visible center dockview. */
@@ -251,7 +264,7 @@ export class ChatPanePage {
         .first();
       await expect(chatTab).toBeVisible({ timeout: 15_000 });
       await chatTab.click();
-      await expect(this.promptInput).toBeVisible({ timeout: 15_000 });
+      await this.focusPromptAfterMenuCloses();
     });
   }
 

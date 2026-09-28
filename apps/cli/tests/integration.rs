@@ -558,8 +558,16 @@ fn workspaces_remove_cleans_up_worktree_and_state() {
     assert_eq!(worktrees.len(), 1);
     assert_eq!(worktrees[0]["branch"], "main");
 
-    // Worktree directory removed from disk
-    assert!(!Path::new(&path).exists(), "worktree dir should be gone");
+    // The server removes the worktree directory in the background after it
+    // responds (`WorkspaceService.removeNow`); poll until it is gone.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while Path::new(&path).exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worktree dir should be gone"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 #[test]

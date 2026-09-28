@@ -93,6 +93,8 @@ export interface StubRequest {
   method: string;
   params: Record<string, unknown>;
   cwd: string;
+  /** The stub process that received it. */
+  pid: number;
   env: { BAND_DISPATCH?: string; BAND_SERVER_URL?: string };
 }
 

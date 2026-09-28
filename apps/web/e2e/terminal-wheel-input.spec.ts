@@ -19,8 +19,8 @@
  * is busy go out in fewer WebSocket messages than keys, with the program
  * reading the same bytes in the same order. A lone keystroke still goes out
  * as its own message, and the typing-latency probe still stamps every key
- * typed at a normal pace. (The probe pairs each keystroke with one output
- * frame, so it can't measure a burst whose echo comes back in one frame.)
+ * typed at a normal pace. (The probe matches each key to the frame carrying
+ * its echo, so a slow echo or two echoes in one frame don't drop a key.)
  *
  * Renderer note: `useWebGLTerminalRenderer: false` so
  * `runInTerminalUntilRendered` can read the probes' ready markers from the DOM
@@ -301,10 +301,16 @@ test.describe("Terminal input coalescing", () => {
     await workspacePage.focusPane(0);
     await workspacePage.waitForTypingEcho();
 
-    await workspacePage.startTypingLatencyProbe();
+    // On a loaded machine a key's echo can come back after the next key is
+    // typed, or in the same frame as the next key's echo. Pairing each key
+    // with the first frame after it would then leave the last key without a
+    // frame, so pair each key with the frame that carries its character (the
+    // 20 keys are distinct letters). The last echo can also land after typing
+    // ends, so wait for every key before stopping the probe.
+    await workspacePage.startTypingLatencyProbe({ matchEcho: true });
     await workspacePage.typeKeysPaced(20, 60);
+    await expect.poll(() => workspacePage.typingLatencySamples()).toBe(20);
     const report = await workspacePage.stopTypingLatencyProbe();
-    expect(report.samples).toBe(20);
     expect(report.unmatched).toBe(0);
     // No multi-frame stall between keydown and the socket. A coalescing turn
     // is well under a millisecond, so this can't tell one from none.
