@@ -507,8 +507,14 @@ fn workspaces_create_unknown_project_fails() {
 #[test]
 fn workspaces_list_shows_created_worktrees() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/a"]);
-    env.band(&["workspaces", "create", "my-project", "feat/b"]);
+    for branch in ["feat/a", "feat/b"] {
+        let output = env.band(&["workspaces", "create", "my-project", branch]);
+        assert!(
+            output.status.success(),
+            "create {branch} failed: {}",
+            stderr(&output)
+        );
+    }
 
     let output = env.band(&["workspaces", "list"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
