@@ -2575,21 +2575,15 @@ export class WorkspacePage {
    *  it). rAF callbacks run right before paint, so each record is what that
    *  frame painted: whether the terminal wrapper sits in the live box (not the
    *  parking container), whether its rendered rows contain `marker` (DOM
-   *  renderer), the combined opacity of the wrapper and its ancestors, and
-   *  xterm's column count. Stops after `frames` visible frames. Assumes one
-   *  terminal per workspace. Read with `readRevealFrames`. */
+   *  renderer), and the combined opacity of the wrapper and its ancestors.
+   *  Stops after `frames` visible frames. Read with `readRevealFrames`. */
   async startRevealFrameProbe(workspaceId: string, marker: string, frames = 20): Promise<void> {
     await this.page.evaluate(
       ([id, text, limit]) => {
-        type Frame = { attached: boolean; hasMarker: boolean; opacity: number; cols: number };
+        type Frame = { attached: boolean; hasMarker: boolean; opacity: number };
         const w = window as unknown as { __bandRevealFrames?: Frame[] };
         const recorded: Frame[] = [];
         w.__bandRevealFrames = recorded;
-        const cache = (
-          globalThis as unknown as {
-            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
-          }
-        ).__bandTerminalCache__;
         const tick = () => {
           const entry = document.querySelector<HTMLElement>(
             `[data-testid="workspace-panel-host__cached-entry--${id}"]`,
@@ -2601,17 +2595,10 @@ export class WorkspacePage {
             for (let el: Element | null = attached ? wrapper : entry; el; el = el.parentElement) {
               opacity *= Number.parseFloat(getComputedStyle(el).opacity);
             }
-            let cols = 0;
-            for (const e of cache?.values() ?? []) {
-              if (e.workspaceId !== id) continue;
-              const term = e.getTerminal() as { cols?: number } | null;
-              cols = term?.cols ?? 0;
-            }
             recorded.push({
               attached,
               hasMarker: !!wrapper?.querySelector(".xterm-rows")?.textContent?.includes(text),
               opacity,
-              cols,
             });
           }
           if (recorded.length < limit) requestAnimationFrame(tick);
@@ -2623,9 +2610,7 @@ export class WorkspacePage {
   }
 
   /** Frames recorded so far by `startRevealFrameProbe`, first visible frame first. */
-  async readRevealFrames(): Promise<
-    { attached: boolean; hasMarker: boolean; opacity: number; cols: number }[]
-  > {
+  async readRevealFrames(): Promise<{ attached: boolean; hasMarker: boolean; opacity: number }[]> {
     return await this.page.evaluate(
       () =>
         (
@@ -2634,7 +2619,6 @@ export class WorkspacePage {
               attached: boolean;
               hasMarker: boolean;
               opacity: number;
-              cols: number;
             }[];
           }
         ).__bandRevealFrames ?? [],

@@ -5,10 +5,15 @@
  *
  *  - The frame that reveals the workspace already paints the terminal: its
  *    wrapper is back in the live box with its content, at full opacity. The
- *    attach used to run in a passive effect (after paint) and the host faded
- *    the incoming workspace in from 0.6 opacity, so a switch blinked.
+ *    host used to fade the incoming workspace in from 0.6 opacity, so a
+ *    switch blinked; that half fails on the old code. The attach now runs in
+ *    a layout effect instead of a passive one, but a click-driven switch
+ *    already ran the passive effect before the next frame, so the
+ *    content half passed before too and only guards against a regression.
  *  - A reveal skips the fit when the box kept its pixel size since the last
- *    one, so a terminal whose box shrank while parked must still be refitted.
+ *    one. A terminal whose box shrank, or whose font grew with the app zoom,
+ *    while parked must still be refitted. These check the outcome, not which
+ *    of the reveal fit or the ResizeObserver did it.
  *  - Output that queued up while the terminal was parked all lands, in order,
  *    over the same socket, when the reveal hands it to the paced visible
  *    drain instead of writing it to xterm in one loop.
@@ -44,10 +49,12 @@ const TOKEN = "e2e-terminal-switch-reveal-token";
 // the same empty workspace.
 const PROJECT_FIRST_FRAME = "first-frame-reveal";
 const PROJECT_RESIZED = "resized-reveal";
+const PROJECT_ZOOMED = "zoomed-reveal";
 const PROJECT_BACKLOG = "backlog-reveal";
 const PROJECT_OTHER = "other-reveal";
 const WORKSPACE_FIRST_FRAME = toWorkspaceId(PROJECT_FIRST_FRAME, "main");
 const WORKSPACE_RESIZED = toWorkspaceId(PROJECT_RESIZED, "main");
+const WORKSPACE_ZOOMED = toWorkspaceId(PROJECT_ZOOMED, "main");
 const WORKSPACE_BACKLOG = toWorkspaceId(PROJECT_BACKLOG, "main");
 const WORKSPACE_OTHER = toWorkspaceId(PROJECT_OTHER, "main");
 
@@ -83,7 +90,13 @@ async function serverOutput(workspaceId: string): Promise<string> {
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, {
-    projects: [PROJECT_FIRST_FRAME, PROJECT_RESIZED, PROJECT_BACKLOG, PROJECT_OTHER].map((name) => {
+    projects: [
+      PROJECT_FIRST_FRAME,
+      PROJECT_RESIZED,
+      PROJECT_ZOOMED,
+      PROJECT_BACKLOG,
+      PROJECT_OTHER,
+    ].map((name) => {
       const path = makeGitWorkdir(name);
       return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
     }),
@@ -170,6 +183,24 @@ test("a terminal whose box was resized while parked is refitted on reveal", asyn
   expect(await workspacePage.isTerminalParked(WORKSPACE_RESIZED)).toBe(false);
 });
 
+test("a terminal zoomed while parked is refitted on reveal", async ({ page }) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await openTerminal(workspacePage, WORKSPACE_ZOOMED);
+  const colsAt100 = await workspacePage.terminalCols(WORKSPACE_ZOOMED);
+  expect(colsAt100).toBeGreaterThan(0);
+
+  await parkBySwitchingAway(workspacePage, WORKSPACE_ZOOMED);
+  // A parked terminal takes the new font size but defers the fit to its
+  // next reveal, which must not take the skip-the-fit path.
+  await workspacePage.zoomInBy(2);
+  await workspacePage.switchWorkspace(WORKSPACE_ZOOMED);
+
+  await expect
+    .poll(() => workspacePage.terminalCols(WORKSPACE_ZOOMED), { timeout: 20_000 })
+    .toBeLessThan(colsAt100);
+  expect(await workspacePage.isTerminalParked(WORKSPACE_ZOOMED)).toBe(false);
+});
+
 test("output queued while parked all lands in order over the same socket on reveal", async ({
   page,
 }) => {
@@ -179,14 +210,14 @@ test("output queued while parked all lands in order over the same socket on reve
   await openTerminal(workspacePage, WORKSPACE_BACKLOG);
   await expect.poll(() => socketCount(), { timeout: 20_000 }).toBe(1);
 
-  // ~1.4 MB, well past the visible drain's 128 KB in flight and under the
+  // ~1.1 MB with the PTY's \r\n, well past the visible drain's 128 KB in flight and under the
   // parked queue's 2 MB cap, printed only once the terminal is parked. The
   // quoted fragments and `$((40+2))` keep the typed command line from
   // matching the markers.
   const gate = join(workdirs.get(PROJECT_BACKLOG) as string, "go");
   await workspacePage.runInTerminalUntilRendered(
     WORKSPACE_BACKLOG,
-    `echo GATE_"ARMED"; while [ ! -e ${gate} ]; do sleep 0.1; done; seq 1 200000; echo BACKLOG_DONE_$((40+2))`,
+    `echo GATE_"ARMED"; while [ ! -e ${gate} ]; do sleep 0.1; done; seq 1 150000; echo BACKLOG_DONE_$((40+2))`,
     /GATE_ARMED/,
   );
 
@@ -211,7 +242,7 @@ test("output queued while parked all lands in order over the same socket on reve
       },
       { timeout: 20_000 },
     )
-    .toEqual(["199999", "200000", "BACKLOG_DONE_42"]);
+    .toEqual(["149999", "150000", "BACKLOG_DONE_42"]);
   // Parsed in place, not dropped and resynced over a new socket.
   expect(socketCount()).toBe(1);
 });

@@ -178,12 +178,13 @@ const MAX_LAYOUT_FRAMES = 5;
 // enough (see `runParkingPass`). A cold-parked terminal's PTY survives on the
 // server; revealing it creates a fresh entry that reconnects and replays.
 //
-// WebGL contexts: Chromium caps live contexts per page (about 16) and drops the
-// oldest when a new one is created. Each warm terminal keeps its context while
-// parked, and the policy's warm set is larger than that cap: up to 6 hidden
-// terminals in each of 4 warm hidden workspaces plus the active workspace's,
-// and more during the 30 s grace window. So with WebGL on, a large working set
-// does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
+// WebGL contexts: Chromium caps live contexts per page (16 by default) and
+// drops the oldest when a new one is created. Each warm terminal keeps its
+// context while parked, and the policy's warm set is larger than 16: up to 6
+// hidden terminals in each of 4 warm hidden workspaces plus the active
+// workspace's, and more during the 30 s grace window. The desktop app raises
+// the cap to 128 (`max-active-webgl-contexts` in `apps/desktop/src/main/
+// index.ts`); in a plain browser a large working set does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
 // parked terminal is only marked suspect and rebuilds on its next `attach`, and
 // only an attached one rebuilds at once, so a loss costs one glyph re-raster on
 // reveal. There is deliberately no user setting for this.
@@ -1134,6 +1135,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // scatter the request-driven flow exists to prevent.
       if (awaitingReplay) return;
       const dprChanged = handleDprChange();
+      // A reveal moves the wrapper out of the fixed-size parking box, which
+      // fires this observer even when the live box kept its size since the
+      // last fit. Skip that one, for the reason given at `repairAndFit`.
+      if (!dprChanged && !boxResizedSinceFit()) return;
       if (!dprChanged) fitToBox();
       sendPtyResize();
     });
@@ -1170,8 +1175,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // switch-back (orca's `pane-reveal-fit.ts`). A reattached WebGL surface's
     // cell metrics can briefly differ, so a fit there could propose a grid one
     // column off, reflow the buffer and snap back, and xterm's rewrap isn't a
-    // perfect inverse. A parked zoom or font change marks the surface suspect,
-    // so it still refits here.
+    // perfect inverse. A zoom or font change while parked marks the surface
+    // suspect, so it still refits here, on the DOM renderer too.
     repairAndFit = () => {
       if (!attached || !hostIsVisible()) return;
       const dprChanged = handleDprChange();
@@ -1182,7 +1187,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           webglAddon = null;
           attachWebGL();
         }
-        if (rebuild || boxResizedSinceFit()) fitToBox();
+        if (webglSuspect || boxResizedSinceFit()) fitToBox();
       }
       webglSuspect = false;
       if (term.rows > 0) term.refresh(0, term.rows - 1);
