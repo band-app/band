@@ -52,8 +52,8 @@ const FLOOD = FLOODS[process.env.BENCH_FLOOD ?? "tui"];
 // The same floods without lowercase letters (no SGR colours), so the only
 // lowercase bytes in the stream are the echoes of the typed keys.
 const ECHO_SAFE_FLOODS: Record<string, string> = {
-  tui: `perl -e '$|=1; while(1){ my $f="e[H"; for my $r (1..40){ $f .= ("=" x 150) . "e[K\n" } print $f; select(undef,undef,undef,0.016) }'`,
-  saturate: `perl -e '$|=1; my $l = ("=" x 150) . "\n"; print $l while 1'`,
+  tui: `perl -e '$|=1; while(1){ my $f="\\e[H"; for my $r (1..40){ $f .= ("=" x 150) . "\\e[K\\n" } print $f; select(undef,undef,undef,0.016) }'`,
+  saturate: `perl -e '$|=1; my $l = ("=" x 150) . "\\n"; print $l while 1'`,
 };
 const ECHO_SAFE_FLOOD = ECHO_SAFE_FLOODS[process.env.BENCH_FLOOD ?? "tui"];
 

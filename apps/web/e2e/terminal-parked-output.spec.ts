@@ -13,6 +13,11 @@
  * path, drained in place over the same socket, is covered by
  * `terminal-parking-output-focus.spec.ts`.
  *
+ * It also checks that a parked terminal acknowledges its output on receipt
+ * (`terminal-cache.ts`): the flood must reach the server faster than the
+ * server's 5 s stall timeout, which is what a parked terminal that withheld
+ * its acks would cost (`api/terminals/output-flow.ts`).
+ *
  * DOM renderer so the rendered rows are readable. Real server, real PTYs.
  */
 
@@ -138,10 +143,12 @@ test("a parked terminal that overflows its output queue is resynced when shown",
     .toBe(true);
   writeFileSync(gate, "");
 
-  // The whole flood (~4 MB, twice the queue cap) reached A while it was parked.
+  // The whole flood (~4 MB, twice the queue cap) reached A while it was
+  // parked, and without once waiting out the 5 s stall timeout.
   await expect
     .poll(async () => (await serverOutput(WORKSPACE_A)).includes("PARKED_DONE_42"), {
-      timeout: 30_000,
+      timeout: 4_500,
+      intervals: [100],
     })
     .toBe(true);
 

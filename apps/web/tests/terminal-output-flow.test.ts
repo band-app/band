@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import WebSocket from "ws";
 import { toWorkspaceId } from "@/dashboard";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
@@ -21,16 +21,47 @@ const PROJECT = "flowproj";
 const WORKSPACE_ID = toWorkspaceId(PROJECT, "main");
 const FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; print $l while 1'\r`;
 /** A flood that also records how many lines it has printed, in `count` in its cwd. */
-const COUNTING_FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\n"; for (my $i = 1; ; $i++) { print $l; if ($i % 1000 == 0) { open(my $f, ">", "count.tmp"); print $f $i; close $f; rename "count.tmp", "count" } }'\r`;
+const COUNTING_FLOOD = `perl -e '$|=1; my $l = ("x" x 150) . "\\n"; for (my $i = 1; ; $i++) { print $l; if ($i % 1000 == 0) { open(my $f, ">", "count.tmp"); print $f $i; close $f; rename "count.tmp", "count" } }'\r`;
 /** The hold threshold plus generous slack for the PTY, socket and daemon buffers. */
 const HELD_BYTES_BOUND = 4 * 1024 * 1024;
-/** How long a held flood is watched for growth. An unheld one streams tens of MB in this time. */
+/**
+ * How long output must stay flat to count as held. An unheld flood streams
+ * tens of MB in this time.
+ */
 const HOLD_WATCH_MS = 1_000;
+/**
+ * The server writes off a client that acknowledges nothing for 5 s, which
+ * would also resume the flood. Every check that the hold, an ack or a
+ * disconnect did something finishes well inside that window, so the write-off
+ * can't be what made it pass.
+ */
+const INSIDE_STALL_WINDOW_MS = 1_500;
 
 const BACKENDS: [string, Record<string, string>][] = [
   ["terminal daemon", {}],
   ["in-process terminals", { BAND_TERMINAL_DAEMON: "0" }],
 ];
+
+/**
+ * Resolve once `read()` has not changed for `HOLD_WATCH_MS`. Bounded below
+ * the 5 s stall write-off (with room for the check after it).
+ */
+async function waitForFlat(read: () => number, label: string): Promise<void> {
+  let last = read();
+  let since = Date.now();
+  await waitFor(
+    async () => {
+      const now = read();
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+        return undefined;
+      }
+      return Date.now() - since >= HOLD_WATCH_MS || undefined;
+    },
+    { timeoutMs: 3_000, intervalMs: 100, label },
+  );
+}
 
 describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
   let tmpHome: string;
@@ -57,29 +88,30 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     return terminalId;
   }
 
-  async function openFlood(flow: boolean, terminalId?: string): Promise<TerminalSocket> {
-    const socket = await TerminalSocket.open(server, {
+  async function openSocket(terminalId: string, flow: boolean): Promise<TerminalSocket> {
+    return await TerminalSocket.open(server, {
       workspaceId: WORKSPACE_ID,
-      terminalId: terminalId ?? (await createTerminal()),
+      terminalId,
       token: TOKEN,
       maxOutputChars: 64 * 1024,
       flow,
     });
+  }
+
+  async function openFlood(flow: boolean, terminalId?: string): Promise<TerminalSocket> {
+    const socket = await openSocket(terminalId ?? (await createTerminal()), flow);
     socket.type(FLOOD);
     return socket;
   }
 
-  /** Output received over `HOLD_WATCH_MS`, once the flood is past the hold threshold. */
-  async function growthWhileUnacked(socket: TerminalSocket): Promise<number> {
+  /** Wait until an unacknowledged flood is past the threshold and has stopped arriving. */
+  async function waitForHeld(socket: TerminalSocket): Promise<void> {
     await waitFor(async () => socket.bytes > 256 * 1024 || undefined, {
       timeoutMs: 15_000,
       label: "flood past the hold threshold",
     });
-    // Let bytes already read from the PTY before the hold arrive.
-    await sleep(HOLD_WATCH_MS);
-    const before = socket.bytes;
-    await sleep(HOLD_WATCH_MS);
-    return socket.bytes - before;
+    await waitForFlat(() => socket.bytes, "flood held");
+    expect(socket.bytes).toBeLessThan(HELD_BYTES_BOUND);
   }
 
   beforeAll(async () => {
@@ -109,16 +141,14 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     timeout: 60_000,
   }, async () => {
     const socket = await openFlood(true);
-
-    expect(await growthWhileUnacked(socket)).toBe(0);
-    expect(socket.bytes).toBeLessThan(HELD_BYTES_BOUND);
+    await waitForHeld(socket);
 
     // Acknowledge everything received: the shell runs again, until the next
     // 256 KB are unacknowledged.
     const held = socket.bytes;
     socket.ack(held);
     await waitFor(async () => socket.bytes > held + 128 * 1024 || undefined, {
-      timeoutMs: 15_000,
+      timeoutMs: INSIDE_STALL_WINDOW_MS,
       label: "flood resumed after the ack",
     });
     await socket.close();
@@ -138,19 +168,15 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
   it("releases the hold when the client disconnects", { timeout: 60_000 }, async () => {
     const terminalId = await createTerminal();
     const first = await openFlood(true, terminalId);
-    await growthWhileUnacked(first);
+    await waitForHeld(first);
     await first.close();
 
     // A second viewer (one that doesn't acknowledge) sees the flood running
     // again: the first viewer's hold went with its socket.
-    const second = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
-      terminalId,
-      token: TOKEN,
-      maxOutputChars: 64 * 1024,
-    });
-    await waitFor(async () => second.bytes > HELD_BYTES_BOUND || undefined, {
-      timeoutMs: 15_000,
+    const second = await openSocket(terminalId, false);
+    const replayed = second.bytes;
+    await waitFor(async () => second.bytes > replayed + 1024 * 1024 || undefined, {
+      timeoutMs: INSIDE_STALL_WINDOW_MS,
       label: "flood resumed for the second viewer",
     });
     await second.close();
@@ -159,12 +185,7 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
   it("paces a client that never opted in on what the server has buffered for it", {
     timeout: 60_000,
   }, async () => {
-    const socket = await TerminalSocket.open(server, {
-      workspaceId: WORKSPACE_ID,
-      terminalId: await createTerminal(),
-      token: TOKEN,
-      maxOutputChars: 64 * 1024,
-    });
+    const socket = await openSocket(await createTerminal(), false);
     socket.type(COUNTING_FLOOD);
     await waitFor(async () => linesPrinted() > 10_000 || undefined, {
       timeoutMs: 15_000,
@@ -174,11 +195,9 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
     // The client stops reading: once the kernel's socket buffers and 256 KB
     // in the server's send buffer fill, the shell is held and stops printing.
     socket.pause();
-    await sleep(2 * HOLD_WATCH_MS);
-    const whilePaused = linesPrinted();
-    await sleep(HOLD_WATCH_MS);
-    expect(linesPrinted()).toBe(whilePaused);
+    await waitForFlat(linesPrinted, "shell held while the client isn't reading");
 
+    const whilePaused = linesPrinted();
     socket.resume();
     await waitFor(async () => linesPrinted() > whilePaused + 10_000 || undefined, {
       timeoutMs: 15_000,
@@ -189,14 +208,31 @@ describe.each(BACKENDS)("terminal output backpressure (%s)", (_name, env) => {
 
   it("writes off a client that stops acknowledging for 5 s", { timeout: 60_000 }, async () => {
     const socket = await openFlood(true);
-    await growthWhileUnacked(socket);
+    await waitForHeld(socket);
     const held = socket.bytes;
-    // No ack at all: after the stall timeout the server stops waiting and the
-    // flood streams again, so one frozen tab can't stall the terminal.
-    await waitFor(async () => socket.bytes > held + 256 * 1024 || undefined, {
+    // No ack at all: after the stall timeout the server stops waiting and
+    // paces the client on its socket buffer instead, so one frozen tab can't
+    // stall the terminal.
+    await waitFor(async () => socket.bytes > held + HELD_BYTES_BOUND || undefined, {
       timeoutMs: 15_000,
       label: "flood resumed after the stall timeout",
     });
     await socket.close();
+  });
+
+  it("refuses the terminal socket without the token", async () => {
+    // The upgrade is destroyed before the handshake, so the socket never opens.
+    const url = new URL(server.url);
+    const ws = new WebSocket(
+      `ws://${url.host}/terminal?workspaceId=${encodeURIComponent(WORKSPACE_ID)}&terminalId=${randomUUID()}`,
+    );
+    const opened = await new Promise<boolean>((resolve) => {
+      ws.once("open", () => resolve(true));
+      ws.once("error", () => resolve(false));
+      ws.once("unexpected-response", () => resolve(false));
+      ws.once("close", () => resolve(false));
+    });
+    ws.terminate();
+    expect(opened).toBe(false);
   });
 });

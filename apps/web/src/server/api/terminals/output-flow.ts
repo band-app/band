@@ -7,13 +7,15 @@ import type { TerminalAttachment } from "../../services/terminal-service";
  * producer watermarks (`pty-producer-flow-control.ts`); the wide gap keeps a
  * draining client from flapping pause/resume once per write.
  */
-export const OUTPUT_HOLD_BYTES = 256 * 1024;
-export const OUTPUT_RESUME_BYTES = 32 * 1024;
+const OUTPUT_HOLD_BYTES = 256 * 1024;
+const OUTPUT_RESUME_BYTES = 32 * 1024;
 /**
  * A held client that acknowledges nothing for this long is treated as stuck
- * (a frozen tab, a debugger): its debt is written off and the PTY resumes, so
- * one wedged browser can't stall a terminal that others are watching. The
- * WebSocket heartbeat reaps it if it never recovers.
+ * (a frozen tab, a debugger): its debt is written off, the PTY resumes, and
+ * the client is paced on `ws.bufferedAmount` like one that never opted in
+ * until it acknowledges again. So one wedged browser can't stall a terminal
+ * that others are watching. The heartbeat doesn't reap it: a frozen page's
+ * network stack still answers protocol pings.
  */
 const ACK_STALL_MS = 5_000;
 /** How often a hold re-checks the socket buffer and the stall timer. */
@@ -35,6 +37,8 @@ export class OutputFlow {
   private sentBytes = 0;
   private ackedBytes = 0;
   private acking = false;
+  /** Stalled while acking; paced on the socket buffer until the next ack. */
+  private writtenOff = false;
   private held = false;
   private lastProgressAt = 0;
   private poll: NodeJS.Timeout | null = null;
@@ -58,8 +62,15 @@ export class OutputFlow {
 
   ack(bytes: number): void {
     if (!this.acking) return;
-    // Clamped so a bad count can't push in-flight below zero.
-    this.ackedBytes = Math.min(this.sentBytes, this.ackedBytes + bytes);
+    if (this.writtenOff) {
+      // Back from a stall: count from here, so acks for written-off bytes
+      // can't make newer output look parsed.
+      this.writtenOff = false;
+      this.ackedBytes = this.sentBytes;
+    } else {
+      // Clamped so a bad count can't push in-flight below zero.
+      this.ackedBytes = Math.min(this.sentBytes, this.ackedBytes + bytes);
+    }
     this.lastProgressAt = Date.now();
     this.update();
   }
@@ -70,7 +81,9 @@ export class OutputFlow {
   }
 
   private inFlight(): number {
-    return this.acking ? this.sentBytes - this.ackedBytes : this.ws.bufferedAmount;
+    return this.acking && !this.writtenOff
+      ? this.sentBytes - this.ackedBytes
+      : this.ws.bufferedAmount;
   }
 
   private update(): void {
@@ -78,8 +91,8 @@ export class OutputFlow {
       if (this.inFlight() > OUTPUT_HOLD_BYTES) this.setHeld(true);
       return;
     }
-    if (this.acking && Date.now() - this.lastProgressAt >= ACK_STALL_MS) {
-      this.ackedBytes = this.sentBytes;
+    if (this.acking && !this.writtenOff && Date.now() - this.lastProgressAt >= ACK_STALL_MS) {
+      this.writtenOff = true;
     }
     if (this.inFlight() < OUTPUT_RESUME_BYTES) this.setHeld(false);
   }

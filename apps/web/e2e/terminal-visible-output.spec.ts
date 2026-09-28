@@ -106,10 +106,11 @@ test("a synchronized-output frame that never ends still reaches the screen", asy
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   await openTerminal(workspacePage);
 
-  // Begin a DEC 2026 frame and never end it.
+  // Begin a DEC 2026 frame and never end it. `clear` first, so the result
+  // doesn't depend on what an earlier test left on this terminal.
   await workspacePage.runInTerminalUntilRendered(
     WORKSPACE,
-    "printf '\\033[?2026hSYNC_%s\\n' OPEN_$((40+2))",
+    "clear; printf '\\033[?2026hSYNC_%s\\n' OPEN_$((40+2))",
     /SYNC_OPEN_42/,
     { attempts: 1, renderTimeoutMs: 10_000 },
   );
