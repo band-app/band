@@ -149,9 +149,9 @@ describe("terminal echo while the branch-status poller runs", () => {
       // `cat` in canonical mode: the tty echoes each key exactly once.
       socket.type("echo READY-$((20+22)); cat\r");
       await socket.waitForOutput("READY-42", 20_000);
-      // No status stream has connected yet, so the poller hasn't started.
-      // Once it starts it doesn't stop when the stream closes, so the idle
-      // hold has to come first.
+      // No status stream has connected yet, so the poller hasn't started. It
+      // starts with the first status-stream subscription, so the idle hold has
+      // to come before the stream opens.
       idleSlow = slowKeys(await holdKey());
       // The dashboard's status stream is what starts the poller. Hold the key
       // once its first tick has reached every workspace.

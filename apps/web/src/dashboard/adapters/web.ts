@@ -221,6 +221,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
   private latestBranchStatuses = new Map<string, SSEEvent>();
 
   private createStatusSubscription() {
+    // The on-connect snapshot refills it. A workspace removed while the
+    // stream was down sent no `remove` event, so its entry would stay.
+    this.latestBranchStatuses.clear();
     this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
       onData: (data: SSEEvent) => {
         if (data.kind === "branch-status" && data.workspaceId) {
