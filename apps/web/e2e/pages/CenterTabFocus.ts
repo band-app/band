@@ -28,6 +28,14 @@ export class CenterTabFocus {
     });
   }
 
+  /** ⌘] / ⌘[ (Ctrl+] / Ctrl+[ off macOS): the next or previous group. */
+  async pressCyclePane(direction: "next" | "previous"): Promise<void> {
+    await test.step(`Cycle to the ${direction} pane`, async () => {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await this.page.keyboard.press(`${modifier}+${direction === "next" ? "]" : "["}`);
+    });
+  }
+
   async pressPreviousTab(): Promise<void> {
     await test.step("Press Ctrl+Shift+Tab", async () => {
       await this.page.keyboard.press("Control+Shift+Tab");
@@ -67,11 +75,7 @@ export class CenterTabFocus {
         return inside("file-viewer__markdown-preview") ? "markdown-preview" : "editor";
       }
       if (el.dataset.testid === "center-diff-leaf__scroller") return "diff";
-      if (
-        el instanceof HTMLTextAreaElement &&
-        el.placeholder === "Type a message..." &&
-        inside("center-chat-leaf__visible-true")
-      ) {
+      if (el.dataset.testid === "chat__composer" && inside("center-chat-leaf__visible-true")) {
         return "chat-composer";
       }
       return describe as FocusedSurface;

@@ -3941,15 +3941,19 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     });
   }, []);
 
-  // Focus the active leaf of a workspace that was just shown. Focus is in the
-  // sidebar or the workspace picker then, so this one takes it from there. A
-  // phone only focuses a terminal or the address bar, as before: an editor or
-  // the chat composer would open the on-screen keyboard.
-  const focusShownLeaf = useCallback(() => {
-    const kind = apiRef.current?.activePanel?.api.component;
-    if (!kind) return;
-    if (!mobile || kind === "term" || kind === "browser") focusLeaf(true);
-  }, [mobile, focusLeaf]);
+  // `focusLeaf`, except that a phone only focuses a terminal or the address
+  // bar, as before: an editor or the chat composer would open the on-screen
+  // keyboard. `force` is for an explicit request (a workspace switch, a
+  // tab or pane cycling command), where focus may be anywhere: the sidebar,
+  // the workspace picker, the previous group's leaf.
+  const focusLeafOnDevice = useCallback(
+    (force: boolean) => {
+      const kind = apiRef.current?.activePanel?.api.component;
+      if (!kind) return;
+      if (!mobile || kind === "term" || kind === "browser") focusLeaf(force);
+    },
+    [mobile, focusLeaf],
+  );
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -4067,16 +4071,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         reportFocus();
         // Every tab switch (Ctrl+Tab, the palette, a click, a close) moves
         // focus into the new leaf, or it stays behind on the tab strip or
-        // falls to <body> and the next Ctrl+Tab is lost. Not on a phone, where
-        // focusing an input opens the keyboard, and not for a restore or
+        // falls to <body> and the next Ctrl+Tab is lost. Not for a restore or
         // another device's change.
-        if (
-          !mobile &&
-          visibleRef.current &&
-          !applyingSharedRef.current &&
-          !isRestoringRef.current
-        ) {
-          focusLeaf();
+        if (visibleRef.current && !applyingSharedRef.current && !isRestoringRef.current) {
+          focusLeafOnDevice(false);
         }
       });
       api.onDidMovePanel(() => {
@@ -4089,7 +4087,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         isRestoringRef.current = false;
         // A workspace shown for the first time mounts its dockview after the
         // visibility effect below ran with no leaves yet.
-        if (visibleRef.current) focusShownLeaf();
+        if (visibleRef.current) focusLeafOnDevice(true);
         // Persist a freshly-built DEFAULT layout once, immediately. It is
         // otherwise only written on the NEXT outer-layout change — but splitting
         // a terminal is a NESTED change that never touches the outer layout, so
@@ -4121,8 +4119,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       schedulePersist,
       flushPersist,
       reportFocus,
-      focusLeaf,
-      focusShownLeaf,
+      focusLeafOnDevice,
     ],
   );
 
@@ -4324,8 +4321,10 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   useEffect(() => {
     if (!visible) return;
 
-    // The active-panel listener in `onReady` moves focus into the leaf these
-    // shortcuts activate.
+    // The cycling shortcuts force focus into the leaf they activate: after
+    // ⌘[ / ⌘] it is still in the previous group's (visible) leaf, which the
+    // active-panel listener in `onReady` leaves alone.
+    const refocus = () => focusLeafOnDevice(true);
     const handler = (e: KeyboardEvent) => {
       const api = apiRef.current;
       if (!api) return;
@@ -4338,7 +4337,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         if (!containerRef.current?.contains(active) && active && active !== document.body) return;
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1);
+        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, refocus);
         return;
       }
 
@@ -4375,13 +4374,13 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1);
+        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1, refocus);
         return;
       }
       if (!e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGridGroups(api, key === "]" ? 1 : -1);
+        cycleGridGroups(api, key === "]" ? 1 : -1, refocus);
         return;
       }
 
@@ -4398,20 +4397,32 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, handleClose, handleSplit]);
+  }, [visible, handleClose, handleSplit, focusLeafOnDevice]);
 
   // Focus the active leaf when the workspace becomes visible.
   useEffect(() => {
     if (!visible) return;
     const id = requestAnimationFrame(() => {
-      focusShownLeaf();
+      focusLeafOnDevice(true);
       reportFocus();
     });
     return () => {
       cancelAnimationFrame(id);
       cancelLeafFocusRef.current();
     };
-  }, [visible, reportFocus, focusShownLeaf]);
+  }, [visible, reportFocus, focusLeafOnDevice]);
+
+  // The palette's Next / Previous Tab and Pane: focus the leaf they activated
+  // once the palette has closed (see `focusActiveLeaf`'s modal check).
+  useEffect(() => {
+    const onFocusActiveLeaf = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string }>).detail;
+      if (detail?.workspaceId !== workspaceId || !visibleRef.current) return;
+      focusLeafOnDevice(true);
+    };
+    window.addEventListener("band:focus-active-leaf", onFocusActiveLeaf);
+    return () => window.removeEventListener("band:focus-active-leaf", onFocusActiveLeaf);
+  }, [workspaceId, focusLeafOnDevice]);
 
   // Force a synchronous re-layout when this workspace's dockview becomes visible
   // (mirrors the legacy inner containers' reveal fix).

@@ -40,10 +40,14 @@ const PROJECT_ALL = "tab-cycle-all-kinds";
 const PROJECT_SPLIT = "tab-cycle-split";
 const PROJECT_CLICK = "tab-cycle-click";
 const PROJECT_SWITCH = "tab-cycle-switch";
+const PROJECT_SWITCH_TARGET = "tab-cycle-switch-target";
+const PROJECT_GROUPS = "tab-cycle-groups";
 const WORKSPACE_ALL = toWorkspaceId(PROJECT_ALL, BRANCH);
 const WORKSPACE_SPLIT = toWorkspaceId(PROJECT_SPLIT, BRANCH);
 const WORKSPACE_CLICK = toWorkspaceId(PROJECT_CLICK, BRANCH);
 const WORKSPACE_SWITCH = toWorkspaceId(PROJECT_SWITCH, BRANCH);
+const WORKSPACE_SWITCH_TARGET = toWorkspaceId(PROJECT_SWITCH_TARGET, BRANCH);
+const WORKSPACE_GROUPS = toWorkspaceId(PROJECT_GROUPS, BRANCH);
 
 const CODE_FILE = "code.ts";
 const MARKDOWN_FILE = "notes.md";
@@ -80,7 +84,14 @@ test.beforeAll(async () => {
     };
   };
   seedState(tmpHome, {
-    projects: [PROJECT_ALL, PROJECT_SPLIT, PROJECT_CLICK, PROJECT_SWITCH].map(makeRepo),
+    projects: [
+      PROJECT_ALL,
+      PROJECT_SPLIT,
+      PROJECT_CLICK,
+      PROJECT_SWITCH,
+      PROJECT_SWITCH_TARGET,
+      PROJECT_GROUPS,
+    ].map(makeRepo),
   });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -198,8 +209,38 @@ test("a split terminal gets focus back in the pane that had it", async ({ page }
   await expect(workspacePage.tabContainer("terminal")).toHaveClass(/\bdv-active-tab\b/);
   await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
 
+  // The same with the second pane, which is also the split's active pane and
+  // not the first xterm in the leaf.
   await focus.pressNextTab();
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
+  await focus.pressPreviousTab();
+  await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(0);
+  await workspacePage.focusPane(1);
+  await expect.poll(() => workspacePage.focusedPaneIndex()).toBe(1);
+  await focus.pressNextTab();
+  await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
+  await focus.pressPreviousTab();
+  await expect.poll(() => workspacePage.focusedPaneIndex(), { timeout: 10_000 }).toBe(1);
+});
+
+test("⌘[ moves focus into the other group's tab", async ({ page }) => {
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  const focus = new CenterTabFocus(page);
+  await workspacePage.goto(WORKSPACE_GROUPS);
+  await workspacePage.waitForReady();
+
+  // Left group: the terminal (shown) and a chat. Right group: a second chat.
+  await workspacePage.openChat(WORKSPACE_GROUPS);
+  await workspacePage.clickChatSplitRight(WORKSPACE_GROUPS);
+  await expect(workspacePage.chatTabs()).toHaveCount(2);
+  await workspacePage.focusTerminal();
+  await workspacePage.chatTabs().nth(1).click();
+  await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("chat-composer");
+
+  // The chat stays visible in its group, and focus must still leave it. (A
+  // focused terminal keeps ⌘[ / ⌘] for its own panes.)
+  await focus.pressCyclePane("previous");
+  await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 });
 
 test("switching workspace focuses the active tab of the one shown", async ({ page }) => {
@@ -210,7 +251,7 @@ test("switching workspace focuses the active tab of the one shown", async ({ pag
   await workspacePage.openFileViaQuickOpen(CODE_FILE);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("editor");
 
-  await workspacePage.switchWorkspace(WORKSPACE_SPLIT);
+  await workspacePage.switchWorkspace(WORKSPACE_SWITCH_TARGET);
   await expect.poll(() => focus.focusedSurface(), { timeout: 10_000 }).toBe("terminal");
 
   await workspacePage.switchWorkspace(WORKSPACE_SWITCH);
