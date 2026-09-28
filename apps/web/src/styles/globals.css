@@ -316,10 +316,9 @@ html[data-translucent-sidebar] {
  * app. Hidden entries stay mounted and laid out at the same place as the
  * active one, and a descendant can turn `visibility: visible` back on (a
  * paint-retained browser pane does, see below), so without this their tab
- * strips' drag areas (`.dv-void-container`, the
- * sidebar gutter, the center drag bar) stay in Chromium's draggable region
- * and cover the visible workspace's tabs: a click on a tab starts a window
- * drag instead. `initial` (no region at all), not `no-drag`: a `no-drag` rect
+ * strips' drag areas (`.dv-void-container`, the sidebar gutter, the center
+ * drag bar) stay in Chromium's draggable region and cover the visible
+ * workspace's tabs: a click on a tab starts a window drag instead. `initial` (no region at all), not `no-drag`: a `no-drag` rect
  * would cut into the active entry's drag areas, and Chromium parses the
  * `none` keyword as `no-drag`. `!important` beats the inline
  * `-webkit-app-region` of the React-rendered drag surfaces.

@@ -4,11 +4,13 @@
  * On desktop the center tab strip is the window's top row, and the empty part
  * of each top-row group's strip (`.dv-void-container`) is `app-region: drag`.
  * Chromium builds the window's drag region from every element in document
- * order, visible or not, so any drag rect that lands on a tab makes clicking
- * the tab start a window drag in the desktop app, and dockview never sees the
- * click or the tab's HTML5 drag. That happened with several workspaces open:
- * hidden workspaces stay mounted at the same place as the visible one, and
- * their strips' empty space covered the visible workspace's tabs.
+ * order whose `visibility` is `visible`, whether or not it shows (z-index,
+ * `inert` and `pointer-events` don't count), so any drag rect that lands on a
+ * tab makes clicking the tab start a window drag in the desktop app, and
+ * dockview never sees the click or the tab's HTML5 drag. That happened with
+ * several workspaces open: hidden workspaces stay mounted at the same place
+ * as the visible one, and their strips' empty space covered the visible
+ * workspace's tabs.
  *
  * Electron is the only place that hit-tests the drag region, and the e2e
  * harness boots the web build in plain Chromium, so these tests assert the

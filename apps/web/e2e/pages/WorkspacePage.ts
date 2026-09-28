@@ -700,8 +700,10 @@ export class WorkspacePage {
    *  gets its click in the desktop app: the mousedown starts a window drag.
    *  Replays Chromium's computation: walk every element in document order,
    *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
-   *  z-index, `inert` and `pointer-events` irrelevant, so a hidden but still
-   *  laid-out workspace counts. Only Electron hit-tests that region, so this
+   *  z-index, `inert` and `pointer-events` irrelevant. Unlike Chromium it
+   *  also counts rects whose `visibility` is `hidden`, on purpose: a hidden
+   *  but still laid-out workspace's strip must stay out of the region through
+   *  its `[inert]` app-region reset alone, not only through its visibility. Only Electron hit-tests that region, so this
    *  is the DOM-level projection of it; each control is sampled on a 3px
    *  grid. Returns a label per covered control (testid, aria-label, title or
    *  text), and throws when there is no drag rect or no tab, so a renamed
