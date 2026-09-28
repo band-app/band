@@ -252,14 +252,17 @@ export function DashboardShell({
   }, []);
 
   // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
-  // Skips when focus is in an editable element so it doesn't hijack typing.
+  // ⌘ works from anywhere, like ⌘K: a workspace switch moves focus into the
+  // terminal or editor (lib/leaf-focus.ts), and ⌘+digit types nothing there.
+  // Ctrl skips editable elements, since a terminal sends Ctrl+3..8 to the
+  // shell as control characters.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key < "0" || e.key > "9") return;
 
       const target = e.target as HTMLElement | null;
-      if (target) {
+      if (target && !e.metaKey) {
         const tag = target.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
           return;
