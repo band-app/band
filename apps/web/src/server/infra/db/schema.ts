@@ -21,6 +21,27 @@ export const workspaceStatuses = sqliteTable("workspace_statuses", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+// One row per agent reporting into a workspace: `chat:<chatId>` for a chat
+// pane's ACP turns, `hook:<sessionId>` for a hook-reporting CLI session,
+// `manual` for `statuses.update`. `workspace_statuses.agent_status` is
+// derived from these rows (needs_attention > working > waiting).
+// `terminal_id` is set when the hook came from a Band terminal, so closing
+// that terminal drops the row.
+export const workspaceStatusSources = sqliteTable(
+  "workspace_status_sources",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    sourceId: text("source_id").notNull(),
+    status: text("status").notNull(),
+    terminalId: text("terminal_id"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.sourceId] }),
+    index("workspace_status_sources_terminal_idx").on(t.terminalId),
+  ],
+);
+
 export const branchStatuses = sqliteTable("branch_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
   gitDirty: integer("git_dirty", { mode: "boolean" }).notNull(),
