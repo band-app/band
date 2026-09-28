@@ -12,10 +12,14 @@ import type {
 /**
  * Wire protocol between the web server and the terminal daemon.
  *
- * Bump on ANY change to the messages below. A daemon outlives app updates, so
- * an old one can still be running when a new server boots; the version is in
- * every runtime file name, and a new server retires daemons of older versions
- * (see `retireOlderDaemons`). Their sessions are lost on that upgrade.
+ * Bump on any change to the messages below that an older peer would
+ * misread. A daemon outlives app updates, so an old one can still be running
+ * when a new server boots; the version is in every runtime file name, and a
+ * new server retires daemons of older versions (see `retireOlderDaemons`).
+ * Their sessions are lost on that upgrade. The one exception is a new
+ * `ControlNotify` that is safe to ignore: a daemon drops notifies it doesn't
+ * know, and since #652 new sessions only start on a daemon of the server's
+ * own build, so adding one costs no shells.
  *
  * The hello / mismatch / shutdown exchange is the one part that must never
  * change: it is how a newer server asks an older daemon to exit.
@@ -206,6 +210,14 @@ export type ControlNotify =
   | { t: "resize"; terminalId: string; cols: number; rows: number }
   | { t: "nudgeResize"; terminalId: string }
   | { t: "detach"; terminalId: string }
+  /**
+   * Pause / resume reading the PTY because this server's viewers are behind
+   * on parsing its output. At most one hold per client and terminal; `detach`
+   * and a dropped connection release it. Added without a version bump: an
+   * older daemon ignores notifies it doesn't know (see `handleNotify`).
+   */
+  | { t: "hold"; terminalId: string }
+  | { t: "release"; terminalId: string }
   | { t: "shutdown" };
 
 export type ControlReply =

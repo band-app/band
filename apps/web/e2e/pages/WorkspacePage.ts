@@ -1120,11 +1120,15 @@ export class WorkspacePage {
     return this.terminalPanes().nth(index).getByRole("textbox", { name: "Terminal input" });
   }
 
-  /** Start the in-app typing-latency probe (`window.__bandTypingLatency`). */
-  async startTypingLatencyProbe(): Promise<void> {
-    await this.page.evaluate(() => {
-      (window as unknown as { __bandTypingLatency: { start(): void } }).__bandTypingLatency.start();
-    });
+  /** Start the in-app typing-latency probe (`window.__bandTypingLatency`).
+   *  `matchEcho` pairs each keystroke with the frame carrying its character,
+   *  for a terminal that streams output while it is typed into. */
+  async startTypingLatencyProbe(options: { matchEcho?: boolean } = {}): Promise<void> {
+    await this.page.evaluate((opts) => {
+      (
+        window as unknown as { __bandTypingLatency: { start(o: { matchEcho?: boolean }): void } }
+      ).__bandTypingLatency.start(opts);
+    }, options);
   }
 
   /** Stop the typing-latency probe and return its report. */
