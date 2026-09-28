@@ -54,6 +54,8 @@ export class WorkspacePage {
    *  menu (right-click). Only present for non-default branches of git
    *  projects. Used by the cache-eviction regression test (issue #508). */
   readonly deleteWorkspaceMenuItem: Locator;
+  /** "Git pull" menu item inside the WorkspaceCard's context menu. */
+  readonly gitPullMenuItem: Locator;
 
   constructor(
     private readonly page: Page,
@@ -65,6 +67,7 @@ export class WorkspacePage {
     this.terminalInput = page.getByRole("textbox", { name: "Terminal input" });
     this.changesHeading = page.getByRole("heading", { name: "Files changed" });
     this.deleteWorkspaceMenuItem = page.getByRole("menuitem", { name: "Delete workspace" });
+    this.gitPullMenuItem = page.getByRole("menuitem", { name: "Git pull" });
   }
 
   /** Locate a workspace card in the project-list sidebar by its canonical
@@ -233,6 +236,15 @@ export class WorkspacePage {
   async clickDisabledWorkspaceCard(workspaceId: string): Promise<void> {
     await test.step(`Click disabled workspace card ${workspaceId}`, async () => {
       await this.workspaceCard(workspaceId).click({ force: true });
+    });
+  }
+
+  /** Right-click the workspace card and click "Git pull", the sidebar's
+   *  pull (`workspaces.gitPull`). */
+  async pullWorkspaceFromSidebar(workspaceId: string): Promise<void> {
+    await test.step(`Git pull ${workspaceId} via sidebar context menu`, async () => {
+      await this.workspaceCard(workspaceId).click({ button: "right" });
+      await this.gitPullMenuItem.click();
     });
   }
 

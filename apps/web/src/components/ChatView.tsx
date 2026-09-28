@@ -62,6 +62,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
 import type { SessionState } from "../shared/chat-events";
 import {
@@ -267,6 +268,7 @@ export function ChatView({
   // True once the user clicks "New session": the still-open subscription
   // keeps reporting the old session until the parent remounts us.
   const [initialSessionCleared, setInitialSessionCleared] = useState(false);
+  const composerObstructionRef = useToastObstruction();
   const [contextMeterEnabled] = useExperimentalContextMeter();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
@@ -769,6 +771,7 @@ export function ChatView({
         {/* On a phone the composer sits right on the home-indicator inset (or
             the keyboard), so it keeps only a small gap below the input. */}
         <div
+          ref={composerObstructionRef}
           data-testid="chat-pane__composer"
           className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-2 lg:pb-4"
         >

@@ -1,6 +1,7 @@
 import { Button } from "@band-app/ui";
-import { CircleAlert, X } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ToastCard } from "./ToastCard";
 
 const DISMISSED_KEY = "band:reinstall-home-screen-dismissed";
 
@@ -64,19 +65,7 @@ export function ReinstallHomeScreenNotice() {
   };
 
   return (
-    <output
-      aria-live="polite"
-      data-testid="reinstall-home-screen-notice"
-      className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 z-50 block rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg sm:left-auto sm:w-80"
-    >
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={dismiss}
-        className="absolute top-2 right-2 rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-      >
-        <X className="size-3.5" />
-      </button>
+    <ToastCard testId="reinstall-home-screen-notice" onClose={dismiss}>
       <div className="flex gap-2.5 pr-6">
         <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
         <div className="min-w-0">
@@ -92,6 +81,6 @@ export function ReinstallHomeScreenNotice() {
           Got it
         </Button>
       </div>
-    </output>
+    </ToastCard>
   );
 }

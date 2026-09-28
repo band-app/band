@@ -9,12 +9,14 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { slugifyBranchName } from "@/lib/branch-name";
+import type { GitOpResult } from "@/shared/git-op-result";
 import { WorkspaceNotFoundError } from "../errors";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
+import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
@@ -258,6 +260,23 @@ export class PlainProjectError extends Error {
  */
 function isRebaseCollision(err: unknown): boolean {
   return String(err).includes("Cannot rebase onto multiple branches");
+}
+
+/**
+ * `git pull --rebase` in `cwd`, shared by both `gitPull` paths. Refusals
+ * (local changes, no upstream) resolve as `ok: false`; any other failure
+ * rethrows with git's stderr.
+ */
+async function pullRebase(cwd: string): Promise<GitOpResult> {
+  try {
+    await execGit(["pull", "--rebase"], cwd);
+  } catch (e) {
+    if (isRebaseCollision(e)) return { ok: true };
+    const refusal = await pullRefusal(e, cwd);
+    if (refusal) return refusal;
+    throw e;
+  }
+  return { ok: true };
 }
 
 export class WorkspaceService {
@@ -923,9 +942,10 @@ export class WorkspaceService {
    * Swallows the specific "Cannot rebase onto multiple branches" exit
    * status that git produces when the fetch step has already fast-
    * forwarded the working tree — the pull effectively succeeded in that
-   * case and a thrown error would surface as a red toast.
+   * case and a thrown error would surface as a red toast. Local changes in
+   * the way, or no upstream, come back as an `ok: false` refusal.
    */
-  async gitPull(input: WorkspaceGitInput): Promise<{ ok: true }> {
+  async gitPull(input: WorkspaceGitInput): Promise<GitOpResult> {
     const workspaceId = toWorkspaceId(input.project, input.name);
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
@@ -936,14 +956,7 @@ export class WorkspaceService {
         `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
       );
     }
-    const cwd = workspace.worktree.path;
-    try {
-      await execGit(["pull", "--rebase"], cwd);
-    } catch (e) {
-      if (isRebaseCollision(e)) return { ok: true };
-      throw e;
-    }
-    return { ok: true };
+    return pullRebase(workspace.worktree.path);
   }
 
   /**
@@ -954,9 +967,10 @@ export class WorkspaceService {
    * The fallback only fires when git reports "no upstream branch" — all
    * other failures (auth, rejected push, network, …) rethrow immediately
    * so the real error surfaces to the caller instead of being masked by
-   * a second failing push.
+   * a second failing push. A non-fast-forward rejection comes back as an
+   * `ok: false` refusal.
    */
-  async gitPush(input: WorkspaceGitInput): Promise<{ ok: true }> {
+  async gitPush(input: WorkspaceGitInput): Promise<GitOpResult> {
     const workspaceId = toWorkspaceId(input.project, input.name);
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
@@ -978,6 +992,8 @@ export class WorkspaceService {
       // second-push failure.
       const msg = err instanceof Error ? err.message : String(err);
       if (!/has no upstream branch/i.test(msg)) {
+        const refusal = pushRefusal(err);
+        if (refusal) return refusal;
         throw err;
       }
       // Set upstream for the LIVE git branch, not the workspace identity —
@@ -991,29 +1007,19 @@ export class WorkspaceService {
    * `git pull --rebase` keyed by workspaceId rather than `(project, branch)`.
    *
    * Used by `api/workspace/router.ts::gitPull` (the per-workspace,
-   * singular-namespace variant). Implements the same `git pull --rebase`
-   * + `isRebaseCollision` swallow logic as the project-keyed `gitPull`
-   * above — both paths share the helper so the substring guard stays in
-   * one place. (We don't `this.gitPull` from here because that variant
+   * singular-namespace variant). Runs the same `pullRebase` helper as the
+   * project-keyed `gitPull` above, so the collision guard and the refusal
+   * mapping stay in one place. (We don't `this.gitPull` from here because that variant
    * additionally enforces the `kind === "plain"` rejection via
    * `PlainProjectError`; the workspaceId surface doesn't carry that
    * concern.)
    */
-  async gitPullByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+  async gitPullByWorkspaceId(workspaceId: string): Promise<GitOpResult> {
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
     }
-    const cwd = workspace.worktree.path;
-    try {
-      await execGit(["pull", "--rebase"], cwd);
-    } catch (e) {
-      if (isRebaseCollision(e)) return { ok: true };
-      // Re-throw the original error to preserve its stack — the project-
-      // keyed `gitPull` above does the same `throw e`.
-      throw e;
-    }
-    return { ok: true };
+    return pullRebase(workspace.worktree.path);
   }
 
   /**
@@ -1025,7 +1031,7 @@ export class WorkspaceService {
    * been renamed via `git branch -m` and the project record not yet
    * refreshed, in which case pushing the stale name fails too.
    */
-  async gitPushByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+  async gitPushByWorkspaceId(workspaceId: string): Promise<GitOpResult> {
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
@@ -1041,6 +1047,8 @@ export class WorkspaceService {
       // `gitPush` above.
       const msg = err instanceof Error ? err.message : String(err);
       if (!/has no upstream branch/i.test(msg)) {
+        const refusal = pushRefusal(err);
+        if (refusal) return refusal;
         throw err;
       }
       // First push needs to set upstream. Resolve the live HEAD branch
@@ -1064,12 +1072,13 @@ export class WorkspaceService {
   /**
    * Commit all pending changes in `workspaceId` with `message` (and optional
    * `body`). Stages everything (tracked + untracked) so the commit reflects
-   * the diff the user just reviewed in the Changes view.
+   * the diff the user just reviewed in the Changes view. A clean working
+   * tree comes back as a `nothing-to-commit` refusal.
    */
   async gitCommit(
     workspaceId: string,
     input: { message: string; body?: string },
-  ): Promise<{ ok: true }> {
+  ): Promise<GitOpResult> {
     const workspace = this.resolve(workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
@@ -1077,6 +1086,11 @@ export class WorkspaceService {
     const cwd = workspace.worktree.path;
 
     await execGit(["add", "-A"], cwd);
+    // `git commit` reports "nothing to commit" on stdout, which `execGit`'s
+    // rejection doesn't carry, so check for staged changes first.
+    if ((await execGit(["status", "--porcelain"], cwd)).trim() === "") {
+      return NOTHING_TO_COMMIT;
+    }
 
     // Pass title + body as separate `-m` args so git formats them with the
     // standard blank-line separator between subject and body.
