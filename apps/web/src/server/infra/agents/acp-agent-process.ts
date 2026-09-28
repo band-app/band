@@ -25,6 +25,15 @@ const log = createLogger("acp-agent");
 const STARTUP_TIMEOUT_MS = 60_000;
 /** `session/load` streams the whole history before answering. */
 const LOAD_TIMEOUT_MS = 180_000;
+/** How long `stopAllAgentProcesses` waits after SIGTERM before SIGKILL. */
+const STOP_TIMEOUT_MS = 3_000;
+
+/**
+ * Every agent process started and not yet exited, including one still
+ * starting up. Agents run in their own process group, so nothing else stops
+ * them when the server exits.
+ */
+const liveChildren = new Set<ChildProcess>();
 
 const CLIENT_CAPABILITIES: acp.ClientCapabilities = {
   fs: { readTextFile: false, writeTextFile: false },
@@ -138,6 +147,8 @@ export class AcpAgentProcess {
       detached: process.platform !== "win32",
     });
     child.stderr?.on("data", stderr.push);
+    child.once("spawn", () => liveChildren.add(child));
+    child.once("exit", () => liveChildren.delete(child));
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -376,12 +387,37 @@ function describe(err: unknown): string {
   return String(err);
 }
 
-function killTree(child: ChildProcess): void {
+/**
+ * Stops every agent process this server started, and what each one started,
+ * and resolves once they have exited. For server shutdown: a detached agent
+ * would otherwise outlive the server, and a Codex agent's app-server with it.
+ */
+export async function stopAllAgentProcesses(): Promise<void> {
+  await Promise.all(
+    [...liveChildren].map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            resolve();
+            return;
+          }
+          const fallback = setTimeout(() => killTree(child, "SIGKILL"), STOP_TIMEOUT_MS);
+          child.once("exit", () => {
+            clearTimeout(fallback);
+            resolve();
+          });
+          killTree(child);
+        }),
+    ),
+  );
+}
+
+function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
   if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill("SIGTERM");
-    else process.kill(-child.pid, "SIGTERM");
+    if (process.platform === "win32") child.kill(signal);
+    else process.kill(-child.pid, signal);
   } catch {
-    child.kill("SIGTERM");
+    child.kill(signal);
   }
 }

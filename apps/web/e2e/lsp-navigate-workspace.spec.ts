@@ -171,7 +171,10 @@ test.describe("Files-panel LSP navigate workspace scoping (cross-workspace file 
     // cached (its listener still alive) while B becomes active.
     await expect(workspacePage.workspaceCard(WORKSPACE_B)).toBeVisible();
     await workspacePage.switchWorkspace(WORKSPACE_B);
-    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
+    // B's center dockview registers its leaf actions a moment after the switch,
+    // while its Explorer can already render. A file row clicked before then
+    // opens nothing, so wait for B's center to be ready first.
+    await workspacePage.waitForWorkspaceReady(WORKSPACE_B);
     // `.count()` is a one-shot read with no auto-retry — poll so an async
     // mount of A's cached panels can't lose a race with this assertion.
     await expect

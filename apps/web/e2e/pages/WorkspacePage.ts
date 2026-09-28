@@ -1253,6 +1253,17 @@ export class WorkspacePage {
     );
   }
 
+  /** Keystrokes the running typing-latency probe has seen echoed and painted
+   *  so far. */
+  async typingLatencySamples(): Promise<number> {
+    return await this.page.evaluate(
+      () =>
+        (
+          window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
+        ).__bandTypingLatency.report().samples,
+    );
+  }
+
   /** Readiness barrier that also works under the WebGL renderer (whose rows
    *  aren't in the DOM): press a key into the focused terminal until the probe
    *  records it echoed and painted, then erase it. */
@@ -1264,12 +1275,7 @@ export class WorkspacePage {
           async () => {
             await this.page.keyboard.press("x");
             await this.page.keyboard.press("Backspace");
-            return await this.page.evaluate(
-              () =>
-                (
-                  window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
-                ).__bandTypingLatency.report().samples,
-            );
+            return await this.typingLatencySamples();
           },
           { timeout: timeoutMs },
         )
@@ -2996,6 +3002,21 @@ export class WorkspacePage {
     return () => count;
   }
 
+  /** Start counting terminal WebSockets that have received a frame. Call this
+   *  BEFORE the terminals to count are opened. The first frame arrives after
+   *  the socket's `open` handler ran, so the count climbing means a new
+   *  terminal finished connecting. */
+  trackConnectedTerminalSockets(): () => number {
+    let count = 0;
+    this.page.on("websocket", (ws) => {
+      if (!ws.url().includes("/terminal?")) return;
+      ws.once("framereceived", () => {
+        count += 1;
+      });
+    });
+    return () => count;
+  }
+
   /** Install a browser-side wrapper around `window.WebSocket` that records
    *  every terminal socket the page opens in `window.__terminalSockets`.
    *  Must run BEFORE `goto` (uses `addInitScript`). Test-only
@@ -3443,6 +3464,14 @@ export class WorkspacePage {
     await test.step(`Type Quick Open query "${text}"`, async () => {
       await this.quickOpenInput.focus();
       await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Keep typing at the caret, without selecting the query first: the way a
+   *  user carries on typing after a pause. */
+  async continueTypingQuickOpen(text: string): Promise<void> {
+    await test.step(`Keep typing "${text}" into Quick Open`, async () => {
       await this.page.keyboard.type(text);
     });
   }
