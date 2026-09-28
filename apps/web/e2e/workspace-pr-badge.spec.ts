@@ -1,6 +1,6 @@
 /**
- * The PR badge in a sidebar workspace row: the PR number colored by CI state,
- * the popover it opens on hover and on keyboard focus (number, title,
+ * The PR badge in a sidebar workspace row: the PR number as an outlined tag
+ * colored by CI state, which leaves the row's height unchanged, the popover it opens on hover and on keyboard focus (number, title,
  * status, "Open on GitHub", "Copy link"), and clicking it to show that
  * workspace's Checks tab.
  *
@@ -177,12 +177,48 @@ test("a workspace with a PR shows its number, colored by CI state", async ({ pag
   await expect(badges.badge(wsId("main"))).toHaveCount(0);
 });
 
+test("the badge is an outlined tag in its state's color, and the row keeps its height", async ({
+  page,
+}) => {
+  const badges = new PullRequestBadgePage(page, server.url, TOKEN);
+  await badges.goto(wsId("main"));
+
+  const tagged = [FAILING, DRAFT, PASSING, MERGED, NO_CHECKS, CLOSED];
+  for (const branch of tagged) {
+    await expect(badges.badge(wsId(branch))).toBeVisible();
+    const outline = await badges.badgeOutline(wsId(branch));
+    expect(outline, branch).toMatchObject({ width: "1px", style: "solid" });
+    expect(outline.radius, branch).not.toBe("0px");
+  }
+
+  // Failing, pending and passing outline in three different colors.
+  const borders = new Set([
+    (await badges.badgeOutline(wsId(FAILING))).color,
+    (await badges.badgeOutline(wsId(DRAFT))).color,
+    (await badges.badgeOutline(wsId(PASSING))).color,
+  ]);
+  expect(borders.size).toBe(3);
+
+  // A row with a tag is as tall as one with only the CI icon. Every height
+  // comes from the same pass, so a late reflow can't split the measurement.
+  await expect(badges.ciIcon(wsId(NO_PR))).toBeVisible();
+  await expect
+    .poll(async () => {
+      const plainRow = await badges.rowHeight(wsId(NO_PR));
+      const heights = await Promise.all(tagged.map((b) => badges.rowHeight(wsId(b))));
+      return heights.every((h) => h === plainRow);
+    })
+    .toBe(true);
+});
+
 test("hovering the badge shows the PR's number, title and status", async ({ page }) => {
   const badges = new PullRequestBadgePage(page, server.url, TOKEN);
   await badges.goto(wsId("main"));
 
   await badges.hoverBadge(wsId(FAILING));
   await expect(badges.popoverNumber).toHaveText("#705");
+  await expect(badges.popoverNumber).toHaveAttribute("data-tone", "failure");
+  expect(await badges.popoverOutline()).toMatchObject({ width: "1px", style: "solid" });
   await expect(badges.popoverTitle).toHaveText(FAILING_TITLE);
   await expect(badges.popoverStatus).toHaveAttribute("data-status", "failure");
   await expect(badges.popoverDraft).toHaveCount(0);
@@ -192,6 +228,7 @@ test("hovering the badge shows the PR's number, title and status", async ({ page
 
   await badges.hoverBadge(wsId(DRAFT));
   await expect(badges.popoverNumber).toHaveText("#706");
+  await expect(badges.popoverNumber).toHaveAttribute("data-tone", "pending");
   await expect(badges.popoverStatus).toHaveAttribute("data-status", "running");
   await expect(badges.popoverDraft).toBeVisible();
 });

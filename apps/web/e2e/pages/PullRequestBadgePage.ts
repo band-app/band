@@ -1,13 +1,15 @@
 /**
  * Page object for the PR badge in a sidebar workspace row
- * (`dashboard/components/PullRequestBadge.tsx`): the PR number
- * `workspace-card__pr-badge` (its `data-tone` is the CI color: `failure`,
- * `pending`, `success`, `neutral`, `merged` or `closed`) and its popover
- * `pr-popover`, with `pr-popover__number`, `__status`, `__draft`, `__title`,
- * `__open` and `__copy`. The status element's `data-status` is the CI state
+ * (`dashboard/components/PullRequestBadge.tsx`): the PR number as an
+ * outlined tag, `workspace-card__pr-badge` (its `data-tone` is the CI color:
+ * `failure`, `pending`, `success`, `neutral`, `merged` or `closed`), and its
+ * popover `pr-popover`, with `pr-popover__number` (the same tag, with the
+ * same `data-tone`), `__status`, `__draft`, `__title`, `__open` and
+ * `__copy`. The status element's `data-status` is the CI state
  * (or `merged` / `closed`), and the copy button has `data-copied` while it
  * shows its confirmation. A row without a PR shows the CI icon
- * `workspace-card__ci-icon` instead.
+ * `workspace-card__ci-icon` instead. `badgeOutline` and `popoverOutline`
+ * read a tag's computed border, and `rowHeight` a sidebar row's height.
  *
  * Navigation, the workspace card and clipboard capture are delegated to
  * `WorkspacePage`.
@@ -15,6 +17,26 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { WorkspacePage } from "./WorkspacePage";
+
+/** A tag's border width, style and color, and corner radius. */
+export interface TagOutline {
+  width: string;
+  style: string;
+  color: string;
+  radius: string;
+}
+
+function readOutline(tag: Locator): Promise<TagOutline> {
+  return tag.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return {
+      width: s.borderTopWidth,
+      style: s.borderTopStyle,
+      color: s.borderTopColor,
+      radius: s.borderTopLeftRadius,
+    };
+  });
+}
 
 export class PullRequestBadgePage {
   readonly popover: Locator;
@@ -75,6 +97,23 @@ export class PullRequestBadgePage {
   /** The badge's rendered text color, as the browser computed it. */
   async badgeColor(workspaceId: string): Promise<string> {
     return this.badge(workspaceId).evaluate((el) => getComputedStyle(el).color);
+  }
+
+  /** The badge's tag outline as the browser computed it. */
+  async badgeOutline(workspaceId: string): Promise<TagOutline> {
+    return readOutline(this.badge(workspaceId));
+  }
+
+  /** The popover number's tag outline as the browser computed it. */
+  async popoverOutline(): Promise<TagOutline> {
+    return readOutline(this.popoverNumber);
+  }
+
+  /** The rendered height of `workspaceId`'s sidebar row, in CSS pixels. */
+  async rowHeight(workspaceId: string): Promise<number> {
+    const box = await this.workspace.workspaceCard(workspaceId).boundingBox();
+    if (!box) throw new Error(`workspace row ${workspaceId} is not rendered`);
+    return box.height;
   }
 
   async hoverBadge(workspaceId: string): Promise<void> {
