@@ -39,6 +39,7 @@ export {
   type SearchOptions,
 } from "./components/SearchBar";
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
+export { TerminalSelectionContextMenu } from "./components/SelectionContextMenu";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { SettingsRow, SettingsSection } from "./components/settings";
@@ -133,6 +134,7 @@ export type {
 } from "./lib/markdown-live-preview";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export {
+  type AddToChatDetail,
   type AddToTerminalDetail,
   buildLineReference,
   type ChatInsertDetail,

@@ -212,11 +212,18 @@ export class ChangesPanelPage {
     });
   }
 
+  /** One editor of the visible diff leaf: `"new"` is the working-tree side
+   *  (the only editor in unified mode), `"old"` the merge-base side of a
+   *  split. */
+  diffEditor(side: "new" | "old"): Locator {
+    return this.diffLeaf.getByTestId(`diff-file__editor--${side}`);
+  }
+
   /** Go-to-definition on one editor of the visible diff leaf: `"new"` is the
    *  working-tree side (the only editor in unified mode, the right one in
    *  split mode), `"old"` the merge-base side of a split. */
   symbols(side: "new" | "old" = "new"): CodeSymbolLinks {
-    return new CodeSymbolLinks(this.page, this.diffLeaf.getByTestId(`diff-file__editor--${side}`));
+    return new CodeSymbolLinks(this.page, this.diffEditor(side));
   }
 
   /** The editor tab a go-to-definition from the diff opened (the visible

@@ -20,7 +20,8 @@ import {
   markdownPreviewWidthTheme,
 } from "../lib/markdown-live-preview";
 import type { MarkdownPreviewWidth } from "../lib/markdown-preview-width";
-import { selectionToChatExtension } from "../lib/selection-to-chat";
+import { selectionReferenceExtension } from "../lib/selection-to-chat";
+import { CodeSelectionContextMenu } from "./SelectionContextMenu";
 
 interface CodeMirrorEditorProps {
   /** Initial content to populate the editor with */
@@ -34,7 +35,7 @@ interface CodeMirrorEditorProps {
   originalContent?: string;
   language: string;
   className?: string;
-  /** Workspace-relative file path — enables "Add to Chat" on text selection */
+  /** Workspace-relative file path — enables the file actions in the selection context menu */
   filePath?: string;
   /** 1-based line number to scroll to and highlight */
   line?: number;
@@ -189,7 +190,7 @@ export function CodeMirrorEditor({
         }),
       ];
       if (filePath) {
-        extensions.push(selectionToChatExtension(filePath));
+        extensions.push(selectionReferenceExtension(filePath));
       }
       if (readOnly) {
         extensions.push(EditorState.readOnly.of(true));
@@ -318,5 +319,9 @@ export function CodeMirrorEditor({
     }
   }, [line, lineEnd, column]);
 
-  return <div ref={containerRef} className={className} />;
+  return (
+    <CodeSelectionContextMenu>
+      <div ref={containerRef} className={className} />
+    </CodeSelectionContextMenu>
+  );
 }

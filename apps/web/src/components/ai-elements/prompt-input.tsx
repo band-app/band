@@ -246,7 +246,7 @@ export const PromptInput = ({
     textarea.selectionStart = textarea.selectionEnd = value.length;
   }, []);
 
-  // Deliver an "Add to Chat" reference from the CodeMirror selection tooltip.
+  // Deliver an "Add to Chat" reference from the selection context menu.
   // SharedDockviewLayout owns the workspace-agnostic `band:add-to-chat` intent:
   // it resolves the active workspace's last-focused chat and re-dispatches the
   // scoped `band:chat-insert` handled here. Many PromptInput instances are
@@ -266,15 +266,26 @@ export const PromptInput = ({
         return;
       }
 
-      // Wrap the shared bare reference in a markdown code span so the chat
-      // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
-      // in file-link-components.tsx — it only links paths inside inline `<code>`).
-      // The terminal/copy actions intentionally use the bare form instead.
-      // Trailing space keeps it separated from any text the user types next.
-      const reference = `\`${buildLineReference(detail.filePath, detail.startLine, detail.endLine)}\` `;
-
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";
+
+      let reference: string;
+      if ("text" in detail) {
+        // Terminal text has no file behind it, so it goes in as a fenced block
+        // on its own lines. The fence is one backtick longer than any run in
+        // the text, so a ``` line in agent output can't close it early.
+        const lead = current === "" || current.endsWith("\n") ? "" : "\n";
+        const longestRun = Math.max(0, ...(detail.text.match(/`+/g) ?? []).map((r) => r.length));
+        const fence = "`".repeat(Math.max(3, longestRun + 1));
+        reference = `${lead}${fence}\n${detail.text.replace(/\n+$/, "")}\n${fence}\n`;
+      } else {
+        // Wrap the shared bare reference in a markdown code span so the chat
+        // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
+        // in file-link-components.tsx — it only links paths inside inline `<code>`).
+        // The terminal/copy actions intentionally use the bare form instead.
+        // Trailing space keeps it separated from any text the user types next.
+        reference = `\`${buildLineReference(detail.filePath, detail.startLine, detail.endLine)}\` `;
+      }
       const combined = current + reference;
 
       // Use native setter pattern to keep React in sync
@@ -285,8 +296,8 @@ export const PromptInput = ({
         )?.set;
         nativeSetter?.call(textarea, combined);
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
-        // Defer focus so it happens after CodeMirror finishes its dispatch
-        // (the mousedown handler collapses the selection which re-grabs focus)
+        // Defer focus to the next frame so it lands after the selection
+        // context menu has finished closing.
         requestAnimationFrame(() => {
           textarea.focus();
           textarea.selectionStart = textarea.selectionEnd = combined.length;
