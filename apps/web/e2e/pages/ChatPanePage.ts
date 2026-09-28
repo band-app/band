@@ -85,8 +85,13 @@ export class ChatPanePage {
   /** The open "Effort" submenu. */
   readonly effortSubmenuContent: Locator;
   /** Stop / cancel button — only present while the current task is in
-   *  the streaming phase (post-`text-start`, pre-`task-completed`). */
+   *  the streaming phase (post-`text-start`, pre-`task-completed`) and the
+   *  prompt is empty. */
   readonly stopButton: Locator;
+  /** Send button. The composer shows either this or Stop, never both. */
+  readonly submitButton: Locator;
+  /** Queued-message bubbles, found by their drag handle. */
+  readonly queuedMessages: Locator;
   /** All tool-call container rows in the conversation (one per ACP
    *  `tool_call`). Each carries a `data-status`
    *  attribute mirroring the StatusDot branch
@@ -151,6 +156,8 @@ export class ChatPanePage {
     this.moreModelsRows = this.moreModelsContent.getByRole("menuitem");
     this.effortSubmenuContent = page.getByTestId("chat-pane__model-menu-effort-submenu-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
+    this.submitButton = page.getByTestId("prompt-input__submit-button").filter({ visible: true });
+    this.queuedMessages = page.getByRole("button", { name: "Reorder queued message" });
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
@@ -166,6 +173,13 @@ export class ChatPanePage {
     const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
     await test.step(`Navigate to workspace ${workspaceId}`, async () => {
       await this.page.goto(url);
+    });
+  }
+
+  /** Reload the page, as a user pressing Cmd+R would. */
+  async reload(): Promise<void> {
+    await test.step("Reload the page", async () => {
+      await this.page.reload();
     });
   }
 
@@ -618,7 +632,7 @@ export class ChatPanePage {
   }
 
   /** Click the Stop button to cancel the in-flight task. The button is
-   *  only rendered while `status === "streaming"`. */
+   *  only rendered while a task is streaming and the prompt is empty. */
   async clickStop(): Promise<void> {
     await test.step("Click Stop to cancel the in-flight task", async () => {
       await this.stopButton.click();
