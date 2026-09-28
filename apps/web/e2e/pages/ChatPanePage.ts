@@ -73,6 +73,8 @@ export class ChatPanePage {
   readonly fastModeSwitch: Locator;
   /** The "More models" row in the model settings menu (opens a submenu). */
   readonly moreModelsSubmenu: Locator;
+  /** The open "More models" submenu, listing the other models. */
+  readonly moreModelsContent: Locator;
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
@@ -134,6 +136,7 @@ export class ChatPanePage {
     this.fastModeItem = page.getByTestId("chat-pane__model-menu-fast");
     this.fastModeSwitch = this.fastModeItem.getByRole("switch", { includeHidden: true });
     this.moreModelsSubmenu = page.getByTestId("chat-pane__model-menu-more-models");
+    this.moreModelsContent = page.getByTestId("chat-pane__model-menu-more-models-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
@@ -261,6 +264,61 @@ export class ChatPanePage {
       await this.modelMenuButton.click();
       await expect(this.modelMenuContent).toBeVisible();
     });
+  }
+
+  /** Open the "More models" submenu of the open model settings menu. */
+  async openMoreModels(): Promise<void> {
+    await test.step("Open the More models submenu", async () => {
+      await this.moreModelsSubmenu.click();
+      await expect(this.moreModelsContent).toBeVisible();
+    });
+  }
+
+  /** A model row in the open "More models" submenu, by display name (agent
+   *  test data). */
+  moreModelsOption(name: string): Locator {
+    return this.moreModelsContent.getByRole("menuitem", { name, exact: true });
+  }
+
+  /** Move keyboard focus to the last row of the open "More models" submenu,
+   *  the way a keyboard user reaches it: into the submenu, then End. */
+  async focusLastMoreModel(): Promise<void> {
+    await test.step("Focus the last model with the keyboard", async () => {
+      await this.moreModelsContent.getByRole("menuitem").first().focus();
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Scroll the open "More models" submenu until the named model is in
+   *  view, the way a wheel or a swipe would. */
+  async scrollToMoreModel(name: string): Promise<void> {
+    await test.step(`Scroll to model "${name}"`, async () => {
+      await this.moreModelsOption(name).scrollIntoViewIfNeeded();
+    });
+  }
+
+  /** Click a model in the open "More models" submenu. The menu closes. */
+  async clickMoreModel(name: string): Promise<void> {
+    await test.step(`Click model "${name}"`, async () => {
+      await this.moreModelsOption(name).click();
+      await expect(this.modelMenuContent).toBeHidden();
+    });
+  }
+
+  /** Scroll the open "More models" submenu back to its top. */
+  async scrollMoreModelsToTop(): Promise<void> {
+    await this.moreModelsContent.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+  }
+
+  /** The rendered box of an element, in viewport pixels. */
+  async readBox(
+    locator: Locator,
+  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
+    const box = await locator.boundingBox();
+    if (!box) throw new Error("element has no layout box");
+    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
   }
 
   /** Close an open menu with Escape. */
