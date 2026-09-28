@@ -87,11 +87,27 @@ jobs:
         with:
           version: 10
 
+      # .nvmrc holds the Node major the desktop app ships (Electron's bundled
+      # Node), so CI tests the runtime users actually run.
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
-          cache: 'pnpm'
+          node-version-file: .nvmrc
+
+      # Split restore/save like the cargo caches above, instead of
+      # setup-node's `cache: 'pnpm'`, whose post-step save has no trust gate.
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: actions/cache/restore@v5
+        with:
+          # When editing path/key here, mirror in "Save pnpm store cache".
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
 
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
@@ -105,6 +121,21 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Saved right after install, when the store is complete. Same trust
+      # gate as the cargo saves below (see the comment block there).
+      - name: Save pnpm store cache
+        if: |
+          steps.cache-pnpm-store.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          # When editing path/key here, mirror in "Restore pnpm store cache".
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Lint (Biome)
         run: pnpm exec biome check .
@@ -121,30 +152,44 @@ jobs:
       - name: Lint (cargo clippy — CLI)
         run: cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
-      - name: Cache Next.js build
-        uses: actions/cache@v5
-        with:
-          path: apps/web/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('apps/web/**/*.[jt]s', 'apps/web/**/*.[jt]sx') }}
-          restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            nextjs-${{ runner.os }}-
-
       - name: Build web (needed by tests)
         run: pnpm build:web
 
       - name: Test (web)
         run: pnpm --filter @band-app/server test
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
+      # Keyed on the Playwright version, with no restore-keys, so a bump
+      # starts clean instead of carrying old browser builds forward.
+      - name: Resolve Playwright version
+        id: playwright
+        working-directory: apps/web
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
+      - name: Restore Playwright browsers cache
+        id: cache-playwright
+        uses: actions/cache/restore@v5
+        with:
+          # When editing path/key here, mirror in "Save Playwright browsers cache".
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # `--with-deps` still installs the apt packages on a cache hit; the hit
+      # only skips the browser download.
       - name: Install Playwright Chromium
         run: pnpm --filter @band-app/server exec playwright install --with-deps chromium
+
+      - name: Save Playwright browsers cache
+        if: |
+          steps.cache-playwright.outputs.cache-hit != 'true' &&
+          ((github.event_name != 'pull_request' &&
+            github.event_name != 'pull_request_target') ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          # When editing path/key here, mirror in "Restore Playwright browsers cache".
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
       - name: Test e2e (web)
         run: pnpm --filter @band-app/server test:e2e
@@ -373,7 +418,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
 
       # macos-latest ships node-pty's darwin prebuild, so (unlike the ubuntu
       # job) no explicit `node-gyp` install is needed — matches release.yml.
@@ -461,7 +506,9 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .nvmrc
+          # deploy-docs only runs on push to main, so this ungated save
+          # never runs for untrusted code.
           cache: 'pnpm'
 
       - name: Install dependencies
