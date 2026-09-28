@@ -61,6 +61,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { trpc } from "../lib/trpc-client";
 import type { SessionState } from "../shared/chat-events";
 import {
@@ -905,6 +906,14 @@ function ModeMenu({
   );
 }
 
+/** Width of the model settings menu. In a viewport too narrow for a
+ *  submenu beside the menu (a phone), the submenu opens over the menu
+ *  instead: a side offset of minus this width puts it on top of the menu. */
+const MODEL_MENU_WIDTH_PX = 256;
+/** Room for the menu and a submenu of the same width side by side, plus the
+ *  composer's margins. */
+const SUBMENU_BESIDE_QUERY = `(min-width: ${2 * MODEL_MENU_WIDTH_PX + 48}px)`;
+
 /**
  * Model, effort, fast mode and any other per-model settings behind one
  * trigger. It only changes settings within the session's agent: a session
@@ -937,6 +946,7 @@ function ModelSettingsMenu({
   const otherModels = models.filter((m) => m !== current);
   const effortChoice = effort && selectChoices(effort).find((c) => c.id === effort.currentValue);
   const fastOn = fast?.currentValue === "on";
+  const submenuOffset = useMediaQuery(SUBMENU_BESIDE_QUERY) ? undefined : -MODEL_MENU_WIDTH_PX;
 
   return (
     <DropdownMenu>
@@ -969,7 +979,7 @@ function ModelSettingsMenu({
       <DropdownMenuContent
         side="top"
         align="end"
-        className="w-64"
+        style={{ width: MODEL_MENU_WIDTH_PX }}
         data-testid="chat-pane__model-menu-content"
       >
         {current && (
@@ -992,6 +1002,7 @@ function ModelSettingsMenu({
             label="Effort"
             disabled={pending}
             testId="chat-pane__model-menu-effort-submenu"
+            sideOffset={submenuOffset}
             onSelect={(value) => onConfig(effort.id, value)}
           />
         )}
@@ -1027,6 +1038,7 @@ function ModelSettingsMenu({
             label={option.name}
             disabled={pending}
             testId={`chat-pane__model-menu-option--${option.id}`}
+            sideOffset={submenuOffset}
             onSelect={(value) => onConfig(option.id, value)}
           />
         ))}
@@ -1039,7 +1051,11 @@ function ModelSettingsMenu({
               More models
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
-              <DropdownMenuSubContent className="w-64 max-h-[400px] overflow-y-auto">
+              <DropdownMenuSubContent
+                className="w-64 max-h-[min(400px,var(--radix-dropdown-menu-content-available-height))]"
+                data-testid="chat-pane__model-menu-more-models-content"
+                sideOffset={submenuOffset}
+              >
                 {otherModels.map((model) => (
                   <DropdownMenuItem
                     key={model.id}
@@ -1068,12 +1084,14 @@ function OptionSubmenu({
   label,
   testId,
   disabled,
+  sideOffset,
   onSelect,
 }: {
   option: SelectOption;
   label: string;
   testId: string;
   disabled?: boolean;
+  sideOffset?: number;
   onSelect: (value: string) => void;
 }) {
   const choices = selectChoices(option);
@@ -1085,7 +1103,11 @@ function OptionSubmenu({
         {current && <span className="text-xs text-muted-foreground">{current.name}</span>}
       </DropdownMenuSubTrigger>
       <DropdownMenuPortal>
-        <DropdownMenuSubContent className="min-w-[180px]">
+        <DropdownMenuSubContent
+          className="min-w-[180px]"
+          sideOffset={sideOffset}
+          data-testid={`${testId}-content`}
+        >
           {choices.map((choice) => (
             <DropdownMenuItem
               key={choice.id}
