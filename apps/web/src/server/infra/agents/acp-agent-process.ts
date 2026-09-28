@@ -147,8 +147,11 @@ export class AcpAgentProcess {
       detached: process.platform !== "win32",
     });
     child.stderr?.on("data", stderr.push);
-    child.once("spawn", () => liveChildren.add(child));
+    liveChildren.add(child);
     child.once("exit", () => liveChildren.delete(child));
+    child.once("error", () => {
+      if (child.pid === undefined) liveChildren.delete(child);
+    });
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -393,31 +396,61 @@ function describe(err: unknown): string {
  * would otherwise outlive the server, and a Codex agent's app-server with it.
  */
 export async function stopAllAgentProcesses(): Promise<void> {
-  await Promise.all(
-    [...liveChildren].map(
-      (child) =>
-        new Promise<void>((resolve) => {
-          if (child.exitCode !== null || child.signalCode !== null) {
-            resolve();
-            return;
-          }
-          const fallback = setTimeout(() => killTree(child, "SIGKILL"), STOP_TIMEOUT_MS);
-          child.once("exit", () => {
-            clearTimeout(fallback);
-            resolve();
-          });
-          killTree(child);
-        }),
-    ),
-  );
+  await Promise.all([...liveChildren].map(stopAgentProcess));
 }
 
-function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
+async function stopAgentProcess(child: ChildProcess): Promise<void> {
+  // Spawned an instant ago: wait for its pid, or for the spawn to fail.
+  if (child.pid === undefined) {
+    await new Promise<void>((resolve) => {
+      child.once("spawn", () => resolve());
+      child.once("error", () => resolve());
+    });
+  }
+  const pid = child.pid;
+  if (pid === undefined) return;
+  const exited = new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once("exit", () => resolve());
+  });
+  // The whole group, not only the agent: a process it started can outlive
+  // it or ignore SIGTERM.
+  const running = () => {
+    if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  killTree(child);
+  const deadline = Date.now() + STOP_TIMEOUT_MS;
+  while (running() && Date.now() < deadline) await delay(20);
+  if (running()) signalGroup(child, pid, "SIGKILL");
+  // Bounded, so shutdown can't hang on a process that never exits.
+  await Promise.race([exited, delay(1_000)]);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function signalGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
   try {
     if (process.platform === "win32") child.kill(signal);
-    else process.kill(-child.pid, signal);
+    else process.kill(-pid, signal);
   } catch {
-    child.kill(signal);
+    // Already gone.
+  }
+}
+
+function killTree(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
+  try {
+    if (process.platform === "win32") child.kill("SIGTERM");
+    else process.kill(-child.pid, "SIGTERM");
+  } catch {
+    child.kill("SIGTERM");
   }
 }

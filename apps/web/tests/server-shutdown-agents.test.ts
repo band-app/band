@@ -11,16 +11,8 @@
 // for a minute, which keeps the stub process alive after its stdin closes,
 // so without the fix it is still running when `close()` returns.
 
-import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  sendMessage,
-  seedAcpHome,
-  startAcpServer,
-  stubRequests,
-  trpc,
-  WORKSPACE_ID,
-} from "./helpers/acp-chat";
+import { sendMessage, startAcpServer, stubRequests, trpc, WORKSPACE_ID } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
 import { waitFor } from "./helpers/wait-for";
 
@@ -34,17 +26,15 @@ function isRunning(pid: number): boolean {
 }
 
 describe("server shutdown", () => {
-  let home: string;
   let server: ServerHandle;
 
   beforeAll(async () => {
-    home = seedAcpHome("band-shutdown-agents-");
-    server = await startAcpServer({ home, turns: [{ steps: [{ sleep: 60_000 }] }] });
+    // Owns its home, so `close()` also deletes it.
+    server = await startAcpServer({ turns: [{ steps: [{ sleep: 60_000 }] }] });
   });
 
   afterAll(async () => {
     await server.close();
-    rmSync(home, { recursive: true, force: true });
   });
 
   it("stops an agent that is in the middle of a turn", async () => {
@@ -53,7 +43,7 @@ describe("server shutdown", () => {
       name: "Busy agent",
     });
     await sendMessage(server.url, chat.id, "take your time");
-    const prompt = await waitFor(async () => stubRequests(home, "session/prompt").at(-1), {
+    const prompt = await waitFor(async () => stubRequests(server.home, "session/prompt").at(-1), {
       label: "agent received the prompt",
     });
     expect(isRunning(prompt.pid)).toBe(true);

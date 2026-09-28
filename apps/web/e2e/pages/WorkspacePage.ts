@@ -3002,19 +3002,18 @@ export class WorkspacePage {
     return () => count;
   }
 
-  /** Start counting terminal WebSockets that have received a frame. Call this
+  /** Start counting terminals whose WebSocket has received a frame. Call this
    *  BEFORE the terminals to count are opened. The first frame arrives after
    *  the socket's `open` handler ran, so the count climbing means a new
-   *  terminal finished connecting. */
+   *  terminal finished connecting. Keyed by socket URL (it carries the
+   *  terminal id), so a reconnect of the same terminal doesn't count again. */
   trackConnectedTerminalSockets(): () => number {
-    let count = 0;
+    const connected = new Set<string>();
     this.page.on("websocket", (ws) => {
       if (!ws.url().includes("/terminal?")) return;
-      ws.once("framereceived", () => {
-        count += 1;
-      });
+      ws.once("framereceived", () => connected.add(ws.url()));
     });
-    return () => count;
+    return () => connected.size;
   }
 
   /** Install a browser-side wrapper around `window.WebSocket` that records
@@ -3469,7 +3468,9 @@ export class WorkspacePage {
   }
 
   /** Keep typing at the caret, without selecting the query first: the way a
-   *  user carries on typing after a pause. */
+   *  user carries on typing after a pause. Unlike `appendQuickOpen`, it
+   *  doesn't focus the input first, so a focus steal between keystrokes stays
+   *  visible to the test (`quick-open-terminal-focus.spec.ts`). */
   async continueTypingQuickOpen(text: string): Promise<void> {
     await test.step(`Keep typing "${text}" into Quick Open`, async () => {
       await this.page.keyboard.type(text);
