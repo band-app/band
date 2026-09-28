@@ -156,7 +156,7 @@ test.describe("Claude Code default model and effort labels", () => {
     await expect(chatPane.modelMenuButton).toContainText("Opus 5.5");
     await expect(chatPane.modelMenuEffort).toHaveText("Medium");
     await chatPane.openModelMenu();
-    await expect(chatPane.selectedModelRow()).toContainText("Opus 5.5");
+    await expect(chatPane.selectedModelItem).toContainText("Opus 5.5");
     await expect(chatPane.effortSubmenu).toContainText("Default: Medium");
     await chatPane.openEffortSubmenu();
     await expect(chatPane.effortOption("Default: Medium")).toBeVisible();

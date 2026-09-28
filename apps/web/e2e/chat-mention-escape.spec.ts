@@ -161,7 +161,8 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     await expect(chatPane.fileMentionDropdown).not.toBeVisible();
 
     // 2) The Stop button is STILL visible — i.e. the task is still
-    //    streaming.
+    //    streaming. The composer shows Send while the prompt holds the
+    //    `@`, so empty it first to bring Stop back.
     //
     //    A single `toBeVisible()` check would race the cancel path:
     //    without the fix, Esc fires `trpc.tasks.abort` whose round-trip
@@ -189,6 +190,7 @@ test.describe("@-mention dropdown — Esc dismisses dropdown, not the running ta
     //    the regression. `page.waitForTimeout` is banned by repo
     //    convention, so this natural-DOM-query polling is the
     //    idiomatic alternative.
+    await chatPane.clearPrompt();
     const deadline = Date.now() + 1500;
     while (Date.now() < deadline) {
       await expect(chatPane.stopButton).toBeVisible({ timeout: 100 });
