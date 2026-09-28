@@ -93,7 +93,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       {/* Always-mounted dialogs — siblings of `children` so the dropdown closing
           doesn't tear them down. */}
       <Dialog open={showTasksDialog} onOpenChange={setShowTasksDialog}>
-        <DialogContent className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0">
+        <DialogContent className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
             <DialogTitle>Tasks</DialogTitle>
           </DialogHeader>
@@ -102,7 +102,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       </Dialog>
 
       <Dialog open={showCronjobsDialog} onOpenChange={setShowCronjobsDialog}>
-        <DialogContent className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0">
+        <DialogContent className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
             <DialogTitle>Cronjobs</DialogTitle>
           </DialogHeader>
@@ -112,7 +112,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
       <Dialog open={showReportsDialog} onOpenChange={setShowReportsDialog}>
         <DialogContent
-          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0"
           data-testid="reports-dialog"
         >
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
@@ -124,7 +124,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
       <Dialog open={showResourcesDialog} onOpenChange={setShowResourcesDialog}>
         <DialogContent
-          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          className="sm:max-w-6xl h-[calc(80vh/var(--app-zoom,1))] flex flex-col p-0 gap-0"
           data-testid="resources-dialog"
         >
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">

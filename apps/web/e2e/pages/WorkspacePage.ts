@@ -377,6 +377,13 @@ export class WorkspacePage {
     });
   }
 
+  /** Zoom the app in `steps` steps with Ctrl+=, then wait until the zoom
+   *  (`--app-zoom`) is 1 + steps / 10. */
+  async zoomInBy(steps: number): Promise<void> {
+    for (let i = 0; i < steps; i++) await this.zoomInViaShortcut();
+    await expect.poll(() => this.readAppZoom()).toBeCloseTo(1 + steps / 10, 5);
+  }
+
   /** Zoom the app out by one step via the real Ctrl/Cmd+- shortcut. Mirror
    *  of `zoomInViaShortcut`; "Minus" so `e.key` resolves to "-". */
   async zoomOutViaShortcut(): Promise<void> {
@@ -461,6 +468,55 @@ export class WorkspacePage {
         return { left: r.left, top: r.top };
       });
       return { cursor, menu };
+    });
+  }
+
+  /** The "Set label" row in an open project menu (opens a submenu). */
+  get setLabelMenuItem(): Locator {
+    return this.page.getByTestId("project-list__action--set-label");
+  }
+
+  /** The open "Set label" submenu, listing "None" and every label. */
+  get labelSubmenu(): Locator {
+    return this.page.getByTestId("project-list__label-submenu");
+  }
+
+  /** A row in the open "Set label" submenu, by label name (test data). */
+  labelSubmenuOption(name: string): Locator {
+    return this.labelSubmenu.getByRole("menuitem", { name, exact: true });
+  }
+
+  /** Open the "Set label" submenu of the open project menu. */
+  async openSetLabelSubmenu(): Promise<void> {
+    await test.step("Open the Set label submenu", async () => {
+      await this.setLabelMenuItem.click();
+      await expect(this.labelSubmenu).toBeVisible();
+    });
+  }
+
+  /** Move keyboard focus to the last row of the open "Set label" submenu:
+   *  into the submenu, then End. */
+  async focusLastLabelSubmenuOption(): Promise<void> {
+    await test.step("Focus the last label with the keyboard", async () => {
+      await this.labelSubmenu.getByRole("menuitem").first().focus();
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Scroll the open "Set label" submenu back to its top. */
+  async scrollLabelSubmenuToTop(): Promise<void> {
+    await test.step("Scroll the Set label submenu to the top", async () => {
+      await this.labelSubmenu.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+    });
+  }
+
+  /** Click a label in the open "Set label" submenu. The menu closes. */
+  async clickLabelSubmenuOption(name: string): Promise<void> {
+    await test.step(`Click label "${name}"`, async () => {
+      await this.labelSubmenuOption(name).click();
+      await expect(this.contextMenu).toHaveCount(0);
     });
   }
 

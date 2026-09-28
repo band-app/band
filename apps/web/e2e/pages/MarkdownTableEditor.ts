@@ -74,11 +74,28 @@ export class MarkdownTableEditor {
     });
   }
 
+  /** A column's grip button (revealed on hover), which opens its menu. */
+  columnGrip(col: number): Locator {
+    return this.root.getByRole("button", { name: `Column ${col + 1} options` });
+  }
+
+  /** The frame's Copy button, which opens the Copy menu. */
+  get copyButton(): Locator {
+    return this.root.getByRole("button", { name: "Copy table" });
+  }
+
+  /** Open the frame's Copy menu without choosing a format. */
+  async openCopyMenu(): Promise<void> {
+    await test.step("Open the table's Copy menu", async () => {
+      await this.copyButton.click();
+    });
+  }
+
   /** Hover a column's header and open its grip menu. */
   async openColumnMenu(col: number): Promise<void> {
     await test.step(`Open the menu of column ${col + 1}`, async () => {
       await this.cell(0, col).hover();
-      await this.root.getByRole("button", { name: `Column ${col + 1} options` }).click();
+      await this.columnGrip(col).click();
     });
   }
 
@@ -106,7 +123,7 @@ export class MarkdownTableEditor {
   /** Copy the grid's data from the frame's Copy menu. */
   async copyAs(format: "Markdown" | "CSV" | "TSV"): Promise<void> {
     await test.step(`Copy the table as ${format}`, async () => {
-      await this.root.getByRole("button", { name: "Copy table" }).click();
+      await this.copyButton.click();
       await this.menuItem(`Copy as ${format}`).click();
     });
   }

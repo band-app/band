@@ -37,7 +37,7 @@ export function ImagePreview({ src, alt }: ImagePreviewProps) {
         <img
           src={src}
           alt={alt}
-          className="max-h-[70vh] max-w-full object-contain"
+          className="max-h-[calc(70vh/var(--app-zoom,1))] max-w-full object-contain"
           onError={() => setError(true)}
           onLoad={(e) => {
             const img = e.currentTarget;

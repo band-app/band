@@ -358,11 +358,21 @@ export class ChatPanePage {
     });
   }
 
-  /** Move keyboard focus to the last row of the open "More models" submenu,
-   *  the way a keyboard user reaches it: into the submenu, then End. */
+  /** Move keyboard focus to the last row (a model, or OpenCode's last
+   *  provider) of the open "More models" submenu, the way a keyboard user
+   *  reaches it: into the submenu, then End. */
   async focusLastMoreModel(): Promise<void> {
     await test.step("Focus the last model with the keyboard", async () => {
       await this.moreModelsContent.getByRole("menuitem").first().focus();
+      await this.page.keyboard.press("End");
+    });
+  }
+
+  /** Move keyboard focus to the last model of one provider's open submenu:
+   *  into the submenu, then End. */
+  async focusLastProviderModel(providerId: string): Promise<void> {
+    await test.step(`Focus the last ${providerId} model with the keyboard`, async () => {
+      await this.providerModelsContent(providerId).getByRole("menuitem").first().focus();
       await this.page.keyboard.press("End");
     });
   }
@@ -378,16 +388,37 @@ export class ChatPanePage {
   /** Scroll the open "More models" submenu to its end with the mouse wheel. */
   async wheelMoreModelsToEnd(): Promise<void> {
     await test.step("Scroll the More models submenu with the wheel", async () => {
-      await this.moreModelsContent.hover();
-      const atEnd = () =>
-        this.moreModelsContent.evaluate(
-          (el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1,
-        );
-      for (let i = 0; i < 50 && !(await atEnd()); i++) {
-        await this.page.mouse.wheel(0, 200);
-      }
-      await expect.poll(atEnd).toBe(true);
+      await this.wheelToEnd(this.moreModelsContent, this.moreModelsSubmenu);
     });
+  }
+
+  /** Scroll one provider's open submenu to its end with the mouse wheel. */
+  async wheelProviderModelsToEnd(providerId: string): Promise<void> {
+    await test.step(`Scroll the ${providerId} provider submenu with the wheel`, async () => {
+      await this.wheelToEnd(
+        this.providerModelsContent(providerId),
+        this.providerSubmenu(providerId),
+      );
+    });
+  }
+
+  private async wheelToEnd(menu: Locator, trigger: Locator): Promise<void> {
+    // Enter the menu the way a pointer does: onto its trigger row, then
+    // straight across. Radix keeps a submenu open while the pointer heads
+    // toward it, judged by the last moves inside the parent menu; a jump
+    // (`hover()` is one move) or a diagonal over other rows closes it.
+    const from = await trigger.boundingBox();
+    const to = await menu.boundingBox();
+    if (!from || !to) throw new Error("menu or trigger has no layout box");
+    const y = from.y + from.height / 2;
+    await this.page.mouse.move(from.x + from.width / 2, y);
+    await this.page.mouse.move(to.x + to.width / 2, y, { steps: 10 });
+    const atEnd = () =>
+      menu.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1);
+    for (let i = 0; i < 50 && !(await atEnd()); i++) {
+      await this.page.mouse.wheel(0, 200);
+    }
+    await expect.poll(atEnd).toBe(true);
   }
 
   /** Click a model in the open "More models" submenu. The menu closes. */
@@ -407,15 +438,13 @@ export class ChatPanePage {
     });
   }
 
-  /** The rendered box of an element, in viewport pixels, once its open
-   *  animation (a zoom from 95%) has finished. */
-  async readBox(
-    locator: Locator,
-  ): Promise<{ top: number; bottom: number; left: number; right: number }> {
-    await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-    const box = await locator.boundingBox();
-    if (!box) throw new Error("element has no layout box");
-    return { top: box.y, bottom: box.y + box.height, left: box.x, right: box.x + box.width };
+  /** Scroll one provider's open submenu back to its top. */
+  async scrollProviderModelsToTop(providerId: string): Promise<void> {
+    await test.step(`Scroll the ${providerId} provider submenu to the top`, async () => {
+      await this.providerModelsContent(providerId).evaluate((el) => {
+        el.scrollTop = 0;
+      });
+    });
   }
 
   /** Close an open menu with Escape. */

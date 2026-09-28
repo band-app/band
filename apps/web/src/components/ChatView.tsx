@@ -1080,7 +1080,7 @@ function ModelSettingsMenu({
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
               <DropdownMenuSubContent
-                className="w-64 max-h-[min(400px,var(--radix-dropdown-menu-content-available-height))]"
+                className="w-64 [--popper-max-height:400px]"
                 data-testid="chat-pane__model-menu-more-models-content"
                 sideOffset={submenuOffset}
               >
@@ -1166,7 +1166,7 @@ function ProviderModelItems({
             </DropdownMenuSubTrigger>
             <DropdownMenuPortal>
               <DropdownMenuSubContent
-                className="w-64 max-h-[min(400px,var(--radix-dropdown-menu-content-available-height))]"
+                className="w-64 [--popper-max-height:400px]"
                 data-testid={`chat-pane__model-menu-provider--${group.id}-content`}
                 sideOffset={sideOffset}
               >

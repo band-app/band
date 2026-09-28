@@ -244,25 +244,25 @@ html[data-translucent-sidebar] {
  * CSS `zoom` on <html> (set by the zoom-apply helper on startup and on every
  * user zoom change, mirrored onto --app-zoom) scales fixed-position
  * descendants — including Radix's popper wrapper — by the zoom factor.
- * Floating UI already positions
- * that wrapper at the anchor's clientX/clientY in *visual* pixels, so the extra
- * zoom scaling lands every popper (context menu, dropdown, tooltip, popover,
- * select) at clientXY × zoom instead of clientXY.
+ * Floating UI measures the anchor and the window in *visual* pixels and writes
+ * them into the wrapper's inline `transform`, so the extra zoom scaling lands
+ * every popper (context menu, dropdown, tooltip, popover, select) at
+ * clientXY × zoom instead of clientXY.
  *
- * Counter the wrapper by 1/zoom about the viewport origin to cancel the doubled
- * scaling, then scale the inner content back up so the popper still renders at
- * the zoomed UI size. The `scale` individual property composes with the
- * `transform: translate(...)` Floating UI writes inline, so this never fights
- * its repositioning. No-op when --app-zoom is unset or 1.
+ * Counter-zoom the wrapper so those inline pixel values apply 1:1, then zoom
+ * the content back to the app zoom. `zoom` (not `scale`) so the wrapper's
+ * layout box has the content's real visual size: Floating UI flips and shifts
+ * the popper by that size, and with `scale` it saw a menu at 110% as 10%
+ * shorter than it was. The content's max-height and max-width divide Radix's
+ * available-space variables by --app-zoom (POPPER_MAX_HEIGHT in
+ * @band-app/ui). No-op when --app-zoom is unset or 1.
  */
 [data-radix-popper-content-wrapper] {
-  transform-origin: 0 0;
-  scale: calc(1 / var(--app-zoom, 1));
+  zoom: calc(1 / var(--app-zoom, 1));
 }
 
 [data-radix-popper-content-wrapper] > * {
-  transform-origin: 0 0;
-  scale: var(--app-zoom, 1);
+  zoom: var(--app-zoom, 1);
 }
 
 /*
@@ -365,7 +365,7 @@ html[data-translucent-sidebar] {
 @media (prefers-reduced-motion: reduce) {
   /* Neutralize tw-animate-css movement; opacity fades
      (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
-  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper `scale` or dockview overlay `zoom` rules. */
+  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper or dockview overlay `zoom` rules. */
   * {
     --tw-enter-translate-x: 0;
     --tw-enter-translate-y: 0;
