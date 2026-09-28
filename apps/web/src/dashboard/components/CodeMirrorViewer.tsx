@@ -11,13 +11,14 @@ import {
   searchHighlightOnly,
   setHighlightLines,
 } from "../lib/codemirror-setup";
-import { selectionToChatExtension } from "../lib/selection-to-chat";
+import { selectionReferenceExtension } from "../lib/selection-to-chat";
+import { CodeSelectionContextMenu } from "./SelectionContextMenu";
 
 interface CodeMirrorViewerProps {
   content: string;
   language: string;
   className?: string;
-  /** Workspace-relative file path — enables "Add to Chat" on text selection */
+  /** Workspace-relative file path — enables the file actions in the selection context menu */
   filePath?: string;
   /** 1-based line number to scroll to and highlight */
   line?: number;
@@ -85,7 +86,7 @@ export function CodeMirrorViewer({
         ),
       ];
       if (filePath) {
-        extensions.push(selectionToChatExtension(filePath));
+        extensions.push(selectionReferenceExtension(filePath));
       }
       if (langSupport) {
         extensions.push(langSupport);
@@ -134,5 +135,9 @@ export function CodeMirrorViewer({
     }
   }, [line, lineEnd, column]);
 
-  return <div ref={containerRef} className={className} />;
+  return (
+    <CodeSelectionContextMenu>
+      <div ref={containerRef} className={className} />
+    </CodeSelectionContextMenu>
+  );
 }

@@ -13,7 +13,8 @@
  *   - the failing banner `pr-checks__failing-banner` with `pr-checks__fix`;
  *   - the summary `pr-checks__summary-<passing|failing|pending>`;
  *   - one `pr-checks__check` row per check (`data-check-state`), with
- *     `pr-checks__check-name`, `-state`, `-link`, `-toggle` and `-details`;
+ *     `pr-checks__check-name`, `-state`, `-link`, `-toggle` and `-details`
+ *     (with `pr-checks__check-duration`);
  *   - the overflow menu `pr-checks__menu` (`pr-checks__menu-open`, `-copy`);
  *   - instead of the panel, `pr-checks__error` (with `-retry`) when `gh`
  *     fails and `pr-checks__unavailable` when no plugin serves the project.
@@ -144,6 +145,22 @@ export class PrChecksPanelPage {
 
   checkDetails(name: string): Locator {
     return this.check(name).getByTestId("pr-checks__check-details");
+  }
+
+  /** The Duration line of an expanded check. */
+  checkDuration(name: string): Locator {
+    return this.check(name).getByTestId("pr-checks__check-duration");
+  }
+
+  /**
+   * Pin the page's `Date.now()` to `time` (Playwright's clock). Timers keep
+   * running, so the panel's one-second tick re-renders against it. Call
+   * before `goto` for the first render to use it.
+   */
+  async setTime(time: string): Promise<void> {
+    await test.step(`Set the page clock to ${time}`, async () => {
+      await this.page.clock.setFixedTime(time);
+    });
   }
 
   async expandCheck(name: string): Promise<void> {

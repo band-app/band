@@ -2,7 +2,7 @@
  * Tracks the last-focused panel per type (chat, terminal, browser) for each
  * workspace.
  *
- * Powers the "Add to Chat" / "Add to Terminal" selection-tooltip actions: they
+ * Powers the "Add to Chat" / "Add to Terminal" selection context menu actions: they
  * ask this service which chat/terminal the user last had focused in a workspace
  * and route the pasted reference into exactly that panel, rather than
  * broadcasting to every open pane.

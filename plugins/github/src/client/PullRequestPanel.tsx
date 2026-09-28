@@ -88,6 +88,7 @@ export function PullRequestPanel({ workspaceId, visible }: WorkspaceSideTabProps
         branch={data.branch}
         review={data.review}
         checks={data.checks}
+        visible={visible}
       />
     </div>
   );
