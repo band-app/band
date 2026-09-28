@@ -5,16 +5,25 @@
   "ignoreBinaries": ["wrangler"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs"],
-      "ignoreDependencies": ["@band-app/cli", "@trpc/client", "@trpc/server"]
+      "entry": ["scripts/*.mjs", "scripts/xterm-patches/regenerate.mjs"],
+      "ignoreDependencies": [
+        "@band-app/cli",
+        "@tanstack/react-query",
+        "@trpc/client",
+        "@trpc/server"
+      ]
     },
     "apps/web": {
       "entry": [
         "src/client.tsx",
         "src/server.ts",
         "src/router.tsx",
+        "src/dashboard/index.ts",
+        "src/dashboard/adapters/web.ts",
+        "src/dashboard/adapters/desktop.ts",
         "bin/band-server.mjs",
-        "start-server.ts"
+        "start-server.ts",
+        "terminal-daemon.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
       "ignoreDependencies": [
@@ -23,19 +32,22 @@
         "class-variance-authority",
         "clsx",
         "tailwind-merge",
-        "@dnd-kit/core",
-        "@dnd-kit/sortable",
-        "@dnd-kit/utilities",
         "@tanstack/router-plugin",
         "nanoid",
         "typescript-language-server",
-        "vscode-jsonrpc"
+        "vscode-jsonrpc",
+        "@babel/runtime",
+        "@codemirror/lint",
+        "esbuild",
+        "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp"
       ]
     },
     "apps/desktop": {
       "entry": [
         "src/main/index.ts",
         "src/preload/index.cts",
+        "src/preload/guest.cts",
         "tests/**/*.test.ts",
         "tests/**/*.test.mjs",
         "tests/loader.mjs",
@@ -54,23 +66,21 @@
       "entry": ["src/index.ts", "src/utils.ts"],
       "project": ["src/**/*.{ts,tsx}"]
     },
-    "packages/dashboard-core": {
-      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/desktop.ts"],
-      "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["@babel/runtime", "@codemirror/lint"]
-    },
     "packages/coding-agent": {
-      "entry": ["src/index.ts", "tests/mocks/*.mjs"],
-      "project": ["src/**/*.ts", "tests/**/*.{ts,mjs}"],
-      "ignoreDependencies": [
-        "@anthropic-ai/claude-agent-sdk",
-        "@nothumanwork/cursor-agents-sdk",
-        "@openai/codex-sdk"
-      ]
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/logger": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "packages/plugin-api": {
+      "entry": ["src/index.ts", "src/server.ts", "src/client.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "plugins/github": {
+      "entry": ["src/server/index.ts", "src/client/index.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     }
   }
 }

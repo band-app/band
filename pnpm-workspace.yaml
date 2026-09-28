@@ -2,11 +2,57 @@ packages:
   - "."
   - "apps/*"
   - "packages/*"
+  - "plugins/*"
 
+# Native packages allowed to run install scripts. Without an approval entry a
+# package counts as unapproved and `pnpm install` exits 1 with
+# ERR_PNPM_IGNORED_BUILDS; `node-pty` and `better-sqlite3` in particular must
+# build or the server can't boot.
+#
+# BOTH keys are listed on purpose and must be kept in sync: pnpm 11 replaced the
+# `onlyBuiltDependencies` list with the `allowBuilds` map, but CI still pins
+# pnpm 10 (`pnpm/action-setup` in ci.yml / release.yml / nightly.yml), which
+# only understands the old key. Each version reads the one it knows and ignores
+# the other. Drop `onlyBuiltDependencies` once every workflow is on pnpm 11.
 onlyBuiltDependencies:
-  - '@nothumanwork/cursor-agents-sdk'
   - better-sqlite3
   - electron
   - esbuild
   - node-pty
   - sharp
+
+allowBuilds:
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+  node-pty: true
+  sharp: true
+
+# Force pnpm to install optional dependencies for the off-host architectures
+# we ship in the Electron desktop bundle. The release workflow runs on
+# `macos-latest` (Apple Silicon → darwin-arm64), but `electron-builder` emits
+# both x64 and arm64 DMGs from the same `apps/web/dist`. Without this list,
+# pnpm only installs `@vscode/ripgrep-darwin-arm64` and the x64 DMG starts up
+# missing its ripgrep binary (see apps/web/scripts/build-server.sh).
+#
+# `current` keeps the host platform/arch installed; the extra entries make
+# pnpm also install x64 binaries so build-server.sh can copy them into the
+# bundle. Adding linux entries is cheap and keeps the npm package usable on
+# Intel and ARM Linux hosts.
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - linux
+  cpu:
+    - current
+    - x64
+    - arm64
+
+# Bug fixes xterm.js has not released, generated from the source patches in
+# patches/xterm-src/. Never edit these patch files by hand. patches/README.md
+# says what each one fixes, how to regenerate them, and why pnpm-lock.yaml must
+# keep the two-line pnpm 10 shape for these entries.
+patchedDependencies:
+  "@xterm/addon-search@0.17.0-beta.300": patches/@xterm__addon-search@0.17.0-beta.300.patch
+  "@xterm/addon-serialize@0.15.0-beta.300": patches/@xterm__addon-serialize@0.15.0-beta.300.patch

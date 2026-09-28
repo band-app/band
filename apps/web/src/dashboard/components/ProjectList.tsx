@@ -1,0 +1,1191 @@
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuPortal,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band-app/ui";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  MouseSensor,
+  TouchSensor,
+  useDndContext,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Check,
+  ChevronRight,
+  Circle,
+  Clipboard,
+  Folder,
+  FolderOpen,
+  GitBranch,
+  ListMinus,
+  MoreVertical,
+  Pin,
+  Plus,
+  Tag,
+} from "lucide-react";
+import {
+  type ElementType,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useAdapter, useCapabilities } from "../context";
+import {
+  LABELS_COLLAPSE_KEY,
+  PINNED_COLLAPSE_KEY,
+  PINNED_SECTION_ID,
+  PROJECTS_COLLAPSE_KEY,
+  UNLABELED_KEY,
+  useCollapseState,
+} from "../hooks/use-collapse-state";
+import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
+import {
+  usePromoteProjectToGit,
+  useRemoveProject,
+  useRemoveWorkspace,
+  useReorderProjects,
+  useUpdateProjectLabel,
+} from "../hooks/use-project-mutations";
+import { useProjects } from "../hooks/use-projects";
+import { useSettingsQuery } from "../hooks/use-settings-query";
+import { toWorkspaceId } from "../lib/workspace-id";
+import { isWorkspaceDeleting } from "../stores/dashboard-store";
+import { useDashboardStore, useRawDashboardStore } from "../stores/index";
+import type {
+  DeleteDialogInfo,
+  LabelDefinition,
+  ProjectInfo,
+  SetupStatus,
+  WorkspaceBranchStatus,
+  WorkspaceStatus,
+} from "../types";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
+import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
+import { NewWorkspaceDialog } from "./NewWorkspaceForm";
+import { ProjectAvatar } from "./ProjectAvatar";
+import { PromoteToGitDialog } from "./PromoteToGitDialog";
+import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
+
+/**
+ * Wraps a collapsible section's body so expand/collapse animates smoothly.
+ *
+ * Uses the CSS grid-rows `[0fr] → [1fr]` trick: the outer grid animates its
+ * single row track between 0 and its content height, and the inner
+ * `overflow-hidden` child clips the content while the track shrinks. This
+ * animates height without measuring it in JS (no `max-height` guesswork).
+ *
+ * The body stays mounted in both states — the transition needs the content
+ * present at both ends to animate (unmounting the content on collapse would
+ * make expand "pop" open with no starting height to animate from). `inert`
+ * takes the hidden subtree out of the tab order and blocks pointer/focus so a
+ * collapsed section behaves as if it weren't there (keyboard workspace nav
+ * already excludes collapsed rows via `allWorkspaceIds`). Keeping a sidebar's
+ * bounded set of cards mounted is cheap — they're memoized and only re-render
+ * when their own store slice changes.
+ */
+function CollapsibleSection({
+  collapsed,
+  className,
+  children,
+}: {
+  collapsed: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${
+        collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+      }`}
+    >
+      <div className={`overflow-hidden ${className ?? ""}`} inert={collapsed}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+interface SortableProjectProps {
+  project: ProjectInfo;
+  statuses: Map<string, WorkspaceStatus>;
+  branchStatuses: Map<string, WorkspaceBranchStatus>;
+  setupStatuses: Map<string, SetupStatus>;
+  removeProject: (name: string) => void;
+  updateProjectLabel: (name: string, label: string | null) => void;
+  /** Opens the promote-to-git confirmation dialog for the given project. */
+  onPromoteToGit: (name: string) => void;
+  labels: LabelDefinition[];
+  setWorkspaceDialog: (name: string | null) => void;
+  onShowDeleteDialog: (info: DeleteDialogInfo) => void;
+  focusedIndex: number;
+  workspaceIndexStart: number;
+  collapsed: boolean;
+  onToggleCollapse: (name: string) => void;
+  /**
+   * True when the project had at least one worktree before pinned ones were
+   * filtered out. Used to suppress the misleading "No workspaces yet" message
+   * when all worktrees are pinned and shown in the Pinned section instead.
+   */
+  hasPinnedSiblings?: boolean;
+  onTogglePinned: (project: string, name: string, currentlyPinned: boolean) => void;
+}
+
+function SortableProject({
+  project,
+  statuses,
+  branchStatuses,
+  setupStatuses,
+  removeProject,
+  updateProjectLabel,
+  onPromoteToGit,
+  labels,
+  setWorkspaceDialog,
+  onShowDeleteDialog,
+  focusedIndex,
+  workspaceIndexStart,
+  collapsed,
+  onToggleCollapse,
+  hasPinnedSiblings,
+  onTogglePinned,
+}: SortableProjectProps) {
+  const isPlain = project.kind === "plain";
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.name,
+  });
+  const capabilities = useCapabilities();
+  // `adapter.promoteProjectToGit` is optional on the DashboardAdapter
+  // interface — only the web adapter implements it today. Hide the menu
+  // item when the active adapter lacks the method so the user can't click
+  // through to a runtime error (`use-project-mutations` rejects with a
+  // friendly message, but hiding the affordance is cleaner).
+  const adapter = useAdapter();
+  const canPromoteToGit = typeof adapter.promoteProjectToGit === "function";
+  // `active` is the currently-dragged item (or null when nothing is being
+  // dragged). We only honour dnd-kit's `transition` while a drag is in
+  // progress: that keeps the smooth slide-out-of-the-way animation while
+  // dragging, but on drop the transition disappears so items snap to their
+  // optimistic new positions instead of animating from old → new (which
+  // looks like the list "shifting" after the drop).
+  const { active } = useDndContext();
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition: active ? transition : undefined,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+
+  // Plain projects flatten: the project header IS the implicit workspace's
+  // card. There's no nested "main" row, no collapse chevron, no "+" Add
+  // workspace button, and crucially no pinning (the workspace is already
+  // at the project level — there's nothing to "pull up to the top"). See
+  // #427.
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
+  // Plain projects are guaranteed to have exactly one worktree (the
+  // implicit `main` synthesized by projects.add and re-synthesized by
+  // `reconcileKindForProject` on any git → plain flip). Read
+  // `worktrees[0].name` directly rather than `?.name ?? "main"`;
+  // the optional chain would mask a real state-corruption bug.
+  const plainName = isPlain ? project.worktrees[0].name : "";
+  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainName) : "";
+  const plainIsActive = useDashboardStore(
+    (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
+  );
+  const plainHref = isPlain ? capabilities.getWorkspaceHref?.(plainWorkspaceId) : undefined;
+  const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
+  const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
+
+  // For git projects: is the currently-active workspace one of this project's
+  // branches? Plain projects already surface this via `plainIsActive`. Git
+  // headers had no active treatment, so the user couldn't tell which project
+  // the open workspace belonged to once scrolled away from its card — this
+  // tints the header (and its folder icon) to close that gap.
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  // Memoized: every Zustand update re-renders this row, and the `.some(...)`
+  // walk is O(worktrees) — recompute only when the inputs actually change.
+  const gitHeaderIsActive = useMemo(
+    () =>
+      !isPlain &&
+      project.worktrees.some((wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId),
+    [isPlain, project.worktrees, project.name, activeWorkspaceId],
+  );
+
+  // Single onClick / onKeyDown for the plain-project header (mirrors the
+  // navigate-or-open dance WorkspaceCard does). For git projects the
+  // header onClick toggles collapse — branched at the call site.
+  const handlePlainOpen = () => {
+    clearNeedsAttention(plainWorkspaceId);
+    if (plainHref && capabilities.navigate) {
+      capabilities.navigate(plainHref);
+    } else if (!plainHref) {
+      openWorkspace(plainWorkspaceId);
+    }
+  };
+
+  let workspaceIndex = workspaceIndexStart;
+
+  // Header className. Both kinds keep the project-level indent (`pl-1`)
+  // so plain projects read as standalone projects, not as nested
+  // workspaces under the project above them. Plain projects also gain
+  // the WorkspaceCard hover/active/focus treatment because the header
+  // itself is clickable — but the inner text styling stays project-bold
+  // (see the `<h2>` block below). `py-1.5` gives a taller hit target
+  // than a workspace card (`py-1`) so the row reads as a project, not
+  // a nested workspace.
+  // On touch devices (`pointer: coarse`) the row grows to a 44px-tall hit
+  // target (iOS HIG minimum) so projects are easy to tap in the list; with a
+  // mouse the row stays compact. `touch-pan-y` (not `touch-manipulation`) is
+  // kept because dnd-kit needs vertical panning to scroll the list mid-drag.
+  const headerClassName = isPlain
+    ? `group flex items-center justify-between mb-0.5 rounded-md pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:py-2.5 ${
+        plainIsActive ? "bg-primary/15 hover:bg-primary/15" : plainIsFocused ? "bg-accent" : ""
+      }`
+    : `group flex items-center justify-between mb-0.5 pl-1 pr-0 rounded select-none touch-pan-y transition-colors hover:bg-accent/50 [@media(pointer:coarse)]:min-h-11`;
+
+  // The project action list is rendered in two places — the right-click
+  // context menu and the header's "⋮" dropdown — so it's defined once here and
+  // parameterised by the menu primitive set (Context* or Dropdown*), which
+  // share the same Item/Sub/SubTrigger/SubContent/Portal shape. Keeps the two
+  // menus from drifting.
+  const renderMenuItems = (menu: {
+    Item: ElementType;
+    Sub: ElementType;
+    SubTrigger: ElementType;
+    SubContent: ElementType;
+    Portal: ElementType;
+  }) => {
+    const { Item, Sub, SubTrigger, SubContent, Portal } = menu;
+    return (
+      <>
+        {/* Git projects only: `git worktree add`. Mirrors the header's
+            hover-revealed "+" button, kept first as the primary action. */}
+        {!isPlain && (
+          <Item
+            data-testid="project-list__action--add-workspace"
+            onClick={() => setWorkspaceDialog(project.name)}
+          >
+            <Plus />
+            Add workspace
+          </Item>
+        )}
+        {labels.length > 0 && (
+          <Sub>
+            <SubTrigger>
+              <Tag />
+              Set label
+            </SubTrigger>
+            <Portal>
+              <SubContent>
+                <Item onClick={() => updateProjectLabel(project.name, null)}>
+                  <span className="flex-1">None</span>
+                  {!project.label && <Check className="size-3" />}
+                </Item>
+                {labels.map((lbl) => (
+                  <Item key={lbl.id} onClick={() => updateProjectLabel(project.name, lbl.id)}>
+                    <span
+                      className="size-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: lbl.color }}
+                    />
+                    <span className="flex-1">{lbl.name}</span>
+                    {project.label === lbl.id && <Check className="size-3" />}
+                  </Item>
+                ))}
+              </SubContent>
+            </Portal>
+          </Sub>
+        )}
+        {isPlain && canPromoteToGit && (
+          <Item onClick={() => onPromoteToGit(project.name)}>
+            <GitBranch />
+            Promote to git…
+          </Item>
+        )}
+        {capabilities.copyPath && (
+          <Item onClick={() => navigator.clipboard.writeText(project.path)}>
+            <Clipboard />
+            Copy path
+          </Item>
+        )}
+        {capabilities.revealInFinder && (
+          <Item onClick={() => capabilities.revealInFinder!(project.path)}>
+            <FolderOpen />
+            Open in Finder
+          </Item>
+        )}
+        <Item onClick={() => removeProject(project.name)}>
+          <ListMinus />
+          Remove from list
+        </Item>
+      </>
+    );
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="min-w-0 px-2">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          {/* The header is a click/tap target on both desktop and mobile.
+              For git projects it toggles collapse; for plain projects it
+              opens the implicit workspace (the project IS the workspace).
+              Keyboard nav lives at the workspace-card level for git
+              projects; for plain projects the same role moves up here. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the ProjectList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
+          <div
+            className={headerClassName}
+            data-testid={`project-list__project-header--${project.name}`}
+            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(project.name))}
+          >
+            {/* Drag listeners live on the title (folder icon + project name)
+                so the project name itself is the drag handle. The 8px
+                MouseSensor / 250ms TouchSensor thresholds mean a still
+                click/tap bubbles up to the outer onClick without starting
+                a drag. */}
+            <div
+              className="flex items-center gap-2 min-w-0 cursor-grab"
+              {...attributes}
+              {...listeners}
+            >
+              {isPlain ? (
+                // Plain project: agent-status dot when the agent is
+                // working / needs attention, otherwise a project-sized
+                // (size-4) Folder icon. Inlined rather than routing
+                // through AgentStatusIndicator's fallback so the idle
+                // icon can match a git project's folder size — using the
+                // indicator's size-3 fallback would make plain headers
+                // read as nested workspace cards (see #427 review).
+                plainAgent &&
+                (plainAgent.status === "working" || plainAgent.status === "needs_attention") ? (
+                  <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                )
+              ) : (
+                // Git project: the GitHub owner's avatar when `origin` is
+                // on GitHub, else the open/closed folder.
+                <ProjectAvatar
+                  avatar={project.avatar}
+                  className="size-4"
+                  testId={`project-list__project-avatar--${project.name}`}
+                  fallback={
+                    collapsed ? (
+                      <Folder
+                        data-testid={`project-list__project-folder--${project.name}`}
+                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                    ) : (
+                      <FolderOpen
+                        data-testid={`project-list__project-folder--${project.name}`}
+                        className={`size-4 shrink-0 ${gitHeaderIsActive ? "text-primary" : "text-muted-foreground"}`}
+                      />
+                    )
+                  }
+                />
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* Same project-bold treatment regardless of kind so a
+                      plain project reads as a top-level project rather
+                      than a nested branch row. Active plain projects
+                      bump to full-foreground for the same emphasis a
+                      WorkspaceCard would get. */}
+                  <h2
+                    className={`text-[13px] truncate ${
+                      (isPlain && plainIsActive) || gitHeaderIsActive
+                        ? "font-bold text-foreground"
+                        : "font-semibold text-foreground/90"
+                    }`}
+                  >
+                    {project.name}
+                  </h2>
+                </TooltipTrigger>
+                {/* Anchored to the right so a long project name doesn't
+                    cover the row above — matches the `side="right"`
+                    treatment on `WorkspaceCard`'s label tooltip. */}
+                <TooltipContent side="right">{project.name}</TooltipContent>
+              </Tooltip>
+            </div>
+            {/* The "+" and "⋮" buttons are revealed on hover (or keyboard
+                focus) to keep the header uncluttered while scanning the list;
+                the same actions live in the right-click / long-press context
+                menu below. `opacity-0` (not `hidden`) reserves the space so the
+                row doesn't reflow on hover. On touch devices there's no hover
+                and no room to spare, so the cluster is hidden entirely — the
+                actions are reached via long-press instead. */}
+            <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:hidden">
+              {/* "⋮" opens the same action list as right-click, so the menu is
+                  reachable with a plain left click (and on touch, where there's
+                  no right-click). Sits to the left of the "+" quick action. */}
+              {!isPlain && (
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="Project actions"
+                          data-testid={`project-list__project-menu-trigger--${project.name}`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreVertical />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>More actions</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end">
+                    {renderMenuItems({
+                      Item: DropdownMenuItem,
+                      Sub: DropdownMenuSub,
+                      SubTrigger: DropdownMenuSubTrigger,
+                      SubContent: DropdownMenuSubContent,
+                      Portal: DropdownMenuPortal,
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {/* Plain (non-git) projects have a single implicit workspace
+                  and don't support `git worktree add`, so the "+" Add
+                  workspace button is hidden — see #427. The server also
+                  rejects `workspaces.create` as a backstop. */}
+              {!isPlain && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWorkspaceDialog(project.name);
+                      }}
+                    >
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Add workspace</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {renderMenuItems({
+            Item: ContextMenuItem,
+            Sub: ContextMenuSub,
+            SubTrigger: ContextMenuSubTrigger,
+            SubContent: ContextMenuSubContent,
+            Portal: ContextMenuPortal,
+          })}
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {/* Nested workspaces section — only meaningful for git projects.
+          Plain projects are flat: the header above IS the workspace.
+          `ml-3` indents the branch list so the workspaces read as children of
+          the project header above, not as sibling rows. The indentation alone
+          (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
+      {!isPlain && (
+        <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
+          {project.worktrees.length === 0 ? (
+            hasPinnedSiblings ? null : (
+              <p className="text-[13px] text-foreground/60 px-4 py-2">No workspaces yet</p>
+            )
+          ) : (
+            project.worktrees.map((wt) => {
+              const wsId = toWorkspaceId(project.name, wt.name);
+              const currentIndex = workspaceIndex++;
+              return (
+                <WorkspaceCard
+                  key={wt.name}
+                  worktree={wt}
+                  projectName={project.name}
+                  defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
+                  status={statuses.get(wsId)}
+                  branchStatus={branchStatuses.get(wsId)}
+                  setupStatus={setupStatuses.get(wsId)}
+                  isFocused={!collapsed && currentIndex === focusedIndex}
+                  onShowDeleteDialog={onShowDeleteDialog}
+                  onTogglePinned={onTogglePinned}
+                />
+              );
+            })
+          )}
+        </CollapsibleSection>
+      )}
+    </div>
+  );
+}
+
+interface DroppableLabelHeaderProps {
+  labelId: string;
+  label: LabelDefinition;
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: DroppableLabelHeaderProps) {
+  const { setNodeRef, isOver } = useDroppable({ id: `group:${labelId}` });
+  return (
+    <button
+      type="button"
+      ref={setNodeRef}
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+        isOver ? "bg-primary/20" : ""
+      }`}
+    >
+      <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
+      <span className="text-[13px] font-semibold text-foreground/90">{label.name}</span>
+      <ChevronRight
+        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+          collapsed ? "" : "rotate-90"
+        }`}
+      />
+    </button>
+  );
+}
+
+interface DroppableUnlabeledHeaderProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHeaderProps) {
+  const { setNodeRef, isOver } = useDroppable({ id: "group:__unlabeled" });
+  return (
+    <button
+      type="button"
+      ref={setNodeRef}
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+        isOver ? "bg-primary/20" : ""
+      }`}
+    >
+      {/* Hollow circle mirrors the position of the filled color dot on labelled
+          group headers, signalling "no label" without borrowing a real color. */}
+      <Circle className="size-2.5 shrink-0 text-muted-foreground" />
+      <span className="text-[13px] font-semibold text-foreground/90">Unlabeled</span>
+      <ChevronRight
+        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+          collapsed ? "" : "rotate-90"
+        }`}
+      />
+    </button>
+  );
+}
+
+interface ProjectListProps {
+  labelFilter: string | null;
+}
+
+export function ProjectList({ labelFilter }: ProjectListProps) {
+  const { projects } = useProjects();
+  const { settings } = useSettingsQuery();
+  const labels = settings.labels ?? [];
+  const statuses = useDashboardStore((s) => s.statuses);
+  const branchStatuses = useDashboardStore((s) => s.branchStatuses);
+  const setupStatuses = useDashboardStore((s) => s.setupStatuses);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+
+  const removeProjectMutation = useRemoveProject();
+  const reorderProjectsMutation = useReorderProjects();
+  const updateProjectLabelMutation = useUpdateProjectLabel();
+  const promoteProjectToGitMutation = usePromoteProjectToGit();
+  const removeWorkspaceMutation = useRemoveWorkspace();
+
+  const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
+  /** Project name whose "Promote to git" confirmation dialog is open. */
+  const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const rawStore = useRawDashboardStore();
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const keyboardNavRef = useRef(false);
+
+  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
+  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorkspaces();
+  // Plain (non-git) projects have no separate workspace card to pull up
+  // to a Pinned section — they're already flat at the project level. Drop
+  // them from the pinned list so a stale `pinned=true` row doesn't show
+  // a confusing duplicate entry at the top of the tree.
+  const pinnedEntries = useMemo(
+    () => pinnedEntriesRaw.filter((e) => e.project.kind !== "plain"),
+    [pinnedEntriesRaw],
+  );
+
+  // Two sensors so reorder works without an explicit "edit" toggle:
+  //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
+  //    threshold avoids hijacking ordinary clicks on the project header.
+  //  • TouchSensor — touch devices require a long-press (250ms) before drag
+  //    activates so taps and scrolling still work normally on mobile.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+
+  // Each pinned workspace is rendered exclusively in the Pinned section, so
+  // we strip pinned worktrees out of the regular tree. Track which projects
+  // had any pinned worktrees so SortableProject can hide the misleading
+  // "No workspaces yet" copy when the only reason a project looks empty is
+  // that everything got pinned.
+  //
+  // Plain (non-git) projects are flat — the project header IS the implicit
+  // workspace, with no nested card to pull up to a separate "Pinned"
+  // section. Skip the filter for them so a stray `pinned=true` row (e.g.
+  // pinned before the feature was disabled for plain projects) doesn't
+  // strand SortableProject with an empty `worktrees: []` and crash on
+  // `worktrees[0].branch`.
+  const { displayProjects, projectsWithPinned } = useMemo(() => {
+    const withPinned = new Set<string>();
+    const display = projects.map((p) => {
+      if (p.kind === "plain") return p;
+      const filtered = p.worktrees.filter((w) => !w.pinned);
+      if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
+      return { ...p, worktrees: filtered };
+    });
+    return { displayProjects: display, projectsWithPinned: withPinned };
+  }, [projects]);
+
+  const pinnedSectionCollapsed = pinnedCollapse.isCollapsed(PINNED_SECTION_ID);
+  const showPinnedSection = pinnedEntries.length > 0;
+  const pinnedNavCount = showPinnedSection && !pinnedSectionCollapsed ? pinnedEntries.length : 0;
+
+  const groups = useMemo(() => {
+    if (labels.length === 0)
+      return [
+        {
+          labelId: null as string | null,
+          label: null as LabelDefinition | null,
+          projects: displayProjects,
+        },
+      ];
+
+    const byLabel = new Map<string | null, ProjectInfo[]>();
+    for (const p of displayProjects) {
+      const key = p.label ?? null;
+      if (!byLabel.has(key)) byLabel.set(key, []);
+      byLabel.get(key)!.push(p);
+    }
+
+    const result: {
+      labelId: string | null;
+      label: LabelDefinition | null;
+      projects: ProjectInfo[];
+    }[] = [];
+    for (const lbl of labels) {
+      const grouped = byLabel.get(lbl.id);
+      if (grouped) {
+        result.push({ labelId: lbl.id, label: lbl, projects: grouped });
+      }
+    }
+    const unlabeled = byLabel.get(null);
+    if (unlabeled) {
+      result.push({ labelId: null, label: null, projects: unlabeled });
+    }
+    return result;
+  }, [displayProjects, labels]);
+
+  const visibleGroups = useMemo(() => {
+    if (!labelFilter) return groups;
+    return groups.filter((g) => g.labelId === labelFilter);
+  }, [groups, labelFilter]);
+
+  // Only count workspaces that are actually rendered — collapsed
+  // projects/labels hide their workspaces entirely, and keyboard arrow
+  // navigation must skip over them so focus never lands on something the
+  // user can't see. Pinned workspaces are always at the top of the list
+  // (independent of label filter), then the regular tree follows.
+  const allWorkspaceIds = useMemo(() => {
+    const headerVisible = labels.length > 0 && !labelFilter;
+    const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.workspaceId) : [];
+    const rest = visibleGroups.flatMap((g) => {
+      const groupKey = g.labelId ?? UNLABELED_KEY;
+      if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
+      return g.projects.flatMap((p) => {
+        if (projectCollapse.isCollapsed(p.name)) return [];
+        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.name));
+      });
+    });
+    return [...pinnedPart, ...rest];
+  }, [
+    visibleGroups,
+    labels.length,
+    labelFilter,
+    labelCollapse,
+    projectCollapse,
+    pinnedEntries,
+    pinnedNavCount,
+  ]);
+
+  const workspaceIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    // Reserve slots [0..pinnedNavCount) for pinned workspaces so per-project
+    // workspaceIndexStart values align with allWorkspaceIds.
+    let index = pinnedNavCount;
+    const headerVisible = labels.length > 0 && !labelFilter;
+    for (const group of visibleGroups) {
+      const groupKey = group.labelId ?? UNLABELED_KEY;
+      if (headerVisible && labelCollapse.isCollapsed(groupKey)) continue;
+      for (const project of group.projects) {
+        map.set(project.name, index);
+        if (!projectCollapse.isCollapsed(project.name)) {
+          index += project.worktrees.length;
+        }
+      }
+    }
+    return map;
+  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse, pinnedNavCount]);
+
+  useEffect(() => {
+    if (keyboardNavRef.current) return;
+    if (activeWorkspaceId) {
+      const idx = allWorkspaceIds.indexOf(activeWorkspaceId);
+      setFocusedIndex(idx);
+    } else {
+      setFocusedIndex(-1);
+    }
+  }, [activeWorkspaceId, allWorkspaceIds]);
+
+  // Reveal the active workspace in the tree by auto-expanding the project
+  // and label group it belongs to. This should run ONLY when
+  // activeWorkspaceId changes — i.e. when the user switches workspaces via
+  // the ⌘K picker, URL nav, notifications, etc. After the initial
+  // reveal we deliberately leave the collapse state alone so the user can
+  // collapse the ancestors of the active workspace (via the "Collapse all"
+  // toolbar button or by clicking a header) without this effect fighting
+  // back on the very next render.
+  //
+  // The naive implementation would include only `activeWorkspaceId` in the
+  // deps, but we also reference `labelCollapse`/`projectCollapse` inside
+  // (their references change on every state update), `groups` (which we
+  // walk), and `pinnedEntries` (for the pinned-workspace early-exit).
+  // Including all of those in the deps makes the effect re-fire on every
+  // collapse-state change and undo the user's collapse. To preserve the
+  // "once per activeWorkspaceId" semantics while keeping the deps list
+  // exhaustive, we gate the body behind a ref that remembers the last
+  // revealed id — subsequent runs no-op until activeWorkspaceId actually
+  // changes.
+  //
+  // We also clear keyboardNavRef so the focusedIndex effect above can
+  // re-run and move the highlight ring to the freshly-revealed workspace.
+  // Without that reset, arrow-key navigation followed by a ⌘K switch
+  // would leave the highlight stuck on the old position.
+  //
+  // Pinned workspaces are rendered exclusively in the Pinned section at
+  // the top of the tree (and are filtered out of `groups` via
+  // `displayProjects`). They have no presence inside their project's
+  // worktree list, so for a pinned active workspace we reveal it by
+  // expanding the Pinned section header — not the project or label group
+  // that contains its (now hidden) original entry.
+  // Two refs so we run the reveal logic again when the *pinned-ness* of
+  // the active workspace changes, not only when activeWorkspaceId itself
+  // changes. Without the pinned-tracking ref, pinning or unpinning the
+  // currently-active workspace early-returns here before
+  // `pinnedCollapse.expand` (or the regular project/label expand) gets
+  // a chance to run.
+  const revealedWorkspaceRef = useRef<string | null>(null);
+  const revealedAsPinnedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      revealedWorkspaceRef.current = null;
+      revealedAsPinnedRef.current = false;
+      return;
+    }
+    const isActivePinned = pinnedEntries.some((e) => e.workspaceId === activeWorkspaceId);
+    if (
+      revealedWorkspaceRef.current === activeWorkspaceId &&
+      revealedAsPinnedRef.current === isActivePinned
+    ) {
+      return;
+    }
+    revealedWorkspaceRef.current = activeWorkspaceId;
+    revealedAsPinnedRef.current = isActivePinned;
+    if (isActivePinned) {
+      pinnedCollapse.expand(PINNED_SECTION_ID);
+      keyboardNavRef.current = false;
+      return;
+    }
+    for (const group of groups) {
+      for (const project of group.projects) {
+        const containsActive = project.worktrees.some(
+          (wt) => toWorkspaceId(project.name, wt.name) === activeWorkspaceId,
+        );
+        if (!containsActive) continue;
+        if (labelFilter && group.labelId !== labelFilter) return;
+        const headerVisible = labels.length > 0 && !labelFilter;
+        if (headerVisible) {
+          labelCollapse.expand(group.labelId ?? UNLABELED_KEY);
+        }
+        projectCollapse.expand(project.name);
+        keyboardNavRef.current = false;
+        return;
+      }
+    }
+  }, [
+    activeWorkspaceId,
+    groups,
+    labelFilter,
+    labels.length,
+    labelCollapse,
+    projectCollapse,
+    pinnedCollapse,
+    pinnedEntries,
+  ]);
+
+  // Focus the container so keyboard navigation works immediately.
+  // Depends on hasProjects because the container div only renders when
+  // projects.length > 0 (see the early return below). On first mount with no
+  // projects, containerRef.current is null; re-running when hasProjects flips
+  // to true ensures we focus the container once it exists in the DOM.
+  const hasProjects = projects.length > 0;
+  useEffect(() => {
+    if (hasProjects) {
+      containerRef.current?.focus({ preventScroll: true });
+    }
+  }, [hasProjects]);
+
+  const capabilities = useCapabilities();
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // KEYBOARD NAVIGATION — READ BEFORE MODIFYING
+  //
+  // This handler is the backbone of keyboard workspace switching. It has
+  // regressed multiple times because the interaction between this container-
+  // level handler and the card-level onKeyDown (in WorkspaceCard) is subtle:
+  //
+  //  • Arrow keys update `focusedIndex` which controls the visual highlight
+  //    ring on WorkspaceCards. However, arrow events may originate on a *child*
+  //    card that has DOM focus (e.g. after the user clicked a card or tabbed
+  //    into the list). They bubble up here because cards don't handle arrows.
+  //
+  //  • Enter on a *card* is handled by the card's own onKeyDown, which calls
+  //    stopPropagation — so this container handler would NEVER see it.
+  //    The card opens *itself*, not necessarily the keyboard-highlighted card.
+  //
+  //  • To fix this, arrow handlers explicitly re-focus the container via
+  //    containerRef.current?.focus(). This guarantees the next Enter fires
+  //    HERE, where we use the correct focusedIndex to open the right workspace.
+  //
+  // DO NOT remove the containerRef.current?.focus() calls. Without them,
+  // pressing Enter after arrow-key navigation opens the wrong workspace (or
+  // no workspace at all, depending on the platform).
+  // ──────────────────────────────────────────────────────────────────────────
+  const selectWorkspace = useCallback(
+    (wsId: string) => {
+      // Mark as in-list activation so WorkspaceCard's scrollIntoView effect
+      // bails out — keyboard focus is already on the chosen card.
+      markRecentActivation(wsId);
+      const href = capabilities.getWorkspaceHref?.(wsId);
+      if (href && capabilities.navigate) {
+        capabilities.navigate(href);
+      } else {
+        openWorkspace(wsId);
+      }
+    },
+    [capabilities, openWorkspace],
+  );
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (allWorkspaceIds.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      keyboardNavRef.current = true;
+      setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
+      // Keep DOM focus on the container so Enter fires here, not on a child card.
+      // See block comment above — removing this breaks keyboard Enter navigation.
+      containerRef.current?.focus({ preventScroll: true });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      keyboardNavRef.current = true;
+      setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+      // Keep DOM focus on the container — same reasoning as ArrowDown above.
+      containerRef.current?.focus({ preventScroll: true });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const wsId = allWorkspaceIds[focusedIndex];
+      if (wsId !== undefined && !isWorkspaceDeleting(rawStore.getState(), wsId)) {
+        keyboardNavRef.current = false;
+        selectWorkspace(wsId);
+      }
+    }
+  }
+
+  const allProjectNames = useMemo(
+    () => visibleGroups.flatMap((g) => g.projects.map((p) => p.name)),
+    [visibleGroups],
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragId(event.active.id as string);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveDragId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    if (overId.startsWith("group:")) {
+      const targetLabelId = overId === "group:__unlabeled" ? null : overId.slice("group:".length);
+      updateProjectLabelMutation.mutate({ name: activeId, label: targetLabelId });
+      return;
+    }
+
+    const activeGroup = groups.find((g) => g.projects.some((p) => p.name === activeId));
+    const overGroup = groups.find((g) => g.projects.some((p) => p.name === overId));
+
+    if (!activeGroup || !overGroup) return;
+
+    if (activeGroup.labelId === overGroup.labelId) {
+      const allNames = projects.map((p) => p.name);
+      const oldIndex = allNames.indexOf(activeId);
+      const newIndex = allNames.indexOf(overId);
+      reorderProjectsMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
+    } else {
+      updateProjectLabelMutation.mutate({ name: activeId, label: overGroup.labelId });
+    }
+  }
+
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <p className="text-lg mb-2">No projects registered</p>
+        <p className="text-sm">Click the + button to register a folder</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        data-testid="project-list__root"
+        onKeyDown={handleKeyDown}
+        onPointerDown={() => {
+          keyboardNavRef.current = false;
+        }}
+        className="flex flex-col gap-0.5 outline-none min-w-0"
+      >
+        {/* Pinned section — rendered outside DndContext/SortableContext so
+            pinned workspaces cannot be touched by project drag-and-drop. It
+            also ignores the label filter (pinned ws should always be
+            visible) and is the *only* place pinned workspaces render. */}
+        {showPinnedSection && (
+          <div key="__pinned">
+            <button
+              type="button"
+              onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
+              aria-expanded={!pinnedSectionCollapsed}
+              className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10"
+            >
+              <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
+              <span className="text-[13px] font-semibold text-foreground/90">Pinned</span>
+              <ChevronRight
+                className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+                  pinnedSectionCollapsed ? "" : "rotate-90"
+                }`}
+              />
+            </button>
+            <CollapsibleSection
+              collapsed={pinnedSectionCollapsed}
+              className="flex flex-col gap-0.5 px-2"
+            >
+              {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
+                <WorkspaceCard
+                  key={workspaceId}
+                  worktree={worktree}
+                  projectName={project.name}
+                  defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
+                  status={statuses.get(workspaceId)}
+                  branchStatus={branchStatuses.get(workspaceId)}
+                  setupStatus={setupStatuses.get(workspaceId)}
+                  isFocused={!pinnedSectionCollapsed && i === focusedIndex}
+                  onShowDeleteDialog={setDeleteDialog}
+                  showProjectName
+                  onTogglePinned={togglePinned}
+                />
+              ))}
+            </CollapsibleSection>
+          </div>
+        )}
+
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
+            {visibleGroups.map((group) => {
+              const groupKey = group.labelId ?? UNLABELED_KEY;
+              // When a label filter is active we render a single group without
+              // a header, so honour the group's collapsed state only when the
+              // header is visible (otherwise users would have no way to expand
+              // it again). Same for the no-labels mode.
+              const headerVisible = labels.length > 0 && !labelFilter;
+              const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
+              return (
+                <div key={groupKey}>
+                  {headerVisible &&
+                    (group.label ? (
+                      <DroppableLabelHeader
+                        labelId={group.labelId!}
+                        label={group.label}
+                        collapsed={groupCollapsed}
+                        onToggle={() => labelCollapse.toggle(groupKey)}
+                      />
+                    ) : (
+                      <DroppableUnlabeledHeader
+                        collapsed={groupCollapsed}
+                        onToggle={() => labelCollapse.toggle(groupKey)}
+                      />
+                    ))}
+                  <CollapsibleSection collapsed={groupCollapsed}>
+                    {group.projects.map((project) => (
+                      // Consecutive projects in a label group are separated by
+                      // spacing alone (no divider line); the first row sits
+                      // flush under the label header.
+                      <div key={project.name} className="pt-1 first:pt-0">
+                        <SortableProject
+                          project={project}
+                          statuses={statuses}
+                          branchStatuses={branchStatuses}
+                          setupStatuses={setupStatuses}
+                          removeProject={(name) => removeProjectMutation.mutate(name)}
+                          updateProjectLabel={(name, label) =>
+                            updateProjectLabelMutation.mutate({ name, label })
+                          }
+                          onPromoteToGit={setPromoteDialog}
+                          labels={labels}
+                          setWorkspaceDialog={setWorkspaceDialog}
+                          onShowDeleteDialog={setDeleteDialog}
+                          focusedIndex={focusedIndex}
+                          workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
+                          collapsed={projectCollapse.isCollapsed(project.name)}
+                          onToggleCollapse={projectCollapse.toggle}
+                          hasPinnedSiblings={projectsWithPinned.has(project.name)}
+                          onTogglePinned={togglePinned}
+                        />
+                      </div>
+                    ))}
+                  </CollapsibleSection>
+                </div>
+              );
+            })}
+          </SortableContext>
+          {/* dropAnimation={null} disables dnd-kit's default snap-back. The
+              reorder mutation runs an optimistic update in onMutate, so when
+              the user releases we want the overlay to disappear instantly
+              and the list to look like the new order — not animate back to
+              the original drop position before re-rendering. */}
+          <DragOverlay dropAnimation={null}>
+            {activeDragId ? (
+              <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
+                <ProjectAvatar
+                  avatar={projects.find((p) => p.name === activeDragId)?.avatar}
+                  className="size-3.5"
+                  fallback={<Folder className="size-3.5 shrink-0 text-muted-foreground" />}
+                />
+                <span className="text-[13px] font-semibold text-foreground">{activeDragId}</span>
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
+
+      <NewWorkspaceDialog
+        projectName={workspaceDialog ?? ""}
+        open={workspaceDialog !== null}
+        onOpenChange={(open) => setWorkspaceDialog(open ? workspaceDialog : null)}
+      />
+
+      <DeleteWorkspaceDialog
+        open={deleteDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteDialog(null);
+        }}
+        onConfirm={() => {
+          if (deleteDialog) {
+            removeWorkspaceMutation.mutate({
+              project: deleteDialog.projectName,
+              name: deleteDialog.name,
+            });
+            setDeleteDialog(null);
+          }
+        }}
+        branchName={deleteDialog?.name ?? ""}
+        isUnmerged={deleteDialog?.isUnmerged ?? false}
+        isDirty={deleteDialog?.isDirty ?? false}
+        hasUnpushedCommits={deleteDialog?.hasUnpushedCommits ?? false}
+      />
+
+      <PromoteToGitDialog
+        open={promoteDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setPromoteDialog(null);
+        }}
+        onConfirm={() => {
+          if (!promoteDialog) return;
+          // Wait for the mutation to settle before dismissing the
+          // dialog. If the server errors (path deleted, already a git
+          // project, etc.) we want the dialog to stay open so the
+          // user can see the error toast in context; closing
+          // synchronously hides the trigger before the failure is
+          // visible.
+          promoteProjectToGitMutation.mutate(promoteDialog, {
+            onSettled: () => setPromoteDialog(null),
+          });
+        }}
+        projectName={promoteDialog ?? ""}
+      />
+    </>
+  );
+}

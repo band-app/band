@@ -12,7 +12,15 @@ import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "tasks-crud-test-token";
-const MIGRATIONS_FOLDER = join(import.meta.dirname, "..", "src", "lib", "db", "migrations");
+const MIGRATIONS_FOLDER = join(
+  import.meta.dirname,
+  "..",
+  "src",
+  "server",
+  "infra",
+  "db",
+  "migrations",
+);
 
 // ---------------------------------------------------------------------------
 // Helpers

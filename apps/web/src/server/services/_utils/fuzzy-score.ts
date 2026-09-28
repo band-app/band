@@ -1,0 +1,171 @@
+/**
+ * Fuzzy file-path scoring — thin wrapper around `fzf-for-js` (npm `fzf`),
+ * a faithful TypeScript port of fzf v2's algorithm.
+ *
+ * Why fzf and not the previous hand-rolled DP scorer:
+ *   The old scorer (see git history for the `fuzzy-score.ts` it replaced)
+ *   used a two-row dynamic-programming approach that occasionally ranked
+ *   scattered subsequence matches above literal substring matches — the
+ *   real-world example from issue #530 was the query `composite` matching
+ *   `flow-source-composite.ts` (a substring run) being out-scored by
+ *   files where the letters c-o-m-p-o-s-i-t-e happened to appear strewn
+ *   across a longer path. With Quick Open's result cap the wanted file
+ *   could be pushed off the list entirely.
+ *
+ *   fzf's v2 algorithm rewards consecutive runs, word boundaries, and
+ *   camel-case boundaries — and it's the upstream-maintained matcher
+ *   junegunn/fzf ships, so we get correct substring-beats-scattered
+ *   behaviour for free without owning the algorithm ourselves.
+ *
+ * Two exported functions:
+ *
+ *   - `scoreFiles(query, files)` — the primary, corpus-shaped API used
+ *     by `SearchService.searchFiles`. One `Fzf` instance + one `.find`
+ *     call over the whole corpus per query, instead of N-of-each
+ *     per-file. Returns only the matches, sorted highest-first.
+ *
+ *   - `fuzzyScore(query, filePath)` — pairwise convenience used by the
+ *     `fuzzy-score.test.ts` cases that compare scores between two
+ *     specific paths. Internally calls `scoreFiles` with a single-item
+ *     corpus, so production search hits the cheap path while tests keep
+ *     a clean per-pair surface to assert on.
+ *
+ * On top of fzf we add two adjustments that mirror the old DP scorer:
+ *
+ *   1. Per-character filename bonus. fzf doesn't know about path
+ *      structure, so `router` in `src/trpc/router.ts` and
+ *      `router/src/trpc.ts` score identically — both are a clean
+ *      consecutive run at a `/` boundary. We boost positions that fall
+ *      inside the filename portion (after the last `/`) so Quick Open
+ *      users see file-name matches above directory matches, which is
+ *      the implicit expectation every Quick Open implementation
+ *      validates (VS Code, Sublime, etc.).
+ *
+ *   2. Short-path tiebreaker. Among equally-scored paths, prefer the
+ *      shorter one (closer to the project root). Small enough that it
+ *      never overturns a real score difference.
+ *
+ *   Because the filename bonus can change relative ordering vs fzf's
+ *   own score, we re-sort the result set after applying it.
+ */
+
+// `fzf` is the npm package name for `ajitid/fzf-for-js`, the TypeScript
+// port of junegunn/fzf's v2 algorithm. Snyk lists the package as
+// "Inactive" (no releases since 2022), accepted as technical debt here:
+// the v2 algorithm itself is intentionally frozen (junegunn/fzf upstream
+// has not changed it), and the package has zero runtime dependencies and
+// a 70 KB unpacked size. The version is pinned to an exact `0.5.2` in
+// `package.json` so a future floating-range resolution can't silently
+// pull in an unaudited patch. Verified publisher: `ajitid` (BSD-3-Clause).
+import { Fzf } from "fzf";
+
+export interface ScoredFile {
+  file: string;
+  score: number;
+}
+
+/**
+ * Per-character bonus for every matched position that falls inside the
+ * filename portion of the path. Mirrors `BONUS_FILENAME_CHAR = 3` in
+ * the old DP scorer — same value, same semantics.
+ */
+const BONUS_FILENAME_CHAR = 3;
+
+/**
+ * Length tiebreaker — among equally-scored results, prefer shorter
+ * paths (closer to the project root). The factor is small enough that
+ * it never overturns a real score difference; for a 150-char path it
+ * shifts the score by at most ~1.5. Mirrors the constant in the
+ * previous DP implementation exactly.
+ */
+const SHORT_PATH_TIEBREAKER_WEIGHT = 0.01;
+
+/**
+ * fzf options reused on every call.
+ *
+ * `casing: "case-insensitive"` preserves the old contract: the
+ * previous DP scorer always lower-cased both operands, so `QOD` matched
+ * `quod_file.tsx`. fzf's default `smart-case` would reject that.
+ *
+ * `forward: false` matches from the end of the string. fzf documents
+ * this exact case in its own JSDoc: "useful if one needs to match a
+ * file path and they prefer querying for the file name over directory
+ * names present in the path." Without it, `git` in
+ * `src/server/infra/git/git-client.ts` matches the `infra/git/`
+ * directory rather than the `git-client.ts` filename — both score
+ * identically in fzf, and forward:true picks the first occurrence.
+ * forward:false picks the last one, which combined with the per-char
+ * filename bonus below gives Quick Open the right ranking.
+ */
+const FZF_OPTIONS = { casing: "case-insensitive", forward: false } as const;
+
+/**
+ * Score `query` against every entry in `files` in a single fzf pass,
+ * returning only the matches sorted highest-first. Empty corpus and
+ * "no fzf matches" both return an empty array.
+ *
+ * Empty query is the caller's responsibility — `SearchService.searchFiles`
+ * short-circuits the empty-query case to return the raw file list, so
+ * this function never has to handle it. fzf itself treats an empty
+ * pattern as "no match" and would return an empty array, which is fine
+ * if a caller stumbles in.
+ */
+export function scoreFiles(query: string, files: string[]): ScoredFile[] {
+  if (files.length === 0) return [];
+
+  // One Fzf instance, one `.find` call, regardless of corpus size —
+  // this is the win over the previous per-file shape. fzf internally
+  // walks the corpus once and returns only matches (each with the raw
+  // score plus the matched position Set).
+  const results = new Fzf(files, FZF_OPTIONS).find(query);
+
+  const scored: ScoredFile[] = [];
+  for (const r of results) {
+    const filePath = r.item;
+    const filenameStart = filePath.lastIndexOf("/") + 1;
+    let filenameBonus = 0;
+    if (filenameStart > 0) {
+      for (const pos of r.positions) {
+        if (pos >= filenameStart) filenameBonus += BONUS_FILENAME_CHAR;
+      }
+    } else {
+      // No `/` in the path means the whole thing is the filename; every
+      // matched position counts. Iterate `r.positions` instead of
+      // multiplying by query length because fzf positions may include
+      // bonus characters in non-fuzzy modes (defensive, even though our
+      // mode is plain v2 fuzzy).
+      filenameBonus = r.positions.size * BONUS_FILENAME_CHAR;
+    }
+    scored.push({
+      file: filePath,
+      score: r.score + filenameBonus - filePath.length * SHORT_PATH_TIEBREAKER_WEIGHT,
+    });
+  }
+  // Re-sort: fzf returns results sorted by its own raw score, but the
+  // filename bonus + length tiebreaker above can change relative order.
+  // Equal scores fall back to path order. Without that, ties keep the corpus
+  // order, which comes from ripgrep and differs between runs on Linux, so each
+  // keystroke's refetch could reshuffle identical results under the user's
+  // cursor (a Quick Open selection would jump mid-navigation).
+  scored.sort((a, b) => b.score - a.score || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return scored;
+}
+
+/**
+ * Pairwise score of a single (query, path). Convenience wrapper around
+ * `scoreFiles` used by the `fuzzy-score.test.ts` cases that compare
+ * scores between two specific files. Production code (`SearchService`)
+ * uses `scoreFiles` directly and skips the per-file Fzf construction.
+ *
+ * Returns:
+ *   - `0`     when `query` is empty (matches everything; legacy contract).
+ *   - `null`  when `filePath` is empty or fzf finds no match.
+ *   - number  the bonused, tiebreaker-adjusted score for the match.
+ */
+export function fuzzyScore(query: string, filePath: string): number | null {
+  if (!query) return 0;
+  if (!filePath) return null;
+
+  const result = scoreFiles(query, [filePath])[0];
+  return result ? result.score : null;
+}

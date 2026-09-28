@@ -111,7 +111,7 @@ jobs:
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       # Build the CLI before running the JS tests. Some tests (e.g.
-      # `apps/web/tests/cli-skills.test.ts`) shell out to `band generate-skills`
+      # `apps/web/tests/cli-skills.test.ts`) shell out to `band skills install`
       # to verify the production sync path against the real binary. The cargo
       # cache key only hashes `apps/cli/Cargo.lock`, so a source-only change
       # (skill templates, command surface) restores a stale binary that
@@ -121,10 +121,17 @@ jobs:
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
 
+      # Pin --test-threads=4 to match ci.yml. Each CLI integration test boots
+      # a real node Band server on its own port (TestEnv::new), and
+      # `workspaces create` dispatches to it. With unbounded parallelism the
+      # macos-latest runner boots too many servers at once; some aren't ready
+      # when create dispatches, so the worktree never registers and the
+      # workspaces_list_*/chat_auto_detects_workspace_from_cwd tests flake
+      # (see run 28698582656). CI already caps this; mirror it here.
       - name: Test
         run: |
           pnpm --filter @band-app/server test
-          cargo test --manifest-path apps/cli/Cargo.toml
+          cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
       - name: Build frontend
         env:
@@ -174,6 +181,18 @@ jobs:
         if: always()
         uses: ./.github/actions/apple-sign-cleanup
 
+      # Give the user-facing DMGs unambiguous arch suffixes
+      # (Band-X.dmg → Band-X-intel.dmg, Band-X-arm64.dmg →
+      # Band-X-apple-silicon.dmg) so people don't accidentally download
+      # the Intel build on Apple Silicon (or vice versa). Only DMGs are
+      # renamed — the `.zip` artifacts referenced from `latest-mac.yml`
+      # keep the `-arm64` substring that electron-updater's MacUpdater
+      # uses to pick the right auto-update file. See the script header
+      # for the full rationale.
+      - name: Rename DMGs to intel/apple-silicon
+        working-directory: apps/desktop
+        run: node scripts/rename-dmgs-by-arch.mjs
+
       - name: Generate changelog
         id: changelog
         run: |
@@ -210,3 +229,47 @@ jobs:
         run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Regenerate the Homebrew cask in band-app/homebrew-band so
+      # `brew install --cask band` resolves the release that was just
+      # published. Hashes the local signed DMGs (same files uploaded above)
+      # and pushes over SSH with a write deploy key scoped to the tap repo.
+      # Runs last so a tap-side failure can't block the npm publish of an
+      # already-tagged release.
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          VERSION: ${{ steps.version.outputs.new_version }}
+        run: |
+          # Defence-in-depth: fail fast if the release version isn't a plain
+          # semver before interpolating it into any command below. (new_version
+          # comes from the trusted bump-version step, and bash does not
+          # re-evaluate $() inside an expanded variable, but a malformed value
+          # would otherwise build a wrong DMG path and fail shasum silently.)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION is not a plain semver: $VERSION" >&2; exit 1; }
+          ARM_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-apple-silicon.dmg" | awk '{print $1}')
+          INTEL_SHA=$(shasum -a 256 "apps/desktop/dist-builder/Band-${VERSION}-intel.dmg" | awk '{print $1}')
+          KEY_FILE="$RUNNER_TEMP/tap_deploy_key"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          # Pin GitHub's published SSH host key (docs.github.com "GitHub's
+          # SSH key fingerprints") instead of trust-on-first-use.
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i \"$KEY_FILE\" -o UserKnownHostsFile=\"$RUNNER_TEMP/known_hosts\" -o StrictHostKeyChecking=yes"
+          git clone --depth 1 git@github.com:band-app/homebrew-band.git "$RUNNER_TEMP/homebrew-band"
+          node scripts/generate-homebrew-cask.mjs \
+            --version "$VERSION" \
+            --arm-sha "$ARM_SHA" \
+            --intel-sha "$INTEL_SHA" \
+            > "$RUNNER_TEMP/homebrew-band/Casks/band.rb"
+          cd "$RUNNER_TEMP/homebrew-band"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/band.rb
+          if git diff --cached --quiet; then
+            echo "Cask already up to date"
+            exit 0
+          fi
+          git commit -m "band ${VERSION}"
+          git push origin HEAD:main

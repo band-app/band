@@ -16,7 +16,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -46,6 +46,13 @@ async function findFreePort(): Promise<number> {
   });
 }
 
+// `FAKE_SERVER` is a *string* of JavaScript source. The test harness writes
+// it to `webDir/dist/start-server.mjs` and spawns it as a child process via
+// `spawnWebServer` — it is never `import`ed by the test runner itself. So
+// the `writeFileSync` calls inside this template only ever run inside the
+// spawned child, where `HOME` has already been overridden to `sandboxHome`
+// by the `before()` hook. There is no second context that would touch the
+// user's real `~/.band/`.
 const FAKE_SERVER = `import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,6 +65,20 @@ const token = "test-token-" + Math.random().toString(36).slice(2);
 const dir = join(homedir(), ".band");
 mkdirSync(dir, { recursive: true });
 writeFileSync(join(dir, "settings.json"), JSON.stringify({ tokenSecret: token, webServerPort: port }, null, 2));
+
+// Record the spawn environment + execPath so the integration test can assert
+// the desktop shell actually invoked us via process.execPath +
+// ELECTRON_RUN_AS_NODE=1. Black-box check — no need to mock spawn.
+//
+// Written once at module load (this file is module-scope), so the assertion
+// captures the *first* spawn's env. That's the only invocation we need today
+// (each test allocates a fresh port and a fresh fake server); revisit if a
+// future test ever reuses a running server across cases.
+writeFileSync(join(dir, "spawn-env.json"), JSON.stringify({
+  execPath: process.execPath,
+  electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
+  nodeOptions: process.env.NODE_OPTIONS ?? null,
+}, null, 2));
 
 const server = http.createServer((req, res) => {
   if (req.url?.startsWith("/api/health")) {
@@ -127,6 +148,59 @@ describe("web-server lifecycle", () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.app, "band-web-server");
+    } finally {
+      await managed.kill();
+    }
+  });
+
+  test("spawnWebServer uses process.execPath + ELECTRON_RUN_AS_NODE=1", async () => {
+    const port = await findFreePort();
+    const managed = new ManagedProcess();
+
+    try {
+      await ensureWebserverRunning({ webDir, managed, port });
+
+      // The fake server writes the spawn env it sees into ~/.band/spawn-env.json.
+      // That tells us — black-box — what the desktop shell actually invoked.
+      // Note: `sandboxHome` here is the same path the fake server resolves
+      // via `homedir()` — the `before()` hook overrides `process.env.HOME`
+      // to point at `sandboxHome` before spawning anything.
+      const raw = await readFile(join(sandboxHome, ".band", "spawn-env.json"), "utf8");
+      const captured = JSON.parse(raw) as {
+        execPath: string;
+        electronRunAsNode: string | null;
+        nodeOptions: string | null;
+      };
+
+      // The test asserts env *shape*, not the spawn-binary target:
+      //
+      //  - In production the spawn binary is the Electron `.app` executable
+      //    (process.execPath), which behaves as Node thanks to the
+      //    ELECTRON_RUN_AS_NODE=1 env var below.
+      //  - In this test environment the spawn binary is the system `node`
+      //    that's running the test runner. process.execPath of the spawned
+      //    child will equal process.execPath of the parent, and both will
+      //    be absolute paths.
+      //
+      // CI gap: cannot verify the spawn-binary choice without a real
+      // Electron binary in the test process. The OS resolves the literal
+      // "node" to an absolute path before the child starts, so a refactor
+      // back to `spawn("node", …)` would still pass these assertions. The
+      // only real guard is a manual smoke test of the packaged `.app` with
+      // system `node` removed from PATH.
+      assert.equal(captured.execPath, process.execPath);
+      assert.ok(captured.execPath.startsWith("/"), "execPath must be absolute");
+
+      // ELECTRON_RUN_AS_NODE=1 is what makes the Electron binary act as a
+      // pure Node interpreter when this code runs inside the packaged .app.
+      // Plain `node` ignores it, but the value must still be propagated.
+      assert.equal(captured.electronRunAsNode, "1");
+
+      // Keep the experimental warning silencer until Node bundled by Electron
+      // moves to 24.x where node:sqlite is stable. We *append* to whatever
+      // NODE_OPTIONS the parent had, so this assertion checks containment
+      // rather than equality.
+      assert.match(captured.nodeOptions ?? "", /--no-warnings=ExperimentalWarning/);
     } finally {
       await managed.kill();
     }

@@ -65,7 +65,7 @@ function ColorPicker({ value, onChange, disabled, showHex = true, className }: C
                 key={color}
                 type="button"
                 className={cn(
-                  "w-7 h-7 rounded border-2 transition-all",
+                  "w-7 h-7 rounded border-2 transition-[border-color,transform]",
                   colorValue === color
                     ? "border-primary scale-110"
                     : "border-transparent hover:border-border",

@@ -1,7 +1,7 @@
-import { DashboardShell } from "@band-app/dashboard-core";
 import { MessageSquare } from "lucide-react";
 import { type ReactNode, useCallback, useRef } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
+import { DashboardShell } from "@/dashboard";
 import {
   loadSidebarWidth,
   SIDEBAR_MAX_SIZE,
@@ -10,10 +10,10 @@ import {
 } from "../lib/sidebar-width";
 
 interface DesktopLayoutProps {
-  toolbarMenuItems?: ReactNode;
+  bottomActions?: ReactNode;
 }
 
-export function DesktopLayout({ toolbarMenuItems }: DesktopLayoutProps) {
+export function DesktopLayout({ bottomActions }: DesktopLayoutProps) {
   const savedWidth = loadSidebarWidth();
   const defaultLayout = savedWidth ? { sidebar: savedWidth, main: 100 - savedWidth } : undefined;
   const skipFirstLayoutCallback = useRef(true);
@@ -43,7 +43,7 @@ export function DesktopLayout({ toolbarMenuItems }: DesktopLayoutProps) {
           collapsedSize="0%"
         >
           <div className="h-full border-r border-border overflow-hidden">
-            <DashboardShell toolbarMenuItems={toolbarMenuItems} />
+            <DashboardShell bottomActions={bottomActions} />
           </div>
         </Panel>
         <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />

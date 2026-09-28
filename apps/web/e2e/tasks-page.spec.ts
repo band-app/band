@@ -1,21 +1,35 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import {
+  cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
   startServer,
 } from "./helpers/server";
+import { TasksDialog } from "./pages/TasksDialog";
 
 const TOKEN = "e2e-test-token";
 
 let server: ServerHandle;
 let tmpHome: string;
+
+// All test-side writes to the same `band.db` the server is using must
+// set `busy_timeout` so a concurrent server transaction doesn't fail
+// us with `SQLITE_BUSY: database is locked`. Phase-B cleanup,
+// branch-status-poller writes, and the task store all hold the
+// write lock briefly — on CI with 2 workers the test's open + write
+// can land exactly inside one of those windows and fail outright
+// instead of waiting. 5 s is generous enough to absorb a runner
+// stall but short enough that a truly deadlocked server still fails
+// fast. (Pre-existing flake surfaced by issue #508's e2e test;
+// reads stay readOnly and need no timeout under WAL mode.)
+const DB_BUSY_TIMEOUT_MS = 5_000;
 
 function seedTask(
   tmpHome: string,
@@ -34,8 +48,9 @@ function seedTask(
   const dbPath = join(tmpHome, ".band", "band.db");
   const sqlite = new DatabaseSync(dbPath);
   sqlite.exec("PRAGMA journal_mode = WAL");
+  sqlite.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
   const db = drizzle({ client: sqlite });
-  migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/lib/db/migrations") });
+  migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/server/infra/db/migrations") });
   sqlite
     .prepare(
       `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
@@ -55,28 +70,26 @@ function seedTask(
   sqlite.close();
 }
 
-/**
- * Open the Tasks dialog from the dashboard's hamburger ("Menu") toolbar
- * dropdown. Returns the dialog locator for further interaction. Use after
- * `page.goto` has loaded the dashboard.
- */
-async function openTasksDialog(page: Page) {
-  // The dashboard React app fetches projects via tRPC on mount, so the
-  // toolbar's React click handlers may not be bound by the time `load`
-  // fires. Wait for the network to settle before driving the dropdown.
-  await page.waitForLoadState("networkidle");
-  const trigger = page.locator('button[aria-label="Menu"]');
-  // Retry the open until the menu actually appears — covers any remaining
-  // hydration race between the click reaching the DOM and React binding
-  // the dropdown's onClick.
-  await expect(async () => {
-    await trigger.click();
-    await expect(page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 15_000 });
-  await page.getByRole("menuitem", { name: "Tasks" }).click();
-  const dialog = page.getByRole("dialog", { name: "Tasks" });
-  await expect(dialog).toBeVisible();
-  return dialog;
+function readTaskStatus(tmpHome: string, taskId: string): string | undefined {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"), { readOnly: true });
+  try {
+    const row = sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as
+      | { status: string }
+      | undefined;
+    return row?.status;
+  } finally {
+    sqlite.close();
+  }
+}
+
+function deleteTask(tmpHome: string, taskId: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
+    sqlite.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+  } finally {
+    sqlite.close();
+  }
 }
 
 test.beforeAll(async () => {
@@ -127,10 +140,38 @@ test.beforeAll(async () => {
     completedAt: Date.now() - 7100_000,
   });
 
+  // Sentinel "running" row that boot-time `cleanupStaleTasks()` is
+  // guaranteed to flip to `failed`. Issue #477 moved that cleanup out
+  // of the await-blocking boot path and into a `setImmediate` after
+  // `httpServer.listen()`, so the listen banner can arrive before
+  // cleanup writes land. Without this sentinel, the orphan-running
+  // row we seed below would race cleanup and get re-flipped to
+  // `failed`, breaking the "Running" badge assertion.
+  seedTask(tmpHome, {
+    id: "tsk_cleanup_sentinel",
+    workspaceId: "myapp-main",
+    project: "myapp",
+    branch: "main",
+    prompt: "sentinel — flipped to failed by Phase B cleanup",
+    status: "running",
+    startedAt: Date.now() - 86400_000,
+  });
+
   server = await startServer({ tmpHome });
 
-  // Seed the running task AFTER the server starts so that cleanupStaleTasks()
-  // (which marks all running tasks as failed on startup) doesn't clobber it.
+  // Wait for Phase-B cleanup to flip the sentinel. Once it has, any
+  // future "running" row we seed will survive untouched on this boot.
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (readTaskStatus(tmpHome, "tsk_cleanup_sentinel") === "failed") break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  // Remove the sentinel so it doesn't show up in the dashboard's
+  // tasks dialog and skew the per-status badge / count assertions.
+  deleteTask(tmpHome, "tsk_cleanup_sentinel");
+
+  // Now seed the running task we want the dashboard to render with
+  // the "Running" badge. Cleanup has already executed for this boot,
+  // so this row stays as-is.
   seedTask(tmpHome, {
     id: "tsk_3000",
     workspaceId: "backend-main",
@@ -142,113 +183,122 @@ test.beforeAll(async () => {
   });
 });
 
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
+
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
-});
-
-test.beforeEach(async ({ page }) => {
-  await page.goto(`${server.url}/?token=${TOKEN}`);
+  cleanupTmpHome(tmpHome);
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+//
+// Seeded task ids (from `beforeAll`):
+//   tsk_1000 — myapp/main,      completed, has session
+//   tsk_2000 — myapp/feat/auth, failed
+//   tsk_3000 — backend/main,    running
 
 test("tasks dialog renders and shows seeded tasks", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
-  await expect(dialog.getByText("Fix login validation bug")).toBeVisible();
-  await expect(dialog.getByText("Optimize database queries")).toBeVisible();
+  await expect(tasks.card("tsk_1000")).toBeVisible();
+  await expect(tasks.card("tsk_2000")).toBeVisible();
+  await expect(tasks.card("tsk_3000")).toBeVisible();
 });
 
 test("tasks dialog shows status badges", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // Scope badge checks to task cards to avoid matching select dropdown options.
-  // The card outline is `rounded-lg border-2` — match either width so this
-  // doesn't break the next time we re-tune the border thickness.
-  const cards = dialog.locator(".rounded-lg.border-2, .rounded-lg.border");
-  await expect(cards.getByText("Completed")).toBeVisible();
-  await expect(cards.getByText("Failed")).toBeVisible();
-  await expect(cards.getByText("Running")).toBeVisible();
+  await expect(tasks.statusBadge("completed")).toBeVisible();
+  await expect(tasks.statusBadge("failed")).toBeVisible();
+  await expect(tasks.statusBadge("running")).toBeVisible();
 });
 
 test("filtering by status works", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // Wait for tasks to load
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  // Wait for tasks to load.
+  await expect(tasks.card("tsk_1000")).toBeVisible();
 
-  // Open status filter dropdown (second select trigger) and pick "completed"
-  await dialog.locator('[data-slot="select-trigger"]').nth(1).click();
-  await page.getByRole("option", { name: "completed" }).click();
+  await tasks.filterByStatus("completed");
 
-  // Only the completed task should be visible
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
-  await expect(dialog.getByText("Fix login validation bug")).not.toBeVisible();
-  await expect(dialog.getByText("Optimize database queries")).not.toBeVisible();
+  // The completed task stays visible (positive anchor proving the filter
+  // applied); the failed + running tasks drop out.
+  await expect(tasks.card("tsk_1000")).toBeVisible();
+  await expect(tasks.card("tsk_2000")).toHaveCount(0);
+  await expect(tasks.card("tsk_3000")).toHaveCount(0);
 });
 
 test("filtering by project works", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // Wait for tasks to load
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  // Wait for tasks to load.
+  await expect(tasks.card("tsk_1000")).toBeVisible();
 
-  // Select "backend" project from dropdown
-  await dialog.locator('[data-slot="select-trigger"]').first().click();
-  await page.getByRole("option", { name: "backend" }).click();
+  await tasks.filterByProject("backend");
 
-  // Only the backend task should be visible
-  await expect(dialog.getByText("Optimize database queries")).toBeVisible();
-  await expect(dialog.getByText("Add authentication to the API")).not.toBeVisible();
-  await expect(dialog.getByText("Fix login validation bug")).not.toBeVisible();
+  // Only the backend task remains (positive anchor); the myapp tasks drop out.
+  await expect(tasks.card("tsk_3000")).toBeVisible();
+  await expect(tasks.card("tsk_1000")).toHaveCount(0);
+  await expect(tasks.card("tsk_2000")).toHaveCount(0);
 });
 
 test("empty state shows when no tasks match filters", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // Wait for tasks to load
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  // Wait for tasks to load.
+  await expect(tasks.card("tsk_1000")).toBeVisible();
 
-  // Select "backend" project + "completed" status — no tasks match
-  await dialog.locator('[data-slot="select-trigger"]').first().click();
-  await page.getByRole("option", { name: "backend" }).click();
-  await dialog.locator('[data-slot="select-trigger"]').nth(1).click();
-  await page.getByRole("option", { name: "completed" }).click();
+  // backend + completed matches no seeded task.
+  await tasks.filterByProject("backend");
+  await tasks.filterByStatus("completed");
 
-  await expect(dialog.getByText("No tasks found")).toBeVisible();
-  await expect(dialog.getByText("Try adjusting your filters")).toBeVisible();
+  await expect(tasks.emptyState).toBeVisible();
+  await expect(tasks.card("tsk_3000")).toHaveCount(0);
 });
 
 test("completed task shows session link", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // The completed task with a sessionId should have a "Session" link
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
-  const sessionLink = dialog.getByRole("link", { name: "Session" });
-  await expect(sessionLink.first()).toBeVisible();
+  // The completed task with a sessionId exposes a session deep-link.
+  await expect(tasks.card("tsk_1000")).toBeVisible();
+  await expect(tasks.sessionLink.first()).toBeVisible();
 });
 
 test("new task dialog opens and shows project/workspace selectors", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
 
-  // Wait for the tasks dialog to load
-  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  await expect(tasks.card("tsk_1000")).toBeVisible();
 
-  // Click "New Task" button (inside the Tasks dialog)
-  await dialog.getByRole("button", { name: "New Task" }).click();
+  await tasks.openNewTask();
 
-  // Nested "New Task" dialog should open with form elements
-  await expect(page.getByText("Dispatch a new task to a coding agent")).toBeVisible();
-  await expect(page.getByText("Project", { exact: true })).toBeVisible();
-  await expect(page.getByText("Workspace", { exact: true })).toBeVisible();
-  await expect(page.getByText("Prompt", { exact: true })).toBeVisible();
+  await expect(tasks.newTaskProject).toBeVisible();
+  await expect(tasks.newTaskWorkspace).toBeVisible();
+  await expect(tasks.newTaskPrompt).toBeVisible();
 });
 
 test("tasks dialog renders filter controls", async ({ page }) => {
-  const dialog = await openTasksDialog(page);
-  await expect(dialog.getByText("All Projects")).toBeVisible();
+  const tasks = new TasksDialog(page, server.url, TOKEN);
+  await tasks.goto();
+  await tasks.open();
+
+  await expect(tasks.projectFilter).toBeVisible();
+  await expect(tasks.statusFilter).toBeVisible();
 });

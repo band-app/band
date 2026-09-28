@@ -1,404 +1,155 @@
-import { rmSync } from "node:fs";
+/**
+ * The agent's plan renders as the pinned TaskListWidget.
+ *
+ * Over the Agent Client Protocol (issue #648) an agent reports its todo
+ * list as a `plan` session update carrying the whole list (Claude Code's
+ * TodoWrite arrives this way through its ACP adapter). The server logs the
+ * update, the chat event stream forwards it, `transcriptReducer` keeps the
+ * latest plan, and `ChatView` pins the `TaskListWidget` above the prompt.
+ *
+ * What's covered:
+ *
+ *   - A `plan` update renders the dedicated widget with every entry, and
+ *     does not render as a generic tool-call card. The assistant's text in
+ *     the same turn still renders.
+ *   - A later `plan` update replaces the list, and a plan whose entries are
+ *     all completed hides the widget.
+ *
+ * Real server, no tRPC mocking; the ACP stub agent
+ * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
   seedState,
   startServer,
 } from "./helpers/server";
-import { createTrpcMock } from "./helpers/trpc-mock";
+import { ChatPanePage } from "./pages/ChatPanePage";
 
-const TOKEN = "e2e-test-token";
+const TOKEN = "e2e-todo-widget-token";
+const PROJECT = "todoproj";
+const WORKSPACE = toWorkspaceId(PROJECT, "main");
+
+test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [] });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
-  server = await startServer({ tmpHome });
+
+  const repoDir = join(tmpHome, "repo");
+  mkdirSync(repoDir, { recursive: true });
+
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: PROJECT,
+        path: repoDir,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: repoDir }],
+      },
+    ],
+  });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [
+      {
+        id: "claude-code",
+        type: "claude-code",
+        label: "Claude Code",
+      },
+    ],
+  });
+
+  // Turn 1 reports a three-entry plan (one completed, one in progress, one
+  // pending) and then a short text reply. Turn 2 reports the same plan with
+  // every entry completed.
+  server = await startServer({
+    tmpHome,
+    env: acpStubEnv(tmpHome, {
+      turns: [
+        {
+          match: "Plan the work",
+          steps: [
+            {
+              update: {
+                sessionUpdate: "plan",
+                entries: [
+                  { content: "Setup project", priority: "high", status: "completed" },
+                  { content: "Write tests", priority: "medium", status: "in_progress" },
+                  { content: "Deploy to prod", priority: "low", status: "pending" },
+                ],
+              },
+            },
+            { say: "Here is your todo list." },
+          ],
+        },
+        {
+          match: "Finish up",
+          steps: [
+            {
+              update: {
+                sessionUpdate: "plan",
+                entries: [
+                  { content: "Setup project", priority: "high", status: "completed" },
+                  { content: "Write tests", priority: "medium", status: "completed" },
+                  { content: "Deploy to prod", priority: "low", status: "completed" },
+                ],
+              },
+            },
+            { say: "All done." },
+          ],
+        },
+      ],
+    }),
+  });
 });
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+test.describe("Agent plan renders as the TaskListWidget", () => {
+  test("a plan update surfaces the dedicated widget, and a fully completed plan hides it", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(WORKSPACE);
+    await chatPane.waitForReady();
 
-/**
- * UIMessage-format part — matches the format returned by the server's
- * sessions.messages endpoint after conversion.
- */
-type UIPart =
-  | { type: "text"; text: string }
-  | {
-      type: "dynamic-tool";
-      toolCallId: string;
-      toolName: string;
-      state: "input-available" | "output-available" | "output-error";
-      input?: unknown;
-      output?: string;
-      errorText?: string;
-      title?: string;
-    };
+    await chatPane.typeMessage("Plan the work");
+    await chatPane.submit();
 
-interface UIMessageFixture {
-  role: "user" | "assistant";
-  id: string;
-  parts: UIPart[];
-}
+    // The widget is located by its BEM testid, not by the English "Todos".
+    await expect(chatPane.taskListWidget).toBeVisible();
+    // Every entry renders, the completed one included (the widget only
+    // hides once *every* entry is completed).
+    await expect(chatPane.taskListWidget).toContainText("Setup project");
+    await expect(chatPane.taskListWidget).toContainText("Write tests");
+    await expect(chatPane.taskListWidget).toContainText("Deploy to prod");
 
-function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: UIMessageFixture[]) {
-  mock.addDockviewMocks();
-  // The chat pane now derives `supportsSessionListing` from the agent
-  // definition rather than `sessions.list`. Without this override the
-  // clock affordance never renders.
-  mock.addSupportedAgentMocks();
-  mock.query("sessions.list", {
-    sessions: [
-      {
-        sessionId: "s1",
-        summary: "Test session",
-        lastModified: Date.now() - 60_000,
-      },
-    ],
-    supported: true,
+    // The assistant's text in the same turn still renders; the widget is
+    // supplementary, not a replacement for the assistant bubble.
+    await expect(chatPane.assistantMessage("Here is your todo list.")).toBeVisible();
+    // A plan is not a tool call, so no generic tool-call card appears.
+    await expect(chatPane.toolCallContainers).toHaveCount(0);
+
+    // A later plan update replaces the whole list. With every entry
+    // completed the widget hides. Positive anchor first: the turn's reply.
+    await chatPane.typeMessage("Finish up");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage("All done.")).toBeVisible();
+    await expect(chatPane.taskListWidget).toHaveCount(0);
   });
-  mock.query("sessions.messages", () => ({
-    messages,
-    firstEventId: null,
-    lastEventId: null,
-    hasMore: false,
-  }));
-}
-
-async function loadSession(page: import("@playwright/test").Page) {
-  const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
-  await expect(clockButton).toBeVisible();
-  await clockButton.click();
-  // Use menuitem role to match DropdownMenuItem (avoids matching the dockview tab title)
-  await page.getByRole("menuitem", { name: /Test session/ }).click();
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-test("TodoWrite renders as a task list widget, not a generic tool call", async ({ page }) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Help me with this project" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "Setup project", status: "completed" },
-              { content: "Write tests", status: "in_progress" },
-              { content: "Deploy to prod", status: "pending" },
-            ],
-          },
-          output: "ok",
-        },
-      ],
-    },
-    {
-      role: "assistant",
-      id: "m4",
-      parts: [{ type: "text", text: "Here is your todo list." }],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  // The TaskListWidget should render
-  await expect(page.getByText("Todos")).toBeVisible();
-  await expect(page.getByText("1/3")).toBeVisible();
-
-  // All task subjects visible
-  await expect(page.getByText("Setup project")).toBeVisible();
-  await expect(page.getByText("Write tests")).toBeVisible();
-  await expect(page.getByText("Deploy to prod")).toBeVisible();
-
-  // No collapsible ToolCall with "TodoWrite" in its title
-  await expect(page.locator("button", { hasText: "TodoWrite" })).not.toBeVisible();
-});
-
-test("completed todos show strikethrough styling", async ({ page }) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Track tasks" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "First done", status: "completed" },
-              { content: "Second done", status: "completed" },
-              { content: "Still pending", status: "pending" },
-            ],
-          },
-          output: "ok",
-        },
-      ],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  await expect(page.getByText("2/3")).toBeVisible();
-
-  // Completed tasks should have line-through class
-  const firstDone = page.getByText("First done");
-  await expect(firstDone).toBeVisible();
-  await expect(firstDone).toHaveClass(/line-through/);
-
-  const secondDone = page.getByText("Second done");
-  await expect(secondDone).toBeVisible();
-  await expect(secondDone).toHaveClass(/line-through/);
-
-  // Pending task should NOT have line-through
-  const pending = page.getByText("Still pending");
-  await expect(pending).toBeVisible();
-  await expect(pending).not.toHaveClass(/line-through/);
-});
-
-test("in-progress todos show activeForm text instead of subject", async ({ page }) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Work on tests" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              {
-                content: "Write tests",
-                status: "in_progress",
-                activeForm: "Writing tests",
-              },
-              { content: "Review PR", status: "pending" },
-            ],
-          },
-          output: "ok",
-        },
-      ],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  // The activeForm text should be shown for the in-progress task
-  await expect(page.getByText("Writing tests")).toBeVisible();
-
-  // The subject "Write tests" should NOT be visible (replaced by activeForm)
-  await expect(page.getByText("Write tests", { exact: true })).not.toBeVisible();
-
-  // The pending task shows its subject normally
-  await expect(page.getByText("Review PR")).toBeVisible();
-});
-
-test("multiple TodoWrite calls in same message collapse into one widget showing final state", async ({
-  page,
-}) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Build the feature" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "Research API", status: "in_progress" },
-              { content: "Implement endpoint", status: "pending" },
-            ],
-          },
-          output: "ok",
-        },
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc2",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "Research API", status: "completed" },
-              { content: "Implement endpoint", status: "completed" },
-              { content: "Write tests", status: "in_progress" },
-            ],
-          },
-          output: "ok",
-        },
-        { type: "text", text: "Making progress on the implementation." },
-      ],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  // Only ONE Todos widget should be rendered (both calls in same message)
-  const todosHeaders = page.getByText("Todos");
-  await expect(todosHeaders).toHaveCount(1);
-
-  // The final state: 2 completed out of 3
-  await expect(page.getByText("2/3")).toBeVisible();
-
-  // All 3 items from the second call should be visible
-  await expect(page.getByText("Research API")).toBeVisible();
-  await expect(page.getByText("Implement endpoint")).toBeVisible();
-  await expect(page.getByText("Write tests")).toBeVisible();
-});
-
-test("task list is hidden when all todos are completed", async ({ page }) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Finish everything" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "Setup project", status: "completed" },
-              { content: "Write tests", status: "completed" },
-              { content: "Deploy to prod", status: "completed" },
-            ],
-          },
-          output: "ok",
-        },
-      ],
-    },
-    {
-      role: "assistant",
-      id: "m4",
-      parts: [{ type: "text", text: "All done!" }],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  // The assistant text should be visible
-  await expect(page.getByText("All done!")).toBeVisible();
-
-  // The TaskListWidget should NOT be rendered since all tasks are completed
-  await expect(page.getByText("Todos")).not.toBeVisible();
-});
-
-test("TodoWrite mixed with regular tool calls renders both correctly", async ({ page }) => {
-  const mock = createTrpcMock();
-  installSessionMock(mock, [
-    {
-      role: "user",
-      id: "m1",
-      parts: [{ type: "text", text: "Help me fix the bug" }],
-    },
-    {
-      role: "assistant",
-      id: "m2",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc1",
-          toolName: "TodoWrite",
-          state: "output-available",
-          input: {
-            todos: [
-              { content: "Investigate bug", status: "in_progress" },
-              { content: "Apply fix", status: "pending" },
-            ],
-          },
-          output: "ok",
-        },
-        {
-          type: "dynamic-tool",
-          toolCallId: "tc2",
-          toolName: "Read",
-          state: "output-available",
-          input: { file_path: "/src/app.ts" },
-          output: "const app = express();",
-          title: "Read(/src/app.ts)",
-        },
-      ],
-    },
-    {
-      role: "assistant",
-      id: "m4",
-      parts: [{ type: "text", text: "I found the issue." }],
-    },
-  ]);
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-  await loadSession(page);
-
-  // The TaskListWidget should be visible
-  await expect(page.getByText("Todos")).toBeVisible();
-  await expect(page.getByText("0/2")).toBeVisible();
-
-  // The Read tool call should render as a collapsible ToolCall
-  await expect(page.locator("button", { hasText: "Read(/src/app.ts)" })).toBeVisible();
 });

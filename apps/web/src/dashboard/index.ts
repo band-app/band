@@ -1,0 +1,195 @@
+// Types
+
+// Adapter
+export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
+// Components
+export { AddProjectDialog } from "./components/AddProjectDialog";
+export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
+export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
+export { ChangesFileTree, type ChangesTreeAction } from "./components/ChangesFileTree";
+export { CIStatusIndicator } from "./components/CIStatusIndicator";
+export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
+export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
+export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
+export { DashboardShell } from "./components/DashboardShell";
+export {
+  DiffFileContent,
+  getStoredViewMode,
+  storeViewMode,
+  type ViewMode,
+} from "./components/DiffFileContent";
+export { DiffOverviewRuler } from "./components/DiffOverviewRuler";
+export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
+export { FileViewer } from "./components/FileViewer";
+export { GitStatusIndicator } from "./components/GitStatusIndicator";
+export { ImagePreview } from "./components/ImagePreview";
+export {
+  AUTO_DETECT_LANGUAGE_ID,
+  LanguagePickerDialog,
+} from "./components/LanguagePickerDialog";
+export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
+export { PdfPreview } from "./components/PdfPreview";
+export { ProjectAvatar } from "./components/ProjectAvatar";
+export { ProjectList } from "./components/ProjectList";
+export { QuickOpenDialog } from "./components/QuickOpenDialog";
+export {
+  SearchBar,
+  type SearchBarHandle,
+  type SearchOptionKey,
+  type SearchOptions,
+} from "./components/SearchBar";
+export { SearchFilesDialog } from "./components/SearchFilesDialog";
+export { SettingsPage } from "./components/SettingsPage";
+export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
+export { SettingsRow, SettingsSection } from "./components/settings";
+export { WorkspaceCard } from "./components/WorkspaceCard";
+export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
+export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
+// Context
+export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export {
+  useBrowserProfiles,
+  useInvalidateBrowserProfiles,
+  useProjectBrowserProfiles,
+  useRemoveBrowserProfile,
+  useSetProjectBrowserProfile,
+} from "./hooks/use-browser-profiles";
+export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
+export {
+  type EditorHistoryEntry,
+  type UseEditorHistoryReturn,
+  useEditorHistory,
+} from "./hooks/use-editor-history";
+export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
+export { useIsDark } from "./hooks/use-is-dark";
+export { LABEL_FILTER_KEY, useLabelFilter } from "./hooks/use-label-filter";
+export {
+  LABEL_LAST_WORKSPACE_KEY,
+  useLabelLastWorkspace,
+} from "./hooks/use-label-last-workspace";
+export {
+  useAddProject,
+  useCreateWorkspace,
+  useRemoveProject,
+  useRemoveWorkspace,
+  useReorderProjects,
+  useUpdateProjectLabel,
+} from "./hooks/use-project-mutations";
+export { useProjects } from "./hooks/use-projects";
+export { type UseSearchReturn, useSearch } from "./hooks/use-search";
+export { useUpdateSettings } from "./hooks/use-settings-mutations";
+export { useSettingsQuery } from "./hooks/use-settings-query";
+// Hooks
+export {
+  useBranchStatusWatcher,
+  useSetupStatusWatcher,
+  useStatusWatcher,
+} from "./hooks/use-status";
+export { useWorkspacePath } from "./hooks/use-workspace-path";
+export { AGENT_MODE_KEY, readAgentMode, useAgentMode } from "./lib/agent-mode";
+export {
+  buildLspWsUrl,
+  createDiffLspNavigation,
+  createLspExtension,
+  getLspLanguageId,
+  hasPendingNavigation,
+  LSP_SUPPORTED_LANGUAGES,
+  releaseLspClient,
+  resolveNavigation,
+  toFileUri,
+  toLspServerLang,
+} from "./lib/codemirror-lsp";
+export {
+  clearSearch,
+  collectSearchMatches,
+  cursorLineTracker,
+  dispatchSearch,
+  restoreScrollPosition,
+  scrollToLine,
+  scrollToSearchMatch,
+  serializeViewPosition,
+} from "./lib/codemirror-setup";
+export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
+export { buildCommands, formatShortcut, isMacPlatform } from "./lib/command-registry";
+export {
+  EXPERIMENTAL_FLAG_KEYS,
+  useExperimentalContextMeter,
+} from "./lib/experimental-flags";
+export { getFileIcon, getFolderIcon } from "./lib/file-icon";
+export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
+export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
+export {
+  extensionToLanguage,
+  filenameToLanguage,
+  languageLabel,
+  languageToExtension,
+  SUPPORTED_LANGUAGES,
+  type SupportedLanguage,
+} from "./lib/language-map";
+export type {
+  RenderedBlockKind,
+  RenderMarkdownBlock,
+} from "./lib/markdown-live-preview";
+export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
+export {
+  type AddToTerminalDetail,
+  buildLineReference,
+  type ChatInsertDetail,
+  type SelectionToChatDetail,
+  type TerminalInsertDetail,
+} from "./lib/selection-to-chat";
+export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
+// Lib
+export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
+export type { SSEEvent } from "./lib/sse";
+export { toWorkspaceId } from "./lib/workspace-id";
+// Query
+export { queryClient, queryKeys } from "./query-client";
+export type { DashboardState, DashboardStore } from "./stores/dashboard-store";
+export { createDashboardStore } from "./stores/dashboard-store";
+// Stores
+export {
+  useDashboardStore,
+  useRawDashboardStore,
+} from "./stores/index";
+export type {
+  AgentInfo,
+  AgentStatusType,
+  BranchCompareStatus,
+  BrowserProfileInfo,
+  ChangeEntry,
+  ChangeSection,
+  CIState,
+  CIStatus,
+  CodingAgentConfig,
+  CodingAgentDefinition,
+  CodingAgentType,
+  ConflictKind,
+  ContentSearchMatch,
+  DiffMode,
+  FileContentResult,
+  FileEntry,
+  FileListResult,
+  FileStatus,
+  FormatFileResult,
+  GitStatus,
+  GitSyncState,
+  HooksStatus,
+  LabelDefinition,
+  ListWorkspaceBranchesResult,
+  NotificationSettings,
+  ProjectAvatarInfo,
+  ProjectInfo,
+  ProjectKind,
+  Settings,
+  SetupState,
+  SetupStatus,
+  TerminalLayoutNode,
+  TerminalPaneConfig,
+  WorkspaceBranchStatus,
+  WorkspaceChanges,
+  WorkspaceDiff,
+  WorkspaceStatus,
+  WorkspaceTerminalConfig,
+  WorktreeInfo,
+} from "./types";

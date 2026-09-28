@@ -1,6 +1,4 @@
-import type { SelectionToChatDetail } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
-import type { ChatStatus } from "ai";
 import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
 import type {
   ComponentProps,
@@ -12,6 +10,8 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { buildLineReference, type ChatInsertDetail } from "@/dashboard";
+import { clientStorage } from "../../lib/client-state";
 
 let fileIdCounter = 0;
 
@@ -54,15 +54,34 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
    *  Used to accept "Add to Chat" events from sibling panels (Changes, Files)
    *  when the Chat tab isn't in front. Falls back to `visible` if not set. */
   wsActive?: boolean;
+  /** The workspace this chat pane belongs to. Used to scope `band:chat-insert`
+   *  delivery so a reference never leaks into another workspace's chat. */
+  workspaceId?: string;
+  /** The chat pane this input belongs to. When a `band:chat-insert` names a
+   *  specific `chatId` (the workspace's last-focused chat), only the matching
+   *  input appends the reference — fixing the old behavior where every open
+   *  chat pane received it. */
+  chatId?: string;
 };
 
+/**
+ * The draft is kept on the server with the other client state, so a message
+ * started on the phone is there on the desktop. Drafts used to live in
+ * sessionStorage; one found there moves over on first read.
+ */
 function readDraft(key: string | null): string {
   if (!key) return "";
+  const draft = clientStorage.getItem(key);
+  if (draft) return draft;
   try {
-    return sessionStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
+    const legacy = sessionStorage.getItem(key);
+    if (legacy) {
+      sessionStorage.removeItem(key);
+      clientStorage.setItem(key, legacy);
+      return legacy;
+    }
+  } catch {}
+  return "";
 }
 
 export const PromptInput = ({
@@ -71,6 +90,8 @@ export const PromptInput = ({
   draftKey,
   visible,
   wsActive,
+  workspaceId,
+  chatId,
   children,
   ...props
 }: PromptInputProps) => {
@@ -126,6 +147,12 @@ export const PromptInput = ({
   // (Changes, Files) are still processed.
   const wsActiveRef = useRef(wsActive ?? visible);
   wsActiveRef.current = wsActive ?? visible;
+  // Mirror workspace/chat identity for the stable `band:chat-insert` handler
+  // (registered once with `[]` deps) so it always matches against current props.
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -150,7 +177,7 @@ export const PromptInput = ({
       setHasText(false);
       setInputValue("");
       setCommandHint(null);
-      if (draftStorageKey) sessionStorage.removeItem(draftStorageKey);
+      if (draftStorageKey) clientStorage.removeItem(draftStorageKey);
     },
     [onSubmit, fileEntries, draftStorageKey],
   );
@@ -195,9 +222,9 @@ export const PromptInput = ({
       setHasText(value.trim().length > 0);
       if (draftStorageKey) {
         if (value) {
-          sessionStorage.setItem(draftStorageKey, value);
+          clientStorage.setItem(draftStorageKey, value);
         } else {
-          sessionStorage.removeItem(draftStorageKey);
+          clientStorage.removeItem(draftStorageKey);
         }
       }
     },
@@ -219,21 +246,32 @@ export const PromptInput = ({
     textarea.selectionStart = textarea.selectionEnd = value.length;
   }, []);
 
-  // Listen for "Add to Chat" events from CodeMirror editors.
-  // Only process the event when this workspace is active — with workspace
-  // show/hide, multiple PromptInput instances are mounted simultaneously
-  // and we must not modify hidden workspaces' textareas.  We gate on
-  // wsActive (not visible) so that events from sibling panels like
-  // Changes or Files are still processed even when the Chat tab isn't focused.
+  // Deliver an "Add to Chat" reference from the CodeMirror selection tooltip.
+  // SharedDockviewLayout owns the workspace-agnostic `band:add-to-chat` intent:
+  // it resolves the active workspace's last-focused chat and re-dispatches the
+  // scoped `band:chat-insert` handled here. Many PromptInput instances are
+  // mounted at once (one per chat pane × one per cached workspace), so we only
+  // append when the delivery targets this pane:
+  //   - workspace must match (skip cached background workspaces), and
+  //   - when the delivery names a chatId, it must be *this* chat; when it
+  //     doesn't (no focus recorded yet), only the visible pane accepts.
   useEffect(() => {
     const handler = (e: Event) => {
-      if (wsActiveRef.current === false) return;
-      const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
+      const detail = (e as CustomEvent<ChatInsertDetail>).detail;
+      if (!detail) return;
+      if (workspaceIdRef.current && detail.workspaceId !== workspaceIdRef.current) return;
+      if (detail.chatId) {
+        if (detail.chatId !== chatIdRef.current) return;
+      } else if (wsActiveRef.current === false || visibleRef.current === false) {
+        return;
+      }
 
-      const lineRef =
-        startLine === endLine ? `${filePath}:${startLine}` : `${filePath}:${startLine}-${endLine}`;
-
-      const reference = `\`${lineRef}\` `;
+      // Wrap the shared bare reference in a markdown code span so the chat
+      // renderer turns it into a clickable file link (see `rehypeFileLinkedCode`
+      // in file-link-components.tsx — it only links paths inside inline `<code>`).
+      // The terminal/copy actions intentionally use the bare form instead.
+      // Trailing space keeps it separated from any text the user types next.
+      const reference = `\`${buildLineReference(detail.filePath, detail.startLine, detail.endLine)}\` `;
 
       const textarea = textareaRef.current;
       const current = textarea?.value ?? "";
@@ -256,12 +294,16 @@ export const PromptInput = ({
       }
     };
 
-    window.addEventListener("band:add-to-chat", handler);
-    return () => window.removeEventListener("band:add-to-chat", handler);
+    window.addEventListener("band:chat-insert", handler);
+    return () => window.removeEventListener("band:chat-insert", handler);
   }, []);
 
   return (
     <form
+      // Keeps iOS AutoFill from offering saved contacts / passwords above the
+      // keyboard for the message field.
+      autoComplete="off"
+      data-testid="prompt-input__form"
       className={cn(
         "relative flex w-full flex-col rounded-md border-2 border-white/20 bg-muted/50 p-2 shadow-sm",
         isDragging && "border-primary/50 bg-primary/5",
@@ -378,7 +420,10 @@ function formatFileSize(bytes: number): string {
 export type PromptInputActionsProps = HTMLAttributes<HTMLDivElement>;
 
 export const PromptInputActions = ({ className, ...props }: PromptInputActionsProps) => (
-  <div className={cn("flex w-full items-center justify-between", className)} {...props} />
+  <div
+    className={cn("flex w-full min-w-0 items-center justify-between gap-1", className)}
+    {...props}
+  />
 );
 
 // Attach button
@@ -393,6 +438,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <input
         ref={fileInputRef}
         type="file"
+        data-testid="prompt-input__file-input"
         multiple
         accept={ACCEPTED_TYPES}
         className="hidden"
@@ -427,6 +473,10 @@ export type PromptInputTextareaProps = HTMLAttributes<HTMLTextAreaElement> & {
   onEscape?: () => void;
   /** Called when ArrowUp is pressed on an empty input. Return the previous message text to load it, or undefined to do nothing. */
   onPreviousMessage?: () => string | undefined;
+  /** Called when Shift+Tab is pressed inside the textarea. When provided,
+   *  the default focus-previous behaviour is suppressed. Used by the host
+   *  to toggle Edit/Plan mode. */
+  onShiftTab?: () => void;
 };
 
 export const PromptInputTextarea = ({
@@ -434,6 +484,7 @@ export const PromptInputTextarea = ({
   placeholder = "Type a message...",
   onEscape,
   onPreviousMessage,
+  onShiftTab,
   ...props
 }: PromptInputTextareaProps) => {
   const [isComposing, setIsComposing] = useState(false);
@@ -451,6 +502,11 @@ export const PromptInputTextarea = ({
         if (isTouchDevice) return;
         e.preventDefault();
         e.currentTarget.form?.requestSubmit();
+      } else if (e.key === "Tab" && e.shiftKey && onShiftTab) {
+        // Suppress default focus-previous so the cursor stays in the
+        // textarea — host uses this to toggle a contextual mode picker.
+        e.preventDefault();
+        onShiftTab();
       } else if (e.key === "Escape") {
         onEscape?.();
       } else if (e.key === "ArrowUp" && onPreviousMessage) {
@@ -464,7 +520,7 @@ export const PromptInputTextarea = ({
         }
       }
     },
-    [isComposing, onEscape, onPreviousMessage, setTextareaValue],
+    [isComposing, onEscape, onPreviousMessage, onShiftTab, setTextareaValue],
   );
 
   // JS fallback for auto-resize when CSS field-sizing-content is not supported
@@ -479,13 +535,33 @@ export const PromptInputTextarea = ({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [inputValue, textareaRef]);
 
+  // Listen for the workspace-level ⌃⌘I "focus Chat" event. Multiple
+  // PromptInputTextarea instances may be mounted (one per chat session
+  // across one or more workspaces) — only the visible one's
+  // offsetParent is non-null, so only that instance's focus() call has
+  // any visible effect. The others are no-ops.
+  useEffect(() => {
+    const handler = () => {
+      const el = textareaRef.current;
+      if (el && el.offsetParent !== null) {
+        el.focus({ preventScroll: true });
+      }
+    };
+    window.addEventListener("band:focus-chat", handler);
+    return () => window.removeEventListener("band:focus-chat", handler);
+  }, [textareaRef]);
+
   return (
     <div className="relative">
       <textarea
         ref={textareaRef}
         autoComplete="off"
         autoCorrect="off"
+        autoCapitalize="off"
         spellCheck={false}
+        // Turns off the inline word completions iOS 17+ types ahead of the
+        // cursor; the attributes above don't cover them.
+        writingsuggestions="false"
         className={cn(
           "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
           className,
@@ -502,8 +578,11 @@ export const PromptInputTextarea = ({
   );
 };
 
+/** What the submit button shows: send, or stop while a turn runs. */
+export type PromptInputStatus = "ready" | "submitted" | "streaming" | "error";
+
 export type PromptInputSubmitProps = ComponentProps<"button"> & {
-  status?: ChatStatus;
+  status?: PromptInputStatus;
   onStop?: () => void;
 };
 
@@ -519,10 +598,12 @@ export const PromptInputSubmit = ({
   const isBusy = isSubmitting || isStreaming;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
       {isStreaming && (
         <button
           type="button"
+          data-testid="prompt-input__stop-button"
+          aria-label="Stop generation"
           className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
           onClick={onStop}
         >
@@ -544,6 +625,7 @@ export const PromptInputSubmit = ({
       ) : (
         <button
           type="submit"
+          data-testid="prompt-input__submit-button"
           disabled={!hasContent}
           className={cn(
             "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full transition-colors",

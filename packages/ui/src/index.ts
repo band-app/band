@@ -19,6 +19,7 @@ export * from "./components/scroll-area";
 export * from "./components/segmented-control";
 export * from "./components/select";
 export * from "./components/separator";
+export * from "./components/sheet";
 export * from "./components/spinner";
 export * from "./components/switch";
 export * from "./components/textarea";

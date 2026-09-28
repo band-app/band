@@ -1,0 +1,200 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAdapter } from "../context";
+import { readAgentMode } from "../lib/agent-mode";
+import { toWorkspaceId } from "../lib/workspace-id";
+import { queryKeys } from "../query-client";
+import { useDashboardStore, useRawDashboardStore } from "../stores/index";
+import type { ProjectInfo } from "../types";
+
+export function useAddProject() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: ({ path, label }: { path: string; label?: string }) =>
+      adapter.addProject(path, label),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function useRemoveProject() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (name: string) => adapter.removeProject(name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function useReorderProjects() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (names: string[]) => adapter.reorderProjects(names),
+    onMutate: async (names) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
+      const previous = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
+      if (previous) {
+        const reordered = [...previous].sort(
+          (a, b) => names.indexOf(a.name) - names.indexOf(b.name),
+        );
+        queryClient.setQueryData(queryKeys.projects, reordered);
+      }
+      return { previous };
+    },
+    onError: (err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.projects, context.previous);
+      }
+      setError(String(err));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+  });
+}
+
+export function useUpdateProjectLabel() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: ({ name, label }: { name: string; label: string | null }) =>
+      adapter.updateProjectLabel(name, label),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function useGitInit() {
+  const adapter = useAdapter();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (path: string) => adapter.gitInit(path),
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function usePromoteProjectToGit() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (name: string) => {
+      if (!adapter.promoteProjectToGit) {
+        return Promise.reject(
+          new Error("This dashboard adapter doesn't support promoting plain projects to git."),
+        );
+      }
+      return adapter.promoteProjectToGit(name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function useCreateWorkspace() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+
+  return useMutation({
+    mutationFn: ({
+      project,
+      branch,
+      base,
+      prompt,
+    }: {
+      project: string;
+      branch: string;
+      base?: string;
+      prompt?: string;
+    }) => adapter.createWorkspace(project, branch, base, prompt, readAgentMode()),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      const workspaceId = toWorkspaceId(vars.project, vars.branch);
+      openWorkspace(workspaceId);
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
+export function useRemoveWorkspace() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const setDeleting = useDashboardStore((s) => s.setDeleting);
+  const store = useRawDashboardStore();
+
+  return useMutation({
+    mutationFn: ({ project, name }: { project: string; name: string }) =>
+      adapter.removeWorkspace(project, name),
+    // The server runs the workspace's teardown before it removes anything,
+    // which can take up to a minute. Mark the card as deleting meanwhile.
+    onMutate: ({ project, name }) => {
+      setDeleting(toWorkspaceId(project, name), true);
+    },
+    onSuccess: async (_data, { project, name }) => {
+      // Awaited so the card is gone from the list before it stops showing
+      // as deleting (see onSettled), rather than flashing back to normal.
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+
+      const deletedWorkspaceId = toWorkspaceId(project, name);
+      if (store.getState().activeWorkspaceId === deletedWorkspaceId) {
+        const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
+        const projectInfo = projects?.find((p) => p.name === project);
+        if (projectInfo) {
+          // Navigate to the project's main workspace by its immutable `name`.
+          // `defaultBranch` is the git remote's default (synced, may drift),
+          // so resolve the surviving worktree whose identity or live branch
+          // matches it and use that row's `name` — falling back to
+          // `defaultBranch` if no row matches (best-effort, matches prior
+          // behavior).
+          const mainWt = projectInfo.worktrees.find(
+            (wt) =>
+              wt.name === projectInfo.defaultBranch || wt.branch === projectInfo.defaultBranch,
+          );
+          openWorkspace(toWorkspaceId(project, mainWt?.name ?? projectInfo.defaultBranch));
+        }
+      }
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+    onSettled: (_data, _err, { project, name }) => {
+      setDeleting(toWorkspaceId(project, name), false);
+    },
+  });
+}

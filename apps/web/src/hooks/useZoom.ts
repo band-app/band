@@ -5,14 +5,19 @@ import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 /**
  * Browser-mode keyboard shortcut handler for zoom.
  *
- * Registers Cmd+= (zoom in), Cmd+- (zoom out), and Cmd+0 (reset).
+ * Registers Cmd+= (zoom in), Cmd+- (zoom out) and Cmd+Shift+0 (reset).
+ * Plain Cmd+0 is intentionally NOT bound — that combo is owned by the
+ * dashboard's "All projects" label filter (see DashboardShell), which is
+ * also why reset uses the shifted variant (mirrored by the desktop View
+ * menu's "Actual Size" accelerator in `apps/desktop/src/main/menu.ts`).
+ *
  * Only active outside the desktop shell — when running inside Electron the
  * native View menu accelerators intercept these keys before they reach the
  * webview (see `apps/desktop/src/main/menu.ts`).
  */
 export function useZoom(): void {
   useEffect(() => {
-    // In a desktop shell, the View menu accelerators handle Cmd+=/Cmd+-/Cmd+0
+    // In a desktop shell, the View menu accelerators handle Cmd+= / Cmd+-
     // before they reach the webview, so skip the JS listener.
     if (isDesktop) return;
 
@@ -36,8 +41,10 @@ export function useZoom(): void {
         return;
       }
 
-      // Cmd+0 → reset zoom
-      if (e.key === "0") {
+      // Cmd+Shift+0 → reset. Match on `e.code`: with Shift held, `e.key`
+      // is layout-dependent (")" on US keyboards), but the physical digit
+      // key is always Digit0.
+      if (e.shiftKey && e.code === "Digit0") {
         e.preventDefault();
         e.stopPropagation();
         zoomReset();

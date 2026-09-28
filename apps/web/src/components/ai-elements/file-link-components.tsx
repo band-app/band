@@ -1,7 +1,6 @@
-import { parseFileLocation } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
-import type { ComponentProps } from "react";
-import { useCallback } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { createContext, useCallback, useContext } from "react";
 import {
   type Components,
   defaultUrlTransform,
@@ -9,195 +8,80 @@ import {
   type UrlTransform,
 } from "streamdown";
 
+import { isFilePath } from "../../lib/file-path-detection";
 import { openExternalUrl } from "../../lib/open-external-url";
 
 // ---------------------------------------------------------------------------
-// Known file extensions (derived from dashboard-core file-icon.ts)
+// Workspace context — scopes `band:open-file` dispatches to the workspace
+// that owns the chat dispatching the click.
+//
+// Multiple workspaces can be alive at once (the per-panel content cache in
+// MultiWorkspacePanelHost keeps every visited workspace's subtree
+// mounted), and `dispatchOpenFile` is a window-scoped CustomEvent.
+// Without a workspace label on the event, every mounted layout's listener
+// races to open the file against its OWN active workspace — and the
+// `SharedDockviewLayout` listener (the only one for the desktop dockview)
+// is bound to whichever workspace is currently focused, not the one whose
+// chat actually fired the click. The result is a cross-workspace leak:
+// click a `band-file:` link in workspace A's chat while workspace B is the
+// active tab → the file opens in B (and is persisted into B's
+// `band-open-tabs:` localStorage entry), often as a bogus path that
+// doesn't resolve on disk. See issue #539.
+//
+// The fix is to attach the chat pane's workspace id to every dispatched
+// event and to filter on it in every listener (same shape every other
+// cross-workspace window event in this codebase already uses — see the
+// `band:open-file-external`, `band:format-current-file`, and
+// `band:open-language-picker` listeners). The context exists because
+// `FileLinkedAnchor` is wired in as a static `Components` map for
+// Streamdown, so the workspace id can't be passed in via props; ChatView
+// wraps its message render in `<FileLinkWorkspaceProvider>` and the
+// anchor reads from there at click time.
 // ---------------------------------------------------------------------------
 
-const KNOWN_EXTENSIONS = new Set([
-  // Code
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "mjs",
-  "cjs",
-  "py",
-  "rb",
-  "go",
-  "rs",
-  "java",
-  "kt",
-  "swift",
-  "c",
-  "cpp",
-  "h",
-  "hpp",
-  "cs",
-  "php",
-  "r",
-  "lua",
-  "zig",
-  "mts",
-  "cts",
-  "ex",
-  "exs",
-  "erl",
-  "hs",
-  "scala",
-  "clj",
-  "dart",
-  "vue",
-  "svelte",
-  // Web / markup
-  "html",
-  "htm",
-  "css",
-  "scss",
-  "less",
-  "sass",
-  // Data / config
-  "json",
-  "jsonc",
-  "json5",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "xml",
-  "csv",
-  "graphql",
-  "gql",
-  "tf",
-  "hcl",
-  "env",
-  "proto",
-  // Text / docs
-  "md",
-  "mdx",
-  "txt",
-  "rst",
-  "tex",
-  "log",
-  // Shell
-  "sh",
-  "bash",
-  "zsh",
-  "fish",
-  "ps1",
-  "bat",
-  "cmd",
-  // Images
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "svg",
-  "webp",
-  "ico",
-  "bmp",
-  "avif",
-  // Database
-  "sql",
-  "sqlite",
-  "db",
-  // Config
-  "editorconfig",
-  "prettierrc",
-  "eslintrc",
-  "lock",
-  // Package / archive
-  "zip",
-  "tar",
-  "gz",
-  "tgz",
-  "wasm",
-  // Misc
-  "diff",
-  "patch",
-]);
-
-const KNOWN_FILENAMES = new Set([
-  "dockerfile",
-  "docker-compose.yml",
-  "docker-compose.yaml",
-  "makefile",
-  "rakefile",
-  "procfile",
-  "gemfile",
-  "vagrantfile",
-  ".gitignore",
-  ".gitattributes",
-  ".npmrc",
-  ".nvmrc",
-  ".prettierrc",
-  ".eslintrc",
-  ".editorconfig",
-  ".env",
-  ".env.local",
-  ".env.development",
-  ".env.production",
-]);
-
-// ---------------------------------------------------------------------------
-// File path detection
-// ---------------------------------------------------------------------------
-
-function getExtension(filePath: string): string {
-  const name = filePath.split("/").pop() ?? filePath;
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-}
-
-function getBasename(filePath: string): string {
-  return (filePath.split("/").pop() ?? filePath).toLowerCase();
-}
+const FileLinkWorkspaceContext = createContext<string | undefined>(undefined);
 
 /**
- * Checks if a string looks like a file path that should be linked.
- *
- * For inline code (backtick-wrapped), matches file paths with or without
- * line indicators. For plain text (remark plugin), callers should only
- * pass strings that already have a line indicator.
+ * Wrap a subtree (typically the chat message list) so any
+ * `band-file:` link clicked inside dispatches an event scoped to this
+ * workspace. Without this provider the dispatched event carries no
+ * workspaceId and every mounted workspace's listener will race for it.
  */
-export function isFilePath(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-
-  // Reject URLs
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return false;
-
-  const loc = parseFileLocation(trimmed);
-  const filePath = loc.filePath;
-
-  // Must not be empty after parsing
-  if (!filePath) return false;
-
-  const ext = getExtension(filePath);
-  const basename = getBasename(filePath);
-  const hasKnownExtension = KNOWN_EXTENSIONS.has(ext);
-  const isKnownFilename = KNOWN_FILENAMES.has(basename);
-
-  if (!hasKnownExtension && !isKnownFilename) return false;
-
-  // For bare filenames without a path separator, require a line indicator
-  // to avoid false positives (e.g. "utils.ts" alone is ambiguous, but
-  // "utils.ts:42" is clearly a file reference)
-  const hasSlash = filePath.includes("/");
-  const hasLineIndicator = loc.line != null;
-
-  if (!hasSlash && !hasLineIndicator && !isKnownFilename) return false;
-
-  return true;
+export function FileLinkWorkspaceProvider({
+  workspaceId,
+  children,
+}: {
+  workspaceId: string;
+  children: ReactNode;
+}): ReactNode {
+  // `workspaceId` is a string primitive — `Object.is` (which Context.Provider
+  // uses to decide whether consumers re-render) already short-circuits on
+  // value equality, so no `useMemo` is needed to stabilise identity. The
+  // Provider re-renders whenever the *value* changes; identical strings
+  // across renders are a no-op for consumers.
+  return (
+    <FileLinkWorkspaceContext.Provider value={workspaceId}>
+      {children}
+    </FileLinkWorkspaceContext.Provider>
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Custom event dispatcher
 // ---------------------------------------------------------------------------
 
-function dispatchOpenFile(filename: string) {
-  window.dispatchEvent(new CustomEvent("band:open-file", { detail: { filename } }));
+/**
+ * Dispatch a workspace-scoped `band:open-file` event.
+ *
+ * `workspaceId` is read from `FileLinkWorkspaceContext` at click time and
+ * MUST be supplied — when undefined (a `FileLinkedAnchor` rendered outside
+ * a `FileLinkWorkspaceProvider`) we still dispatch, but the event detail's
+ * `workspaceId` is `undefined`. Listeners treat the missing-workspace
+ * case as "fall through to the active workspace" so existing call sites
+ * outside chat (none today, but a forward-compat hatch) keep working.
+ */
+function dispatchOpenFile(filename: string, workspaceId: string | undefined) {
+  window.dispatchEvent(new CustomEvent("band:open-file", { detail: { filename, workspaceId } }));
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +178,11 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
   const { node: _node, href, children, ...rest } = props;
 
   const isBandFile = typeof href === "string" && href.startsWith("band-file:");
+  // Workspace id is read at click time so that a `MessageResponse` rendered
+  // inside two mounted workspaces routes each click to the workspace
+  // that *owns* the surrounding subtree — not whichever workspace happens
+  // to be active when the listener fires.
+  const workspaceId = useContext(FileLinkWorkspaceContext);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -301,13 +190,13 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
         e.preventDefault();
         e.stopPropagation();
         if (isBandFile) {
-          dispatchOpenFile(href.slice("band-file:".length));
+          dispatchOpenFile(href.slice("band-file:".length), workspaceId);
         } else {
           openExternalUrl(href);
         }
       }
     },
-    [isBandFile, href],
+    [isBandFile, href, workspaceId],
   );
 
   if (isBandFile) {

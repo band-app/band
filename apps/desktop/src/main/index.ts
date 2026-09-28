@@ -9,54 +9,149 @@
  *      in debug builds).
  *   3. Create the main BrowserWindow pointed at the web URL.
  *   4. Register IPC handlers (Phases 1-3 ported; menus are Phase 5).
- *   5. On quit: kill the web server tree, destroy all WebContentsViews,
+ *   5. On quit: kill the web server tree, close offscreen browser pages,
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow } from "electron";
-
-import { BrowserViewManager } from "../browser/view-manager.js";
+import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "electron";
+import { CertExceptionStore } from "../browser/cert-exceptions.js";
+import { BrowserGuestManager } from "../browser/guest-manager.js";
+import { Events } from "../shared/ipc-channels.js";
+import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
-import { dashLog, logToFile } from "./services/log.js";
+import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
+import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
-import { getConfiguredPort } from "./services/settings.js";
+import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
-import { scheduleStartupCheck } from "./updater.js";
+import { isUpdaterEnabled, UpdateController } from "./updater.js";
+import { installWebviewSecurity } from "./webview-security.js";
 import { createMainWindow } from "./window.js";
+
+const log = createLogger("desktop");
 
 interface AppState {
   mainWindow: BrowserWindow | null;
   managed: ManagedProcess;
-  browserManager: BrowserViewManager | null;
+  browserManager: BrowserGuestManager | null;
+  /**
+   * Session-scoped TLS exception store, shared between the
+   * `BrowserGuestManager` (which records exceptions on user proceed)
+   * and the process-wide `app.on("certificate-error")` override hook
+   * installed below (which reads them back to decide whether to
+   * call `callback(true)`). See `browser/cert-exceptions.ts`.
+   */
+  certExceptions: CertExceptionStore;
   unregisterIpc: (() => void) | null;
-  cancelStartupUpdateCheck: (() => void) | null;
+  /** Cancels the background update checks started in `bootstrap`. */
+  stopUpdateChecks: (() => void) | null;
+  activityMonitor: ActivityMonitorHandle | null;
   cleanedUp: boolean;
   port: number;
   /** Empty string in dev mode where we don't own the server. */
   webDir: string;
 }
 
+/** powerMonitor listeners survive window close; wire them at most once. */
+let powerEventsWired = false;
+
 const state: AppState = {
   mainWindow: null,
   managed: new ManagedProcess(),
   browserManager: null,
+  certExceptions: new CertExceptionStore(),
   unregisterIpc: null,
-  cancelStartupUpdateCheck: null,
+  stopUpdateChecks: null,
+  activityMonitor: null,
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
 };
 
+/**
+ * Owns the auto-update flow for the life of the process, so a download
+ * started from the toast keeps its state across a dashboard reload. Every
+ * status change goes to every renderer, which shows it in the update toast.
+ */
+const updates = new UpdateController({
+  currentVersion: app.getVersion(),
+  onStatus: (status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send(Events.updaterStatusChanged, status);
+    }
+  },
+});
+
+/** "Check for Updates…": bring the dashboard forward so its toast is seen. */
+function checkForUpdatesFromMenu(): void {
+  const win = state.mainWindow;
+  if (!win || win.isDestroyed()) {
+    // On macOS the app outlives its closed window, and no renderer is left
+    // to show the toast. Run the same flow with native dialogs instead.
+    void checkForUpdatesWithDialogs().catch((err) => {
+      log.error({ err: String(err) }, "check for updates (no window) failed");
+    });
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  void updates.check({ userInitiated: true });
+}
+
+async function checkForUpdatesWithDialogs(): Promise<void> {
+  await updates.check({ userInitiated: true });
+  let status = updates.getStatus();
+  if (status.state === "available") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is available`,
+      detail: `You have v${status.currentVersion}.`,
+      buttons: ["Update", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+    await updates.download();
+    status = updates.getStatus();
+  }
+  if (status.state === "downloaded") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: `Band v${status.version} is ready`,
+      detail: "Restart Band to finish updating. It also installs when you quit.",
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) updates.restart();
+  } else if (status.state === "up-to-date") {
+    await dialog.showMessageBox({
+      type: "info",
+      message: "You're on the latest version",
+      detail: `Band v${status.currentVersion}`,
+    });
+  } else if (status.state === "error") {
+    await dialog.showMessageBox({
+      type: "warning",
+      message:
+        status.phase === "download" ? "Couldn't download the update" : "Couldn't check for updates",
+      detail: status.message,
+    });
+  }
+}
+
 function installCrashHandlers(): void {
   process.on("uncaughtException", (err) => {
     const stack = err.stack ?? String(err);
-    dashLog(`uncaughtException: ${stack}`);
+    log.fatal({ err: stack }, "uncaughtException");
   });
   process.on("unhandledRejection", (reason) => {
-    dashLog(`unhandledRejection: ${String(reason)}`);
+    log.error({ reason: String(reason) }, "unhandledRejection");
   });
 }
 
@@ -83,6 +178,7 @@ async function resolveDashboardUrl(): Promise<string> {
   const { port, token } = await ensureWebserverRunning({
     webDir: state.webDir,
     managed: state.managed,
+    isPackaged: app.isPackaged,
   });
   state.port = port;
   return `http://localhost:${port}/?token=${encodeURIComponent(token)}`;
@@ -92,9 +188,11 @@ async function cleanupOnce(): Promise<void> {
   if (state.cleanedUp) return;
   state.cleanedUp = true;
 
-  // Cancel any pending startup update check so its dialog doesn't pop up
-  // mid-shutdown (the 10s delay can outlive Cmd+Q on a quick quit).
-  state.cancelStartupUpdateCheck?.();
+  // Cancel the update timers so they don't fire mid-shutdown. The 10s
+  // startup delay can outlive a quick Cmd+Q.
+  state.stopUpdateChecks?.();
+  state.stopUpdateChecks = null;
+  state.activityMonitor?.stop();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
   await state.managed.kill();
@@ -109,13 +207,59 @@ async function cleanupOnce(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   installCrashHandlers();
-  logToFile("dashboard starting (electron)");
+  log.info("dashboard starting (electron)");
+
+  // CDP screencast experiment: when the user has the feature enabled
+  // (settings.webBrowserCdpEnabled, default false — opt-in), expose
+  // every webContents on a fixed CDP port so the web UI's `/cdp` proxy
+  // can attach. Must be set BEFORE app.whenReady(); afterwards chromium
+  // has already finished initializing the debugger. Leaving the setting
+  // off saves the port, the hidden window for ensure-only pages, and the
+  // cost of keeping hidden browser panes painting (the renderer's paint
+  // retention in `BrowserPanel.tsx` keys off the same setting).
+  // Port intentionally !== 9222 so it doesn't collide with a Chrome a
+  // developer might have running. The renderer-side constant in
+  // `apps/web/src/server/infra/browser-host/host-state.ts::DESKTOP_CDP_PORT` mirrors the
+  // default (9223) used by the screencast `/cdp` proxy. The env-var
+  // override below is for developers running a second Band instance
+  // alongside their daily-driver build — set `BAND_CDP_PORT=9224` (or
+  // any free port) on the dev launch and that instance gets its own
+  // CDP endpoint without colliding with the running prod app, even if
+  // both have `webBrowserCdpEnabled` on. Setting the env var also
+  // implicitly enables CDP for that instance — no need to flip the
+  // user-facing setting just to debug the renderer.
+  // Treat `BAND_CDP_PORT=""` (set but blank, e.g. from a `BAND_CDP_PORT=
+  // electron .` invocation) the same as unset — handing chromium an empty
+  // string would either no-op or pick a random port, neither of which is
+  // what a developer typing that command meant.
+  const cdpPortEnv = process.env.BAND_CDP_PORT?.trim();
+  const cdpEnabled =
+    getWebBrowserCdpEnabled() || (cdpPortEnv !== undefined && cdpPortEnv.length > 0);
+  if (cdpEnabled) {
+    const cdpPort = cdpPortEnv && cdpPortEnv.length > 0 ? cdpPortEnv : "9223";
+    app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
+  }
+
+  // Make `band-action://` a known scheme so Chromium handles it
+  // internally instead of falling back to the OS external-protocol
+  // handler (issue #444). Without this registration, clicking a
+  // `band-action://cert-proceed?…` link inside the in-view cert
+  // interstitial pops the macOS "no application set to open the
+  // URL" dialog because no app is registered for the scheme. With
+  // it, Chromium routes the request to the no-op
+  // `protocol.handle("band-action", …)` we register after app
+  // ready — and our per-tab `did-start-navigation` listener does
+  // the actual action dispatch. MUST be called before
+  // `app.whenReady()`.
+  protocol.registerSchemesAsPrivileged([
+    { scheme: "band-action", privileges: { standard: false, supportFetchAPI: false } },
+  ]);
 
   await app.whenReady();
 
   // Install the application menu (Edit/View/Settings + accelerators) before
   // creating the window so Cmd+, etc. are bound from the first frame.
-  installAppMenu();
+  installAppMenu({ checkForUpdates: checkForUpdatesFromMenu });
 
   // macOS dock icon. In a packaged build this comes from the .app's .icns
   // (Info.plist resolves CFBundleIconFile); in dev there's no bundle so we
@@ -126,22 +270,69 @@ async function bootstrap(): Promise<void> {
       try {
         app.dock.setIcon(iconPath);
       } catch (err) {
-        dashLog(`failed to set dock icon: ${String(err)}`);
+        log.warn({ err: String(err) }, "failed to set dock icon");
       }
     }
   }
 
   const url = await resolveDashboardUrl();
-  dashLog(`loading url: ${url}`);
+  log.info({ url }, "loading url");
   state.mainWindow = createMainWindow({ url });
 
   // Surface preload load failures, which otherwise fail silently and leave
   // `__BAND_DESKTOP__` undefined on `window` (collapses isDesktop everywhere).
   state.mainWindow.webContents.on("preload-error", (_e, preloadPath, error) => {
-    dashLog(`preload-error: ${preloadPath} → ${error.stack ?? error.message}`);
+    log.error({ preloadPath, err: error.stack ?? error.message }, "preload-error");
   });
 
-  state.browserManager = new BrowserViewManager({ mainWindow: state.mainWindow });
+  // Hidden BrowserWindow that hosts the offscreen pages the CDP bridge
+  // ensures for tabs no pane has mounted. Chromium needs a "visible" parent
+  // for a view to keep compositing, otherwise screencast and
+  // captureScreenshot both stall. See `hidden-browser-window.ts`. Skipped
+  // when the CDP screencast feature is off, the only time `ensure` runs.
+  const hiddenBrowserWindow = cdpEnabled ? createHiddenBrowserWindow() : undefined;
+
+  state.browserManager = new BrowserGuestManager({
+    mainWindow: state.mainWindow,
+    hiddenWindow: hiddenBrowserWindow,
+    certExceptions: state.certExceptions,
+  });
+  // Browser tabs are <webview> guests of the dashboard window. Gate their
+  // attach in the same tick the window was created, before the renderer can
+  // mount one. See `webview-security.ts`.
+  installWebviewSecurity(state.mainWindow, state.browserManager);
+
+  // NOTE on TLS overrides (issue #444): the trust decision is made
+  // in `BrowserGuestManager.wireEvents` via the per-`webContents`
+  // `certificate-error` event, not here via
+  // `session.setCertificateVerifyProc`. The verify proc is the
+  // documented Electron API for cert overrides, but empirical
+  // testing showed it gets bypassed by Chromium's internal
+  // per-host bad-cert cache on retry attempts after a denial — the
+  // proc fires for the FIRST connection that fails, but then for
+  // subsequent reconnects within the same session Chromium reuses
+  // its cached "deny" decision and never re-invokes the proc.
+  // `certificate-error` does fire on those retries, so that's the
+  // hook the guest manager uses for the override.
+
+  // No-op handler for `band-action://` so Chromium accepts the
+  // navigation and doesn't fall back to the OS external-protocol
+  // handler. The scheme is registered as privileged before
+  // `app.whenReady()` above. The actual action dispatch (record
+  // cert exception, loadURL the real URL, etc.) happens in the
+  // per-tab `did-start-navigation` listener in `guest-manager.ts`,
+  // which fires synchronously when the user clicks an in-view
+  // band-action link. By the time Chromium asks this handler for
+  // a response we've already kicked off the real navigation in a
+  // setImmediate, so we just return an empty no-content response
+  // and Chromium quietly throws away the result.
+  //
+  // This registration covers `session.defaultSession` (the dashboard
+  // window). Each partition's `Session` has its own protocol registry, so
+  // the guest manager registers the same handler on every tab's session
+  // when its guest attaches (`prepareBrowserSession`), whichever partition
+  // (default or browser profile) it uses.
+  session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,
@@ -153,18 +344,57 @@ async function bootstrap(): Promise<void> {
       resourcesPath: process.resourcesPath,
       appPath: app.getAppPath(),
     },
+    updates,
   });
 
-  // Auto-update check 10s after launch (matches the Tauri shell's
-  // `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run). No-op
-  // in unpacked dev runs (`!app.isPackaged`) — see updater.ts.
-  state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
-    parentWindow: state.mainWindow,
+  // Background update checks: 10s after launch so the dashboard has loaded,
+  // then hourly. They surface in the toast only when they find an update.
+  // Skipped in unpacked dev runs, where electron-updater refuses to run.
+  if (isUpdaterEnabled(app.isPackaged)) {
+    state.stopUpdateChecks = updates.start();
+  }
+
+  // Watch focus + AC/battery state and tell the web server to widen the
+  // branch-status poller interval whenever the user isn't actively using
+  // Band. Best-effort; failures are logged but don't block startup.
+  state.activityMonitor = startActivityMonitor({
+    mainWindow: state.mainWindow,
+    port: state.port,
   });
 
   state.mainWindow.on("close", () => {
     void cleanupOnce();
   });
+
+  // Forward macOS native fullscreen state to the renderer so the title bar
+  // can drop the 80px traffic-light offset when the controls are hidden.
+  const sendFullscreen = (fs: boolean) => {
+    state.mainWindow?.webContents.send("window-fullscreen-changed", fs);
+  };
+  state.mainWindow.on("enter-full-screen", () => sendFullscreen(true));
+  state.mainWindow.on("leave-full-screen", () => sendFullscreen(false));
+
+  // Forward wake-from-sleep / screen-unlock to the renderer (see the
+  // `systemResumed` event doc in shared/ipc-channels.ts). powerMonitor
+  // listeners are process-global, so guard against a macOS dock re-activate
+  // re-running bootstrap and stacking duplicates.
+  if (!powerEventsWired) {
+    powerEventsWired = true;
+    const sendSystemResumed = () => {
+      // These listeners outlive the window: on macOS the app stays alive in
+      // the dock after close, and a destroyed BrowserWindow's webContents
+      // throws (optional chaining only guards null, not destroyed).
+      const win = state.mainWindow;
+      if (win && !win.isDestroyed()) win.webContents.send(Events.systemResumed);
+    };
+    powerMonitor.on("resume", sendSystemResumed);
+    powerMonitor.on("unlock-screen", sendSystemResumed);
+    // The hourly update timer doesn't advance while the Mac sleeps, so a
+    // laptop woken each morning would otherwise wait up to an hour more.
+    powerMonitor.on("resume", () => {
+      if (state.stopUpdateChecks) updates.checkIfStale();
+    });
+  }
 }
 
 app.on("window-all-closed", () => {
@@ -188,6 +418,6 @@ app.on("activate", () => {
 
 bootstrap().catch((err) => {
   const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  dashLog(`bootstrap failed: ${message}`);
+  log.fatal({ err: message }, "bootstrap failed");
   app.exit(1);
 });

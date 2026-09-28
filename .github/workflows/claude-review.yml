@@ -1,0 +1,372 @@
+name: Claude PR Review
+
+# Automated review of pull requests by Anthropic's Claude.
+#
+# WHY pull_request (and NOT pull_request_target):
+#   - pull_request runs against the PR head, which is what we want to review.
+#   - pull_request from forks does NOT receive repository secrets (per GitHub
+#     policy), so even without our author check the CLAUDE_CODE_OAUTH_TOKEN
+#     would never be exposed to a fork's checked-out code. The author_association
+#     gate below is therefore a *budget / noise* control — not a credential
+#     boundary. Forks already cannot read the key.
+#   - pull_request_target would run against the base ref WITH secrets exposed.
+#     That is the well-known "pwn request" attack pattern. Don't switch to it.
+#
+# WHY the author_association gate:
+#   - Without it we would burn API credits on every drive-by fork PR. Costs
+#     and review noise are both unbounded. We only auto-review PRs from people
+#     already trusted with the repo (OWNER / MEMBER / COLLABORATOR).
+#   - Outside contributors come back as CONTRIBUTOR or NONE and are skipped.
+#     Dependabot reports as NONE; if you want Claude to review dependabot PRs,
+#     add `|| github.actor == 'dependabot[bot]'` to the gate.
+#   - DO NOT loosen this gate without team discussion. The check lives at the
+#     job level, not just the step level, so the runner never spins up for
+#     skipped PRs.
+#
+# WHY the Claude CLI version is pinned (the reliability fix):
+#   - This workflow dispatches a four-specialist review: a general-purpose
+#     orchestrator subagent that spawns coding/testing/security/performance
+#     reviewers via the `Agent` tool.
+#   - In a REGRESSED Claude CLI (~late-Jan 2026 onward) running under the
+#     claude-code-action headless Agent-SDK runtime (`claude -p` one-shot),
+#     parallel `Agent` dispatch launches subagents as BACKGROUND tasks. The
+#     one-shot run reaches a terminal `result` state and ENDS before the
+#     subagents finish, so no report is produced — yet the action still exits
+#     0, so a silent no-op looked like a passing review (it posted ~50% of the
+#     time, nondeterministically). Refs:
+#       - anthropics/claude-code-action#1124 (SDK session ends before
+#         subagents complete — open, no fix)
+#       - anthropics/claude-code#23909 (main thread ends prematurely while
+#         subagents run in background)
+#   - Fix: pin the CLI to a PRE-regression version where dispatched subagents
+#     run SYNCHRONOUSLY, pre-install it, and point the action at it via
+#     `path_to_claude_code_executable`. Modelled on the sibling dev-tools
+#     repo's `_pr-review.yaml`, which runs the same multi-specialist design
+#     reliably on 2.1.177. Bump CLAUDE_CLI_VERSION deliberately and only to a
+#     version verified to still dispatch Agent subagents synchronously.
+#   - An old CLI can reject a too-new default model, so we ALSO pin the model
+#     explicitly via `--model` (claude-code-action#1416: with no model pinned
+#     the action can fall back to a non-existent model and fail).
+#
+# WHY the workflow posts the comment (not the agent):
+#   - The agent used to build a `gh api ... --body "$(cat <<EOF ...)"` heredoc
+#     from arbitrary review text (backticks, $(), emojis) — a second,
+#     independent source of flakiness. Now the agent only WRITES its report to
+#     a file under RUNNER_TEMP; a deterministic github-script step reads that
+#     file and upserts a marker-keyed sticky comment via the REST API, passing
+#     the body as a JS string (no shell escaping). The action's own
+#     `use_sticky_comment` feature is NOT used: it requires claude[bot]
+#     authentication and breaks under a custom github_token
+#     (see claude-code-action FAQ), and we deliberately stay on GITHUB_TOKEN
+#     (no claude[bot] GitHub App install). Marker-keyed upsert works fine under
+#     the github-actions[bot] identity because it finds its own prior comment
+#     by the embedded marker, not by author.
+#   - The post step also GUARDS against silent no-ops: if the report file is
+#     missing/empty or is missing any of the four specialist sections or the
+#     Verdict line, it posts a clear failure notice AND fails the job (RED
+#     check) instead of leaving a green pass with no review.
+#
+# REQUIRED REPO SECRET:
+#   CLAUDE_CODE_OAUTH_TOKEN — generated locally by running `claude setup-token`
+#   while signed into a Claude Pro / Max account, then added at
+#   Settings → Secrets and variables → Actions → New repository secret.
+#   Usage bills against the token holder's Claude subscription quota (not a
+#   metered API account), so if PR volume grows, watch quota and consider
+#   switching to `anthropic_api_key` with a metered key instead.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancel an in-flight review when a new commit lands on the same PR so a
+# rapid re-push doesn't double-bill the API.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Single source of truth for the CLI version and model. Bump CLAUDE_CLI_VERSION
+# in this one place — the cache key below keys on it (so a bump busts the cache
+# instead of restoring the old binary) and the install step installs exactly it.
+env:
+  # Pre-regression CLI: dispatched `Agent` subagents run synchronously here, so
+  # the one-shot run waits for all four specialists before it ends. See the
+  # header comment. Verify any bump still dispatches subagents synchronously.
+  CLAUDE_CLI_VERSION: "2.1.177"
+  # Pinned explicitly (a) so an older CLI doesn't reject a too-new default model
+  # and (b) to dodge claude-code-action#1416 (no-model fallback to a
+  # non-existent model). Must be a model the Pro/Max OAuth subscription grants.
+  ANTHROPIC_MODEL: "claude-sonnet-4-6"
+
+# Minimum permissions the action needs.
+#   contents: read       — to clone the PR head and fetch base for diff.
+#   pull-requests: write — to post the review comment via the workflow's
+#                          auto-provisioned GITHUB_TOKEN. Comments post as
+#                          `github-actions[bot]`. If you'd rather have the
+#                          claude[bot] identity, install
+#                          https://github.com/apps/claude on the repo, drop the
+#                          github_token input below, and add `id-token: write`.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Claude review
+    runs-on: ubuntu-latest
+    # Hard cap so a runaway action doesn't hold the concurrency slot for
+    # hours or drain subscription quota. Reviews usually finish in <5 min.
+    timeout-minutes: 15
+
+    # Budget gate — see header comment. OWNER / MEMBER / COLLABORATOR are the
+    # three "trusted" author_association values; everything else (CONTRIBUTOR,
+    # FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE, MANNEQUIN) is skipped.
+    if: >
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+               github.event.pull_request.author_association)
+
+    # Checkout is required by the action itself (it runs `git fetch origin main`
+    # internally for diff context) and by the `review-changes` skill at runtime,
+    # which reads the four criteria files and other repo files to do its review.
+    # The skill is defined in `.claude/skills/review-changes/SKILL.md` — the
+    # same definition the local `/review-and-apply` skill invokes. One source of
+    # truth for "how to review" lives in that skill plus the four specialist
+    # agent files under `.claude/agents/`.
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # Restore the pinned CLI from cache when available; keyed on the version
+      # so a CLAUDE_CLI_VERSION bump busts the cache (otherwise the old binary
+      # is restored and the new install is skipped).
+      - name: Cache Claude Code CLI
+        id: cache-claude
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/bin/claude
+          key: claude-code-cli-${{ env.CLAUDE_CLI_VERSION }}
+
+      - name: Install Claude Code CLI
+        run: |
+          # Always verify the binary is present — a cache hit can be a false
+          # positive (e.g. a prior run cached an empty path after a failed
+          # download).
+          if [ -x "$HOME/.local/bin/claude" ]; then
+            echo "Claude Code CLI already present, skipping install"
+          else
+            echo "Installing Claude Code CLI ${CLAUDE_CLI_VERSION}..."
+            for attempt in 1 2 3; do
+              echo "Installation attempt ${attempt}..."
+              curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CLI_VERSION}" && break
+              [ "${attempt}" -eq 3 ] && echo "Failed to install Claude Code after 3 attempts" && exit 1
+              echo "Retrying in 15s..."
+              sleep 15
+            done
+          fi
+          # Fail loudly (RED) if the pinned version is unusable, rather than
+          # silently letting the action fall back to auto-install.
+          "$HOME/.local/bin/claude" --version
+
+      - name: Run Claude review
+        # Pinned to the v1 stable tag of the official Anthropic action.
+        # See https://github.com/anthropics/claude-code-action/releases — bump
+        # this deliberately when reviewing release notes; do not pin to @main.
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Use the workflow's auto-provisioned token instead of the
+          # claude[bot] GitHub App. Avoids the App-install requirement;
+          # comments post as github-actions[bot]. See permissions comment.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Point the action at the pinned, pre-installed binary instead of
+          # letting it auto-install a (regressed) newer CLI.
+          path_to_claude_code_executable: /home/runner/.local/bin/claude
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are a thin dispatcher running in GitHub Actions. You do NOT
+            review the PR yourself, and you do NOT post any GitHub comment — a
+            later workflow step owns posting. Your ONLY job is to dispatch ONE
+            general-purpose subagent that runs the review and WRITES its report
+            to a file. Then you stop.
+
+            Resolve these values:
+              REPO    = ${{ github.repository }}
+              PR      = ${{ github.event.pull_request.number }}
+              BASE    = origin/${{ github.event.pull_request.base.ref }}
+              HEAD    = ${{ github.event.pull_request.head.sha }}
+              REPORT  = ${{ runner.temp }}/claude-review-report.md
+
+            Make exactly one Agent call:
+
+              Agent(subagent_type="general-purpose", prompt=<see below>)
+
+            The subagent's prompt is exactly this (with values substituted
+            from above):
+
+                You are running Band's CI PR review. You must produce a
+                COMPLETE four-specialist review and WRITE it to a file. You
+                do NOT post any GitHub comment.
+
+                Step A — Read the orchestration spec:
+                    Read `.claude/skills/review-changes/SKILL.md` end-to-end.
+                    It defines the four specialists to dispatch, the context
+                    bundle shape, the aggregation rules, and the exact report
+                    format. Read the file directly with the Read tool — the
+                    `Skill` tool is NOT available in this runtime, so
+                    Skill(skill="review-changes") returns "Unknown skill".
+
+                Step B — Gather context:
+                    - Diff:       `gh pr diff <PR>`  (do NOT truncate)
+                    - PR meta:    `gh pr view <PR> --json title,body,headRefName,baseRefName`
+                    - Linked issues: extract `closes #N` / `fixes #N` /
+                      `resolves #N` from the PR body and from
+                      `git log <BASE>..<HEAD> --format=%s%n%b`; for each match
+                      run `gh issue view <N>`. If none, use "none detected".
+
+                Step C — Dispatch the FOUR specialists IN PARALLEL, as four
+                Agent calls in a SINGLE message, each with the context bundle
+                described in the SKILL.md "Step 2 — Dispatch four specialists
+                in parallel" template:
+
+                    Agent(subagent_type="coding-reviewer",      prompt=<bundle>)
+                    Agent(subagent_type="testing-reviewer",     prompt=<bundle>)
+                    Agent(subagent_type="security-reviewer",    prompt=<bundle>)
+                    Agent(subagent_type="performance-reviewer", prompt=<bundle>)
+
+                Wait for all four to return, then aggregate them per the
+                SKILL.md "Step 3 — Aggregate per section".
+
+                Step D — WRITE the output (do NOT print it as your final
+                message, do NOT post a comment):
+
+                    Using the Write tool, write the aggregated report to:
+                         <REPORT>
+                    The content is EXACTLY the SKILL.md "Step 4" report:
+                    the four domain headers in fixed order (Coding →
+                    Testing → Security → Performance), each on its own line
+                    as `<Domain> <emoji>` (emoji is one of 🚨 / ⚠️ / ✅),
+                    each followed by its findings, ending with a single
+                    `Verdict: <approved 👍 | request changes 👎>` line. The
+                    FIRST line of the file MUST be `Coding <emoji>` and the
+                    LAST line MUST be the `Verdict:` line. No code fences,
+                    no preamble, no wrapper text, no "Posted by" notes.
+
+                The file MUST be written even when every domain is ✅ (a clean
+                review is still `approved` with the four ✅ headers). After
+                writing the file, return the single word `done`.
+
+            Wait for the subagent to return `done`. You may Read <REPORT> to
+            confirm it exists. You are then finished — do NOT post anything, do
+            NOT run git or gh yourself, do NOT reformat or echo the report.
+          # allowedTools notes for maintainers:
+          # - `Write` is required so the general-purpose subagent can persist
+          #   the report file that the workflow's post step reads.
+          # - `Skill` is omitted. The claude-code-action@v1 runtime does NOT
+          #   auto-discover project-defined skills under .claude/skills/, so
+          #   Skill(skill="review-changes") returns "Unknown skill" in CI.
+          #   The subagent Reads the SKILL.md file directly instead.
+          # - `gh pr comment` / `gh api` are intentionally NOT allowed: the
+          #   agent no longer posts anything. The deterministic post step below
+          #   owns the GitHub write, which removes the fragile heredoc that was
+          #   an independent source of flakiness.
+          claude_args: |-
+            --model ${{ env.ANTHROPIC_MODEL }}
+            --permission-mode default
+            --allowedTools "Agent,Read,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*)"
+
+      # Deterministic, workflow-owned posting + silent-no-op guard. Runs even if
+      # the action step failed, so an incomplete/aborted run still posts a
+      # notice and turns the check RED instead of silently green.
+      - name: Post review comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          REPORT_FILE: ${{ runner.temp }}/claude-review-report.md
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const MARKER = '<!-- claude-review-summary -->';
+
+            let report = '';
+            if (fs.existsSync(process.env.REPORT_FILE)) {
+              report = fs.readFileSync(process.env.REPORT_FILE, 'utf8').trim();
+            }
+
+            // A complete run emits all four specialist section headers plus a
+            // Verdict line. Anything less means the run ended before producing
+            // a real four-specialist review (e.g. the subagent-race no-op).
+            // Match each header as a STANDALONE line — `<Domain> <emoji>` — so
+            // ordinary finding prose like "Performance regression in ..." can't
+            // satisfy the guard: require the domain word, a space, then a short
+            // (emoji-length) token to end of line.
+            const hasAllSections = ['Coding', 'Testing', 'Security', 'Performance']
+              .every((s) => new RegExp('^' + s + ' .{1,3}$', 'm').test(report));
+            const hasVerdict = /^Verdict:/m.test(report);
+            const complete = report.length > 0 && hasAllSections && hasVerdict;
+
+            // GitHub's hard comment limit is 65,536 chars; leave headroom for
+            // the marker + a truncation note so a verbose review still posts.
+            const MAX_BODY = 64000;
+            let body;
+            if (complete) {
+              const shown =
+                report.length > MAX_BODY
+                  ? report.slice(0, MAX_BODY) +
+                    '\n\n_…review truncated to fit GitHub\'s comment limit; see the workflow logs for the full report._'
+                  : report;
+              body = `${MARKER}\n${shown}`;
+            } else {
+              body =
+                `${MARKER}\n` +
+                '## ⚠️ Automated review did not complete\n\n' +
+                'The Claude PR review ran but did not produce a complete ' +
+                'four-specialist report on this run, so this check is failing ' +
+                'rather than silently passing. Check the workflow logs, then ' +
+                're-run the job.\n';
+              if (report.length > 0) {
+                body +=
+                  '\n<details><summary>Partial output</summary>\n\n```\n' +
+                  report.slice(0, 60000) +
+                  '\n```\n</details>\n';
+              }
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            // Upsert by embedded marker — survives across runs and works under
+            // the github-actions[bot] identity (matched by marker, not author).
+            const existing = comments.find((c) => (c.body || '').includes(MARKER));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated existing review comment ${existing.id}`);
+            } else {
+              const { data } = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+              core.info(`Created review comment ${data.id}`);
+            }
+
+            if (!complete) {
+              core.setFailed(
+                'Claude review did not produce a complete four-specialist ' +
+                  'report — see logs. Posted a failure notice on the PR.'
+              );
+            }

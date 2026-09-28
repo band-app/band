@@ -158,7 +158,7 @@ export function TasksPageContent() {
     <div className="flex flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2">
         <Select value={projectFilter} onValueChange={setProjectFilter}>
-          <SelectTrigger className="h-8 w-40 text-xs">
+          <SelectTrigger className="h-8 w-40 text-xs" data-testid="tasks__project-filter">
             <SelectValue placeholder="All Projects" />
           </SelectTrigger>
           <SelectContent>
@@ -172,7 +172,7 @@ export function TasksPageContent() {
         </Select>
 
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-          <SelectTrigger className="h-8 w-40 text-xs">
+          <SelectTrigger className="h-8 w-40 text-xs" data-testid="tasks__status-filter">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
@@ -196,6 +196,7 @@ export function TasksPageContent() {
             variant="outline"
             size="xs"
             className="hidden sm:inline-flex"
+            data-testid="tasks__new-task-button"
             onClick={() => setShowNewTask(true)}
           >
             <Plus className="size-3" />
@@ -230,7 +231,10 @@ export function TasksPageContent() {
         )}
 
         {!loading && !error && filteredTasks.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+          <div
+            className="flex flex-col items-center justify-center gap-3 py-16 text-center"
+            data-testid="tasks__empty-state"
+          >
             <ListTodo className="size-10 text-muted-foreground" />
             <div>
               <p className="font-medium">No tasks found</p>
@@ -265,21 +269,25 @@ function StatusBadge({ status }: { status: TaskRecord["status"] }) {
   switch (status) {
     case "running":
       return (
-        <Badge variant="secondary" className="gap-1.5">
+        <Badge variant="secondary" className="gap-1.5" data-testid="tasks__status-badge--running">
           <Loader2 className="size-3 animate-spin" />
           Running
         </Badge>
       );
     case "completed":
       return (
-        <Badge variant="secondary" className="gap-1.5 text-green-600 dark:text-green-400">
+        <Badge
+          variant="secondary"
+          className="gap-1.5 text-green-600 dark:text-green-400"
+          data-testid="tasks__status-badge--completed"
+        >
           <CheckCircle2 className="size-3" />
           Completed
         </Badge>
       );
     case "failed":
       return (
-        <Badge variant="destructive" className="gap-1.5">
+        <Badge variant="destructive" className="gap-1.5" data-testid="tasks__status-badge--failed">
           <AlertCircle className="size-3" />
           Failed
         </Badge>
@@ -329,7 +337,10 @@ function TaskCard({
   }, [task.id, onAction]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border-2 border-border/50 p-4 transition-colors hover:border-border">
+    <div
+      className="flex flex-col gap-2 rounded-lg border-2 border-border/50 p-4 transition-colors hover:border-border"
+      data-testid={`tasks__card--${task.id}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium text-foreground">
           {task.prompt}
@@ -406,6 +417,7 @@ function TaskCard({
             <Link
               to={sessionHref}
               className="inline-flex items-center gap-1 text-primary hover:underline"
+              data-testid="tasks__session-link"
             >
               <ExternalLink className="size-3" />
               Session
@@ -556,7 +568,7 @@ function NewTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-testid="tasks__new-task-dialog">
         <DialogHeader>
           <DialogTitle>New Task</DialogTitle>
           <DialogDescription>Dispatch a new task to a coding agent</DialogDescription>
@@ -568,7 +580,7 @@ function NewTaskDialog({
               Project
             </label>
             <Select value={selectedProject} onValueChange={handleProjectChange}>
-              <SelectTrigger id="project-select">
+              <SelectTrigger id="project-select" data-testid="tasks__new-task-project">
                 <SelectValue placeholder="Select a project" />
               </SelectTrigger>
               <SelectContent>
@@ -590,7 +602,7 @@ function NewTaskDialog({
               onValueChange={setSelectedBranch}
               disabled={!selectedProject}
             >
-              <SelectTrigger id="branch-select">
+              <SelectTrigger id="branch-select" data-testid="tasks__new-task-workspace">
                 <SelectValue
                   placeholder={selectedProject ? "Select a workspace" : "Select a project first"}
                 />
@@ -611,6 +623,7 @@ function NewTaskDialog({
             </label>
             <Textarea
               id="task-prompt"
+              data-testid="tasks__new-task-prompt"
               placeholder="Describe what the agent should do..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}

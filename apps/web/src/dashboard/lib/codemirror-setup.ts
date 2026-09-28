@@ -1,0 +1,789 @@
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import {
+  defaultKeymap,
+  history,
+  historyField,
+  historyKeymap,
+  indentLess,
+  indentMore,
+} from "@codemirror/commands";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  indentUnit,
+  LanguageSupport,
+  StreamLanguage,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { highlightSelectionMatches, SearchQuery } from "@codemirror/search";
+import {
+  EditorSelection,
+  EditorState,
+  type Extension,
+  type Range,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  type KeyBinding,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
+import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
+
+/**
+ * Lazy-loads a CodeMirror LanguageSupport for the given language name.
+ * Language names match those from language-map.ts (e.g. "javascript", "python").
+ * Returns null for unsupported languages (renders without highlighting).
+ */
+export async function loadLanguage(lang: string): Promise<LanguageSupport | null> {
+  try {
+    switch (lang) {
+      case "javascript":
+        return import("@codemirror/lang-javascript").then((m) => m.javascript());
+      case "jsx":
+        return import("@codemirror/lang-javascript").then((m) => m.javascript({ jsx: true }));
+      case "typescript":
+        return import("@codemirror/lang-javascript").then((m) =>
+          m.javascript({ typescript: true }),
+        );
+      case "tsx":
+        return import("@codemirror/lang-javascript").then((m) =>
+          m.javascript({ jsx: true, typescript: true }),
+        );
+      case "python":
+        return import("@codemirror/lang-python").then((m) => m.python());
+      case "html":
+        return import("@codemirror/lang-html").then((m) => m.html());
+      case "css":
+        return import("@codemirror/lang-css").then((m) => m.css());
+      case "scss":
+      case "sass":
+        return import("@codemirror/lang-sass").then((m) => m.sass());
+      case "less":
+        return import("@codemirror/lang-less").then((m) => m.less());
+      case "json":
+      case "jsonc":
+        return import("@codemirror/lang-json").then((m) => m.json());
+      case "markdown":
+      case "mdx":
+        return import("@codemirror/lang-markdown").then((m) => m.markdown());
+      case "xml":
+        return import("@codemirror/lang-xml").then((m) => m.xml());
+      case "yaml":
+        return import("@codemirror/lang-yaml").then((m) => m.yaml());
+      case "sql":
+        return import("@codemirror/lang-sql").then((m) => m.sql());
+      case "rust":
+        return import("@codemirror/lang-rust").then((m) => m.rust());
+      case "go":
+        return import("@codemirror/lang-go").then((m) => m.go());
+      case "java":
+        return import("@codemirror/lang-java").then((m) => m.java());
+      case "kotlin":
+        return import("@codemirror/lang-java").then((m) => m.java());
+      case "c":
+      case "cpp":
+        return import("@codemirror/lang-cpp").then((m) => m.cpp());
+      case "php":
+        return import("@codemirror/lang-php").then((m) => m.php());
+      // Legacy modes via StreamLanguage
+      case "bash":
+      case "fish":
+      case "powershell":
+        return import("@codemirror/legacy-modes/mode/shell").then(
+          ({ shell }) => new LanguageSupport(StreamLanguage.define(shell)),
+        );
+      case "ruby":
+        return import("@codemirror/legacy-modes/mode/ruby").then(
+          ({ ruby }) => new LanguageSupport(StreamLanguage.define(ruby)),
+        );
+      case "dockerfile":
+        return import("@codemirror/legacy-modes/mode/dockerfile").then(
+          ({ dockerFile }) => new LanguageSupport(StreamLanguage.define(dockerFile)),
+        );
+      case "toml":
+        return import("@codemirror/legacy-modes/mode/toml").then(
+          ({ toml }) => new LanguageSupport(StreamLanguage.define(toml)),
+        );
+      case "lua":
+        return import("@codemirror/legacy-modes/mode/lua").then(
+          ({ lua }) => new LanguageSupport(StreamLanguage.define(lua)),
+        );
+      case "r":
+        return import("@codemirror/legacy-modes/mode/r").then(
+          ({ r }) => new LanguageSupport(StreamLanguage.define(r)),
+        );
+      case "swift":
+        return import("@codemirror/legacy-modes/mode/swift").then(
+          ({ swift }) => new LanguageSupport(StreamLanguage.define(swift)),
+        );
+      case "clojure":
+        return import("@codemirror/legacy-modes/mode/clojure").then(
+          ({ clojure }) => new LanguageSupport(StreamLanguage.define(clojure)),
+        );
+      case "dart":
+        return import("@codemirror/legacy-modes/mode/clike").then(
+          ({ dart }) => new LanguageSupport(StreamLanguage.define(dart)),
+        );
+      case "erlang":
+        return import("@codemirror/legacy-modes/mode/erlang").then(
+          ({ erlang }) => new LanguageSupport(StreamLanguage.define(erlang)),
+        );
+      case "haskell":
+        return import("@codemirror/legacy-modes/mode/haskell").then(
+          ({ haskell }) => new LanguageSupport(StreamLanguage.define(haskell)),
+        );
+      case "diff":
+        return import("@codemirror/legacy-modes/mode/diff").then(
+          ({ diff }) => new LanguageSupport(StreamLanguage.define(diff)),
+        );
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Base extensions for a read-only CodeMirror viewer.
+ * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
+ * @param opts.skipLineNumbers - When true, omit the default lineNumbers() extension
+ *   so callers can supply a custom one (e.g. with remapped line numbers for diffs).
+ * @param opts.naturalHeight - When true, the editor sizes to its content rather than
+ *   filling a fixed-height parent. Omits `height: 100%` on the root and uses
+ *   `overflow: visible` on the scroller so the editor lays out at its intrinsic
+ *   content height. Use this when the editor lives inside an auto-height container
+ *   (e.g. the diff rows in the Changes view). Defaults to false (fixed-height).
+ */
+export function baseViewerExtensions(
+  isDark = true,
+  opts?: { skipLineNumbers?: boolean; naturalHeight?: boolean },
+): Extension[] {
+  const naturalHeight = opts?.naturalHeight ?? false;
+  const rootDarkStyles: Record<string, string> = { fontSize: "13px" };
+  const rootLightStyles: Record<string, string> = {
+    fontSize: "13px",
+    backgroundColor: "var(--background)",
+  };
+  if (!naturalHeight) {
+    rootDarkStyles.height = "100%";
+    rootLightStyles.height = "100%";
+  }
+  // Natural-height callers need `.cm-scroller` to flow with its content
+  // *vertically* (no fixed scrolling container) but still let long lines
+  // scroll *horizontally* — otherwise minified JS, generated SQL, or any
+  // unwrapped long line in a diff is silently clipped by `overflow-clip`
+  // on `LazyFileRow`'s root and the user can't reach it (issue: Changes
+  // view doesn't scroll horizontally).
+  //
+  // Only `overflowX: auto` is authored explicitly. `overflow-y` defaults
+  // to `visible`, which per CSS Overflow L3 resolves to `auto` whenever
+  // the orthogonal axis is non-`visible` — so the *computed* style is
+  // `overflowX: auto, overflowY: auto` regardless. Authoring it as
+  // `visible` would diverge from the computed value and become a
+  // footgun the next reader has to reason past; omitting it lets the
+  // browser do the resolution and the object literal matches reality.
+  //
+  // The load-bearing invariant is `height: auto`. What actually
+  // prevents PR #501's collapse-to-0 bug from coming back is this
+  // explicit override of CodeMirror's base theme `.cm-scroller {
+  // height: 100% }`: the moment the scroller becomes a scroll
+  // container (overflowX != visible), that percentage resolves to 0
+  // against an auto-height `.cm-editor` parent. `height: auto` breaks
+  // the percentage chain so the scroller sizes to its content — no
+  // vertical scrollbar ever appears (content fits exactly), while
+  // horizontal still scrolls when a line is wider than the viewport.
+  const scrollerStyles: Record<string, string> = naturalHeight
+    ? { overflowX: "auto", height: "auto" }
+    : { overflow: "auto" };
+
+  return [
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    ...(opts?.skipLineNumbers ? [] : [lineNumbers()]),
+    bracketMatching(),
+    highlightSelectionMatches(),
+    ...(isDark
+      ? [
+          vscodeDarkInit({
+            settings: {
+              background: "var(--background)",
+              gutterBackground: "var(--background)",
+              lineHighlight: "transparent",
+            },
+          }),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        ]
+      : [syntaxHighlighting(defaultHighlightStyle)]),
+    keymap.of([...defaultKeymap]),
+    // Viewer-specific overrides
+    EditorView.theme(
+      isDark
+        ? {
+            "&": rootDarkStyles,
+            ".cm-scroller": scrollerStyles,
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-activeLineGutter": { backgroundColor: "transparent" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.35)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.5)",
+            },
+          }
+        : {
+            "&": rootLightStyles,
+            ".cm-scroller": scrollerStyles,
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-gutters": {
+              backgroundColor: "var(--background)",
+              border: "none",
+              color: "#6e7781",
+            },
+            ".cm-activeLineGutter": { backgroundColor: "transparent" },
+            ".cm-activeLine": { backgroundColor: "transparent" },
+            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
+            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+              backgroundColor: "rgba(0, 0, 0, 0.07)",
+            },
+            ".cm-line": { color: "#24292f" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.4)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.55)",
+            },
+          },
+      { dark: isDark },
+    ),
+  ];
+}
+
+/**
+ * Custom Enter handler that provides reliable continuation indentation.
+ *
+ * Several CodeMirror language packages have incomplete or misleading
+ * `indentNodeProp` rules.  For example `@codemirror/lang-rust` defines
+ * `continuedIndent()` on `Statement` but has no `delimitedIndent` for
+ * brace-delimited blocks.  This causes two failure modes:
+ *
+ *  • `getIndentation` returns **0** inside a block → cursor jumps to col 1.
+ *  • `getIndentation` returns a **false-positive continuation indent**
+ *    (e.g. +1 level after a completed `let … ;`) → cursor over-indents.
+ *
+ * Rather than trying to distinguish correct vs. incorrect language values,
+ * this handler uses simple heuristics that are reliable across every
+ * language:
+ *
+ *  1. Copy the current line's leading whitespace.
+ *  2. Add one indent level when the line ends with `{`, `(`, or `[`.
+ *  3. Handle the "between brackets" case (`{|}` → `{\n  |\n}`).
+ *
+ * Language-specific re-indentation (e.g. auto-dedent when typing `}`) is
+ * still handled by `indentOnInput()` which runs independently.
+ */
+function smartNewlineAndIndent(view: EditorView): boolean {
+  const { state } = view;
+
+  // For multiple cursors, defer to the default handler.
+  if (state.selection.ranges.length > 1) return false;
+
+  const { from, to } = state.selection.main;
+  const line = state.doc.lineAt(from);
+  const leadingWS = /^\s*/.exec(line.text)![0];
+  const textBeforeCursor = line.text.slice(0, from - line.from).trimEnd();
+  const opensBlock = /[{([]$/.test(textBeforeCursor);
+
+  const afterLine = state.doc.lineAt(to);
+  const textAfterCursor = afterLine.text.slice(to - afterLine.from).trimStart();
+  const closesBlock = /^[})\]]/.test(textAfterCursor);
+  const unit = state.facet(indentUnit);
+
+  if (opensBlock && closesBlock) {
+    // Between brackets:  {|}  →  {\n  |\n}
+    const inner = `\n${leadingWS}${unit}`;
+    const outer = `\n${leadingWS}`;
+    view.dispatch(
+      state.update({
+        changes: { from, to, insert: inner + outer },
+        selection: EditorSelection.cursor(from + inner.length),
+        userEvent: "input",
+      }),
+    );
+    return true;
+  }
+
+  const extra = opensBlock ? unit : "";
+  const insert = `\n${leadingWS}${extra}`;
+  view.dispatch(
+    state.update({
+      changes: { from, to, insert },
+      selection: EditorSelection.cursor(from + insert.length),
+      userEvent: "input",
+    }),
+  );
+  return true;
+}
+
+/**
+ * Base extensions for an editable CodeMirror editor.
+ * Includes editing features: undo/redo, indent-on-input, fold gutter.
+ * Does NOT include readOnly or editable(false).
+ * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
+ * @param onSave - Optional callback invoked on Cmd/Ctrl+S.
+ * @param opts.indent - Indentation string: `"  "` (2 spaces), `"    "` (4 spaces), or `"\t"`. Defaults to `"  "`.
+ * @param opts.tabSize - Display width of a tab character. Defaults to the indent string length, or 4 for tabs.
+ */
+export function baseEditorExtensions(
+  isDark = true,
+  onSave?: () => void,
+  opts?: { indent?: string; tabSize?: number },
+): Extension[] {
+  const indent = opts?.indent ?? "  ";
+  const tabSize = opts?.tabSize ?? (indent === "\t" ? 4 : indent.length);
+  const customKeyBindings: KeyBinding[] = [
+    ...(onSave
+      ? [
+          {
+            key: "Mod-s",
+            run: () => {
+              onSave();
+              return true;
+            },
+          } satisfies KeyBinding,
+        ]
+      : []),
+  ];
+
+  return [
+    lineNumbers(),
+    history(),
+    foldGutter(),
+    bracketMatching(),
+    closeBrackets(),
+    indentOnInput(),
+    indentUnit.of(indent),
+    EditorState.tabSize.of(tabSize),
+    highlightSelectionMatches(),
+    ...(isDark
+      ? [
+          vscodeDarkInit({
+            settings: {
+              background: "var(--background)",
+              gutterBackground: "var(--background)",
+            },
+          }),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        ]
+      : [syntaxHighlighting(defaultHighlightStyle)]),
+    keymap.of([
+      ...customKeyBindings,
+      { key: "Enter", run: smartNewlineAndIndent },
+      { key: "Tab", run: indentMore },
+      { key: "Shift-Tab", run: indentLess },
+      ...closeBracketsKeymap,
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+      // Catch-all: absorb undo/redo when the history is empty so the
+      // event is preventDefault-ed and doesn't trigger parent handlers.
+      { key: "Mod-z", run: () => true },
+      { key: "Mod-Shift-z", run: () => true },
+      { key: "Mod-y", run: () => true },
+    ]),
+    // CodeMirror calls preventDefault() on handled keys but never
+    // stopPropagation(), so keyboard events always bubble to parent
+    // DOM elements (React components, global listeners, etc.).
+    // Explicitly stop propagation for keys the editor owns.
+    EditorView.domEventHandlers({
+      keydown(event) {
+        const mod = event.metaKey || event.ctrlKey;
+        if (
+          event.key === "Tab" ||
+          (mod && event.key.toLowerCase() === "z") ||
+          (mod && event.key.toLowerCase() === "y")
+        ) {
+          event.stopPropagation();
+        }
+        // Return false so CM's own keymap processing still runs.
+        return false;
+      },
+    }),
+    EditorView.theme(
+      isDark
+        ? {
+            "&": { height: "100%", fontSize: "13px" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.03)" },
+            ".cm-activeLineGutter": { backgroundColor: "rgba(255,255,255,0.03)" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.35)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.5)",
+            },
+          }
+        : {
+            "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-gutters": {
+              backgroundColor: "var(--background)",
+              border: "none",
+              color: "#6e7781",
+            },
+            ".cm-activeLine": { backgroundColor: "rgba(0,0,0,0.03)" },
+            ".cm-activeLineGutter": { backgroundColor: "rgba(0,0,0,0.03)" },
+            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
+            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+              backgroundColor: "rgba(0, 0, 0, 0.07)",
+            },
+            ".cm-line": { color: "#24292f" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.4)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.55)",
+            },
+          },
+      { dark: isDark },
+    ),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Search highlight extension (custom — replaces @codemirror/search's built-in
+// searchHighlighter to avoid module-identity issues with setSearchQuery)
+// ---------------------------------------------------------------------------
+
+/** Effect that sets (or, with an empty query, clears) the active search. */
+const setSearch = StateEffect.define<{ query: string; opts?: SearchOpts }>();
+
+const searchMatchMark = Decoration.mark({ class: "cm-searchMatch" });
+
+/** Largest document (in characters) whose search highlights are rebuilt on every edit. */
+const SEARCH_RESCAN_MAX_DOC_LENGTH = 200_000;
+
+interface SearchHighlightState {
+  query: string;
+  opts?: SearchOpts;
+  decorations: DecorationSet;
+}
+
+/**
+ * StateField that holds the active search and its match decorations. Edits
+ * re-run the search so text typed while the find bar is open (for example in
+ * the editable markdown preview) is highlighted too.
+ */
+const searchHighlightField = StateField.define<SearchHighlightState>({
+  create() {
+    return { query: "", decorations: Decoration.none };
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setSearch)) {
+        const { query, opts } = effect.value;
+        return { query, opts, decorations: buildSearchDecorations(tr.state, query, opts) };
+      }
+    }
+    if (!tr.docChanged) return value;
+    // Rescanning on each edit is a full-document regex pass, so large files
+    // only map their existing matches through the change.
+    if (value.query && tr.state.doc.length <= SEARCH_RESCAN_MAX_DOC_LENGTH) {
+      return { ...value, decorations: buildSearchDecorations(tr.state, value.query, value.opts) };
+    }
+    return { ...value, decorations: value.decorations.map(tr.changes) };
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
+});
+
+/**
+ * Extension that enables search-match highlighting via `dispatchSearch`.
+ * Include this in editor extensions to support find-in-file highlighting.
+ */
+export function searchHighlightOnly(): Extension {
+  return searchHighlightField;
+}
+
+/** Build a sorted DecorationSet for the given query against a state. */
+function buildSearchDecorations(
+  state: EditorState,
+  query: string,
+  opts?: SearchOpts,
+): DecorationSet {
+  if (!query) return Decoration.none;
+  const cmQuery = makeSearchQuery(query, opts);
+  if (!cmQuery.valid) return Decoration.none;
+  const builder = new RangeSetBuilder<Decoration>();
+  const cursor = cmQuery.getCursor(state);
+  let result = cursor.next();
+  while (!result.done) {
+    builder.add(result.value.from, result.value.to, searchMatchMark);
+    result = cursor.next();
+  }
+  return builder.finish();
+}
+
+type SearchOpts = { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean };
+
+function makeSearchQuery(query: string, opts?: SearchOpts): SearchQuery {
+  return new SearchQuery({
+    search: query,
+    caseSensitive: opts?.caseSensitive ?? false,
+    literal: !opts?.regex,
+    regexp: opts?.regex ?? false,
+    wholeWord: opts?.wholeWord ?? false,
+  });
+}
+
+/**
+ * Dispatches a search query to one or more CodeMirror `EditorView` instances.
+ * Highlights matches inside each editor.
+ */
+export function dispatchSearch(views: EditorView[], query: string, opts?: SearchOpts): void {
+  for (const view of views) {
+    view.dispatch({ effects: setSearch.of({ query, opts }) });
+  }
+}
+
+/**
+ * Counts all matches in the given editor views and returns them as an ordered
+ * list of `{ view, from, to }` objects suitable for next/prev navigation.
+ */
+export function collectSearchMatches(
+  views: EditorView[],
+  query: string,
+  opts?: SearchOpts,
+): Array<{ view: EditorView; from: number; to: number }> {
+  if (!query) return [];
+  const cmQuery = makeSearchQuery(query, opts);
+  const matches: Array<{ view: EditorView; from: number; to: number }> = [];
+  for (const view of views) {
+    const cursor = cmQuery.getCursor(view.state);
+    let result = cursor.next();
+    while (!result.done) {
+      matches.push({ view, from: result.value.from, to: result.value.to });
+      result = cursor.next();
+    }
+  }
+  return matches;
+}
+
+/**
+ * Selects the given match range and scrolls it into view (centered).
+ */
+export function scrollToSearchMatch(match: { view: EditorView; from: number; to: number }): void {
+  match.view.dispatch({
+    selection: { anchor: match.from, head: match.to },
+    effects: EditorView.scrollIntoView(match.from, { y: "center" }),
+    // Lets the markdown preview reveal a match inside hidden syntax.
+    userEvent: "select.search",
+  });
+}
+
+/**
+ * Clears search highlights and collapses the selection in all given views.
+ */
+export function clearSearch(views: EditorView[]): void {
+  for (const view of views) {
+    view.dispatch({
+      effects: setSearch.of({ query: "" }),
+      selection: { anchor: view.state.selection.main.head },
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Line highlight extension
+// ---------------------------------------------------------------------------
+
+/** Effect to set or clear the highlighted line range. */
+export const setHighlightLines = StateEffect.define<{
+  from: number;
+  to: number;
+} | null>();
+
+const highlightLineDeco = Decoration.line({ class: "cm-highlighted-line" });
+
+const highlightLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decos, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setHighlightLines)) {
+        if (!e.value) return Decoration.none;
+        const { from, to } = e.value;
+        const doc = tr.state.doc;
+        const decorations: Range<Decoration>[] = [];
+        for (let line = from; line <= to && line <= doc.lines; line++) {
+          decorations.push(highlightLineDeco.range(doc.line(line).from));
+        }
+        return Decoration.set(decorations);
+      }
+    }
+    return decos;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Extension that enables line highlighting via the setHighlightLines effect.
+ * Include this in the editor's extensions to support scroll-to-line + highlight.
+ */
+export function lineHighlightExtension(isDark = true): Extension[] {
+  return [
+    highlightLineField,
+    EditorView.theme(
+      {
+        ".cm-highlighted-line": {
+          backgroundColor: isDark ? "rgba(255, 213, 79, 0.12)" : "rgba(255, 213, 79, 0.25)",
+        },
+      },
+      { dark: isDark },
+    ),
+  ];
+}
+
+/**
+ * Scrolls the editor to the given 1-based line, highlights the range,
+ * and places the cursor at the target position.
+ * Optionally positions cursor at a specific column.
+ */
+export function scrollToLine(
+  view: EditorView,
+  line: number,
+  lineEnd?: number,
+  column?: number,
+): void {
+  const doc = view.state.doc;
+  const clampedLine = Math.max(1, Math.min(line, doc.lines));
+  const clampedEnd = lineEnd ? Math.max(clampedLine, Math.min(lineEnd, doc.lines)) : clampedLine;
+
+  const lineObj = doc.line(clampedLine);
+  const cursorPos = column != null ? Math.min(lineObj.from + column - 1, lineObj.to) : lineObj.from;
+
+  // Set highlight, move cursor, and scroll in a single dispatch
+  view.dispatch({
+    selection: { anchor: cursorPos },
+    effects: [
+      setHighlightLines.of({ from: clampedLine, to: clampedEnd }),
+      EditorView.scrollIntoView(cursorPos, { y: "center" }),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cursor line tracker extension
+// ---------------------------------------------------------------------------
+
+const CURSOR_JUMP_THRESHOLD = 10;
+
+/**
+ * Extension that detects user-initiated cursor jumps across distant lines
+ * (e.g. clicking a far-away line, Page Up/Down). Fires the callback with the
+ * departure line when the cursor moves ≥ CURSOR_JUMP_THRESHOLD lines.
+ *
+ * Only reacts to user events (mouse clicks, keyboard navigation) — programmatic
+ * cursor changes (scrollToLine, goBack/goForward) are ignored because they
+ * don't carry `isUserEvent("select")` annotations.
+ */
+export function cursorLineTracker(
+  onSignificantJump: (departureLine: number, arrivalLine: number) => void,
+): Extension {
+  let lastLine = -1;
+  return EditorView.updateListener.of((update) => {
+    if (!update.selectionSet) return;
+    // Only track user-initiated cursor moves (clicks, keyboard nav).
+    // Programmatic dispatches (scrollToLine, history navigation) don't
+    // carry user-event annotations and are silently ignored.
+    if (!update.transactions.some((t) => t.isUserEvent("select"))) return;
+
+    const newLine = update.state.doc.lineAt(update.state.selection.main.head).number;
+    if (lastLine >= 0 && Math.abs(newLine - lastLine) >= CURSOR_JUMP_THRESHOLD) {
+      onSignificantJump(lastLine, newLine);
+    }
+    lastLine = newLine;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Editor state serialization (for tab state persistence)
+// ---------------------------------------------------------------------------
+
+export { historyField };
+
+/**
+ * Serialize the editor state (document, selection, undo history) and scroll
+ * position.  Restore with `EditorState.fromJSON()` passing
+ * `{ history: historyField }` as the field mapping.
+ */
+export function serializeEditorState(view: EditorView): {
+  editorState: unknown;
+  scrollTop: number;
+} {
+  return {
+    editorState: view.state.toJSON({ history: historyField }),
+    scrollTop: view.scrollDOM.scrollTop,
+  };
+}
+
+/**
+ * Capture only where the user is in the document: the selection (cursor
+ * positions, as character offsets) and the scroll offset. Unlike
+ * `serializeEditorState`, this carries NO document text and NO undo history, so
+ * it is small enough to persist per file in localStorage and can never replay a
+ * stale copy of the file over newer on-disk content. Restore it with
+ * `selectionFromJSON` against whatever document the editor was built from.
+ */
+export function serializeViewPosition(view: EditorView): {
+  selection: unknown;
+  scrollTop: number;
+} {
+  return {
+    selection: view.state.selection.toJSON(),
+    scrollTop: view.scrollDOM.scrollTop,
+  };
+}
+
+/**
+ * Rebuild a selection saved by `serializeViewPosition`, clamping every range to
+ * `docLength`: the file may have shrunk since the selection was captured (an
+ * agent edited it, a checkout changed it), and dispatching an out-of-range
+ * selection throws. Returns null for anything that isn't a valid saved
+ * selection, so a malformed or legacy localStorage value is simply ignored.
+ */
+export function selectionFromJSON(json: unknown, docLength: number): EditorSelection | null {
+  try {
+    const parsed = EditorSelection.fromJSON(json);
+    const clamp = (pos: number) => Math.max(0, Math.min(pos, docLength));
+    return EditorSelection.create(
+      parsed.ranges.map((r) => EditorSelection.range(clamp(r.anchor), clamp(r.head))),
+      parsed.mainIndex,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore the scroll position of an editor view.
+ * Call after creating a view from `EditorState.fromJSON()`.
+ */
+export function restoreScrollPosition(view: EditorView, scrollTop: number): void {
+  view.scrollDOM.scrollTop = scrollTop;
+}

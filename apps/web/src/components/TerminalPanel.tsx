@@ -1,58 +1,19 @@
-import type { FitAddon } from "@xterm/addon-fit";
-import type { ITheme, Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
-import { openExternalUrl } from "../lib/open-external-url";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import {
+  SearchBar,
+  type SearchBarHandle,
+  type TerminalInsertDetail,
+  useSettingsQuery,
+} from "@/dashboard";
+import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
+import {
+  getOrCreateTerminal,
+  type PaneMetadata,
+  type TerminalCacheEntry,
+} from "../lib/terminal-cache";
+import { TerminalToolbar } from "./TerminalToolbar";
 
-/** xterm.js theme that follows the app's dark mode. Background/foreground use the
- *  same neutrals as the rest of the UI so the terminal blends into the panel. */
-const DARK_TERMINAL_THEME: ITheme = {
-  background: "#1e1e1e",
-  foreground: "#e8e8e8",
-  cursor: "#e8e8e8",
-  selectionBackground: "rgba(255, 255, 255, 0.2)",
-};
-
-const LIGHT_TERMINAL_THEME: ITheme = {
-  background: "#ffffff",
-  foreground: "#1e1e1e",
-  cursor: "#1e1e1e",
-  cursorAccent: "#ffffff",
-  selectionBackground: "rgba(0, 0, 0, 0.15)",
-  // Tweak ANSI colors so they remain readable on a white background. The default
-  // bright-yellow / bright-green xterm palette washes out badly in light mode.
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0a8043",
-  yellow: "#946800",
-  blue: "#0451a5",
-  magenta: "#bc05bc",
-  cyan: "#0598bc",
-  white: "#555555",
-  brightBlack: "#666666",
-  brightRed: "#cd3131",
-  brightGreen: "#0a8043",
-  brightYellow: "#946800",
-  brightBlue: "#0451a5",
-  brightMagenta: "#bc05bc",
-  brightCyan: "#0598bc",
-  brightWhite: "#1e1e1e",
-};
-
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains("dark");
-}
-
-function getTerminalTheme(): ITheme {
-  return isDarkMode() ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
-}
-
-export interface PaneMetadata {
-  name?: string;
-  command?: string;
-  cwd?: string;
-  env?: Record<string, string>;
-  focus?: boolean;
-}
+export type { PaneMetadata };
 
 interface TerminalPanelProps {
   workspaceId: string;
@@ -62,10 +23,26 @@ interface TerminalPanelProps {
   paneMetadata?: PaneMetadata;
   /** When true, auto-focus this terminal after it opens. */
   autoFocus?: boolean;
-  /** Called when the terminal emits a title change (e.g. shell sets window title via escape sequence). */
+  /** Called when the terminal emits a title change (shell window title). */
   onTitleChange?: (title: string) => void;
 }
 
+/**
+ * Thin React view over a cached, persistent xterm instance.
+ *
+ * The xterm lifecycle (creation, addons, WebSocket, reconnect, resize/zoom/DPR,
+ * gestures, and the search/selection/sticky-Ctrl UI state) lives entirely in
+ * `terminal-cache.ts`. This component only:
+ *   - resolves (or lazily creates) the cache entry for `terminalId`,
+ *   - `attach`es the entry's persistent wrapper into a live container when the
+ *     panel is visible and `detach`es (parks it off-screen) otherwise — never
+ *     disposing on a workspace/tab switch (band-app/band#617),
+ *   - mirrors the entry's reactive UI state via `useSyncExternalStore` and
+ *     renders the find bar + iOS keyboard toolbar wired to the entry's handlers.
+ *
+ * Dispose is driven externally (pane close / workspace deletion / the parking
+ * policy's cold park), NOT by this component's unmount — unmount only parks.
+ */
 export function TerminalPanel({
   workspaceId,
   terminalId,
@@ -74,201 +51,165 @@ export function TerminalPanel({
   autoFocus,
   onTitleChange,
 }: TerminalPanelProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const liveRef = useRef<HTMLDivElement>(null);
+  const searchBarRef = useRef<SearchBarHandle>(null);
+
+  // WebGL preference is snapshotted at entry-create time; toggling it later
+  // should not tear down a live session (users are told to reopen the terminal).
+  const { settings } = useSettingsQuery();
+  const useWebGL = settings.useWebGLTerminalRenderer ?? true;
+
+  // Resolve (or create) the stable cache entry for this terminal. Kept in a ref
+  // so `subscribe`/`getSnapshot` identities stay stable across renders; only a
+  // terminalId change (never happens for a given dockview panel) re-resolves.
+  const entryRef = useRef<TerminalCacheEntry | null>(null);
+  // Re-resolve when the terminalId changes (never for a given panel) OR when the
+  // held entry was disposed out from under us — the parking policy cold-parks a
+  // hidden terminal while this panel stays mounted (a hidden tab, or a hidden
+  // workspace). On becoming visible again we must pick up a fresh entry, which
+  // reconnects + replays, rather than attach a destroyed one (a no-op that would
+  // leave a dead/blank terminal). Only on becoming visible: re-creating it on an
+  // unrelated re-render while still hidden would undo the cold park.
+  if (
+    !entryRef.current ||
+    entryRef.current.terminalId !== terminalId ||
+    (entryRef.current.isDestroyed() && visible)
+  ) {
+    entryRef.current = getOrCreateTerminal(terminalId, {
+      workspaceId,
+      paneMetadata,
+      useWebGL,
+      autoFocus,
+    });
+  }
+  const entry = entryRef.current;
+
+  const state = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
+
+  // Attach when visible, park when hidden. Park (not dispose) on unmount.
+  useEffect(() => {
+    const el = liveRef.current;
+    if (!el) return;
+    if (visible) entry.attach(el, { autoFocus });
+    else entry.detach();
+  }, [visible, entry, autoFocus]);
+  useEffect(() => () => entry.detach(), [entry]);
+
+  // Route title changes to the dockview tab; replays the last known title so a
+  // title set while this panel was unmounted/parked isn't lost.
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;
+  useEffect(
+    () => entry.registerTitleListener((title) => onTitleChangeRef.current?.(title)),
+    [entry],
+  );
 
+  // Workspace-level ⌃` "focus Terminal": only the visible session grabs focus.
   useEffect(() => {
-    if (!containerRef.current) return;
-
-    let cancelled = false;
-    let cleanup: (() => void) | undefined;
-
-    // Dynamic import so @xterm (CJS) is never evaluated during SSR
-    Promise.all([
-      import("@xterm/xterm"),
-      import("@xterm/addon-fit"),
-      import("@xterm/addon-web-links"),
-    ]).then(([{ Terminal: XTerm }, { FitAddon: XFitAddon }, { WebLinksAddon: XWebLinksAddon }]) => {
-      if (cancelled || !containerRef.current) return;
-
-      // CSS loaded on client only
-      import("@xterm/xterm/css/xterm.css");
-
-      const terminal = new XTerm({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
-        macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
-        scrollback: 10000,
-        theme: getTerminalTheme(),
-      });
-
-      // Keep the terminal palette in sync with the app theme. ThemeSync toggles
-      // the "dark" class on <html>; we mirror that onto xterm at runtime.
-      const themeObserver = new MutationObserver(() => {
-        terminal.options.theme = getTerminalTheme();
-      });
-      themeObserver.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["class"],
-      });
-
-      const fitAddon = new XFitAddon();
-      terminal.loadAddon(fitAddon);
-      terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
-      terminal.open(containerRef.current!);
-
-      // Custom key bindings:
-      // - Shift+Enter → CSI u sequence so shells/tools receive a distinct keycode
-      // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
-      terminal.attachCustomKeyEventHandler((e) => {
-        if (e.type === "keydown") {
-          // Shift+Enter → send CSI 13;2u (kitty/fixterms keyboard protocol)
-          if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-            terminal.input("\x1b[13;2u");
-            return false;
-          }
-          if (e.altKey && !e.metaKey && !e.ctrlKey) {
-            if (e.key === "ArrowLeft") {
-              terminal.input("\x1bb");
-              return false;
-            }
-            if (e.key === "ArrowRight") {
-              terminal.input("\x1bf");
-              return false;
-            }
-          }
-        }
-        return true;
-      });
-
-      terminalRef.current = terminal;
-      fitAddonRef.current = fitAddon;
-
-      // Connect WebSocket
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(
-        `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`,
-      );
-      wsRef.current = ws;
-
-      // Binary frames = PTY data, text frames = JSON control messages (e.g. title updates)
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        // Send init message with pane metadata (command, cwd, env) if available.
-        // The server uses this to configure the PTY on first spawn.
-        if (paneMetadata && (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)) {
-          const initMsg: Record<string, unknown> = { type: "init" };
-          if (paneMetadata.command) initMsg.command = paneMetadata.command;
-          if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
-          if (paneMetadata.env) initMsg.env = paneMetadata.env;
-          ws.send(JSON.stringify(initMsg));
-        }
-
-        fitAddon.fit();
-        ws.send(
-          JSON.stringify({
-            type: "resize",
-            cols: terminal.cols,
-            rows: terminal.rows,
-          }),
-        );
-
-        // Auto-focus this terminal if requested
-        if (autoFocus) {
-          terminal.focus();
-        }
-      };
-
-      ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          // Binary frame = raw PTY output
-          terminal.write(new Uint8Array(event.data));
-        } else {
-          // Text frame = JSON control message
-          try {
-            const msg = JSON.parse(event.data as string);
-            if (msg.type === "title" && typeof msg.title === "string") {
-              onTitleChangeRef.current?.(msg.title);
-            }
-          } catch {
-            // Not valid JSON — write as-is (shouldn't happen)
-            terminal.write(event.data);
-          }
-        }
-      };
-
-      ws.onclose = () => {
-        terminal.write("\r\n\x1b[90m[Terminal disconnected]\x1b[0m\r\n");
-      };
-
-      terminal.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      // Propagate shell title changes (e.g. running command, cwd) to the tab
-      terminal.onTitleChange((title) => {
-        onTitleChangeRef.current?.(title);
-      });
-
-      // Auto-fit on container resize (skip zero-size to avoid killing server PTY)
-      const resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
-        fitAddon.fit();
-        if (ws.readyState === WebSocket.OPEN && terminal.cols > 0 && terminal.rows > 0) {
-          ws.send(
-            JSON.stringify({
-              type: "resize",
-              cols: terminal.cols,
-              rows: terminal.rows,
-            }),
-          );
-        }
-      });
-      resizeObserver.observe(containerRef.current!);
-
-      cleanup = () => {
-        themeObserver.disconnect();
-        resizeObserver.disconnect();
-        ws.close();
-        terminal.dispose();
-        terminalRef.current = null;
-        fitAddonRef.current = null;
-        wsRef.current = null;
-      };
-    });
-
-    return () => {
-      cancelled = true;
-      cleanup?.();
+    const handler = () => {
+      if (visible) entry.focus();
     };
-  }, [terminalId, workspaceId, paneMetadata, autoFocus]);
+    window.addEventListener("band:focus-terminal", handler);
+    return () => window.removeEventListener("band:focus-terminal", handler);
+  }, [visible, entry]);
 
-  // Refit when visibility changes and notify server of new size
+  // ---- Find-in-terminal: focus + select the bar when it opens ----
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      requestAnimationFrame(() => {
-        fitAddonRef.current?.fit();
-        const term = terminalRef.current;
-        const ws = wsRef.current;
-        if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
-          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-        }
-      });
-    }
-  }, [visible]);
+    if (!state.searchOpen) return;
+    const id = requestAnimationFrame(() => {
+      searchBarRef.current?.focus();
+      searchBarRef.current?.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [state.searchOpen]);
+
+  // ---- "Add to Terminal" reference delivery (mirrors the old buffering) ----
+  // A reference dispatched via `band:terminal-insert` is written verbatim to the
+  // PTY as typed input (no newline). Surfacing the terminal flips `visible` on a
+  // later render, so buffer until this panel is visible with an open socket;
+  // drop the buffer when hidden so a stale reference can't surface later.
+  const pendingInsertRef = useRef<string | null>(null);
+  const flushPendingInsert = useCallback(() => {
+    const reference = pendingInsertRef.current;
+    if (!reference) return;
+    if (!entry.isSocketOpen()) return;
+    entry.sendInput(reference);
+    pendingInsertRef.current = null;
+    entry.focus();
+  }, [entry]);
+
+  useEffect(() => {
+    if (visible) flushPendingInsert();
+    else pendingInsertRef.current = null;
+  }, [visible, flushPendingInsert]);
+
+  // Flush a reference buffered during a reconnect gap once the socket reopens.
+  useEffect(
+    () =>
+      entry.subscribeConnect(() => {
+        if (visible) flushPendingInsert();
+      }),
+    [entry, visible, flushPendingInsert],
+  );
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<TerminalInsertDetail>).detail;
+      if (!detail?.reference || detail.workspaceId !== workspaceId) return;
+      if (detail.terminalId && detail.terminalId !== terminalId) return;
+      pendingInsertRef.current = detail.reference;
+      if (visible) flushPendingInsert();
+    };
+    window.addEventListener("band:terminal-insert", handler);
+    return () => window.removeEventListener("band:terminal-insert", handler);
+  }, [visible, workspaceId, terminalId, flushPendingInsert]);
+
+  // Reserve space at the bottom for the floating iOS keyboard toolbar (0 on
+  // desktop). The cache's ResizeObserver on the wrapper reflows xterm on change.
+  const { contentBottomInset } = useVirtualKeyboardToolbar();
+
+  const terminal = entry.getTerminal();
 
   return (
-    <div className="relative h-full w-full">
-      <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+    <div className="relative flex h-full w-full flex-col">
+      <div className="relative min-h-0 flex-1">
+        {state.searchOpen && (
+          <SearchBar
+            ref={searchBarRef}
+            variant="floating"
+            query={state.searchQuery}
+            onQueryChange={entry.setSearchQuery}
+            options={state.searchOptions}
+            onOptionsChange={entry.setSearchOptions}
+            placeholder="Find in terminal..."
+            matchInfo={state.matchInfo}
+            onNext={entry.findNext}
+            onPrevious={entry.findPrevious}
+            onClose={entry.closeSearch}
+          />
+        )}
+        {/* Sizing box only — the cache's persistent wrapper (which carries the
+            counter-zoom and hosts xterm) is appended here on `attach` and moved
+            to the parking container on `detach`. `absolute` makes it the
+            positioned containing block for the wrapper's `inset: 0`. */}
+        <div
+          ref={liveRef}
+          className="absolute inset-x-2 top-2 overflow-hidden"
+          style={{ bottom: 8 + contentBottomInset }}
+        />
+      </div>
+      {state.ready && terminal && (
+        <TerminalToolbar
+          terminal={terminal}
+          sendInput={entry.sendInput}
+          pendingCtrl={state.pendingCtrl}
+          onToggleCtrl={entry.toggleCtrl}
+          selectionMode={state.selectionMode}
+          onExtendSelection={entry.extendSelection}
+          onExitSelection={entry.exitSelection}
+          onSelectAll={entry.selectAll}
+        />
+      )}
     </div>
   );
 }

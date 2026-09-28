@@ -32,6 +32,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
     },
+    /// Start coding agents and list their sessions
+    Agents {
+        #[command(subcommand)]
+        cmd: AgentsCmd,
+    },
     /// Manage chat panes (multi-agent)
     Chats {
         #[command(subcommand)]
@@ -59,19 +64,43 @@ enum Commands {
         #[command(subcommand)]
         cmd: TunnelCmd,
     },
-    /// Receive hook notifications from Claude Code (reads JSON from stdin)
+    /// Open a file in the active Band workspace's editor pane
+    Open {
+        /// Path to the file (absolute, or relative to cwd). Optionally
+        /// suffixed with `:line` / `:line:col` / `:line-lineEnd`.
+        file_path: String,
+        /// Workspace ID (overrides the dashboard's active workspace)
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Don't raise the dashboard window to the foreground after opening
+        #[arg(long = "no-focus")]
+        no_focus: bool,
+    },
+    /// Receive coding-agent hook notifications (reads JSON from stdin)
     Notify,
     /// Show command schemas as JSON
     Schema {
         /// Command name (omit to list all commands)
         command: Option<String>,
     },
-    /// Generate SKILL.md files from schema and registry
-    GenerateSkills {
-        /// Output directory for generated skills (default: skills/)
-        #[arg(long, default_value = "skills")]
-        output_dir: String,
-        /// Filter skills by name (substring match)
+    /// Manage CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
+    /// `band-browser`, `band-start`, `band-loop`)
+    Skills {
+        #[command(subcommand)]
+        cmd: SkillsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillsCmd {
+    /// Install (or refresh) skills into the shared `~/.agents/skills/`
+    /// directory and symlink each detected coding agent's skills/ folder.
+    Install {
+        /// Override the destination home dir (advanced; mostly for tests).
+        /// Defaults to `$HOME`.
+        #[arg(long)]
+        home: Option<String>,
+        /// Filter which skills to install by name (substring match).
         #[arg(long)]
         filter: Option<String>,
     },
@@ -115,9 +144,6 @@ enum WorkspacesCmd {
         /// Prompt to pass to the coding agent
         #[arg(long)]
         prompt: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
@@ -127,13 +153,21 @@ enum WorkspacesCmd {
         /// Coding agent ID to use (e.g. 'claude-code')
         #[arg(long)]
         agent: Option<String>,
+        /// Dispatch target for the prompt: 'terminal' (CLI default —
+        /// launches the agent's interactive CLI in a fresh terminal pane)
+        /// or 'chat' (submits to the workspace chat pane). Override
+        /// precedence highest first: `--via` flag → `BAND_DISPATCH` env →
+        /// `.band/config.json` `workspace.defaultVia` →
+        /// `~/.band/settings.json` `cli.defaultVia` → terminal (issue #551)
+        #[arg(long)]
+        via: Option<String>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
         /// Project name
         project: String,
-        /// Branch name
-        branch: String,
+        /// Workspace name (the branch it was created on — its stable identity)
+        name: String,
     },
 }
 
@@ -160,6 +194,10 @@ enum ChatsCmd {
         /// Mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
+        /// Label in the form `key=value` (repeatable). Keys with the
+        /// reserved `band:` prefix are rejected by the server.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
     /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
     Send {
@@ -171,9 +209,6 @@ enum ChatsCmd {
         /// Workspace ID (auto-detected from cwd if omitted)
         #[arg(long)]
         workspace: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
@@ -198,6 +233,24 @@ enum ChatsCmd {
     Remove {
         /// Chat pane ID (defaults to the cwd workspace's first chat pane)
         chat_id: Option<String>,
+    },
+    /// Add or overwrite labels on a chat pane (additive merge — other
+    /// labels are preserved).
+    Label {
+        /// Chat pane ID
+        chat_id: String,
+        /// One or more `key=value` pairs. Keys with the reserved
+        /// `band:` prefix are rejected by the server.
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+    /// Remove labels from a chat pane by key (other labels are preserved).
+    Unlabel {
+        /// Chat pane ID
+        chat_id: String,
+        /// One or more label keys to remove. Unknown keys are ignored.
+        #[arg(required = true)]
+        keys: Vec<String>,
     },
 }
 
@@ -236,6 +289,31 @@ enum BrowsersCmd {
     Remove {
         /// Browser tab ID (defaults to the cwd workspace's first browser tab)
         browser_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentsCmd {
+    /// List the running agent sessions of a workspace
+    List {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+    },
+    /// Start a coding agent, as a chat (gui) or as its CLI in a terminal (tui)
+    Launch {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+        /// Coding agent ID from settings (default agent if omitted)
+        #[arg(long)]
+        agent: Option<String>,
+        /// `gui` (chat) or `tui` (terminal); `chat` / `terminal` also accepted.
+        /// Falls back to `$BAND_DISPATCH`, the repo's `.band/config.json`
+        /// `workspace.defaultVia`, then the server's `agents.defaultMode`.
+        #[arg(long)]
+        mode: Option<String>,
+        /// First prompt for the agent
+        #[arg(long)]
+        prompt: Option<String>,
     },
 }
 
@@ -286,6 +364,8 @@ enum TerminalsCmd {
         /// Terminal ID (defaults to the cwd workspace's first terminal)
         terminal_id: Option<String>,
     },
+    /// Restart the terminal daemon, ending every terminal it hosts
+    RestartDaemon,
 }
 
 #[derive(Subcommand)]
@@ -318,6 +398,15 @@ enum CronjobsCmd {
         /// Workspace ID (required when scope is "workspace")
         #[arg(long)]
         workspace_id: Option<String>,
+        /// Where each fire dispatches the prompt: `chat` (chat pane) or
+        /// `terminal` (agent's vendor CLI in a fresh self-closing PTY). When
+        /// omitted, resolved via the same precedence as `workspaces create`:
+        /// `--via` flag → `$BAND_DISPATCH` → `.band/config.json`
+        /// `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia`
+        /// → `terminal`. So a cron created from a chat agent defaults to chat,
+        /// one created from a terminal defaults to terminal (issue #581).
+        #[arg(long)]
+        via: Option<String>,
         /// Start disabled
         #[arg(long)]
         disabled: bool,
@@ -433,21 +522,35 @@ fn main() {
                 branch,
                 base,
                 prompt,
-                max_turns,
                 mode,
                 model,
                 agent,
+                via,
             } => cmd_workspaces_create(
                 &project,
                 &branch,
                 base.as_deref(),
                 prompt.as_deref(),
-                max_turns,
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
+                via.as_deref(),
             ),
-            WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
+            WorkspacesCmd::Remove { project, name } => cmd_workspaces_remove(&project, &name),
+        },
+        Commands::Agents { cmd } => match cmd {
+            AgentsCmd::List { workspace_id } => cmd_agents_list(workspace_id.as_deref()),
+            AgentsCmd::Launch {
+                workspace_id,
+                agent,
+                mode,
+                prompt,
+            } => cmd_agents_launch(
+                workspace_id.as_deref(),
+                agent.as_deref(),
+                mode.as_deref(),
+                prompt.as_deref(),
+            ),
         },
         Commands::Chats { cmd } => match cmd {
             ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
@@ -457,18 +560,19 @@ fn main() {
                 agent,
                 model,
                 mode,
+                labels,
             } => cmd_chats_create(
                 workspace_id.as_deref(),
                 name.as_deref(),
                 agent.as_deref(),
                 model.as_deref(),
                 mode.as_deref(),
+                &labels,
             ),
             ChatsCmd::Send {
                 chat_id,
                 message,
                 workspace,
-                max_turns,
                 mode,
                 model,
                 agent,
@@ -476,7 +580,6 @@ fn main() {
                 chat_id.as_deref(),
                 &message,
                 workspace.as_deref(),
-                max_turns,
                 mode.as_deref(),
                 model.as_deref(),
                 agent.as_deref(),
@@ -484,6 +587,8 @@ fn main() {
             ChatsCmd::Watch { .. } => unreachable!(),
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(chat_id.as_deref()),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(chat_id.as_deref()),
+            ChatsCmd::Label { chat_id, labels } => cmd_chats_label(&chat_id, &labels),
+            ChatsCmd::Unlabel { chat_id, keys } => cmd_chats_unlabel(&chat_id, &keys),
         },
         Commands::Browsers { cmd } => match cmd {
             BrowsersCmd::List { workspace_id } => cmd_browser_list(workspace_id.as_deref()),
@@ -515,6 +620,7 @@ fn main() {
             } => cmd_terminal_output(terminal_id.as_deref(), lines),
             TerminalsCmd::Output { .. } | TerminalsCmd::Attach { .. } => unreachable!(),
             TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(terminal_id.as_deref()),
+            TerminalsCmd::RestartDaemon => cmd_terminal_restart_daemon(),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -527,6 +633,7 @@ fn main() {
                 cron,
                 scope,
                 workspace_id,
+                via,
                 disabled,
             } => cmd_cronjobs_create(
                 &key,
@@ -535,6 +642,7 @@ fn main() {
                 &cron,
                 &scope,
                 workspace_id.as_deref(),
+                via.as_deref(),
                 disabled,
             ),
             CronjobsCmd::Update {
@@ -563,11 +671,18 @@ fn main() {
             TunnelCmd::Start => cmd_tunnel_start(),
             TunnelCmd::Stop => cmd_tunnel_stop(),
         },
+        Commands::Open {
+            file_path,
+            workspace,
+            no_focus,
+        } => cmd_open(&file_path, workspace.as_deref(), !no_focus),
         Commands::Notify => cmd_notify(),
         Commands::Schema { .. } => unreachable!(),
-        Commands::GenerateSkills { output_dir, filter } => {
-            skills::generate_skills(&output_dir, filter.as_deref())
-        }
+        Commands::Skills { cmd } => match cmd {
+            SkillsCmd::Install { home, filter } => {
+                skills::install_skills(home.as_deref(), filter.as_deref())
+            }
+        },
     };
 
     match result {
@@ -612,14 +727,22 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_projects = Vec::new();
-    let mut rows: Vec<[String; 3]> = Vec::new();
+    let mut rows: Vec<[String; 4]> = Vec::new();
     for proj in &projects {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
+        // `kind` defaults to "git" — the server always sets it, but older
+        // servers (or test fixtures predating #427) may omit the field.
+        let kind = proj.get("kind").and_then(|k| k.as_str()).unwrap_or("git");
         let wt_count = proj
             .get("worktrees")
             .and_then(|w| w.as_array())
             .map_or(0, Vec::len);
+        // KIND is appended to the end of the column list (not inserted
+        // between NAME and PATH) so existing scripts that index the text
+        // output positionally — e.g. `awk '{print $2}'` to extract the
+        // path — keep working. The JSON output is keyed and order-
+        // insensitive, so the field placement there doesn't matter.
         rows.push([
             name.to_string(),
             path.to_string(),
@@ -628,15 +751,17 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
                 wt_count,
                 if wt_count == 1 { "" } else { "s" }
             ),
+            kind.to_string(),
         ]);
         json_projects.push(serde_json::json!({
             "name": name,
             "path": path,
+            "kind": kind,
             "worktreeCount": wt_count,
         }));
     }
 
-    let text = format_table(&["NAME", "PATH", "WORKTREES"], &rows);
+    let text = format_table(&["NAME", "PATH", "WORKTREES", "KIND"], &rows);
 
     Ok(CommandResult {
         text,
@@ -745,10 +870,10 @@ fn cmd_workspaces_create(
     branch: &str,
     base: Option<&str>,
     prompt: Option<&str>,
-    max_turns: Option<u32>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
+    via: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -756,19 +881,53 @@ fn cmd_workspaces_create(
         validate::validate_name(b, "Base branch")?;
     }
 
-    let client = api::ApiClient::from_settings()?;
+    // Read settings once and share the snapshot between the API client
+    // (port + auth token) and the dispatch-target resolver (which may
+    // fall back to `cli.defaultVia`). Without this, the bottom of the
+    // `--via` precedence chain re-reads `~/.band/settings.json` on
+    // every CLI invocation that doesn't supply `--via` and
+    // `BAND_DISPATCH`.
+    let settings = state::load_settings()?;
+    let client = api::ApiClient::from_loaded_settings(settings.clone());
+
+    // The server only branches on `via` when a prompt is present —
+    // a no-prompt workspace create is a pure worktree-add with no
+    // dispatch. Skip the precedence resolution entirely in that case
+    // so we don't fork `git rev-parse --show-toplevel` or `stat` the
+    // `.band/config.json` for nothing. We still validate an
+    // explicitly-passed `--via` so a typo fails fast even without a
+    // prompt — but BAND_DISPATCH / config / settings fallbacks are
+    // dead weight on the no-prompt path.
+    let resolved_via = if prompt.is_some() {
+        // Resolve dispatch target (issue #551). Precedence, highest first:
+        //   1. --via flag.
+        //   2. $BAND_DISPATCH env var.
+        //   3. .band/config.json `workspace.defaultVia` in the current repo.
+        //   4. ~/.band/settings.json `cli.defaultVia`.
+        //   5. Built-in CLI default: "terminal".
+        //
+        // The server-side default is "chat" so the web UI keeps its
+        // existing behavior; the CLI explicitly forwards the resolved
+        // value on every call so the server never has to guess.
+        Some(resolve_dispatch_target(via, &settings)?)
+    } else if let Some(v) = via {
+        Some(validate_via(v, "--via flag")?)
+    } else {
+        None
+    };
+
     let mut input = serde_json::json!({
         "project": project,
         "branch": branch,
     });
+    if let Some(ref v) = resolved_via {
+        input["via"] = serde_json::json!(v);
+    }
     if let Some(base) = base {
         input["base"] = serde_json::json!(base);
     }
     if let Some(prompt) = prompt {
         input["prompt"] = serde_json::json!(prompt);
-    }
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
@@ -781,23 +940,154 @@ fn cmd_workspaces_create(
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    // The server is the source of truth for the actual dispatch. It echoes
+    // back the via it dispatched with (which may differ from
+    // `resolved_via` when the chosen adapter falls back to chat) and
+    // emits `terminalId` only when a PTY was reserved. On the idempotent
+    // path (existing workspace) the server omits both fields entirely —
+    // no fresh dispatch happened — and the CLI must suppress them too so
+    // a caller scripting on `.terminalId` can detect that case.
+    let actual_via = data
+        .get("via")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
+    let terminal_id = data
+        .get("terminalId")
+        .and_then(|t| t.as_str())
+        .map(std::string::ToString::to_string);
+
+    let mut json = serde_json::json!({ "path": path });
+    if let Some(ref v) = actual_via {
+        json["via"] = serde_json::json!(v);
+    }
+    if let Some(ref tid) = terminal_id {
+        json["terminalId"] = serde_json::json!(tid);
+    }
 
     Ok(CommandResult {
         text: format!("{path}\n"),
-        json: serde_json::json!({"path": path}),
+        json,
     })
 }
 
-fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, String> {
+/// Walk the dispatch-target precedence chain (issue #551):
+///   1. `--via` flag value.
+///   2. `$BAND_DISPATCH` env var.
+///   3. `.band/config.json` `workspace.defaultVia` in the current repo.
+///   4. `~/.band/settings.json` `cli.defaultVia`.
+///   5. Built-in CLI default: `"terminal"`.
+///
+/// Takes a pre-loaded `Settings` snapshot so the caller can share its
+/// file read with the API client (`api::ApiClient::from_loaded_settings`)
+/// — without it, every `band workspaces create` without `--via` or
+/// `BAND_DISPATCH` would `stat`+`read` `~/.band/settings.json` twice.
+///
+/// Rejects unknown string values with a CLI error so a typo
+/// (e.g. `--via terminall` or `BAND_DISPATCH=chats`) fails fast instead
+/// of being silently rejected by the server's `z.enum` validator.
+fn resolve_dispatch_target(
+    flag: Option<&str>,
+    settings: &state::Settings,
+) -> Result<String, String> {
+    if let Some(v) = flag {
+        return validate_via(v, "--via flag");
+    }
+    if let Ok(env) = std::env::var("BAND_DISPATCH") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return validate_via(trimmed, "BAND_DISPATCH env var");
+        }
+    }
+    if let Some(v) = read_repo_default_via() {
+        return validate_via(&v, ".band/config.json workspace.defaultVia");
+    }
+    if let Some(v) = user_default_via(settings) {
+        return validate_via(&v, "~/.band/settings.json cli.defaultVia");
+    }
+    Ok("terminal".to_string())
+}
+
+fn validate_via(value: &str, source: &str) -> Result<String, String> {
+    match value {
+        "chat" | "terminal" => Ok(value.to_string()),
+        other => Err(format!(
+            "Invalid dispatch target '{other}' from {source}: expected 'chat' or 'terminal'."
+        )),
+    }
+}
+
+/// Read `workspace.defaultVia` from `.band/config.json` in the current
+/// working directory's git toplevel (or `cwd` when not in a git repo).
+/// Returns `None` if the file is absent, malformed, or missing the key.
+///
+/// The repo-level config is the per-project override for the user-level
+/// `cli.defaultVia`. We deliberately read the file directly (no server
+/// roundtrip) so the CLI behaves the same way whether the dashboard is
+/// running or not.
+///
+/// **Cheap-stat first.** Most callers are outside a `.band/`-configured
+/// repo (or run from a workspace that has none), so we check whether
+/// `cwd/.band/config.json` exists *before* forking `git
+/// rev-parse --show-toplevel`. If the file already sits in cwd we read
+/// it directly; otherwise we fall through to the git-toplevel resolution
+/// (the common case for being deep inside a subdirectory).
+fn read_repo_default_via() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    let cwd_config = cwd.join(".band").join("config.json");
+    if cwd_config.is_file() {
+        return parse_default_via(&cwd_config);
+    }
+    // Neutralise `GIT_DIR` and `GIT_WORK_TREE` so an outer git
+    // configuration can't redirect the toplevel lookup to a different
+    // repo — `validate_via` already rejects anything but
+    // `"chat"|"terminal"`, so this is defence-in-depth rather than a
+    // hot path, but eliminating the trust boundary is cheap.
+    let toplevel = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&cwd)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))?;
+    parse_default_via(&toplevel.join(".band").join("config.json"))
+}
+
+fn parse_default_via(config_path: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed
+        .get("workspace")
+        .and_then(|w| w.get("defaultVia"))
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
+}
+
+/// Pluck `cli.defaultVia` out of an already-loaded `Settings` snapshot.
+/// Returns `None` when the key is absent or has the wrong type.
+fn user_default_via(settings: &state::Settings) -> Option<String> {
+    settings
+        .cli
+        .as_ref()
+        .and_then(|c| c.get("defaultVia"))
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
+}
+
+fn cmd_workspaces_remove(project: &str, name: &str) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
-    validate::validate_name(branch, "Branch name")?;
+    validate::validate_name(name, "Workspace name")?;
 
     let client = api::ApiClient::from_settings()?;
+    // The server identifies a workspace by its immutable `name` — the branch
+    // it was created on, which stays stable even after the git branch is
+    // switched (see the `worktrees.name` column).
     client.trpc_mutate(
         "workspaces.remove",
         &serde_json::json!({
             "project": project,
-            "branch": branch,
+            "name": name,
         }),
     )?;
 
@@ -823,23 +1113,42 @@ fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
         .cloned()
         .unwrap_or_default();
 
-    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut rows: Vec<[String; 5]> = Vec::new();
     let mut json_chats = Vec::new();
     for chat in &chats {
         let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let name = chat.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let agent = chat.get("agent").and_then(|v| v.as_str()).unwrap_or("");
         let status = chat.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        // Labels are persisted as a Record<string, string> on the server and
+        // returned inline on each chat. Render them as `k=v,k=v` to keep the
+        // table compact — empty record or missing field both render as an
+        // empty cell. Keys are sorted for stable output (the server doesn't
+        // promise insertion order across rehydrations).
+        let labels = chat
+            .get("labels")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
+                pairs.sort_by(|a, b| a.0.cmp(b.0));
+                pairs
+                    .into_iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}={s}")))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
         rows.push([
             id.to_string(),
             name.to_string(),
             agent.to_string(),
             status.to_string(),
+            labels,
         ]);
         json_chats.push(chat.clone());
     }
 
-    let text = format_table(&["ID", "NAME", "AGENT", "STATUS"], &rows);
+    let text = format_table(&["ID", "NAME", "AGENT", "STATUS", "LABELS"], &rows);
 
     Ok(CommandResult {
         text,
@@ -853,6 +1162,7 @@ fn cmd_chats_create(
     agent: Option<&str>,
     model: Option<&str>,
     mode: Option<&str>,
+    label_args: &[String],
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let workspace_id = resolve_workspace_id(&client, workspace_id)?;
@@ -869,6 +1179,10 @@ fn cmd_chats_create(
     if let Some(m) = mode {
         input["mode"] = serde_json::json!(m);
     }
+    if !label_args.is_empty() {
+        let labels = parse_label_pairs(label_args)?;
+        input["labels"] = serde_json::Value::Object(labels);
+    }
     let data = client.trpc_mutate("chats.create", &input)?;
     let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
     let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -877,6 +1191,154 @@ fn cmd_chats_create(
         text: format!("{id}\n"),
         json: serde_json::json!({"chat": chat}),
     })
+}
+
+/// Parse a list of `key=value` strings into a JSON object. Splits each
+/// pair on the **first** `=` so values may legitimately contain further
+/// `=` characters (e.g. base64 or URL fragments). Refuses any pair that
+/// lacks `=` or has an empty key, so a typo like `--label phaseplan`
+/// fails loudly with a clear message instead of being silently dropped
+/// or sent to the server as a no-key validation failure.
+fn parse_label_pairs(
+    pairs: &[String],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut out = serde_json::Map::new();
+    for raw in pairs {
+        let (k, v) = raw
+            .split_once('=')
+            .ok_or_else(|| format!("label \"{raw}\" must be in the form key=value"))?;
+        if k.is_empty() {
+            return Err(format!("label \"{raw}\" has an empty key"));
+        }
+        // Catch empty values at the CLI boundary so the user sees an
+        // actionable message tied to their input instead of the server's
+        // generic "value must be a non-empty string" tRPC error — same
+        // rule the server enforces but with the offending pair quoted
+        // back at them. Aligns the CLI-side check with the server-side
+        // one in `validateLabels`.
+        if v.is_empty() {
+            return Err(format!("label \"{raw}\" has an empty value"));
+        }
+        // Later duplicates overwrite earlier ones — `--label k=a --label k=b`
+        // ends up as `k=b`, matching how kubectl handles the same input.
+        out.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+    }
+    Ok(out)
+}
+
+/// Fetch the current labels record for a chat via `chats.get`. Returns
+/// an empty `Map` for unlabeled chats (and for chats whose server
+/// response omits the field entirely — defensive read).
+///
+/// Used as the "read" half of the label/unlabel read-modify-write loop.
+/// The intervening server-side `chats.update` is a full-set replace, so
+/// the CLI has to fetch the current labels, merge locally, and send the
+/// full intended set back. Two callers mutating labels on the same
+/// chat concurrently can race; for the single-user workflow this is
+/// targeting that's acceptable.
+fn fetch_chat_labels(
+    client: &api::ApiClient,
+    chat_id: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let data = client.trpc_query("chats.get", &serde_json::json!({"chatId": chat_id}))?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    if chat.is_null() {
+        return Err(format!("Chat \"{chat_id}\" not found"));
+    }
+    Ok(chat
+        .get("labels")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn cmd_chats_label(chat_id: &str, label_args: &[String]) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let additions = parse_label_pairs(label_args)?;
+    let mut labels = fetch_chat_labels(&client, chat_id)?;
+    for (k, v) in additions {
+        labels.insert(k, v);
+    }
+    let intended = serde_json::Value::Object(labels);
+    let data = client.trpc_mutate(
+        "chats.update",
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
+    )?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CommandResult {
+        // Prefer the server-confirmed labels so the text output can't drift
+        // from the JSON output if the server ever normalises keys differently
+        // (today they always agree because validation runs the same sort).
+        // Fall back to the intended set only if the response somehow omits
+        // the field — that's a server bug we'd want to see surfaced.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
+        json: serde_json::json!({"chat": chat}),
+    })
+}
+
+fn cmd_chats_unlabel(chat_id: &str, keys: &[String]) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut labels = fetch_chat_labels(&client, chat_id)?;
+    for k in keys {
+        labels.remove(k);
+    }
+    let intended = serde_json::Value::Object(labels);
+    let data = client.trpc_mutate(
+        "chats.update",
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
+    )?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CommandResult {
+        // See `cmd_chats_label` — prefer server-confirmed labels for text
+        // output so it can't silently diverge from the JSON output.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
+        json: serde_json::json!({"chat": chat}),
+    })
+}
+
+/// Extract the `labels` field from a `chats.update` server response.
+/// Returns `None` if the response is missing the field or if it's the wrong
+/// shape — in which case the caller should fall back to the locally-computed
+/// set rather than silently rendering an empty cell.
+fn server_labels(chat: &serde_json::Value) -> Option<&serde_json::Value> {
+    let labels = chat.get("labels")?;
+    if labels.is_object() {
+        Some(labels)
+    } else {
+        None
+    }
+}
+
+/// Render a labels record as `k=v,k=v\n` with sorted keys. Shared
+/// between `band chats label` and `band chats unlabel` so both surface
+/// the final state of the chat in the same format `chats list` uses.
+///
+/// **Sort-order assumption:** uses Rust's default byte-order `cmp`, which
+/// matches the server's byte-order sort in `validateLabels` (codepoint
+/// comparison via `a < b ? -1 : a > b ? 1 : 0`). Both sides deliberately
+/// avoid locale-aware sort so the CLI table and JSON output show the
+/// same chat with the same key ordering under every locale. If the
+/// server's sort ever changes — or if the label-key regex
+/// `^[a-zA-Z0-9_:-]{1,64}$` is relaxed to allow Unicode — re-audit both
+/// sites together so they stay aligned.
+fn format_labels_cell(labels: &serde_json::Value) -> String {
+    // Empty string (not `"\n"`) when there's nothing to render — the
+    // caller checks `!output.text.is_empty()` before printing, so a
+    // bare `"\n"` would emit a spurious blank line on the
+    // edge case where the server response lacks a labels object.
+    let Some(obj) = labels.as_object() else {
+        return String::new();
+    };
+    if obj.is_empty() {
+        return String::new();
+    }
+    let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let rendered: Vec<String> = pairs
+        .into_iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}={s}")))
+        .collect();
+    format!("{}\n", rendered.join(","))
 }
 
 /// Send a message to a workspace chat, defaulting to the workspace's active
@@ -892,7 +1354,6 @@ fn cmd_chats_send(
     chat_id: Option<&str>,
     message: &str,
     workspace_id: Option<&str>,
-    max_turns: Option<u32>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
@@ -906,9 +1367,6 @@ fn cmd_chats_send(
     });
     if let Some(chat_id) = chat_id {
         input["chatId"] = serde_json::json!(chat_id);
-    }
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
@@ -939,12 +1397,19 @@ fn cmd_chats_send(
     })
 }
 
-/// Stream a chat pane's currently-running task as raw NDJSON.
+/// Stream a chat pane's event log as raw NDJSON.
 ///
-/// Connects to `GET /api/tasks/<chat_id>/stream` (the same SSE endpoint the
-/// dashboard uses) and dumps each `data: {...}` payload to stdout, one JSON
-/// object per line. The output is always raw JSON regardless of `--output`.
-/// Exits 0 with no output when the chat has no running task (HTTP 204).
+/// Connects to `GET /api/chats/<chat_id>/events` (the unified server-
+/// authoritative SSE event log the dashboard uses) and dumps each
+/// `data: {...}` payload to stdout, one JSON object per line. The
+/// output is always raw JSON regardless of `--output`.
+///
+/// Behaviour change from the legacy `/api/tasks/<chat_id>/stream`:
+/// the new endpoint keeps the connection open even when no task is
+/// running, so the watcher behaves like `tail -f` — it surfaces the
+/// NEXT submission's events live. SIGINT (Ctrl-C) terminates it. The
+/// legacy 204 "no running task" branch is retained for forward-compat
+/// in case any deployment still routes the old path through a proxy.
 fn handle_chats_watch(chat_id: Option<&str>) -> i32 {
     match cmd_chats_watch(chat_id) {
         Ok(()) => 0,
@@ -961,7 +1426,7 @@ fn cmd_chats_watch(chat_id: Option<&str>) -> Result<(), String> {
     let client = api::ApiClient::from_settings()?;
     let chat_id =
         resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
-    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(&chat_id));
+    let path = format!("/api/chats/{}/events", urlencoded_path_segment(&chat_id));
     let mut response = client.get_raw_stream(&path)?;
     let status = response.status().as_u16();
 
@@ -1212,6 +1677,136 @@ fn cmd_browser_remove(browser_id: Option<&str>) -> Result<CommandResult, String>
     })
 }
 
+// --- Agent commands ---
+
+/// Normalize an agent mode flag: `gui` / `tui`, with the `--via` names
+/// `chat` / `terminal` as aliases.
+fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {
+    match mode {
+        "gui" | "chat" => Ok("gui"),
+        "tui" | "terminal" => Ok("tui"),
+        other => Err(format!(
+            "Invalid agent mode '{other}': expected gui, tui, chat or terminal"
+        )),
+    }
+}
+
+fn cmd_agents_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let data = client.trpc_query(
+        "agentSessions.list",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+    let sessions = data
+        .get("agentSessions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let field = |s: &serde_json::Value, key: &str| {
+        s.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let rows: Vec<[String; 6]> = sessions
+        .iter()
+        .map(|s| {
+            // A gui session lives in a chat, a tui session in a terminal.
+            let pane = s
+                .get("chatId")
+                .and_then(|v| v.as_str())
+                .or_else(|| s.get("terminalId").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            [
+                field(s, "id"),
+                field(s, "agentDefinitionId"),
+                field(s, "mode"),
+                field(s, "state"),
+                pane,
+                field(s, "providerSessionId"),
+            ]
+        })
+        .collect();
+
+    let text = format_table(
+        &[
+            "SESSION ID",
+            "AGENT",
+            "MODE",
+            "STATE",
+            "PANE",
+            "PROVIDER SESSION",
+        ],
+        &rows,
+    );
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"agentSessions": sessions}),
+    })
+}
+
+/// Resolve `band agents launch`'s mode, highest first: `--mode`, then
+/// `$BAND_DISPATCH` (so an agent running in a Band terminal or chat starts
+/// its agents the same way), then the repo's `.band/config.json`
+/// `workspace.defaultVia`. `None` leaves the choice to the server's
+/// `agents.defaultMode`, which also covers the older `cli.defaultVia`.
+fn resolve_agent_mode(flag: Option<&str>) -> Result<Option<&'static str>, String> {
+    if let Some(m) = flag {
+        return parse_agent_mode(m).map(Some);
+    }
+    if let Ok(env) = std::env::var("BAND_DISPATCH") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return parse_agent_mode(trimmed)
+                .map(Some)
+                .map_err(|e| format!("{e} (from BAND_DISPATCH env var)"));
+        }
+    }
+    if let Some(v) = read_repo_default_via() {
+        return parse_agent_mode(&v)
+            .map(Some)
+            .map_err(|e| format!("{e} (from .band/config.json workspace.defaultVia)"));
+    }
+    Ok(None)
+}
+
+fn cmd_agents_launch(
+    workspace_id: Option<&str>,
+    agent: Option<&str>,
+    mode: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<CommandResult, String> {
+    let mode = resolve_agent_mode(mode)?;
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
+    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    if let Some(a) = agent {
+        input["agentId"] = serde_json::json!(a);
+    }
+    if let Some(m) = mode {
+        input["mode"] = serde_json::json!(m);
+    }
+    if let Some(p) = prompt {
+        input["prompt"] = serde_json::json!(p);
+    }
+    let data = client.trpc_mutate("agentSessions.launch", &input)?;
+
+    let started_mode = data.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+    let pane = data
+        .get("chatId")
+        .and_then(|v| v.as_str())
+        .or_else(|| data.get("terminalId").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let mut text = format!("{started_mode}\t{pane}\n");
+    if let Some(notice) = data.get("notice").and_then(|v| v.as_str()) {
+        text = format!("{text}note: {notice}\n");
+    }
+    Ok(CommandResult { text, json: data })
+}
+
 // --- Terminal commands ---
 
 fn cmd_terminal_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
@@ -1351,6 +1946,22 @@ fn cmd_terminal_kill(terminal_id: Option<&str>) -> Result<CommandResult, String>
     Ok(CommandResult {
         text: format!("Terminal {terminal_id} killed\n"),
         json: serde_json::json!({"ok": true, "terminalId": terminal_id}),
+    })
+}
+
+fn cmd_terminal_restart_daemon() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let result = client.trpc_mutate("terminal.restartDaemon", &serde_json::json!({}))?;
+    let killed_count = result
+        .get("killedCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    Ok(CommandResult {
+        text: format!(
+            "Terminal daemon restarted; ended {killed_count} terminal session(s). Sessions from a previous version of Band are kept.\n"
+        ),
+        json: serde_json::json!({"ok": true, "killedCount": killed_count}),
     })
 }
 
@@ -1697,6 +2308,7 @@ fn cmd_cronjobs_create(
     cron: &str,
     scope: &str,
     workspace_id: Option<&str>,
+    via: Option<&str>,
     disabled: bool,
 ) -> Result<CommandResult, String> {
     if scope != "project" && scope != "workspace" {
@@ -1706,13 +2318,23 @@ fn cmd_cronjobs_create(
         return Err("--workspace-id is required when scope is 'workspace'".to_string());
     }
 
-    let client = api::ApiClient::from_settings()?;
+    // Read settings once and share the snapshot between the API client (port +
+    // auth token) and the dispatch-target resolver — same pattern as
+    // `cmd_workspaces_create`. A cronjob always carries a prompt, so we always
+    // resolve `via` through the precedence chain: a cron created from a chat
+    // agent (BAND_DISPATCH=chat) defaults to chat, one from a terminal
+    // (BAND_DISPATCH=terminal) defaults to terminal (issue #581).
+    let settings = state::load_settings()?;
+    let client = api::ApiClient::from_loaded_settings(settings.clone());
+    let resolved_via = resolve_dispatch_target(via, &settings)?;
+
     let mut input = serde_json::json!({
         "key": key,
         "name": name,
         "prompt": prompt,
         "cronExpression": cron,
         "scope": scope,
+        "via": resolved_via,
         "enabled": !disabled,
     });
     if let Some(ws) = workspace_id {
@@ -1788,15 +2410,39 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
         &serde_json::json!({"key": key, "id": id}),
     )?;
 
-    let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+    // The server echoes the dispatch it actually used (issue #581). A
+    // via="terminal" job returns a `terminalId` (and no task/chat); a via="chat"
+    // job — including a terminal job whose agent has no vendor CLI and fell back
+    // — returns `taskId`/`chatId`.
     let workspace_id = data
         .get("workspaceId")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let via = data.get("via").and_then(|v| v.as_str()).unwrap_or("chat");
 
+    if via == "terminal" {
+        let terminal_id = data
+            .get("terminalId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        return Ok(CommandResult {
+            text: format!("{terminal_id}\n"),
+            json: serde_json::json!({
+                "via": "terminal",
+                "terminalId": terminal_id,
+                "workspaceId": workspace_id,
+            }),
+        });
+    }
+
+    let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
     Ok(CommandResult {
         text: format!("{task_id}\n"),
-        json: serde_json::json!({"taskId": task_id, "workspaceId": workspace_id}),
+        json: serde_json::json!({
+            "via": "chat",
+            "taskId": task_id,
+            "workspaceId": workspace_id,
+        }),
     })
 }
 
@@ -1958,10 +2604,189 @@ fn cmd_tunnel_stop() -> Result<CommandResult, String> {
     })
 }
 
+// --- Open command ---
+
+/// Split a `path:line[:column]` / `path:line-lineEnd` suffix off the tail
+/// of a user-supplied file argument. Mirrors `parseFileLocation` in
+/// `packages/dashboard-core/src/lib/file-location.ts` — the server speaks
+/// the same syntax on the wire, but we have to strip it before resolving
+/// the path against the filesystem because a colon in the middle of a
+/// real Unix filename is rare-but-legal.
+///
+/// Returns `(filePath, line, lineEnd, column)`. Numeric components are
+/// `None` when the input doesn't carry that piece.
+fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u32>) {
+    // Try :line-lineEnd
+    if let Some(idx) = raw.rfind(':') {
+        let tail = &raw[idx + 1..];
+        if let Some(dash) = tail.find('-') {
+            let (a, b) = (&tail[..dash], &tail[dash + 1..]);
+            if let (Ok(line), Ok(end)) = (a.parse::<u32>(), b.parse::<u32>()) {
+                // Reject inverted ranges like `:10-5` — letting them through
+                // would forward a backwards `(line=10, lineEnd=5)` pair to
+                // the server, which round-trips through `formatFileLocation`
+                // and reaches the editor as a malformed selection. Falls
+                // through to the other suffix branches; none of them match
+                // a `digit-digit` tail, so the suffix is treated as part of
+                // the filename and the server returns a clean "File not
+                // found" error.
+                if line > 0 && end > 0 && line <= end {
+                    return (raw[..idx].to_string(), Some(line), Some(end), None);
+                }
+            }
+        }
+    }
+
+    // Try :line:column (two trailing numeric components).
+    //
+    // The `> 0` guards match the server's `z.number().int().positive()`
+    // validators — 1-based, no zero. This means `file.rs:42:0` /
+    // `file.rs:0` / `file.rs:0:5` deliberately fall through every
+    // suffix branch and the raw colon-string ends up as the filename.
+    // The server then surfaces a clean "File not found" rather than
+    // silently treating `:0` as "no column" or "no line." It's a
+    // surprising edge case for the user but the alternative —
+    // accepting zero as a sentinel — would let a typo silently
+    // suppress positioning. Errs on the side of visibility.
+    // `rsplitn` walks right-to-left, so name the bindings to match the
+    // iterator order (rightmost = col, middle = line, head = path).
+    // Otherwise a future reader skimming `last`/`middle`/`head`
+    // left-to-right will swap line and col in their mental model.
+    let mut parts = raw.rsplitn(3, ':');
+    let rightmost = parts.next();
+    let middle = parts.next();
+    let head = parts.next();
+    if let (Some(head), Some(middle), Some(rightmost)) = (head, middle, rightmost) {
+        if let (Ok(line), Ok(col)) = (middle.parse::<u32>(), rightmost.parse::<u32>()) {
+            if line > 0 && col > 0 {
+                return (head.to_string(), Some(line), None, Some(col));
+            }
+        }
+    }
+
+    // Try :line (single trailing numeric component). Same `> 0`
+    // policy as above.
+    //
+    // The `!contains(':')` guard on the head is load-bearing: without
+    // it, an input like `file.rs:0:5` that fails the `:line:col` guard
+    // above would re-enter this branch, find the final `:5`, parse 5
+    // as the line, and return `path="file.rs:0", line=5` — which the
+    // server then surfaces as a confusing "File not found: file.rs:0".
+    // The guard skips this branch whenever a colon survives in the
+    // candidate path, so unmatched colon-suffix inputs keep the full
+    // raw string as the filename.
+    if let Some(idx) = raw.rfind(':') {
+        let head = &raw[..idx];
+        let tail = &raw[idx + 1..];
+        if !head.contains(':') {
+            if let Ok(line) = tail.parse::<u32>() {
+                if line > 0 {
+                    return (head.to_string(), Some(line), None, None);
+                }
+            }
+        }
+    }
+
+    (raw.to_string(), None, None, None)
+}
+
+fn cmd_open(
+    file_path: &str,
+    workspace: Option<&str>,
+    focus: bool,
+) -> Result<CommandResult, String> {
+    let (path_only, line, line_end, column) = split_file_location(file_path);
+    if path_only.is_empty() {
+        return Err("File path is empty".to_string());
+    }
+
+    // Resolve relative paths against cwd so the server sees an absolute
+    // path it can validate against the workspace root. Absolute paths are
+    // passed through unchanged.
+    let resolved: std::path::PathBuf = if std::path::Path::new(&path_only).is_absolute() {
+        std::path::PathBuf::from(&path_only)
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("Failed to read current directory: {e}"))?;
+        cwd.join(&path_only)
+    };
+    // Canonicalize when possible so the server sees the real on-disk path
+    // (e.g. resolves `./foo` and `..`). When the file doesn't exist yet,
+    // fall back to the joined path so the server can produce a clear
+    // "file not found" error rather than a generic IO failure here.
+    let absolute = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+    let absolute_str = absolute.to_string_lossy().into_owned();
+
+    let client = api::ApiClient::from_settings()?;
+
+    let mut input = serde_json::json!({
+        "filePath": absolute_str,
+        "focus": focus,
+    });
+    if let Some(ws) = workspace {
+        input["workspaceId"] = serde_json::json!(ws);
+    }
+    if let Some(line) = line {
+        input["line"] = serde_json::json!(line);
+    }
+    if let Some(end) = line_end {
+        input["lineEnd"] = serde_json::json!(end);
+    }
+    if let Some(col) = column {
+        input["column"] = serde_json::json!(col);
+    }
+
+    let data = client.trpc_mutate("editor.openFile", &input)?;
+    // Surface a clear error rather than printing "Opened <path> in " if
+    // the server's response shape ever drifts — the three fields below
+    // are part of the editor.openFile contract; an empty string here
+    // would be a silent bug.
+    let workspace_id = data
+        .get("workspaceId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "server response missing workspaceId".to_string())?;
+    let resolved_path = data
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "server response missing filePath".to_string())?;
+    let external = data
+        .get("external")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "server response missing external".to_string())?;
+
+    let where_label = if external {
+        format!("{workspace_id} (external)")
+    } else {
+        workspace_id.to_string()
+    };
+
+    Ok(CommandResult {
+        text: format!("Opened {resolved_path} in {where_label}\n"),
+        json: serde_json::json!({
+            "ok": true,
+            "workspaceId": workspace_id,
+            "filePath": resolved_path,
+            "external": external,
+        }),
+    })
+}
+
 // --- Notify command ---
 
 fn cmd_notify() -> Result<CommandResult, String> {
     use std::io::Read;
+
+    // The CLI is intentionally agent-agnostic: it forwards the raw hook
+    // payload to the server and lets the server dispatch to the relevant
+    // coding-agent adapter to decide the workspace status. Adding hook
+    // support for a new agent therefore never requires changing this command.
+
+    let ok = || {
+        Ok(CommandResult {
+            text: String::new(),
+            json: serde_json::json!({"ok": true}),
+        })
+    };
 
     let mut input = String::new();
     std::io::stdin()
@@ -1971,24 +2796,9 @@ fn cmd_notify() -> Result<CommandResult, String> {
     let payload: serde_json::Value = serde_json::from_str(&input)
         .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
 
-    let hook_event = payload
-        .get("hook_event_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let tool_name = payload
-        .get("tool_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let agent_status = match hook_event {
-        "Stop" => "needs_attention",
-        "PreToolUse" if tool_name == "AskUserQuestion" || tool_name == "ExitPlanMode" => {
-            "needs_attention"
-        }
-        _ => "working",
-    };
-
+    // `cwd` tells the server which workspace this notification is for — that's
+    // about routing, not about interpreting the agent's behavior. Prefer the
+    // payload's cwd (agents include it), falling back to the process cwd.
     let cwd = payload
         .get("cwd")
         .and_then(|v| v.as_str())
@@ -2001,52 +2811,20 @@ fn cmd_notify() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     // All API calls for notify are fire-and-forget — fail silently
-    // because this runs from git hooks and must not break git workflows
+    // because this runs from agent hooks and must not break the agent.
     let Ok(client) = api::ApiClient::from_settings() else {
-        return Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        });
+        return ok();
     };
 
-    // Resolve CWD to workspace ID
-    let resolve_result = client.trpc_query("statuses.resolve", &serde_json::json!({ "cwd": cwd }));
-    let workspace_id = match resolve_result {
-        Ok(data) => data
-            .get("workspaceId")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        Err(_) => {
-            return Ok(CommandResult {
-                text: String::new(),
-                json: serde_json::json!({"ok": true}),
-            });
-        }
-    };
-
-    let Some(workspace_id) = workspace_id else {
-        return Ok(CommandResult {
-            text: String::new(),
-            json: serde_json::json!({"ok": true}),
-        });
-    };
-
-    // Update status via API
     let _ = client.trpc_mutate(
-        "statuses.update",
+        "statuses.notify",
         &serde_json::json!({
-            "workspaceId": workspace_id,
-            "agent": {
-                "status": agent_status,
-                "lastActivity": chrono_now(),
-            },
+            "cwd": cwd,
+            "payload": payload,
         }),
     );
 
-    Ok(CommandResult {
-        text: String::new(),
-        json: serde_json::json!({"ok": true}),
-    })
+    ok()
 }
 
 // --- Table formatting ---
@@ -2141,21 +2919,21 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
+                {"name": "--via", "type": "string", "required": false, "description": "Where to dispatch --prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a PTY). Defaults to 'terminal' from the CLI."},
             ],
-            "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
+            "notes": "Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\n**Dispatch target (`--via`, issue #551).** With `--prompt`, the prompt is dispatched to either:\n- `terminal` (CLI default) — spawns the vendor CLI in a fresh terminal pane with the prompt as the first positional argument (cmux-style: `claude \"<prompt>\"`, `codex \"<prompt>\"`, …). Returns a `terminalId` in the JSON output.\n- `chat` — submits a streaming task to the workspace's chat pane (the web UI default).\n\nPrecedence, highest first: `--via` flag → `BAND_DISPATCH` env var → `.band/config.json` `workspace.defaultVia` → `~/.band/settings.json` `cli.defaultVia` → `terminal`.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n\n# Force chat dispatch when terminal is the user-level default\nband workspaces create my-app feat/auth --prompt \"...\" --via chat\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
         serde_json::json!({
             "name": "workspaces remove",
             "description": "Remove a workspace (git worktree + state cleanup)",
             "parameters": [
                 {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
-                {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
+                {"name": "name", "type": "string", "required": true, "positional": true, "description": "Workspace name (the branch it was created on — its stable identity)"},
             ],
-            "notes": "Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files."
+            "notes": "Runs the `.band/config.json` `teardown` command in a terminal tab of the workspace first and waits for it (up to 60s; a failure does not stop the removal). Cleans up all associated files."
         }),
         serde_json::json!({
             "name": "settings",
@@ -2199,6 +2977,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--cron", "type": "string", "required": true, "description": "Cron expression (e.g. \"0 */6 * * *\")"},
                 {"name": "--scope", "type": "string", "required": false, "description": "Scope: project (default) or workspace"},
                 {"name": "--workspace-id", "type": "string", "required": false, "description": "Workspace ID (required when scope is workspace)"},
+                {"name": "--via", "type": "string", "required": false, "description": "Where each fire dispatches the prompt: 'chat' (chat pane) or 'terminal' (vendor CLI in a fresh self-closing PTY). Defaults via the same precedence as 'workspaces create' (--via > BAND_DISPATCH > config > settings > terminal)."},
                 {"name": "--disabled", "type": "boolean", "required": false, "description": "Create the job in disabled state"},
             ]
         }),
@@ -2237,7 +3016,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS` (tab-separated table).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\"}]}`"
+            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
         }),
         serde_json::json!({
             "name": "chats create",
@@ -2248,8 +3027,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model override"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Mode (e.g. 'plan', 'edit')"},
+                {"name": "--label", "type": "string", "required": false, "repeatable": true, "description": "Label in the form `key=value` (repeatable). Keys with the reserved `band:` prefix are rejected."},
             ],
-            "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\"}}`"
+            "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\", \"labels\": {\"k\": \"v\"}}}`"
         }),
         serde_json::json!({
             "name": "chats send",
@@ -2258,7 +3038,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the workspace's active chat panel)"},
                 {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
                 {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (auto-detected from cwd if omitted)"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
@@ -2288,6 +3067,24 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "chats label",
+            "description": "Add or overwrite labels on a chat pane (additive merge)",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "labels", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more `key=value` pairs"},
+            ],
+            "notes": "Reads the chat's current labels, merges the new pairs in (later wins for duplicate keys, other labels untouched), and persists via `chats.update`. Keys with the reserved `band:` prefix are rejected by the server. Two callers labeling the same chat concurrently can race; intended for single-user workflows.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update."
+        }),
+        serde_json::json!({
+            "name": "chats unlabel",
+            "description": "Remove labels from a chat pane by key",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "keys", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more label keys to remove"},
+            ],
+            "notes": "Reads the chat's current labels, drops the listed keys (unknown keys are ignored), and persists via `chats.update`. Other labels are preserved.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update."
         }),
         serde_json::json!({
             "name": "browsers list",
@@ -2331,6 +3128,25 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Removes the browser tab and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "agents list",
+            "description": "List the running agent sessions of a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+            ],
+            "notes": "An agent session is one run of a coding agent: `gui` in a chat pane, `tui` as the agent's CLI in a terminal. Ended sessions are not listed.\nText output: `SESSION ID\\tAGENT\\tMODE\\tSTATE\\tPANE\\tPROVIDER SESSION` (tab-separated table). PANE is the chat ID for gui sessions and the terminal ID for tui sessions.\nJSON output: `{\"agentSessions\": [{\"id\": \"...\", \"workspaceId\": \"...\", \"agentDefinitionId\": \"...\", \"providerSessionId\": \"...\" | null, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\" | null, \"terminalId\": \"...\" | null, \"state\": \"starting\" | \"running\", \"createdAt\": N, \"updatedAt\": N}]}`"
+        }),
+        serde_json::json!({
+            "name": "agents launch",
+            "description": "Start a coding agent as a chat (gui) or as its CLI in a terminal (tui)",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID from settings (default agent if omitted)"},
+                {"name": "--mode", "type": "string", "required": false, "description": "gui (chat) or tui (terminal); chat / terminal also accepted. Falls back to BAND_DISPATCH, then .band/config.json workspace.defaultVia, then the server's agents.defaultMode"},
+                {"name": "--prompt", "type": "string", "required": false, "description": "First prompt for the agent"},
+            ],
+            "notes": "`gui` opens a chat pane and submits the prompt to the agent. `tui` opens a terminal running the agent's CLI (`claude \"<prompt>\"`, `codex \"<prompt>\"`, ...). Mode precedence, highest first: `--mode` → `BAND_DISPATCH` env var (set in every Band terminal and chat agent) → `.band/config.json` `workspace.defaultVia` → the server's `agents.defaultMode` setting. An agent with no terminal mode (Cursor CLI) starts as a chat, and the output carries a notice.\nText output: `<mode>\\t<chat or terminal ID>`, plus a `note:` line after a fallback.\nJSON output: `{\"agentSession\": {...}, \"mode\": \"gui\" | \"tui\", \"chatId\": \"...\", \"terminalId\": \"...\", \"notice\": \"...\"}` (chatId for gui, terminalId for tui, notice only after a fallback).\nExample: band agents launch --agent codex --mode tui --prompt \"Fix the failing test\""
         }),
         serde_json::json!({
             "name": "terminals list",
@@ -2386,10 +3202,26 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
         }),
         serde_json::json!({
-            "name": "notify",
-            "description": "Receive hook notifications from Claude Code (reads JSON from stdin)",
+            "name": "terminals restart-daemon",
+            "description": "Restart the terminal daemon, ending every terminal it hosts",
             "parameters": [],
-            "notes": "Not called directly — registered as a Claude Code hook by the Band dashboard."
+            "notes": "Ends every terminal hosted by the current-build terminal daemon; panes show the process exited and can be reopened, with their scrollback and working directory restored. Sessions from a previous version of Band, on a retired daemon, are left running."
+        }),
+        serde_json::json!({
+            "name": "open",
+            "description": "Open a file in the active Band workspace's editor pane",
+            "parameters": [
+                {"name": "file_path", "type": "string", "required": true, "positional": true, "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'."},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (overrides the dashboard's active workspace)"},
+                {"name": "--no-focus", "type": "boolean", "required": false, "description": "Don't raise the dashboard window to the foreground after opening"},
+            ],
+            "notes": "Opens the file in the dashboard's currently focused workspace. When `--workspace` is omitted, the server uses the workspace most recently focused in the Band dashboard — exits non-zero if no workspace is active. Relative paths are resolved against the current working directory. Paths inside the workspace open as normal editor tabs; paths outside any workspace root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever workspace the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-workspace fallback\nband open src/main.rs --workspace my-app/feat/auth\n\n# An out-of-workspace file opens as an external tab (workspace-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
+        }),
+        serde_json::json!({
+            "name": "notify",
+            "description": "Receive coding-agent hook notifications (reads JSON from stdin)",
+            "parameters": [],
+            "notes": "Not called directly — registered as a coding-agent hook by the Band dashboard. Forwards the raw payload to the server, which dispatches to the agent's adapter to derive the workspace status."
         }),
         serde_json::json!({
             "name": "schema",
@@ -2399,12 +3231,13 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             ]
         }),
         serde_json::json!({
-            "name": "generate-skills",
-            "description": "Generate SKILL.md files from schema and registry",
+            "name": "skills install",
+            "description": "Install (or refresh) skills into ~/.agents/skills and symlink each detected coding agent's skills/ folder",
             "parameters": [
-                {"name": "--output-dir", "type": "string", "required": false, "description": "Output directory for generated skills (default: skills/)"},
-                {"name": "--filter", "type": "string", "required": false, "description": "Filter skills by name (substring match)"},
-            ]
+                {"name": "--home", "type": "string", "required": false, "description": "Override the destination home dir (advanced; mostly for tests). Defaults to $HOME."},
+                {"name": "--filter", "type": "string", "required": false, "description": "Filter which skills to install by name (substring match)"},
+            ],
+            "notes": "Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir)."
         }),
     ];
 
@@ -2417,13 +3250,4 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
     } else {
         Ok(serde_json::json!({"commands": commands}))
     }
-}
-
-/// Simple Unix timestamp without pulling in chrono crate.
-pub(crate) fn chrono_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", dur.as_secs())
 }

@@ -1,155 +1,123 @@
-import { rmSync } from "node:fs";
+/**
+ * Session-history dropdown against the real server (issue #648).
+ *
+ * Past sessions come from the agent over the Agent Client Protocol: the
+ * dropdown lists them with `session/list`, and picking one attaches the chat
+ * to it, which replays it with `session/load` (or reads it back from Band's
+ * own event log when Band recorded it). The ACP stub agent
+ * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub; it keeps
+ * its sessions in the test's tmp home, so they survive the agent process.
+ *
+ * What's covered here:
+ *
+ *   1. Empty state ("No sessions yet") when the agent has no sessions for
+ *      the workspace.
+ *   2. After a real message, the session shows up in the dropdown under
+ *      its first prompt; "New session" clears the chat to the empty state;
+ *      picking the past session brings its messages back.
+ *
+ * Each test uses its own workspace, because the stub filters `session/list`
+ * by working directory, so the tests don't depend on running order.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv } from "./helpers/acp-stub";
 import {
+  cleanupTmpHome,
   createTmpHome,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
   startServer,
 } from "./helpers/server";
-import { createTrpcMock } from "./helpers/trpc-mock";
+import { ChatPanePage } from "./pages/ChatPanePage";
 
-const TOKEN = "e2e-test-token";
+const TOKEN = "e2e-session-history-token";
+const EMPTY_PROJECT = "histempty";
+const FLOW_PROJECT = "histflow";
+
+test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [] });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
-  server = await startServer({ tmpHome });
+
+  const projects = [EMPTY_PROJECT, FLOW_PROJECT].map((name) => {
+    const repoDir = join(tmpHome, name);
+    mkdirSync(repoDir, { recursive: true });
+    return {
+      name,
+      path: repoDir,
+      defaultBranch: "main",
+      worktrees: [{ branch: "main", path: repoDir }],
+    };
+  });
+  seedState(tmpHome, { projects });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+  });
+
+  // Fast-completing turn so the session exists before the dropdown opens.
+  server = await startServer({
+    tmpHome,
+    env: acpStubEnv(tmpHome, { turns: [{ steps: [{ say: "noted" }] }] }),
+  });
 });
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+test.describe("Session history dropdown", () => {
+  test("empty state — opening the dropdown on a fresh workspace shows 'No sessions yet'", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId(EMPTY_PROJECT, "main"));
+    await chatPane.waitForReady();
 
-test("sessions load and display in the session list", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.addDockviewMocks();
-  mock.addSupportedAgentMocks();
-  mock.query("sessions.list", {
-    sessions: [
-      {
-        sessionId: "s1",
-        summary: "Fix login bug",
-        lastModified: Date.now() - 60_000 * 5,
-        gitBranch: "fix-login",
-      },
-      {
-        sessionId: "s2",
-        summary: "Add tests",
-        lastModified: Date.now() - 60_000 * 120,
-      },
-    ],
-    supported: true,
+    await chatPane.openSessionHistory();
+
+    // The agent has no sessions for this workspace's directory yet.
+    await expect(chatPane.sessionHistoryEmpty).toBeVisible();
   });
-  await mock.install(page);
 
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  test("a sent message's session is listed, and picking it after 'New session' brings it back", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId(FLOW_PROJECT, "main"));
+    await chatPane.waitForReady();
 
-  // The clock button should be visible since sessions are supported
-  const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
-  await expect(clockButton).toBeVisible();
+    await chatPane.typeMessage("remember this conversation");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage("noted")).toBeVisible();
 
-  // Click the clock button to open the session list
-  await clockButton.click();
+    // "New session" detaches the chat: the conversation clears.
+    await chatPane.openSessionHistory();
+    await chatPane.clickNewSession();
+    await expect(chatPane.emptyConversation).toBeVisible();
+    await expect(chatPane.userMessage("remember this conversation")).toHaveCount(0);
 
-  // Verify session summaries are displayed in the dropdown menu
-  await expect(page.getByRole("menuitem", { name: /Fix login bug/ })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: /Add tests/ })).toBeVisible();
-
-  // Verify git branch badge
-  await expect(page.getByText("fix-login")).toBeVisible();
-
-  // Verify relative times
-  await expect(page.getByText("5m ago")).toBeVisible();
-  await expect(page.getByText("2h ago")).toBeVisible();
-});
-
-test("empty state shows 'No sessions yet' message", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.addDockviewMocks();
-  mock.addSupportedAgentMocks();
-  mock.query("sessions.list", { sessions: [], supported: true });
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-
-  // Open session list
-  const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
-  await expect(clockButton).toBeVisible();
-  await clockButton.click();
-
-  await expect(page.getByText("No sessions yet")).toBeVisible();
-});
-
-test("session toggle is hidden when not supported", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.addDockviewMocks();
-  mock.query("sessions.list", { sessions: [], supported: false });
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-
-  // Wait for the page to settle — the chat prompt input should be visible
-  await expect(page.getByPlaceholder("Type a message")).toBeVisible();
-
-  // The clock button should NOT be present
-  const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
-  await expect(clockButton).not.toBeVisible();
-});
-
-test("selecting a session loads its messages", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.addDockviewMocks();
-  mock.addSupportedAgentMocks();
-  mock.query("sessions.list", {
-    sessions: [
-      {
-        sessionId: "s1",
-        summary: "Fix login bug",
-        lastModified: Date.now() - 60_000,
-      },
-    ],
-    supported: true,
+    // The finished session is listed under its first prompt. Picking it
+    // re-attaches the chat and its messages come back.
+    await chatPane.openSessionHistory();
+    await expect(chatPane.sessionHistoryItem("remember this conversation")).toBeVisible();
+    await chatPane.selectPastSession("remember this conversation");
+    await expect(chatPane.userMessage("remember this conversation")).toBeVisible();
+    await expect(chatPane.assistantMessage("noted")).toBeVisible();
   });
-  mock.query("sessions.messages", () => ({
-    messages: [
-      {
-        role: "user" as const,
-        id: "m1",
-        parts: [{ type: "text" as const, text: "Please fix the login bug" }],
-      },
-      {
-        role: "assistant" as const,
-        id: "m2",
-        parts: [{ type: "text" as const, text: "I found the issue in auth.ts and fixed it." }],
-      },
-    ],
-    firstEventId: null,
-    lastEventId: null,
-    hasMore: false,
-  }));
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
-
-  // Open session list
-  const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
-  await expect(clockButton).toBeVisible();
-  await clockButton.click();
-
-  // Click the session (use menuitem role for DropdownMenuItem)
-  await page.getByRole("menuitem", { name: /Fix login bug/ }).click();
-
-  // Verify historical messages render
-  await expect(page.getByText("Please fix the login bug")).toBeVisible();
-  await expect(page.getByText("I found the issue in auth.ts and fixed it.")).toBeVisible();
 });

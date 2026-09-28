@@ -1,4 +1,3 @@
-import { useAdapter } from "@band-app/dashboard-core";
 import {
   Button,
   Dialog,
@@ -10,6 +9,7 @@ import {
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";
+import { useAdapter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 
 type TunnelStep = "starting" | "connecting" | "ready" | "error";

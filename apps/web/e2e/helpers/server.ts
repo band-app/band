@@ -1,19 +1,33 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { stopTerminalDaemon } from "../../tests/helpers/terminal-daemon";
+import { ACP_STUB_AGENT_PATH } from "./acp-stub";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
-const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/lib/db/migrations");
+const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
 
 export interface ServerHandle {
   url: string;
   home: string;
-  close: () => Promise<void>;
+  /**
+   * Stop the server, then the terminal daemon it may have launched for
+   * `home` (see `stopTerminalDaemon`). Pass `keepTerminalDaemon` to model a
+   * server restart, where the daemon and its shells must survive.
+   */
+  close: (opts?: { keepTerminalDaemon?: boolean }) => Promise<void>;
+  /**
+   * Restart the way a desktop relaunch does: stop this server, leave the
+   * terminal daemon (and every shell in it) running, and boot a new server on
+   * the same home, port and env. The port matters: the page's sockets
+   * reconnect to the original URL.
+   */
+  restart: () => Promise<ServerHandle>;
 }
 
 export function createTmpHome(): string {
@@ -24,12 +38,34 @@ export function createTmpHome(): string {
   return tmp;
 }
 
+/**
+ * Recursively remove a tmp home directory created with `createTmpHome()`.
+ *
+ * Use this in every `afterAll` instead of a bare `rmSync(tmpHome, {
+ * recursive: true, force: true })`. The `maxRetries`/`retryDelay` options
+ * are Node's documented escape hatch for the `ENOTEMPTY` race that fires
+ * when the server process's background subprocesses (du, branch-status
+ * pollers, SQLite WAL flushers) are still writing to the tree as we
+ * walk it bottom-up — see flake reports on issue #508 and the matching
+ * resources / cache-eviction afterAll failures. `rmSync`'s recursive
+ * walker retries on `EBUSY`, `EMFILE`, `ENFILE`, `ENOTEMPTY`, and
+ * `EPERM`, so 10 × 100 ms gives ~1 s of headroom — well within the
+ * window for `du` to wrap up on a small fixture but short enough that a
+ * truly stuck cleanup still fails fast.
+ */
+export function cleanupTmpHome(tmpHome: string): void {
+  rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 interface SeedProject {
   name: string;
   path: string;
   defaultBranch: string;
   label?: string;
-  worktrees: { branch: string; path: string }[];
+  // `name` is the immutable workspace identity — defaults to `branch` (the
+  // create-time invariant). Pass it explicitly to simulate a workspace
+  // whose git branch was switched after creation.
+  worktrees: { name?: string; branch: string; path: string }[];
 }
 
 export function seedState(tmpHome: string, state: { projects: SeedProject[] }): void {
@@ -55,13 +91,32 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
     for (const wt of project.worktrees) {
       sqlite
         .prepare(
-          `INSERT INTO worktrees (project_name, branch, path)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO worktrees (project_name, name, branch, path)
+           VALUES (?, ?, ?, ?)`,
         )
-        .run(project.name, wt.branch, wt.path);
+        .run(project.name, wt.name ?? wt.branch, wt.branch, wt.path);
     }
   }
   sqlite.close();
+}
+
+/**
+ * Delete every client-state row (the UI state the dashboard keeps on the
+ * server: center tabs, panel widths, label memory, …). Before client state
+ * moved to the server it lived in each browser context's localStorage, so a
+ * spec whose tests share one server got fresh UI state per test for free.
+ * Call this in `beforeEach` to keep that: one test's collapsed sidebar or
+ * open tabs must not show up in the next test's new browser context. Safe
+ * while the server runs, which reads the table on every request.
+ */
+export function resetClientState(tmpHome: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite.exec("DELETE FROM client_state");
+  } finally {
+    sqlite.close();
+  }
 }
 
 export function seedSettings(tmpHome: string, settings: object): void {
@@ -82,15 +137,31 @@ export function getRandomPort(): Promise<number> {
 }
 
 export async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
+  opts: { tmpHome?: string; env?: Record<string, string>; port?: number } = {},
 ): Promise<ServerHandle> {
   const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
+  // Allow pinning the port so a test can restart the server on the SAME
+  // address — the client's `EventSource` auto-reconnects to the original
+  // URL, so a fresh random port would orphan the connection. Used by the
+  // stuck-thinking-indicator reconnect spec, which kills and re-spawns the
+  // server to model a lost `task-completed` (in-memory buffer wiped on
+  // restart). Defaults to an OS-assigned random port for isolation.
+  const port = opts.port ?? (await getRandomPort());
 
   return new Promise((resolve, reject) => {
     // The production bundle runs under Node (see apps/web/README.md) and
     // uses Node's built-in `node:sqlite` for storage. Vitest integration
     // tests use the same spawn pattern via `tests/helpers/server-runtime.ts`.
+    //
+    // `detached: true` puts the child in its own process group. The
+    // server spawns grandchildren (`du` for resource accounting, `git`
+    // for the branch-status poller, terminal PTYs, …) and a plain
+    // `child.kill('SIGTERM')` only signals the direct child — the
+    // grandchildren are re-parented to init and keep writing to the
+    // tmp home as we try to `rmSync` it, producing the `ENOTEMPTY`
+    // race documented on the cleanup helper above. Putting the child
+    // in its own group lets us signal the WHOLE TREE via the negative
+    // pid trick in `close()` below.
     const child = spawn("node", ["dist/start-server.mjs"], {
       cwd: PROJECT_ROOT,
       env: {
@@ -98,17 +169,60 @@ export async function startServer(
         HOME: home,
         PORT: String(port),
         NODE_ENV: "production",
+        // Every coding agent runs as an ACP subprocess (issue #648). Point
+        // them all at the scripted stub so no spec starts a real `claude` /
+        // `codex` adapter: the boot-time model refresh probes every
+        // configured agent, chat or not. Specs that script replies pass
+        // `acpStubEnv()` from `./acp-stub` in `opts.env`.
+        BAND_TEST_ACP_AGENT: ACP_STUB_AGENT_PATH,
         ...opts.env,
       },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     let stderr = "";
     let settled = false;
 
+    // Signal the whole process group, not just the direct child, so
+    // grandchildren spawned by the server (du, git, terminal PTYs,
+    // language servers) are torn down before `rmSync(tmpHome)` runs.
+    // `process.kill(-pgid, signal)` with a NEGATIVE pid targets the
+    // group. Falls back to a plain `child.kill` if the pid is missing
+    // (process already exited / never started). Wrapped in try/catch:
+    // a benign ESRCH means "group already gone" — fine to ignore.
+    const killGroup = (signal: NodeJS.Signals) => {
+      const pid = child.pid;
+      try {
+        if (typeof pid === "number") process.kill(-pid, signal);
+        else child.kill(signal);
+      } catch {
+        // group already torn down
+      }
+    };
+
     child.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
+
+    const close = async (closeOpts?: { keepTerminalDaemon?: boolean }) => {
+      await new Promise<void>((r) => {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          r();
+          return;
+        }
+        // Hard backstop: if the group hasn't drained in 5 s,
+        // escalate to SIGKILL so test teardown can't hang
+        // forever waiting on a stuck PTY or language server.
+        const fallback = setTimeout(() => killGroup("SIGKILL"), 5_000);
+        child.on("exit", () => {
+          clearTimeout(fallback);
+          r();
+        });
+        killGroup("SIGTERM");
+      });
+      if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(home);
+    };
 
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
@@ -117,11 +231,11 @@ export async function startServer(
         resolve({
           url: `http://127.0.0.1:${port}`,
           home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
+          close,
+          restart: async () => {
+            await close({ keepTerminalDaemon: true });
+            return startServer({ ...opts, tmpHome: home, port });
+          },
         });
       }
     });
@@ -143,7 +257,7 @@ export async function startServer(
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill("SIGTERM");
+        killGroup("SIGTERM");
         reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
       }
     }, 15_000);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "../src/lib/fuzzy-score";
+import { fuzzyScore, scoreFiles } from "../src/server/services/_utils/fuzzy-score";
 
 // ---------------------------------------------------------------------------
 // Helper: given a query and a list of file paths, return them sorted by score
@@ -71,11 +71,21 @@ describe("fuzzyScore – consecutive matches", () => {
 // 2. Start-of-word / segment matches score higher
 // ---------------------------------------------------------------------------
 describe("fuzzyScore – word-start bonus", () => {
-  it("match at word boundary beats match mid-word", () => {
-    // 'r' at the start of 'router' (after /) vs 'r' buried inside 'error'
-    const wordStart = fuzzyScore("rts", "src/router.ts")!;
-    const midWord = fuzzyScore("rts", "src/errors.ts")!;
-    expect(wordStart).toBeGreaterThan(midWord);
+  // The previous hand-rolled DP scorer weighted a `r` at the start of a
+  // segment (e.g. `router` after `/`) above a consecutive `ts` run, so
+  // `src/router.ts` outscored `src/errors.ts` for query `rts`. fzf-for-js
+  // reverses that bias — its v2 algorithm rewards consecutive runs more
+  // aggressively than word-start boundaries, so `src/errors.ts` (which
+  // has `ts` consecutive at the end while `router.ts` does not — the
+  // matched `t` in router falls inside `router` before the `.ts`) now
+  // outscores `src/router.ts`. This matches the upstream fzf CLI's
+  // behaviour, which is the de facto fuzzy-matching reference. Test
+  // updated intentionally as part of issue #530 — see the file header
+  // for context.
+  it("consecutive runs are rewarded over word boundaries (fzf v2 weighting)", () => {
+    const consecutive = fuzzyScore("rts", "src/errors.ts")!;
+    const noConsecutive = fuzzyScore("rts", "src/router.ts")!;
+    expect(consecutive).toBeGreaterThan(noConsecutive);
   });
 
   it("camelCase boundaries count as word starts", () => {
@@ -118,8 +128,8 @@ describe("fuzzyScore – filename vs directory weight", () => {
   });
 
   it("full filename match beats partial directory match even for short queries", () => {
-    const filename = fuzzyScore("git", "src/lib/git.ts")!;
-    const directory = fuzzyScore("git", "git/src/lib.ts")!;
+    const filename = fuzzyScore("git", "src/server/infra/git/git-client.ts")!;
+    const directory = fuzzyScore("git", "git/src/services.ts")!;
     expect(filename).toBeGreaterThan(directory);
   });
 });
@@ -129,14 +139,14 @@ describe("fuzzyScore – filename vs directory weight", () => {
 // ---------------------------------------------------------------------------
 describe("fuzzyScore – real-world ranking", () => {
   const FILES = [
-    "apps/web/src/lib/fuzzy-score.ts",
-    "apps/web/src/trpc/router.ts",
-    "apps/web/src/lib/db/schema.ts",
-    "packages/dashboard-core/src/components/QuickOpenDialog.tsx",
-    "apps/web/src/lib/state.ts",
-    "apps/web/src/lib/git.ts",
+    "apps/web/src/server/services/fuzzy-score.ts",
+    "apps/web/src/server/api/router.ts",
+    "apps/web/src/server/infra/db/schema.ts",
+    "apps/web/src/dashboard/components/QuickOpenDialog.tsx",
+    "apps/web/src/server/services/state.ts",
+    "apps/web/src/server/infra/git/git-client.ts",
     "apps/web/tests/trpc.test.ts",
-    "apps/web/src/lib/workspace.ts",
+    "apps/web/src/server/services/workspace.ts",
     "schema.prisma",
     "src/old/scattered_chars_hema.ts",
   ];
@@ -148,33 +158,74 @@ describe("fuzzyScore – real-world ranking", () => {
 
   it("'schema' ranks db/schema.ts above scattered matches", () => {
     const result = ranked("schema", FILES);
-    const schemaIdx = result.indexOf("apps/web/src/lib/db/schema.ts");
+    const schemaIdx = result.indexOf("apps/web/src/server/infra/db/schema.ts");
     const scatteredIdx = result.indexOf("src/old/scattered_chars_hema.ts");
     expect(schemaIdx).toBeLessThan(scatteredIdx);
   });
 
   it("'router' ranks router.ts first", () => {
     const result = ranked("router", FILES);
-    expect(result[0]).toBe("apps/web/src/trpc/router.ts");
+    expect(result[0]).toBe("apps/web/src/server/api/router.ts");
   });
 
   it("'qod' ranks QuickOpenDialog.tsx first", () => {
     const result = ranked("qod", FILES);
-    expect(result[0]).toBe("packages/dashboard-core/src/components/QuickOpenDialog.tsx");
+    expect(result[0]).toBe("apps/web/src/dashboard/components/QuickOpenDialog.tsx");
   });
 
-  it("'git' ranks git.ts first", () => {
+  it("'git' ranks the git client first", () => {
     const result = ranked("git", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/git.ts");
+    expect(result[0]).toBe("apps/web/src/server/infra/git/git-client.ts");
   });
 
   it("'state' ranks state.ts first", () => {
     const result = ranked("state", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/state.ts");
+    expect(result[0]).toBe("apps/web/src/server/services/state.ts");
   });
 
   it("'fz' ranks fuzzy-score.ts first", () => {
     const result = ranked("fz", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/fuzzy-score.ts");
+    expect(result[0]).toBe("apps/web/src/server/services/fuzzy-score.ts");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: substring matches beat scattered subsequence matches.
+//
+// Issue #530 reported the Cmd+P picker ranking files with the letters
+// c-o-m-p-o-s-i-t-e scattered across them above files whose path
+// contained `composite` as a literal substring. With the previous hand-
+// rolled DP scorer combined with the 50-result cap, the wanted file
+// (`flow-source-composite.ts`) could be pushed off the result list
+// entirely. fzf v2's consecutive-run bonus makes the substring file the
+// clear winner; this test pins the new behaviour so future scorer swaps
+// can't regress it.
+// ---------------------------------------------------------------------------
+describe("fuzzyScore – substring beats scattered subsequence (issue #530)", () => {
+  it("'composite' ranks flow-source-composite.ts above scattered matches", () => {
+    const FILES = [
+      // Substring match — `composite` appears as a literal consecutive run.
+      "src/flow/flow-source-composite.ts",
+      // Scattered matches — every char appears in order but spread across
+      // a longer path. These are the kind of "noise" files that pushed
+      // the wanted result off the bottom of the list in issue #530.
+      "src/compose/option/site/setup.ts",
+      "src/comparison/positive/site.ts",
+      "src/components/positions/situational/test.ts",
+    ];
+    const result = ranked("composite", FILES);
+    expect(result[0]).toBe("src/flow/flow-source-composite.ts");
+  });
+});
+
+describe("scoreFiles – ordering", () => {
+  it("orders equal-score results by path, whatever order the corpus arrives in", () => {
+    // Same-length names that score identically for "report". The corpus order
+    // comes from ripgrep, which is not stable between runs on Linux; results
+    // must not depend on it.
+    const files = ["reports-07.ts", "reports-02.ts", "reports-15.ts", "reports-00.ts"];
+    const expected = ["reports-00.ts", "reports-02.ts", "reports-07.ts", "reports-15.ts"];
+    expect(scoreFiles("report", files).map((r) => r.file)).toEqual(expected);
+    expect(scoreFiles("report", [...files].reverse()).map((r) => r.file)).toEqual(expected);
   });
 });

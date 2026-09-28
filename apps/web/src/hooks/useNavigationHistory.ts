@@ -1,19 +1,22 @@
-import type { PlatformCapabilities } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PlatformCapabilities } from "@/dashboard";
 
 /**
- * Browser-like workspace history for Cmd+[ (back) and Cmd+] (forward).
+ * Browser-like workspace history powering the title-bar back/forward buttons.
  *
  * Tracks which workspaces the user visits in a stack with a cursor.
  * Navigating back/forward moves the cursor without pushing a new entry.
  * Any normal workspace visit truncates the forward stack — exactly like
  * a browser.
  *
- * Uses `capabilities.getWorkspaceHref()` when navigating so the user
- * lands on the last-viewed tab inside each workspace.
+ * Uses `capabilities.getWorkspaceHref()` to build the destination URL.
+ * Post-#467, that's always the canonical `/workspace/$id` — there is no
+ * per-tab sub-path to restore anymore, since tab state lives in the
+ * mobile layout's local React state and the desktop dockview renders
+ * every panel regardless of URL.
  *
- * Returns the same `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`
+ * Returns the `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`
  * flags so callers can render UI controls (e.g. arrow buttons in the title bar).
  */
 
@@ -107,23 +110,6 @@ export function useNavigationHistory(
       if (href) routerNavigate(href);
     }
   }, [routerNavigate, capabilities]);
-
-  // Global Cmd+[ / Cmd+] listener (capture phase).
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key !== "[" && e.key !== "]") return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === "[") goBack();
-      else goForward();
-    };
-
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [goBack, goForward]);
 
   return {
     goBack,

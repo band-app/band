@@ -1,5 +1,7 @@
-import { useChat } from "@ai-sdk/react";
-import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
+// The chat pane (issue #648): renders one chat's ACP event log. Messages,
+// session settings and requests all come from `useChatSubscription`, which
+// folds the server's event stream through `transcriptReducer`.
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import {
   Badge,
   Button,
@@ -11,15 +13,17 @@ import {
   DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuPortal,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Switch,
   Textarea,
   Tooltip,
   TooltipContent,
@@ -40,41 +44,36 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { UIMessage } from "ai";
-import { getToolName, isToolUIPart } from "ai";
 import {
   Bot,
+  Brain,
+  Check,
   ChevronDown,
   Clock,
   CodeXml,
-  GitBranch,
   GripHorizontal,
   Loader2,
   Plus,
   ScrollText,
   X,
+  Zap,
 } from "lucide-react";
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { TaskChatTransport } from "../lib/task-chat-transport";
+import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
+import type { SessionState } from "../shared/chat-events";
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
   ConversationScrollButton,
 } from "./ai-elements/conversation";
+import { ElicitationForm } from "./ai-elements/elicitation-form";
+import { FileLinkWorkspaceProvider } from "./ai-elements/file-link-components";
 import { FileMentionSuggestions } from "./ai-elements/file-mention-suggestions";
-import { groupMessageParts } from "./ai-elements/group-parts";
 import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
+import { PermissionRequest } from "./ai-elements/permission-request";
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
 import {
   PromptInput,
@@ -85,47 +84,17 @@ import {
 } from "./ai-elements/prompt-input";
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
-import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-state";
-import type { ToolPart } from "./ai-elements/tool";
-import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
-
-const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
-  "input-available",
-  "input-streaming",
-  "approval-requested",
-  "approval-responded",
-]);
-
-const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
-
-function toolPartToItem(part: ToolPart): ToolCallItem {
-  const approval = "approval" in part ? (part.approval as { id?: string } | undefined) : undefined;
-  const toolName = getToolName(part);
-  const displayTitle = "title" in part && typeof part.title === "string" ? part.title : undefined;
-  return {
-    toolCallId: part.toolCallId,
-    toolName,
-    displayTitle,
-    input: part.input,
-    output: part.output,
-    errorText: part.errorText,
-    isError: ERROR_STATES.has(part.state),
-    isInProgress: IN_PROGRESS_STATES.has(part.state),
-    // Interactive tools (AskUserQuestion, ExitPlanMode) use toolCallId as
-    // the approval key since the canUseTool callback in the agent adapter
-    // manages the pending-input lifecycle directly (not through the AI SDK
-    // approval mechanism).
-    approvalId:
-      toolName === "AskUserQuestion" || toolName === "ExitPlanMode"
-        ? part.toolCallId
-        : approval?.id,
-  };
-}
+import type { ChatMessage, Entry } from "./chat/transcript";
+import { useChatSubscription } from "./chat/use-chat-subscription";
+import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
 
 function ThinkingIndicator() {
   return (
-    <div className="mt-2 flex items-center gap-2 text-muted-foreground">
+    <div
+      data-testid="chat-pane__thinking-indicator"
+      className="mt-2 flex items-center gap-2 text-muted-foreground"
+    >
       <Loader2 className="size-4 lg:size-3.5 animate-spin" />
       <span className="text-base lg:text-sm">Thinking...</span>
     </div>
@@ -142,14 +111,17 @@ function SkeletonBar({ widthClass, className }: { widthClass: string; className?
 }
 
 function ConversationSkeleton() {
+  // Skeleton bubbles override the role-scoped `data-testid` that
+  // `Message` stamps by default — locators like
+  // `chatPane.userMessage(text)` should target REAL message bubbles
+  // only, never the loading-state placeholders.
   return (
     <output
       className="flex animate-pulse flex-col gap-6"
       aria-busy="true"
       aria-label="Loading messages"
     >
-      {/* User bubble — right-aligned, narrower */}
-      <Message from="user">
+      <Message from="user" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 py-1">
             <SkeletonBar widthClass="w-48" className="bg-foreground/10" />
@@ -157,9 +129,7 @@ function ConversationSkeleton() {
           </div>
         </MessageContent>
       </Message>
-
-      {/* Assistant bubble — full width, several lines */}
-      <Message from="assistant">
+      <Message from="assistant" data-testid={undefined}>
         <MessageContent>
           <div className="flex flex-col gap-2 pt-1">
             <SkeletonBar widthClass="w-3/4" />
@@ -169,32 +139,9 @@ function ConversationSkeleton() {
           </div>
         </MessageContent>
       </Message>
-
-      {/* A second user/assistant pair for longer-feeling conversations */}
-      <Message from="user">
-        <MessageContent>
-          <div className="flex flex-col gap-2 py-1">
-            <SkeletonBar widthClass="w-40" className="bg-foreground/10" />
-          </div>
-        </MessageContent>
-      </Message>
-
-      <Message from="assistant">
-        <MessageContent>
-          <div className="flex flex-col gap-2 pt-1">
-            <SkeletonBar widthClass="w-2/3" />
-            <SkeletonBar widthClass="w-4/5" />
-            <SkeletonBar widthClass="w-1/2" />
-          </div>
-        </MessageContent>
-      </Message>
     </output>
   );
 }
-
-type UIMessageParts = ReturnType<
-  typeof import("@ai-sdk/react").useChat
->["messages"][number]["parts"];
 
 interface QueuedFilePart {
   mediaType: string;
@@ -202,96 +149,100 @@ interface QueuedFilePart {
   filename?: string;
 }
 
-type QueueSegment = {
-  userPrompt: string | null;
-  userFiles?: QueuedFilePart[];
-  parts: UIMessageParts;
-};
-
-/**
- * Splits an assistant message's parts at `data-prompt` boundaries so each
- * queued task renders as a separate user→assistant pair.
- *
- * Every `data-prompt` becomes a user bubble — they are only emitted for
- * queued messages (never for the initial direct message which is already
- * a real user message in the messages array).
- */
-function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
-  const segments: QueueSegment[] = [];
-  let current: QueueSegment = { userPrompt: null, parts: [] };
-
-  for (const part of parts) {
-    if (part.type === "data-prompt") {
-      // Finish current segment and start a new one
-      segments.push(current);
-      const data = (part as { type: string; data: { text: string; files?: QueuedFilePart[] } })
-        .data;
-      current = {
-        userPrompt: data.text,
-        userFiles: data.files,
-        parts: [],
-      };
-      continue;
-    }
-    // Skip other data-* parts (data-result, data-session) from rendering
-    if (typeof part.type === "string" && part.type.startsWith("data-")) continue;
-    current.parts.push(part);
-  }
-  segments.push(current);
-  return segments;
-}
-
-interface ModelInfo {
+interface Choice {
   id: string;
   name: string;
   description?: string;
-  /** Approximate max input context window in tokens, when known. */
-  contextWindow?: number;
 }
 
-interface AgentGroup {
-  agentId: string;
-  agentType: string;
-  agentLabel: string;
-  models: ModelInfo[];
-  defaultModel?: string;
+type SelectOption = Extract<SessionConfigOption, { type: "select" }>;
+
+function selectChoices(option: SelectOption): Choice[] {
+  return option.options
+    .flatMap((o) => ("group" in o ? o.options : [o]))
+    .map((o) => ({ id: o.value, name: o.name, description: o.description ?? undefined }));
 }
 
-interface UsageData {
-  /** Provider that produced this snapshot. Drives legacy context-size math. */
-  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  reasoningOutputTokens?: number;
-  /** Provider-aware total context tokens (preferred over summing fields). */
-  contextTokens?: number;
-  /** Cumulative processed tokens for the session/thread when available. */
-  totalProcessedTokens?: number;
-  /** Authoritative model context window from the agent SDK. */
-  maxContextTokens?: number;
+function findSelect(session: SessionState | null, category: "model" | "mode") {
+  return session?.configOptions.find(
+    (o): o is SelectOption => o.type === "select" && (o.category === category || o.id === category),
+  );
+}
+
+/**
+ * The model and mode pickers read ACP session config options (category
+ * `model` / `mode`). Agents without them expose the legacy model and mode
+ * state instead; `__legacy_model` / `__legacy_mode` tell the server to use
+ * `session/set_model` / `session/set_mode`.
+ */
+function sessionPickers(session: SessionState | null) {
+  const modelOption = findSelect(session, "model");
+  const modeOption = findSelect(session, "mode");
+  const models: Choice[] = modelOption
+    ? selectChoices(modelOption)
+    : (session?.models?.availableModels ?? []).map((m) => ({
+        id: m.modelId,
+        name: m.name,
+        description: m.description ?? undefined,
+      }));
+  const modes: Choice[] = modeOption
+    ? selectChoices(modeOption)
+    : (session?.modes?.availableModes ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description ?? undefined,
+      }));
+  const rest = (session?.configOptions ?? []).filter(
+    (o): o is SelectOption => o.type === "select" && o !== modelOption && o !== modeOption,
+  );
+  const fast = rest.find(isFastModeOption);
+  const effort = rest.find(
+    (o) => o !== fast && (o.category === "thought_level" || o.id === "effort"),
+  );
+  return {
+    models,
+    model: modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId,
+    modelConfigId: modelOption?.id ?? "__legacy_model",
+    modes,
+    mode: modeOption ? String(modeOption.currentValue) : session?.modes?.currentModeId,
+    modeConfigId: modeOption?.id ?? "__legacy_mode",
+    effort,
+    fast,
+    // Everything else the agent lets the user choose.
+    others: rest.filter((o) => o !== effort && o !== fast),
+  };
+}
+
+/** Fast mode as an on/off select. Band doesn't advertise boolean config
+ *  options, so agents (Claude Code's `fast`) fall back to this shape. */
+function isFastModeOption(option: SelectOption): boolean {
+  if (option.id !== "fast") return false;
+  const values = new Set(selectChoices(option).map((c) => c.id));
+  return values.size === 2 && values.has("off") && values.has("on");
 }
 
 interface ChatViewProps {
   workspaceId: string;
   chatId: string;
   workspaceName: string;
-  supportsSessionListing: boolean;
   initialSessionId?: string;
-  /** True once the parent's sessions.list query has resolved. */
-  sessionQueryDone?: boolean;
-  showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
   onNewSessionRef?: React.MutableRefObject<(() => void) | null>;
-  /** Called when the active session changes (user picks one, or a new one starts). */
-  onActiveSessionChange?: (sessionId: string | undefined) => void;
-  chatKey?: number;
+  /**
+   * Background-notify path: the chat attached to a session on its own
+   * (first message in a new chat). The parent refreshes its tab-title
+   * cache only; it must NOT remount this component.
+   */
+  onSessionDiscovered?: (sessionId: string) => void;
+  /**
+   * User-initiated path: "Select past session" and "New session". The
+   * parent persists the choice and remounts this component so its
+   * subscription opens against the new session.
+   */
+  onSwitchSession?: (sessionId: string | undefined, summary?: string) => Promise<void> | void;
   agentType?: string;
   codingAgentId?: string;
-  /** Called when the user picks a model under a different coding agent. */
-  onSwitchAgent?: (agentId: string) => void;
   visible?: boolean;
   /** Workspace is active (even if the chat tab isn't the focused tab). */
   wsActive?: boolean;
@@ -301,744 +252,208 @@ export function ChatView({
   workspaceId,
   chatId,
   workspaceName,
-  supportsSessionListing,
   initialSessionId,
-  sessionQueryDone = false,
-  showSessionList: _showSessionList,
   onShowSessionListChange,
   onStreamingChange,
   onNewSessionRef,
-  onActiveSessionChange,
-  chatKey = 0,
+  onSessionDiscovered,
+  onSwitchSession,
   agentType,
   codingAgentId,
-  onSwitchAgent,
   visible,
   wsActive,
 }: ChatViewProps) {
-  const sessionIdRef = useRef<string | undefined>(undefined);
-  const lastEventIdRef = useRef<number | undefined>(undefined);
-  const firstEventIdRef = useRef<number | undefined>(undefined);
-  // Index of the first JSONL message currently in `messages`. Used as the
-  // exclusive upper bound for the next "older messages" pagination request.
-  // Set when the server returns history sourced from JSONL (firstEventId is
-  // null). When pagination is buffer-based, this stays undefined.
-  const firstMessageIndexRef = useRef<number | undefined>(undefined);
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
-  // If we have an initialSessionId we're going to call loadMessages() in the
-  // mount effect below — initialize loadingHistory to true so the skeleton
-  // shows on the first render rather than briefly flashing the empty state.
-  const [loadingHistory, setLoadingHistory] = useState(!!initialSessionId);
-  // True once the user explicitly clears the session via "New session". The
-  // `initialSessionId` prop reflects the parent's persisted activeSessionId
-  // and may stay stale for a tick (or longer) after handleNewSession fires,
-  // so we ignore it for skeleton/empty-state decisions once cleared.
+  // True once the user clicks "New session": the still-open subscription
+  // keeps reporting the old session until the parent remounts us.
   const [initialSessionCleared, setInitialSessionCleared] = useState(false);
-  // The session this view is currently on, considering local navigation:
-  //   - activeSessionId once the mount effect / handleSelectSession sets it
-  //   - else the initialSessionId prop, unless the user explicitly cleared
-  // This is what render conditions should consult, not initialSessionId.
-  const currentSessionId =
-    activeSessionId ?? (initialSessionCleared ? undefined : initialSessionId);
-  const [hasMore, setHasMore] = useState(false);
-  const [usage, setUsage] = useState<UsageData | undefined>(undefined);
   const [contextMeterEnabled] = useExperimentalContextMeter();
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
-  // Gate that ensures we run the initial history-load exactly once for a
-  // given (chatKey, initialSessionId) tuple. Distinct from the connect
-  // retry loop, which is allowed to fire multiple times.
-  const initialHistoryLoadedRef = useRef(false);
-  // Mirrors `useChat`'s status so the retry loop can read it without
-  // forcing a re-render of the closure.
-  const statusRef = useRef<"submitted" | "streaming" | "ready" | "error">("ready");
-  // Holds the AbortController for the in-flight reconnect attempt so a new
-  // attempt (or unmount) can cancel the old one cleanly.
-  const connectAbortRef = useRef<AbortController | null>(null);
   const prevVisibleRef = useRef(visible);
+  // Resolved StickToBottom scroll element, surfaced as state so the
+  // scroll-back IntersectionObserver effect re-runs once it's available.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
-  // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
-  // The scroll container may have had zero height while hidden, so StickToBottom
-  // couldn't track position. We force-scroll after layout settles.
+  // Attach a stable `data-testid` to the StickToBottom scroll element.
+  // `use-stick-to-bottom` renders the scroller itself with no attribute
+  // pass-through, and populates its ref after the first commit, so retry
+  // for a few frames.
+  useEffect(() => {
+    let raf = 0;
+    let attempts = 0;
+    const attach = () => {
+      attempts += 1;
+      const el = stickyContextRef.current?.scrollRef?.current;
+      if (el) {
+        if (!el.dataset.testid) el.dataset.testid = "chat-pane__scroller";
+        setScrollEl(el);
+        return;
+      }
+      if (attempts >= 10) return;
+      raf = requestAnimationFrame(attach);
+    };
+    attach();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  // Scroll to bottom when the panel becomes visible again: while hidden the
+  // container had no height, so StickToBottom couldn't track position.
   useEffect(() => {
     const wasHidden = prevVisibleRef.current === false;
     prevVisibleRef.current = visible;
     if (!wasHidden || !visible) return;
-
     const scrollToEnd = () => {
-      // Try the StickToBottom API first
       stickyContextRef.current?.scrollToBottom?.("instant");
-      // Also force the raw scroll element as a fallback
       const el = stickyContextRef.current?.scrollRef?.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      }
+      if (el) el.scrollTop = el.scrollHeight;
     };
-
-    // Run after layout settles — rAF alone isn't enough because dockview
-    // may still be resizing the container after the tab switch.
     requestAnimationFrame(() => {
       scrollToEnd();
-      // Second pass catches late layout shifts
       setTimeout(scrollToEnd, 50);
     });
   }, [visible]);
 
-  const [skills, setSkills] = useState<
-    { name: string; description: string; argumentHint?: string }[]
-  >([]);
-  useEffect(() => {
-    trpc.skills.list
-      .query({ workspaceId, chatId })
-      .then((data) => setSkills(data.skills))
-      .catch(() => setSkills([]));
-  }, [workspaceId, chatId]);
+  const subscription = useChatSubscription({
+    workspaceId,
+    chatId,
+    codingAgentId,
+    // Release the connection while the pane isn't the active tab.
+    enabled: wsActive !== false,
+  });
+  const {
+    messages,
+    status,
+    sessionId,
+    queue,
+    session,
+    plan,
+    send,
+    cancel,
+    loadOlder,
+    answerPermission,
+    answerElicitation,
+    setConfigOption,
+  } = subscription;
+  const isStreaming = status === "submitting" || status === "streaming";
 
-  const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
-  const [selectedMode, setSelectedMode] = useState<string | undefined>();
+  // Session settings from the ACP session (or the agent catalog before the
+  // chat has one).
+  const pickers = useMemo(() => sessionPickers(session), [session]);
+  const skills = useMemo(
+    () =>
+      (session?.commands ?? []).map((c) => ({
+        name: c.name,
+        description: c.description,
+        argumentHint: c.input && "hint" in c.input ? c.input.hint : undefined,
+      })),
+    [session?.commands],
+  );
+
+  // Changes in flight. A chat without a live session starts one before the
+  // change applies, which takes a few seconds.
+  const [pendingConfig, setPendingConfig] = useState(0);
+  const handleConfig = useCallback(
+    (configId: string, value: string) => {
+      setPendingConfig((n) => n + 1);
+      setConfigOption(configId, value)
+        .catch((err) => console.error("[ChatView] error setting session option:", err))
+        .finally(() => setPendingConfig((n) => n - 1));
+    },
+    [setConfigOption],
+  );
+  const handleModelSelect = useCallback(
+    (model: string | undefined) => {
+      if (model) handleConfig(pickers.modelConfigId, model);
+    },
+    [handleConfig, pickers.modelConfigId],
+  );
   const handleModeSelect = useCallback(
     (mode: string | undefined) => {
-      setSelectedMode(mode);
-      trpc.chats.update
-        .mutate({ chatId, mode: mode ?? "" })
-        .catch((err) => console.error("[ChatView] error persisting mode:", err));
+      if (mode) handleConfig(pickers.modeConfigId, mode);
     },
-    [chatId],
+    [handleConfig, pickers.modeConfigId],
   );
-  useEffect(() => {
-    trpc.modes.list
-      .query({ agentId: codingAgentId || undefined })
-      .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
-      .catch(() => setModes([]));
-    // Hydrate persisted mode from the chat record, or derive from active task
-    trpc.chats.get
-      .query({ chatId })
-      .then((data) => {
-        const persisted = data.chat?.mode;
-        if (typeof persisted === "string" && persisted) {
-          setSelectedMode(persisted);
-        }
-      })
-      .catch(() => {});
-    trpc.tasks.get
-      .query({ workspaceId, chatId })
-      .then((data) => {
-        if (data.task?.mode && data.task.status === "running") {
-          setSelectedMode(data.task.mode);
-        }
-      })
-      .catch(() => {});
-  }, [workspaceId, chatId, codingAgentId]);
 
-  // Listen for Shift+Tab mode toggle dispatched from the workspace layout
+  // Shift+Tab cycles modes (dispatched from the workspace layout too).
   useEffect(() => {
     const handler = () => {
+      const { modes, mode } = pickers;
       if (modes.length < 2) return;
-      const currentIndex = modes.findIndex((m) => m.id === selectedMode);
-      const nextIndex = currentIndex === -1 ? 1 : (currentIndex + 1) % modes.length;
-      handleModeSelect(modes[nextIndex].id);
+      const current = modes.findIndex((m) => m.id === mode);
+      handleModeSelect(modes[(current + 1) % modes.length].id);
     };
     window.addEventListener("band:toggle-mode", handler);
     return () => window.removeEventListener("band:toggle-mode", handler);
-  }, [modes, selectedMode, handleModeSelect]);
+  }, [pickers, handleModeSelect]);
 
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
-  // Default model from agent settings (per agent type)
-  const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
-  // Explicit user override from the model dropdown
-  const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
-  // Effective model: user override takes precedence, then agent default
-  const selectedModel = userModelOverride ?? agentDefaultModel;
-  // Resolved ModelInfo for the active selection — flows the SDK-reported
-  // contextWindow into the meter so it doesn't have to guess from the id.
-  const selectedModelInfo = useMemo(
-    () => models.find((m) => m.id === selectedModel),
-    [models, selectedModel],
-  );
-
-  // Drop the SDK-reported `maxContextTokens` when the model changes — that
-  // value was for the prior model and would otherwise stick until the next
-  // turn refreshes it (e.g. switching Sonnet 1M → Haiku 200k would still
-  // show the 1M denominator). Falling back to undefined lets ContextMeter
-  // use the static MODEL_CONTEXT_WINDOWS entry for the new model in the
-  // meantime.
+  // Forward a session the chat attached to on its own to the parent, for
+  // the tab title. Seeded with `initialSessionId` so a remount doesn't
+  // re-fire for the session the parent already knows.
+  const lastNotifiedSessionRef = useRef<string | undefined>(initialSessionId);
   useEffect(() => {
-    if (!selectedModel) return;
-    setUsage((prev) => {
-      if (!prev || prev.maxContextTokens === undefined) return prev;
-      const { maxContextTokens: _drop, ...rest } = prev;
-      return rest;
-    });
-  }, [selectedModel]);
+    if (sessionId && lastNotifiedSessionRef.current !== sessionId) {
+      lastNotifiedSessionRef.current = sessionId;
+      onSessionDiscovered?.(sessionId);
+    }
+  }, [sessionId, onSessionDiscovered]);
 
+  // Queue view with drag-reorder. `optimisticQueue` holds the local order
+  // until the server's next `queue-updated` confirms it.
+  type QueuedMessageView = { id: string; text: string; files?: QueuedFilePart[] };
+  const [optimisticQueue, setOptimisticQueue] = useState<QueuedMessageView[] | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queue`
   useEffect(() => {
-    const modelsP = trpc.models.listAll
-      .query()
-      .then((data) => {
-        setAgentGroups(data.agents as AgentGroup[]);
-        // Derive current agent's models from the groups
-        const currentGroup = (data.agents as AgentGroup[]).find((g) => g.agentId === codingAgentId);
-        if (currentGroup) {
-          setModels(currentGroup.models);
-          setAgentDefaultModel(currentGroup.defaultModel || undefined);
-        } else if ((data.agents as AgentGroup[]).length > 0) {
-          const first = (data.agents as AgentGroup[])[0];
-          setModels(first.models);
-          setAgentDefaultModel(first.defaultModel || undefined);
-        }
-      })
-      .catch(() => setAgentGroups([]));
+    setOptimisticQueue(null);
+  }, [queue]);
+  const queuedMessagesView: QueuedMessageView[] = optimisticQueue ?? queue;
 
-    // Hydrate persisted model override from the chat record
-    const chatP = trpc.chats.get
-      .query({ chatId })
-      .then((data) => {
-        const persisted = data.chat?.model;
-        if (typeof persisted === "string" && persisted) {
-          setUserModelOverride(persisted);
-        }
-      })
-      .catch(() => {});
+  const currentSessionId = initialSessionCleared ? undefined : (sessionId ?? initialSessionId);
 
-    void Promise.all([modelsP, chatP]);
-  }, [codingAgentId, chatId]);
-
-  const handleModelSelect = useCallback(
-    (model: string | undefined) => {
-      setUserModelOverride(model);
-      trpc.chats.update
-        .mutate({ chatId, model: model ?? "" })
-        .catch((err) => console.error("[ChatView] error persisting model:", err));
-    },
-    [chatId],
-  );
-
-  interface QueuedMessageView {
-    id: string;
-    text: string;
-    files?: QueuedFilePart[];
-  }
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageView[]>([]);
-
-  // Subscribe to queue state changes via a dedicated tRPC subscription.
-  // The backend pushes the full queue array on every change (push, shift,
-  // remove, clear) so the frontend always has the authoritative state.
-  useEffect(() => {
-    const subscription = trpc.queue.stream.subscribe(
-      { workspaceId, chatId },
-      {
-        onData(data: { messages: QueuedMessageView[] }) {
-          setQueuedMessages(data.messages);
-        },
-      },
-    );
-    return () => subscription.unsubscribe();
-  }, [workspaceId, chatId]);
-
-  const transport = useMemo(
-    () =>
-      new TaskChatTransport(
-        workspaceId,
-        chatId,
-        () => sessionIdRef.current,
-        () => lastEventIdRef.current,
-      ),
-    [workspaceId, chatId],
-  );
-
-  // Close the SSE connection when the transport is replaced (chat/workspace
-  // change) or the component unmounts. This releases the HTTP connection back
-  // to the browser pool — critical because browsers limit HTTP/1.1 connections
-  // to ~6 per origin, and each SSE stream holds one open.
-  useEffect(() => {
-    return () => transport.close();
-  }, [transport]);
-
-  useEffect(() => {
-    transport.mode = selectedMode;
-  }, [transport, selectedMode]);
-
-  useEffect(() => {
-    transport.model = userModelOverride ?? agentDefaultModel;
-  }, [transport, userModelOverride, agentDefaultModel]);
-
-  useEffect(() => {
-    transport.codingAgentId = codingAgentId;
-  }, [transport, codingAgentId]);
-
-  const { messages, sendMessage, status, setMessages, stop, resumeStream } = useChat({
-    id: `${chatId}:${chatKey}`,
-    transport,
-    // Don't auto-resume — we control when to resume so that sessionIdRef
-    // and lastEventIdRef are populated first (from loadMessages).
-    resume: false,
-    onData: (dataPart) => {
-      if (
-        dataPart.type === "data-session" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object" &&
-        "sessionId" in (dataPart.data as Record<string, unknown>)
-      ) {
-        const sid = (dataPart.data as { sessionId: string }).sessionId;
-        sessionIdRef.current = sid;
-        onActiveSessionChange?.(sid);
-      } else if (
-        dataPart.type === "data-usage" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object"
-      ) {
-        const data = dataPart.data as Partial<UsageData>;
-        if (typeof data.inputTokens === "number" && typeof data.outputTokens === "number") {
-          const next: UsageData = {
-            provider: data.provider,
-            inputTokens: data.inputTokens,
-            outputTokens: data.outputTokens,
-            cacheReadTokens: data.cacheReadTokens,
-            cacheCreationTokens: data.cacheCreationTokens,
-            reasoningOutputTokens: data.reasoningOutputTokens,
-            contextTokens: data.contextTokens,
-            totalProcessedTokens: data.totalProcessedTokens,
-            maxContextTokens: data.maxContextTokens,
-          };
-          // SSE gap-fill can replay older usage chunks on reconnect. Prefer
-          // monotonic totalProcessedTokens when present so context may shrink
-          // after compaction; older providers fall back to context size.
-          setUsage((prev) => {
-            const shouldUseNext =
-              prev?.totalProcessedTokens !== undefined && next.totalProcessedTokens !== undefined
-                ? next.totalProcessedTokens >= prev.totalProcessedTokens
-                : usageContextSize(next) >= usageContextSize(prev);
-            return shouldUseNext ? next : prev;
-          });
-        }
-      }
-    },
-  });
-
-  const abortingRef = useRef(false);
-
-  // Keep statusRef in sync with the live `status` so the connect-retry loop
-  // (which can outlive a single render) can observe transitions to
-  // "submitted"/"streaming" and stop retrying.
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+  const hasMore = subscription.hasOlder;
+  const loadingHistory = !isStreaming && messages.length === 0 && !subscription.isConnected;
+  const loadingOlder = subscription.loadingOlder;
 
   const handleStop = useCallback(() => {
-    abortingRef.current = true;
-    transport.abort().finally(() => {
-      abortingRef.current = false;
-      stop();
-    });
-  }, [transport, stop]);
-
-  const isStreaming = status === "submitted" || status === "streaming";
-
-  // Cancel any in-flight reconnect retry. Called before opening a new one
-  // and on unmount/dependency change.
-  const cancelConnectAttempt = useCallback(() => {
-    if (connectAbortRef.current) {
-      connectAbortRef.current.abort();
-      connectAbortRef.current = null;
-    }
-  }, []);
-
-  /**
-   * Try to reconnect to a running task's SSE stream, retrying with backoff
-   * until one of:
-   *   - `useChat.status` flips to "submitted"/"streaming" (success)
-   *   - the server confirms no task is running (clean give-up)
-   *   - we exhaust the retry budget
-   *   - the attempt is cancelled (unmount / new attempt)
-   *
-   * Why retry? `GET /api/tasks/:chatId/stream` returns 204 if the in-memory
-   * task hasn't been registered yet (registration lag, server boot, brief
-   * race during workspace switch). The Vercel AI SDK treats 204 as "nothing
-   * to resume" and silently leaves status at "ready" — no thinking indicator,
-   * no error, no log. The retry loop turns that silent failure into either
-   * a real connection or a clean give-up.
-   */
-  const connectToRunningStream = useCallback(async () => {
-    cancelConnectAttempt();
-    const controller = new AbortController();
-    connectAbortRef.current = controller;
-    const signal = controller.signal;
-
-    // Read the latest status off the ref. Wrapping the read in a function
-    // keeps TypeScript from narrowing the ref's union type across awaits —
-    // `statusRef.current` is mutable, so a check earlier in the function
-    // shouldn't shrink its type later.
-    const isAttached = (): boolean => {
-      const s = statusRef.current;
-      return s === "submitted" || s === "streaming";
-    };
-
-    // Backoff schedule (ms): first attempt is immediate, then 250 → 500 →
-    // 1000 → 2000. Total wait ~3.75s before giving up — long enough to
-    // cover task registration lag without blocking the UI for too long.
-    const delays = [0, 250, 500, 1000, 2000];
-
-    try {
-      for (let i = 0; i < delays.length; i++) {
-        if (signal.aborted) return;
-
-        if (delays[i] > 0) {
-          await new Promise<void>((r) => setTimeout(r, delays[i]));
-          if (signal.aborted) return;
-        }
-
-        // If `useChat` is already streaming (e.g. a sendMessage just took
-        // over while we were waiting), we're done.
-        if (isAttached()) return;
-
-        // Attempt the resume. The transport aborts any prior in-flight
-        // connection internally, so calling this repeatedly is safe.
-        resumeStream();
-
-        // Give the AI SDK a tick to update `status`. If the GET succeeds
-        // and the server has events to send, status flips to "streaming"
-        // shortly after the first chunk arrives.
-        await new Promise<void>((r) => setTimeout(r, 350));
-        if (signal.aborted) return;
-
-        if (isAttached()) return;
-
-        // Status didn't change → resumeStream resolved to null (204) or
-        // hasn't seen events yet. Ask the server: is anything actually
-        // running? If not, give up cleanly. If yes, keep retrying.
-        try {
-          const { running } = await trpc.tasks.isRunning.query({ workspaceId, chatId });
-          if (signal.aborted) return;
-          if (!running) return;
-        } catch {
-          // Network blip — keep retrying with the same backoff.
-        }
-      }
-    } finally {
-      if (connectAbortRef.current === controller) {
-        connectAbortRef.current = null;
-      }
-    }
-  }, [workspaceId, chatId, resumeStream, cancelConnectAttempt]);
+    void cancel();
+  }, [cancel]);
 
   useEffect(() => {
     onStreamingChange?.(isStreaming);
   }, [isStreaming, onStreamingChange]);
 
   const handleEscape = useCallback(() => {
-    if (isStreaming) {
-      handleStop();
-    }
+    if (isStreaming) handleStop();
   }, [isStreaming, handleStop]);
 
-  const doSendMessage = useCallback(
-    (message: PromptInputMessage) => {
-      if (message.files?.length) {
-        const dataTransfer = new DataTransfer();
-        for (const file of message.files) {
-          dataTransfer.items.add(file);
-        }
-        sendMessage({ text: message.text, files: dataTransfer.files });
-      } else {
-        sendMessage({ text: message.text });
-      }
-    },
-    [sendMessage],
-  );
-
-  // Load session history, then attempt to resume the live stream.
-  // This ensures sessionIdRef and lastEventIdRef are set BEFORE
-  // reconnectToStream runs, so gap-fill replays from the right point.
-  const loadMessages = useCallback(
-    async (sessionId: string) => {
-      // Kill any stale stream before loading + resuming to prevent
-      // two concurrent streams writing to the same messages array.
-      stop();
-      cancelConnectAttempt();
-      setLoadingHistory(true);
-      try {
-        const data = await trpc.sessions.messages.query({
-          workspaceId,
-          chatId,
-          sessionId,
-        });
-        setMessages(data.messages as unknown as UIMessage[]);
-        lastEventIdRef.current = data.lastEventId ?? undefined;
-        firstEventIdRef.current = data.firstEventId ?? undefined;
-        firstMessageIndexRef.current =
-          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
-        setHasMore(data.hasMore);
-        // Re-hydrate the context meter from the persisted snapshot so it
-        // survives task completion and page refreshes.
-        if (data.lastUsage) {
-          setUsage({
-            provider: data.lastUsage.provider,
-            inputTokens: data.lastUsage.inputTokens,
-            outputTokens: data.lastUsage.outputTokens,
-            cacheReadTokens: data.lastUsage.cacheReadTokens,
-            cacheCreationTokens: data.lastUsage.cacheCreationTokens,
-            reasoningOutputTokens: data.lastUsage.reasoningOutputTokens,
-            contextTokens: data.lastUsage.contextTokens,
-            totalProcessedTokens: data.lastUsage.totalProcessedTokens,
-            maxContextTokens: data.lastUsage.maxContextTokens,
-          });
-        }
-      } finally {
-        setLoadingHistory(false);
-      }
-      // Now that refs are populated, try to reconnect to a running stream
-      // with retries. If no task is running on the server, the loop gives
-      // up cleanly after one round-trip to tasks.isRunning.
-      void connectToRunningStream();
-    },
-    [workspaceId, chatId, setMessages, connectToRunningStream, stop, cancelConnectAttempt],
-  );
-
-  // Load older messages when the user scrolls to the top of the chat.
-  // Uses the buffer cursor (firstEventId) when available, otherwise the
-  // JSONL cursor (firstMessageIndex). Exactly one of the two is set.
-  const loadOlderMessages = useCallback(async () => {
-    const sessionId = sessionIdRef.current;
-    const beforeEventId = firstEventIdRef.current;
-    const beforeMessageIndex = firstMessageIndexRef.current;
-    const haveCursor = beforeEventId !== undefined || beforeMessageIndex !== undefined;
-    if (!sessionId || !haveCursor || !hasMore || loadingOlder || loadingHistory) {
-      return;
-    }
-
-    setLoadingOlder(true);
-    try {
-      const data = await trpc.sessions.messages.query({
-        workspaceId,
-        chatId,
-        sessionId,
-        beforeEventId,
-        beforeMessageIndex,
-        limit: 100,
-      });
-
-      if (data.messages.length > 0) {
-        // Capture scroll height before prepend for position restoration
-        const scrollEl = stickyContextRef.current?.scrollRef?.current;
-        if (scrollEl) {
-          scrollHeightBeforePrependRef.current = scrollEl.scrollHeight;
-        }
-
-        setMessages((prev) => [...(data.messages as unknown as UIMessage[]), ...prev]);
-        firstEventIdRef.current = data.firstEventId ?? undefined;
-        firstMessageIndexRef.current =
-          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
-        setHasMore(data.hasMore);
-      } else {
-        setHasMore(false);
-      }
-    } catch (err) {
-      console.error("[loadOlderMessages] error:", err);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [workspaceId, chatId, hasMore, loadingOlder, loadingHistory, setMessages]);
-
-  // Restore scroll position after prepending older messages so the user's
-  // viewport doesn't jump. Fires synchronously before the browser paints.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: messages triggers re-run after prepend
-  useLayoutEffect(() => {
-    const prevHeight = scrollHeightBeforePrependRef.current;
-    if (prevHeight === null) return;
-    scrollHeightBeforePrependRef.current = null;
-
-    const scrollEl = stickyContextRef.current?.scrollRef?.current;
-    if (!scrollEl) return;
-
-    const delta = scrollEl.scrollHeight - prevHeight;
-    if (delta > 0) {
-      scrollEl.scrollTop += delta;
-    }
-  }, [messages]);
-
-  // Observe a sentinel element at the top of the chat to trigger loading
-  // older messages when the user scrolls near the top.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: hasMore/loadingOlder/loadingHistory re-create observer when state changes
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const scrollEl = stickyContextRef.current?.scrollRef?.current;
-    if (!sentinel || !scrollEl) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          loadOlderMessages();
-        }
-      },
-      {
-        root: scrollEl,
-        rootMargin: "200px 0px 0px 0px",
-        threshold: 0,
-      },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loadingOlder, loadingHistory, loadOlderMessages]);
-
-  // Wait for the parent's session query to resolve before doing anything.
-  // This avoids the race where an eager resumeStream() opens stream A,
-  // then initialSessionId arrives → loadMessages opens stream B, and
-  // both pump chunks into the same messages array (causing duplicates).
-  //
-  // The history-load itself is one-shot per (chatKey, initialSessionId):
-  // we don't want to refetch all messages on every render. The reconnect
-  // attempt embedded in loadMessages (via connectToRunningStream) IS
-  // retryable, and is also re-triggered on tab focus / network online
-  // events below.
-  useEffect(() => {
-    if (initialHistoryLoadedRef.current) return;
-    if (initialSessionId) {
-      initialHistoryLoadedRef.current = true;
-      sessionIdRef.current = initialSessionId;
-      setActiveSessionId(initialSessionId);
-      loadMessages(initialSessionId);
-    } else if (sessionQueryDone && !initialSessionId) {
-      // No sessions — just try resuming a running task (e.g. started from
-      // CLI). Use the retrying connect helper instead of a single
-      // resumeStream() call so we cover the registration-lag window.
-      initialHistoryLoadedRef.current = true;
-      void connectToRunningStream();
-    }
-  }, [initialSessionId, sessionQueryDone, loadMessages, connectToRunningStream]);
-
-  // Re-attempt reconnect when the tab regains focus or the network comes
-  // back online. We skip if we're already streaming or already attempting,
-  // and we ask the server first to avoid a retry storm when nothing's
-  // actually running.
-  useEffect(() => {
-    const maybeReconnect = () => {
-      if (statusRef.current === "submitted" || statusRef.current === "streaming") return;
-      if (connectAbortRef.current) return;
-      // Fire-and-forget: connectToRunningStream itself handles the
-      // is-running short-circuit.
-      void connectToRunningStream();
-    };
-    const onFocus = () => maybeReconnect();
-    const onOnline = () => maybeReconnect();
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [connectToRunningStream]);
-
-  // Release the SSE connection while the workspace is hidden so cached
-  // (but inactive) workspaces don't pin HTTP/1.1 connection slots —
-  // browsers cap at ~6 per origin and the dockview LRU keeps several
-  // workspaces alive at once. The server-side task keeps running
-  // independently; on reactivation we re-fetch the persisted session
-  // history (so messages that landed while we were hidden show up) and
-  // then resume any still-running stream via Last-Event-ID.
-  const prevWsActiveRef = useRef(wsActive);
-  useEffect(() => {
-    const prev = prevWsActiveRef.current;
-    prevWsActiveRef.current = wsActive;
-
-    if (prev && !wsActive) {
-      // Workspace just deactivated — abort any in-flight reconnect retry
-      // and close the active SSE fetch. transport.close() is a no-op when
-      // there's no open connection (idle chat).
-      cancelConnectAttempt();
-      transport.close();
-    } else if (!prev && wsActive && sessionIdRef.current) {
-      // Workspace just reactivated and we know about a session — refresh
-      // from the persisted JSONL state. loadMessages also calls
-      // connectToRunningStream at the end, so an in-flight task is
-      // resumed from Last-Event-ID. If the task completed while we were
-      // hidden, this is the only path that surfaces the final message
-      // (the resume endpoint returns 204 once the in-memory task is
-      // gone, so resumeStream alone wouldn't pick it up).
-      void loadMessages(sessionIdRef.current);
-    }
-  }, [wsActive, transport, cancelConnectAttempt, loadMessages]);
-
-  // Cancel any in-flight reconnect on unmount or when the underlying
-  // chat/key changes (transport gets recreated).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey/chatId trigger cleanup
-  useEffect(() => {
-    return () => cancelConnectAttempt();
-  }, [chatKey, chatId, cancelConnectAttempt]);
-
+  // Session switching is handled by the parent, which persists the choice
+  // and remounts this component with a fresh subscription.
   const handleSelectSession = useCallback(
-    async (sessionId: string) => {
-      // Stop any active stream before switching sessions
-      stop();
-      cancelConnectAttempt();
-      sessionIdRef.current = sessionId;
-      lastEventIdRef.current = undefined;
-      firstEventIdRef.current = undefined;
-      firstMessageIndexRef.current = undefined;
-      setHasMore(false);
-      setActiveSessionId(sessionId);
-      onActiveSessionChange?.(sessionId);
-      setMessages([]);
-      setQueuedMessages([]);
-      setUsage(undefined);
+    async (nextSessionId: string, summary?: string) => {
+      // Queued messages belong to the session they were queued against.
       trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
       onShowSessionListChange(false);
-      await loadMessages(sessionId);
+      await onSwitchSession?.(nextSessionId, summary);
     },
-    [
-      loadMessages,
-      setMessages,
-      stop,
-      cancelConnectAttempt,
-      onShowSessionListChange,
-      onActiveSessionChange,
-      workspaceId,
-      chatId,
-    ],
+    [onSwitchSession, onShowSessionListChange, workspaceId, chatId],
   );
 
   const handleNewSession = useCallback(() => {
-    stop();
-    cancelConnectAttempt();
-    sessionIdRef.current = undefined;
-    lastEventIdRef.current = undefined;
-    firstEventIdRef.current = undefined;
-    firstMessageIndexRef.current = undefined;
-    setHasMore(false);
-    setActiveSessionId(undefined);
     setInitialSessionCleared(true);
-    onActiveSessionChange?.(undefined);
-    setMessages([]);
-    setQueuedMessages([]);
-    setUsage(undefined);
     trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
     onShowSessionListChange(false);
-  }, [
-    setMessages,
-    stop,
-    cancelConnectAttempt,
-    onShowSessionListChange,
-    onActiveSessionChange,
-    workspaceId,
-    chatId,
-  ]);
+    void onSwitchSession?.(undefined);
+  }, [onSwitchSession, onShowSessionListChange, workspaceId, chatId]);
 
   useEffect(() => {
-    if (onNewSessionRef) {
-      onNewSessionRef.current = handleNewSession;
-    }
+    if (onNewSessionRef) onNewSessionRef.current = handleNewSession;
     return () => {
-      if (onNewSessionRef) {
-        onNewSessionRef.current = null;
-      }
+      if (onNewSessionRef) onNewSessionRef.current = null;
     };
   }, [onNewSessionRef, handleNewSession]);
 
-  // Global keyboard shortcut: Cmd/Ctrl+Shift+N → start new session.
-  // Only the visible chat pane in the active workspace responds.
+  // Cmd/Ctrl+Shift+N starts a new session in the visible chat pane.
   useEffect(() => {
     if (!visible || !wsActive) return;
     const onNewChat = () => handleNewSession();
@@ -1046,98 +461,38 @@ export function ChatView({
     return () => window.removeEventListener("band:new-chat-session", onNewChat);
   }, [visible, wsActive, handleNewSession]);
 
-  const queueMessage = useCallback(
-    async (message: PromptInputMessage) => {
-      // Convert browser File[] to base64 data URLs so they can be
-      // serialized through tRPC. Files are uploaded to disk only when
-      // the queued message is drained (server-side).
-      const files = await Promise.all(
-        (message.files ?? []).map(
-          (file): Promise<QueuedFilePart> =>
-            new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => {
-                resolve({
-                  mediaType: file.type,
-                  url: reader.result as string,
-                  filename: file.name,
-                });
-              };
-              reader.onerror = () => reject(reader.error);
-              reader.readAsDataURL(file);
-            }),
-        ),
-      );
-
-      // Optimistic update with a temporary id; subscription corrects when
-      // the server's response arrives.
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      setQueuedMessages((prev) => [
-        ...prev,
-        { id: tempId, text: message.text, files: files.length > 0 ? files : undefined },
-      ]);
-      trpc.queue.push
-        .mutate({
-          workspaceId,
-          chatId,
-          text: message.text,
-          ...(files.length > 0 && { files }),
-        })
-        .catch(() => {});
-    },
-    [workspaceId, chatId],
-  );
-
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
-
-      if (isStreaming) {
-        // Agent is busy — queue the message on the backend.
-        // Optimistic update for instant feedback; subscription corrects if needed.
-        await queueMessage(message);
-        return;
-      }
-
-      // Check if a task is running in the background (e.g. started from CLI
-      // or another tab) that this chat doesn't know about yet.
+      // The server queues the message when a turn is already running.
       try {
-        const { task } = await trpc.tasks.get.query({ workspaceId, chatId });
-        if (task && task.status === "running") {
-          await queueMessage(message);
-          return;
-        }
-      } catch {
-        // If the check fails, proceed with sending — the backend will
-        // reject with CONFLICT if a task is actually running.
+        await send(message.text, message.files);
+      } catch (err) {
+        console.error("[ChatView] send failed:", err);
       }
-
-      doSendMessage(message);
     },
-    [doSendMessage, isStreaming, workspaceId, chatId, queueMessage],
+    [send],
   );
 
   const handleCancelQueued = useCallback(
     (id: string) => {
-      // Optimistic update for instant feedback; subscription corrects if needed.
-      setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+      setOptimisticQueue((current) => (current ?? queue).filter((m) => m.id !== id));
       trpc.queue.remove.mutate({ workspaceId, chatId, id }).catch(() => {});
     },
-    [workspaceId, chatId],
+    [queue, workspaceId, chatId],
   );
 
   const handleEditQueued = useCallback(
     (id: string, text: string) => {
-      // Optimistic update for instant feedback; subscription corrects if needed.
-      setQueuedMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+      setOptimisticQueue((current) =>
+        (current ?? queue).map((m) => (m.id === id ? { ...m, text } : m)),
+      );
       trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
     },
-    [workspaceId, chatId],
+    [queue, workspaceId, chatId],
   );
 
-  // Pointer sensor with a small activation distance so a click on the
-  // drag handle (or anywhere) doesn't accidentally start a drag —
-  // the user has to actually move a few pixels first.
+  // A small activation distance so a click doesn't start a drag.
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
@@ -1146,359 +501,345 @@ export function ChatView({
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      setQueuedMessages((prev) => {
-        const oldIdx = prev.findIndex((m) => m.id === active.id);
-        const newIdx = prev.findIndex((m) => m.id === over.id);
-        if (oldIdx === -1 || newIdx === -1) return prev;
-        const reordered = arrayMove(prev, oldIdx, newIdx);
-        // Persist the new order. queue.set replaces the whole queue;
-        // the subscription will broadcast the same shape back so the
-        // optimistic state and the server stay in sync.
-        trpc.queue.set
-          .mutate({
-            workspaceId,
-            chatId,
-            messages: reordered.map((m) => ({
-              id: m.id,
-              text: m.text,
-              ...(m.files && m.files.length > 0 && { files: m.files }),
-            })),
-          })
-          .catch(() => {});
-        return reordered;
-      });
+      const base = optimisticQueue ?? queue;
+      const oldIdx = base.findIndex((m) => m.id === active.id);
+      const newIdx = base.findIndex((m) => m.id === over.id);
+      if (oldIdx === -1 || newIdx === -1) return;
+      const reordered = arrayMove(base, oldIdx, newIdx);
+      setOptimisticQueue(reordered);
+      trpc.queue.set
+        .mutate({
+          workspaceId,
+          chatId,
+          messages: reordered.map((m) => ({
+            id: m.id,
+            text: m.text,
+            ...(m.files && m.files.length > 0 && { files: m.files }),
+          })),
+        })
+        .catch(() => {});
     },
-    [workspaceId, chatId],
+    [optimisticQueue, queue, workspaceId, chatId],
   );
 
-  const taskMap: TaskMap = useMemo(() => {
-    let map: TaskMap = new Map();
-    for (const msg of messages) {
-      for (const part of msg.parts) {
-        if (!isToolUIPart(part)) continue;
-        const toolPart = part as ToolPart;
-        const name = getToolName(toolPart);
-        if (!isTaskTool(name)) continue;
-        const item = toolPartToItem(toolPart);
-        map = applyTaskToolCall(map, item);
-      }
+  // Stable identity for the virtualizer's `getItemKey`.
+  const getMessageKey = useCallback((message: ChatMessage) => message.id, []);
+
+  // `messages` changes on every streamed chunk; read it through a ref so the
+  // row renderer keeps its identity and windowed rows keep their memo.
+  // `isStreaming` stays a real dependency: it flips only at turn start and
+  // end, and the last row's thinking indicator must see that flip.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const actionsRef = useRef({ answerPermission, answerElicitation });
+  actionsRef.current = { answerPermission, answerElicitation };
+
+  // Entrance animation only for messages appended at the end after the
+  // first render; loaded history and prepended pages render instantly.
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
+  const enteringIdsRef = useRef<Set<string>>(new Set());
+
+  // Scroll-back pagination: fetch older turns when the top sentinel shows.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !scrollEl || !hasMore || loadingHistory) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) void loadOlder();
+        }
+      },
+      { root: scrollEl, rootMargin: "150px 0px 0px 0px" },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [scrollEl, hasMore, loadingHistory, loadOlder]);
+
+  const renderEntry = useCallback((entry: Entry) => {
+    switch (entry.kind) {
+      case "text":
+        return entry.text.trim() ? (
+          <MessageResponse key={entry.id}>{entry.text}</MessageResponse>
+        ) : null;
+      case "thought":
+        return (
+          <details key={entry.id} className="group/thought text-muted-foreground">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs">
+              <Brain className="size-3.5" />
+              Thinking
+            </summary>
+            <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/50 pl-3 text-xs">
+              {entry.text}
+            </div>
+          </details>
+        );
+      case "tool":
+        return <ToolCall key={entry.id} entry={entry} />;
+      case "permission":
+        return (
+          <PermissionRequest
+            key={entry.id}
+            entry={entry}
+            onAnswer={(optionId) => actionsRef.current.answerPermission(entry.id, optionId)}
+          />
+        );
+      case "elicitation":
+        return (
+          <ElicitationForm
+            key={entry.id}
+            entry={entry}
+            onAnswer={(action, content) =>
+              actionsRef.current.answerElicitation(entry.id, action, content)
+            }
+          />
+        );
+      case "file":
+        return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
+      case "notice":
+        return (
+          <div
+            key={entry.id}
+            data-testid="chat-pane__notice"
+            data-level={entry.level}
+            className={cn(
+              "text-sm",
+              entry.level === "error" && "text-destructive",
+              entry.level === "warning" && "text-amber-600 dark:text-amber-400",
+              entry.level === "info" && "text-muted-foreground",
+            )}
+          >
+            {entry.text}
+          </div>
+        );
     }
-    return map;
-  }, [messages]);
+  }, []);
+
+  const renderMessageItem = useCallback(
+    (message: ChatMessage, messageIndex: number) => {
+      const currentMessages = messagesRef.current;
+      const isLastMessage = messageIndex === currentMessages.length - 1;
+
+      const seen = seenMessageIdsRef.current;
+      let entering = false;
+      if (seen === null) {
+        seenMessageIdsRef.current = new Set(currentMessages.map((m) => m.id));
+      } else if (!seen.has(message.id)) {
+        seen.add(message.id);
+        if (messageIndex >= currentMessages.length - 2) {
+          entering = true;
+          enteringIdsRef.current.add(message.id);
+          window.setTimeout(() => enteringIdsRef.current.delete(message.id), 400);
+        }
+      } else if (enteringIdsRef.current.has(message.id)) {
+        entering = true;
+      }
+
+      if (message.role === "user") {
+        return (
+          <Message
+            from="user"
+            className={cn(entering && "chat-message-enter", message.pending && "opacity-80")}
+          >
+            <MessageContent>
+              {message.files?.map((file) => (
+                <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
+              ))}
+              {message.text.trim() && <MessageResponse>{message.text}</MessageResponse>}
+            </MessageContent>
+          </Message>
+        );
+      }
+
+      // The agent waiting on the user isn't "thinking".
+      const waiting = message.entries.some(
+        (e) => (e.kind === "permission" || e.kind === "elicitation") && !e.answer,
+      );
+      const showThinking = isLastMessage && isStreaming && !waiting;
+      if (message.entries.length === 0 && !showThinking) return null;
+      return (
+        <Message from="assistant" className={entering ? "chat-message-enter" : undefined}>
+          <MessageContent>
+            {message.entries.map(renderEntry)}
+            {showThinking && <ThinkingIndicator />}
+          </MessageContent>
+        </Message>
+      );
+    },
+    [isStreaming, renderEntry],
+  );
 
   const getLastUserMessage = useCallback((): string | undefined => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        const text = messages[i].parts
-          .filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join("\n")
-          .trim();
-        if (text) return text;
-      }
-      if (messages[i].role === "assistant") {
-        // Find the last data-prompt in this message
-        const prompts = messages[i].parts.filter((p) => p.type === "data-prompt");
-        const last = prompts[prompts.length - 1];
-        if (last) return (last as { type: string; data: { text: string } }).data.text;
-      }
+    const current = messagesRef.current;
+    for (let i = current.length - 1; i >= 0; i--) {
+      const m = current[i];
+      if (m.role === "user" && m.text.trim()) return m.text.trim();
     }
     return undefined;
-  }, [messages]);
-
-  const isEmpty = messages.length === 0;
+  }, []);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
-        <ConversationContent>
-          {/* Sentinel for scroll-back pagination */}
-          {hasMore && !loadingHistory && (
-            <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
-          )}
-
-          {/* Loading indicator for older messages — skeleton row matching
-              the bubble layout so the prepended history doesn't pop. */}
+    // Scope every `band-file:` link clicked inside this chat to *this*
+    // workspace (issue #539).
+    <FileLinkWorkspaceProvider workspaceId={workspaceId}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
+          {/* Absolutely positioned so it never shifts content while an older
+              page loads (issue #572). */}
           {loadingOlder && (
             <output
-              className="flex animate-pulse flex-col gap-2 py-3"
+              className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center"
               aria-busy="true"
               aria-label="Loading older messages"
+              data-testid="chat-pane__loading-older"
             >
-              <SkeletonBar widthClass="w-2/3" />
-              <SkeletonBar widthClass="w-3/4" />
-              <SkeletonBar widthClass="w-1/2" />
+              <span className="flex items-center gap-2 rounded-full bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm">
+                <Loader2 className="size-3.5 animate-spin" />
+                Loading earlier messages…
+              </span>
             </output>
           )}
+          <ConversationContent>
+            {hasMore && !loadingHistory && (
+              <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
+            )}
 
-          {/*
-            Empty state: only when we know there's no session to load.
-            Skeleton: when sessions are still being fetched, when we have a
-            session but the message-load effect hasn't kicked in yet, or while
-            the load is in flight. This prevents the empty state from
-            flashing on first workspace load before chats.get resolves.
-          */}
-          {isEmpty && sessionQueryDone && !currentSessionId && !loadingHistory && (
-            <ConversationEmptyState
-              icon={
-                agentType ? (
-                  <AgentIcon type={agentType} className="size-8" />
-                ) : (
-                  <Bot className="size-8" />
-                )
-              }
-              title={workspaceName}
-              description="Send a message to start coding"
-            />
-          )}
+            {/* Not connected yet → skeleton. Connected with nothing → empty
+                state. The replay arrives on the same response that flips
+                `isConnected`, so the gap is sub-frame. */}
+            {messages.length === 0 && !subscription.isConnected && <ConversationSkeleton />}
 
-          {messages.length === 0 && (loadingHistory || !sessionQueryDone || !!currentSessionId) && (
-            <ConversationSkeleton />
-          )}
+            {messages.length === 0 && subscription.isConnected && (
+              <ConversationEmptyState
+                data-testid="chat-pane__empty-state"
+                icon={
+                  agentType ? (
+                    <AgentIcon type={agentType} className="size-8" />
+                  ) : (
+                    <Bot className="size-8" />
+                  )
+                }
+                title={workspaceName}
+                description="Send a message to start coding"
+              />
+            )}
 
-          {(() => {
-            return messages.map((message, messageIndex) => {
-              const isLastMessage = messageIndex === messages.length - 1;
-              const isLastAssistant = message.role === "assistant" && isLastMessage;
-              const hasPendingInteractiveTool =
-                isLastAssistant &&
-                message.parts.some(
-                  (p) =>
-                    isToolUIPart(p) &&
-                    IN_PROGRESS_STATES.has(p.state) &&
-                    (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
-                );
-              const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-
-              if (message.role !== "assistant") {
-                // User messages render normally
-                const userParts = groupMessageParts(message.parts);
-                if (userParts.length === 0) return null;
-                return (
-                  <Message key={message.id} from="user">
-                    <MessageContent>
-                      {userParts.map((segment) => {
-                        if (
-                          segment.type === "text" &&
-                          segment.part.type === "text" &&
-                          segment.part.text.trim()
-                        ) {
-                          return (
-                            <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
-                              {segment.part.text}
-                            </MessageResponse>
-                          );
-                        }
-                        if (segment.type === "file") {
-                          return (
-                            <MessageFilePart
-                              key={`${message.id}-file-${segment.partIndex}`}
-                              part={segment.part}
-                            />
-                          );
-                        }
-                        return null;
-                      })}
-                    </MessageContent>
-                  </Message>
-                );
-              }
-
-              // Assistant message
-              const hasDataPrompts = message.parts.some((p) => p.type === "data-prompt");
-
-              if (!hasDataPrompts) {
-                // No queue boundaries — render as before
-                const visibleParts = message.parts.filter(
-                  (p) =>
-                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-                );
-                if (visibleParts.length === 0 && !showThinking) return null;
-                return (
-                  <Message key={message.id} from="assistant">
-                    <MessageContent>
-                      {groupMessageParts(message.parts).map((segment) => {
-                        if (segment.type === "text") {
-                          const { part, partIndex } = segment;
-                          if (part.type === "text" && part.text.trim()) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                                {part.text}
-                              </MessageResponse>
-                            );
-                          }
-                          return null;
-                        }
-                        if (segment.type === "file") {
-                          return (
-                            <MessageFilePart
-                              key={`${message.id}-file-${segment.partIndex}`}
-                              part={segment.part}
-                            />
-                          );
-                        }
-                        const item = toolPartToItem(segment.part);
-                        if (isTaskTool(item.toolName)) return null;
-                        return (
-                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                        );
-                      })}
-                      {showThinking && <ThinkingIndicator />}
-                    </MessageContent>
-                  </Message>
-                );
-              }
-
-              // Split at data-prompt boundaries
-              const segments = splitMessageAtQueueBoundaries(message.parts);
-
-              return segments.map((segment, segIdx) => {
-                const visibleParts = groupMessageParts(segment.parts);
-                const isLastSegment = segIdx === segments.length - 1;
-                const segKey = segment.userPrompt ?? "initial";
-
-                return (
-                  <Fragment key={`${message.id}-seg-${segKey}`}>
-                    {segment.userPrompt && (
-                      <Message from="user">
-                        <MessageContent>
-                          {segment.userFiles?.map((file, fileIdx) => (
-                            <MessageFilePart
-                              key={`${message.id}-${segKey}-userfile-${fileIdx}`}
-                              part={{ type: "file", ...file }}
-                            />
-                          ))}
-                          <MessageResponse>{segment.userPrompt}</MessageResponse>
-                        </MessageContent>
-                      </Message>
-                    )}
-                    {(visibleParts.length > 0 || (isLastSegment && showThinking)) && (
-                      <Message from="assistant">
-                        <MessageContent>
-                          {visibleParts.map((seg) => {
-                            if (seg.type === "text") {
-                              const { part, partIndex } = seg;
-                              if (part.type === "text" && part.text.trim()) {
-                                return (
-                                  <MessageResponse
-                                    key={`${message.id}-${segKey}-text-${partIndex}`}
-                                  >
-                                    {part.text}
-                                  </MessageResponse>
-                                );
-                              }
-                              return null;
-                            }
-                            if (seg.type === "file") {
-                              return (
-                                <MessageFilePart
-                                  key={`${message.id}-${segKey}-file-${seg.partIndex}`}
-                                  part={seg.part}
-                                />
-                              );
-                            }
-                            const item = toolPartToItem(seg.part);
-                            if (isTaskTool(item.toolName)) return null;
-                            return (
-                              <ToolCall
-                                key={`${message.id}-${segKey}-tool-${seg.partIndex}`}
-                                item={item}
-                              />
-                            );
-                          })}
-                          {isLastSegment && showThinking && <ThinkingIndicator />}
-                        </MessageContent>
-                      </Message>
-                    )}
-                  </Fragment>
-                );
-              });
-            });
-          })()}
-          {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
-            <Message from="assistant">
-              <MessageContent>
-                <ThinkingIndicator />
-              </MessageContent>
-            </Message>
-          )}
-          {queuedMessages.length > 0 && (
-            <DndContext
-              sensors={dndSensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleReorderQueued}
-            >
-              <SortableContext
-                items={queuedMessages.map((m) => m.id)}
-                strategy={verticalListSortingStrategy}
+            {messages.length > 0 && (
+              <VirtualizedMessageList
+                items={messages}
+                getKey={getMessageKey}
+                renderItem={renderMessageItem}
+              />
+            )}
+            {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
+              // No assistant-message testid on the standalone placeholder.
+              <Message from="assistant" data-testid={undefined}>
+                <MessageContent>
+                  <ThinkingIndicator />
+                </MessageContent>
+              </Message>
+            )}
+            {queuedMessagesView.length > 0 && (
+              <DndContext
+                sensors={dndSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleReorderQueued}
               >
-                {queuedMessages.map((m) => (
-                  <QueuedMessageBubble
-                    key={m.id}
-                    id={m.id}
-                    text={m.text}
-                    files={m.files}
-                    onCancel={() => handleCancelQueued(m.id)}
-                    onEdit={(newText) => handleEditQueued(m.id, newText)}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+                <SortableContext
+                  items={queuedMessagesView.map((m) => m.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {queuedMessagesView.map((m) => (
+                    <QueuedMessageBubble
+                      key={m.id}
+                      id={m.id}
+                      text={m.text}
+                      files={m.files}
+                      onCancel={() => handleCancelQueued(m.id)}
+                      onEdit={(newText) => handleEditQueued(m.id, newText)}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+            )}
+          </ConversationContent>
+          <ConversationScrollButton />
+        </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
-        <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        <PromptInput
-          onSubmit={handleSubmit}
-          draftKey={workspaceId}
-          visible={visible}
-          wsActive={wsActive}
+        {/* On a phone the composer sits right on the home-indicator inset (or
+            the keyboard), so it keeps only a small gap below the input. */}
+        <div
+          data-testid="chat-pane__composer"
+          className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-2 lg:pb-4"
         >
-          <SlashCommandSuggestions skills={skills} />
-          <FileMentionSuggestions workspaceId={workspaceId} />
-          <PromptInputTextarea
-            placeholder="Type a message..."
-            onEscape={handleEscape}
-            onPreviousMessage={getLastUserMessage}
-          />
-          <PromptInputActions>
-            <div className="flex items-center gap-0.5">
-              <PromptInputAttach />
-              {supportsSessionListing && (
+          <TaskListWidget plan={plan} workspaceId={workspaceId} />
+          <PromptInput
+            onSubmit={handleSubmit}
+            draftKey={workspaceId}
+            visible={visible}
+            wsActive={wsActive}
+            workspaceId={workspaceId}
+            chatId={chatId}
+          >
+            <SlashCommandSuggestions skills={skills} />
+            <FileMentionSuggestions workspaceId={workspaceId} />
+            <PromptInputTextarea
+              placeholder="Type a message..."
+              onEscape={handleEscape}
+              onPreviousMessage={getLastUserMessage}
+              onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
+            />
+            <PromptInputActions>
+              {/* min-w-0 lets the picker labels truncate on a narrow screen
+                  instead of pushing the send button out of the composer. */}
+              <div className="flex min-w-0 items-center gap-0.5">
+                <PromptInputAttach />
                 <SessionHistoryMenu
                   workspaceId={workspaceId}
                   chatId={chatId}
-                  activeSessionId={activeSessionId ?? sessionIdRef.current}
+                  activeSessionId={currentSessionId}
                   onSelectSession={handleSelectSession}
                   onNewSession={handleNewSession}
                 />
-              )}
-              {contextMeterEnabled && (
-                <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
-              )}
-              {(agentGroups.length > 0 || models.length > 0) && (
-                <AgentModelMenu
-                  agentGroups={agentGroups}
-                  currentAgentId={codingAgentId}
-                  currentAgentType={agentType}
-                  selectedModel={selectedModel}
-                  onSelectModel={handleModelSelect}
-                  onSwitchAgent={onSwitchAgent}
-                  disabled={status !== "ready" && status !== "error"}
+                {contextMeterEnabled && (
+                  <ContextMeter usage={session?.usage ?? null} costUsd={session?.costUsd ?? null} />
+                )}
+                {pickers.modes.length > 0 && (
+                  <ModeMenu
+                    modes={pickers.modes}
+                    selected={pickers.mode}
+                    onSelect={handleModeSelect}
+                  />
+                )}
+              </div>
+              <div className="flex min-w-0 items-center gap-0.5">
+                {(pickers.models.length > 0 ||
+                  pickers.effort ||
+                  pickers.fast ||
+                  pickers.others.length > 0) && (
+                  <ModelSettingsMenu
+                    models={pickers.models}
+                    selectedModel={pickers.model}
+                    onSelectModel={handleModelSelect}
+                    effort={pickers.effort}
+                    fast={pickers.fast}
+                    others={pickers.others}
+                    onConfig={handleConfig}
+                    modelsDisabled={isStreaming}
+                    pending={pendingConfig > 0}
+                  />
+                )}
+                <PromptInputSubmit
+                  status={
+                    status === "submitting" ? "submitted" : status === "idle" ? "ready" : status
+                  }
+                  onStop={handleStop}
                 />
-              )}
-              {modes.length > 0 && (
-                <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
-              )}
-            </div>
-            <PromptInputSubmit status={status} onStop={handleStop} />
-          </PromptInputActions>
-        </PromptInput>
+              </div>
+            </PromptInputActions>
+          </PromptInput>
+        </div>
       </div>
-    </div>
+    </FileLinkWorkspaceProvider>
   );
 }
 
@@ -1530,10 +871,11 @@ function ModeMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              data-testid="chat-pane__mode-menu"
+              className="inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <ModeIcon modeId={current?.id ?? ""} className="size-3" />
-              {current?.name ?? "Mode"}
+              <ModeIcon modeId={current?.id ?? ""} className="size-3 shrink-0" />
+              <span className="truncate">{current?.name ?? "Mode"}</span>
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -1563,119 +905,205 @@ function ModeMenu({
   );
 }
 
-function AgentModelMenu({
-  agentGroups,
-  currentAgentId,
-  currentAgentType,
+/**
+ * Model, effort, fast mode and any other per-model settings behind one
+ * trigger. It only changes settings within the session's agent: a session
+ * belongs to the agent that started it, so the agent is picked when a chat
+ * is created (the "New Chat" submenu in the tab bar).
+ */
+function ModelSettingsMenu({
+  models,
   selectedModel,
   onSelectModel,
-  onSwitchAgent,
-  disabled,
+  effort,
+  fast,
+  others,
+  onConfig,
+  modelsDisabled,
+  pending,
 }: {
-  agentGroups: AgentGroup[];
-  currentAgentId?: string;
-  currentAgentType?: string;
+  models: Choice[];
   selectedModel: string | undefined;
   onSelectModel: (model: string | undefined) => void;
-  onSwitchAgent?: (agentId: string) => void;
-  disabled?: boolean;
+  effort: SelectOption | undefined;
+  fast: SelectOption | undefined;
+  others: SelectOption[];
+  onConfig: (configId: string, value: string) => void;
+  modelsDisabled?: boolean;
+  /** A change is being applied. */
+  pending?: boolean;
 }) {
-  const currentGroup = agentGroups.find((g) => g.agentId === currentAgentId) ?? agentGroups[0];
-  const currentModels = currentGroup?.models ?? [];
-  const current = currentModels.find((m) => m.id === selectedModel) ?? currentModels[0];
-  const displayName = current?.name ?? "Model";
-  const showGroups = agentGroups.length > 1;
+  const current = models.find((m) => m.id === selectedModel) ?? models[0];
+  const otherModels = models.filter((m) => m !== current);
+  const effortChoice = effort && selectChoices(effort).find((c) => c.id === effort.currentValue);
+  const fastOn = fast?.currentValue === "on";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          disabled={disabled}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-            disabled && "opacity-50 cursor-not-allowed",
-          )}
+          data-testid="chat-pane__model-menu"
+          aria-busy={pending || undefined}
+          className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
         >
-          {currentAgentType ? (
-            <AgentIcon type={currentAgentType} className="size-3" />
-          ) : (
-            <ChevronDown className="size-3" />
+          <span data-testid="chat-pane__model-menu-model" className="truncate">
+            {current?.name ?? "Model"}
+          </span>
+          {effortChoice && (
+            <span
+              data-testid="chat-pane__model-menu-effort"
+              className="truncate text-muted-foreground"
+            >
+              {effortChoice.name}
+            </span>
           )}
-          {displayName}
+          {fastOn && <Zap aria-label="Fast mode on" className="size-3 shrink-0" />}
+          {pending ? (
+            <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+          )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[200px] max-h-[400px] overflow-y-auto">
-        {showGroups
-          ? agentGroups.map((group, groupIndex) => {
-              const isCurrentAgent = group.agentId === currentAgentId;
-              return (
-                <Fragment key={group.agentId}>
-                  {groupIndex > 0 && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel className="flex items-center gap-1.5">
-                    <AgentIcon type={group.agentType} className="size-3.5" />
-                    {group.agentLabel}
-                  </DropdownMenuLabel>
-                  <DropdownMenuGroup>
-                    {group.models.length > 0 ? (
-                      group.models.map((model) => (
-                        <DropdownMenuItem
-                          key={`${group.agentId}:${model.id}`}
-                          onClick={() => {
-                            if (isCurrentAgent) {
-                              onSelectModel(model.id);
-                            } else {
-                              onSwitchAgent?.(group.agentId);
-                            }
-                          }}
-                          className={cn(
-                            "flex flex-col items-start gap-0.5 pl-6",
-                            isCurrentAgent && model.id === selectedModel ? "bg-accent" : "",
-                          )}
-                        >
-                          <ModelLine model={model} />
-                          {model.description && (
-                            <span className="text-xs text-muted-foreground">
-                              {model.description}
-                            </span>
-                          )}
-                        </DropdownMenuItem>
-                      ))
-                    ) : (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          if (!isCurrentAgent) {
-                            onSwitchAgent?.(group.agentId);
-                          }
-                        }}
-                        className="pl-6 text-muted-foreground"
-                      >
-                        <span className="text-sm italic">
-                          {isCurrentAgent ? "Default model" : "Switch to this agent"}
-                        </span>
-                      </DropdownMenuItem>
+      <DropdownMenuContent
+        side="top"
+        align="end"
+        className="w-64"
+        data-testid="chat-pane__model-menu-content"
+      >
+        {current && (
+          <DropdownMenuItem className="flex items-start gap-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="text-sm font-medium">{current.name}</span>
+              {current.description && (
+                <span className="text-xs text-muted-foreground">{current.description}</span>
+              )}
+            </div>
+            <Check className="mt-0.5 size-4 shrink-0" />
+          </DropdownMenuItem>
+        )}
+        {current && (effort || fast || others.length > 0 || otherModels.length > 0) && (
+          <DropdownMenuSeparator />
+        )}
+        {effort && (
+          <OptionSubmenu
+            option={effort}
+            label="Effort"
+            disabled={pending}
+            testId="chat-pane__model-menu-effort-submenu"
+            onSelect={(value) => onConfig(effort.id, value)}
+          />
+        )}
+        {fast && (
+          <DropdownMenuItem
+            data-testid="chat-pane__model-menu-fast"
+            // The switch flips from the last confirmed value, so wait for it.
+            disabled={pending}
+            // Keep the menu open so the switch visibly flips.
+            onSelect={(e) => {
+              e.preventDefault();
+              onConfig(fast.id, fastOn ? "off" : "on");
+            }}
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span>{fast.name}</span>
+              {fast.description && (
+                <span className="text-xs text-muted-foreground">{fast.description}</span>
+              )}
+            </div>
+            <Switch
+              checked={fastOn}
+              tabIndex={-1}
+              aria-hidden="true"
+              className="pointer-events-none data-[state=unchecked]:bg-muted-foreground/30"
+            />
+          </DropdownMenuItem>
+        )}
+        {others.map((option) => (
+          <OptionSubmenu
+            key={option.id}
+            option={option}
+            label={option.name}
+            disabled={pending}
+            testId={`chat-pane__model-menu-option--${option.id}`}
+            onSelect={(value) => onConfig(option.id, value)}
+          />
+        ))}
+        {otherModels.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              disabled={modelsDisabled || pending}
+              data-testid="chat-pane__model-menu-more-models"
+            >
+              More models
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent className="w-64 max-h-[400px] overflow-y-auto">
+                {otherModels.map((model) => (
+                  <DropdownMenuItem
+                    key={model.id}
+                    onClick={() => onSelectModel(model.id)}
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    <span className="text-sm font-medium">{model.name}</span>
+                    {model.description && (
+                      <span className="text-xs text-muted-foreground">{model.description}</span>
                     )}
-                  </DropdownMenuGroup>
-                </Fragment>
-              );
-            })
-          : currentModels.map((model) => (
-              <DropdownMenuItem
-                key={model.id}
-                onClick={() => onSelectModel(model.id)}
-                className={cn(
-                  "flex flex-col items-start gap-0.5",
-                  model.id === selectedModel ? "bg-accent" : "",
-                )}
-              >
-                <ModelLine model={model} />
-                {model.description && (
-                  <span className="text-xs text-muted-foreground">{model.description}</span>
-                )}
-              </DropdownMenuItem>
-            ))}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** A select-type session config option (reasoning effort, …) as a submenu
+ *  row showing its current value. */
+function OptionSubmenu({
+  option,
+  label,
+  testId,
+  disabled,
+  onSelect,
+}: {
+  option: SelectOption;
+  label: string;
+  testId: string;
+  disabled?: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const choices = selectChoices(option);
+  const current = choices.find((c) => c.id === option.currentValue);
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger data-testid={testId} disabled={disabled}>
+        <span className="flex-1">{label}</span>
+        {current && <span className="text-xs text-muted-foreground">{current.name}</span>}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent className="min-w-[180px]">
+          {choices.map((choice) => (
+            <DropdownMenuItem
+              key={choice.id}
+              onClick={() => onSelect(choice.id)}
+              className="flex items-start gap-2"
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm">{choice.name}</span>
+                {choice.description && (
+                  <span className="text-xs text-muted-foreground">{choice.description}</span>
+                )}
+              </div>
+              {choice.id === option.currentValue && <Check className="mt-0.5 size-4 shrink-0" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
   );
 }
 
@@ -1692,75 +1120,10 @@ function relativeTime(ms: number): string {
   return `${months}mo ago`;
 }
 
-// Approximate context window per model. Fallback for the chat context meter
-// when an adapter doesn't report `maxContextTokens` live and the picker
-// doesn't supply a `contextWindow` on the ModelInfo. Claude Code adapter
-// always passes the SDK's `getContextUsage().maxTokens`, so this map is
-// fallback-only for Claude; Codex/Gemini/Cursor SDKs don't expose a context
-// window field, so they rely on this map directly.
-//
-// Order matters: `getContextWindow` walks entries with the longest key first
-// so "claude-opus-4-7[1m]" matches before "claude-opus-4-7".
-const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // Claude — Opus 4.x ships a 200k default and a separate [1m] long-context
-  // tier. Sonnet 4.6 is 1M GA at standard pricing (the [1m] suffix is a
-  // legacy alias). Haiku 4.5 stays at 200k.
-  "claude-opus-4-7[1m]": 1_000_000,
-  "claude-opus-4-6[1m]": 1_000_000,
-  "claude-opus-4-7": 200_000,
-  "claude-opus-4-6": 200_000,
-  "claude-sonnet-4-6[1m]": 1_000_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-haiku-4-5": 200_000,
-  // OpenAI — GPT-5 family runs at 400k inside Codex CLI (the Responses API
-  // tier is 1M but Band shells out to the codex binary which caps at 400k).
-  "gpt-5": 400_000,
-  "gpt-4.1": 1_000_000,
-  "gpt-4o": 128_000,
-  // Gemini 2.5 Pro and Flash are both 1M (~1,048,576).
-  "gemini-2.5-pro": 1_000_000,
-  "gemini-2.5-flash": 1_000_000,
-};
-
-function getContextWindow(model: string | undefined): number {
-  if (!model) return 200_000;
-  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
-  // Prefix match — sort by descending key length so longer/more specific
-  // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
-  const entries = Object.entries(MODEL_CONTEXT_WINDOWS).sort(([a], [b]) => b.length - a.length);
-  for (const [key, value] of entries) {
-    if (model.startsWith(key)) return value;
-  }
-  return 200_000;
-}
-
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
   return String(n);
-}
-
-/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
-function formatCtxWindow(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
-  }
-  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-  return String(n);
-}
-
-function ModelLine({ model }: { model: ModelInfo }) {
-  return (
-    <span className="flex w-full items-baseline justify-between gap-2">
-      <span className="text-sm font-medium">{model.name}</span>
-      {model.contextWindow !== undefined && (
-        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
-          {formatCtxWindow(model.contextWindow)} ctx
-        </span>
-      )}
-    </span>
-  );
 }
 
 // Donut geometry — 24×24 viewBox keeps the SVG aligned with `size-4`
@@ -1769,50 +1132,32 @@ function ModelLine({ model }: { model: ModelInfo }) {
 const DONUT_RADIUS = 9;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 
+/**
+ * Context-window pressure from the agent's ACP `usage_update` (tokens in
+ * context out of the window size), plus the session's cost: the agent's
+ * own figure, or Band's estimate from token counts for agents that report
+ * none.
+ */
 function ContextMeter({
   usage,
-  model,
-  modelInfo,
+  costUsd,
 }: {
-  usage: UsageData | undefined;
-  model: string | undefined;
-  modelInfo?: ModelInfo;
+  usage: SessionState["usage"];
+  costUsd: number | null;
 }) {
-  // Adapters compute context size with provider-aware semantics and pass it
-  // through `contextTokens`. Only fall back to summation for legacy snapshots
-  // that predate that field. Provider semantics differ:
-  //   • Claude: `inputTokens` is the *uncached* portion → must add cache.
-  //   • Codex/OpenAI: `inputTokens` is the full prompt (already includes
-  //     cached) → adding `cacheReadTokens` would double-count.
-  // `legacyContextSize` uses the `provider` discriminator (with a
-  // cacheCreationTokens-presence fallback for old snapshots).
-  const contextSize = usage ? (usage.contextTokens ?? legacyContextSize(usage)) : 0;
-  // Window denominator priority:
-  //   1. SDK-reported `maxContextTokens` (Claude only, auto-compact-aware)
-  //   2. `modelInfo.contextWindow` from the adapter's listModels()
-  //   3. Static MODEL_CONTEXT_WINDOWS map keyed by id prefix
-  const window = usage?.maxContextTokens ?? modelInfo?.contextWindow ?? getContextWindow(model);
-  const pct = Math.min(100, (contextSize / window) * 100);
+  const pct = usage && usage.size > 0 ? Math.min(100, (usage.used / usage.size) * 100) : 0;
   const pctRounded = Math.round(pct);
   const danger = pct >= 85;
   const warn = !danger && pct >= 65;
-  // Monochrome gray progression — the donut sits among other muted-foreground
-  // affordances in PromptInputActions, so it should read as a quiet status
-  // glyph rather than a colored alert. Higher usage = darker shade.
+  // Monochrome: the donut is a quiet status glyph among the other muted
+  // affordances. Higher usage = darker shade.
   const progressColor = danger
     ? "stroke-foreground"
     : warn
       ? "stroke-muted-foreground"
       : "stroke-muted-foreground/60";
-  // Empty arc would render as a full ring at strokeDashoffset = circumference,
-  // so dot-treat the 0% case explicitly to match a "nothing yet" affordance.
   const dashOffset = pct <= 0 ? DONUT_CIRCUMFERENCE : DONUT_CIRCUMFERENCE * (1 - pct / 100);
-
-  // Popover (controlled) instead of Tooltip so the breakdown is reachable on
-  // touch devices where hover doesn't fire reliably. On desktop we still want
-  // the lightweight hover-to-peek feel, so `onPointerEnter`/`onPointerLeave`
-  // open/close the popover when the input is a mouse. Touch and pen taps fall
-  // through to Popover's built-in click toggle.
+  // Controlled popover: hover-to-peek with a mouse, tap on touch devices.
   const [open, setOpen] = useState(false);
 
   return (
@@ -1820,10 +1165,13 @@ function ContextMeter({
       <PopoverTrigger asChild>
         <button
           type="button"
-          // Match `SessionHistoryMenu`'s button shell so the donut sits
-          // visually on the same row of affordances inside PromptInputActions.
-          aria-label={`Context window: ${pctRounded}% of ${formatTokens(window)}`}
-          className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          data-testid="chat-pane__context-meter"
+          aria-label={
+            usage
+              ? `Context window: ${pctRounded}% of ${formatTokens(usage.size)}`
+              : "Context window: no usage yet"
+          }
+          className="inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onPointerEnter={(e) => {
             if (e.pointerType === "mouse") setOpen(true);
           }}
@@ -1845,7 +1193,7 @@ function ContextMeter({
               cy="12"
               r={DONUT_RADIUS}
               fill="none"
-              className={cn("transition-all", progressColor)}
+              className={cn("transition-[stroke-dashoffset,stroke]", progressColor)}
               strokeWidth="3"
               strokeLinecap="round"
               strokeDasharray={DONUT_CIRCUMFERENCE}
@@ -1855,9 +1203,6 @@ function ContextMeter({
         </button>
       </PopoverTrigger>
       <PopoverContent
-        // Keep the popover open while the mouse is over its content (otherwise
-        // hovering off the trigger into the popover would close it before the
-        // user can read it). Touch users dismiss via tap-outside / Escape.
         onPointerEnter={(e) => {
           if (e.pointerType === "mouse") setOpen(true);
         }}
@@ -1870,65 +1215,23 @@ function ContextMeter({
       >
         <div className="space-y-0.5 text-xs">
           {usage ? (
-            <>
-              <div>Input: {usage.inputTokens.toLocaleString()}</div>
-              <div>Output: {usage.outputTokens.toLocaleString()}</div>
-              {usage.cacheReadTokens !== undefined && (
-                <div>Cache read: {usage.cacheReadTokens.toLocaleString()}</div>
-              )}
-              {usage.cacheCreationTokens !== undefined && (
-                <div>Cache write: {usage.cacheCreationTokens.toLocaleString()}</div>
-              )}
-              {usage.reasoningOutputTokens !== undefined && (
-                <div>Reasoning output: {usage.reasoningOutputTokens.toLocaleString()}</div>
-              )}
-              {usage.totalProcessedTokens !== undefined &&
-                usage.totalProcessedTokens > contextSize && (
-                  <div>Total processed: {usage.totalProcessedTokens.toLocaleString()}</div>
-                )}
-              <div className="mt-1 border-t pt-1">
-                Context: {contextSize.toLocaleString()} / {window.toLocaleString()} ({pctRounded}%)
-              </div>
-            </>
+            <div>
+              Context: {usage.used.toLocaleString()} / {usage.size.toLocaleString()} ({pctRounded}%)
+            </div>
           ) : (
-            <div>Context window: {window.toLocaleString()} tokens</div>
+            <div>No usage reported yet</div>
           )}
+          {costUsd !== null && <div>Cost: ${costUsd.toFixed(costUsd < 1 ? 3 : 2)}</div>}
         </div>
       </PopoverContent>
     </Popover>
   );
 }
 
-function usageContextSize(usage: UsageData | undefined): number {
-  if (!usage) return 0;
-  return usage.contextTokens ?? legacyContextSize(usage);
-}
-
-/**
- * Backward-compat fallback for usage snapshots that lack `contextTokens`.
- * Uses `provider` when set; falls back to `cacheCreationTokens` presence as
- * a Claude detector for snapshots persisted before the provider field
- * existed. Claude `inputTokens` excludes cached content (must add cache
- * fields); other providers report the full prompt.
- */
-function legacyContextSize(usage: UsageData): number {
-  const isClaude = usage.provider === "claude" || usage.cacheCreationTokens !== undefined;
-  if (isClaude) {
-    return (
-      usage.inputTokens +
-      (usage.cacheReadTokens ?? 0) +
-      (usage.cacheCreationTokens ?? 0) +
-      (usage.reasoningOutputTokens ?? 0)
-    );
-  }
-  return usage.inputTokens + (usage.reasoningOutputTokens ?? 0);
-}
-
 interface SessionHistoryItem {
   sessionId: string;
   summary: string;
   lastModified: number;
-  gitBranch?: string;
 }
 
 function SessionHistoryMenu({
@@ -1941,7 +1244,7 @@ function SessionHistoryMenu({
   workspaceId: string;
   chatId: string;
   activeSessionId?: string;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, summary: string) => void;
   onNewSession: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1958,28 +1261,53 @@ function SessionHistoryMenu({
       .finally(() => setLoading(false));
   }, [open, workspaceId, chatId]);
 
+  // Composing Tooltip + DropdownMenu trigger:
+  //
+  //   <Tooltip><TooltipTrigger asChild><DropdownMenuTrigger className="…">
+  //
+  // i.e. only ONE `asChild` in the chain. The previous shape was:
+  //
+  //   <TooltipTrigger asChild><DropdownMenuTrigger asChild><button>…
+  //
+  // Two stacked `asChild` triggers fight over the underlying button's ref:
+  // Radix's `composeRefs` works pairwise but the outer `asChild` ends up
+  // capturing the inner `DropdownMenuTrigger` (a forwardRef component) as
+  // the anchor *element* rather than the actual `<button>`. The Popper
+  // then can't find an anchor on first open and falls back to positioning
+  // against the document body — visually that's the dropdown sitting in
+  // the top-left of the chat with a 100+ px gap from the Clock icon
+  // trigger. Removing the inner `asChild` lets DropdownMenuTrigger render
+  // its own `<button>`, the tooltip wraps it cleanly, and Popper anchors
+  // correctly every time. Same fix kills the click-leak: with a correct
+  // anchor the menu opens ABOVE the trigger (via `side="top"`) instead
+  // of underneath the cursor.
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Clock className="size-4" />
-            </button>
+          <DropdownMenuTrigger
+            type="button"
+            data-testid="chat-pane__session-history-button"
+            aria-label="Session history"
+            className="inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Clock className="size-4" />
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>Session history</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" className="w-72">
+      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-72">
         {loading ? (
           <div className="flex items-center justify-center py-6">
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           </div>
         ) : sessions.length === 0 ? (
-          <div className="px-3 py-4 text-center text-sm text-muted-foreground">No sessions yet</div>
+          <div
+            data-testid="chat-pane__session-history-empty"
+            className="px-3 py-4 text-center text-sm text-muted-foreground"
+          >
+            No sessions yet
+          </div>
         ) : (
           <div className="max-h-64 overflow-y-auto">
             {sessions.map((session) => {
@@ -1987,32 +1315,22 @@ function SessionHistoryMenu({
               return (
                 <DropdownMenuItem
                   key={session.sessionId}
-                  onClick={() => onSelectSession(session.sessionId)}
+                  onSelect={() => onSelectSession(session.sessionId, session.summary)}
                   className={cn("flex flex-col items-start gap-0.5", isActive && "bg-accent")}
                 >
                   <span className="line-clamp-1 text-sm font-medium">{session.summary}</span>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{relativeTime(session.lastModified)}</span>
-                    {session.gitBranch && (
-                      <>
-                        <span className="text-border">·</span>
-                        <span className="inline-flex items-center gap-1">
-                          <GitBranch className="size-2.5" />
-                          {session.gitBranch}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {session.lastModified ? relativeTime(session.lastModified) : ""}
+                  </span>
                 </DropdownMenuItem>
               );
             })}
           </div>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onNewSession()}>
+        <DropdownMenuItem onSelect={() => onNewSession()}>
           <Plus className="size-3.5" />
           New session
-          <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -2080,8 +1398,8 @@ function QueuedMessageBubble({
             <GripHorizontal className="size-3.5" />
           </button>
           <div className="flex flex-col gap-2 break-words text-sm px-3 py-2">
-            {files?.map((file, idx) => (
-              <MessageFilePart key={`queued-file-${idx}`} part={{ type: "file", ...file }} />
+            {files?.map((file) => (
+              <MessageFilePart key={`queued-file-${file.url}`} part={{ type: "file", ...file }} />
             ))}
             <button
               type="button"

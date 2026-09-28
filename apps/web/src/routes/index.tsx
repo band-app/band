@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
@@ -10,24 +9,23 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
   const isWideScreen = useIsDesktop();
-  // Desktop split layout is active inside the desktop shell or in a wide browser window.
+  // Desktop split layout is active inside the desktop shell or in a wide
+  // browser window.
   const useDesktopLayout = isWideScreen || isDesktop;
 
-  // Desktop: sidebar is rendered by root layout, just show empty state
+  // Desktop: the SharedDockviewLayout mounted in __root.tsx already covers
+  // this route. Each per-workspace panel host renders its NoWorkspaceMessage
+  // empty state because the URL has no $workspaceId. There is nothing else
+  // to render here — the AppShell's <Outlet /> sits BEHIND
+  // <SharedDockviewLayout />, so anything we return would be hidden.
   if (useDesktopLayout) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-center px-8">
-          <MessageSquare className="size-8 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">Select a workspace to get started</p>
-        </div>
-      </div>
-    );
+    return null;
   }
 
-  // Mobile / narrow browser: full-screen dashboard shell
+  // Mobile / narrow browser: full-screen dashboard shell. DashboardShell owns
+  // the bottom gap and both safe-area insets.
   return (
-    <div className="h-dvh pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
+    <div className="h-dvh">
       <DashboardView />
     </div>
   );

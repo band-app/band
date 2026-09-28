@@ -1,0 +1,271 @@
+/**
+ * End-to-end coverage for the project-list sidebar toggle.
+ *
+ * The project list now lives in a standalone left sidebar, SEPARATE from the
+ * dockview (it used to be the dockview's `edge-left` "projects" panel). A
+ * header button — plus the ⌘B shortcut and the ⌃0 "Focus Projects" path —
+ * toggles its visibility, and the last-left state persists across reloads.
+ *
+ * Architecture (matches the repo's integration doctrine):
+ *   - The real production binary runs against a fresh tmp `~/.band/`.
+ *   - No tRPC mocking — the dashboard renders against the real backend. One
+ *     project (no real worktree on disk) is seeded into SQLite so a
+ *     workspace route mounts; background git calls fail gracefully but the
+ *     dockview + sidebar still render.
+ *   - All UI is driven through `WorkspacePage` (no raw `page.*` in the body).
+ *
+ * The sidebar is a collapsible resizable-panel: collapsing shrinks its width
+ * to ~0 rather than unmounting the sibling panel that holds the dockview
+ * (which must stay mounted so cached workspaces survive a toggle). So the
+ * user-observable signal for hidden/shown is the sidebar's rendered width,
+ * cross-checked against the toggle button's `aria-pressed` state.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import {
+  cleanupTmpHome,
+  createTmpHome,
+  resetClientState,
+  type ServerHandle,
+  seedSettings,
+  seedState,
+  startServer,
+} from "./helpers/server";
+import { WorkspacePage } from "./pages/WorkspacePage";
+
+const TOKEN = "e2e-sidebar-toggle-token";
+const PROJECT = "alpha-sidebar";
+const WORKSPACE = toWorkspaceId(PROJECT, "main");
+
+// Wide viewport so `useIsDesktop()` reports true and the desktop layout
+// (sidebar + dockview) renders (>= 1024px in useIsDesktop.ts).
+test.use({ viewport: { width: 1280, height: 800 } });
+
+let server: ServerHandle;
+let tmpHome: string;
+
+test.beforeAll(async () => {
+  tmpHome = createTmpHome();
+  // A real directory, not `/tmp/fake/...`: the default center layout is a
+  // single terminal, and a shell can't start in a directory that doesn't
+  // exist. Its PTY dies, the leaf is removed, and the center drops to its
+  // empty state, so `waitForReady` never sees the toolbar after a reload.
+  const projectPath = join(tmpHome, PROJECT);
+  mkdirSync(projectPath, { recursive: true });
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: PROJECT,
+        path: projectPath,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: projectPath }],
+      },
+    ],
+  });
+  // `translucentSidebar: true` is the default, seeded explicitly so the
+  // solid-sidebar test below proves the browser build ignores it.
+  seedSettings(tmpHome, { tokenSecret: TOKEN, translucentSidebar: true });
+  server = await startServer({ tmpHome });
+});
+
+// UI state lives on the server now: start each test from none, like the
+// fresh localStorage each test's browser context used to give it.
+test.beforeEach(() => resetClientState(tmpHome));
+
+test.afterAll(async () => {
+  await server.close();
+  cleanupTmpHome(tmpHome);
+});
+
+test("the sidebar is visible by default and the toggle button reads pressed", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toBeVisible();
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the header button hides and shows the sidebar", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Hide.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "false");
+
+  // Show.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the ⌘B shortcut toggles the sidebar", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  await wp.toggleSidebarViaShortcut();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "false");
+
+  await wp.toggleSidebarViaShortcut();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("⌃0 (Focus Projects) reveals a collapsed sidebar", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Hide first, then prove ⌃0 brings it back.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+
+  await wp.focusProjectsViaShortcut();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the nav cluster renders once alongside the sidebar's own action bar", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // The nav cluster is a single stationary overlay over the title-bar row. The
+  // overflow actions live in the project-list bottom action bar; there is
+  // no title-bar hamburger anywhere, so the Menu button is absent.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarToggle).toHaveCount(1);
+  await expect(wp.actionBarWithinSidebar).toBeVisible();
+  await expect(wp.menuTrigger).toHaveCount(0);
+});
+
+test("the toggle and back/forward stay put (no relocation, no jump) when the sidebar collapses", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Precondition: while visible, the actions live in the project-list bottom
+  // action bar and there is no title-bar hamburger.
+  await expect(wp.actionBarWithinSidebar).toBeVisible();
+  await expect(wp.menuTrigger).toHaveCount(0);
+  await expect(wp.sidebarToggle).toBeVisible();
+  const xBefore = await wp.sidebarToggleX();
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+
+  // The cluster is hosted in a stationary overlay, so its controls stay reachable
+  // while the list is collapsed — at the exact same position (the flicker
+  // regression was the cluster remounting 3px off between the two bars)...
+  await expect(wp.sidebarToggle).toBeVisible();
+  await expect(wp.backButton).toBeVisible();
+  await expect(wp.forwardButton).toBeVisible();
+  await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
+  // ...and no hamburger appears in the collapsed state either.
+  await expect(wp.menuTrigger).toHaveCount(0);
+
+  // Round trip: re-expanding was the other half of the flicker regression
+  // (the cluster used to remount into the sidebar bar) — the toggle must
+  // hold the same position through the expand too.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect.poll(() => wp.sidebarToggleX()).toBe(xBefore);
+});
+
+test("the nav-cluster overlay renders after the top-row drag surfaces in DOM order", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Positive anchor: the overlay and its toggle actually rendered.
+  await expect(wp.sidebarToggle).toBeVisible();
+
+  // Drag-region invariant (PR #634): in the Electron shell, Chromium builds
+  // the window's draggable region in DOCUMENT order — the overlay's `no-drag`
+  // carve-out only wins if it comes after the top row's `drag` rects. An
+  // earlier-in-DOM overlay leaves the nav buttons covered by the drag region
+  // (clicks start a window drag instead). Real drag-region hit-testing isn't
+  // reachable from this browser harness, so DOM order is the assertable
+  // projection; the page-object probe throws if either side goes missing.
+  expect(await wp.navOverlayFollowsDragSurfaces()).toBe(true);
+
+  // The invariant must hold in the collapsed state too, when the overlay sits
+  // over the tab strip's sidebar gutter.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarGutter).toBeVisible();
+  expect(await wp.navOverlayFollowsDragSurfaces()).toBe(true);
+});
+
+test("the tab strip reserves room for the nav cluster only while the sidebar is collapsed", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Visible sidebar: the nav cluster sits over the sidebar's title bar, so
+  // the tab strip reserves nothing.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.tab("terminal")).toBeVisible();
+  await expect(wp.sidebarGutter).toHaveCount(0);
+
+  // Collapsed: the cluster now floats over the tab strip, and the strip's
+  // top-left group starts its tabs to the right of it.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarGutter).toBeVisible();
+  const overlay = await wp.boxOf(wp.navOverlay);
+  await expect
+    .poll(async () => (await wp.boxOf(wp.tab("terminal"))).x)
+    .toBeGreaterThanOrEqual(overlay.x + overlay.width);
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  await expect(wp.sidebarGutter).toHaveCount(0);
+});
+
+test("the collapsed state persists across a reload", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect.poll(() => wp.readSidebarCollapsed()).toBe(true);
+
+  await wp.reload();
+  await wp.waitForReady();
+
+  // The mount effect re-collapses from persisted state.
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarToggle).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the browser build paints the sidebar solid even with translucentSidebar on", async ({
+  page,
+}) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  await wp.goto(WORKSPACE);
+  await wp.waitForReady();
+
+  // Positive anchor: the sidebar rendered at full width.
+  await expect.poll(() => wp.sidebarWidth()).toBeGreaterThan(200);
+  // The translucent sidebar needs the macOS desktop window's vibrancy layer,
+  // so a plain browser tab keeps the page opaque and the sidebar solid.
+  await expect.poll(() => wp.translucentSidebarActive()).toBe(false);
+  await expect.poll(() => wp.sidebarBackgroundAlpha()).toBe(1);
+});

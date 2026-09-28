@@ -1,8 +1,8 @@
-import { DashboardShell } from "@band-app/dashboard-core";
+import { DashboardShell } from "@/dashboard";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
 import { DesktopLayout } from "./DesktopLayout";
-import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "./ToolbarButtons";
+import { ToolbarActionBar, ToolbarOverflowProvider } from "./ToolbarButtons";
 
 export function DashboardView() {
   const isWideScreen = useIsDesktop();
@@ -11,14 +11,14 @@ export function DashboardView() {
   if (useDesktopLayout) {
     return (
       <ToolbarOverflowProvider>
-        <DesktopLayout toolbarMenuItems={<ToolbarOverflowMenuItems />} />
+        <DesktopLayout bottomActions={<ToolbarActionBar />} />
       </ToolbarOverflowProvider>
     );
   }
 
   return (
     <ToolbarOverflowProvider>
-      <DashboardShell toolbarMenuItems={<ToolbarOverflowMenuItems />} />
+      <DashboardShell bottomActions={<ToolbarActionBar />} />
     </ToolbarOverflowProvider>
   );
 }

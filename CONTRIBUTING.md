@@ -94,6 +94,10 @@ CI does not run automatically on fork PRs to keep costs under control. Here's ho
 3. The maintainer adds the `ci:approved` label to trigger CI.
 4. CI runs. If you push new commits, CI re-runs automatically while the label is present.
 
+## Automated Claude Reviews
+
+PRs opened by project collaborators (OWNER / MEMBER / COLLABORATOR on this repo) automatically receive an AI review from Anthropic's Claude via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) — see [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml). The review posts **one consolidated PR comment** with findings grouped by domain (Coding / Testing / Security / Performance) plus a final `Verdict:` line (`approved 👍` or `request changes 👎`); the same comment is updated in place on each subsequent push (marker-based PATCH, see [`.claude/skills/review-changes/SKILL.md`](.claude/skills/review-changes/SKILL.md)). It's advisory, not a required check, and a human reviewer is still expected to sign off. PRs from outside contributors / forks intentionally do **not** trigger the automated review (budget and noise control), and `pull_request` (rather than `pull_request_target`) is used so the `CLAUDE_CODE_OAUTH_TOKEN` secret is never exposed to fork code.
+
 ## What to Contribute
 
 - **Bug fixes** — check [open issues](https://github.com/band-app/band/issues) or report a new one.
@@ -105,11 +109,14 @@ CI does not run automatically on fork PRs to keep costs under control. Here's ho
 
 This project uses **integration tests** as the primary testing approach. Do not write unit tests with mocked dependencies.
 
-- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs.
+- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs, the rendered DOM (frontend).
+- **The real binary runs inside the test.** Backend and frontend tests both boot the production server process — no shallow renders, no in-memory React mounts, no test-only build flags.
 - **Real infrastructure.** Use test containers for databases, temporary directories for file-based state, real servers on random ports.
-- **MSW for external APIs.** Mock only third-party APIs you don't own, using [MSW](https://mswjs.io/) at the network layer.
-- **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`.
-- **Never modify production code to make a test pass.**
+- **External services get Express stubs.** Mock only services your process calls *out* to (third-party APIs, GitHub, agent binaries) using an Express stub on a random port + an env-var override read at request time. Do **not** use [MSW](https://mswjs.io/) — it misses subprocess-originated traffic. Do **not** use `page.route()` to intercept your own backend's routes from a Playwright test.
+- **Test framework matches the package.** `node:test` + `node:assert/strict` is the default for new code. The web app (`apps/web`) uses `vitest`.
+- **Never modify production code to make a test pass.** The only allowed production-code change a test may introduce is a `data-testid` attribute on a JSX element, or refactoring an outbound URL to be read from an env var at request time so the test can override it.
+
+For the full doctrine — backend + frontend test patterns, Express-stub examples, page-object conventions, and worked examples — see [`CLAUDE.md`](CLAUDE.md#testing-strategy) and the [`write-integration-test`](.claude/skills/write-integration-test/SKILL.md) skill. Those are the authoritative sources; this section is a summary.
 
 ## Building Locally vs. Signed Releases
 
@@ -134,3 +141,4 @@ Be respectful and constructive. We're all here to build something useful.
 ## Questions?
 
 Open an issue or start a discussion on the repo. We're happy to help you get oriented.
+

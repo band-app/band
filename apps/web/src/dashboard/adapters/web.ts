@@ -1,0 +1,556 @@
+import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import type { AgentMode } from "../../shared/agent-sessions";
+import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
+import type { SSEEvent } from "../lib/sse";
+import type {
+  BrowserProfileInfo,
+  CIStatus,
+  CliStatus,
+  ContentSearchMatch,
+  DiffMode,
+  FileContentResult,
+  FileListResult,
+  FormatFileResult,
+  GitStatus,
+  HooksStatus,
+  ListWorkspaceBranchesResult,
+  ProjectInfo,
+  Settings,
+  WorkspaceDiff,
+  WorkspaceStatus,
+} from "../types";
+
+const wsClient = createWSClient({
+  url: () => {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/trpc`;
+  },
+});
+
+export class WebDashboardAdapter implements DashboardAdapter {
+  // The AppRouter type lives in apps/web which cannot be imported here
+  // (circular dep). Type safety comes from the DashboardAdapter interface.
+  // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
+  protected trpc: any = createTRPCClient({
+    links: [
+      splitLink({
+        condition: (op) => op.type === "subscription",
+        true: wsLink({ client: wsClient }),
+        // Cap batched GETs to stay under Node/proxy header limits — issue #430.
+        false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
+      }),
+    ],
+  });
+
+  async listProjects(): Promise<ProjectInfo[]> {
+    const data = await this.trpc.projects.list.query();
+    // Normalise `kind` at the adapter boundary so downstream consumers
+    // can treat it as required. Newer servers always set it, but the
+    // dashboard may briefly run against an older server during a rolling
+    // upgrade — default to "git" in that case (matches the migration's
+    // DEFAULT 'git' for pre-existing rows).
+    return (data.projects as ProjectInfo[]).map((p) => ({
+      ...p,
+      kind: p.kind ?? "git",
+    }));
+  }
+
+  async addProject(path: string, label?: string): Promise<void> {
+    await this.trpc.projects.add.mutate({ path, label });
+  }
+
+  async removeProject(name: string): Promise<void> {
+    await this.trpc.projects.remove.mutate({ name });
+  }
+
+  async reorderProjects(names: string[]): Promise<void> {
+    await this.trpc.projects.reorder.mutate({ names });
+  }
+
+  async updateProjectLabel(name: string, label: string | null): Promise<void> {
+    await this.trpc.projects.updateLabel.mutate({ name, label });
+  }
+
+  async checkPath(path: string): Promise<{ isGitRepo: boolean }> {
+    return await this.trpc.projects.checkPath.query({ path });
+  }
+
+  async gitInit(path: string): Promise<void> {
+    await this.trpc.projects.gitInit.mutate({ path });
+  }
+
+  async promoteProjectToGit(name: string): Promise<void> {
+    await this.trpc.projects.promoteToGit.mutate({ name });
+  }
+
+  async createWorkspace(
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+    agentMode?: AgentMode,
+  ): Promise<void> {
+    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt, agentMode });
+  }
+
+  async removeWorkspace(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.remove.mutate({ project, name });
+  }
+
+  async setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void> {
+    await this.trpc.workspaces.setPinned.mutate({ project, name, pinned });
+  }
+
+  async clearNeedsAttention(workspaceId: string): Promise<void> {
+    await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
+  }
+
+  async runScript(path: string, scriptType: string): Promise<void> {
+    await this.trpc.workspaces.runScript.mutate({ path, scriptType });
+  }
+
+  async gitPull(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.gitPull.mutate({ project, name });
+  }
+
+  async gitPush(project: string, name: string): Promise<void> {
+    await this.trpc.workspaces.gitPush.mutate({ project, name });
+  }
+
+  async listBrowserProfiles(): Promise<BrowserProfileInfo[]> {
+    const data = await this.trpc.browserProfiles.list.query();
+    return data.profiles as BrowserProfileInfo[];
+  }
+
+  async removeBrowserProfile(profileId: string): Promise<void> {
+    await this.trpc.browserProfiles.remove.mutate({ profileId });
+  }
+
+  async listProjectBrowserProfiles(): Promise<Record<string, string>> {
+    const data = await this.trpc.browserProfiles.projectDefaults.query();
+    const byProject: Record<string, string> = {};
+    for (const row of data.defaults as { projectName: string; profileId: string }[]) {
+      byProject[row.projectName] = row.profileId;
+    }
+    return byProject;
+  }
+
+  async setProjectBrowserProfile(projectName: string, profileId: string | null): Promise<void> {
+    await this.trpc.browserProfiles.setProjectDefault.mutate({ projectName, profileId });
+  }
+
+  async getSettings(): Promise<Settings> {
+    return (await this.trpc.settings.get.query()) as Settings;
+  }
+
+  async updateSettings(settings: Settings): Promise<void> {
+    await this.trpc.settings.update.mutate(settings as unknown as Record<string, unknown>);
+  }
+
+  async listModels(agentId?: string): Promise<{
+    models: { id: string; name: string; description?: string; contextWindow?: number }[];
+    defaultModel?: string;
+    updatedAt?: number;
+  }> {
+    const data = await this.trpc.models.list.query({ agentId });
+    return data as {
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      defaultModel?: string;
+      updatedAt?: number;
+    };
+  }
+
+  async listAllModels(): Promise<{
+    agents: {
+      agentId: string;
+      agentType: string;
+      agentLabel: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt?: number;
+      defaultModel?: string;
+    }[];
+    defaultAgentId: string;
+  }> {
+    const data = await this.trpc.models.listAll.query();
+    return data as {
+      agents: {
+        agentId: string;
+        agentType: string;
+        agentLabel: string;
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt?: number;
+        defaultModel?: string;
+      }[];
+      defaultAgentId: string;
+    };
+  }
+
+  async refreshModels(agentId?: string): Promise<{
+    results: {
+      agentId: string;
+      models: { id: string; name: string; description?: string; contextWindow?: number }[];
+      updatedAt: number;
+      error?: string;
+    }[];
+  }> {
+    const data = await this.trpc.models.refresh.mutate({ agentId });
+    return data as {
+      results: {
+        agentId: string;
+        models: { id: string; name: string; description?: string; contextWindow?: number }[];
+        updatedAt: number;
+        error?: string;
+      }[];
+    };
+  }
+
+  private statusHandlers = new Set<(data: SSEEvent) => void>();
+  private statusSubscription: { unsubscribe: () => void } | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private createStatusSubscription() {
+    this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
+      onData: (data: SSEEvent) => {
+        for (const h of this.statusHandlers) {
+          h(data);
+        }
+      },
+      onError: () => {
+        this.statusSubscription = null;
+        this.scheduleReconnect();
+      },
+      onComplete: () => {
+        this.statusSubscription = null;
+        this.scheduleReconnect();
+      },
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    if (this.statusHandlers.size === 0) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.statusHandlers.size > 0 && !this.statusSubscription) {
+        this.createStatusSubscription();
+      }
+    }, 2000);
+  }
+
+  private subscribeStatusStream(handler: (data: SSEEvent) => void): Unsubscribe {
+    this.statusHandlers.add(handler);
+
+    if (!this.statusSubscription) {
+      this.createStatusSubscription();
+    }
+
+    return () => {
+      this.statusHandlers.delete(handler);
+      if (this.statusHandlers.size === 0) {
+        if (this.statusSubscription) {
+          this.statusSubscription.unsubscribe();
+          this.statusSubscription = null;
+        }
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+      }
+    };
+  }
+
+  subscribeStatusEvents(handler: (event: Record<string, unknown>) => void): Unsubscribe {
+    return this.subscribeStatusStream(handler);
+  }
+
+  /**
+   * Cache so we only post to the server when the value actually changes —
+   * the React tree can re-render and call this on routes that don't
+   * change the workspace, and we don't want to spam the mutation.
+   */
+  private lastActiveWorkspaceId: string | null | undefined = undefined;
+
+  async setActiveWorkspace(workspaceId: string | null): Promise<void> {
+    if (this.lastActiveWorkspaceId === workspaceId) return;
+    this.lastActiveWorkspaceId = workspaceId;
+    try {
+      await this.trpc.editor.setActiveWorkspace.mutate({ workspaceId });
+    } catch {
+      // Best-effort: the active-workspace hint is a UX nicety, not a
+      // correctness invariant. Reset the cache so the next change attempt
+      // re-posts (rather than silently agreeing with a stale value the
+      // server never received).
+      this.lastActiveWorkspaceId = undefined;
+    }
+  }
+
+  subscribeAgentStatus(
+    onSnapshot: (statuses: WorkspaceStatus[]) => void,
+    onUpdate: (status: WorkspaceStatus) => void,
+    onRemove: (workspaceId: string) => void,
+  ): Unsubscribe {
+    return this.subscribeStatusStream((data) => {
+      if (data.kind === "snapshot" && data.statuses) {
+        onSnapshot(data.statuses);
+      } else if (data.kind === "update" && data.status) {
+        onUpdate(data.status);
+      } else if (data.kind === "remove" && data.workspaceId) {
+        onRemove(data.workspaceId);
+      }
+    });
+  }
+
+  subscribeBranchStatus(
+    onGit: (workspaceId: string, git: GitStatus) => void,
+    onCI: (workspaceId: string, ci: CIStatus) => void,
+  ): Unsubscribe {
+    return this.subscribeStatusStream((data) => {
+      if (data.kind === "branch-status" && data.workspaceId) {
+        if (data.git) onGit(data.workspaceId, data.git);
+        if (data.ci) onCI(data.workspaceId, data.ci);
+      }
+    });
+  }
+
+  subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {
+    // The server tears the underlying watcher down (and the subscription
+    // completes) when its `fs.watch` hits an unrecoverable error — e.g.
+    // the worktree directory was deleted. We reconnect with exponential
+    // backoff so the FileBrowser silently re-acquires auto-refresh when
+    // the workspace comes back, but doesn't busy-loop if the workspace
+    // is permanently gone (server returns immediately each time). The
+    // `active` flag stops reconnects after the caller unsubscribes; in
+    // the steady state the FileBrowser unmounts when the workspace is
+    // removed, so the loop terminates naturally.
+    let active = true;
+    let currentSub: { unsubscribe: () => void } | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_BACKOFF_MS = 30_000;
+
+    // Some tRPC transports can fire onStopped after onError (or vice
+    // versa) for the same disconnect; the `!reconnectTimer` guard makes
+    // the second call a no-op so we don't schedule the reconnect twice.
+    const handleDisconnect = () => {
+      currentSub = null;
+      if (active && !reconnectTimer) {
+        // 500, 1000, 2000, 4000 … capped at 30 s.
+        const delay = Math.min(2 ** attempt * 500, MAX_BACKOFF_MS);
+        attempt += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (active) connect();
+        }, delay);
+      }
+    };
+
+    const connect = () => {
+      currentSub = this.trpc.workspace.fileChanges.subscribe(
+        { workspaceId },
+        {
+          onData: (data: { path: string }) => {
+            // A successful data delivery proves the watcher is healthy;
+            // reset the backoff so the next disconnection restarts the
+            // climb from the floor.
+            attempt = 0;
+            handler(data.path);
+          },
+          onStopped: handleDisconnect,
+          onError: handleDisconnect,
+        },
+      );
+    };
+
+    connect();
+
+    return () => {
+      active = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      currentSub?.unsubscribe();
+      currentSub = null;
+    };
+  }
+
+  async checkHooks(): Promise<HooksStatus> {
+    return await this.trpc.hooks.check.query();
+  }
+
+  async installHooks(): Promise<void> {
+    await this.trpc.hooks.install.mutate();
+  }
+
+  async checkCli(): Promise<CliStatus> {
+    const data = await this.trpc.cli.check.query();
+    return data.status as CliStatus;
+  }
+
+  async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
+    await this.trpc.cli.install.mutate(opts);
+  }
+
+  async getWorkspaceDiff(
+    workspaceId: string,
+    contextLines?: number,
+    diffMode?: DiffMode,
+    compareBranch?: string,
+  ): Promise<WorkspaceDiff> {
+    return (await this.trpc.workspace.getDiff.query({
+      workspaceId,
+      contextLines,
+      diffMode,
+      compareBranch,
+    })) as WorkspaceDiff;
+  }
+
+  async listWorkspaceBranches(
+    workspaceId: string,
+    options?: { query?: string; limit?: number },
+  ): Promise<ListWorkspaceBranchesResult> {
+    return await this.trpc.workspace.listBranches.query({ workspaceId, ...options });
+  }
+
+  async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
+    return (await this.trpc.workspace.listFiles.query({ workspaceId, path })) as FileListResult;
+  }
+
+  async getWorkspaceFile(workspaceId: string, path: string): Promise<FileContentResult> {
+    return (await this.trpc.workspace.getFile.query({ workspaceId, path })) as FileContentResult;
+  }
+
+  async saveWorkspaceFile(workspaceId: string, path: string, content: string): Promise<void> {
+    await this.trpc.workspace.saveFile.mutate({ workspaceId, path, content });
+  }
+
+  async readExternalFile(absolutePath: string): Promise<FileContentResult> {
+    // tRPC infers a discriminated union (`{ tooLarge } | { binary } | { content }`)
+    // for the procedure's return. `FileContentResult` widens those into a single
+    // shape with all variants as optional fields — same pattern `getWorkspaceFile`
+    // uses (and the downstream `FileViewer` consumer already keys off the flags
+    // before reading `.content`).
+    return (await this.trpc.host.readFile.query({ absolutePath })) as FileContentResult;
+  }
+
+  async resolveWorkspacePath(
+    workspaceId: string,
+    path: string,
+  ): Promise<{
+    exists: boolean;
+    isFile: boolean;
+    external: boolean;
+    workspaceRelativePath: string | null;
+  }> {
+    return await this.trpc.workspace.resolvePath.query({ workspaceId, path });
+  }
+
+  async saveExternalFile(absolutePath: string, content: string): Promise<void> {
+    await this.trpc.host.saveFile.mutate({ absolutePath, content });
+  }
+
+  async formatWorkspaceFile(
+    workspaceId: string,
+    filePath: string,
+    content: string,
+  ): Promise<FormatFileResult> {
+    return await this.trpc.workspace.formatFile.mutate({
+      workspaceId,
+      filePath,
+      content,
+    });
+  }
+
+  async createWorkspaceFile(workspaceId: string, path: string, content = ""): Promise<void> {
+    await this.trpc.workspace.createFile.mutate({ workspaceId, path, content });
+  }
+
+  async createWorkspaceDirectory(workspaceId: string, path: string): Promise<void> {
+    await this.trpc.workspace.createDirectory.mutate({ workspaceId, path });
+  }
+
+  async deleteWorkspacePath(
+    workspaceId: string,
+    path: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.deletePath.mutate({ workspaceId, path })) as {
+      kind: "file" | "directory";
+    };
+  }
+
+  async renameWorkspacePath(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.renamePath.mutate({
+      workspaceId,
+      fromPath,
+      toPath,
+    })) as { kind: "file" | "directory" };
+  }
+
+  async copyWorkspacePath(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.copyPath.mutate({
+      workspaceId,
+      fromPath,
+      toPath,
+    })) as { kind: "file" | "directory" };
+  }
+
+  getWorkspaceFileUrl(workspaceId: string, path: string): string {
+    return `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+  }
+
+  async searchWorkspaceFiles(
+    workspaceId: string,
+    query: string,
+    limit?: number,
+  ): Promise<{ files: string[] }> {
+    return (await this.trpc.workspace.searchFiles.query({
+      workspaceId,
+      query,
+      limit,
+    })) as { files: string[] };
+  }
+
+  async searchWorkspaceContent(
+    workspaceId: string,
+    query: string,
+    options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number },
+  ): Promise<{ results: ContentSearchMatch[] }> {
+    return (await this.trpc.workspace.searchContent.query({
+      workspaceId,
+      query,
+      caseSensitive: options?.caseSensitive,
+      wholeWord: options?.wholeWord,
+      regex: options?.regex,
+      limit: options?.limit,
+    })) as { results: ContentSearchMatch[] };
+  }
+}
+
+export class WebCapabilities implements PlatformCapabilities {
+  copyPath = false;
+  navigate?: (href: string) => void;
+
+  // The workspace URL no longer carries a sub-path for the active tab —
+  // tab state lives entirely inside `MobileWorkspaceLayout`, and the
+  // desktop dockview at AppShell renders every panel regardless of URL.
+  // See issue #467 for the refactor that removed the `band-tab:` session
+  // store and the `/changes` / `/code` / `/terminal` child routes.
+  getWorkspaceHref(workspaceId: string): string {
+    return `/workspace/${encodeURIComponent(workspaceId)}`;
+  }
+
+  async openUrl(url: string): Promise<void> {
+    window.open(url, "_blank");
+  }
+}

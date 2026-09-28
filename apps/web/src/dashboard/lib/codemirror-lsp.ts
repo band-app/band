@@ -1,0 +1,851 @@
+import {
+  jumpToDefinition,
+  LSPClient,
+  LSPPlugin,
+  languageServerExtensions,
+  type Transport,
+  Workspace,
+  type WorkspaceFile,
+} from "@codemirror/lsp-client";
+import {
+  type ChangeSet,
+  type Extension,
+  StateEffect,
+  StateField,
+  type Text,
+} from "@codemirror/state";
+import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
+
+// ---------------------------------------------------------------------------
+// LSP language ID mapping (CodeMirror language name -> LSP languageId)
+// ---------------------------------------------------------------------------
+const LSP_LANGUAGE_IDS: Record<string, string> = {
+  typescript: "typescript",
+  tsx: "typescriptreact",
+  javascript: "javascript",
+  jsx: "javascriptreact",
+};
+
+/**
+ * Languages that have an LSP server configured on the backend.
+ * Used to determine whether to create an LSP extension for a file.
+ */
+export const LSP_SUPPORTED_LANGUAGES = new Set(Object.keys(LSP_LANGUAGE_IDS));
+
+/**
+ * Map a CodeMirror language name to the backend `lang` parameter
+ * used in the WebSocket URL (e.g., tsx -> typescript).
+ */
+export function toLspServerLang(cmLanguage: string): string | null {
+  switch (cmLanguage) {
+    case "typescript":
+    case "tsx":
+    case "javascript":
+    case "jsx":
+      return "typescript";
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-file navigation support
+// ---------------------------------------------------------------------------
+
+/**
+ * Pending cross-file navigation. When the LSP client needs to display
+ * a file other than the current one (e.g., go-to-definition), this
+ * stores the resolve callback so the new EditorView can be provided
+ * once the navigation completes and the editor mounts.
+ */
+let pendingNavigation: {
+  resolve: (view: EditorView | null) => void;
+  timer: ReturnType<typeof setTimeout>;
+} | null = null;
+
+/**
+ * Called by the code browser when a new EditorView is mounted after
+ * an LSP-triggered cross-file navigation. Resolves the pending
+ * displayFile() promise so the library can position the cursor.
+ */
+export function resolveNavigation(view: EditorView): void {
+  if (pendingNavigation) {
+    clearTimeout(pendingNavigation.timer);
+    pendingNavigation.resolve(view);
+    pendingNavigation = null;
+  }
+}
+
+/**
+ * Returns true if there is a pending LSP navigation waiting for
+ * an EditorView to resolve.
+ */
+export function hasPendingNavigation(): boolean {
+  return pendingNavigation !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Custom Workspace — extends DefaultWorkspace with cross-file navigation
+// ---------------------------------------------------------------------------
+
+interface InternalWorkspaceFile extends WorkspaceFile {
+  uri: string;
+  languageId: string;
+  version: number;
+  doc: Text;
+  view: EditorView;
+  getView(): EditorView | null;
+}
+
+class BandWorkspaceFile implements InternalWorkspaceFile {
+  constructor(
+    public uri: string,
+    public languageId: string,
+    public version: number,
+    public doc: Text,
+    public view: EditorView,
+  ) {}
+
+  getView(): EditorView | null {
+    return this.view;
+  }
+}
+
+/**
+ * Custom Workspace that supports cross-file navigation by dispatching
+ * a CustomEvent when displayFile() is called for an unknown URI.
+ */
+class BandWorkspace extends Workspace {
+  files: BandWorkspaceFile[] = [];
+  private fileVersions: Record<string, number> = Object.create(null);
+  /**
+   * Working-tree text shown by diff views, keyed by URI. A diff view has no
+   * LSPPlugin (it is read-only and must not own the file the way an editor
+   * does), but the server still needs the document open to answer
+   * go-to-definition. When no editor has the file open, the diff text is
+   * opened on the server in its place; an editor opening the file takes over.
+   */
+  private diffDocs = new Map<string, { languageId: string; doc: Text; count: number }>();
+  /** URIs currently open on the server with a diff view's text. */
+  private diffOpen = new Set<string>();
+  private rootUri: string;
+  private workspaceId: string | undefined;
+
+  constructor(client: LSPClient, rootUri: string, workspaceId?: string) {
+    super(client);
+    this.rootUri = rootUri;
+    this.workspaceId = workspaceId;
+  }
+
+  private nextFileVersion(uri: string): number {
+    const next = (this.fileVersions[uri] ?? -1) + 1;
+    this.fileVersions[uri] = next;
+    return next;
+  }
+
+  syncFiles(): readonly { file: WorkspaceFile; prevDoc: Text; changes: ChangeSet }[] {
+    const result: { file: WorkspaceFile; prevDoc: Text; changes: ChangeSet }[] = [];
+    for (const file of this.files) {
+      const view = file.getView();
+      if (!view) continue;
+      const plugin = LSPPlugin.get(view);
+      if (!plugin) continue;
+      const changes = plugin.unsyncedChanges;
+      if (!changes.empty) {
+        result.push({ changes, file, prevDoc: file.doc });
+        file.doc = view.state.doc;
+        file.version = this.nextFileVersion(file.uri);
+        plugin.clear();
+      }
+    }
+    return result;
+  }
+
+  openFile(uri: string, languageId: string, view: EditorView): void {
+    // If the file is already tracked, update the view reference
+    const existing = this.files.find((f) => f.uri === uri);
+    if (existing) {
+      existing.view = view;
+      return;
+    }
+    // An editor takes the document over from a diff view.
+    if (this.diffOpen.delete(uri)) this.client.didClose(uri);
+    const file = new BandWorkspaceFile(
+      uri,
+      languageId,
+      this.nextFileVersion(uri),
+      view.state.doc,
+      view,
+    );
+    this.files.push(file);
+    this.client.didOpen(file);
+  }
+
+  closeFile(uri: string): void {
+    const file = this.getFile(uri);
+    if (file) {
+      this.files = this.files.filter((f) => f !== file);
+      this.client.didClose(uri);
+      // A diff view still showing the file hands the server its text again.
+      if (this.diffDocs.has(uri)) this.openDiffOnServer(uri);
+    }
+  }
+
+  /** Register a diff view's working-tree text for `uri` (see `diffDocs`). */
+  openDiffDoc(uri: string, languageId: string, doc: Text): void {
+    const entry = this.diffDocs.get(uri);
+    // Re-send only new text: a second view of the same diff, or a rebuild
+    // with unchanged hunks, must not close and reopen the server's copy.
+    const changed = !entry || !entry.doc.eq(doc);
+    if (entry) {
+      entry.count++;
+      entry.languageId = languageId;
+      entry.doc = doc;
+    } else {
+      this.diffDocs.set(uri, { languageId, doc, count: 1 });
+    }
+    if (this.getFile(uri)) return;
+    if (changed || !this.diffOpen.has(uri)) this.openDiffOnServer(uri);
+  }
+
+  closeDiffDoc(uri: string): void {
+    const entry = this.diffDocs.get(uri);
+    if (!entry) return;
+    if (--entry.count > 0) return;
+    this.diffDocs.delete(uri);
+    if (this.diffOpen.delete(uri)) this.client.didClose(uri);
+  }
+
+  /**
+   * The text the server currently holds for `uri`: the editor's document
+   * (synced first, so unsaved edits count) or the diff view's text.
+   */
+  serverDoc(uri: string): Text | null {
+    const file = this.getFile(uri);
+    if (file) {
+      // Flush the editor's unsaved edits so the answer (and the position the
+      // caller then requests at) matches the server's version of the file.
+      this.client.sync();
+      return file.doc;
+    }
+    return this.diffOpen.has(uri) ? (this.diffDocs.get(uri)?.doc ?? null) : null;
+  }
+
+  private openDiffOnServer(uri: string): void {
+    const entry = this.diffDocs.get(uri);
+    if (!entry) return;
+    if (this.diffOpen.has(uri)) this.client.didClose(uri);
+    this.client.didOpen({
+      uri,
+      languageId: entry.languageId,
+      version: this.nextFileVersion(uri),
+      doc: entry.doc,
+      getView: () => null,
+    });
+    this.diffOpen.add(uri);
+  }
+
+  displayFile(uri: string): Promise<EditorView | null> {
+    // Check if the file is already open
+    const file = this.getFile(uri);
+    if (file) {
+      const view = file.getView();
+      if (view) return Promise.resolve(view);
+    }
+
+    // Cross-file navigation: dispatch event and wait for the new view
+    const filePath = this.uriToWorkspacePath(uri);
+
+    return new Promise<EditorView | null>((resolve) => {
+      // Cancel any previous pending navigation
+      if (pendingNavigation) {
+        clearTimeout(pendingNavigation.timer);
+        pendingNavigation.resolve(null);
+      }
+
+      // Set up timeout
+      const timer = setTimeout(() => {
+        if (pendingNavigation) {
+          pendingNavigation = null;
+          resolve(null);
+        }
+      }, 5000);
+
+      pendingNavigation = { resolve, timer };
+
+      // Dispatch navigation event to CodeBrowserView.
+      //
+      // Scope the event to the owning workspace. Multiple workspace subtrees
+      // stay mounted at once (MultiWorkspacePanelHost keeps every visited
+      // workspace alive, hidden with visibility:hidden), and each
+      // one's CodeBrowserView listens for `band:lsp-navigate` on `window`.
+      // Without a workspace label, a go-to-definition in the active workspace
+      // A would also open the (A-relative) file in hidden workspaces B/C,
+      // whose FileViewer then stats it against B/C's own worktree root →
+      // ENOENT, and poisons B/C's `band-open-tabs:` localStorage. The listener
+      // filters on this id; a missing id falls through to the active
+      // workspace (forward-compat). Same shape as `band:open-file`, see
+      // issue #539.
+      window.dispatchEvent(
+        new CustomEvent("band:lsp-navigate", {
+          detail: { filePath, workspaceId: this.workspaceId },
+        }),
+      );
+    });
+  }
+
+  uriToWorkspacePath(encodedUri: string): string {
+    const uri = decodeUri(encodedUri);
+    const root = this.rootUri.endsWith("/") ? this.rootUri : `${this.rootUri}/`;
+    if (uri.startsWith(root)) {
+      return uri.slice(root.length);
+    }
+    // Fallback: strip file:// prefix and try to make relative
+    const absPath = uri.replace(/^file:\/\//, "");
+    const rootPath = root.replace(/^file:\/\//, "");
+    if (absPath.startsWith(rootPath)) {
+      return absPath.slice(rootPath.length);
+    }
+    return absPath;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket Transport
+// ---------------------------------------------------------------------------
+
+/** Transport with an explicit close method so we can shut down the WebSocket. */
+interface CloseableTransport extends Transport {
+  close(): void;
+}
+
+function createWebSocketTransport(url: string): Promise<CloseableTransport> {
+  return new Promise<CloseableTransport>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let handlers: ((value: string) => void)[] = [];
+
+    ws.onopen = () => {
+      resolve({
+        send(message: string) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(message);
+          }
+        },
+        subscribe(handler: (value: string) => void) {
+          handlers.push(handler);
+        },
+        unsubscribe(handler: (value: string) => void) {
+          handlers = handlers.filter((h) => h !== handler);
+        },
+        close() {
+          ws.close();
+        },
+      });
+    };
+
+    ws.onmessage = (e) => {
+      const data = typeof e.data === "string" ? e.data : e.data.toString();
+      for (const h of handlers) h(data);
+    };
+
+    ws.onerror = () => {
+      reject(new Error(`WebSocket connection failed: ${url}`));
+    };
+
+    ws.onclose = () => {
+      // Clear handlers on close
+      handlers = [];
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// LSP Client cache (one client per WebSocket URL = per workspace+language)
+// ---------------------------------------------------------------------------
+
+interface ConnectedClient {
+  client: LSPClient;
+  transport: CloseableTransport;
+}
+
+interface CachedClient {
+  /** The connect in flight, cached before it resolves so concurrent callers
+   *  for one URL share a single client and WebSocket. */
+  ready: Promise<ConnectedClient>;
+  refCount: number;
+}
+
+const clientCache = new Map<string, CachedClient>();
+
+/**
+ * Get or create an LSP client for the given WebSocket URL.
+ * The client is cached per URL (effectively per workspace+language).
+ *
+ * `workspaceId` is only consumed on the CREATE path — it's baked into the
+ * `BandWorkspace` at construction. On a cache hit it's intentionally ignored:
+ * `wsUrl` is built from the workspaceId (`buildLspWsUrl`), so the cache key
+ * already partitions clients by workspace and a hit is guaranteed to carry the
+ * same workspaceId the caller passed. (If that URL↔workspace coupling ever
+ * changes, this assumption must be revisited.)
+ *
+ * A rejected promise holds no reference, so callers release only after a
+ * successful acquire.
+ */
+async function getOrCreateClient(
+  wsUrl: string,
+  rootUri: string,
+  workspaceId?: string,
+): Promise<LSPClient> {
+  let cached = clientCache.get(wsUrl);
+  if (cached) {
+    cached.refCount++;
+  } else {
+    const client = new LSPClient({
+      rootUri,
+      workspace: (c) => new BandWorkspace(c, rootUri, workspaceId),
+      extensions: languageServerExtensions(),
+      timeout: 10000,
+    });
+    const ready = createWebSocketTransport(wsUrl).then((transport) => {
+      client.connect(transport);
+      return { client, transport };
+    });
+    cached = { ready, refCount: 1 };
+    clientCache.set(wsUrl, cached);
+  }
+  const entry = cached;
+  try {
+    return (await entry.ready).client;
+  } catch (err) {
+    // A failed connect is dropped so the next caller retries.
+    entry.refCount--;
+    if (clientCache.get(wsUrl) === entry) clientCache.delete(wsUrl);
+    throw err;
+  }
+}
+
+/**
+ * Release a reference to an LSP client. When the last reference
+ * is released, sends LSP shutdown/exit, disconnects the client,
+ * and closes the WebSocket.
+ */
+export function releaseLspClient(wsUrl: string): void {
+  const cached = clientCache.get(wsUrl);
+  if (!cached) return;
+  cached.refCount--;
+  if (cached.refCount > 0) return;
+  clientCache.delete(wsUrl);
+  cached.ready
+    .then(({ client, transport }) =>
+      // Send LSP shutdown request followed by exit notification.
+      // This tells the language server to cleanly terminate.
+      client
+        .request("shutdown", null)
+        .then(() => {
+          transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
+        })
+        .catch(() => {
+          // Server may already be gone — that's fine
+        })
+        .finally(() => {
+          client.disconnect();
+          transport.close();
+        }),
+    )
+    .catch(() => {
+      // Never connected: nothing to shut down.
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Cmd+hover link (visual affordance for Cmd+Click go-to-definition)
+// ---------------------------------------------------------------------------
+
+/** Returns the word boundaries around `pos`, or null if not on a word. */
+function wordRangeAt(view: EditorView, pos: number): { from: number; to: number } | null {
+  const { doc } = view.state;
+  if (pos < 0 || pos > doc.length) return null;
+  const line = doc.lineAt(pos);
+  const text = line.text;
+  const col = pos - line.from;
+  // Walk backward/forward to find word chars (letters, digits, underscore, $)
+  const wordRe = /[\w$]/;
+  if (col >= text.length || !wordRe.test(text[col])) return null;
+  let from = col;
+  let to = col;
+  while (from > 0 && wordRe.test(text[from - 1])) from--;
+  while (to < text.length - 1 && wordRe.test(text[to + 1])) to++;
+  return { from: line.from + from, to: line.from + to + 1 };
+}
+
+/** An LSP `Location`, or the target half of a `LocationLink`. */
+interface DefinitionLocation {
+  uri: string;
+  range: { start: { line: number; character: number } };
+}
+
+type DefinitionResponse =
+  | DefinitionLocation
+  | DefinitionLocation[]
+  | { targetUri: string; targetSelectionRange: DefinitionLocation["range"] }[]
+  | null;
+
+/** Servers percent-encode URIs (`%20`, `%40`); Band builds them raw. */
+function decodeUri(uri: string): string {
+  try {
+    return decodeURIComponent(uri);
+  } catch {
+    return uri;
+  }
+}
+
+function firstLocation(response: DefinitionResponse): DefinitionLocation | null {
+  const first = Array.isArray(response) ? response[0] : response;
+  if (!first) return null;
+  if ("targetUri" in first) return { uri: first.targetUri, range: first.targetSelectionRange };
+  return first;
+}
+
+/** How long the pointer rests on a word before the server is asked about it. */
+const HOVER_CHECK_DELAY_MS = 80;
+
+/** Finds out whether the word at `pos` has a definition to jump to. */
+type CanNavigate = (view: EditorView, pos: number) => Promise<boolean>;
+
+const setLink = StateEffect.define<{ from: number; to: number } | null>();
+
+const linkMark = Decoration.mark({
+  class: "cm-lsp-cmd-link",
+  attributes: { "data-testid": "code-editor__definition-link" },
+});
+
+const linkField = StateField.define({
+  create: () => Decoration.none,
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setLink)) {
+        return e.value
+          ? Decoration.set([linkMark.range(e.value.from, e.value.to)])
+          : Decoration.none;
+      }
+    }
+    return tr.docChanged ? Decoration.none : value;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+// The whole symbol takes the link colour, not just the underline: syntax
+// highlighting nests its own coloured spans inside (or around) the mark, so
+// the colour is forced on the mark and everything inside it.
+const cmdClickLinkTheme = EditorView.baseTheme({
+  ".cm-lsp-cmd-link, .cm-lsp-cmd-link *": {
+    color: "var(--link) !important",
+    textDecoration: "underline",
+    cursor: "pointer",
+  },
+});
+
+/**
+ * Colours and underlines the word under the mouse while Cmd/Ctrl is held,
+ * once `canNavigate` confirms it has a definition, as a hint that
+ * Cmd/Ctrl+Click will jump there.
+ */
+function cmdClickLink(canNavigate: CanNavigate): Extension {
+  const plugin = ViewPlugin.fromClass(
+    class {
+      private modDown = false;
+      private mouseX = -1;
+      private mouseY = -1;
+      /** The word currently shown (or being checked), as `from:to`. */
+      private current: string | null = null;
+      /** Words (`from:to`) the server reported a definition for during the
+       *  current Cmd/Ctrl hold. Cleared on release: the answer can change
+       *  without this view's document changing (a diff view's text is fixed,
+       *  but an editor's unsaved edits move the server's copy). */
+      private navigable = new Set<string>();
+      private timer: ReturnType<typeof setTimeout> | undefined;
+      private checkedDoc: Text;
+
+      constructor(readonly view: EditorView) {
+        this.checkedDoc = view.state.doc;
+        this.onKeyDown = this.onKeyDown.bind(this);
+        this.onKeyUp = this.onKeyUp.bind(this);
+        this.onMouseMove = this.onMouseMove.bind(this);
+        this.onMouseLeave = this.onMouseLeave.bind(this);
+        this.onBlur = this.onBlur.bind(this);
+
+        window.addEventListener("keydown", this.onKeyDown);
+        window.addEventListener("keyup", this.onKeyUp);
+        view.dom.addEventListener("mousemove", this.onMouseMove);
+        view.dom.addEventListener("mouseleave", this.onMouseLeave);
+        window.addEventListener("blur", this.onBlur);
+      }
+
+      destroy() {
+        clearTimeout(this.timer);
+        window.removeEventListener("keydown", this.onKeyDown);
+        window.removeEventListener("keyup", this.onKeyUp);
+        this.view.dom.removeEventListener("mousemove", this.onMouseMove);
+        this.view.dom.removeEventListener("mouseleave", this.onMouseLeave);
+        window.removeEventListener("blur", this.onBlur);
+      }
+
+      private onKeyDown(e: KeyboardEvent) {
+        if (e.key === "Meta" || e.key === "Control") {
+          this.modDown = true;
+          this.recompute();
+        }
+      }
+
+      private onKeyUp(e: KeyboardEvent) {
+        if (e.key === "Meta" || e.key === "Control") {
+          this.modDown = false;
+          this.navigable.clear();
+          this.show(null);
+        }
+      }
+
+      private onMouseMove(e: MouseEvent) {
+        this.mouseX = e.clientX;
+        this.mouseY = e.clientY;
+        // Track the modifier from the event too, so a Cmd pressed while
+        // focus was elsewhere (e.g. another pane) still counts.
+        this.modDown = e.metaKey || e.ctrlKey;
+        this.recompute();
+      }
+
+      private onMouseLeave() {
+        this.mouseX = -1;
+        this.show(null);
+      }
+
+      private onBlur() {
+        this.modDown = false;
+        this.navigable.clear();
+        this.show(null);
+      }
+
+      private recompute() {
+        if (!this.modDown || this.mouseX < 0) return this.show(null);
+        const pos = this.view.posAtCoords({ x: this.mouseX, y: this.mouseY });
+        const range = pos == null ? null : wordRangeAt(this.view, pos);
+        if (!range) return this.show(null);
+        const key = `${range.from}:${range.to}`;
+        if (key === this.current) return;
+        this.show(null);
+        this.current = key;
+
+        const doc = this.view.state.doc;
+        if (doc !== this.checkedDoc) {
+          this.checkedDoc = doc;
+          this.navigable.clear();
+        }
+        if (this.navigable.has(key)) return this.show(range, key);
+        // Ask the server only once the pointer rests on a word, so sweeping
+        // across a line doesn't queue a definition request per word crossed.
+        this.timer = setTimeout(() => {
+          void canNavigate(this.view, range.from)
+            .catch(() => false)
+            .then((ok) => {
+              // Only a hit is cached: a miss may be a server still loading
+              // the project, so the next hover asks again.
+              if (!ok || this.view.state.doc !== doc) return;
+              this.navigable.add(key);
+              if (this.current === key) this.show(range, key);
+            });
+        }, HOVER_CHECK_DELAY_MS);
+      }
+
+      private show(range: { from: number; to: number } | null, key: string | null = null) {
+        clearTimeout(this.timer);
+        this.current = key;
+        const shown = this.view.state.field(linkField, false);
+        if (!range && (!shown || shown.size === 0)) return;
+        this.view.dispatch({ effects: setLink.of(range) });
+      }
+    },
+  );
+  return [linkField, plugin, cmdClickLinkTheme];
+}
+
+/**
+ * Handles Cmd+Click (Mac) / Ctrl+Click (other) by moving the cursor to the
+ * clicked position and running `jump`.
+ */
+function cmdClickHandler(jump: (view: EditorView, pos: number) => boolean): Extension {
+  return EditorView.domEventHandlers({
+    click(event: MouseEvent, view: EditorView) {
+      if (!(event.metaKey || event.ctrlKey)) return false;
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      if (pos == null) return false;
+      view.dispatch({ selection: { anchor: pos } });
+      return jump(view, pos);
+    },
+  });
+}
+
+function requestDefinition(
+  client: LSPClient,
+  uri: string,
+  position: { line: number; character: number },
+): Promise<DefinitionLocation | null> {
+  const caps = client.serverCapabilities;
+  if (caps && !caps.definitionProvider) return Promise.resolve(null);
+  return client
+    .request<unknown, DefinitionResponse>("textDocument/definition", {
+      textDocument: { uri },
+      position,
+    })
+    .then(firstLocation);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a CodeMirror extension that connects the editor to an LSP server.
+ * Returns a promise that resolves to the Extension once the WebSocket is
+ * connected and the LSP client is ready.
+ *
+ * @param wsUrl - WebSocket URL (e.g., `ws://localhost:3000/lsp?workspaceId=X&lang=typescript`)
+ * @param rootUri - Workspace root as file URI (e.g., `file:///path/to/workspace`)
+ * @param documentUri - Current file as file URI (e.g., `file:///path/to/workspace/src/index.ts`)
+ * @param languageId - LSP language ID (e.g., `typescript`, `typescriptreact`)
+ * @param workspaceId - Owning workspace id, stamped onto `band:lsp-navigate`
+ *   events so hidden sibling workspaces ignore this workspace's
+ *   cross-file navigations (see issue #539 pattern).
+ */
+export async function createLspExtension(
+  wsUrl: string,
+  rootUri: string,
+  documentUri: string,
+  languageId?: string,
+  workspaceId?: string,
+): Promise<Extension> {
+  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
+  return [
+    client.plugin(documentUri, languageId),
+    // Cmd+Click (Mac) / Ctrl+Click (other) to jump to definition — the
+    // library only binds F12 by default.
+    cmdClickHandler((view) => jumpToDefinition(view)),
+    cmdClickLink((view, pos) => {
+      const plugin = LSPPlugin.get(view);
+      if (!plugin) return Promise.resolve(false);
+      client.sync();
+      return requestDefinition(client, plugin.uri, plugin.toPosition(pos)).then((loc) => !!loc);
+    }),
+  ];
+}
+
+/**
+ * Creates go-to-definition (Cmd/Ctrl+hover link, Cmd/Ctrl+Click) for the
+ * working-tree side of a diff. The caller must only attach it to a view whose
+ * document is the whole working-tree file, line for line, so a position in
+ * the view is the same position in the file.
+ *
+ * The view gets no LSPPlugin (no completions, diagnostics or edits in a
+ * read-only diff). Its text is opened on the server only while no editor has
+ * the file open (see `BandWorkspace.diffDocs`). Before each request the
+ * clicked line is compared with the server's copy of that line; if they
+ * differ (for example an editor holds unsaved edits above it), the symbol is
+ * not treated as navigable, since the position would point somewhere else.
+ *
+ * A definition in the same file scrolls the diff to it; any other file opens
+ * in an editor tab at the definition.
+ */
+export async function createDiffLspNavigation(
+  wsUrl: string,
+  rootUri: string,
+  documentUri: string,
+  languageId: string,
+  workspaceId?: string,
+): Promise<Extension> {
+  const client = await getOrCreateClient(wsUrl, rootUri, workspaceId);
+  const workspace = client.workspace as BandWorkspace;
+
+  const register = ViewPlugin.fromClass(
+    class {
+      constructor(readonly view: EditorView) {
+        workspace.openDiffDoc(documentUri, languageId, view.state.doc);
+      }
+      destroy() {
+        workspace.closeDiffDoc(documentUri);
+      }
+    },
+  );
+
+  const definitionAt = (view: EditorView, pos: number): Promise<DefinitionLocation | null> => {
+    const line = view.state.doc.lineAt(pos);
+    const serverDoc = workspace.serverDoc(documentUri);
+    if (!serverDoc || line.number > serverDoc.lines) return Promise.resolve(null);
+    if (serverDoc.line(line.number).text !== line.text) return Promise.resolve(null);
+    return requestDefinition(client, documentUri, {
+      line: line.number - 1,
+      character: pos - line.from,
+    });
+  };
+
+  const jump = (view: EditorView, pos: number) => {
+    definitionAt(view, pos)
+      .then((loc) => {
+        if (!loc) return;
+        const { line, character } = loc.range.start;
+        if (decodeUri(loc.uri) === decodeUri(documentUri) && line < view.state.doc.lines) {
+          const target = Math.min(
+            view.state.doc.line(line + 1).from + character,
+            view.state.doc.length,
+          );
+          view.dispatch({
+            selection: { anchor: target },
+            effects: EditorView.scrollIntoView(target, { y: "center" }),
+          });
+          return;
+        }
+        // Same event the editor's cross-file jump uses (see
+        // `BandWorkspace.displayFile`), plus the position to land on.
+        window.dispatchEvent(
+          new CustomEvent("band:lsp-navigate", {
+            detail: {
+              filePath: workspace.uriToWorkspacePath(loc.uri),
+              workspaceId,
+              line: line + 1,
+              column: character + 1,
+            },
+          }),
+        );
+      })
+      .catch((err) => console.warn("[diff] go to definition failed:", err));
+    return true;
+  };
+
+  return [
+    register,
+    cmdClickHandler(jump),
+    cmdClickLink((view, pos) => definitionAt(view, pos).then((loc) => !!loc)),
+  ];
+}
+
+/**
+ * Build the WebSocket URL for connecting to the LSP proxy.
+ */
+export function buildLspWsUrl(workspaceId: string, lang: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/lsp?workspaceId=${encodeURIComponent(workspaceId)}&lang=${encodeURIComponent(lang)}`;
+}
+
+/**
+ * Build a file URI from a workspace root path and a workspace-relative file path.
+ */
+export function toFileUri(workspacePath: string, relativePath?: string): string {
+  const root = `file://${workspacePath}`;
+  if (!relativePath) return root;
+  return `${root}/${relativePath}`;
+}
+
+/**
+ * Get the LSP language ID for a CodeMirror language name.
+ */
+export function getLspLanguageId(cmLanguage: string): string | undefined {
+  return LSP_LANGUAGE_IDS[cmLanguage];
+}

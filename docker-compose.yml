@@ -1,0 +1,37 @@
+# Run the standalone Band web server on Linux (issue #594) — no desktop app.
+#
+#   docker compose up --build
+#   → open the http://localhost:3456/?token=... URL printed on startup
+#
+# The image is a stock Debian host with NO zsh and NO Homebrew, so it
+# exercises the cross-platform shell/PATH fallbacks. State (SQLite DB,
+# settings, installed skills) lives in the `band-data` volume.
+#
+# To register a project: in the web UI use "Register Project" and enter the
+# container path of a repo you've mounted below (e.g. /projects/myrepo).
+services:
+  band:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: band-server:linux-test
+    # Host 3457 (not 3456): Band's default port is 3456, and if you already
+    # run Band natively it owns that port — the container would be shadowed.
+    ports:
+      - "3457:3456"
+    environment:
+      # Token for the ?token= access URL. Change it for anything shared.
+      BAND_ACCESS_TOKEN: band-local
+      # Host-side port (must match the left side of `ports` above) — used only
+      # for the access URL printed on startup.
+      BAND_HOST_PORT: "3457"
+    volumes:
+      - band-data:/data
+      # Mount a host git repo to register it as a Band project (read-write so
+      # worktrees can be created). Then add "/projects/myrepo" in the UI:
+      # - /absolute/path/to/your/repo:/projects/myrepo
+    tty: true
+    stop_grace_period: 10s
+
+volumes:
+  band-data:

@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `has_origin` integer DEFAULT true NOT NULL;

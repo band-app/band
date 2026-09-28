@@ -1,8 +1,8 @@
-import { CodeMirrorViewer } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
 import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
+import { CodeMirrorViewer } from "@/dashboard";
 
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
 
@@ -69,7 +69,10 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
           </div>
 
           {/* Content area */}
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div
+            data-testid="file-preview-overlay__content"
+            className="min-h-0 flex-1 overflow-hidden pb-[env(safe-area-inset-bottom)]"
+          >
             {isImage && <ImagePreview url={part.url} alt={filename} />}
             {isText && <TextPreview url={part.url} filename={filename} />}
             {!isImage && !isText && (

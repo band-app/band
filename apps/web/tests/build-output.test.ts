@@ -1,14 +1,24 @@
-import { existsSync, readdirSync } from "node:fs";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const dist = join(import.meta.dirname, "../dist");
+const packageRoot = join(import.meta.dirname, "..");
+const dist = join(packageRoot, "dist");
 
 const skipSdkChecks = process.env.NPM_PUBLISH === "1";
 
 describe("build output", () => {
   it("contains the server bundle", () => {
     expect(existsSync(join(dist, "start-server.mjs"))).toBe(true);
+  });
+
+  // The server forks this from next to its own bundle; the desktop app and
+  // the npm package ship it only if it lands in dist/.
+  it("contains the terminal daemon bundle", () => {
+    expect(existsSync(join(dist, "terminal-daemon.mjs"))).toBe(true);
   });
 
   it("contains the OpenAPI spec", () => {
@@ -37,6 +47,37 @@ describe("build output", () => {
     expect(readdirSync(prebuildsDir).length).toBeGreaterThan(0);
   });
 
+  it("contains the @vscode/ripgrep wrapper package", () => {
+    expect(existsSync(join(dist, "node_modules/@vscode/ripgrep/package.json"))).toBe(true);
+    expect(existsSync(join(dist, "node_modules/@vscode/ripgrep/lib/index.js"))).toBe(true);
+  });
+
+  it("contains the host-platform ripgrep binary", () => {
+    const platformPkg = `@vscode/ripgrep-${process.platform}-${process.arch}`;
+    const binName = process.platform === "win32" ? "rg.exe" : "rg";
+    expect(existsSync(join(dist, "node_modules", platformPkg, "bin", binName))).toBe(true);
+  });
+
+  it("contains ripgrep binaries for both archs on macOS builds", () => {
+    // electron-builder emits both x64 and arm64 macOS artifacts from the same
+    // `apps/web/dist`, so the off-host arch binary must also be present —
+    // otherwise the off-arch DMG dies at startup with "Could not find
+    // @vscode/ripgrep-darwin-x64". This regression was shipped in v0.x: the
+    // build host was Apple Silicon (`runs-on: macos-latest` on Actions) and
+    // the bundle only carried the arm64 ripgrep, breaking every Intel Mac
+    // install. See pnpm-workspace.yaml::supportedArchitectures and
+    // apps/web/scripts/build-server.sh for the matching install/copy logic.
+    if (process.platform !== "darwin") return;
+    if (skipSdkChecks) return; // npm publish path skips native-module copy
+    for (const arch of ["x64", "arm64"]) {
+      const pkg = `@vscode/ripgrep-darwin-${arch}`;
+      expect(
+        existsSync(join(dist, "node_modules", pkg, "bin", "rg")),
+        `missing ${pkg}/bin/rg`,
+      ).toBe(true);
+    }
+  });
+
   it("does NOT bundle a SQLite native module", () => {
     // SQLite is provided by Node's built-in `node:sqlite` (RC since 22.13).
     // Nothing for SQLite should ship under dist/node_modules/.
@@ -62,7 +103,218 @@ describe("build output", () => {
     expect(found).toBe(false);
   });
 
-  it.skipIf(skipSdkChecks)("contains Codex SDK package", () => {
-    expect(existsSync(join(dist, "node_modules/@openai/codex/package.json"))).toBe(true);
+  it.skipIf(skipSdkChecks)("contains the pre-bundled Claude Code and Codex ACP adapters", () => {
+    // Claude Code and Codex run as ACP agents through their adapters
+    // (issue #648), which `scripts/build-server.sh` bundles next to the
+    // server so the desktop app needs no `node_modules` lookup for them.
+    expect(existsSync(join(dist, "agents/claude-agent-acp.mjs"))).toBe(true);
+    expect(existsSync(join(dist, "agents/codex-acp.mjs"))).toBe(true);
   });
 });
+
+// End-to-end regression test for #475. The bug there was that
+// `dist/openapi.json` was generated correctly into the build output but was
+// missing from the `files` array in `package.json`, so npm stripped it from
+// the published tarball. The published server then crashed silently on
+// startup when start-server.ts tried to read it (the uncaughtException
+// handler exited 1 before any output reached the terminal).
+//
+// The pre-existing `existsSync(dist/openapi.json)` check above passed all
+// along while the published package was broken — checking dist/ is not
+// enough. This suite goes through the same path `npx @band-app/server`
+// does: pack the package, install the tarball into a fresh project, spawn
+// the bin shim, and verify the server actually boots and serves the spec.
+describe("published @band-app/server runs via the bin shim", () => {
+  let workDir: string;
+  let server: ChildProcess | undefined;
+  let baseUrl: string;
+  let token: string;
+  let exitCode: number | null = null;
+  const serverOutput: string[] = [];
+
+  beforeAll(async () => {
+    // 1. Build an isolated sandbox: a consumer project (where we'll install
+    //    the tarball) and a fresh BAND_HOME (so the server doesn't touch the
+    //    developer's real ~/.band).
+    workDir = mkdtempSync(join(tmpdir(), "band-pack-test-"));
+    const consumerDir = join(workDir, "consumer");
+    const bandHome = join(workDir, "band-home");
+    mkdirSync(consumerDir, { recursive: true });
+    mkdirSync(bandHome, { recursive: true });
+
+    // 2. Pre-seed a known auth token. Otherwise the server generates a random
+    //    one on first boot and we'd have to race-read settings.json.
+    token = `test-token-${Math.random().toString(36).slice(2)}`;
+    writeFileSync(join(bandHome, "settings.json"), JSON.stringify({ tokenSecret: token }), "utf-8");
+
+    // 3. Pack the workspace package the same way `npm publish` would. The
+    //    `pretest` script already ran `pnpm build`, so dist/ is populated.
+    //    Pipe (don't inherit) npm's chatty `notice` output so the test log
+    //    isn't flooded; execFileSync throws with stderr attached if it fails.
+    execFileSync("npm", ["pack", "--pack-destination", workDir, "--loglevel=error"], {
+      cwd: packageRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const tgz = readdirSync(workDir).find((f) => f.endsWith(".tgz"));
+    if (!tgz) throw new Error("npm pack did not produce a tarball");
+
+    // 4. Install the tarball into the consumer project — exactly what `npx
+    //    @band-app/server` does internally (npx unpacks the tarball into a
+    //    temp prefix and runs the bin from inside node_modules).
+    writeFileSync(
+      join(consumerDir, "package.json"),
+      JSON.stringify({ name: "consumer", private: true }),
+      "utf-8",
+    );
+    execFileSync(
+      "npm",
+      [
+        "install",
+        "--no-audit",
+        "--no-fund",
+        "--prefer-offline",
+        "--loglevel=error",
+        join(workDir, tgz),
+      ],
+      { cwd: consumerDir, stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    const binPath = join(consumerDir, "node_modules/@band-app/server/bin/band-server.mjs");
+    expect(existsSync(binPath), `bin shim missing at ${binPath}`).toBe(true);
+
+    // 5. Pick a free ephemeral port (avoid clashing with the developer's
+    //    dev server on 3456) and boot the bin shim.
+    const port = await findFreePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+
+    // Build an explicit env rather than inheriting the test runner's. NODE_OPTIONS
+    // in particular can carry vitest loader flags (--import tsx/esm,
+    // --experimental-vm-modules) that break the server's ESM boot in subtle ways.
+    const serverEnv: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      PORT: String(port),
+      BAND_HOME: bandHome,
+    };
+    server = spawn(process.execPath, [binPath], {
+      env: serverEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    server.on("exit", (code) => {
+      exitCode = code;
+    });
+
+    // Capture the server's output continuously. We dump it in afterAll only
+    // if a test failed, so a regression like #475 (which silently exited 1)
+    // surfaces with the actual stack instead of an opaque "fetch failed".
+    server.stdout?.on("data", (chunk: Buffer) => serverOutput.push(chunk.toString()));
+    server.stderr?.on("data", (chunk: Buffer) => serverOutput.push(chunk.toString()));
+
+    try {
+      await waitForServer(baseUrl, 30_000);
+    } catch (err) {
+      process.stderr.write(
+        `\n--- @band-app/server output ---\n${serverOutput.join("")}\n--- exit code: ${exitCode} ---\n`,
+      );
+      throw err;
+    }
+  }, 120_000);
+
+  afterAll(async (ctx) => {
+    if (ctx.tasks.some((t) => t.result?.state === "fail")) {
+      process.stderr.write(
+        `\n--- @band-app/server output ---\n${serverOutput.join("")}\n--- exit code: ${exitCode} ---\n`,
+      );
+    }
+    // Wait for the spawned server to actually exit before removing workDir.
+    // Without this await, `rmSync(workDir, { recursive: true })` races the
+    // server's writes to `BAND_HOME` (SQLite WAL checkpoints, pino log lines,
+    // settings.json updates) — on macOS APFS that surfaces as ENOTEMPTY when
+    // the recursive walk has emptied a child directory but the server writes
+    // back into it between the child removal and the parent rmdir. Observed
+    // on Release run 26726110047 / job 78761522277 with all 1052 tests
+    // otherwise passing.
+    if (server && server.exitCode === null && !server.killed) {
+      const exited = new Promise<void>((resolve) => {
+        server!.once("exit", () => resolve());
+      });
+      server.kill("SIGTERM");
+      // Escalate to SIGKILL if SIGTERM doesn't take within a few seconds, so
+      // a wedged child can never deadlock cleanup.
+      const escalate = setTimeout(() => {
+        if (server && server.exitCode === null) server.kill("SIGKILL");
+      }, 5_000);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(escalate);
+      }
+    }
+    if (workDir) {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  it("server boots without crashing", () => {
+    // Generic boot-crash invariant — not specifically a #475 guard. With
+    // lazy openapi.json reading (issue #472), the #475 failure mode now
+    // surfaces on the first /api/openapi.json request rather than at boot,
+    // so the fetch test below is what actually locks in the packaging fix.
+    expect(exitCode).toBeNull();
+  });
+
+  it("serves the OpenAPI spec via /api/openapi.json", async () => {
+    // The actual #475 regression check: this fetch fails ("other side
+    // closed") when start-server.mjs throws ENOENT reading the missing
+    // dist/openapi.json. afterAll dumps the server output so you can see
+    // why.
+    const res = await fetch(`${baseUrl}/api/openapi.json`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    const spec = (await res.json()) as { openapi?: string; info?: { title?: string } };
+    expect(spec.openapi).toMatch(/^3\./);
+    expect(spec.info?.title).toBeDefined();
+  });
+});
+
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      if (typeof addr === "object" && addr) {
+        const { port } = addr;
+        srv.close(() => resolve(port));
+      } else {
+        srv.close();
+        reject(new Error("could not allocate free port"));
+      }
+    });
+  });
+}
+
+async function waitForServer(baseUrl: string, deadlineMs: number): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${baseUrl}/api/openapi.json`);
+      // Any HTTP response (200, 401, etc.) means the server is up and
+      // handling requests. We don't check the status here — auth is
+      // verified by the per-test fetch below. Drain the body so undici
+      // doesn't leak ~150 keep-alive sockets across the polling loop.
+      if (res.status >= 100 && res.status < 600) {
+        await res.body?.cancel();
+        return;
+      }
+      await res.body?.cancel();
+    } catch (err) {
+      lastError = err;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`server did not become ready within ${deadlineMs}ms: ${String(lastError)}`);
+}

@@ -1,0 +1,20 @@
+# Keep the build context small and force a clean install/build inside the
+# image. Source, package.json files, lockfile and configs are all included;
+# build outputs and installed deps are rebuilt in the image.
+.git
+.gitignore
+**/node_modules
+**/dist
+**/.turbo
+apps/cli/target
+apps/desktop/out
+apps/desktop/dist
+apps/web/test-results
+apps/web/playwright-report
+apps/web/.band
+**/*.log
+.band
+.claude
+.vscode
+.idea
+docker/README.md

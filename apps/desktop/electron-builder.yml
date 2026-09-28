@@ -11,8 +11,10 @@
 #     Windows + Linux are out of scope for this phase: the runtime in
 #     `apps/desktop/src/main/` and the bundled web server (apps/web,
 #     `"os": ["darwin", "linux"]`) currently assume a Unix-y host (POSIX
-#     shell for `shellPath`, `lsof` for port reclamation, `node` on PATH for
-#     spawning the bundled server). Adding those platforms is its own issue.
+#     shell for `shellPath`, `lsof` for port reclamation). The bundled web
+#     server is spawned via Electron's embedded Node runtime
+#     (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`), so no system `node`
+#     binary needs to be on PATH. Adding Windows/Linux is its own issue.
 #
 # Cross-references:
 #   - Tauri sidecar:        apps/dashboard/src-tauri/tauri.conf.json (`externalBin`).

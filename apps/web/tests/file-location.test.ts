@@ -1,5 +1,5 @@
-import { formatFileLocation, parseFileLocation } from "@band-app/dashboard-core";
 import { describe, expect, it } from "vitest";
+import { formatFileLocation, parseFileLocation } from "@/dashboard";
 
 // ---------------------------------------------------------------------------
 // parseFileLocation
@@ -37,10 +37,8 @@ describe("parseFileLocation", () => {
   });
 
   it("handles deeply nested paths with line reference", () => {
-    expect(
-      parseFileLocation("packages/dashboard-core/src/components/QuickOpenDialog.tsx:77"),
-    ).toEqual({
-      filePath: "packages/dashboard-core/src/components/QuickOpenDialog.tsx",
+    expect(parseFileLocation("apps/web/src/dashboard/components/QuickOpenDialog.tsx:77")).toEqual({
+      filePath: "apps/web/src/dashboard/components/QuickOpenDialog.tsx",
       line: 77,
     });
   });

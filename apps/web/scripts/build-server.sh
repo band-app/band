@@ -3,15 +3,41 @@ set -euo pipefail
 
 # Generate OpenAPI spec from tRPC router (static TypeScript analysis)
 mkdir -p dist
-pnpm exec trpc-openapi ./src/trpc/router.ts -o dist/openapi.json --title "Band API" --version "1.0.0"
+pnpm exec trpc-openapi ./src/server/api/router.ts -o dist/openapi.json --title "Band API" --version "1.0.0"
 
 # Bundle the server entry point
+# `vite` and `@trpc/openapi` are imported dynamically inside the
+# `NODE_ENV=development` branch of start-server.ts (see #477 — unified
+# dev/prod server). esbuild's static-analysis bundler still tries to
+# follow those dynamic imports unless we mark them external. They are
+# never reached at runtime in the prod bundle (the branch is gated on
+# `process.env.NODE_ENV === "development"`), so leaving them as
+# unresolved imports is safe — and required, since vite drags in
+# `lightningcss` / `fsevents` native modules that esbuild can't bundle.
 esbuild start-server.ts \
   --bundle \
   --platform=node \
   --format=esm \
   --outfile=dist/start-server.mjs \
   --external:./server/server.js \
+  --external:node-pty \
+  --external:@vscode/ripgrep \
+  --external:prettier \
+  --external:vite \
+  --external:@trpc/openapi \
+  --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
+
+# Bundle the terminal daemon: the detached process that owns terminal PTYs
+# so shells survive a server restart (src/server/infra/terminals/daemon/).
+# The server forks it from next to its own bundle, so it must land in dist/
+# beside start-server.mjs; the desktop app ships all of dist/. Same flags as
+# the server bundle: node-pty stays external and resolves from
+# dist/node_modules, copied below.
+esbuild terminal-daemon.ts \
+  --bundle \
+  --platform=node \
+  --format=esm \
+  --outfile=dist/terminal-daemon.mjs \
   --external:node-pty \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
@@ -57,9 +83,92 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
     chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
   fi
 
+  # -----------------------------------------------------------------------
+  # Copy @vscode/ripgrep wrapper + platform-specific binaries into dist/.
+  # The wrapper (lib/index.js) does:
+  #   createRequire(import.meta.url).resolve(`@vscode/ripgrep-${platform}-${arch}/bin/rg`)
+  # so the platform package must be resolvable as a sibling in node_modules.
+  #
+  # `electron-builder` emits both x64 and arm64 macOS artifacts from the same
+  # `apps/web/dist`, so we must ship binaries for BOTH architectures of the
+  # host OS — otherwise the off-arch DMG dies at startup with
+  # "Could not find @vscode/ripgrep-darwin-x64". pnpm is told to install
+  # cross-arch optional deps via `supportedArchitectures` in
+  # `pnpm-workspace.yaml`; if the off-arch package is still missing here
+  # (older pnpm install, fork without the workspace setting) we warn loudly
+  # but don't fail — the host-arch binary alone keeps single-arch builds
+  # working.
+  # -----------------------------------------------------------------------
+
+  RG_REAL="$(cd node_modules/@vscode/ripgrep && pwd -P)"
+  mkdir -p dist/node_modules/@vscode/ripgrep/lib
+  cp "$RG_REAL/package.json" dist/node_modules/@vscode/ripgrep/
+  cp "$RG_REAL/lib/index.js" dist/node_modules/@vscode/ripgrep/lib/
+  cp "$RG_REAL/lib/index.d.ts" dist/node_modules/@vscode/ripgrep/lib/ 2>/dev/null || true
+
+  RG_HOST_PLATFORM="$(node -e 'console.log(process.platform)')"
+  RG_HOST_ARCH="$(node -e 'console.log(process.arch)')"
+
+  # Pick the arch matrix to ship for the current build OS. Electron desktop
+  # builds (`apps/desktop/electron-builder.yml`) target macOS only and emit
+  # both x64 + arm64 DMGs, so on darwin we MUST ship both archs. Linux is
+  # included for symmetry — `apps/web` advertises `"os": ["darwin", "linux"]`
+  # in package.json and consumers of the npm package may run on either arch.
+  case "$RG_HOST_PLATFORM" in
+    darwin) RG_ARCHES="x64 arm64" ;;
+    linux)  RG_ARCHES="x64 arm64" ;;
+    win32)  RG_ARCHES="x64 arm64" ;;
+    *)      RG_ARCHES="$RG_HOST_ARCH" ;;
+  esac
+
+  RG_BIN_NAME="$([ "$RG_HOST_PLATFORM" = "win32" ] && echo "rg.exe" || echo "rg")"
+
+  for arch in $RG_ARCHES; do
+    pkg="@vscode/ripgrep-${RG_HOST_PLATFORM}-${arch}"
+    # Under pnpm's strict layout, the platform-specific package is hoisted
+    # only into `@vscode/ripgrep`'s own sandbox, not into the workspace's
+    # top-level node_modules — so we resolve it from the wrapper's directory.
+    pkg_json="$(cd "$RG_REAL" && node -e "try{console.log(require.resolve('${pkg}/package.json'))}catch{}" 2>/dev/null || true)"
+    if [ -z "$pkg_json" ]; then
+      if [ "$arch" = "$RG_HOST_ARCH" ]; then
+        # Missing host arch is fatal on darwin/linux/win32 builds — find-in-files
+        # would break for every user of the bundle.
+        echo "ERROR: host-arch ripgrep package ${pkg} not found; aborting build" >&2
+        exit 1
+      else
+        echo "WARNING: cross-arch ripgrep package ${pkg} not found; ${RG_HOST_PLATFORM}-${arch} users of this bundle will fail at startup. Re-run \`pnpm install\` after pulling pnpm-workspace.yaml changes." >&2
+        continue
+      fi
+    fi
+    pkg_dir="$(dirname "$pkg_json")"
+    mkdir -p "dist/node_modules/${pkg}/bin"
+    cp "$pkg_dir/package.json" "dist/node_modules/${pkg}/"
+    cp "$pkg_dir/bin/$RG_BIN_NAME" "dist/node_modules/${pkg}/bin/"
+    chmod +x "dist/node_modules/${pkg}/bin/$RG_BIN_NAME"
+  done
+
   # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
   # available unflagged since Node 22.13). No native module ships in the
   # bundle for SQLite — the user's `node` binary supplies it.
+
+  # -----------------------------------------------------------------------
+  # Prettier — used by `workspace.formatFile` for in-process formatting.
+  # We can't bundle it: prettier's CJS shim redeclares `__filename`, which
+  # collides with the esbuild banner's `const __filename` at the top of
+  # the bundled output (SyntaxError: Identifier '__filename' has already
+  # been declared). Marked `--external:prettier` and copied here so the
+  # runtime `createRequire(...)` lookup resolves cleanly.
+  #
+  # Lives inside the NPM_PUBLISH guard because npm consumers install
+  # prettier from `apps/web/package.json::dependencies` instead — the
+  # bundled `--external:prettier` reference is resolved from the
+  # consumer's node_modules at install time. The copy here is purely for
+  # self-contained desktop / Electron builds where there is no
+  # `npm install` step on the user's machine.
+  # -----------------------------------------------------------------------
+  PRETTIER_REAL="$(cd node_modules/prettier && pwd -P)"
+  mkdir -p dist/node_modules/prettier
+  cp -RL "$PRETTIER_REAL"/* dist/node_modules/prettier/
 
   # -----------------------------------------------------------------------
   # Bundle typescript-language-server + typescript for LSP support.
@@ -104,26 +213,30 @@ exec node "$basedir/../typescript/bin/tsserver" "$@"
 SHIM
   chmod +x dist/node_modules/.bin/tsserver
 
-  # Resolve the monorepo root (where the pnpm store lives).
-  # The SDK packages below are deps of packages/coding-agent, not apps/web,
-  # so they only exist in the root node_modules/.pnpm store.
-  MONO_ROOT="$(cd ../.. && pwd)"
-
-  # NOTE: We deliberately do NOT bundle the @anthropic-ai/claude-agent-sdk
-  # platform-specific native binary (~206MB on macOS arm64). Bundling it
-  # makes the Electron app balloon to ~300MB. Band users are developers using
-  # AI coding agents, so they already have `claude` installed on PATH —
-  # the SDK resolves it from there at runtime.
-
-  # Copy Codex SDK package.json so createRequire(import.meta.url).resolve("@openai/codex/package.json")
-  # works from dist/. The actual codex CLI binary is expected to be installed on the user's system.
-  CODEX_PKG_DIR="$(find "$MONO_ROOT/node_modules/.pnpm" -path "*/@openai/codex/package.json" -type f 2>/dev/null | head -1)"
-  if [ -n "$CODEX_PKG_DIR" ]; then
-    mkdir -p dist/node_modules/@openai/codex
-    cp "$CODEX_PKG_DIR" dist/node_modules/@openai/codex/
-  fi
+  # -----------------------------------------------------------------------
+  # ACP adapters for Claude Code and Codex (issue #648). Band runs each as a
+  # Node subprocess speaking the Agent Client Protocol over stdio (see
+  # `src/server/infra/agents/acp-launch.ts`, which looks for them at
+  # `dist/agents/<name>.mjs` before falling back to node_modules). Bundled
+  # into one file each so the desktop app needs no node_modules for them.
+  #
+  # The vendors' native CLIs are NOT bundled: the adapters drive the user's
+  # own `claude` / `codex` binary (`CLAUDE_CODE_EXECUTABLE`, `CODEX_PATH`),
+  # the same way the pre-ACP SDK adapters did.
+  # -----------------------------------------------------------------------
+  rm -rf dist/agents
+  mkdir -p dist/agents
+  for adapter in claude-agent-acp codex-acp; do
+    esbuild "node_modules/@agentclientprotocol/${adapter}/dist/index.js" \
+      --bundle \
+      --platform=node \
+      --format=esm \
+      --log-level=warning \
+      --outfile="dist/agents/${adapter}.mjs" \
+      --banner:js="import{createRequire as __cr}from'module';const require=__cr(import.meta.url);"
+  done
 fi
 
 # Copy Drizzle migrations
 rm -rf dist/migrations
-cp -R src/lib/db/migrations dist/migrations
+cp -R src/server/infra/db/migrations dist/migrations

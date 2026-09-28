@@ -1,0 +1,65 @@
+/**
+ * Shared tRPC helper for e2e specs that drive the real server.
+ *
+ * Centralises the "POST /trpc/<procedure>" idiom so multiple specs
+ * share one implementation instead of each copying it inline. Auth
+ * is carried via the `band_token` Cookie (matching the
+ * `defaultHeaders` pattern in `apps/web/tests/chat-events.test.ts`)
+ * rather than a `?token=` query param — keeps secrets out of the
+ * server access logs and proxy logs.
+ */
+
+/**
+ * Call a tRPC mutation against the real server's HTTP surface.
+ *
+ * Throws on non-2xx so callers don't need to handle response
+ * inspection themselves — the integration tests want a fast
+ * "something is broken" signal, not silent error swallowing.
+ */
+export async function trpcMutate(
+  serverUrl: string,
+  token: string,
+  procedure: string,
+  input: unknown,
+): Promise<void> {
+  const res = await fetch(`${serverUrl}/trpc/${procedure}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `band_token=${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    // Truncate so a chatty validation error that echoes request
+    // input back doesn't bloat test logs or accidentally surface
+    // sensitive fields. 200 chars is enough to identify which
+    // procedure failed and what kind of error it was.
+    const snippet = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${snippet}`);
+  }
+}
+
+/**
+ * Call a tRPC query against the real server's HTTP surface and return its
+ * `result.data`. Throws on non-2xx, like `trpcMutate`.
+ */
+export async function trpcQuery<T>(
+  serverUrl: string,
+  token: string,
+  procedure: string,
+  input?: unknown,
+): Promise<T> {
+  const query = input === undefined ? "" : `?input=${encodeURIComponent(JSON.stringify(input))}`;
+  const res = await fetch(`${serverUrl}/trpc/${procedure}${query}`, {
+    headers: { Cookie: `band_token=${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const snippet = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    throw new Error(`trpcQuery(${procedure}) failed: ${res.status} ${snippet}`);
+  }
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
+}

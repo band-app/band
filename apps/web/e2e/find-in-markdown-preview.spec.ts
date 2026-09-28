@@ -1,0 +1,189 @@
+/**
+ * End-to-end coverage for the markdown-preview find bar (issue #435).
+ *
+ * Drives a real Band server against an on-disk worktree containing a
+ * markdown file with deterministic match counts, then exercises the
+ * find UX through the renderer: open with Cmd+F, count matches, step
+ * through them with Enter / Shift+Enter, and dismiss with Escape.
+ *
+ * The preview is an editable CodeMirror view (see
+ * `markdown-live-preview.ts`), so it uses the same find as the source
+ * editor. The assertions key off observable UI state (the match counter,
+ * the input's presence and focus) rather than the highlight paint.
+ */
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { expect, type Page, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import { git } from "./helpers/git";
+import { expectNoKeyboardSuggestions } from "./helpers/keyboard-suggestions";
+import {
+  cleanupTmpHome,
+  createTmpHome,
+  type ServerHandle,
+  seedSettings,
+  seedState,
+  startServer,
+} from "./helpers/server";
+import { FileViewerPage } from "./pages/FileViewerPage";
+import { MobileLayoutPage } from "./pages/MobileLayoutPage";
+import { WorkspacePage } from "./pages/WorkspacePage";
+
+// Force the mobile layout (viewport < 1024 px) so the workspace route's
+// `Outlet` mounts `CodeBrowserView` directly via the routed component
+// tree rather than going through the dockview panel manager. The find
+// bar's behaviour is identical in either layout — but the mobile path
+// keeps the test focused on the preview and skips deep dockview /
+// chat-pane setup that would otherwise need to be coaxed.
+test.use({ viewport: { width: 800, height: 900 } });
+
+const TOKEN = "e2e-find-md-token";
+const REPO_NAME = "find-md-repo";
+const BRANCH = "main";
+const FILE_PATH = "GUIDE.md";
+
+// Three occurrences of "needle" across H1, body, and a deeper section
+// so we can verify wrap-around navigation as well as match counting.
+const MARKDOWN_CONTENT = [
+  "# Test Document",
+  "",
+  "This is a paragraph mentioning the needle in passing.",
+  "",
+  "## Section A",
+  "",
+  "Lorem ipsum dolor sit amet. The needle is here again.",
+  "",
+  "Some unrelated prose without the search term.",
+  "",
+  "## Section B",
+  "",
+  "Final occurrence of needle at the end.",
+  "",
+].join("\n");
+
+let server: ServerHandle;
+let tmpHome: string;
+let workspaceId: string;
+
+test.beforeAll(async () => {
+  tmpHome = createTmpHome();
+  const repoPath = join(tmpHome, REPO_NAME);
+  mkdirSync(repoPath, { recursive: true });
+
+  // A bare metadata seed isn't enough — `workspace.getFile` reads the
+  // file off disk, so we need a real worktree with the markdown file
+  // committed. One commit is enough; the find bar doesn't care about
+  // branch state.
+  git(repoPath, ["init", "-b", BRANCH]);
+  writeFileSync(join(repoPath, FILE_PATH), MARKDOWN_CONTENT);
+  git(repoPath, ["add", "."]);
+  git(repoPath, ["commit", "-m", "initial"]);
+
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: REPO_NAME,
+        path: repoPath,
+        defaultBranch: BRANCH,
+        worktrees: [{ branch: BRANCH, path: repoPath }],
+      },
+    ],
+  });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  server = await startServer({ tmpHome });
+  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+});
+
+test.afterAll(async () => {
+  await server.close();
+  cleanupTmpHome(tmpHome);
+});
+
+/**
+ * Navigate to the workspace, switch to the Files tab, then click the
+ * markdown file in the tree. Post-#467 (route unification), the workspace
+ * URL no longer carries a sub-path for the active tab OR the selected file
+ * — both live in `MobileWorkspaceLayout`'s local state — so this drives
+ * the same UI flow a real mobile user would take.
+ */
+async function openMarkdownPreview(page: Page): Promise<void> {
+  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const layout = new MobileLayoutPage(page, server.url, TOKEN);
+  await workspace.goto(workspaceId);
+  await workspace.waitForMobileReady();
+
+  // Open the Explorer sheet and tap the markdown file — it opens as a `file`
+  // leaf in the center dockview (markdown files default to the rendered preview).
+  await layout.openSheet("explorer");
+  await page.getByTestId(`file-tree__row--${FILE_PATH}`).click();
+
+  // The markdown renders into a sticky heading — when it appears, the
+  // preview is laid out and ready for the find bar to attach its keybind.
+  await expect(page.getByRole("heading", { level: 1, name: "Test Document" })).toBeVisible({
+    timeout: 20_000,
+  });
+}
+
+test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({ page }) => {
+  await openMarkdownPreview(page);
+
+  // The find bar uses a single placeholder string in both source and
+  // preview modes — only the search target differs internally. The
+  // placeholder flips to "Find in preview..." while the preview is the
+  // active surface.
+  const viewer = new FileViewerPage(page);
+  const find = viewer.findWidget;
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
+
+  // Cmd+F is scoped to the focused leaf, so put focus in the preview first,
+  // the way a user clicks into what they're reading. (Tapping the file in the
+  // Explorer sheet leaves focus on the tree row, outside the leaf.)
+  await viewer.clickIntoPreview("Test Document");
+
+  // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
+  // keybind → `useSearch.handleOpenSearch` → renders the toolbar
+  // SearchBar, which searches the preview's editor view.
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+f`);
+
+  // Exactly one find widget should appear, floating over the preview. The old
+  // "stacked bars" regression (#435 follow-up) would surface here as a
+  // second input with the same placeholder.
+  await expect(viewer.allFileFindInputs).toHaveCount(1);
+  await expect(find.input).toBeVisible();
+  await expect(find.input).toBeFocused();
+  await expect(find.input).toHaveAttribute("placeholder", "Find in preview...");
+  await expectNoKeyboardSuggestions(find.input);
+
+  await find.type("needle");
+
+  // "needle" appears 3× in the fixture — once in the first paragraph,
+  // once under Section A, and once under Section B. The counter starts
+  // on the first match.
+  await expect(find.count).toHaveText("1/3");
+
+  // Enter advances to the next match.
+  await find.press("Enter");
+  await expect(find.count).toHaveText("2/3");
+
+  await find.press("Enter");
+  await expect(find.count).toHaveText("3/3");
+
+  // Wrap-around: another Enter cycles back to the first match.
+  await find.press("Enter");
+  await expect(find.count).toHaveText("1/3");
+
+  // Shift+Enter walks backwards.
+  await find.press("Shift+Enter");
+  await expect(find.count).toHaveText("3/3");
+
+  // A query with no matches marks the input invalid (the counter then reads
+  // "No results").
+  await find.type("xyzzzzzzzzzzzz");
+  await find.expectNoResults();
+
+  // Escape closes the bar.
+  await find.press("Escape");
+  await expect(viewer.allFileFindInputs).toHaveCount(0);
+});

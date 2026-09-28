@@ -5,7 +5,11 @@
  * the post-build adjustments in `apps/dashboard/src-tauri/src/lib.rs`:
  *   - 1200×800 default, min 800
  *   - Black window background (so the area behind macOS traffic lights
- *     matches the dark UI; identical to Tauri's NSColor setBackgroundColor)
+ *     matches the dark UI; identical to Tauri's NSColor setBackgroundColor),
+ *     except on macOS, where the window is transparent over a `sidebar`
+ *     vibrancy layer so the renderer can let the blurred desktop show
+ *     through the project-list sidebar (see `data-translucent-sidebar` in
+ *     apps/web/src/styles/globals.css)
  *   - Hidden inset title bar (overlay) with traffic lights at (13, 16)
  *   - Resize to fill the primary monitor on launch
  *   - Drag-drop disabled on the window chrome
@@ -16,7 +20,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, screen } from "electron";
 import { resolveAppIcon } from "./icon.js";
-import { dashLog } from "./services/log.js";
+import { createLogger } from "./services/log.js";
+
+const log = createLogger("window");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,7 +46,7 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   const preload = preloadPath();
   // Diagnostic: log the resolved preload path AND whether the file exists.
   // The most common preload-not-loading cause is a path mismatch.
-  dashLog(`preload path: ${preload} (exists=${existsSync(preload)})`);
+  log.info({ preload, exists: existsSync(preload) }, "preload path");
   const win = new BrowserWindow({
     title: "Band",
     width: 1200,
@@ -49,7 +55,15 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     x: 0,
     y: 0,
     show: false,
-    backgroundColor: "#000000",
+    // On macOS the window is transparent over a `sidebar` vibrancy layer. The
+    // renderer paints every region opaque except the project-list sidebar,
+    // which it tints lightly so the blurred desktop shows through (or paints
+    // solid when the user turns the translucent sidebar off in Settings).
+    // `visualEffectState: "active"` keeps the blur when the window loses
+    // focus, like Finder's sidebar.
+    ...(process.platform === "darwin"
+      ? { backgroundColor: "#00000000", vibrancy: "sidebar", visualEffectState: "active" }
+      : { backgroundColor: "#000000" }),
     // BrowserWindow.icon is honoured on Windows/Linux; on macOS the dock
     // icon comes from the .icns in the packaged app, so we set it via
     // app.dock.setIcon() below for dev mode.
@@ -66,10 +80,11 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
       // builds re-enable sandbox once we're confident the preload runs.
       sandbox: app.isPackaged,
       nodeIntegration: false,
-      // The Tauri shell sets dragDropEnabled=false on the window. The renderer
-      // implements its own drag/drop; we don't want files dropped onto the
-      // window chrome to navigate the webview.
-      webviewTag: false,
+      // Browser tabs are <webview> guests laid out in the DOM, so Band's
+      // menus, dialogs and tooltips stack over them with plain CSS. Every
+      // attach goes through `webview-security.ts`, which refuses unknown
+      // partitions and sources and strips Node and preload access.
+      webviewTag: true,
     },
   });
 
@@ -77,6 +92,18 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   const primary = screen.getPrimaryDisplay();
   const { width, height } = primary.workAreaSize;
   win.setBounds({ x: 0, y: 0, width, height });
+
+  // The dashboard's zoom is CSS-based (`<html> zoom`, see
+  // apps/web/src/lib/zoom.ts) — its Chromium-level zoom must always stay
+  // at 1. Chromium persists per-origin zoom in the default partition's
+  // Preferences, so a stray zoom on the dashboard's origin (historically:
+  // zooming a browser tab pointed at localhost:<port> back when tabs
+  // shared the default session) would silently rescale the whole window
+  // on every boot. Force it back on every load; this also rewrites the
+  // persisted entry.
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.setZoomLevel(0);
+  });
 
   win.once("ready-to-show", () => {
     win.show();

@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "../../src/trpc/router";
+import type { AppRouter } from "../../src/server/api/router";
 
 // ---------------------------------------------------------------------------
 // Type helpers — map dot-notation paths to procedure input/output types
@@ -157,10 +157,21 @@ export function createTrpcMock() {
     // DashboardShell sidebar: project list
     query("projects.list" as ProcedurePath, (() => ({ projects: [] })) as Handler<ProcedurePath>);
 
-    // DockviewWorkspaceLayout: diff count badge
+    // Changes tab badge
     query(
-      "workspace.getDiffSummary" as ProcedurePath,
-      (() => ({ stats: null })) as Handler<ProcedurePath>,
+      "workspace.getChanges" as ProcedurePath,
+      (() => ({
+        headBranch: "main",
+        defaultBranch: "main",
+        compareBranch: "main",
+        mergeBase: null,
+        branchStatus: "ready",
+        conflicts: [],
+        unstaged: [],
+        staged: [],
+        untracked: [],
+        branch: [],
+      })) as Handler<ProcedurePath>,
     );
   }
 

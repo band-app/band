@@ -1,6 +1,6 @@
 # Web App Architecture
 
-> **Status: target architecture, not current state.** The existing `apps/web/src/` layout is flatter — most server logic lives directly under `apps/web/src/lib/` (e.g. `chat-manager.ts`, `agent-pool.ts`, `git.ts`, `lsp-manager.ts`) and tRPC procedures live under `apps/web/src/trpc/`. This document describes the **API → Services → Infra** structure that new code should be migrated toward, not the layout you will find today. See `apps/web/src/trpc/router.ts` for the actual entry point.
+> **Status: shipped.** The 3-tier migration completed in Phase 8 (issue #319). Server logic now lives under `apps/web/src/server/{api,services,infra}/`, with the canonical tRPC entry point at `apps/web/src/server/api/router.ts`. The legacy `apps/web/src/trpc/` directory has been removed, and the only remaining content under `apps/web/src/lib/` is browser-side utilities (clipboard helpers, dockview state, the tRPC client wrapper, etc.). New code MUST follow this layout — see the per-tier rules below.
 
 The web server (`apps/web`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
 
@@ -10,6 +10,15 @@ API (routers)  -->  Services (business logic)  -->  Infra (DB, git, external cli
 
 Higher tiers depend on lower tiers. Never the reverse. Infra knows nothing about services. Services know nothing about routers.
 
+## Enforcement
+
+The reviewer-checkable rule set distilled from this doc lives in [`.claude/coding-criteria.md`](../.claude/coding-criteria.md) as rules `CODE-1`…`CODE-19`. That file is the **source of truth** for what a PR review enforces — it is loaded verbatim by:
+
+- `.github/workflows/claude-review.yml` (CI runs against every PR), and
+- `.claude/skills/review-changes/SKILL.md` (the orchestrator that the local `review-and-apply` skill and CI both invoke; it dispatches `.claude/agents/coding-reviewer.md`).
+
+This document is the narrative — the *why*, the examples, the rationale. The criteria file is the rule. When the two disagree, **the criteria file wins** and this doc is stale. A PR that changes one without the other should be flagged.
+
 ## Directory Structure
 
 ```
@@ -17,30 +26,96 @@ apps/web/src/server/
   api/
     projects/
       router.ts
-    workspaces/
+    workspaces/               # plural — workspace lifecycle (create/remove/setPinned/runScript/gitPull/gitPush by (project, branch))
       router.ts
-    chats/
+    workspace/                # singular — per-workspace ops (file CRUD, search, diff, gitPull/Push by workspaceId, formatFile, generateCommitMessage, fileChanges)
       router.ts
+    chats/                    # plural — list/create + per-chat CRUD/send/stop/resume
+      router.ts
+    chat/                     # singular — single pending-input answer (chat.answer)
+      router.ts
+    browsers/
+      router.ts              # browser tabs + browserLayout
     tasks/
+      router.ts
+    queue/                    # message queue (per chat/workspace)
+      router.ts
+    history/                  # browser visit history (per workspace)
       router.ts
     cronjobs/
       router.ts
     terminals/
-      router.ts
+      router.ts              # terminal + terminalLayout
     sessions/
       router.ts
     settings/
       router.ts
+    tunnel/
+      router.ts              # cloudflared lifecycle
+    editor/
+      router.ts              # LSP + file watching + formatter
+    browser-host/
+      router.ts              # host.* + browserHost.* (CDP proxy)
+    cli/
+      router.ts              # band-CLI symlink installer
+    hooks/
+      router.ts              # ~/.claude/settings.json hook editor
+    skills/
+      router.ts              # agent skills install/list
+    prereqs/
+      router.ts              # tool/binary prerequisite checks
+    statuses/
+      router.ts              # statuses.* + status.*
+    modes/
+      router.ts              # agent mode catalog
+    models/
+      router.ts              # agent model catalog
+    system/
+      router.ts              # services.* (health, activity, resources)
     router.ts                # merges all sub-routers
   services/
     project-service.ts
     workspace-service.ts
-    chat-service.ts
+    chat-service.ts          # CRUD + activeSessionSummary helpers
+    browser-service.ts
+    browser-history-service.ts
     task-service.ts
     cronjob-service.ts
     terminal-service.ts
+    workspace-script-service.ts # setup/teardown commands in a workspace terminal tab
     session-service.ts
     settings-service.ts
+    tunnel-service.ts
+    editor-service.ts        # LSP + file watch + format orchestration
+    browser-host-service.ts  # CDP proxy + target list (wraps infra/browser-host/)
+    agent-service.ts         # thin pass-through over the agent-pool for routers
+    files-service.ts         # workspace file CRUD (path-traversal + .git guards)
+    search-service.ts        # workspace file-name fuzzy + ripgrep content search
+    diff-service.ts          # listBranches / getDiff / getChanges / getFileDiff / stage / unstage / discard
+    cli-service.ts           # band-CLI binary resolver + symlink installer
+    cli-skills-service.ts    # render + install agent skill templates
+    hooks-service.ts         # ~/.claude/settings.json read/write
+    setup-service.ts         # first-time-setup orchestration
+    sync-service.ts          # syncWorktrees (state.json ↔ git worktree list)
+    state.ts                 # legacy state-file shims (loadState/saveState/loadSettings/...)
+    file-watcher.ts          # filesystem watch wiring (consumed via EditorService)
+    formatter.ts             # prettier wrapper (consumed via EditorService)
+    system-service.ts        # process orchestration (du rate-limit, prereq checks)
+    watcher-service.ts       # status-event-bus façade (subscribe + snapshot)
+    branch-status-poller.ts  # git/CI poller class + function-shaped facade
+    _utils/                  # non-domain helpers shared by services + API tier
+      fuzzy-score.ts
+      mime-types.ts
+      port-utils.ts
+      upload-utils.ts
+      github-graphql.ts
+      sse-writer.ts
+      jsonl-message-to-events.ts
+      queued-message-store.ts
+      dockview-layout-manager.ts
+      terminal-layout-manager.ts
+  shared/
+    chat-events.ts           # SSE wire schema shared by server + client halves
   infra/
     db/
       schema.ts              # Drizzle schema (all tables)
@@ -48,12 +123,18 @@ apps/web/src/server/
       queries/
         projects.ts
         workspaces.ts
+        workspace-statuses.ts # workspace_statuses row CRUD
         tasks.ts
         chats.ts
+        browsers.ts
+        browser-history.ts
         cronjobs.ts
         panel-states.ts
+        settings.ts          # settings.json (file-backed) + resolveAgentDefinition
+    events/
+      status-event-bus.ts    # emit / subscribe primitives + StatusEvent type
     git/
-      git-client.ts          # git exec wrappers
+      git-client.ts          # git/gh exec wrappers
     agents/
       agent-pool.ts          # coding agent lifecycle
     tunnels/
@@ -61,8 +142,31 @@ apps/web/src/server/
     terminals/
       terminal-pool.ts       # PTY lifecycle
     lsp/
-      lsp-client.ts          # language server process management
+      lsp-manager.ts         # language server process management
+      lsp-proxy.ts           # raw LSP message proxy
+    browser-host/
+      cdp-proxy.ts           # Chrome DevTools Protocol proxy
+      cdp-targets.ts         # CDP target discovery
+      host-state.ts          # bandTabId ↔ cdpTargetId mapping + ensure-view
+      browser-lookup.ts      # registry the BrowserService populates with a tab lookup
+    process/
+      path.ts                # interactive-shell $PATH + which-binary helpers
+      du.ts                  # raw du -sk shell-out
+      install.ts             # raw brew install shell-out
+    setup/
+      script-run.ts          # wraps a setup/teardown command to report its exit code from a terminal
+      project-config.ts      # .band/config.json reader
 ```
+
+### Singular vs plural sub-routers
+
+A few domains split into both a **singular** and a **plural** sub-router. The
+plural name (e.g. `workspaces/`, `chats/`) owns collection-level lifecycle
+operations (create, remove, list-by-collection-shape, …); the singular name
+(e.g. `workspace/`, `chat/`) owns per-entity operations keyed by an opaque
+id. The split mirrors the wire-level namespace the client already speaks
+(`trpc.workspace.*` vs `trpc.workspaces.*`); keep both directories rather
+than collapsing the routes into a single sub-router with mixed keying.
 
 ## Tier 1: API (Routers)
 

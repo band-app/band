@@ -1,0 +1,1265 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import type { Extension } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Code,
+  Eye,
+  FileWarning,
+  GitCompare,
+  Loader2,
+  Save,
+} from "lucide-react";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAdapter } from "../context";
+import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
+import {
+  extensionToLanguage,
+  filenameToLanguage,
+  languageLabel,
+  languageToExtension,
+} from "../lib/language-map";
+import type { RenderMarkdownBlock } from "../lib/markdown-live-preview";
+import type { FileContentResult } from "../types";
+import { CodeMirrorEditor } from "./CodeMirrorEditor";
+import { CodeMirrorViewer } from "./CodeMirrorViewer";
+import { ImagePreview } from "./ImagePreview";
+import { LanguagePickerDialog } from "./LanguagePickerDialog";
+import { PdfPreview } from "./PdfPreview";
+
+interface FileViewerProps {
+  workspaceId: string;
+  filePath: string;
+  onBack?: () => void;
+  /** 1-based line number to scroll to and highlight */
+  line?: number;
+  /** 1-based end line for range highlight (inclusive) */
+  lineEnd?: number;
+  /** 1-based column number for cursor positioning */
+  column?: number;
+  /** Called when the CodeMirror EditorView is created or destroyed */
+  onEditorView?: (view: EditorView | null) => void;
+  /** Optional overlay laid over the content area, e.g. the floating find
+   *  widget (it positions itself against the content area's top-right). */
+  overlay?: React.ReactNode;
+  /**
+   * Renders tables, frontmatter and mermaid blocks inside the markdown
+   * preview. When provided, markdown files open in an editable rendered
+   * preview with a preview/source toggle.
+   */
+  renderMarkdownBlock?: RenderMarkdownBlock;
+  /** When true, code files open in an editable editor instead of read-only viewer */
+  editable?: boolean;
+  /** Called when user clicks the back navigation button */
+  onGoBack?: () => void;
+  /** Called when user clicks the forward navigation button */
+  onGoForward?: () => void;
+  /** Whether the back navigation button is enabled */
+  canGoBack?: boolean;
+  /** Whether the forward navigation button is enabled */
+  canGoForward?: boolean;
+  /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
+  onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
+  /** When true, hides the title bar (path, size, nav arrows). */
+  hideTitleBar?: boolean;
+  /**
+   * When true, keeps the title bar (and all action buttons — nav, save,
+   * format, markdown toggle, language) but hides only the redundant
+   * path/size/(modified) label, replacing it with a flex spacer so the
+   * action buttons stay right-aligned. Used by the center `file` leaf,
+   * where the dockview tab already shows the filename. Additive/default-
+   * false so mobile `CodeBrowserView` is unchanged.
+   */
+  hidePathLabel?: boolean;
+  /** Controlled view mode for markdown files (preview vs source). When provided, FileViewer uses this instead of internal state. */
+  viewMode?: "preview" | "source";
+  /** Called when the user toggles between preview and source mode. */
+  onViewModeChange?: (mode: "preview" | "source") => void;
+  /** Optional LSP extension to wire into the editor for code intelligence */
+  lspExtension?: Extension | null;
+  /** Subscribe to the workspace file watcher (default true). While false the
+   *  subscription is closed; turning it back on reloads the file once, since
+   *  changes made in between were not observed. */
+  watchFileChanges?: boolean;
+  /** Initial edited content to restore (from tab state). null = no cached edits. */
+  initialEditedContent?: string | null;
+  /** Saved cursor selection (from `serializeViewPosition`) to re-apply on creation */
+  savedSelection?: unknown;
+  /** Scroll position to restore after editor creation */
+  savedScrollTop?: number;
+  /** Called when edited content changes (for persistence to tab state) */
+  onEditedContentChange?: (content: string | null) => void;
+  /**
+   * When true, `filePath` is treated as an absolute filesystem path
+   * outside the workspace root (the "Open File…" flow), and reads
+   * /writes go through the host file IO surface
+   * (`adapter.readExternalFile` / `adapter.saveExternalFile`) instead of
+   * the workspace one. `workspaceId` is still required by the prop
+   * shape but is unused on this path — image/PDF preview URLs and LSP
+   * are intentionally not wired for external files.
+   */
+  external?: boolean;
+  /**
+   * When true, the viewer renders an untitled (scratch) buffer that
+   * has no backing file. `filePath` carries the synthetic `untitled:N`
+   * key from `useFileTabs`; no remote IO happens (no `getWorkspaceFile`
+   * / `readExternalFile` call). Buffer state lives entirely in
+   * `initialEditedContent` / `onEditedContentChange` until the user
+   * picks a destination via `onSaveAs` — that callback is responsible
+   * for surfacing the OS save dialog (gated on
+   * `capabilities.pickSaveFile`) and transitioning the tab to a
+   * file-backed one.
+   */
+  untitled?: boolean;
+  /**
+   * Manual syntax-highlighting language override (e.g. `"typescript"`,
+   * `"markdown"`, `"plaintext"`). When set, takes precedence over
+   * file-extension auto-detection — the user's explicit choice in the
+   * language picker survives saves and tab restores.
+   */
+  languageOverride?: string;
+  /**
+   * Called when the user picks a language from the editor's language
+   * indicator dropdown / "Change Language Mode…" command. The caller
+   * persists the choice to tab state so it survives tab switches.
+   */
+  onLanguageOverrideChange?: (languageId: string) => void;
+  /**
+   * Save-as flow for untitled tabs. Called when the user hits Cmd+S on
+   * an untitled buffer (or the close-confirm "Save" button). Receives
+   * the live editor content and is expected to surface the OS save
+   * dialog, persist the bytes, and resolve with the chosen absolute
+   * path — at which point the caller transitions the tab to file-
+   * backed. Resolves with `null` when the user cancels the save dialog
+   * so the close path can keep the tab open.
+   */
+  onSaveAs?: (content: string) => Promise<string | null>;
+  /**
+   * When provided, renders a "View changes" button in the title bar that
+   * opens the file's diff. The inverse of the diff leaf's "Edit" button — used
+   * by the center `file` leaf to jump to the changeset for the open file.
+   */
+  onViewDiff?: () => void;
+  /**
+   * Reports the viewer's current title-bar action state (save + markdown
+   * toggle availability) whenever it changes. Lets a host that renders its own
+   * chrome — the center `file` leaf, which lifts these into the dockview group
+   * header — drive Save and the markdown toggle from outside while the viewer's
+   * own title bar is hidden (`hideTitleBar`).
+   */
+  onActionsChange?: (actions: {
+    isDirty: boolean;
+    canSave: boolean;
+    saving: boolean;
+    save: () => void;
+    showMarkdownToggle: boolean;
+  }) => void;
+  /**
+   * Called when the workspace/external loader rejects (typically
+   * `ENOENT: no such file or directory ...` from the server's `stat`
+   * call). The parent can use this to self-heal stale tab state — e.g.
+   * dropping a persisted active tab that points at a path which doesn't
+   * exist in the current workspace (issue #539: a cross-workspace leak
+   * could write a non-existent path into `band-open-tabs:<ws>`).
+   */
+  onLoadError?: (err: { filePath: string; message: string }) => void;
+}
+
+function getFilename(path: string): string {
+  return path.split("/").pop() || path;
+}
+
+function getExtension(path: string): string {
+  const name = getFilename(path);
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
+}
+
+/**
+ * Workspace-relative parent directory of a path, matching the semantics
+ * of the server-side file watcher (`file-watcher.ts::parentDirOf`): a
+ * top-level file ("README.md") has parent `""`, a nested file
+ * ("src/app.ts") has parent "src". The `fileChanges` subscription emits
+ * the parent directory of any touched path, so a viewer auto-refreshes
+ * when the changed directory equals its own file's parent.
+ */
+function parentDirOf(path: string): string {
+  const normalised = path.split(/[\\/]+/).join("/");
+  const idx = normalised.lastIndexOf("/");
+  return idx === -1 ? "" : normalised.slice(0, idx);
+}
+
+function detectLanguage(filePath: string, serverHint?: string): string {
+  if (serverHint) return serverHint;
+  const ext = getExtension(filePath);
+  const fromExt = extensionToLanguage(ext);
+  if (fromExt) return fromExt;
+  const fromName = filenameToLanguage(getFilename(filePath));
+  return fromName || "plaintext";
+}
+
+/**
+ * Should this FileViewer respond to a workspace-scoped event whose
+ * `detail.filePath` may or may not match the currently-viewed file?
+ *
+ * The dispatcher in `DockviewWorkspaceLayout` reads
+ * `currentFileRef.current`, which is updated only through
+ * `notifySelectFile` — and that path deliberately filters out
+ * untitled / external paths (they can't round-trip through the
+ * workspace-relative URL). So:
+ *
+ *   - **No hint sent** — accept. The dispatcher couldn't read a path
+ *     (e.g. restored-on-boot tab that hasn't been activated yet, or
+ *     the user is currently viewing an untitled / external tab whose
+ *     path was filtered out of the ref). Workspace ID alone scopes
+ *     the response.
+ *   - **Hint matches our viewer path** — accept. Authoritative match.
+ *   - **Hint is a non-matching real path** — depends on the viewer:
+ *       - Regular workspace viewer: REJECT. Some other file-backed
+ *         viewer in this workspace (split-pane future) is the
+ *         intended recipient; we shouldn't double-handle.
+ *       - Untitled / external viewer: ACCEPT. The hint is a stale ref
+ *         from the dispatcher (the previously-viewed real file) —
+ *         the user pressed format/picker *while looking at* this
+ *         untitled/external tab, so it's the intended target.
+ *
+ * Order matters: the untitled/external branch runs AFTER the hint
+ * equality check so a future split-pane setup with both a file-backed
+ * and an untitled viewer can still route a non-null hint specifically
+ * at the file-backed one without also triggering the untitled one.
+ *
+ * Extracted so the format and language-picker listeners stay in lockstep.
+ */
+function matchesFilePathHint(
+  hint: string | null | undefined,
+  viewerPath: string,
+  viewerUntitled: boolean | undefined,
+  viewerExternal: boolean | undefined,
+): boolean {
+  if (hint == null) return true;
+  if (hint === viewerPath) return true;
+  // Hint is present and doesn't match. Accept only when our path
+  // can't round-trip through the dispatcher's ref — in those cases
+  // the hint is necessarily stale, not targeted.
+  return Boolean(viewerUntitled || viewerExternal);
+}
+
+export function FileViewer({
+  workspaceId,
+  filePath,
+  onBack,
+  line,
+  lineEnd,
+  column,
+  onEditorView,
+  overlay,
+  renderMarkdownBlock,
+  editable,
+  onGoBack,
+  onGoForward,
+  canGoBack,
+  canGoForward,
+  onCursorLineChange,
+  hideTitleBar,
+  hidePathLabel,
+  viewMode: controlledViewMode,
+  onViewModeChange,
+  lspExtension,
+  watchFileChanges = true,
+  initialEditedContent,
+  savedSelection,
+  savedScrollTop,
+  onEditedContentChange,
+  external,
+  untitled,
+  languageOverride,
+  onLanguageOverrideChange,
+  onSaveAs,
+  onViewDiff,
+  onActionsChange,
+  onLoadError,
+}: FileViewerProps) {
+  const adapter = useAdapter();
+  const [data, setData] = useState<FileContentResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [internalViewMode, setInternalViewMode] = useState<"preview" | "source">("preview");
+
+  // Support both controlled and uncontrolled view mode
+  const viewMode = controlledViewMode ?? internalViewMode;
+  const setViewMode = onViewModeChange ?? setInternalViewMode;
+
+  // Editing state
+  const [editedContent, setEditedContent] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Status banner for the ⇧⌥F "Format Current File" action. Kept separate
+  // from `saveError` so a successful format flash doesn't get swallowed by
+  // an unrelated stale save error. `kind: "info"` covers the soft-skip
+  // path (unsupported file extension); error covers Prettier syntax errors.
+  const [formatStatus, setFormatStatus] = useState<{
+    kind: "ok" | "error" | "info";
+    message: string;
+  } | null>(null);
+  // `formatting` drives the spinner in the toolbar; `formattingRef` is the
+  // re-entrancy guard. We can't use the React-state value as the guard —
+  // setState is async, so two ⇧⌥F presses inside the same React batch
+  // would both observe `formatting === false` and proceed in parallel. The
+  // ref flips synchronously on call entry and clears in `finally`.
+  const [formatting, setFormatting] = useState(false);
+  const formattingRef = useRef(false);
+
+  const editorViewRef = useRef<EditorView | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  // Keep a ref to the latest `onLoadError` so the load effect's deps
+  // don't change every render (the callback identity from the parent is
+  // not always stable, and including it would re-fire the loader on
+  // every render). Mirror-pair lives next to the other ref/state-mirror
+  // pairs above so a reader sees all of them in one place.
+  const onLoadErrorRef = useRef(onLoadError);
+  onLoadErrorRef.current = onLoadError;
+  // Latest `filePath`, mirrored so `reloadFromDisk` can detect that the
+  // user switched files mid-fetch and bail before writing one file's
+  // bytes into another file's editor (the FileViewer instance is reused
+  // across file→file navigation — see the `key="file"` in CodeBrowserView).
+  const filePathRef = useRef(filePath);
+  filePathRef.current = filePath;
+
+  // Untitled tabs are "dirty" whenever they have any content typed in —
+  // there's no on-disk baseline to compare against. An empty buffer
+  // counts as clean so closing an untouched scratch tab doesn't pop
+  // the unsaved-changes confirmation.
+  const isDirty = untitled
+    ? editedContent != null && editedContent !== ""
+    : editedContent !== null && editedContent !== data?.content;
+
+  // Untitled tabs are *always* editable — the buffer lives entirely in
+  // the renderer, so typing into it has nothing to do with whether a
+  // save mechanism is available. `canSave` (below) gates the Save
+  // button separately, so in a web build (no `onSaveAs` because
+  // `capabilities.pickSaveFile` is undefined) the user can still draft
+  // text into an untitled tab; only persistence requires the desktop
+  // shell.
+  //
+  // Before this split, an untitled tab created from a non-desktop
+  // entry point fell through to `CodeMirrorViewer` (read-only), which
+  // looked like "the editor is empty and I can't type" — issue raised
+  // post-review and fixed here.
+  const canEdit =
+    editable &&
+    (untitled ? true : external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
+
+  const canSave = untitled
+    ? !!onSaveAs
+    : external
+      ? !!adapter.saveExternalFile
+      : !!adapter.saveWorkspaceFile;
+
+  // Untitled tabs never have a backing file extension to drive the
+  // preview-type heuristic — force "code" so the editor renders rather
+  // than the image/PDF/markdown branches.
+  const previewType: FilePreviewType = untitled ? "code" : getFilePreviewType(filePath);
+
+  // Reset editing state when switching files.
+  // Edited content is initialized from the parent's tab state (via prop).
+  // No cleanup effect needed — the parent saves content on every keystroke
+  // via onEditedContentChange and saves editor state in handleTabSelect.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: controlledViewMode and initialEditedContent are intentionally excluded — we only reset on file change
+  useEffect(() => {
+    if (!controlledViewMode) setInternalViewMode("preview");
+    setEditedContent(initialEditedContent ?? null);
+    setSaveError(null);
+    setFormatStatus(null);
+  }, [workspaceId, filePath]);
+
+  // Listen for discard-edits events from handleTabClose.  When the parent
+  // closes a tab with "Close Without Saving", it dispatches this event
+  // BEFORE the tab switch so we can null out the ref synchronously.
+  // The cleanup effect (above) then sees null and skips re-saving.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.filePath === filePath) {
+        editedContentRef.current = null;
+        setEditedContent(null);
+      }
+    };
+    window.addEventListener("band:discard-edits", handler);
+    return () => window.removeEventListener("band:discard-edits", handler);
+  }, [filePath]);
+
+  // Warn before tab close when dirty
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  // Image and PDF previews have no editor view. (The markdown preview is an
+  // editor and reports its own view.)
+  useEffect(() => {
+    if (previewType === "image" || previewType === "pdf") {
+      onEditorView?.(null);
+    }
+  }, [previewType, onEditorView]);
+
+  useEffect(() => {
+    // Untitled tabs have no backing file — synthesise an empty
+    // content record so the rest of the render pipeline (canEdit
+    // check, CodeMirrorEditor mount, dirty-state diff against
+    // `data?.content`) keeps its existing shape. `initialEditedContent`
+    // (threaded by the parent from useTabState) carries any in-memory
+    // typing the user has done so far.
+    if (untitled) {
+      setData({ content: "", size: 0, binary: false, tooLarge: false });
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed.
+    // External files don't have a workspace-relative URL; for the moment we
+    // fall through to the text-content path (binary detection will catch
+    // genuine images), since opening an arbitrary binary outside the workspace
+    // root is rare and the image preview UI isn't a goal of the external-file
+    // flow.
+    if (!external && (previewType === "image" || previewType === "pdf")) {
+      setData(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const loader = external ? adapter.readExternalFile : adapter.getWorkspaceFile;
+    if (!loader) {
+      setError("File viewing not supported");
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    const promise = external
+      ? adapter.readExternalFile!(filePath)
+      : adapter.getWorkspaceFile!(workspaceId, filePath);
+    promise
+      .then((result) => {
+        if (!cancelled) setData(result);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to read file";
+        setError(message);
+        // Notify the parent so it can self-heal stale state (e.g. drop a
+        // persisted active tab pointing at a path that doesn't exist in
+        // this workspace, the leak path described in issue #539). The
+        // callback is intentionally fire-and-forget — the FileViewer
+        // still surfaces the error itself, and the parent decides
+        // whether the error is worth acting on (ENOENT vs. transient).
+        onLoadErrorRef.current?.({ filePath, message });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, workspaceId, filePath, previewType, external, untitled]);
+
+  // The user's explicit choice from the language picker always wins over
+  // file-extension detection (issue #434: "manual override sticks for the
+  // lifetime of the tab"). Untitled tabs default to plain text; file-
+  // backed tabs fall through to the existing detection path.
+  const lang = languageOverride
+    ? languageOverride
+    : untitled
+      ? "plaintext"
+      : data?.content
+        ? detectLanguage(filePath, data.language)
+        : "plaintext";
+
+  // External files don't have a workspace-relative raw URL endpoint, so
+  // image/PDF rendering for external paths is intentionally not wired.
+  const fileUrl =
+    !external && adapter.getWorkspaceFileUrl
+      ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
+      : undefined;
+
+  const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
+
+  // Options for the editable markdown preview. Relative image paths resolve
+  // against the markdown file's directory through the raw file URL.
+  const markdownPreview = useMemo(() => {
+    if (!renderMarkdownBlock) return undefined;
+    const canLoadFiles = !external && !!adapter.getWorkspaceFileUrl;
+    const resolveImageUrl = (src: string): string | undefined => {
+      if (/^(https?:|data:)/i.test(src)) return src;
+      // Absolute paths and other schemes (including protocol-relative `//host`)
+      // don't map to a workspace file.
+      if (!canLoadFiles || /^[a-z]+:/i.test(src) || src.startsWith("/")) return undefined;
+      const path = resolveRelativePath(parentDirOf(filePath), src.split(/[?#]/)[0]);
+      return path == null ? undefined : adapter.getWorkspaceFileUrl?.(workspaceId, path);
+    };
+    return { renderBlock: renderMarkdownBlock, resolveImageUrl };
+  }, [renderMarkdownBlock, external, adapter, workspaceId, filePath]);
+
+  // The content to display — use edited content when available, otherwise server content
+  const displayContent = editedContent ?? data?.content;
+
+  // Use refs to avoid stale closures in handlers
+  const editedContentRef = useRef(editedContent);
+  editedContentRef.current = editedContent;
+  const onEditedContentChangeRef = useRef(onEditedContentChange);
+  onEditedContentChangeRef.current = onEditedContentChange;
+
+  const handleSave = useCallback(async () => {
+    // Untitled tabs route through the OS save dialog (`onSaveAs`).
+    // We use the *live* editor buffer rather than `editedContentRef`
+    // because an empty untitled buffer never sets edited content
+    // (isDirty filters out the empty string), so editedContentRef can
+    // legitimately be null even when the user wants to save an
+    // empty file from a fresh untitled tab.
+    if (untitled) {
+      if (!onSaveAs) return;
+      const content = editorViewRef.current?.state.doc.toString() ?? editedContentRef.current ?? "";
+      setSaving(true);
+      setSaveError(null);
+      try {
+        // `onSaveAs` is responsible for the OS dialog, the file
+        // write, and the tab transition. Cancellation resolves with
+        // null — keep the tab as-is.
+        const newPath = await onSaveAs(content);
+        if (newPath != null) {
+          // The parent has already swapped the tab key from
+          // `untitled:N` to the real path; this component will be
+          // remounted under the new filePath, so we don't need to
+          // clear local state.
+          window.dispatchEvent(new CustomEvent("band:dirty-change"));
+        }
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (editedContentRef.current === null) return;
+    const save = external
+      ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
+      : adapter.saveWorkspaceFile &&
+        ((c: string) => adapter.saveWorkspaceFile!(workspaceId, filePath, c));
+    if (!save) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await save(editedContentRef.current);
+      // Update the data state so isDirty resets
+      const savedContent = editedContentRef.current;
+      setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
+      // Clear edited content — saved content is now on disk
+      setEditedContent(null);
+      onEditedContentChangeRef.current?.(null);
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [adapter, workspaceId, filePath, external, untitled, onSaveAs]);
+
+  // Report title-bar action state to a host that renders its own chrome (the
+  // center `file` leaf lifts Save + the markdown toggle into the group header).
+  const onActionsChangeRef = useRef(onActionsChange);
+  onActionsChangeRef.current = onActionsChange;
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  useEffect(() => {
+    onActionsChangeRef.current?.({
+      isDirty,
+      canSave,
+      saving,
+      save: () => handleSaveRef.current(),
+      showMarkdownToggle,
+    });
+  }, [isDirty, canSave, saving, showMarkdownToggle]);
+
+  /**
+   * Format the editor buffer in-place via Prettier.
+   *
+   * Server-side is pure — it takes the current editor content as a
+   * string, formats it, and returns the result. Disk is untouched: any
+   * unsaved edits stay unsaved, and the formatted output replaces the
+   * editor buffer the same way a user-typed change would. The user
+   * decides when to save with Cmd+S.
+   *
+   * Soft-skip outcomes (no Prettier parser, `.prettierignore` match)
+   * render as a muted info message so editor save hooks can fire this
+   * indiscriminately without yelling at the user for `.png` files.
+   */
+  const handleFormat = useCallback(async (): Promise<void> => {
+    if (!adapter.formatWorkspaceFile) {
+      setFormatStatus({ kind: "error", message: "Formatting not supported by this adapter" });
+      return;
+    }
+    // Re-entrancy guard. Intentionally silent: a second ⌘⇧F press while a
+    // format is in flight is a no-op rather than a queued retry. The
+    // existing spinner is still visible (`formatting` state hasn't been
+    // cleared), so the user sees "format is happening" from the first
+    // press — adding feedback for the dropped second press would mostly
+    // be noise.
+    if (formattingRef.current) return;
+
+    // Read the live buffer straight off the EditorView so we always
+    // pick up unsaved keystrokes. Fall back to `editedContent` / `data`
+    // (read-only viewer case, or any timing edge where the view ref is
+    // null) so the in-memory shape stays canonical.
+    const view = editorViewRef.current;
+    const sourceContent =
+      view?.state.doc.toString() ?? editedContentRef.current ?? dataRef.current?.content ?? null;
+    if (sourceContent === null) {
+      setFormatStatus({ kind: "error", message: "No content to format" });
+      return;
+    }
+
+    formattingRef.current = true;
+    setFormatting(true);
+    setFormatStatus(null);
+    try {
+      // Untitled tabs have no real extension for Prettier to dispatch
+      // on — synthesize a virtual filename inside the workspace from
+      // the user's language choice (`languageOverride`) so the server-
+      // side formatter picks the right parser. Untitled tabs default
+      // to plain text, which Prettier has no parser for; short-circuit
+      // with an actionable message instead of the generic "no parser
+      // available" soft-skip — first-run users were confused by it
+      // because the muted info-status easily reads as "format ran but
+      // did nothing" when in fact the formatter never even got the
+      // request.
+      let formatPath = filePath;
+      if (untitled) {
+        const ext = languageOverride ? languageToExtension(languageOverride) : undefined;
+        if (!ext) {
+          setFormatStatus({
+            kind: "info",
+            message: "Set a language mode first to format this untitled tab",
+          });
+          return;
+        }
+        // The server's formatter requires the path to resolve inside
+        // the worktree; using a leading "." filename keeps it inside
+        // the workspace root and doesn't clobber any real file. Include
+        // the synthetic tab key (`untitled:N` → `untitled-N`) so two
+        // simultaneously-formatting untitled tabs of the same language
+        // don't collide on the virtual filename — relevant if any
+        // future formatter caches by path. The character substitution
+        // strips the colon so the resulting filename is portable
+        // across POSIX and Windows.
+        const tabKey = filePath.replace(/[^a-z0-9]/gi, "-");
+        formatPath = `.band-${tabKey}${ext}`;
+      }
+      const result = await adapter.formatWorkspaceFile(workspaceId, formatPath, sourceContent);
+      if (result.skipped) {
+        setFormatStatus({ kind: "info", message: result.reason });
+        return;
+      }
+
+      if (result.changed) {
+        const formatted = result.formatted;
+        if (view) {
+          // CodeMirrorEditor intentionally ignores `content` prop
+          // changes after initial creation (the editor owns its
+          // buffer), so we drive the update through the live
+          // EditorView. Tag it `band.format` so a single Cmd+Z reverts
+          // the format back to what the user had typed before.
+          const currentDoc = view.state.doc.toString();
+          if (currentDoc !== formatted) {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: formatted },
+              userEvent: "band.format",
+            });
+          }
+        } else {
+          // Read-only viewer (no live editor). The CodeMirrorViewer keys
+          // its document on the `content` prop, so swapping
+          // `editedContent` here is enough to re-render it with the
+          // formatted bytes.
+          setEditedContent(formatted);
+          onEditedContentChangeRef.current?.(formatted);
+          window.dispatchEvent(new CustomEvent("band:dirty-change"));
+        }
+      }
+
+      setFormatStatus({
+        kind: "ok",
+        message: result.changed ? "Formatted" : "Already formatted",
+      });
+    } catch (err) {
+      setFormatStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to format",
+      });
+    } finally {
+      formattingRef.current = false;
+      setFormatting(false);
+    }
+  }, [adapter, workspaceId, filePath, untitled, languageOverride]);
+
+  // Listen for the global "Format Current File" event (⇧⌥F + palette).
+  // The dispatcher reads `currentFileRef.current`, which is only
+  // updated by `notifySelectFile` — and that path filters out untitled
+  // / external tabs (their paths can't round-trip through the
+  // workspace-relative URL). So when the user is currently viewing an
+  // untitled or external tab, `detail.filePath` is either absent or
+  // stale (the previously-viewed real file). We accept those cases
+  // here, but still reject when a non-matching filePath is sent and
+  // the current viewer is a regular workspace tab — that preserves
+  // the original cross-workspace / future-split-pane safety net
+  // (workspaceId alone would silently double-format if two file-backed
+  // FileViewers were ever mounted concurrently).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { workspaceId?: string; filePath?: string | null }
+        | undefined;
+      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
+      void handleFormat();
+    };
+    window.addEventListener("band:format-current-file", handler);
+    return () => window.removeEventListener("band:format-current-file", handler);
+  }, [workspaceId, filePath, untitled, external, handleFormat]);
+
+  // Auto-clear the "Formatted" success flash so it doesn't linger next to
+  // the filename. Errors stay until the user changes files or saves.
+  useEffect(() => {
+    if (formatStatus?.kind !== "ok") return;
+    const timer = window.setTimeout(() => setFormatStatus(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [formatStatus]);
+
+  const handleContentChange = useCallback((newContent: string) => {
+    // When undo brings the content back to the on-disk version, clear
+    // the edited state entirely so the dirty indicators (title bar +
+    // tab dot) disappear.
+    if (newContent === dataRef.current?.content) {
+      setEditedContent(null);
+      onEditedContentChangeRef.current?.(null);
+    } else {
+      setEditedContent(newContent);
+      onEditedContentChangeRef.current?.(newContent);
+    }
+    // Notify FileTabBar (and any other listener) that dirty state changed
+    window.dispatchEvent(new CustomEvent("band:dirty-change"));
+  }, []);
+
+  // Capture the EditorView locally (for revert) while forwarding to the parent
+  const handleEditorView = useCallback(
+    (view: EditorView | null) => {
+      editorViewRef.current = view;
+      onEditorView?.(view);
+    },
+    [onEditorView],
+  );
+
+  // ---- Auto-refresh on external disk changes -----------------------------
+  //
+  // Re-read the file from disk and reflect the new bytes in the viewer,
+  // but ONLY when the buffer is clean. If the user has unsaved edits
+  // (`editedContentRef.current !== null`) we leave the buffer untouched so
+  // a background change (a teammate's `git pull`, the agent rewriting the
+  // file) can't silently clobber what they're typing. The dirty check is
+  // re-evaluated after the async read because the user may start typing
+  // during the round-trip.
+  const reloadFromDisk = useCallback(async () => {
+    // Untitled buffers have no backing file; external files aren't covered
+    // by the workspace watcher. Both are out of scope for auto-refresh.
+    if (untitled || external) return;
+    if (!adapter.getWorkspaceFile) return;
+    // Don't clobber unsaved edits.
+    if (editedContentRef.current !== null) return;
+
+    let result: FileContentResult;
+    try {
+      result = await adapter.getWorkspaceFile(workspaceId, filePath);
+    } catch {
+      // The file may have just been deleted/renamed, or the read raced a
+      // write. Leave the current view as-is — the file tree handles
+      // removal, and the next change event will retry.
+      return;
+    }
+
+    // The user switched files while the read was in flight — this result
+    // belongs to the previously-viewed file. Dropping it here prevents the
+    // stale bytes from being dispatched into the now-current file's editor
+    // (the FileViewer instance is reused across file→file navigation).
+    if (filePathRef.current !== filePath) return;
+    // The user may have started editing while the read was in flight.
+    if (editedContentRef.current !== null) return;
+    // The read succeeded, so a prior load error (e.g. the file was missing
+    // and has since been created) is now stale — clear it so the content
+    // area isn't left gated behind the old error banner.
+    setError(null);
+    // The open file's own bytes are unchanged — typically a sibling file in
+    // the same directory triggered the event. (The O(1) size check
+    // short-circuits the O(n) content comparison in the common case where
+    // the file genuinely changed.) Only re-render when the server metadata
+    // actually drifted; otherwise a stream of sibling-file events would each
+    // force a gratuitous re-render of the editor for no visible change.
+    if (result.size === dataRef.current?.size && result.content === dataRef.current?.content) {
+      if (result.language !== dataRef.current?.language) setData(result);
+      return;
+    }
+
+    // Update the on-disk baseline first so the editor's change listener
+    // (`handleContentChange`) sees the new content and keeps the buffer
+    // marked clean rather than flipping it to dirty.
+    dataRef.current = result;
+    setData(result);
+
+    // The editable CodeMirror intentionally ignores `content` prop changes
+    // after creation (it owns its document), so drive the swap through the
+    // live EditorView — the same mechanism `handleFormat` uses. The
+    // read-only viewer keys off `data` and re-renders from `setData` alone.
+    // We reach this only when the buffer is clean and the content genuinely changed, so the live doc already
+    // equals the old baseline — replacing it unconditionally avoids an
+    // O(file_size) `doc.toString()` just to confirm what we already know.
+    const view = editorViewRef.current;
+    if (view && typeof result.content === "string") {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: result.content },
+        userEvent: "band.reload",
+      });
+    }
+  }, [adapter, workspaceId, filePath, untitled, external]);
+
+  // Subscribe to the workspace file watcher and reload when the directory
+  // containing this file reports a change. The server coalesces events per
+  // parent directory, so we match on `parentDirOf(filePath)`. Image/PDF
+  // previews render straight off the raw file URL (no in-memory content to
+  // refresh), and untitled/external tabs have no watcher path — skip all
+  // of them.
+  const missedFileChangesRef = useRef(false);
+  useEffect(() => {
+    if (untitled || external) return;
+    if (previewType === "image" || previewType === "pdf") return;
+    if (!adapter.subscribeFileChanges) return;
+    if (!watchFileChanges) {
+      missedFileChangesRef.current = true;
+      return;
+    }
+    if (missedFileChangesRef.current) {
+      missedFileChangesRef.current = false;
+      void reloadFromDisk();
+    }
+    const watchedDir = parentDirOf(filePath);
+    const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedDir) => {
+      if (changedDir !== watchedDir) return;
+      void reloadFromDisk();
+    });
+    return unsubscribe;
+  }, [
+    adapter,
+    workspaceId,
+    filePath,
+    untitled,
+    external,
+    previewType,
+    reloadFromDisk,
+    watchFileChanges,
+  ]);
+
+  const handleBack = useCallback(() => {
+    if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
+      return;
+    }
+    // Clear dirty state
+    setEditedContent(null);
+    onEditedContentChangeRef.current?.(null);
+    window.dispatchEvent(new CustomEvent("band:dirty-change"));
+    onBack?.();
+  }, [isDirty, onBack]);
+
+  // Searchable language-mode picker (issue #434). Opens from the
+  // status-bar language indicator or the "Change Language Mode…" palette
+  // entry; in both cases we dispatch / listen to a single event so the
+  // wiring stays symmetrical with Quick Open / Search in Files. Same
+  // filePath-hint rules as the format listener (see
+  // `matchesFilePathHint`): accept when the hint is absent / matches /
+  // we're an untitled or external viewer (the dispatcher's ref is
+  // stale or never set for those), reject only when a mismatched hint
+  // targets a different file-backed viewer.
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { workspaceId?: string; filePath?: string | null }
+        | undefined;
+      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
+      setLanguagePickerOpen(true);
+    };
+    window.addEventListener("band:open-language-picker", handler);
+    return () => window.removeEventListener("band:open-language-picker", handler);
+  }, [workspaceId, filePath, untitled, external]);
+
+  return (
+    // min-w-0 prevents intrinsic-width content (CodeMirror's long unwrapped
+    // lines, in particular) from forcing this box wider than its allocated
+    // flex slot, which would propagate up and shove neighbouring layout
+    // (e.g. the right-edge tab strip) off-screen.
+    <div data-testid="file-viewer__root" className="flex h-full min-w-0 flex-col overflow-hidden">
+      {/* Title bar. h-8 lines up with the diff leaf header. */}
+      {!hideTitleBar && (
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+          {onBack && (
+            <button
+              type="button"
+              onClick={handleBack}
+              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent"
+            >
+              <ArrowLeft className="size-3.5" />
+            </button>
+          )}
+          {/* Editor navigation history buttons */}
+          {(onGoBack || onGoForward) && (
+            <div className="flex items-center gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoBack}
+                    disabled={!canGoBack}
+                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronLeft className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Go Back{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌃-
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoForward}
+                    disabled={!canGoForward}
+                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Go Forward{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌃⇧-
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+          {hidePathLabel ? (
+            // Keep the action buttons right-aligned without the redundant
+            // path label (the dockview tab already shows the filename).
+            <span className="min-w-0 flex-1" />
+          ) : (
+            <span
+              className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
+              title={untitled ? "Untitled" : filePath}
+              data-testid="file-viewer__path"
+            >
+              {untitled ? "Untitled" : filePath}
+              {isDirty && <span className="ml-1">(modified)</span>}
+            </span>
+          )}
+          {onViewDiff && (
+            <button
+              type="button"
+              onClick={onViewDiff}
+              title="View changes"
+              data-testid="file-viewer__view-diff"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <GitCompare className="size-3.5" />
+            </button>
+          )}
+          {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
+          {formatStatus && (
+            <span
+              className={`shrink-0 truncate text-xs ${
+                formatStatus.kind === "error"
+                  ? "text-destructive"
+                  : formatStatus.kind === "ok"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground"
+              }`}
+              title={formatStatus.message}
+            >
+              {formatStatus.kind === "error" ? "Format failed" : formatStatus.message}
+            </span>
+          )}
+          {formatting && (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          )}
+          {canSave && isDirty && (
+            // Gate on canSave (which requires a working save target —
+            // adapter method for file-backed tabs, `onSaveAs` for
+            // untitled ones) rather than canEdit, so an untitled tab in
+            // the web build still renders an editable surface even
+            // though no Save button can appear.
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              title="Save (Cmd+S)"
+              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
+            >
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+            </button>
+          )}
+          {/* Markdown preview/source toggle icons */}
+          {showMarkdownToggle && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode("preview")}
+                title="Preview"
+                className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                  viewMode === "preview"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                <Eye className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("source")}
+                title="Source"
+                className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                  viewMode === "source"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                <Code className="size-3.5" />
+              </button>
+            </div>
+          )}
+          {data && !hidePathLabel && (
+            <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
+          )}
+        </div>
+      )}
+      {/* Content area */}
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {overlay}
+        {loading && (
+          <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+            Loading...
+          </div>
+        )}
+
+        {error && (
+          <div
+            data-testid="file-viewer__error"
+            className="flex h-32 items-center justify-center text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Image preview */}
+        {!loading && !error && previewType === "image" && fileUrl && (
+          <ImagePreview src={fileUrl} alt={getFilename(filePath)} />
+        )}
+
+        {/* PDF preview */}
+        {!loading && !error && previewType === "pdf" && fileUrl && (
+          <PdfPreview src={fileUrl} filename={getFilename(filePath)} />
+        )}
+
+        {/* Markdown preview: an editor over the same markdown text that
+             renders it as you type (see markdown-live-preview.ts). Edits go
+             through the same dirty/save path as the source editor. Check
+             `!== undefined` so an empty file still renders the preview. */}
+        {!loading &&
+          !error &&
+          previewType === "markdown" &&
+          markdownPreview &&
+          viewMode === "preview" &&
+          data?.content !== undefined && (
+            <div data-testid="file-viewer__markdown-preview" className="h-full">
+              <CodeMirrorEditor
+                content={displayContent ?? ""}
+                originalContent={data.content}
+                language="markdown"
+                className="h-full"
+                filePath={filePath}
+                line={line}
+                lineEnd={lineEnd}
+                column={column}
+                onEditorView={handleEditorView}
+                onContentChange={handleContentChange}
+                onSave={handleSave}
+                onCursorLineChange={onCursorLineChange}
+                savedSelection={savedSelection}
+                savedScrollTop={savedScrollTop}
+                markdownPreview={markdownPreview}
+                readOnly={!canEdit}
+              />
+            </div>
+          )}
+
+        {/* Source view: editable editor or read-only viewer.
+             Same undefined-check as the markdown branch — empty files
+             are still valid and must surface the editor. */}
+        {!loading &&
+          !error &&
+          data?.content !== undefined &&
+          (previewType === "code" ||
+            (previewType === "markdown" && (!renderMarkdownBlock || viewMode === "source"))) &&
+          (canEdit ? (
+            <CodeMirrorEditor
+              content={displayContent ?? ""}
+              originalContent={data.content}
+              language={lang}
+              className="h-full"
+              filePath={filePath}
+              line={line}
+              lineEnd={lineEnd}
+              column={column}
+              onEditorView={handleEditorView}
+              onContentChange={handleContentChange}
+              onSave={handleSave}
+              onCursorLineChange={onCursorLineChange}
+              lspExtension={lspExtension}
+              savedSelection={savedSelection}
+              savedScrollTop={savedScrollTop}
+            />
+          ) : (
+            <CodeMirrorViewer
+              content={data.content}
+              language={lang}
+              className="h-full"
+              filePath={filePath}
+              line={line}
+              lineEnd={lineEnd}
+              column={column}
+              onEditorView={onEditorView}
+              onCursorLineChange={onCursorLineChange}
+            />
+          ))}
+
+        {/* Binary file fallback (non-image, non-pdf) */}
+        {!loading && !error && data?.binary && previewType === "code" && (
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <FileWarning className="size-8" />
+            Binary file ({formatSize(data.size)})
+          </div>
+        )}
+
+        {/* File too large (only for code/text files — images and PDFs use the raw URL) */}
+        {!loading && !error && data?.tooLarge && previewType === "code" && (
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <FileWarning className="size-8" />
+            File too large ({formatSize(data.size)})
+          </div>
+        )}
+      </div>
+
+      {/* Status bar — language indicator (click to change). Rendered for
+          every editor tab (untitled and file-backed) so the picker
+          surface is always reachable; we gate on the picker callback
+          being wired rather than the file type so the host can opt
+          panels in/out. */}
+      {onLanguageOverrideChange && previewType === "code" && (
+        <div className="flex h-6 shrink-0 items-center justify-end gap-2 border-t border-border/50 bg-background px-2 text-xs">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setLanguagePickerOpen(true)}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                {languageLabel(lang)}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Select Language Mode
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+
+      {/* Only render the picker when there's a callback to receive
+          its selection. The dialog is also gated on `onLanguageOverrideChange`
+          when surfacing the status-bar indicator above, so dropping
+          the dialog when the callback is missing keeps the two
+          surfaces in sync — neither appears in adapters that don't
+          wire the override (none today, but the prop is optional).
+          The `AUTO_DETECT_LANGUAGE_ID` sentinel passed through this
+          callback's contract means "drop the override"; the caller
+          (CodeBrowserView's `handleLanguageOverride`) treats it as a
+          `removeLanguage` and falls back to extension detection. */}
+      {onLanguageOverrideChange && (
+        <LanguagePickerDialog
+          open={languagePickerOpen}
+          onOpenChange={setLanguagePickerOpen}
+          currentLanguage={lang}
+          hasOverride={languageOverride != null}
+          onSelect={onLanguageOverrideChange}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Join a workspace-relative directory and a relative path (`./a.png`,
+ * `../img/b.png`). Returns null when the path climbs above the workspace root.
+ */
+function resolveRelativePath(dir: string, relative: string): string | null {
+  // Decode before splitting, so an encoded `%2E%2E` or `%2F` is validated as
+  // the `..` / `/` it becomes, not smuggled past the climb check.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(relative);
+  } catch {
+    return null;
+  }
+  const parts = dir ? dir.split("/") : [];
+  for (const segment of decoded.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+    } else {
+      parts.push(segment);
+    }
+  }
+  return parts.join("/");
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

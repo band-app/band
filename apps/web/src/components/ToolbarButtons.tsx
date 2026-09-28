@@ -1,16 +1,33 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenuItem } from "@band-app/ui";
-import { Globe, ListTodo, Timer } from "lucide-react";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band-app/ui";
+import { Activity, BarChart3, Globe, ListTodo, MoreVertical, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
+import { ReportsPageContent } from "./ReportsPageContent";
+import { ResourcesPage } from "./ResourcesPage";
 import { TasksPageContent } from "./TasksPageContent";
 import { TunnelDialog } from "./TunnelDialog";
 
 interface ToolbarOverflowContextValue {
   openTasks: () => void;
   openCronjobs: () => void;
+  openReports: () => void;
   openTunnel: () => void;
+  openResources: () => void;
   /** Tunnel state hint for the menu item (so we can show running/error coloring). */
   tunnelStatus: "idle" | "running" | "error";
 }
@@ -21,12 +38,15 @@ const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>
  * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
  *
  * The dialogs are rendered as siblings to `children`, so they remain mounted even when
- * the parent overflow dropdown closes. Menu items live inside the dropdown via
- * <ToolbarOverflowMenuItems /> and call the context handlers to open the dialogs.
+ * the parent overflow dropdown closes. The action buttons live in the project-list
+ * bottom action bar via <ToolbarActionBar /> and call the context handlers to open
+ * the dialogs.
  */
 export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
+  const [showReportsDialog, setShowReportsDialog] = useState(false);
+  const [showResourcesDialog, setShowResourcesDialog] = useState(false);
 
   const {
     webServerRunning,
@@ -44,7 +64,9 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 
   const openTasks = useCallback(() => setShowTasksDialog(true), []);
   const openCronjobs = useCallback(() => setShowCronjobsDialog(true), []);
+  const openReports = useCallback(() => setShowReportsDialog(true), []);
   const openTunnel = useCallback(() => openTunnelDialog(), [openTunnelDialog]);
+  const openResources = useCallback(() => setShowResourcesDialog(true), []);
 
   const tunnelStatus: ToolbarOverflowContextValue["tunnelStatus"] = tunnelError
     ? "error"
@@ -53,8 +75,15 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       : "idle";
 
   const value = useMemo(
-    () => ({ openTasks, openCronjobs, openTunnel, tunnelStatus }),
-    [openTasks, openCronjobs, openTunnel, tunnelStatus],
+    () => ({
+      openTasks,
+      openCronjobs,
+      openReports,
+      openTunnel,
+      openResources,
+      tunnelStatus,
+    }),
+    [openTasks, openCronjobs, openReports, openTunnel, openResources, tunnelStatus],
   );
 
   return (
@@ -81,6 +110,32 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showReportsDialog} onOpenChange={setShowReportsDialog}>
+        <DialogContent
+          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          data-testid="reports-dialog"
+        >
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Usage</DialogTitle>
+          </DialogHeader>
+          <ReportsPageContent />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showResourcesDialog} onOpenChange={setShowResourcesDialog}>
+        <DialogContent
+          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          data-testid="resources-dialog"
+        >
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Resources</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0">
+            <ResourcesPage />
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <PrereqDialog open={showPrereq} onOpenChange={setShowPrereq} onReady={onPrereqReady} />
       <TunnelDialog
         open={showTunnelDialog}
@@ -94,39 +149,92 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Menu items for the dashboard's overflow ("3 dots") dropdown.
+ * Bottom action row cluster for the project list (right-hand side).
  *
- * Must be rendered inside a <ToolbarOverflowProvider>. Returns a fragment of
- * DropdownMenuItem so it can be embedded directly in a DropdownMenuContent.
+ * Surfaces Resources and Usage as standalone icon buttons and tucks the
+ * remaining actions (Tasks, Cronjobs, tunnel) behind a 3-dot overflow menu.
+ * Rendered inside `DashboardShell`'s persistent footer; passed in as a
+ * `ReactNode` prop because the `dashboard/` module must not import from
+ * `components/`. Must be mounted inside a <ToolbarOverflowProvider>.
  */
-export function ToolbarOverflowMenuItems() {
+export function ToolbarActionBar() {
   const ctx = useContext(ToolbarOverflowContext);
   if (!ctx) {
-    throw new Error("ToolbarOverflowMenuItems must be used inside ToolbarOverflowProvider");
+    throw new Error("ToolbarActionBar must be used inside ToolbarOverflowProvider");
   }
 
   return (
     <>
-      <DropdownMenuItem onClick={ctx.openTasks}>
-        <ListTodo className="size-4" />
-        Tasks
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openCronjobs}>
-        <Timer className="size-4" />
-        Cronjobs
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={ctx.openTunnel}>
-        <Globe
-          className={
-            ctx.tunnelStatus === "error"
-              ? "size-4 text-red-500"
-              : ctx.tunnelStatus === "running"
-                ? "size-4 text-green-500"
-                : "size-4"
-          }
-        />
-        {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
-      </DropdownMenuItem>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="More actions"
+                data-testid="project-list__overflow-trigger"
+              >
+                <MoreVertical className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">More</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={ctx.openTasks}>
+            <ListTodo className="size-4" />
+            Tasks
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openCronjobs}>
+            <Timer className="size-4" />
+            Cronjobs
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={ctx.openTunnel}>
+            <Globe
+              className={
+                ctx.tunnelStatus === "error"
+                  ? "size-4 text-red-500"
+                  : ctx.tunnelStatus === "running"
+                    ? "size-4 text-green-500"
+                    : "size-4"
+              }
+            />
+            {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-label="Resources"
+            data-testid="project-list__resources-button"
+            onClick={ctx.openResources}
+          >
+            <Activity className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Resources</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-label="Usage"
+            data-testid="project-list__usage-button"
+            onClick={ctx.openReports}
+          >
+            <BarChart3 className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Usage</TooltipContent>
+      </Tooltip>
     </>
   );
 }

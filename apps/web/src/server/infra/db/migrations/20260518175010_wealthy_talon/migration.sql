@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `kind` text DEFAULT 'git' NOT NULL;

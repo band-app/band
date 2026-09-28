@@ -12,8 +12,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>System Overview</h2>
 
   <ul>
-    <li><strong>Desktop App (Electron)</strong> — Hosts the dashboard webview, auto-starts the web server, and provides macOS-only shell helpers (folder picker, reveal in Finder, install the CLI with admin privileges).</li>
-    <li><strong>Web Server (Node.js)</strong> — Data management, state, API, and background processes.</li>
+    <li><strong>Desktop App (Electron)</strong> — Hosts the dashboard webview, auto-starts the web server, and provides macOS-only shell helpers (folder picker, reveal in Finder, install the CLI with admin privileges). The desktop app spawns the web server using Electron's embedded Node runtime (<code>ELECTRON_RUN_AS_NODE=1</code>), so end users do not need to install Node themselves.</li>
+    <li><strong>Web Server (Node.js)</strong> — Data management, state, API, and background processes. Runs under whichever Node interpreter the host supplies — Electron's bundled Node 22.x in the packaged desktop app, or a system <code>node</code> binary when run standalone.</li>
     <li><strong>CLI (Rust)</strong> — Command-line interface for scripting and automation.</li>
   </ul>
 

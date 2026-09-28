@@ -1,6 +1,6 @@
 import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";
 
 export interface SlashCommandSkill {
@@ -40,15 +40,31 @@ function getCommandContext(inputValue: string): { prefix: string; query: string 
 }
 
 /**
- * Filter skills by fuzzy-matching against the partial command name.
+ * Commands matching the partial name, best first, ranked the way Claude
+ * Code's own picker ranks them: an exact name, then names starting with the
+ * query (shortest first), then names containing it, then descriptions
+ * containing it. Codex prefixes skills with `$`, so `/tdd` still finds
+ * `$tdd` as an exact or prefix match. Ties keep the agent's order.
  */
 function filterSkills(skills: SlashCommandSkill[], query: string): SlashCommandSkill[] {
   if (!query) return skills;
-  const lower = query.toLowerCase();
-  return skills.filter(
-    (skill) =>
-      skill.name.toLowerCase().includes(lower) || skill.description.toLowerCase().includes(lower),
-  );
+  const q = query.toLowerCase();
+  const rank = (skill: SlashCommandSkill): [number, number] => {
+    const name = skill.name.toLowerCase();
+    const bare = name.replace(/^\$/, "");
+    if (name === q || bare === q) return [0, 0];
+    if (name.startsWith(q) || bare.startsWith(q)) return [1, bare.length];
+    if (name.includes(q)) return [2, 0];
+    // Two letters appear in half of all descriptions ("un" in "run"), so
+    // descriptions only count once the query says something.
+    if (q.length >= 3 && skill.description.toLowerCase().includes(q)) return [3, 0];
+    return [-1, 0];
+  };
+  return skills
+    .map((skill, index) => ({ skill, index, rank: rank(skill) }))
+    .filter((m) => m.rank[0] >= 0)
+    .sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.index - b.index)
+    .map((m) => m.skill);
 }
 
 export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps) {
@@ -59,7 +75,10 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
   const ctx = skills.length > 0 ? getCommandContext(inputValue) : null;
   const isOpen = ctx !== null;
   const query = ctx?.query ?? "";
-  const filteredSkills = isOpen ? filterSkills(skills, query) : [];
+  const filteredSkills = useMemo(
+    () => (isOpen ? filterSkills(skills, query) : []),
+    [isOpen, skills, query],
+  );
   const hasResults = filteredSkills.length > 0;
 
   // Reset selection when query changes
@@ -85,26 +104,39 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
     [inputValue, setTextareaValue, setCommandHint],
   );
 
-  // Intercept keyboard events on the textarea for navigation
+  // Intercept keyboard events on the textarea for navigation.
+  //
+  // The listener is gated only on `isOpen` — NOT on `hasResults` — so
+  // that Esc is swallowed even when the user has typed `/something`
+  // that matches no skill (e.g. mid-typing before a longer command
+  // name becomes valid). Otherwise Esc would fall through to the
+  // chat-level handler that cancels the in-flight task. Mirrors the
+  // same fix applied to `file-mention-suggestions.tsx`.
   useEffect(() => {
-    if (!isOpen || !hasResults) return;
+    if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" && hasResults) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev + 1) % filteredSkills.length);
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp" && hasResults) {
         e.preventDefault();
         setSelectedIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
-      } else if (e.key === "Enter" && !e.shiftKey) {
+      } else if (e.key === "Enter" && !e.shiftKey && hasResults) {
         e.preventDefault();
         e.stopPropagation();
         handleSelect(filteredSkills[selectedIndex]);
       } else if (e.key === "Escape") {
+        // Swallow Esc so it doesn't bubble to the chat-level handler that
+        // cancels the in-flight task — the user just wants to close this
+        // dropdown. Listener is registered in the capture phase, so
+        // stopPropagation() here also keeps the event from reaching the
+        // textarea's React onKeyDown.
         e.preventDefault();
+        e.stopPropagation();
         setTextareaValue("");
         setCommandHint(null);
-      } else if (e.key === "Tab") {
+      } else if (e.key === "Tab" && hasResults) {
         e.preventDefault();
         handleSelect(filteredSkills[selectedIndex]);
       }
@@ -143,8 +175,8 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
             className={cn(
               "flex w-full cursor-pointer items-start gap-3 rounded-sm px-3 py-2 text-left text-sm outline-none transition-colors",
               index === selectedIndex
-                ? "bg-accent text-accent-foreground"
-                : "text-popover-foreground hover:bg-accent/50",
+                ? "bg-accent text-accent-foreground dark:bg-neutral-700"
+                : "text-popover-foreground hover:bg-accent/50 dark:hover:bg-neutral-700/50",
             )}
             onMouseEnter={() => setSelectedIndex(index)}
             onMouseDown={(e) => {
@@ -156,7 +188,9 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
             <CommandIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="font-medium">/{skill.name}</span>
+                <span className="font-medium" data-testid="slash-command-suggestions__name">
+                  /{skill.name}
+                </span>
                 {skill.argumentHint && (
                   <span className="truncate text-xs text-muted-foreground">
                     {skill.argumentHint}

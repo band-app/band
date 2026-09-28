@@ -4,10 +4,14 @@
 
 @source "../../../../packages/dashboard-core/src";
 @source "../../../../packages/ui/src";
+@source "../../../../plugins";
 @source "../../node_modules/streamdown/dist";
 
 @custom-variant dark (&:is(.dark *));
-@custom-variant standalone (@media (display-mode: standalone));
+/* Active while the macOS desktop app shows the desktop through the sidebar
+   (see lib/translucent-sidebar.ts). `:where` adds no specificity, so
+   `hover:`/`active:` utilities still win over it. */
+@custom-variant translucent-sidebar (&:where([data-translucent-sidebar] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -24,7 +28,9 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-sidebar: var(--sidebar);
   --color-destructive: var(--destructive);
+  --color-link: var(--link);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -39,6 +45,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-xl: calc(var(--radius) + 4px);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* strong ease-out for UI */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* strong ease-in-out for on-screen movement */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* iOS-like drawer curve */
 }
 
 :root {
@@ -48,6 +57,9 @@
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
+  /* xterm's background (LIGHT_TERMINAL_THEME in lib/terminal-cache.ts). Keep
+     the two in sync: chrome floating over a terminal paints with this. */
+  --terminal-background: #ffffff;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -60,7 +72,13 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.965 0 0);
   --accent-foreground: oklch(0.205 0 0);
+  /* Project-list sidebar surface. On light theme it sits a touch DARKER than
+     the white --background so the project list reads as a distinct panel from
+     the workspace layout. */
+  --sidebar: oklch(0.962 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Clickable text in code, e.g. a Cmd/Ctrl+hover go-to-definition link. */
+  --link: oklch(0.546 0.245 262.881);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -81,6 +99,8 @@
   scrollbar-color: oklch(0.32 0 0) transparent;
   --background: #1e1e1e;
   --foreground: oklch(0.922 0 0);
+  /* DARK_TERMINAL_THEME's background in lib/terminal-cache.ts. */
+  --terminal-background: #1e1e1e;
   --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.922 0 0);
   /* Popover/dropdown surfaces are elevated above the page, so they're a touch
@@ -96,7 +116,12 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.922 0 0);
+  /* Project-list sidebar surface. On dark theme it sits a touch LIGHTER than
+     the #1e1e1e --background so the project list reads as a distinct panel
+     from the workspace layout (mirrors the VS Code editor/sidebar contrast). */
+  --sidebar: #252526;
   --destructive: oklch(0.704 0.191 22.216);
+  --link: oklch(0.707 0.165 254.624);
   --border: oklch(0.35 0 0);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.556 0 0);
@@ -133,6 +158,35 @@ button,
   animation: status-pulse 1.5s ease-in-out infinite;
 }
 
+.chat-message-enter {
+  animation: chat-message-enter 180ms var(--ease-out) both;
+}
+
+@keyframes chat-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message-enter {
+    animation-name: chat-message-enter-fade;
+  }
+  @keyframes chat-message-enter-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
 pre {
   overflow-x: auto;
 }
@@ -149,4 +203,170 @@ body {
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * Translucent sidebar (macOS desktop app, `data-translucent-sidebar` on
+ * <html>, see lib/translucent-sidebar.ts). The Electron window is transparent
+ * over a `sidebar` vibrancy layer, so the page itself must be transparent for
+ * the blur to reach the sidebar column. The AppShell keeps every other region
+ * solid, and the sidebar column paints `--sidebar-translucent`: the sidebar
+ * colour at `--sidebar-tint` opacity.
+ *
+ * The vibrancy material follows the macOS appearance, not Band's theme. When
+ * the two disagree (Band dark on a light macOS, or the reverse), text in
+ * Band's theme colours is hard to read on a light tint, so the tint goes
+ * near-opaque. `prefers-color-scheme` reports the macOS appearance here.
+ */
+html[data-translucent-sidebar],
+html[data-translucent-sidebar] body {
+  background: transparent;
+}
+
+html[data-translucent-sidebar] {
+  --sidebar-tint: 40%;
+  --sidebar-translucent: color-mix(in oklab, var(--sidebar) var(--sidebar-tint), transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-translucent-sidebar].dark {
+    --sidebar-tint: 88%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-translucent-sidebar]:not(.dark) {
+    --sidebar-tint: 88%;
+  }
+}
+
+/*
+ * CSS `zoom` on <html> (set by the zoom-apply helper on startup and on every
+ * user zoom change, mirrored onto --app-zoom) scales fixed-position
+ * descendants — including Radix's popper wrapper — by the zoom factor.
+ * Floating UI already positions
+ * that wrapper at the anchor's clientX/clientY in *visual* pixels, so the extra
+ * zoom scaling lands every popper (context menu, dropdown, tooltip, popover,
+ * select) at clientXY × zoom instead of clientXY.
+ *
+ * Counter the wrapper by 1/zoom about the viewport origin to cancel the doubled
+ * scaling, then scale the inner content back up so the popper still renders at
+ * the zoomed UI size. The `scale` individual property composes with the
+ * `transform: translate(...)` Floating UI writes inline, so this never fights
+ * its repositioning. No-op when --app-zoom is unset or 1.
+ */
+[data-radix-popper-content-wrapper] {
+  transform-origin: 0 0;
+  scale: calc(1 / var(--app-zoom, 1));
+}
+
+[data-radix-popper-content-wrapper] > * {
+  transform-origin: 0 0;
+  scale: var(--app-zoom, 1);
+}
+
+/*
+ * Same doubled scaling for dockview's `renderer: "always"` panels (terminal
+ * leaves). dockview positions each panel's `.dv-render-overlay` by writing
+ * getBoundingClientRect() deltas (visual pixels) into its inline
+ * left/top/width/height, which the <html> zoom then scales again. At 110% the
+ * overlay came out 10% too big, so its bottom rows (a TUI's prompt and status
+ * line) fell outside the clipped group; below 100% it came out too small.
+ *
+ * Counter-zoom the overlay so those inline pixel values apply 1:1, then zoom
+ * its content back to the app zoom. `zoom` (not `scale`) so the content's
+ * layout box really has the corrected size: xterm fits to it and hit-tests in
+ * it. No-op when --app-zoom is unset or 1.
+ */
+.dv-render-overlay {
+  zoom: calc(1 / var(--app-zoom, 1));
+}
+
+.dv-render-overlay > * {
+  zoom: var(--app-zoom, 1);
+}
+
+/*
+ * Browser tabs are Electron <webview>s, and a guest page renders at its
+ * host element's effective zoom: at 125% app zoom every page would be
+ * zoomed 125% on top of its own per-origin zoom. Undo the app zoom on the
+ * guest host so pages keep only the zoom the user set on the tab. The host
+ * is a flex item, so it still fills its box; only the page's CSS pixel scale
+ * changes.
+ */
+.band-browser-guest-host {
+  zoom: calc(1 / var(--app-zoom, 1));
+}
+
+/* Indeterminate loading bar under a browser pane's address bar. */
+@keyframes browser-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(200%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+/*
+ * Paint retention for the CDP screencast experiment. Chromium stops painting
+ * a <webview> guest inside a display:none, visibility:hidden or
+ * content-visibility:hidden subtree, which is how inactive dockview tabs and
+ * hidden workspaces are hidden, so a remote viewer of that tab gets no
+ * frames. A hidden browser pane that must keep painting carries
+ * `data-band-browser-paint-retained` (see `BrowserPanel.tsx`). Then:
+ *   - its workspace entry keeps `visibility: hidden` but drops the
+ *     `content-visibility` skip, which no descendant can override;
+ *   - its dockview overlay is laid out again (dockview writes an inline
+ *     `display: none`) but stays `visibility: hidden`;
+ *   - only the page host opts back into visibility, at opacity 0 and
+ *     without pointer events, so the page paints but nothing shows.
+ * The pane root is `inert` while hidden, so its page can't take focus.
+ */
+.band-workspace-entry:has([data-band-browser-paint-retained]) {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat the entry's inline content-visibility. */
+  content-visibility: visible !important;
+}
+
+.dv-render-overlay:has([data-band-browser-paint-retained]) {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat dockview's inline display: none. */
+  display: block !important;
+  /* biome-ignore lint/complexity/noImportantStyles: dockview writes an inline visibility on first attach. */
+  visibility: hidden !important;
+}
+
+[data-band-browser-paint-retained] .band-browser-guest-host {
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Neutralize tw-animate-css movement; opacity fades
+     (--tw-enter-opacity / --tw-exit-opacity) are deliberately untouched. */
+  /* biome-ignore lint/style/noDescendingSpecificity: this universal selector only sets tw-animate custom properties inside a reduced-motion media query; it does not compete with the earlier popper `scale` or dockview overlay `zoom` rules. */
+  * {
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-enter-scale: 1;
+    --tw-enter-rotate: 0;
+    --tw-enter-blur: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+    --tw-exit-scale: 1;
+    --tw-exit-rotate: 0;
+    --tw-exit-blur: 0;
+  }
+
+  /* Height keyframes can't be neutralized via the vars above — disable them.
+     Content snaps open/closed instead of sliding. */
+  .animate-accordion-down,
+  .animate-accordion-up,
+  .animate-collapsible-down,
+  .animate-collapsible-up {
+    animation: none;
+  }
 }

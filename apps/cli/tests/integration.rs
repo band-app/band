@@ -21,18 +21,38 @@ struct TestEnv {
 impl TestEnv {
     fn new() -> Self {
         let tmp = tempfile::tempdir().expect("create tempdir");
-        // home_dir is the fake HOME — server computes band_home as HOME/.band
-        let home_dir = tmp.path().to_path_buf();
+        // Canonicalize the temp HOME up front. On macOS `tempfile::tempdir()`
+        // hands back `/var/folders/...` while git (and `fs::canonicalize`)
+        // resolve that symlink to `/private/var/folders/...`. Every Band path
+        // derives from HOME, and since #606 both `syncWorktrees` and
+        // `project-service.list` reconcile on-disk worktrees against tracked
+        // rows by *path string equality*. If `worktreesDir` stayed
+        // non-canonical, worktrees created under it (stored as
+        // `/var/folders/...`) would never match git's `/private/var/folders/...`
+        // report and would be dropped from `workspaces list` — the exact
+        // macOS-only failure that passes on Linux CI (`ubuntu-latest`, no
+        // `/private` symlink) but fails on the `macos-latest` release runner.
+        // Canonicalizing here keeps band_dir, worktreesDir, and repo_path all
+        // aligned with git. See #427 (same fix, previously only for repo_path).
+        let home_dir = fs::canonicalize(tmp.path()).expect("canonicalize home_dir");
         // band_dir is HOME/.band — used as BAND_HOME for the CLI
         let band_dir = home_dir.join(".band");
-        let repo_path = tmp.path().join("my-project");
+        let repo_path = home_dir.join("my-project");
         let token = "test-token-12345";
 
         // Create .band dirs
         fs::create_dir_all(band_dir.join("status")).unwrap();
         fs::create_dir_all(band_dir.join("worktrees")).unwrap();
 
-        // Create a real git repo
+        // Create a real git repo. `repo_path` is already canonical (it
+        // derives from the canonicalized `home_dir` above), so it matches
+        // what `git worktree list --porcelain` reports. This matters because
+        // the server's syncWorktrees (invoked at boot via runFirstTimeSetup)
+        // compares the seeded worktree path against git's canonical form with
+        // string equality — a `/var/folders` vs `/private/var/folders`
+        // mismatch would reconcile the seeded row away on the first boot,
+        // leaving `statuses.resolve` unable to map the CLI's cwd back to a
+        // workspaceId. See #427.
         fs::create_dir_all(&repo_path).unwrap();
         git(&repo_path, &["init", "-b", "main"]);
         git(&repo_path, &["commit", "--allow-empty", "-m", "init"]);
@@ -139,6 +159,16 @@ impl TestEnv {
             .current_dir(dir)
             .output()
             .expect("failed to execute band")
+    }
+
+    /// Run the `band` binary with extra env vars.
+    fn band_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_band"));
+        cmd.args(args).env("BAND_HOME", &self.band_dir);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("failed to execute band")
     }
 
     fn state_json(&self) -> serde_json::Value {
@@ -674,6 +704,294 @@ fn workspaces_create_with_prompt_and_base() {
     );
 }
 
+// --- Issue #551: `workspaces create --via` dispatch precedence ---
+//
+// The CLI resolves `via` from this chain, highest first:
+//   1. `--via` flag.
+//   2. `BAND_DISPATCH` env var.
+//   3. `.band/config.json` `workspace.defaultVia` in the cwd repo.
+//   4. `~/.band/settings.json` `cli.defaultVia`.
+//   5. Built-in CLI default: "terminal".
+//
+// The server is the single source of truth for the *actual* dispatch
+// used (it echoes the value back in the response so a fallback for an
+// unsupported adapter is visible to the caller). Each test below pins
+// one layer of the chain by setting up an environment where every
+// lower-precedence layer is absent or contradicts the asserted value.
+
+#[test]
+fn workspaces_create_with_prompt_defaults_to_terminal_from_cli() {
+    let env = TestEnv::new();
+
+    // No flag, no env, no repo config, no user settings override —
+    // CLI's built-in default should send us into terminal dispatch.
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-default",
+        "--prompt",
+        "default via",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected CLI default to be 'terminal'; got {json}"
+    );
+    assert!(
+        json["terminalId"].is_string(),
+        "expected terminalId on terminal dispatch; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_via_chat_flag_overrides_default() {
+    let env = TestEnv::new();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-flag",
+        "--prompt",
+        "flag override",
+        "--via",
+        "chat",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+    assert!(
+        json.get("terminalId").is_none() || json["terminalId"].is_null(),
+        "chat dispatch must not return a terminalId; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_band_dispatch_env_overrides_default() {
+    let env = TestEnv::new();
+
+    // BAND_DISPATCH sits between --via and config files in the precedence
+    // chain. With no --via flag, the env var should win.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-env",
+            "--prompt",
+            "env override",
+        ],
+        &[("BAND_DISPATCH", "chat")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+}
+
+#[test]
+fn workspaces_create_via_flag_beats_band_dispatch_env() {
+    let env = TestEnv::new();
+
+    // --via flag is highest precedence; an opposing env var must lose.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-flag-env",
+            "--prompt",
+            "flag wins",
+            "--via",
+            "chat",
+        ],
+        &[("BAND_DISPATCH", "terminal")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(json["via"], "chat", "got {json}");
+}
+
+#[test]
+fn workspaces_create_user_settings_default_via_overrides_built_in() {
+    let env = TestEnv::new();
+
+    // Bypass the test harness's seeded settings.json by rewriting it
+    // with `cli.defaultVia: "chat"`. The TestEnv seed used `worktreesDir`
+    // and `tokenSecret`; we preserve those so the server-bound CLI still
+    // authenticates and resolves the worktree root.
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["cli"] = serde_json::json!({ "defaultVia": "chat" });
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    // No --via, no BAND_DISPATCH, no repo `.band/config.json` — the
+    // user-level `cli.defaultVia` should win over the built-in "terminal".
+    let output = env.band(&[
+        "--output",
+        "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/via-user",
+        "--prompt",
+        "user override",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "chat",
+        "expected user settings to override built-in default; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_repo_config_default_via_overrides_user_settings() {
+    let env = TestEnv::new();
+
+    // Set user-level fallback to "chat".
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    settings["cli"] = serde_json::json!({ "defaultVia": "chat" });
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    // Per-repo override beats user settings — write `.band/config.json`
+    // inside the test's git toplevel with `workspace.defaultVia: "terminal"`.
+    let repo_band = env.repo_path.join(".band");
+    fs::create_dir_all(&repo_band).expect("mkdir .band");
+    fs::write(
+        repo_band.join("config.json"),
+        r#"{ "workspace": { "defaultVia": "terminal" } }"#,
+    )
+    .expect("write .band/config.json");
+
+    // Run from inside the repo so `read_repo_default_via` picks it up
+    // (it walks `git rev-parse --show-toplevel` from cwd).
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args([
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-repo",
+            "--prompt",
+            "repo override",
+        ])
+        .env("BAND_HOME", &env.band_dir)
+        .current_dir(&env.repo_path)
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected repo .band/config.json to override user settings; got {json}"
+    );
+    assert!(
+        json["terminalId"].is_string(),
+        "expected terminalId on terminal dispatch; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_band_dispatch_env_beats_repo_config_default_via() {
+    let env = TestEnv::new();
+
+    // Per-repo `.band/config.json::workspace.defaultVia: "chat"` — the
+    // lower-precedence side of the link we're pinning.
+    let repo_band = env.repo_path.join(".band");
+    fs::create_dir_all(&repo_band).expect("mkdir .band");
+    fs::write(
+        repo_band.join("config.json"),
+        r#"{ "workspace": { "defaultVia": "chat" } }"#,
+    )
+    .expect("write .band/config.json");
+
+    // `BAND_DISPATCH=terminal` must override the repo config. Run from
+    // inside the repo so `read_repo_default_via` would otherwise pick up
+    // the per-repo value if the env var weren't winning.
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args([
+            "--output",
+            "json",
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-env-vs-repo",
+            "--prompt",
+            "env beats repo",
+        ])
+        .env("BAND_HOME", &env.band_dir)
+        .env("BAND_DISPATCH", "terminal")
+        .current_dir(&env.repo_path)
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(
+        json["via"], "terminal",
+        "expected BAND_DISPATCH to override .band/config.json; got {json}"
+    );
+}
+
+#[test]
+fn workspaces_create_invalid_band_dispatch_fails_fast() {
+    let env = TestEnv::new();
+
+    // A typo in BAND_DISPATCH should fail at the CLI layer rather than
+    // round-tripping through the server's zod validator. The CLI's
+    // resolver lists the source ("BAND_DISPATCH env var") so the user
+    // knows which knob to fix.
+    let output = env.band_with_env(
+        &[
+            "workspaces",
+            "create",
+            "my-project",
+            "feat/via-bad-env",
+            "--prompt",
+            "bad",
+        ],
+        &[("BAND_DISPATCH", "chats")],
+    );
+    assert!(
+        !output.status.success(),
+        "expected CLI to reject typo'd BAND_DISPATCH"
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("BAND_DISPATCH") && err.contains("chats"),
+        "expected CLI error to name the source and the bad value; got: {err}"
+    );
+}
+
 #[test]
 fn workspaces_create_unknown_project_with_prompt_fails() {
     let env = TestEnv::new();
@@ -795,111 +1113,48 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
     json["status"].as_str().map(String::from)
 }
 
+/// The CLI is intentionally a dumb forwarder: it pipes the raw hook payload to
+/// the server, which resolves the workspace and dispatches to the coding-agent
+/// adapter to derive the status. This test verifies ONLY forwarding integrity
+/// (cwd resolution + forward + that the server actually maps something) — it is
+/// a wiring smoke-test, NOT a behaviour contract. The event-specific contract
+/// (which event maps to which status) is owned entirely by the web server's
+/// tests (`apps/web/tests/needs-attention.test.ts`), next to the adapter that
+/// owns the mapping — so adding a new agent never touches the CLI or these tests.
 #[test]
-fn notify_pre_tool_use_ask_user_question_sets_needs_attention() {
+fn notify_forwards_payload_to_server() {
     let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("needs_attention"),
-        "PreToolUse+AskUserQuestion should set needs_attention"
+    // A "Stop" hook → the agent finished its turn → needs_attention.
+    let output = band_notify(
+        &env,
+        &serde_json::json!({
+            "hook_event_name": "Stop",
+            "cwd": env.repo_path.to_string_lossy()
+        }),
     );
-}
-
-#[test]
-fn notify_pre_tool_use_exit_plan_mode_sets_needs_attention() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "ExitPlanMode",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("needs_attention"),
-        "PreToolUse+ExitPlanMode should set needs_attention"
-    );
-}
-
-#[test]
-fn notify_pre_tool_use_regular_tool_stays_working() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "Read",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("working"),
-        "PreToolUse+Read should set working, not needs_attention"
-    );
-}
-
-#[test]
-fn notify_post_tool_use_after_ask_user_restores_working() {
-    let env = TestEnv::new();
-
-    // First, AskUserQuestion triggers needs_attention
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success());
     assert_eq!(
         query_agent_status(&env.band_dir, "my-project-main").as_deref(),
-        Some("needs_attention")
+        Some("needs_attention"),
+        "Stop hook should be forwarded and mapped to needs_attention by the server"
     );
 
-    // Then PostToolUse fires after user responds → back to working
-    let payload = serde_json::json!({
-        "hook_event_name": "PostToolUse",
-        "tool_name": "AskUserQuestion",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success());
+    // A regular tool-use hook → the agent is making progress → working. Proves
+    // the CLI forwards the full payload rather than hardcoding a single status.
+    let output = band_notify(
+        &env,
+        &serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "cwd": env.repo_path.to_string_lossy()
+        }),
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert_eq!(
         query_agent_status(&env.band_dir, "my-project-main").as_deref(),
         Some("working"),
-        "PostToolUse should restore working status"
-    );
-}
-
-#[test]
-fn notify_permission_request_sets_working() {
-    let env = TestEnv::new();
-    let payload = serde_json::json!({
-        "hook_event_name": "PermissionRequest",
-        "tool_name": "Bash",
-        "cwd": env.repo_path.to_string_lossy()
-    });
-    let output = band_notify(&env, &payload);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let status = query_agent_status(&env.band_dir, "my-project-main");
-    assert_eq!(
-        status.as_deref(),
-        Some("working"),
-        "PermissionRequest should set working (not needs_attention)"
+        "PreToolUse+Read should be forwarded and mapped to working by the server"
     );
 }
 
@@ -1819,6 +2074,241 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
     );
 }
 
+/// Issue #520: end-to-end exercise of the label-management CLI surface.
+///
+/// Drives every CLI command that touches labels — `chats create --label`,
+/// `chats list` (text + JSON), `chats label`, `chats unlabel` — and
+/// asserts both the rendered text and the JSON state at each step.
+/// Locks in the LABELS column header, the `k=v,k=v` rendering with
+/// sorted keys, the additive-merge semantics of `chats label`, and the
+/// key-stripping semantics of `chats unlabel`. A regression that drops
+/// the column, changes the separator, or flips merge to replace will
+/// be caught at CI rather than by a confused user.
+#[test]
+fn chats_list_renders_labels_column() {
+    let env = TestEnv::new();
+    let create = env.band(&["workspaces", "create", "my-project", "feat/labels-col"]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+    let workspace_id = "my-project-feat-labels-col";
+
+    // ----- chats create --label seeds labels at creation time -----
+    // Deliberately use insertion order that's reverse-alphabetical so a
+    // bug that drops the server-side sort surfaces in the rendered text
+    // below.
+    let labeled = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Tagged",
+        "--label",
+        "priority=high",
+        "--label",
+        "phase=plan",
+        "--output",
+        "json",
+    ]);
+    assert!(labeled.status.success(), "stderr: {}", stderr(&labeled));
+    let labeled_chat =
+        serde_json::from_str::<serde_json::Value>(&stdout(&labeled)).unwrap()["chat"].clone();
+    let labeled_id = labeled_chat["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        labeled_chat["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "high" }),
+        "chats create --label should round-trip both pairs"
+    );
+
+    let _unlabeled = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Bare",
+        "--output",
+        "json",
+    ]);
+
+    // ----- Text output (default): header + sorted rendering -----
+    let list_text = env.band(&["chats", "list", workspace_id]);
+    assert!(list_text.status.success(), "stderr: {}", stderr(&list_text));
+    let text = stdout(&list_text);
+    assert!(
+        text.contains("LABELS"),
+        "expected LABELS column header in `chats list` text output, got:\n{text}"
+    );
+    assert!(
+        text.contains("phase=plan,priority=high"),
+        "expected sorted `phase=plan,priority=high` rendering in text output, got:\n{text}"
+    );
+
+    // ----- JSON output: labels round-trip as a real record -----
+    let list_json = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    assert!(list_json.status.success(), "stderr: {}", stderr(&list_json));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&list_json)).unwrap();
+    let chats = parsed["chats"].as_array().expect("chats array");
+
+    let labeled_row = chats
+        .iter()
+        .find(|c| c["id"].as_str() == Some(&labeled_id))
+        .unwrap_or_else(|| panic!("labeled chat missing from JSON output: {parsed}"));
+    assert_eq!(
+        labeled_row["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "high" }),
+        "labels should round-trip through chats.list JSON output"
+    );
+
+    let unlabeled_row = chats
+        .iter()
+        .find(|c| c["name"].as_str() == Some("Bare"))
+        .unwrap_or_else(|| panic!("unlabeled chat missing from JSON output: {parsed}"));
+    assert!(
+        unlabeled_row["labels"]
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty),
+        "expected empty labels {{}} for the unlabeled chat: {unlabeled_row}"
+    );
+
+    // ----- chats label: additive merge keeps `phase`/`priority`, adds `owner` -----
+    let label = env.band(&[
+        "chats",
+        "label",
+        &labeled_id,
+        "owner=alice",
+        "--output",
+        "json",
+    ]);
+    assert!(label.status.success(), "stderr: {}", stderr(&label));
+    let after_label =
+        serde_json::from_str::<serde_json::Value>(&stdout(&label)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_label["labels"],
+        serde_json::json!({ "owner": "alice", "phase": "plan", "priority": "high" }),
+        "chats label should merge `owner`, not replace existing labels"
+    );
+
+    // The default text output should be the rendered cell. Also verify
+    // the JSON output of the same operation so a regression that
+    // accidentally renders an old in-memory snapshot (vs. the
+    // server-confirmed labels) would show up on the structured side
+    // rather than only via the text rendering — text could happen to
+    // agree with the wrong source if both went through the same sort.
+    let label_text = env.band(&["chats", "label", &labeled_id, "priority=low"]);
+    assert!(
+        label_text.status.success(),
+        "stderr: {}",
+        stderr(&label_text)
+    );
+    assert_eq!(
+        stdout(&label_text).trim(),
+        "owner=alice,phase=plan,priority=low",
+        "text output should show the chat's final labels in sorted k=v,k=v form"
+    );
+    let label_json = env.band(&[
+        "chats",
+        "label",
+        &labeled_id,
+        "priority=low",
+        "--output",
+        "json",
+    ]);
+    assert!(
+        label_json.status.success(),
+        "stderr: {}",
+        stderr(&label_json)
+    );
+    let after_second_label =
+        serde_json::from_str::<serde_json::Value>(&stdout(&label_json)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_second_label["labels"],
+        serde_json::json!({ "owner": "alice", "phase": "plan", "priority": "low" }),
+        "JSON output of the second `chats label` should reflect the full server-confirmed state"
+    );
+
+    // ----- chats unlabel: removes the listed keys, preserves the rest -----
+    let unlabel = env.band(&[
+        "chats",
+        "unlabel",
+        &labeled_id,
+        "owner",
+        "nonexistent", // unknown keys are silently ignored
+        "--output",
+        "json",
+    ]);
+    assert!(unlabel.status.success(), "stderr: {}", stderr(&unlabel));
+    let after_unlabel =
+        serde_json::from_str::<serde_json::Value>(&stdout(&unlabel)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_unlabel["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "low" }),
+        "chats unlabel should strip only the listed keys"
+    );
+
+    // ----- Reserved `band:` prefix is rejected at the server boundary -----
+    let reserved = env.band(&["chats", "label", &labeled_id, "band:custom=denied"]);
+    assert!(
+        !reserved.status.success(),
+        "chats label with `band:` prefix should fail; stdout={} stderr={}",
+        stdout(&reserved),
+        stderr(&reserved),
+    );
+    // The chat's labels should be unchanged after the rejected mutation.
+    let after_reject = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let after_reject_json: serde_json::Value =
+        serde_json::from_str(&stdout(&after_reject)).unwrap();
+    let still = after_reject_json["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"].as_str() == Some(&labeled_id))
+        .unwrap()
+        .clone();
+    assert_eq!(
+        still["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "low" }),
+        "rejected mutation must not touch existing labels"
+    );
+
+    // ----- Malformed `key=value` argument fails at the CLI -----
+    let malformed = env.band(&["chats", "label", &labeled_id, "no-equals-here"]);
+    assert!(
+        !malformed.status.success(),
+        "label without `=` should fail at the CLI parser"
+    );
+    let err = stderr(&malformed);
+    assert!(
+        err.contains("key=value"),
+        "expected guidance about `key=value` form in stderr, got:\n{err}"
+    );
+
+    // ----- Empty `key=` argument is rejected at the CLI -----
+    let empty_value = env.band(&["chats", "label", &labeled_id, "phase="]);
+    assert!(
+        !empty_value.status.success(),
+        "label with empty value should fail at the CLI parser"
+    );
+    let err = stderr(&empty_value);
+    assert!(
+        err.contains("empty value"),
+        "expected `empty value` guidance in stderr, got:\n{err}"
+    );
+
+    // ----- Strip everything: text output is empty (no spurious newline) -----
+    // Regression coverage for the `format_labels_cell` blocker — a
+    // missing-labels-object response used to render as `"\n"`, which the
+    // command runner would print as a spurious blank line. The fix
+    // returns `String::new()` so the runner's `!output.text.is_empty()`
+    // gate skips printing entirely. Assert on raw bytes (not `stdout()`,
+    // which trims) so a future regression that re-introduces the
+    // trailing newline shows up here.
+    let strip = env.band(&["chats", "unlabel", &labeled_id, "phase", "priority"]);
+    assert!(strip.status.success(), "stderr: {}", stderr(&strip));
+    assert!(
+        strip.stdout.is_empty(),
+        "expected fully empty stdout when no labels remain, got: {:?}",
+        String::from_utf8_lossy(&strip.stdout)
+    );
+}
+
 #[test]
 fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let env = TestEnv::new();
@@ -2345,9 +2835,10 @@ fn chats_watch_url_encodes_chat_id_path_segment() {
 
     let path = mock.captured_path().expect("mock did not capture a path");
     assert!(
-        path.starts_with("/api/tasks/"),
-        "expected /api/tasks/ prefix: {path}"
+        path.starts_with("/api/chats/"),
+        "expected /api/chats/ prefix: {path}"
     );
+    assert!(path.ends_with("/events"), "expected /events suffix: {path}");
     assert!(
         !path.contains("/../"),
         "chat_id slashes should be encoded, got: {path}"
@@ -2358,10 +2849,10 @@ fn chats_watch_url_encodes_chat_id_path_segment() {
     );
 }
 
-// --- generate-skills tests ---
+// --- offline command test helper ---
 
 /// Run the `band` binary with no `BAND_HOME` and no server. Used by tests for
-/// pure commands (like `generate-skills` and `schema`) that don't talk to the
+/// pure commands (like `skills install` and `schema`) that don't talk to the
 /// web server.
 fn band_offline(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_band"))
@@ -2370,335 +2861,1207 @@ fn band_offline(args: &[&str]) -> std::process::Output {
         .expect("failed to execute band")
 }
 
-/// Read the generated SKILL.md for a given skill name from the output dir.
-fn read_skill(output_dir: &Path, name: &str) -> String {
-    let path = output_dir.join(name).join("SKILL.md");
-    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+// --- skills install tests ---
+
+/// Set up a fresh sandbox HOME for `skills install` tests. Optionally
+/// pre-creates the listed agent config dirs so detection picks them up.
+fn skills_sandbox(agent_dirs: &[&str]) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let home = tmp.path();
+    for rel in agent_dirs {
+        fs::create_dir_all(home.join(rel)).expect("create agent config dir");
+    }
+    tmp
 }
 
-/// Extract the auto-generated `## Commands` section from a SKILL.md.
+/// Run `band skills install --home <tmp>` with a clean environment (no
+/// inherited `CODEX_HOME`) and parse its JSON output.
 ///
-/// The generator replaces the `<!-- COMMANDS -->` placeholder with a block
-/// that starts with `## Commands` and ends at the next top-level `## ` heading
-/// in the template (e.g. `## Workflows`). Tests use this to assert each
-/// domain's skill ships only its own schema-derived commands while still
-/// allowing cross-reference prose to mention sibling skills' commands.
-fn commands_section(skill: &str) -> &str {
-    let start = skill
-        .find("## Commands")
-        .unwrap_or_else(|| panic!("SKILL.md has no `## Commands` section"));
-    let rest = &skill[start..];
-    // Skip the heading itself when searching for the next `## ` heading.
-    let after_heading = &rest["## Commands".len()..];
-    let end_offset = after_heading
-        .find("\n## ")
-        .map_or(rest.len(), |i| "## Commands".len() + i + 1);
-    &rest[..end_offset]
-}
-
-/// Extract a single frontmatter field from a SKILL.md file's YAML header.
-fn frontmatter_field<'a>(skill: &'a str, key: &'a str) -> Option<&'a str> {
-    let mut lines = skill.lines();
-    // First line must be the opening `---`.
-    if lines.next().map(str::trim) != Some("---") {
-        return None;
-    }
-    for line in lines {
-        if line.trim() == "---" {
-            return None;
-        }
-        if let Some(rest) = line.strip_prefix(key) {
-            if let Some(value) = rest.strip_prefix(':') {
-                return Some(value.trim());
-            }
-        }
-    }
-    None
+/// The CLI's `codex_home()` helper reads `$CODEX_HOME` at call time and
+/// uses it instead of `home` when set. If a developer runs the test
+/// suite from a shell that has `CODEX_HOME` exported (real install,
+/// previous test session, accidental export), the subprocess would
+/// pick it up and either:
+///   - link skills into the developer's real `$CODEX_HOME/skills/`, or
+///   - silently skip codex detection (if `$CODEX_HOME` points
+///     somewhere that doesn't exist), making assertions like
+///     `agents.len() == 2` flake on otherwise-correct code.
+///
+/// Stripping `CODEX_HOME` from the child's env at this seam isolates
+/// every `run_install_json` caller without touching the developer's
+/// actual shell. Tests that *want* to exercise the env override can use
+/// `run_install_json_with_env` below.
+fn run_install_json(home: &Path) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .env_remove("CODEX_HOME")
+        .args([
+            "--output",
+            "json",
+            "skills",
+            "install",
+            "--home",
+            home.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)))
 }
 
 #[test]
-fn generate_skills_emits_all_four_domain_skills() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
+fn skills_install_writes_shared_skills_and_links_into_claude() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+    let result = run_install_json(home);
 
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    // Shared SKILL.md files all created fresh.
+    let written = result["shared"]["written"]
+        .as_array()
+        .expect("written array");
+    assert_eq!(
+        written.len(),
+        6,
+        "expected 6 shared writes, got {written:?}"
+    );
 
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
-        let path = out.join(name).join("SKILL.md");
-        assert!(
-            path.exists(),
-            "expected {} to exist; out={}",
-            path.display(),
-            stdout(&output)
-        );
-    }
-}
-
-#[test]
-fn generate_skills_each_skill_has_non_empty_description() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
-        let skill = read_skill(out, name);
-        let desc = frontmatter_field(&skill, "description")
-            .unwrap_or_else(|| panic!("{name} has no description"));
-        assert!(!desc.is_empty(), "{name} description must be non-empty");
-        // The description must be specific enough to mention what triggers
-        // the skill — sanity-check that each domain's description references
-        // its own keyword and not the others'.
-        let lower = desc.to_lowercase();
-        match name {
-            "band-chat" => {
-                assert!(lower.contains("chat"), "{name}: {desc}");
-                assert!(
-                    !lower.contains("terminal") && !lower.contains("browser"),
-                    "{name} description leaks other domains: {desc}"
-                );
-            }
-            "band-terminal" => {
-                assert!(lower.contains("terminal"), "{name}: {desc}");
-                assert!(
-                    !lower.contains(" chat ") && !lower.contains("browser"),
-                    "{name} description leaks other domains: {desc}"
-                );
-            }
-            "band-browser" => {
-                assert!(lower.contains("browser"), "{name}: {desc}");
-                assert!(
-                    !lower.contains(" chat ") && !lower.contains("terminal"),
-                    "{name} description leaks other domains: {desc}"
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
-#[test]
-fn generate_skills_general_skill_excludes_domain_commands() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let band = read_skill(out, "band");
-    let cmds = commands_section(&band);
-
-    // Includes general commands.
-    for needle in [
-        "band projects list",
-        "band workspaces create",
-        "band workspaces remove",
-        "band cronjobs create",
-        "band tunnel start",
-        "band settings",
-        "band schema",
-        "band generate-skills",
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
     ] {
+        let shared = shared_dir.join(name).join("SKILL.md");
         assert!(
-            cmds.contains(needle),
-            "general skill Commands section missing `{needle}`"
+            shared.is_file(),
+            "shared file missing: {}",
+            shared.display()
+        );
+
+        let link = home.join(".claude").join("skills").join(name);
+        let metadata = fs::symlink_metadata(&link)
+            .unwrap_or_else(|e| panic!("symlink_metadata({}) failed: {e}", link.display()));
+        assert!(
+            metadata.file_type().is_symlink(),
+            "{} is not a symlink",
+            link.display()
+        );
+        // Symlink should resolve to the shared dir for this skill (via realpath).
+        let resolved = fs::canonicalize(&link).expect("canonicalize link");
+        let expected = fs::canonicalize(shared_dir.join(name)).expect("canonicalize shared dir");
+        assert_eq!(
+            resolved,
+            expected,
+            "link {} points elsewhere",
+            link.display()
         );
     }
+}
 
-    // The Commands section must not document any domain commands — those
-    // live in the sibling skills. Cross-reference prose elsewhere in the
-    // skill is allowed and verified separately.
-    //
-    // The whole `band chats *` group belongs to band-chat. The `tasks`
-    // subcommand was fully removed.
+#[test]
+fn skills_install_is_idempotent_on_second_run() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    let first = run_install_json(home);
+    assert_eq!(first["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        first["symlinks"]["linked"].as_array().unwrap().len(),
+        6,
+        "expected 6 fresh symlinks on first run"
+    );
+
+    let second = run_install_json(home);
+    assert_eq!(
+        second["shared"]["written"].as_array().unwrap().len(),
+        0,
+        "second run should not write any shared files"
+    );
+    assert_eq!(
+        second["shared"]["unchanged"].as_array().unwrap().len(),
+        6,
+        "second run should report 6 unchanged shared files"
+    );
+    assert_eq!(
+        second["symlinks"]["linked"].as_array().unwrap().len(),
+        0,
+        "second run should not create any new symlinks"
+    );
+    assert_eq!(
+        second["symlinks"]["alreadyLinked"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6,
+        "second run should report 6 already-linked"
+    );
+}
+
+#[test]
+fn skills_install_skips_agents_without_a_config_dir() {
+    // Only .gemini exists; the other supported agents should be skipped.
+    let tmp = skills_sandbox(&[".gemini"]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    let agents = result["agents"].as_array().expect("agents array");
+    assert_eq!(agents.len(), 1, "expected 1 agent detected, got {agents:?}");
+    assert_eq!(agents[0]["type"].as_str(), Some("gemini-cli"));
+
+    // No symlinks anywhere except under .gemini/skills.
+    assert!(!home.join(".claude").exists());
+    assert!(!home.join(".codex").exists());
+    assert!(!home.join(".config").join("opencode").exists());
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        let link = home.join(".gemini").join("skills").join(name);
+        let meta = fs::symlink_metadata(&link)
+            .unwrap_or_else(|e| panic!("expected {} to exist: {e}", link.display()));
+        assert!(
+            meta.file_type().is_symlink(),
+            "{} not symlink",
+            link.display()
+        );
+    }
+}
+
+// The conflict path relies on `std::os::unix::fs::symlink` to plant a
+// decoy, so it only exercises a meaningful scenario on unix. Gating the
+// whole test on `#[cfg(unix)]` avoids it silently passing-by-omission on
+// other platforms (which would make a Windows-port regression invisible
+// here).
+#[cfg(unix)]
+#[test]
+fn skills_install_surfaces_conflict_when_wrong_target_symlink_exists() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    // Plant a symlink at ~/.claude/skills/band that points at a decoy.
+    let decoy = home.join("decoy-band-skill");
+    fs::create_dir_all(&decoy).expect("create decoy");
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create skills dir");
+    let link = claude_skills.join("band");
+    std::os::unix::fs::symlink(&decoy, &link).expect("plant decoy symlink");
+
+    let result = run_install_json(home);
+
+    // Conflict reported, link untouched.
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
     assert!(
-        !cmds.contains("\nband chats "),
-        "general skill Commands section leaks `band chats` command"
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(link.to_str().unwrap())),
+        "expected conflict for {} in {conflicts:?}",
+        link.display()
+    );
+    let resolved = fs::canonicalize(&link).expect("canonicalize");
+    let expected = fs::canonicalize(&decoy).expect("canonicalize decoy");
+    assert_eq!(resolved, expected, "link should still point at decoy");
+
+    // Other skills still get linked normally.
+    assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
+}
+
+// Dangling-symlink scenario: the link exists but its target has been
+// removed (e.g. the user manually pruned `~/.agents/skills/`, or `$HOME`
+// moved since the last install). Implementation reports
+// `existing symlink is broken (...)` as a Conflict; lock that in.
+#[cfg(unix)]
+#[test]
+fn skills_install_surfaces_conflict_when_dangling_symlink_exists() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create skills dir");
+    let link = claude_skills.join("band");
+
+    // Plant a symlink at ~/.claude/skills/band whose target never existed.
+    let bogus_target = home.join("never-existed").join("agents-skills-band");
+    std::os::unix::fs::symlink(&bogus_target, &link).expect("plant dangling symlink");
+    // Sanity: lstat sees the symlink, canonicalize/read on it fails.
+    assert!(fs::symlink_metadata(&link).is_ok());
+    assert!(fs::canonicalize(&link).is_err());
+
+    let result = run_install_json(home);
+
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(link.to_str().unwrap())
+                && c["reason"].as_str().unwrap_or("").contains("broken")),
+        "expected broken-symlink conflict for {} in {conflicts:?}",
+        link.display()
+    );
+    // The dangling symlink is left in place — no overwrite.
+    let meta = fs::symlink_metadata(&link).expect("metadata");
+    assert!(
+        meta.file_type().is_symlink(),
+        "link should still be a symlink"
     );
     assert!(
-        !cmds.contains("\nband tasks "),
-        "general skill Commands section leaks removed `band tasks` command"
+        fs::canonicalize(&link).is_err(),
+        "link should still be dangling"
     );
-    for needle in [
-        "band chats list",
-        "band chats create",
-        "band chats send",
-        "band terminals list",
-        "band terminals create",
-        "band terminals send",
-        "band browsers list",
-        "band browsers create",
-        "band browsers navigate",
+    // Other skills still get linked correctly.
+    assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
+}
+
+#[test]
+fn skills_install_surfaces_conflict_when_real_directory_occupies_path() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    // Plant a real directory with user content at ~/.claude/skills/band.
+    let claude_skills = home.join(".claude").join("skills");
+    let real_dir = claude_skills.join("band");
+    fs::create_dir_all(&real_dir).expect("create real dir");
+    let user_file = real_dir.join("SKILL.md");
+    fs::write(&user_file, "# user-authored band skill\n").expect("write user file");
+
+    let result = run_install_json(home);
+
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(real_dir.to_str().unwrap())
+                && c["reason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("real directory")),
+        "expected real-directory conflict, got {conflicts:?}"
+    );
+    // User content preserved.
+    assert_eq!(
+        fs::read_to_string(&user_file).expect("read user file"),
+        "# user-authored band skill\n"
+    );
+    // Path is still a real directory, not a symlink.
+    let meta = fs::symlink_metadata(&real_dir).expect("metadata");
+    assert!(!meta.file_type().is_symlink());
+}
+
+#[test]
+fn skills_install_writes_shared_skills_even_when_no_agents_are_detected() {
+    // No agent config dirs exist — installing still populates ~/.agents/skills/
+    // because the shared content is useful on its own.
+    let tmp = skills_sandbox(&[]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    assert_eq!(result["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 0);
+    assert_eq!(result["agents"].as_array().unwrap().len(), 0);
+
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
     ] {
         assert!(
-            !cmds.contains(needle),
-            "general skill Commands section leaks domain command `{needle}`"
+            shared_dir.join(name).join("SKILL.md").is_file(),
+            "shared {} should exist",
+            name
         );
     }
 }
 
 #[test]
-fn generate_skills_chat_skill_contains_only_chat_commands() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+fn skills_install_text_output_summarizes_each_stage() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+    let output = band_offline(&["skills", "install", "--home", home.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let chat = read_skill(out, "band-chat");
-    let cmds = commands_section(&chat);
-
-    // The entire `band chats *` group lives here. `chats send` is the
-    // message-sending entry point (replaces the old `chats chat`).
-    for needle in [
-        "band chats list",
-        "band chats create",
-        "band chats send",
-        "band chats watch",
-        "band chats stop",
-        "band chats remove",
-    ] {
-        assert!(
-            cmds.contains(needle),
-            "band-chat Commands section missing `{needle}`"
-        );
-    }
-
-    for needle in [
-        "band terminals list",
-        "band browsers list",
-        "band workspaces list",
-        "band projects list",
-    ] {
-        assert!(
-            !cmds.contains(needle),
-            "band-chat Commands section leaks foreign command `{needle}`"
-        );
-    }
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Installed 6 skill(s)"));
+    assert!(stdout.contains("shared: 6 written"));
+    assert!(stdout.contains("symlinks: 6 created"));
+    assert!(stdout.contains("claude-code →"));
 }
 
 #[test]
-fn generate_skills_terminal_skill_contains_only_terminal_commands() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let term = read_skill(out, "band-terminal");
-    let cmds = commands_section(&term);
-
-    for needle in [
-        "band terminals list",
-        "band terminals create",
-        "band terminals send",
-        "band terminals output",
-        "band terminals kill",
-        "band terminals attach",
-    ] {
-        assert!(
-            cmds.contains(needle),
-            "band-terminal Commands section missing `{needle}`"
-        );
-    }
-
-    for needle in [
-        "band chats list",
-        "band browsers list",
-        "band workspaces list",
-        "band projects list",
-    ] {
-        assert!(
-            !cmds.contains(needle),
-            "band-terminal Commands section leaks foreign command `{needle}`"
-        );
-    }
-}
-
-#[test]
-fn generate_skills_browser_skill_contains_only_browser_commands() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let browser = read_skill(out, "band-browser");
-    let cmds = commands_section(&browser);
-
-    for needle in [
-        "band browsers list",
-        "band browsers create",
-        "band browsers navigate",
-        "band browsers get",
-        "band browsers remove",
-    ] {
-        assert!(
-            cmds.contains(needle),
-            "band-browser Commands section missing `{needle}`"
-        );
-    }
-
-    for needle in [
-        "band chats list",
-        "band terminals list",
-        "band workspaces list",
-        "band projects list",
-    ] {
-        assert!(
-            !cmds.contains(needle),
-            "band-browser Commands section leaks foreign command `{needle}`"
-        );
-    }
-}
-
-#[test]
-fn generate_skills_filter_limits_to_one_skill() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
+fn skills_install_filter_limits_to_matching_skills_only() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
     let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
+        "--output",
+        "json",
+        "skills",
+        "install",
+        "--home",
+        home.to_str().unwrap(),
         "--filter",
         "chat",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
 
-    assert!(out.join("band-chat").join("SKILL.md").exists());
-    assert!(!out.join("band").join("SKILL.md").exists());
-    assert!(!out.join("band-terminal").join("SKILL.md").exists());
-    assert!(!out.join("band-browser").join("SKILL.md").exists());
+    let skills = result["skills"].as_array().expect("skills");
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0]["name"].as_str(), Some("band-chat"));
+
+    assert!(home
+        .join(".agents")
+        .join("skills")
+        .join("band-chat")
+        .join("SKILL.md")
+        .is_file());
+    assert!(!home.join(".agents").join("skills").join("band").exists());
+    // Only one symlink (just band-chat) under .claude/skills/.
+    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 1);
+}
+
+/// Regression test for the "Skipped loading N skill(s) due to invalid SKILL.md
+/// files" error that Codex emitted on startup (issue: `argument-hint:
+/// [command] [args...]` in `apps/cli/skills/band/SKILL.md` was parsed by
+/// strict YAML as a malformed flow sequence).
+///
+/// Install all 6 templates via the public CLI surface, then parse each
+/// installed file's YAML frontmatter with a strict parser. Any template that
+/// regresses to invalid YAML (unquoted flow-sequence-looking values, stray
+/// colons, bad indentation) will fail here before it reaches a user's
+/// coding agent.
+#[test]
+fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
+    let tmp = skills_sandbox(&[]);
+    let home = tmp.path();
+    // Assert the install itself succeeded so a failure here surfaces as an
+    // install error rather than a confusing "file not found" downstream.
+    let result = run_install_json(home);
+    assert_eq!(
+        result["shared"]["written"].as_array().map(Vec::len),
+        Some(6),
+        "install did not write 6 shared skills: {result}"
+    );
+
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        let path = shared_dir.join(name).join("SKILL.md");
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+
+        // Frontmatter block lives between the first two `---` lines.
+        let mut parts = content.splitn(3, "---\n");
+        let _leading_empty = parts.next().expect("split prefix");
+        let block = parts
+            .next()
+            .unwrap_or_else(|| panic!("{name}: missing opening `---`"));
+
+        let value: serde_yml::Value = serde_yml::from_str(block).unwrap_or_else(|e| {
+            panic!("{name}: SKILL.md frontmatter does not parse as YAML: {e}\nblock:\n{block}")
+        });
+
+        // Sanity-check that the fields the agent reads are present and the
+        // right shape (not an accidental flow sequence). Catches the exact
+        // regression that prompted this test. All 6 Band skills are
+        // expected to declare `argument-hint` — the hard unwrap below is
+        // intentional, not an oversight. A future skill without
+        // `argument-hint` should add the field rather than soften the
+        // assertion here.
+        let mapping = value
+            .as_mapping()
+            .unwrap_or_else(|| panic!("{name}: frontmatter is not a YAML mapping"));
+        let arg_hint = mapping
+            .get(serde_yml::Value::String("argument-hint".to_string()))
+            .unwrap_or_else(|| panic!("{name}: missing argument-hint"));
+        assert!(
+            arg_hint.is_string(),
+            "{name}: argument-hint must be a string, got {arg_hint:?} (looks like an unquoted \
+             flow sequence — quote the value in the template)"
+        );
+    }
+}
+
+// --- Open command tests ---
+
+/// Call the test helper that posts to `editor.setActiveWorkspace` on the
+/// running server. Mirrors the dashboard's behaviour when the user focuses
+/// a workspace, without requiring a real renderer to drive the focus event.
+fn set_active_workspace(band_dir: &Path, workspace_id: Option<&str>) {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/set-active-workspace.mjs");
+    let value = workspace_id.unwrap_or("null");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(value)
+        .output()
+        .expect("set-active-workspace.mjs failed to execute");
+    assert!(
+        output.status.success(),
+        "set-active-workspace.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
-fn generate_skills_json_output_lists_generated_skills() {
-    let tmp = tempfile::tempdir().expect("create tempdir");
-    let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
+fn open_with_explicit_workspace_opens_file() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/open"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a file inside the new worktree so the server's existence check
+    // passes. The CLI sends an absolute path; the server normalizes it
+    // back to a workspace-relative path before emitting the open event.
+    let file_path = Path::new(&workspace_path).join("hello.txt");
+    fs::write(&file_path, "hello world\n").unwrap();
+
+    let output = env.band(&[
         "--output",
         "json",
+        "open",
+        file_path.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-open",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    let skills = json["skills"].as_array().expect("skills array");
-    let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(json["ok"].as_bool(), Some(true));
+    assert_eq!(
+        json["workspaceId"].as_str(),
+        Some("my-project-feat-open"),
+        "json: {json}",
+    );
+    // Server normalises the path against the workspace root, so the wire
+    // value is workspace-relative ("hello.txt"), not the absolute path the
+    // CLI sent.
+    assert_eq!(json["filePath"].as_str(), Some("hello.txt"), "json: {json}");
+    // In-workspace files report external=false so the renderer routes
+    // through the workspace-relative `_splat` route, not the external-tab
+    // path.
+    assert_eq!(
+        json["external"].as_bool(),
+        Some(false),
+        "in-workspace file should not be external: {json}",
+    );
+}
 
-    assert_eq!(names.len(), 4, "expected 4 skills, got {names:?}");
-    assert!(names.contains(&"band"));
-    assert!(names.contains(&"band-chat"));
-    assert!(names.contains(&"band-terminal"));
-    assert!(names.contains(&"band-browser"));
+#[test]
+fn open_resolves_relative_path_against_cwd() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/relpath"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+    let workspace_path = fs::canonicalize(&workspace_path).expect("canonicalize worktree");
 
-    // Every skill must report at least one command.
-    for skill in skills {
-        let count = skill["commandCount"].as_u64().unwrap_or(0);
+    // Drop a file into a subdir so the relative-path resolution has
+    // something to bite on.
+    let sub = workspace_path.join("src");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("main.rs"), "fn main() {}\n").unwrap();
+
+    // Run band from inside the workspace; pass a relative path with a
+    // line/column suffix to exercise both code paths in `split_file_location`.
+    let output = env.band_in(
+        &workspace_path,
+        &[
+            "--output",
+            "json",
+            "open",
+            "src/main.rs:7:3",
+            "--workspace",
+            "my-project-feat-relpath",
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    // Server re-emits the workspace-relative path with the line/column
+    // suffix preserved verbatim (it's a UX hint, not a filesystem
+    // identifier).
+    assert_eq!(
+        json["filePath"].as_str(),
+        Some("src/main.rs:7:3"),
+        "json: {json}",
+    );
+}
+
+#[test]
+fn open_falls_back_to_active_workspace() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/active"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+    fs::write(Path::new(&workspace_path).join("README.md"), "# Hi\n").unwrap();
+
+    // Simulate the dashboard focusing this workspace.
+    set_active_workspace(&env.band_dir, Some("my-project-feat-active"));
+
+    // No `--workspace` flag — server should pull the workspaceId from the
+    // active-workspace atom.
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        Path::new(&workspace_path)
+            .join("README.md")
+            .to_str()
+            .unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["workspaceId"].as_str(),
+        Some("my-project-feat-active"),
+        "json: {json}",
+    );
+}
+
+#[test]
+fn open_without_active_workspace_errors_clearly() {
+    let env = TestEnv::new();
+    // Explicitly clear any leftover active-workspace state from previous
+    // server interactions (the in-memory atom starts null on boot, but
+    // belt-and-braces).
+    set_active_workspace(&env.band_dir, None);
+
+    // Use a fully-qualified non-existent path so the test asserts the
+    // "no active workspace" branch regardless of cwd. With a relative
+    // path like `some-file.txt`, `cmd_open` would resolve it against the
+    // test runner's cwd and — if that file happens to exist — the
+    // server's workspace-resolution guard would trip *before* the
+    // existence check, masking the branch we want to cover.
+    let output = env.band(&["open", "/nonexistent/path/some-file.txt"]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output)
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("No active workspace"),
+        "expected 'No active workspace' in stderr, got: {err}",
+    );
+}
+
+#[test]
+fn open_missing_file_errors_clearly() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/missing"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    let bogus = Path::new(&workspace_path).join("does-not-exist.txt");
+    let output = env.band(&[
+        "open",
+        bogus.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-missing",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output)
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("File not found") || err.contains("not found"),
+        "expected 'not found' in stderr, got: {err}",
+    );
+}
+
+#[test]
+fn open_external_path_outside_workspace_opens_as_external_tab() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/outside"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // A real file on disk that lives outside the workspace root (the
+    // `band open` flow needs to open this as an external editor tab —
+    // same surface as desktop Cmd+O / "Open File…").
+    let stray = env.tmp.path().join("stray.txt");
+    fs::write(&stray, "out of bounds\n").unwrap();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        stray.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-outside",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["external"].as_bool(),
+        Some(true),
+        "expected external=true for out-of-workspace file: {json}",
+    );
+    // For external files the wire path stays absolute (the renderer
+    // needs the full path to call `readExternalFile`).
+    let returned = json["filePath"].as_str().unwrap_or("");
+    assert!(
+        returned.ends_with("/stray.txt"),
+        "expected absolute path ending in /stray.txt: {json}",
+    );
+}
+
+#[test]
+fn open_external_path_with_line_suffix_preserved() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/external-line"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let stray = env.tmp.path().join("logs.txt");
+    fs::write(&stray, "line1\nline2\nline3\n").unwrap();
+
+    // The line:column suffix is parsed off the path on the CLI side
+    // before the path is resolved against the filesystem, then attached
+    // back onto the response so the renderer can position the cursor.
+    let arg = format!("{}:2:3", stray.to_str().unwrap());
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        &arg,
+        "--workspace",
+        "my-project-feat-external-line",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["external"].as_bool(), Some(true));
+    let returned = json["filePath"].as_str().unwrap_or("");
+    assert!(
+        returned.ends_with("/logs.txt:2:3"),
+        "expected absolute path with :line:col suffix: {json}",
+    );
+}
+
+#[test]
+fn open_inverted_range_is_rejected_as_suffix() {
+    // `:10-5` is a backwards line range. The CLI's `split_file_location`
+    // should refuse to parse it as a `line-lineEnd` suffix; the suffix
+    // sticks to the filename and the server fails the existence check,
+    // which is the right "I have no idea what this path is" answer.
+    //
+    // Without the `line <= end` guard, the suffix would be parsed as
+    // `(line=10, lineEnd=5)` and forwarded to the editor as a malformed
+    // selection — silent corruption rather than a visible error.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/inverted"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a real file so the only failure mode is the parser-driven one
+    // — if the test ever started passing because the suffix-bearing path
+    // happened to not exist, we wouldn't notice the guard regressing.
+    fs::write(Path::new(&workspace_path).join("real.txt"), "hi\n").unwrap();
+
+    let bogus = format!("{}/real.txt:10-5", &workspace_path);
+    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-inverted"]);
+    assert!(
+        !output.status.success(),
+        "expected failure for inverted range, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("File not found"),
+        "expected 'not found' error for unparseable suffix, got: {err}",
+    );
+}
+
+#[test]
+fn open_with_nonexistent_workspace_errors_clearly() {
+    // The server resolves `--workspace <id>` via `resolveWorkspace` and
+    // throws `NOT_FOUND: Workspace '<id>' not found` when no row exists.
+    // Without an integration test, a regression that silently created
+    // a placeholder workspace (or swallowed the error and emitted an
+    // open-file event pointing at a non-existent worktree) would slip
+    // through.
+    let env = TestEnv::new();
+    let file = env.tmp.path().join("any.txt");
+    fs::write(&file, "hi\n").unwrap();
+
+    let output = env.band(&[
+        "open",
+        file.to_str().unwrap(),
+        "--workspace",
+        "definitely-not-a-real-workspace",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("Workspace"),
+        "expected 'workspace not found' error, got: {err}",
+    );
+}
+
+#[test]
+fn open_zero_column_falls_through_to_filename() {
+    // `file.rs:0:5` and `file.rs:5:0` would, naively, fail the
+    // `:line:col` guard (line/col must be ≥ 1) and then trip the
+    // `:line` branch on the rightmost `:5` or `:0`, mis-parsing the
+    // input as `(path="file.rs:0", line=5)` / similar. The
+    // `!contains(':')` guard on the `:line` branch ensures the whole
+    // colon-suffixed input falls through to the filename instead, so
+    // the user gets a clear "File not found" against the literal
+    // string they typed rather than a half-parsed surprise.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/zerocol"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a real `file.rs` so a regression that strips off `:0:5`
+    // would *succeed* instead of failing. Without this, the test
+    // could pass for the wrong reason (regressed parser strips
+    // suffix → opens real file.rs → success when we expect failure).
+    fs::write(Path::new(&workspace_path).join("file.rs"), "// real\n").unwrap();
+
+    let bogus = format!("{}/file.rs:0:5", &workspace_path);
+    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-zerocol"]);
+    assert!(
+        !output.status.success(),
+        "expected failure (file.rs:0:5 has no file on disk), got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("File not found"),
+        "expected 'not found' error mentioning the full input, got: {err}",
+    );
+    assert!(
+        err.contains("file.rs:0:5"),
+        "expected error to include literal input 'file.rs:0:5' (proves we didn't strip the suffix), got: {err}",
+    );
+}
+
+#[test]
+fn open_directory_is_rejected() {
+    // `existsSync` returns true for directories, so without the
+    // `statSync().isFile()` guard on the server, `band open <dir>`
+    // would treat the directory as an external file and the renderer
+    // would try to open it as a text buffer. This also covers the
+    // workspace-root edge case (`band open <workspace-root>` →
+    // directory → rejected here before the renderer's empty-splat
+    // logic fires).
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/dir"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Create a real subdirectory inside the workspace.
+    let dir_inside = Path::new(&workspace_path).join("src");
+    fs::create_dir_all(&dir_inside).unwrap();
+
+    let output = env.band(&[
+        "open",
+        dir_inside.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-dir",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("Not a file") || err.contains("not a file"),
+        "expected 'not a file' error, got: {err}",
+    );
+}
+
+#[test]
+fn open_valid_line_range_is_parsed_and_round_tripped() {
+    // Companion to `open_inverted_range_is_rejected_as_suffix`:
+    // exercises the happy path of the `:line-lineEnd` branch. Without
+    // this, a regression that swaps `line` / `lineEnd` in the JSON
+    // payload (or in the server's `formatFileLocation` call) would go
+    // undetected — the rejection test only covers the guard.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/range"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    fs::write(
+        Path::new(&workspace_path).join("ranged.txt"),
+        "one\ntwo\nthree\nfour\nfive\n",
+    )
+    .unwrap();
+
+    let arg = format!("{}/ranged.txt:2-4", &workspace_path);
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        &arg,
+        "--workspace",
+        "my-project-feat-range",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["external"].as_bool(), Some(false));
+    // Server normalises to a workspace-relative path with the range
+    // suffix preserved verbatim. If `line` and `lineEnd` got swapped
+    // anywhere in the pipeline, the round-tripped suffix would be
+    // `:4-2` (which the inverted-range test verifies is rejected).
+    assert_eq!(
+        json["filePath"].as_str(),
+        Some("ranged.txt:2-4"),
+        "json: {json}",
+    );
+}
+
+// --- agents (issue #682) ---
+
+/// Read-modify-write the test home's `settings.json`.
+fn update_settings(env: &TestEnv, edit: impl FnOnce(&mut serde_json::Value)) {
+    let settings_path = env.band_dir.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read settings.json"))
+            .expect("settings.json is valid JSON");
+    edit(&mut settings);
+    fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+}
+
+/// Configure agents whose CLI is a shell stub that prints `marker` and its
+/// arguments, then stays running, so a `tui` launch never starts a real
+/// agent. `claude-code` is the default; `codex` uses the same stub.
+fn use_stub_agent_cli(env: &TestEnv, marker: &str) {
+    let stub = env.tmp.path().join("stub-agent-cli.sh");
+    fs::write(
+        &stub,
+        format!("#!/bin/sh\necho {marker} \"$@\"\nexec sleep 600\n"),
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&stub).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&stub, perms).unwrap();
+
+    let command = stub.to_string_lossy().to_string();
+    update_settings(env, |settings| {
+        settings["codingAgents"] = serde_json::json!([
+            {"id": "claude-code", "type": "claude-code", "label": "Claude Code", "command": command},
+            {"id": "codex", "type": "codex", "label": "Codex", "command": command},
+            {"id": "cursor-cli", "type": "cursor-cli", "label": "Cursor CLI"},
+        ]);
+        settings["defaultCodingAgent"] = serde_json::json!("claude-code");
+    });
+}
+
+/// Run `band` with an empty `BAND_DISPATCH`, so a value in the developer's
+/// shell can't pick the agent mode.
+fn band_clean(env: &TestEnv, args: &[&str]) -> std::process::Output {
+    env.band_with_env(args, &[("BAND_DISPATCH", "")])
+}
+
+fn band_json(env: &TestEnv, args: &[&str]) -> serde_json::Value {
+    let mut full = vec!["--output", "json"];
+    full.extend_from_slice(args);
+    let output = band_clean(env, &full);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON")
+}
+
+fn wait_for_terminal_output(env: &TestEnv, terminal_id: &str, needle: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let output = env.band(&["terminals", "output", terminal_id]);
+        if stdout(&output).contains(needle) {
+            return;
+        }
         assert!(
-            count > 0,
-            "skill {} has no commands",
-            skill["name"].as_str().unwrap_or("?")
+            std::time::Instant::now() < deadline,
+            "terminal {terminal_id} never printed {needle:?}: {}",
+            stdout(&output)
         );
+        std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+#[test]
+fn agents_launch_gui_opens_a_chat_listed_as_a_session() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-gui"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_id = "my-project-feat-agents-gui";
+
+    // Text output: `<mode>\t<chat id>`.
+    let output = band_clean(&env, &["agents", "launch", workspace_id, "--mode", "gui"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    let (mode, chat_id) = text.split_once('\t').expect("mode and pane, tab-separated");
+    assert_eq!(mode, "gui", "got {text:?}");
+    let chat_id = chat_id.to_string();
+
+    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let sessions = listed["agentSessions"]
+        .as_array()
+        .expect("agentSessions array");
+    assert_eq!(sessions.len(), 1, "got {listed}");
+    assert_eq!(sessions[0]["mode"], "gui");
+    assert_eq!(sessions[0]["chatId"], chat_id.as_str());
+    assert_eq!(sessions[0]["agentDefinitionId"], "claude-code");
+    let session_id = sessions[0]["id"].as_str().unwrap().to_string();
+
+    // Text output of `agents list`: the header, then a row whose PANE is the chat.
+    let table = band_clean(&env, &["agents", "list", workspace_id]);
+    assert!(table.status.success(), "stderr: {}", stderr(&table));
+    let table = stdout(&table);
+    let mut lines = table.lines();
+    let header = lines.next().expect("header row");
+    for column in [
+        "SESSION ID",
+        "AGENT",
+        "MODE",
+        "STATE",
+        "PANE",
+        "PROVIDER SESSION",
+    ] {
+        assert!(header.contains(column), "header {header:?} lacks {column}");
+    }
+    let row = lines.next().expect("session row");
+    for cell in [session_id.as_str(), "claude-code", "gui", chat_id.as_str()] {
+        assert!(row.contains(cell), "row {row:?} lacks {cell}");
+    }
+
+    let chats = band_json(&env, &["chats", "list", workspace_id]);
+    let has_chat = chats["chats"]
+        .as_array()
+        .expect("chats array")
+        .iter()
+        .any(|c| c["id"] == chat_id.as_str());
+    assert!(has_chat, "launched chat missing from chats list: {chats}");
+}
+
+#[test]
+fn agents_launch_terminal_alias_runs_the_chosen_agent_with_the_prompt() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-tui"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_id = "my-project-feat-agents-tui";
+
+    // `terminal` is the `--via` name for `tui`.
+    let launched = band_json(
+        &env,
+        &[
+            "agents",
+            "launch",
+            workspace_id,
+            "--mode",
+            "terminal",
+            "--agent",
+            "codex",
+            "--prompt",
+            "hello-from-cli",
+        ],
+    );
+    assert_eq!(launched["mode"], "tui", "got {launched}");
+    let terminal_id = launched["terminalId"]
+        .as_str()
+        .expect("terminalId on a tui launch")
+        .to_string();
+    wait_for_terminal_output(&env, &terminal_id, "STUB_AGENT_STARTED hello-from-cli");
+
+    let listed = band_json(&env, &["agents", "list", workspace_id]);
+    let sessions = listed["agentSessions"]
+        .as_array()
+        .expect("agentSessions array");
+    assert_eq!(sessions.len(), 1, "got {listed}");
+    assert_eq!(sessions[0]["mode"], "tui");
+    assert_eq!(sessions[0]["agentDefinitionId"], "codex");
+    assert_eq!(sessions[0]["terminalId"], terminal_id.as_str());
+
+    let killed = env.band(&["terminals", "kill", &terminal_id]);
+    assert!(killed.status.success(), "stderr: {}", stderr(&killed));
+}
+
+#[test]
+fn agents_launch_prints_a_note_when_an_agent_falls_back_to_a_chat() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-note"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let output = band_clean(
+        &env,
+        &[
+            "agents",
+            "launch",
+            "my-project-feat-agents-note",
+            "--mode",
+            "tui",
+            "--agent",
+            "cursor-cli",
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let text = stdout(&output);
+    let mut lines = text.lines();
+    let first = lines.next().expect("mode line");
+    assert!(first.starts_with("gui\t"), "got {text:?}");
+    let note = lines.next().expect("note line");
+    assert!(note.starts_with("note: "), "got {text:?}");
+}
+
+#[test]
+fn agents_launch_without_mode_uses_the_server_default() {
+    let env = TestEnv::new();
+    use_stub_agent_cli(&env, "STUB_AGENT_STARTED");
+    update_settings(&env, |settings| {
+        settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
+    });
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-default"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let launched = band_json(
+        &env,
+        &["agents", "launch", "my-project-feat-agents-default"],
+    );
+    assert_eq!(launched["mode"], "tui", "got {launched}");
+    let terminal_id = launched["terminalId"].as_str().expect("terminalId");
+    let killed = env.band(&["terminals", "kill", terminal_id]);
+    assert!(killed.status.success(), "stderr: {}", stderr(&killed));
+}
+
+#[test]
+fn agents_launch_follows_band_dispatch_over_the_server_default() {
+    let env = TestEnv::new();
+    update_settings(&env, |settings| {
+        settings["agents"] = serde_json::json!({ "defaultMode": "tui" });
+    });
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/agents-env"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // An agent in a Band chat has BAND_DISPATCH=chat, so it starts chats.
+    let output = env.band_with_env(
+        &[
+            "--output",
+            "json",
+            "agents",
+            "launch",
+            "my-project-feat-agents-env",
+        ],
+        &[("BAND_DISPATCH", "chat")],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let launched: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("CLI output is JSON");
+    assert_eq!(launched["mode"], "gui", "got {launched}");
+    assert!(launched["chatId"].is_string(), "got {launched}");
+}
+
+#[test]
+fn agents_launch_rejects_an_unknown_mode() {
+    // The mode is checked before the CLI reads settings or calls the
+    // server, so this needs no server.
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["agents", "launch", "my-project-main", "--mode", "web"])
+        .env("BAND_HOME", tmp.path())
+        .output()
+        .expect("failed to execute band");
+    assert!(!output.status.success(), "expected failure for --mode web");
+    assert!(
+        stderr(&output).contains("Invalid agent mode 'web'"),
+        "stderr: {}",
+        stderr(&output)
+    );
 }

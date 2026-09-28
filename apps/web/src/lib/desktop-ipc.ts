@@ -20,14 +20,27 @@ interface ElectronBridge {
   on(event: string, cb: (payload: unknown) => void): Unlisten;
 }
 
-function electronBridge(): ElectronBridge | null {
+/**
+ * Resolve the Electron preload bridge directly. Most call sites should
+ * prefer `invoke()` / `listen()` above (which throw helpfully when the
+ * bridge is missing); exported only for renderer code that needs to
+ * forward IPC calls *without* throwing on the web/dev path — e.g. the
+ * `__bandReload` / `__bandZoom` menu globals in `routes/__root.tsx`,
+ * which silently fall back to dashboard-level reload/zoom when run
+ * outside the desktop shell.
+ */
+export function getElectronBridge(): ElectronBridge | null {
   if (!isDesktop) return null;
   const bridge = (window as unknown as { __BAND_DESKTOP__?: ElectronBridge }).__BAND_DESKTOP__;
   return bridge ?? null;
 }
 
+function electronBridge(): ElectronBridge | null {
+  return getElectronBridge();
+}
+
 /**
- * Invoke a main-process command (e.g. `"browser_create"`,
+ * Invoke a main-process command (e.g. `"browser_register_guest"`,
  * `"webserver_start"`). Throws if called outside the desktop shell — call
  * sites should gate on `isDesktop` first.
  */

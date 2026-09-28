@@ -1,0 +1,307 @@
+/**
+ * Chats sub-routers — migrated out of the legacy `apps/web/src/trpc/router.ts`
+ * in issue #316 (Phase 5 of the 3-tier refactor described in
+ * `docs/web-architecture.md`).
+ *
+ * The router is intentionally thin: it validates input with Zod, delegates
+ * to `ChatService` (and a few sibling helpers that haven't migrated yet),
+ * and returns. No business logic lives here.
+ *
+ * One sub-router is exported:
+ *   - `chatsRouter` covers the per-pane CRUD + message lifecycle
+ *     (`chats.list`, `chats.create`, …) at the `chats.*` tRPC namespace.
+ *
+ * It is merged into the root router by `server/api/router.ts`. The
+ * sibling helpers (`scheduleActiveSessionRefresh`, `submitTask`, …) now
+ * live under `server/services/`; routing through them here keeps the same
+ * shape as the pre-migration legacy procedures.
+ */
+
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import { sessionIdSchema } from "../../services/_utils/session-id";
+import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
+import { chatService, InvalidLabelsError } from "../../services/chat-service";
+import { TaskConflictError, taskService } from "../../services/task-service";
+import { workspaceService } from "../../services/workspace-service";
+import { publicProcedure, t } from "../trpc";
+
+// ---------------------------------------------------------------------------
+// Chats (multi-pane chat management)
+// ---------------------------------------------------------------------------
+
+export const chatsRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { chats: chatService.list(input.workspaceId) };
+  }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        id: z.string().optional(),
+        name: z.string().optional(),
+        agent: z.string().optional(),
+        model: z.string().optional(),
+        mode: z.string().optional(),
+        labels: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      try {
+        const chat = chatService.create(input.workspaceId, {
+          id: input.id,
+          name: input.name,
+          agent: input.agent,
+          model: input.model,
+          mode: input.mode,
+          labels: input.labels,
+          // tRPC is a user-facing surface — never allow callers to set
+          // reserved `band:`-prefixed labels.
+        });
+        return { chat };
+      } catch (err) {
+        if (err instanceof InvalidLabelsError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  get: publicProcedure.input(z.object({ chatId: z.string() })).query(({ input }) => {
+    return { chat: chatService.ensureActiveSessionSummary(input.chatId) ?? null };
+  }),
+
+  /**
+   * Session settings for the chat's pickers: model, mode and other config
+   * options, slash commands, context usage (issue #648). The chat event
+   * stream sends the same snapshot on subscribe; this read is for callers
+   * without a stream open (the CLI).
+   */
+  sessionState: publicProcedure
+    .input(z.object({ chatId: z.string() }))
+    .query(({ input }) => ({ state: agentSessionService.getSessionState(input.chatId) })),
+
+  /**
+   * Changes one ACP session config option (model, mode, reasoning effort,
+   * …) on the chat's live session, and saves model / mode on the chat row
+   * so the next session starts with them. `__legacy_model` /
+   * `__legacy_mode` address agents that expose models and modes without
+   * config options (Gemini CLI, Cursor CLI).
+   */
+  setConfigOption: publicProcedure
+    .input(
+      z.object({
+        chatId: z.string(),
+        configId: z.string(),
+        value: z.string(),
+        // Lets a new pane's first settings change create its chat record,
+        // like its first message does.
+        workspaceId: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        return {
+          state: await agentSessionService.setConfigOption(
+            input.chatId,
+            input.configId,
+            input.value,
+            input.workspaceId,
+          ),
+        };
+      } catch (err) {
+        if (err instanceof ChatNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
+
+  /**
+   * Update one or more fields on an existing chat pane.
+   *
+   * Behavior contract:
+   *   - `labels` replaces the **full** record. Pass `{}` to clear.
+   *   - Returns `NOT_FOUND` (404) if `chatId` doesn't resolve. This is
+   *     a behavior change from before issue #520, when this route
+   *     returned `200 { chat: undefined }` on an unknown id. The
+   *     previous silent-no-op was harmless for cosmetic edits but
+   *     would let a `labels: {}` "clear" against a stale id succeed
+   *     misleadingly, which is why the route now surfaces the error.
+   *     Existing UI callers (`ChatView.tsx` `.catch(...)` handlers
+   *     for mode/model changes) absorb the new 404 the same way they
+   *     absorbed the silent 200; new callers should expect it.
+   *   - Returns `BAD_REQUEST` (400) if `labels` violates validation
+   *     rules in `validateLabels` (max 20 keys, key regex, value
+   *     rules, reserved `band:` prefix).
+   */
+  update: publicProcedure
+    .input(
+      z.object({
+        chatId: z.string(),
+        name: z.string().optional(),
+        agent: z.string().optional(),
+        // `model`/`mode` are nullable so callers can explicitly clear them
+        // ("use the agent's default"). The service's `UpdateChatOptions`
+        // type already accepts `string | null`; the legacy router's
+        // `.string().optional()` Zod schema dropped `null` on the floor,
+        // which made the "clear" path unreachable via tRPC.
+        model: z.string().nullable().optional(),
+        mode: z.string().nullable().optional(),
+        labels: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const { chatId, ...updates } = input;
+      try {
+        const chat = chatService.update(chatId, updates);
+        if (!chat) {
+          // Issue #520: `chats.update` previously returned 200 with
+          // `chat: undefined` when the chatId didn't resolve. Harmless when
+          // the route only touched cosmetic fields, but the new `labels`
+          // semantic is "replace the whole record" — a silent no-op on a
+          // typo'd id would let a caller believe their relabel succeeded.
+          //
+          // Existing UI callers (`ChatView.tsx`'s `trpc.chats.update.mutate`
+          // for `mode` / `model` changes) wrap the call in `.catch` and log
+          // — they used to absorb the silent success, and they'll now
+          // absorb the 404 the same way. Intentional: the 404 is the
+          // correct shape for a stale chatId; any new caller (CLI
+          // `chats label` / `chats unlabel`) wants it surfaced.
+          throw new TRPCError({ code: "NOT_FOUND", message: "Chat not found" });
+        }
+        return { chat };
+      } catch (err) {
+        if (err instanceof InvalidLabelsError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  remove: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    chatService.remove(input.chatId);
+    return { ok: true };
+  }),
+
+  setActiveSession: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string(),
+        // Cap the length: this id is persisted as `activeSessionId` and later
+        // flows into the resume command line (`continueInTerminal` →
+        // `formatShellCommand` → PTY). Real provider ids are well under this.
+        sessionId: sessionIdSchema.optional(),
+        summary: z.string().max(1000).optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      // Lazily ensure the server-side chat record exists. The client
+      // generates chatIds locally, so setActiveSession may be called
+      // before the first message is sent (which normally creates the record).
+      if (!chatService.get(input.chatId)) {
+        chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+      }
+
+      if (!input.sessionId) {
+        chatService.updateActiveSession(input.chatId, undefined);
+        return { ok: true };
+      }
+
+      // Title: the caller's (from the agent's session list), else the
+      // session's first prompt in Band's log.
+      const summary = input.summary ?? agentSessionService.sessionTitle(input.sessionId);
+      const lastModified = Date.now();
+
+      chatService.updateActiveSession(input.chatId, {
+        activeSessionId: input.sessionId,
+        summary,
+        lastModified,
+      });
+      return { ok: true };
+    }),
+
+  send: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string(),
+        message: z.string(),
+        sessionId: sessionIdSchema.optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      // Lazily ensure the server-side chat record exists. The client
+      // generates chatIds locally for instant rendering, so the first
+      // message sent may arrive before a record is created.
+      let chat = chatService.get(input.chatId);
+      if (!chat) {
+        chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
+      }
+      try {
+        const task = taskService.submitTask({
+          workspaceId: chat.workspaceId,
+          chatId: chat.id,
+          prompt: input.message,
+          sessionId: input.sessionId,
+        });
+        return { taskId: task.id, sessionId: task.sessionId };
+      } catch (err) {
+        if (err instanceof TaskConflictError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Task already running for this chat pane",
+          });
+        }
+        throw err;
+      }
+    }),
+
+  stop: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    taskService.abortTask(input.chatId);
+    chatService.updateStatus(input.chatId, "stopped");
+    return { ok: true };
+  }),
+
+  resume: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    chatService.updateStatus(input.chatId, "idle");
+    return { ok: true };
+  }),
+
+  /**
+   * Continue this chat's coding-agent session in a terminal pane.
+   *
+   * Resolves the chat's underlying agent session ID (`activeSessionId`) and
+   * the adapter for whichever coding agent it ran, asks the adapter for the
+   * vendor CLI's *resume* invocation (`claude --resume <id>`,
+   * `codex resume <id>`, `opencode --session <id>`), composes it into a
+   * shell-safe command, and spawns a fresh terminal pane running it — so the
+   * user keeps working in the very session the web chat was running.
+   *
+   * Mirrors the spawn+emit pair in `WorkspaceService.create`'s
+   * `via=terminal` branch (issue #551), and resolves the agent inline the
+   * same way `setActiveSession` above does. Errors surface to the client so
+   * the UI can keep the menu item disabled for agents that can't resume
+   * (Gemini CLI / Cursor CLI) or chats with no session yet.
+   */
+  continueInTerminal: publicProcedure
+    .input(z.object({ chatId: z.string().max(512) }))
+    .mutation(async ({ input }) => {
+      const result = await workspaceService.continueChatInTerminal(input.chatId);
+      if (!result.ok) {
+        throw new TRPCError({ code: result.code, message: result.message });
+      }
+      return {
+        terminalId: result.terminalId,
+        workspaceId: result.workspaceId,
+        sessionId: result.sessionId,
+      };
+    }),
+});
+
+export type ChatsRouter = typeof chatsRouter;

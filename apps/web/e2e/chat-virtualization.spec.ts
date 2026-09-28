@@ -1,0 +1,246 @@
+/**
+ * Frontend integration test for chat message-list virtualization (issue
+ * tracking renderer memory: live profiling found ~88% of the desktop
+ * renderer's DOM was un-virtualized chat history; a 600-turn
+ * conversation produced ~30k DOM nodes and held the renderer at ~1 GB
+ * resident). The fix mounts only messages near the viewport via
+ * `@tanstack/react-virtual` inside `<StickToBottom.Content>`.
+ *
+ * Boots the real production server, drives through Playwright + a page
+ * object, no tRPC mocking. The spec body never touches `page.goto` /
+ * `page.getByTestId` / `page.getByText` directly — all locators live on
+ * `ChatPanePage`.
+ *
+ * What this test proves:
+ *
+ *   1. **Windowing works.** A chat seeded with a 500-turn
+ *      (1000-message) session renders only a handful of message rows
+ *      in the DOM at any one time — well below the total.
+ *
+ *   2. **Stick-to-bottom still works.** On cold load with a long
+ *      conversation, the last (most recent) message is the one visible
+ *      in the viewport, not the first.
+ *
+ *   3. **Scrolling reveals earlier messages.** Scrolling the chat
+ *      container to the top brings the first seeded message into the
+ *      DOM (the virtualizer mounts it on demand).
+ *
+ * Architecture:
+ *
+ *   - REAL production `dist/start-server.mjs` against a fresh
+ *     `mkdtempSync()` home. Migrations run on boot.
+ *   - NO tRPC mocking. The session is seeded in the ACP stub agent's
+ *     store; the server imports it with `session/load` into Band's event
+ *     log, and the chat-events SSE stream replays it from there.
+ *   - The chat row + chat dockview layout are seeded through real
+ *     tRPC calls (`chats.create` + `chats.setActiveSession`) BEFORE
+ *     the user navigates — that way the dashboard's saved layout
+ *     reflects our chosen `chatId` and we don't fight with the
+ *     `createDefaultPanel` fallback.
+ *   - We don't submit a message in this test — replay is all we need.
+ *   - UI driven through `ChatPanePage` (page-object pattern); no
+ *     `page.getByTestId` / `page.getByText` / `page.evaluate`
+ *     querySelector lookups in the test body.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import { HISTORY_PAGE_SIZE } from "@/shared/chat-events";
+import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
+import {
+  cleanupTmpHome,
+  createTmpHome,
+  type ServerHandle,
+  seedSettings,
+  seedState,
+  startServer,
+} from "./helpers/server";
+import { trpcMutate } from "./helpers/trpc";
+import { ChatPanePage } from "./pages/ChatPanePage";
+
+const TOKEN = "e2e-chat-virtualization-token";
+const PROJECT = "virtproj";
+const WORKSPACE = toWorkspaceId(PROJECT, "main");
+const CHAT_ID = "virt-chat-deterministic-id";
+const SESSION_ID = "11111111-2222-3333-4444-555555555555";
+
+// Total seeded turns. Each turn writes one user + one assistant message,
+// so the rendered conversation is 2 × TURNS messages. 500 is large
+// enough to make windowing measurable (renderer should ideally cap at
+// a few dozen rows mounted) without ballooning test cost.
+const TURNS = 500;
+
+// Cold-subscribe replay window, in turns.
+const WINDOW_TURNS = HISTORY_PAGE_SIZE;
+
+// Wide viewport so useIsDesktop() reports true and the shared dockview
+// renders the chat pane in its desktop layout (mobile layout has a
+// different DOM structure).
+test.use({ viewport: { width: 1280, height: 800 } });
+
+let server: ServerHandle;
+let tmpHome: string;
+let repoDir: string;
+
+test.beforeAll(async () => {
+  tmpHome = createTmpHome();
+
+  repoDir = join(tmpHome, "repo");
+  mkdirSync(repoDir, { recursive: true });
+
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: PROJECT,
+        path: repoDir,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: repoDir }],
+      },
+    ],
+  });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [
+      {
+        id: "claude-code",
+        type: "claude-code",
+        label: "Claude Code",
+      },
+    ],
+  });
+
+  // Seed the session in the stub agent's own store, as if an earlier agent
+  // process had recorded it. Band has never seen it, so pointing the chat
+  // at it makes the server `session/load` it: the stub replays every turn
+  // as `user_message_chunk` + `agent_message_chunk` updates, which Band
+  // writes to its event log.
+  seedStubSession(tmpHome, { sessionId: SESSION_ID, cwd: repoDir, turns: buildTurns(TURNS) });
+
+  server = await startServer({ tmpHome, env: acpStubEnv(tmpHome) });
+
+  // Pre-create the chat with a deterministic id (so the dashboard's
+  // saved-layout lookup finds it) and point it at our seeded session.
+  // Hitting the real tRPC surface keeps the layout/active-session
+  // bookkeeping consistent with the production code paths.
+  await trpcMutate(server.url, TOKEN, "chats.create", {
+    workspaceId: WORKSPACE,
+    id: CHAT_ID,
+    agent: "claude-code",
+  });
+  // `chats.update` doesn't take sessionId — `setActiveSession` does. The
+  // chat has no agent process yet, so opening its stream attaches the
+  // session through `session/load`.
+  await trpcMutate(server.url, TOKEN, "chats.setActiveSession", {
+    workspaceId: WORKSPACE,
+    chatId: CHAT_ID,
+    sessionId: SESSION_ID,
+  });
+});
+
+test.afterAll(async () => {
+  // Null-guard: if `startServer` threw in beforeAll, `server` is
+  // unassigned. Letting that bubble would mask the original
+  // setup failure with a `TypeError`.
+  if (server) await server.close();
+  cleanupTmpHome(tmpHome);
+});
+
+test.describe("Chat message-list virtualization", () => {
+  test("long conversation renders only a windowed slice of messages and stays scrolled to bottom", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(WORKSPACE);
+    await chatPane.waitForReady();
+
+    // Wait for the virtualized list container to mount. Its appearance
+    // means the chat-events subscription has resolved the seeded
+    // session and the reducer has at least one message to render.
+    // Driven through a page-object method so the test body never
+    // touches the raw `virtualList` locator.
+    await chatPane.waitForVirtualList(15_000);
+
+    // Wait for the LAST seeded message text to be present. That's how
+    // we know the replay completed AND stick-to-bottom did its
+    // initial scroll — the bottom row mounts only when the viewport
+    // is at the end of the list.
+    const lastAssistantTag = assistantText(TURNS - 1);
+    await expect(chatPane.assistantMessage(lastAssistantTag)).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Windowing assertion — the number of mounted message rows must be
+    // a small fraction of the total. A non-virtualized list would
+    // mount all 1000 rows. The exact cap depends on viewport height
+    // and overscan; well below 100 leaves plenty of headroom for
+    // safe variation across CI runners and rules out the
+    // un-virtualized regression cleanly. `expect.poll` lets the bound
+    // itself auto-retry — the visibility wait above already proves at
+    // least one row mounted, so we don't need a separate "> 0" check.
+    // Explicit `timeout: 15_000` so a slow CI runner replaying a
+    // 500-turn session has time to settle (Playwright's default poll
+    // timeout is ~5 s). `interval: 500` because the actual signal we
+    // care about (row count stabilising under the bound) flips
+    // exactly once, so polling 10× per second during the long
+    // loading phase wastes CPU compared to ~2× per second.
+    await expect
+      .poll(() => chatPane.messageRowCount(), { timeout: 15_000, interval: 500 })
+      .toBeLessThan(100);
+
+    // The very first seeded message must NOT be in the DOM right now —
+    // the user is parked at the bottom of a 1000-message conversation,
+    // there's no way the row at position 0 is mounted. Under windowed
+    // cold subscribe (issue #572) it isn't even loaded into the reducer:
+    // only the most recent HISTORY_PAGE_SIZE (20) turns replay. Full
+    // scroll-back pagination to message 0 is exercised by
+    // `chat-pagination.spec.ts`.
+    const firstUserTag = userText(0);
+    await expect(chatPane.userMessage(firstUserTag)).toHaveCount(0);
+
+    // The OLDEST message in the initial window is turn
+    // `TURNS - WINDOW_TURNS`. It is off-screen at the bottom but loaded; scrolling to the top mounts it.
+    const oldestWindowTag = userText(TURNS - WINDOW_TURNS);
+
+    // Scroll to the top of the chat container via the page-object
+    // helper — drives the virtualizer's on-demand mount path so the
+    // oldest windowed row enters the DOM (and triggers the scroll-back
+    // sentinel, which prepends the next older page).
+    await chatPane.scrollToTop();
+    await expect(chatPane.userMessage(oldestWindowTag)).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // After scrolling up, the bottom row is no longer mounted — the
+    // window moved. This proves the renderer is genuinely swapping
+    // rows in and out (not just rendering everything and scrolling).
+    // `expect.poll` so Playwright retries while the virtualizer
+    // catches up to the scroll-position change; a single synchronous
+    // sample could race the React commit on slow CI runners.
+    await expect
+      .poll(() => chatPane.assistantMessage(lastAssistantTag).count(), { timeout: 10_000 })
+      .toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** `turns` user→assistant pairs, each carrying index-bearing text so the
+ *  test can address a specific message without matching the wrong row. */
+function buildTurns(turns: number): SeededTurn[] {
+  return Array.from({ length: turns }, (_, i) => ({ user: userText(i), agent: assistantText(i) }));
+}
+
+/** Distinct, easily-matchable text per turn — index-bearing so we can
+ *  query for a specific message without ambiguity. */
+function userText(turn: number): string {
+  return `virt-prompt-${turn}-marker`;
+}
+
+function assistantText(turn: number): string {
+  return `virt-reply-${turn}-marker`;
+}

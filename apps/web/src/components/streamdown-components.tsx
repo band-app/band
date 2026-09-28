@@ -1,3 +1,7 @@
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { createMathPlugin } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
 import type { AnchorHTMLAttributes } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
 
@@ -31,3 +35,22 @@ function ExternalLink({
 
 /** Shared Streamdown component overrides. */
 export const streamdownComponents = { a: ExternalLink };
+
+/**
+ * Shared Streamdown plugin set used by both the chat message renderer and the
+ * markdown file preview. Single source of truth so a config change (e.g.
+ * enabling single-dollar inline math) lands in one place instead of drifting
+ * across call sites.
+ *
+ * `singleDollarTextMath: true` opts into `remark-math`'s `$…$` inline syntax.
+ * `remark-math` won't open a math span when the character after `$` is
+ * whitespace, and won't close one when the character before `$` is whitespace,
+ * so prose like `costs $5 and $10` is not parsed as math. Authors who want to
+ * be extra defensive can still escape with `\$`.
+ */
+export const streamdownPlugins = {
+  cjk,
+  code,
+  math: createMathPlugin({ singleDollarTextMath: true }),
+  mermaid,
+};

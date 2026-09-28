@@ -1,15 +1,11 @@
 import { cn } from "@band-app/ui";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
-import type { UIMessage } from "ai";
 import { Download, Expand, FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { memo, useCallback, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 
+import { streamdownPlugins } from "../streamdown-components";
 import {
   fileLinkComponents,
   fileLinkRehypePlugins,
@@ -20,11 +16,18 @@ import { FilePreviewOverlay } from "./file-preview-overlay";
 import { downloadFile, isTextMediaType } from "./file-preview-utils";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
-  from: UIMessage["role"];
+  from: "user" | "assistant";
 };
 
 export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
+    // Default role-scoped testid lets integration tests target real
+    // message bubbles. Callers that wrap `Message` in a skeleton
+    // placeholder (see `ConversationSkeleton`) override it with
+    // `data-testid={undefined}` so locators don't pick up loading
+    // states. Spread-after-default means an explicit `data-testid` in
+    // `props` always wins.
+    data-testid={from === "user" ? "chat-pane__user-message" : "chat-pane__assistant-message"}
     className={cn(
       "group flex w-full min-w-0 flex-col gap-2",
       from === "user" ? "is-user ml-auto max-w-[90%] justify-end" : "is-assistant",
@@ -52,8 +55,6 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
 );
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
-
-const streamdownPlugins = { cjk, code, math, mermaid };
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
@@ -106,6 +107,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
       <>
         <button
           type="button"
+          data-testid="message__image-preview-button"
           onClick={() => setOverlayOpen(true)}
           className="group/img relative max-w-xs cursor-pointer overflow-hidden rounded-md"
         >

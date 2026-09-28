@@ -20,14 +20,49 @@ function ContextMenuPortal({ ...props }: React.ComponentProps<typeof ContextMenu
 
 function ContextMenuContent({
   className,
+  onPointerDownCapture,
+  onPointerUpCapture,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         data-slot="context-menu-content"
+        // Swallow right-button (button=2) pointer events in the capture
+        // phase so they never reach the inner `MenuItem` handlers.
+        //
+        // Why: Radix's `MenuItem` synthesises a `.click()` on every
+        // `pointerup` that fires on an item without a matching prior
+        // `pointerdown` on the same item — a heuristic to support
+        // "drag from outside, release on item" UX. The opening
+        // right-click sequence (`pointerdown` on the trigger →
+        // `contextmenu` opens the menu → `pointerup` at the cursor)
+        // matches that heuristic verbatim: `pointerdown` was on the
+        // trigger, `pointerup` is now on a freshly-mounted item, the
+        // ref is `false`, and Radix calls `click()` → the first item
+        // activates and the menu closes.
+        //
+        // At browser zoom = 100% the first item sits ~7 CSS px right
+        // of the cursor (1px border + 4px padding + 2px popper
+        // sideOffset), so `pointerup` lands on the trigger and the
+        // bug is invisible. At any other zoom, sub-pixel rounding by
+        // Floating UI / Chromium puts the cursor inside the item's
+        // bounding box, the heuristic fires, and the menu disappears
+        // before the user can pick anything.
+        //
+        // Only right-button (button=2) events are swallowed. Left-button
+        // (selection, hover, focus, keyboard activation) and middle-button
+        // (auto-scroll in tall menus) events still propagate untouched.
+        onPointerDownCapture={(event) => {
+          onPointerDownCapture?.(event);
+          if (event.button === 2) event.stopPropagation();
+        }}
+        onPointerUpCapture={(event) => {
+          onPointerUpCapture?.(event);
+          if (event.button === 2) event.stopPropagation();
+        }}
         className={cn(
-          "z-50 max-h-(--radix-context-menu-content-available-height) min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          "ease-out duration-150 z-50 max-h-(--radix-context-menu-content-available-height) min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md dark:text-neutral-50 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className,
         )}
         {...props}
@@ -51,7 +86,7 @@ function ContextMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:*:[svg]:text-destructive!",
+        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground dark:focus:bg-neutral-700 dark:focus:text-neutral-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 dark:data-[variant=destructive]:focus:text-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75 data-[variant=destructive]:*:[svg]:text-destructive!",
         className,
       )}
       {...props}
@@ -76,13 +111,13 @@ function ContextMenuSubTrigger({
       data-slot="context-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px] leading-5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground dark:focus:bg-neutral-700 dark:focus:text-neutral-50 data-[inset]:pl-8 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground dark:data-[state=open]:bg-neutral-700 dark:data-[state=open]:text-neutral-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-popover-foreground/75",
         className,
       )}
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ml-auto size-4" />
+      <ChevronRightIcon className="ml-auto size-3.5" />
     </ContextMenuPrimitive.SubTrigger>
   );
 }
@@ -95,9 +130,26 @@ function ContextMenuSubContent({
     <ContextMenuPrimitive.SubContent
       data-slot="context-menu-sub-content"
       className={cn(
-        "z-50 min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+        "ease-out duration-150 z-50 min-w-[8rem] origin-(--radix-context-menu-content-transform-origin) overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg dark:text-neutral-50 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
         className,
       )}
+      {...props}
+    />
+  );
+}
+
+function ContextMenuLabel({
+  className,
+  inset,
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.Label> & {
+  inset?: boolean;
+}) {
+  return (
+    <ContextMenuPrimitive.Label
+      data-slot="context-menu-label"
+      data-inset={inset}
+      className={cn("px-2 pt-1 pb-0.5 text-xs text-muted-foreground data-[inset]:pl-8", className)}
       {...props}
     />
   );
@@ -120,6 +172,7 @@ export {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuPortal,
   ContextMenuSeparator,
   ContextMenuSub,
