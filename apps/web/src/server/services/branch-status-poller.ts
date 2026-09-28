@@ -345,6 +345,13 @@ export async function getBatchedCIStatuses(
 let pollCount = 0;
 /** The newest poll started for each workspace (see `pollWorkspace`). */
 const latestPollByWorkspace = new Map<string, number>();
+/**
+ * CI status a tick fetched for a workspace and hasn't stored yet. When a
+ * later poll supersedes the tick's (see `pollWorkspace`), the later poll
+ * stores this instead of the older row, so the GitHub result isn't lost
+ * until the next CI tick.
+ */
+const pendingCIByWorkspace = new Map<string, CIStatus>();
 
 /**
  * Poll one workspace's git status, store it with `newCI` (or the stored CI
@@ -353,14 +360,16 @@ const latestPollByWorkspace = new Map<string, number>();
 async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
   const poll = ++pollCount;
   latestPollByWorkspace.set(ws.workspaceId, poll);
+  if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
   const git = await getGitStatus(ws.worktreePath);
   // A poll of this workspace that started later (a selection refresh during a
   // tick) read fresher state and writes it; this older result must not land last.
   if (latestPollByWorkspace.get(ws.workspaceId) !== poll) return;
 
   const db = getDb();
-  let ci: CIStatus = newCI ?? { state: "none" };
-  if (!newCI) {
+  const pendingCI = pendingCIByWorkspace.get(ws.workspaceId);
+  let ci: CIStatus = newCI ?? pendingCI ?? { state: "none" };
+  if (!newCI && !pendingCI) {
     // Keep the stored CI status when this poll didn't query CI
     const existing = db
       .select({
@@ -407,6 +416,9 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
       },
     })
     .run();
+  if (pendingCIByWorkspace.get(ws.workspaceId) === ci) {
+    pendingCIByWorkspace.delete(ws.workspaceId);
+  }
 
   // Emit directly to SSE listeners
   emit({
