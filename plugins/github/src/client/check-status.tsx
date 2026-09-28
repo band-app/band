@@ -37,7 +37,7 @@ export function countChecks(checks: CheckRun[]): CheckCounts {
   for (const check of checks) {
     if (check.state === "success" || check.state === "neutral") counts.passing++;
     else if (check.state === "failure") counts.failing++;
-    else if (check.state === "running" || check.state === "pending") counts.pending++;
+    else if (isUnfinished(check)) counts.pending++;
   }
   return counts;
 }
@@ -82,13 +82,19 @@ export function isUnfinished(check: CheckRun): boolean {
   return check.state === "running" || check.state === "pending";
 }
 
+/** Whether the check has started and not finished, so its elapsed time grows. */
+export function isCountingUp(check: CheckRun): boolean {
+  return isUnfinished(check) && !!check.startedAt && !check.completedAt;
+}
+
 /**
  * What the Duration line says for a check that has not finished: the time
  * since GitHub's `startedAt`, or "Queued" when it has not started.
  */
 export function checkElapsed(check: CheckRun, now: number): string | null {
-  if (!isUnfinished(check) || check.completedAt) return null;
-  if (!check.startedAt) return "Queued";
-  const elapsed = formatDuration(now - Date.parse(check.startedAt));
-  return elapsed && `Running for ${elapsed}`;
+  if (isCountingUp(check)) {
+    const elapsed = formatDuration(now - Date.parse(check.startedAt as string));
+    return elapsed && `Running for ${elapsed}`;
+  }
+  return isUnfinished(check) && !check.startedAt ? "Queued" : null;
 }

@@ -2,14 +2,14 @@ import type { CheckRun, ChecksReport, ReviewInfo } from "@band-app/plugin-api";
 import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronDown, ChevronRight, CircleX, ExternalLink, WandSparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   CheckStateIcon,
   checkDuration,
   checkElapsed,
   checkStateLabel,
   countChecks,
-  isUnfinished,
+  isCountingUp,
 } from "./check-status";
 
 function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[]): string {
@@ -58,9 +58,7 @@ export function ChecksSection({
 }) {
   const host = useClientPluginHost();
   const [open, setOpen] = useState(true);
-  const now = useNow(
-    visible && open && checks.checks.some((c) => isUnfinished(c) && c.startedAt && !c.completedAt),
-  );
+  const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
   const [fixError, setFixError] = useState<string | null>(null);
 
@@ -147,7 +145,12 @@ export function ChecksSection({
         <CollapsibleContent>
           <ul data-testid="pr-checks__list">
             {checks.checks.map((check) => (
-              <CheckRow key={check.id} check={check} now={now} />
+              <CheckRow
+                key={check.id}
+                check={check}
+                // Rows without a growing elapsed time keep a stable prop and skip the tick.
+                now={isCountingUp(check) ? now : 0}
+              />
             ))}
           </ul>
         </CollapsibleContent>
@@ -180,7 +183,7 @@ function SummaryCount({
   );
 }
 
-function CheckRow({ check, now }: { check: CheckRun; now: number }) {
+const CheckRow = memo(function CheckRow({ check, now }: { check: CheckRun; now: number }) {
   const host = useClientPluginHost();
   const [open, setOpen] = useState(false);
   const duration = checkDuration(check) ?? checkElapsed(check, now);
@@ -271,4 +274,4 @@ function CheckRow({ check, now }: { check: CheckRun; now: number }) {
       </Collapsible>
     </li>
   );
-}
+});

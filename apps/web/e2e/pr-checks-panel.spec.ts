@@ -112,11 +112,13 @@ test.beforeAll(async () => {
   git(repo, ["worktree", "add", "-b", PR_BRANCH, prWorktree]);
   const readyWorktree = join(tmpHome, "wt-ready");
   git(repo, ["worktree", "add", "-b", READY_BRANCH, readyWorktree]);
-  const worktrees = [MERGE_FAIL_BRANCH, REFRESH_BRANCH, GH_DOWN_BRANCH, RUNNING_BRANCH].map((branch) => {
-    const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
-    git(repo, ["worktree", "add", "-b", branch, path]);
-    return { name: branch, branch, path };
-  });
+  const worktrees = [MERGE_FAIL_BRANCH, REFRESH_BRANCH, GH_DOWN_BRANCH, RUNNING_BRANCH].map(
+    (branch) => {
+      const path = join(tmpHome, `wt-${branch.replaceAll("/", "-")}`);
+      git(repo, ["worktree", "add", "-b", branch, path]);
+      return { name: branch, branch, path };
+    },
+  );
   const localOnly = join(tmpHome, "local-only");
   mkdirSync(localOnly, { recursive: true });
   git(localOnly, ["init", "-b", "main"]);
@@ -371,9 +373,8 @@ test("Refresh runs the lookup again and shows the new checks", async ({ page }) 
   await expect(panel.checkNames).toHaveText(["Build", "Deploy"]);
 });
 
-test("a running check counts up from its start time and a queued one says so", async ({
-  page,
-}) => {
+test("a running check counts up from its start time and a queued one says so", async ({ page }) => {
+  runningAnswer = runningChecks({ completedAt: null });
   const panel = new PrChecksPanelPage(page, server.url, TOKEN);
   await panel.setTime("2026-01-01T10:04:12Z");
   await panel.goto(toWorkspaceId(PROJECT, RUNNING_BRANCH));
