@@ -4,7 +4,7 @@
  *
  * The dashboard's inner dockview containers call `set` when the user switches
  * the active chat/terminal/browser tab; the "Add to Chat" / "Add to Terminal"
- * selection-tooltip actions call `get` to resolve which pane should receive the
+ * selection context menu actions call `get` to resolve which pane should receive the
  * pasted reference. Thin pass-through to `PanelFocusService`.
  */
 

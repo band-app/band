@@ -1,8 +1,9 @@
-import type { RepoInfo } from "../../infra/git/git-client";
+import type { PullRequestSummary, RepoInfo } from "../../infra/git/git-client";
 
 export interface CIStatus {
   state: string;
   url?: string | null;
+  pr?: PullRequestSummary | null;
 }
 
 export interface BatchCIInput {
@@ -21,9 +22,20 @@ interface CheckSuiteNode {
   } | null;
 }
 
+interface PullRequestNode {
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  isDraft: boolean;
+  /** Null when the fork the PR came from has been deleted. */
+  headRepositoryOwner: { login: string } | null;
+}
+
 interface GraphQLRepoResponse {
+  owner?: { login: string };
   pullRequests: {
-    nodes: Array<{ state: string; url: string }>;
+    nodes: PullRequestNode[];
   };
   ref: {
     target: {
@@ -48,8 +60,9 @@ export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
     const branch = escapeGraphQL(input.branch);
 
     return `${input.alias}: repository(owner: "${owner}", name: "${repo}") {
-    pullRequests(headRefName: "${branch}", first: 1, states: [OPEN, MERGED], orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes { state url }
+    owner { login }
+    pullRequests(headRefName: "${branch}", first: 5, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes { number title state url isDraft headRepositoryOwner { login } }
     }
     ref(qualifiedName: "refs/heads/${branch}") {
       target {
@@ -72,6 +85,50 @@ export function buildBatchedCIQuery(inputs: BatchCIInput[]): string {
   });
 
   return `query { ${fragments.join("\n  ")} }`;
+}
+
+/**
+ * The branch's PR: open first, then merged, then closed, each the most
+ * recently updated (the query orders by `UPDATED_AT`). `headRefName` also
+ * matches PRs from forks with a branch of the same name, so only PRs whose
+ * head is in the repository itself count, and only ones with a web URL (the
+ * badge hands it to the system's URL handler). On the default branch only
+ * an open PR counts: a merged or closed PR whose head is `main` came from a
+ * merge of main into another branch.
+ */
+function pickPullRequest(
+  allNodes: PullRequestNode[],
+  repoOwner: string | undefined,
+  isDefaultBranch: boolean,
+): PullRequestSummary | null {
+  const nodes = allNodes.filter(
+    (n) =>
+      repoOwner !== undefined &&
+      n.headRepositoryOwner?.login.toLowerCase() === repoOwner.toLowerCase() &&
+      isWebUrl(n.url),
+  );
+  const node =
+    nodes.find((n) => n.state === "OPEN") ??
+    (isDefaultBranch
+      ? undefined
+      : (nodes.find((n) => n.state === "MERGED") ?? nodes.find((n) => n.state === "CLOSED")));
+  if (!node) return null;
+  return {
+    number: node.number,
+    title: node.title,
+    url: node.url,
+    state: node.state === "OPEN" ? "open" : node.state === "MERGED" ? "merged" : "closed",
+    isDraft: node.isDraft,
+  };
+}
+
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 function escapeGraphQL(value: string): string {
@@ -117,21 +174,13 @@ export function parseBatchedCIResponse(
     }
 
     // Check PR status
-    let prUrl: string | null = null;
     const isDefaultBranch = defaultBranches?.get(alias) !== undefined;
-    const prNodes = repo.pullRequests?.nodes ?? [];
-    if (prNodes.length > 0) {
-      const pr = prNodes[0];
-      // Only show "merged" for feature branches, not the default branch.
-      // A merged PR on main just means someone merged main into another branch.
-      if (pr.state === "MERGED" && !isDefaultBranch) {
-        results.set(alias, { state: "merged", url: pr.url });
-        continue;
-      }
-      if (pr.state !== "MERGED") {
-        prUrl = pr.url;
-      }
+    const pr = pickPullRequest(repo.pullRequests?.nodes ?? [], repo.owner?.login, isDefaultBranch);
+    if (pr?.state === "merged") {
+      results.set(alias, { state: "merged", url: pr.url, pr });
+      continue;
     }
+    const prUrl = pr?.state === "open" ? pr.url : null;
 
     // Check CI status from check suites
     const checkSuiteNodes = repo.ref?.target?.checkSuites?.nodes ?? [];
@@ -143,7 +192,7 @@ export function parseBatchedCIResponse(
     );
 
     if (workflowRuns.length === 0) {
-      results.set(alias, { state: "none", url: prUrl });
+      results.set(alias, { state: "none", url: prUrl, pr });
       continue;
     }
 
@@ -197,6 +246,7 @@ export function parseBatchedCIResponse(
     results.set(alias, {
       state: aggregatedState,
       url: prUrl ?? aggregatedUrl,
+      pr,
     });
   }
 

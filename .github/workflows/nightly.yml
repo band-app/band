@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: write
+  # Open, update and close the `ci:nightly-failure` issue (see the last steps).
+  issues: write
 
 jobs:
   nightly:
@@ -193,3 +195,45 @@ jobs:
             --notes "Latest unstable build from main. Version: $NIGHTLY_VERSION. Commit: $GH_SHA. Not published to stable updater channel." \
             --prerelease \
             "$STAGING"/*
+
+      # A failed nightly used to fail silently: nobody watches scheduled runs,
+      # and it once failed on the same test three nights in a row. A failed
+      # scheduled run opens an issue labelled `ci:nightly-failure` (or
+      # comments on the open one), and the next passing run closes it. Manual
+      # runs (workflow_dispatch, possibly of a branch) only write the job
+      # summary.
+      - name: Report nightly failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BODY="The nightly build failed on \`${GH_SHA}\`: ${RUN_URL}"
+          echo "### Nightly build failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "$BODY" >> "$GITHUB_STEP_SUMMARY"
+          [ "$EVENT_NAME" = "schedule" ] || exit 0
+          gh label create ci:nightly-failure --color B60205 \
+            --description "The scheduled nightly build is failing" --force
+          ISSUE=$(gh issue list --label ci:nightly-failure --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body "$BODY"
+          else
+            gh issue create --title "Nightly build is failing" --label ci:nightly-failure \
+              --body "$BODY The next passing nightly closes this issue."
+          fi
+
+      - name: Close nightly failure issue
+        if: success() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for ISSUE in $(gh issue list --label ci:nightly-failure --state open --json number --jq '.[].number'); do
+            gh issue close "$ISSUE" --comment "The nightly build passed again: ${RUN_URL}"
+          done

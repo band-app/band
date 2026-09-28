@@ -93,9 +93,20 @@ export type CIState =
   | "cancelled"
   | "merged";
 
+/** A workspace branch's pull request, found by the branch-status poller. */
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+}
+
 export interface CIStatus {
   state: CIState;
   url?: string;
+  /** The branch's PR: open, else the latest merged, else the latest closed. */
+  pr?: PullRequestSummary | null;
 }
 
 export interface WorkspaceBranchStatus {

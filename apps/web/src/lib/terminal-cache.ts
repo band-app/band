@@ -518,6 +518,9 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     // --- Custom key bindings (sticky-Ctrl, Cmd+F, Shift+Enter, Alt+Arrow) ---
     term.attachCustomKeyEventHandler((e) => {
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle center tabs (WorkspaceCenterDockview's
+      // window handler). Never send them to the shell as a Tab.
+      if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) return false;
       if (e.type === "keydown") {
         if (state.pendingCtrl && e.key.length === 1 && !e.metaKey && !e.altKey && !e.ctrlKey) {
           const lower = e.key.toLowerCase();
@@ -795,7 +798,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         didConnectOnce = true;
 
         if (dims && autoFocusPending && !isReconnect) {
-          term.focus();
+          // Leave focus in an open dialog (Quick Open, the workspace picker)
+          // the user moved to while the socket connected. Its focus trap
+          // would pull focus back with the query selected, and the next
+          // keystroke would replace everything typed so far.
+          if (!document.activeElement?.closest('[role="dialog"], [role="alertdialog"]')) {
+            term.focus();
+          }
           autoFocusPending = false;
         }
 

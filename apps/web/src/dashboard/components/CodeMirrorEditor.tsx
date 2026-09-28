@@ -1,6 +1,6 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseEditorExtensions,
@@ -17,8 +17,11 @@ import {
 import {
   type MarkdownLivePreviewOptions,
   markdownLivePreviewExtensions,
+  markdownPreviewWidthTheme,
 } from "../lib/markdown-live-preview";
-import { selectionToChatExtension } from "../lib/selection-to-chat";
+import type { MarkdownPreviewWidth } from "../lib/markdown-preview-width";
+import { selectionReferenceExtension } from "../lib/selection-to-chat";
+import { CodeSelectionContextMenu } from "./SelectionContextMenu";
 
 interface CodeMirrorEditorProps {
   /** Initial content to populate the editor with */
@@ -32,7 +35,7 @@ interface CodeMirrorEditorProps {
   originalContent?: string;
   language: string;
   className?: string;
-  /** Workspace-relative file path — enables "Add to Chat" on text selection */
+  /** Workspace-relative file path — enables the file actions in the selection context menu */
   filePath?: string;
   /** 1-based line number to scroll to and highlight */
   line?: number;
@@ -65,6 +68,11 @@ interface CodeMirrorEditorProps {
    * editor.
    */
   markdownPreview?: Pick<MarkdownLivePreviewOptions, "renderBlock" | "resolveImageUrl">;
+  /**
+   * Text column width of the markdown preview. Changing it reconfigures the
+   * live editor, keeping its document, selection, history and scroll.
+   */
+  markdownPreviewWidth?: MarkdownPreviewWidth;
   /** Make the document read-only (used for a markdown preview that cannot be saved). */
   readOnly?: boolean;
 }
@@ -86,6 +94,7 @@ export function CodeMirrorEditor({
   savedSelection,
   savedScrollTop,
   markdownPreview,
+  markdownPreviewWidth = "narrow",
   readOnly = false,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +113,11 @@ export function CodeMirrorEditor({
   const markdownPreviewRef = useRef(markdownPreview);
   markdownPreviewRef.current = markdownPreview;
   const isMarkdownPreview = markdownPreview != null;
+  const [widthCompartment] = useState(() => new Compartment());
+  const markdownPreviewWidthRef = useRef(markdownPreviewWidth);
+  markdownPreviewWidthRef.current = markdownPreviewWidth;
+  /** The width the current view was built or last reconfigured with. */
+  const appliedWidthRef = useRef(markdownPreviewWidth);
 
   // Store line props in refs so the creation effect can read them without re-running
   const lineRef = useRef(line);
@@ -155,9 +169,13 @@ export function CodeMirrorEditor({
 
       const onSave = () => onSaveRef.current?.();
       const preview = markdownPreviewRef.current;
+      appliedWidthRef.current = markdownPreviewWidthRef.current;
       const extensions = [
         ...(preview
-          ? markdownLivePreviewExtensions({ ...preview, isDark, onSave })
+          ? [
+              ...markdownLivePreviewExtensions({ ...preview, isDark, onSave }),
+              widthCompartment.of(markdownPreviewWidthTheme(markdownPreviewWidthRef.current)),
+            ]
           : baseEditorExtensions(isDark, onSave)),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
@@ -172,7 +190,7 @@ export function CodeMirrorEditor({
         }),
       ];
       if (filePath) {
-        extensions.push(selectionToChatExtension(filePath));
+        extensions.push(selectionReferenceExtension(filePath));
       }
       if (readOnly) {
         extensions.push(EditorState.readOnly.of(true));
@@ -274,7 +292,19 @@ export function CodeMirrorEditor({
         onEditorViewRef.current?.(null);
       }
     };
-  }, [language, isDark, filePath, isMarkdownPreview, readOnly]);
+  }, [language, isDark, filePath, isMarkdownPreview, readOnly, widthCompartment]);
+
+  // Width changes swap only the width theme, so the view keeps its document,
+  // selection and history, and CodeMirror's scroll anchor keeps the same text
+  // at the top while the lines rewrap.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !isMarkdownPreview || appliedWidthRef.current === markdownPreviewWidth) return;
+    appliedWidthRef.current = markdownPreviewWidth;
+    view.dispatch({
+      effects: widthCompartment.reconfigure(markdownPreviewWidthTheme(markdownPreviewWidth)),
+    });
+  }, [markdownPreviewWidth, isMarkdownPreview, widthCompartment]);
 
   // Handle line/lineEnd/column changes without recreating the editor
   useEffect(() => {
@@ -289,5 +319,9 @@ export function CodeMirrorEditor({
     }
   }, [line, lineEnd, column]);
 
-  return <div ref={containerRef} className={className} />;
+  return (
+    <CodeSelectionContextMenu>
+      <div ref={containerRef} className={className} />
+    </CodeSelectionContextMenu>
+  );
 }

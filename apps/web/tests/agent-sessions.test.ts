@@ -216,10 +216,12 @@ describe("agentSessions.launch", () => {
     const terminalId = "6c1f4a7b-2d3e-4f60-9b0c-1d2e3f4a5b6c";
     const result = await launch(server.url, { mode: "tui", terminalId });
     expect(result.mode).toBe("tui");
+    // The stub prints `ARGV:` and its closing newline with separate writes,
+    // so a read can land between them. Wait for the line to end.
     const output = await waitFor(
       async () => {
         const out = await terminalOutput(server.url, terminalId);
-        return out?.includes("ARGV:") ? out : undefined;
+        return out?.match(/ARGV:.*\r?\n/) ? out : undefined;
       },
       { label: "agent CLI started" },
     );

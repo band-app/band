@@ -46,6 +46,7 @@ import { WebSocket } from "ws";
 import * as schema from "../src/server/infra/db/schema";
 import { findFreePort } from "../src/server/services/_utils/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
+import { waitForProcessGroupExit } from "./helpers/server";
 import { stopTerminalDaemon } from "./helpers/terminal-daemon";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -105,6 +106,9 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
         NO_UPDATE_NOTIFIER: "1",
       },
       stdio: ["pipe", "pipe", "pipe"],
+      // Its own process group, so `close()` reaches the tsx server under
+      // pnpm, not only pnpm.
+      detached: true,
     });
 
     let stderr = "";
@@ -128,13 +132,18 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
           home: tmpHome,
           child,
           close: async () => {
-            await new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-              // Hard kill if SIGTERM hangs (tsx watch's signal handling
-              // sometimes wedges in tests).
-              setTimeout(() => child.kill("SIGKILL"), 3_000).unref();
-            });
+            // pnpm exits before the server under it has finished shutting
+            // down (and writing into the tmp home), so wait for the whole
+            // group. It sends SIGKILL if SIGTERM hangs (tsx watch's signal
+            // handling sometimes wedges in tests).
+            if (child.pid !== undefined) {
+              try {
+                process.kill(-child.pid, "SIGTERM");
+              } catch {
+                // Group already gone.
+              }
+              await waitForProcessGroupExit(child.pid, 3_000);
+            }
             // The /terminal upgrade launches the detached terminal daemon,
             // which outlives the server and keeps writing into the tmp home.
             await stopTerminalDaemon(tmpHome);
@@ -165,7 +174,11 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill("SIGKILL");
+        try {
+          if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+        } catch {
+          // Group already gone.
+        }
         reject(
           new Error(`Dev server did not start within 60 s.\nstdout: ${stdout}\nstderr: ${stderr}`),
         );

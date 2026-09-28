@@ -2,8 +2,15 @@ import type { CheckRun, ChecksReport, ReviewInfo } from "@band-app/plugin-api";
 import { useClientPluginHost } from "@band-app/plugin-api/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import { ChevronDown, ChevronRight, CircleX, ExternalLink, WandSparkles } from "lucide-react";
-import { useState } from "react";
-import { CheckStateIcon, checkDuration, checkStateLabel, countChecks } from "./check-status";
+import { memo, useEffect, useState } from "react";
+import {
+  CheckStateIcon,
+  checkDuration,
+  checkElapsed,
+  checkStateLabel,
+  countChecks,
+  isCountingUp,
+} from "./check-status";
 
 function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[]): string {
   const subject = review ? `pull request #${review.number} (${review.title})` : `branch ${branch}`;
@@ -19,20 +26,39 @@ function fixPrompt(branch: string, review: ReviewInfo | null, failing: CheckRun[
   ].join("\n");
 }
 
+/**
+ * The current time, updated every second while `ticking`. One timer for the
+ * whole list, so running checks count up together.
+ */
+function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  return now;
+}
+
 /** The failing banner with Fix, the summary row and the list of checks. */
 export function ChecksSection({
   workspaceId,
   branch,
   review,
   checks,
+  visible,
 }: {
   workspaceId: string;
   branch: string;
   review: ReviewInfo | null;
   checks: ChecksReport;
+  /** Whether the tab is on screen; the elapsed-time timer only runs then. */
+  visible: boolean;
 }) {
   const host = useClientPluginHost();
   const [open, setOpen] = useState(true);
+  const now = useNow(visible && open && checks.checks.some(isCountingUp));
   const [fixState, setFixState] = useState<"idle" | "starting" | "started">("idle");
   const [fixError, setFixError] = useState<string | null>(null);
 
@@ -119,7 +145,12 @@ export function ChecksSection({
         <CollapsibleContent>
           <ul data-testid="pr-checks__list">
             {checks.checks.map((check) => (
-              <CheckRow key={check.id} check={check} />
+              <CheckRow
+                key={check.id}
+                check={check}
+                // Rows without a growing elapsed time keep a stable prop and skip the tick.
+                now={isCountingUp(check) ? now : 0}
+              />
             ))}
           </ul>
         </CollapsibleContent>
@@ -152,10 +183,10 @@ function SummaryCount({
   );
 }
 
-function CheckRow({ check }: { check: CheckRun }) {
+const CheckRow = memo(function CheckRow({ check, now }: { check: CheckRun; now: number }) {
   const host = useClientPluginHost();
   const [open, setOpen] = useState(false);
-  const duration = checkDuration(check);
+  const duration = checkDuration(check) ?? checkElapsed(check, now);
   return (
     <li
       className="border-b border-border/60"
@@ -235,7 +266,7 @@ function CheckRow({ check }: { check: CheckRun }) {
             {duration && (
               <>
                 <dt className="text-muted-foreground">Duration</dt>
-                <dd>{duration}</dd>
+                <dd data-testid="pr-checks__check-duration">{duration}</dd>
               </>
             )}
           </dl>
@@ -243,4 +274,4 @@ function CheckRow({ check }: { check: CheckRun }) {
       </Collapsible>
     </li>
   );
-}
+});

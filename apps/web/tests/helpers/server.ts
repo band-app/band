@@ -150,6 +150,35 @@ export interface StartServerOptions {
 }
 
 /**
+ * Resolve once no process is left in process group `pgid`, sending SIGKILL
+ * to the group if it is still there after `timeoutMs`. `afterAll` deletes
+ * the tmp home next, and a process still writing into it fails that delete
+ * with ENOTEMPTY.
+ */
+export async function waitForProcessGroupExit(pgid: number, timeoutMs = 5_000): Promise<void> {
+  const alive = () => {
+    try {
+      process.kill(-pgid, 0);
+      return true;
+    } catch (err) {
+      // EPERM: the group exists but isn't ours to signal, so it's alive.
+      return (err as NodeJS.ErrnoException).code === "EPERM";
+    }
+  };
+  const waitUntil = async (deadline: number) => {
+    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  };
+  await waitUntil(Date.now() + timeoutMs);
+  if (!alive()) return;
+  try {
+    process.kill(-pgid, "SIGKILL");
+  } catch {
+    return;
+  }
+  await waitUntil(Date.now() + 1_000);
+}
+
+/**
  * Boot the production server bundle in a child process. Resolves
  * when the server logs `"listening"` to stdout; rejects if it exits
  * first or doesn't bind within 15 s. The returned `close()` signals
@@ -230,6 +259,9 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
               });
               killGroup("SIGTERM");
             });
+            // The server exiting doesn't mean its group has: a `git` it ran
+            // can still be writing into the tmp home.
+            if (child.pid !== undefined) await waitForProcessGroupExit(child.pid);
             if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(tmpHome);
           },
         });
