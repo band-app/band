@@ -130,6 +130,7 @@ import {
 } from "../lib/dockview-section-actions";
 import { attachTouchTabActivation } from "../lib/dockview-touch-tabs";
 import { isDesktop } from "../lib/is-desktop";
+import { focusActiveLeaf } from "../lib/leaf-focus";
 import {
   markBrowserFresh,
   markChatFresh,
@@ -761,7 +762,10 @@ function ChatLeafContent({
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the composer mounts (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-chat-leaf__visible-${visible ? "true" : "false"}`}
     >
       <ChatPane
@@ -816,7 +820,10 @@ function TerminalLeaf({ params, api, containerApi }: IDockviewPanelProps<TermLea
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the xterm attaches (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-term-leaf__visible-${visible ? "true" : "false"}`}
     >
       <TerminalSplitLeaf
@@ -854,7 +861,10 @@ function BrowserLeaf({ params, api }: IDockviewPanelProps<BrowserLeafParams>) {
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the address bar mounts (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-browser-leaf__visible-${visible ? "true" : "false"}`}
     >
       <BrowserPaneComponent
@@ -1530,7 +1540,10 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
       // moves focus inside it. `useLeafFind` only opens on Cmd/Ctrl+F when
       // focus is within this container; without this a preview could never
       // open its find bar.
+      // It's also the focus fallback for a leaf with no editor (an image, a
+      // PDF) or one still loading (lib/leaf-focus.ts).
       tabIndex={-1}
+      data-band-leaf-root=""
       className="flex h-full w-full flex-col overflow-hidden outline-none"
       data-testid={`center-file-leaf__visible-${visible ? "true" : "false"}`}
     >
@@ -1848,7 +1861,10 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
   return (
     <div
       ref={containerRef}
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="flex h-full w-full flex-col overflow-hidden outline-none"
+      // The focus fallback while the diff loads (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-root=""
       data-testid={`center-diff-leaf__visible-${visible ? "true" : "false"}`}
     >
       <div className="relative min-h-0 flex-1">
@@ -1857,8 +1873,12 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
             so the native one is hidden and the content leaves room for it. */}
         <div
           ref={diffScrollerRef}
+          // Focused when the tab is shown, so the arrow keys scroll the diff
+          // (lib/leaf-focus.ts).
+          tabIndex={-1}
+          data-band-leaf-focus=""
           data-testid="center-diff-leaf__scroller"
-          className={`h-full overflow-auto ${diff ? "pr-3 [scrollbar-width:none]" : ""}`}
+          className={`h-full overflow-auto outline-none ${diff ? "pr-3 [scrollbar-width:none]" : ""}`}
         >
           {diff ? (
             <DiffFileContent
@@ -1945,7 +1965,14 @@ function SectionDiffsLeaf({
   const mergeBase = changesQuery.data?.mergeBase ?? undefined;
 
   return (
-    <div className="h-full w-full overflow-auto" data-testid={`center-section-diffs--${section}`}>
+    <div
+      className="h-full w-full overflow-auto outline-none"
+      // Focused when the tab is shown, so the arrow keys scroll the diffs
+      // (lib/leaf-focus.ts).
+      tabIndex={-1}
+      data-band-leaf-focus=""
+      data-testid={`center-section-diffs--${section}`}
+    >
       {entries.length === 0 ? (
         <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
           {changesQuery.isLoading ? "Loading diff…" : "No changes"}
@@ -3899,6 +3926,31 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     [workspaceId],
   );
 
+  // Move focus into the active leaf (lib/leaf-focus.ts). One attempt at a
+  // time: a newer tab switch cancels the previous one's retries.
+  const cancelLeafFocusRef = useRef<() => void>(() => {});
+  const focusLeaf = useCallback((force = false) => {
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    cancelLeafFocusRef.current();
+    cancelLeafFocusRef.current = focusActiveLeaf(api, {
+      container,
+      force,
+      isCurrent: () => visibleRef.current && wsActiveRef.current !== false,
+    });
+  }, []);
+
+  // Focus the active leaf of a workspace that was just shown. Focus is in the
+  // sidebar or the workspace picker then, so this one takes it from there. A
+  // phone only focuses a terminal or the address bar, as before: an editor or
+  // the chat composer would open the on-screen keyboard.
+  const focusShownLeaf = useCallback(() => {
+    const kind = apiRef.current?.activePanel?.api.component;
+    if (!kind) return;
+    if (!mobile || kind === "term" || kind === "browser") focusLeaf(true);
+  }, [mobile, focusLeaf]);
+
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const api = event.api;
@@ -4013,6 +4065,19 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
         }
         schedulePersist();
         reportFocus();
+        // Every tab switch (Ctrl+Tab, the palette, a click, a close) moves
+        // focus into the new leaf, or it stays behind on the tab strip or
+        // falls to <body> and the next Ctrl+Tab is lost. Not on a phone, where
+        // focusing an input opens the keyboard, and not for a restore or
+        // another device's change.
+        if (
+          !mobile &&
+          visibleRef.current &&
+          !applyingSharedRef.current &&
+          !isRestoringRef.current
+        ) {
+          focusLeaf();
+        }
       });
       api.onDidMovePanel(() => {
         if (!applyingSharedRef.current && !isRestoringRef.current) {
@@ -4022,6 +4087,9 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
 
       setTimeout(() => {
         isRestoringRef.current = false;
+        // A workspace shown for the first time mounts its dockview after the
+        // visibility effect below ran with no leaves yet.
+        if (visibleRef.current) focusShownLeaf();
         // Persist a freshly-built DEFAULT layout once, immediately. It is
         // otherwise only written on the NEXT outer-layout change — but splitting
         // a terminal is a NESTED change that never touches the outer layout, so
@@ -4053,6 +4121,8 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       schedulePersist,
       flushPersist,
       reportFocus,
+      focusLeaf,
+      focusShownLeaf,
     ],
   );
 
@@ -4254,30 +4324,25 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   useEffect(() => {
     if (!visible) return;
 
-    const refocusActive = () => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      const el = panel.view.content.element;
-      (
-        el.querySelector<HTMLElement>(".xterm-helper-textarea") ??
-        el.querySelector<HTMLElement>("[data-band-address-input]")
-      )?.focus();
-    };
-
+    // The active-panel listener in `onReady` moves focus into the leaf these
+    // shortcuts activate.
     const handler = (e: KeyboardEvent) => {
-      if (!containerRef.current?.contains(document.activeElement)) return;
       const api = apiRef.current;
       if (!api) return;
       const key = e.key.toLowerCase();
+      const active = document.activeElement;
 
-      if (e.ctrlKey && !e.metaKey && key === "tab") {
+      // Ctrl+Tab also works with focus on <body>: a leaf that lost focus (its
+      // content unmounted, a dialog closed onto nothing) mustn't strand it.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && key === "tab") {
+        if (!containerRef.current?.contains(active) && active && active !== document.body) return;
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1, () =>
-          requestAnimationFrame(refocusActive),
-        );
+        cycleTabsInActiveGroup(api, e.shiftKey ? -1 : 1);
         return;
       }
+
+      if (!containerRef.current?.contains(active)) return;
 
       // ⌘D / ⌘⇧D (Ctrl+Shift+D / Alt+Shift+D off macOS) split chat / browser
       // leaves into sibling groups. Terminals split INTO nested panes instead,
@@ -4310,15 +4375,13 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
       if (e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1, () =>
-          requestAnimationFrame(refocusActive),
-        );
+        cycleTabsInActiveGroup(api, key === "]" ? 1 : -1);
         return;
       }
       if (!e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGridGroups(api, key === "]" ? 1 : -1, () => requestAnimationFrame(refocusActive));
+        cycleGridGroups(api, key === "]" ? 1 : -1);
         return;
       }
 
@@ -4341,17 +4404,14 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
   useEffect(() => {
     if (!visible) return;
     const id = requestAnimationFrame(() => {
-      const panel = apiRef.current?.activePanel;
-      if (!panel) return;
-      const el = panel.view.content.element;
-      (
-        el.querySelector<HTMLElement>(".xterm-helper-textarea") ??
-        el.querySelector<HTMLElement>("[data-band-address-input]")
-      )?.focus();
+      focusShownLeaf();
       reportFocus();
     });
-    return () => cancelAnimationFrame(id);
-  }, [visible, reportFocus]);
+    return () => {
+      cancelAnimationFrame(id);
+      cancelLeafFocusRef.current();
+    };
+  }, [visible, reportFocus, focusShownLeaf]);
 
   // Force a synchronous re-layout when this workspace's dockview becomes visible
   // (mirrors the legacy inner containers' reveal fix).

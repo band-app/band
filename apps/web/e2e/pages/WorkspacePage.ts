@@ -916,6 +916,15 @@ export class WorkspacePage {
     return this.page.getByTestId("center-file-leaf__view-diff");
   }
 
+  /** Open the active file leaf's changes in a diff tab through its "View
+   *  changes" header button, and wait until the diff tab exists. */
+  async openChangesOfActiveFile(path: string): Promise<void> {
+    await test.step(`Open the changes of ${path}`, async () => {
+      await this.fileLeafViewChangesButton.click();
+      await expect(this.diffTab(path)).toBeAttached({ timeout: 15_000 });
+    });
+  }
+
   /** Open `path` as a pinned file leaf through Quick Open (type the name,
    *  Enter) and wait until its tab exists. */
   async openFileViaQuickOpen(path: string): Promise<void> {
@@ -1539,6 +1548,12 @@ export class WorkspacePage {
    *  `tabContainer`. */
   fileTabContainer(path: string): Locator {
     return this.page.locator(`.dv-tab:has([data-testid="center-file-tab--${path}"])`);
+  }
+
+  /** The dockview `.dv-tab` wrapper of the `diff` leaf tab for `path`. See
+   *  `fileTabContainer`. */
+  diffTabContainer(path: string): Locator {
+    return this.page.locator(`.dv-tab:has([data-testid="center-diff-tab--${path}"])`);
   }
 
   // ──────────────────────────────────────────────────────────────────────

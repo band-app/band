@@ -502,7 +502,8 @@ export const PromptInputTextarea = ({
         if (isTouchDevice) return;
         e.preventDefault();
         e.currentTarget.form?.requestSubmit();
-      } else if (e.key === "Tab" && e.shiftKey && onShiftTab) {
+      } else if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && onShiftTab) {
+        // Ctrl+Shift+Tab is the previous-tab chord, not a mode toggle.
         // Suppress default focus-previous so the cursor stays in the
         // textarea — host uses this to toggle a contextual mode picker.
         e.preventDefault();
