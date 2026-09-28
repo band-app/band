@@ -120,7 +120,7 @@ describe("terminal echo while the branch-status poller runs", () => {
         label: "first poll tick",
       });
 
-      socket.onOutput((text) => {
+      const stopCounting = socket.onOutput((text) => {
         const at = performance.now();
         for (const char of text) if (char === "a") echoes.push(at);
       });
@@ -134,6 +134,9 @@ describe("terminal echo while the branch-status poller runs", () => {
       await waitFor(async () => echoes.length >= sent.length || undefined, {
         label: "every held key echoed",
       });
+      // What the shell prints after the Ctrl-C isn't an echo: with `SHELL`
+      // set to bash, which ignores `.zshrc`, its prompt `bash-3.2$ ` has an "a".
+      stopCounting();
       socket.type("\x03");
     } finally {
       status?.close();
