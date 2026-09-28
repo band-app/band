@@ -577,6 +577,21 @@ export class WorkspacePage {
     return this.page.getByTestId("app-shell__sidebar");
   }
 
+  /** Drag the separator between the sidebar and the center column by `dx`
+   *  pixels (positive widens the sidebar). */
+  async dragSidebarEdgeBy(dx: number): Promise<void> {
+    await test.step(`Drag the sidebar edge by ${dx}px`, async () => {
+      const box = await this.page.getByTestId("app-shell__sidebar-separator").boundingBox();
+      if (!box) throw new Error("sidebar separator not visible");
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await this.page.mouse.move(x, y);
+      await this.page.mouse.down();
+      await this.page.mouse.move(x + dx, y, { steps: 10 });
+      await this.page.mouse.up();
+    });
+  }
+
   /** The header button that toggles the sidebar (⌘B). Rendered by
    *  `NavControls` in `DesktopTitleBar.tsx`, hosted once in `AppShell`'s
    *  stationary overlay pinned over the title-bar row's left edge — it stays put in both

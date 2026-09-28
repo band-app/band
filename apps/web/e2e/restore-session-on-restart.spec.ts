@@ -9,8 +9,8 @@
  *
  * Each test restarts the real server on the same HOME and port, then opens
  * `/` the way the desktop shell does:
- *   - the workspace, the selected label, the active center tab and the right
- *     sidepanel tab all come back, in the same browser and in a new one with
+ *   - the workspace, the selected label, the active center tab, the right
+ *     sidepanel tab and the sidebar width all come back, in the same browser and in a new one with
  *     empty localStorage (the values come from the server);
  *   - a workspace deleted while Band was closed leaves the app on `/`;
  *   - when another device picked a different label, the label and the
@@ -109,6 +109,10 @@ test("a restart reopens the workspace, label, active tab and right sidepanel tab
   await workspacePage.waitForReady();
   await workspacePage.openFileLeaf(FILE, WS_BETA);
   await workspacePage.selectRightSidepanelTab("changes");
+  const sidebarBefore = await workspacePage.sidebarWidth();
+  await workspacePage.dragSidebarEdgeBy(120);
+  await expect.poll(() => workspacePage.sidebarWidth()).toBeGreaterThan(sidebarBefore + 60);
+  const sidebarWidth = await workspacePage.sidebarWidth();
 
   // Everything reached the server before it stops.
   await expect
@@ -117,7 +121,10 @@ test("a restart reopens the workspace, label, active tab and right sidepanel tab
   await expect
     .poll(() => workspacePage.readServerClientState(null, "band:right-sidepanel-tab"))
     .toBe("changes");
-  await expect.poll(() => workspacePage.readSharedActiveTab(WS_BETA)).not.toBeNull();
+  await expect.poll(() => workspacePage.readSharedActiveTab(WS_BETA)).toBe(`file:${FILE}`);
+  await expect
+    .poll(() => workspacePage.readServerClientState(null, "band:sidebar-width"))
+    .not.toBeNull();
 
   server = await server.restart();
 
@@ -127,6 +134,7 @@ test("a restart reopens the workspace, label, active tab and right sidepanel tab
   await expect(workspacePage.labelFilterTrigger()).toHaveText("Beta");
   await expect(workspacePage.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
   await expect(workspacePage.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => workspacePage.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
 
   // A browser with nothing in localStorage gets the same from the server.
   const context = await browser.newContext(DESKTOP);
@@ -137,6 +145,7 @@ test("a restart reopens the workspace, label, active tab and right sidepanel tab
     await expect(fresh.labelFilterTrigger()).toHaveText("Beta");
     await expect(fresh.fileTabContainer(FILE)).toHaveClass(/dv-active-tab/);
     await expect(fresh.rightSidepanelTab("changes")).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => fresh.sidebarWidth()).toBeCloseTo(sidebarWidth, 0);
   } finally {
     await context.close();
   }
@@ -198,6 +207,11 @@ test("a label another device picked opens that label's last workspace", async ({
   } finally {
     await context.close();
   }
+
+  // The desktop itself is still on Alpha: only the label says Beta.
+  await expect
+    .poll(() => desktop.readServerClientState(null, "band:last-workspace"))
+    .toBe(WS_ALPHA);
 
   server = await server.restart();
 

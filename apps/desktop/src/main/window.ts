@@ -48,9 +48,11 @@ function preloadPath(): string {
 const SAVE_DELAY_MS = 500;
 
 /**
- * Apply the saved bounds and maximized state, or fill the primary display's
- * work area like Tauri did. Full screen is applied after the window shows,
- * because macOS ignores it on a hidden window. Returns the saved state.
+ * Apply the saved bounds, or fill the primary display's work area like Tauri
+ * did. Returns the saved state when its bounds were used, so the caller
+ * maximizes or enters full screen once the window shows: `maximize()` would
+ * show the window before the page paints, and macOS ignores full screen on
+ * a hidden window.
  */
 function restoreWindowState(win: BrowserWindow): WindowState | null {
   const saved = loadWindowState();
@@ -58,12 +60,11 @@ function restoreWindowState(win: BrowserWindow): WindowState | null {
   const bounds = saved ? fitToDisplays(saved.bounds, areas) : null;
   if (bounds) {
     win.setBounds(bounds);
-    if (saved?.maximized) win.maximize();
   } else {
     const { width, height } = screen.getPrimaryDisplay().workAreaSize;
     win.setBounds({ x: 0, y: 0, width, height });
   }
-  return saved;
+  return bounds ? saved : null;
 }
 
 /** Save the window's state as it moves, resizes, (un)maximizes and closes. */
@@ -165,6 +166,7 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
 
   win.once("ready-to-show", () => {
     win.show();
+    if (saved?.maximized) win.maximize();
     if (saved?.fullScreen) win.setFullScreen(true);
     // Auto-open DevTools in dev so the renderer is inspectable from the
     // first frame. Packaged builds stay quiet — users can toggle DevTools

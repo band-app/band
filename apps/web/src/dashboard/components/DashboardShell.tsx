@@ -150,17 +150,14 @@ export function DashboardShell({
     [projects],
   );
 
-  // Per-label "last workspace" tracking for issue #505. Two write sites
-  // cooperate so the user's selection is captured whether they open a
-  // workspace (`useRecordLabelLastWorkspace`, run by the app shell so it also
-  // sees a pick on the phone's full-screen dashboard, which unmounts this
-  // shell) or switch label without opening anything (`setLabelFilter`
-  // below), which saves the outgoing label so the most recent selection is
-  // captured even when it was reached by direct URL, the ⌘K picker or a
-  // reload.
-  // Per-label "last workspace" plumbing for issue #505. The orchestration
-  // lives in `setLabelFilter` below; the helper here keeps the bookkeeping
-  // out of the keyboard / dropdown handlers.
+  // Per-label "last workspace" for issue #505. Two write sites cooperate:
+  // `useRecordLabelLastWorkspace`, run by the app shell, records each
+  // workspace opened under a label (the app shell also sees a pick on the
+  // phone's full-screen dashboard, which unmounts this shell), and
+  // `setLabelFilter` below saves the outgoing label's workspace on a label
+  // switch, so a workspace reached by direct URL, the ⌘K picker or a reload
+  // is captured too. `setLabelFilter` also restores the incoming label's
+  // workspace.
   //
   // Invariants enforced by the caller:
   //   1. Saves only happen when the outgoing label is non-null (ALL has no

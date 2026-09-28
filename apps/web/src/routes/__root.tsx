@@ -44,7 +44,11 @@ import { type BrowserWebview, getBrowserWebview, zoomBrowserWebview } from "../l
 import { HYDRATE_WAIT_MS, hydrateGlobal, startClientStateSync } from "../lib/client-state";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
-import { pickStartWorkspace, recordLastWorkspace } from "../lib/last-workspace";
+import {
+  keepLastWorkspaceOnce,
+  pickStartWorkspace,
+  recordLastWorkspace,
+} from "../lib/last-workspace";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   loadRightPanelCollapsed,
@@ -342,6 +346,7 @@ function ClientStateGate({ children }: { children: ReactNode }) {
       // device type last showed. A URL that names a workspace is kept.
       if (router.state.location.pathname === "/") {
         const list = await withTimeout(projects, HYDRATE_WAIT_MS);
+        if (!list) keepLastWorkspaceOnce();
         const target = list ? pickStartWorkspace(list) : null;
         if (target && !cancelled) {
           await router.navigate({
@@ -362,7 +367,11 @@ function ClientStateGate({ children }: { children: ReactNode }) {
 
 /** `promise`'s value, or null when it takes longer than `ms`. */
 function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
-  return Promise.race([promise, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((r) => {
+    timer = setTimeout(() => r(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function AppShell() {
@@ -868,7 +877,11 @@ function AppShell() {
                 see-through tint would let the vibrancy layer through past the
                 sidebar's border. The colours equal the other separator's
                 accent tints over `--background`. */}
-              <Separator className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize" />
+              {/* react-resizable-panels writes `id` into `data-testid`. */}
+              <Separator
+                id="app-shell__sidebar-separator"
+                className="w-[3px] bg-background hover:bg-[color-mix(in_srgb,var(--accent-foreground)_20%,var(--background))] active:bg-[color-mix(in_srgb,var(--accent-foreground)_30%,var(--background))] transition-colors cursor-col-resize"
+              />
               <Panel id="main" elementRef={mainElRef} minSize="20%">
                 {/* Stays mounted across sidebar toggles — never unmount this
                   subtree or the dockview tears down all cached workspaces. */}

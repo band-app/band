@@ -10,28 +10,37 @@
  */
 
 import { LABEL_FILTER_KEY } from "../dashboard/hooks/use-label-filter";
-import { LABEL_LAST_WORKSPACE_KEY } from "../dashboard/hooks/use-label-last-workspace";
+import { readLabelLastWorkspaces } from "../dashboard/hooks/use-label-last-workspace";
 import { toWorkspaceId } from "../dashboard/lib/workspace-id";
 import type { ProjectInfo } from "../dashboard/types";
 import { clientStorage } from "./client-state";
 
 export const LAST_WORKSPACE_KEY = "band:last-workspace";
 
+/**
+ * Set by `keepLastWorkspaceOnce` when the start check couldn't tell whether
+ * the saved workspace still exists (the project list failed or was slow).
+ */
+let keepOnce = false;
+
+/**
+ * Don't let the next "no workspace on screen" clear the saved one. For a
+ * launch that stayed on `/` only because the project list didn't arrive in
+ * time: the next launch should still try the saved workspace.
+ */
+export function keepLastWorkspaceOnce(): void {
+  keepOnce = true;
+}
+
 /** Record the workspace on screen, or null when none is. */
 export function recordLastWorkspace(workspaceId: string | null): void {
+  if (keepOnce) {
+    keepOnce = false;
+    if (!workspaceId) return;
+  }
   if (clientStorage.getItem(LAST_WORKSPACE_KEY) === workspaceId) return;
   if (workspaceId) clientStorage.setItem(LAST_WORKSPACE_KEY, workspaceId);
   else clientStorage.removeItem(LAST_WORKSPACE_KEY);
-}
-
-function readLabelLastWorkspace(labelId: string): string | undefined {
-  try {
-    const map = JSON.parse(clientStorage.getItem(LABEL_LAST_WORKSPACE_KEY) ?? "{}");
-    const value = map?.[labelId];
-    return typeof value === "string" ? value : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -56,7 +65,7 @@ export function pickStartWorkspace(projects: readonly ProjectInfo[]): string | n
   const label = clientStorage.getItem(LABEL_FILTER_KEY);
   if (!last) return null;
   if (label && labelOf.get(last) !== label) {
-    const labelled = readLabelLastWorkspace(label);
+    const labelled = readLabelLastWorkspaces()[label];
     if (labelled && labelOf.get(labelled) === label) return labelled;
   }
   return labelOf.has(last) ? last : null;
