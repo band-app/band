@@ -118,6 +118,18 @@ export interface SessionState {
    *  one, else Band's estimate from the last turn's tokens. */
   costUsd: number | null;
   title: string | null;
+  /** Claude Code only: the model and effort its `default` model and effort
+   *  choices run with, as the session reports them or config sets them.
+   *  Absent for other agents. */
+  resolvedDefaults?: ResolvedDefaults;
+}
+
+/** What an agent's `default` model and effort choices resolve to. */
+export interface ResolvedDefaults {
+  /** A model id or alias (`claude-opus-5-5`, `opus[1m]`, `sonnet`). */
+  model?: string;
+  /** An effort level (`low`, `medium`, `high`, `xhigh`, `max`). */
+  effort?: string;
 }
 
 // ---------------------------------------------------------------------------

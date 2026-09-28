@@ -29,6 +29,11 @@
  *   BAND_TEST_ACP_COMMANDS  JSON array of AvailableCommand replacing the
  *                           default `echo` and `review` commands, in the
  *                           order the agent advertises them.
+ *   BAND_TEST_ACP_CLI_ARGS  JSON array of arguments. When set, every session
+ *                           starts an idle child process whose command line
+ *                           is `--session-id=<id>` followed by them, the way
+ *                           the Claude adapter starts the `claude` CLI (or a
+ *                           wrapper script that adds `--settings`).
  *
  * Scenario file:
  *
@@ -59,6 +64,7 @@
  * the session's model.
  */
 
+import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -150,6 +156,20 @@ function configOptions(s) {
       currentValue: s.extra?.[o.id] ?? o.options[0]?.value ?? "",
     })),
   ];
+}
+
+const cliArgs = env.BAND_TEST_ACP_CLI_ARGS ? JSON.parse(env.BAND_TEST_ACP_CLI_ARGS) : null;
+/** sessionIds that have a CLI child running */
+const clis = new Set();
+
+/** Starts the session's stand-in CLI process, which exits with the stub. */
+function startCli(sessionId) {
+  if (!cliArgs || clis.has(sessionId)) return;
+  clis.add(sessionId);
+  const idle = "const p = process.ppid; setInterval(() => { if (process.ppid !== p) process.exit(); }, 500);";
+  spawn(process.execPath, ["-e", idle, "--", `--session-id=${sessionId}`, ...cliArgs], {
+    stdio: "ignore",
+  }).unref();
 }
 
 function newSessionId() {
@@ -278,6 +298,7 @@ acp
     const s = { cwd: ctx.params.cwd, title: null, updatedAt: new Date().toISOString(), model: MODELS[0].value, mode: MODES[0].value, history: [] };
     sessions.set(sessionId, s);
     save(sessionId);
+    startCli(sessionId);
     // Sent before the reply on purpose: a client must accept updates for a
     // session whose id it hasn't been told yet (the real adapters do this).
     await ctx.client.notify(acp.methods.client.session.update, {
@@ -290,6 +311,7 @@ acp
     logRequest("session/load", ctx.params);
     const s = lookup(ctx.params.sessionId);
     if (!s) throw new acp.RequestError(-32002, `Resource not found: ${ctx.params.sessionId}`);
+    startCli(ctx.params.sessionId);
     for (const update of s.history) {
       await ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update });
     }
@@ -299,6 +321,7 @@ acp
     logRequest("session/resume", ctx.params);
     const s = lookup(ctx.params.sessionId);
     if (!s) throw new acp.RequestError(-32002, `Resource not found: ${ctx.params.sessionId}`);
+    startCli(ctx.params.sessionId);
     return { configOptions: configOptions(s) };
   })
   .onRequest("session/list", (ctx) => {
