@@ -14,6 +14,9 @@
  *                           process can `session/list`, `session/load` and
  *                           `session/resume` them (a server restart).
  *                           Without it sessions live in memory.
+ *   BAND_TEST_ACP_LIST_ALL_CWDS  When set, `session/list` ignores `cwd` and
+ *                           returns every saved session, the way the Claude
+ *                           adapter lists sessions from all git worktrees.
  *   BAND_TEST_ACP_LOG       File to append one JSON line per request and
  *                           notification received ({ method, params, cwd,
  *                           pid, env }), so a test can assert what Band sent.
@@ -328,7 +331,7 @@ acp
     logRequest("session/list", ctx.params);
     return {
       sessions: allSessions()
-        .filter(([, s]) => !ctx.params.cwd || s.cwd === ctx.params.cwd)
+        .filter(([, s]) => env.BAND_TEST_ACP_LIST_ALL_CWDS || !ctx.params.cwd || s.cwd === ctx.params.cwd)
         .map(([sessionId, s]) => ({ sessionId, cwd: s.cwd, title: s.title, updatedAt: s.updatedAt })),
     };
   })
