@@ -332,6 +332,9 @@ export async function getBatchedCIStatuses(
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
+  // The first tick asks GitHub too (without the fetch), so the PR badges are
+  // current as soon as a client connects instead of one CI period later.
+  const queryCI = isCITick || pollerState.tickCount === 1;
 
   if (pollerState.tickCount === 1 || isCITick) {
     await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
@@ -361,7 +364,7 @@ async function pollTick() {
   // tick body just above; freshly-discovered origin changes land in the
   // map before this filter reads it.
   let ciStatuses = new Map<string, CIStatus>();
-  if (isCITick) {
+  if (queryCI) {
     const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
     if (ciWorkspaces.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
@@ -373,17 +376,21 @@ async function pollTick() {
       const git = await getGitStatus(ws.worktreePath);
 
       let ci: CIStatus = { state: "none" };
-      if (isCITick) {
+      if (queryCI) {
         ci = ciStatuses.get(ws.workspaceId) ?? { state: "none" };
       } else {
         // Preserve existing CI status from DB on non-CI ticks
         const existing = db
-          .select({ ciState: branchStatusesTable.ciState, ciUrl: branchStatusesTable.ciUrl })
+          .select({
+            ciState: branchStatusesTable.ciState,
+            ciUrl: branchStatusesTable.ciUrl,
+            ciPr: branchStatusesTable.ciPr,
+          })
           .from(branchStatusesTable)
           .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
           .get();
         if (existing) {
-          ci = { state: existing.ciState, url: existing.ciUrl };
+          ci = { state: existing.ciState, url: existing.ciUrl, pr: existing.ciPr };
         }
       }
 
@@ -400,6 +407,7 @@ async function pollTick() {
           gitSyncState: git.sync_state,
           ciState: ci.state,
           ciUrl: ci.url ?? null,
+          ciPr: ci.pr ?? null,
           updatedAt: now,
         })
         .onConflictDoUpdate({
@@ -412,6 +420,7 @@ async function pollTick() {
             gitSyncState: git.sync_state,
             ciState: ci.state,
             ciUrl: ci.url ?? null,
+            ciPr: ci.pr ?? null,
             updatedAt: now,
           },
         })

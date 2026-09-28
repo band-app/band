@@ -214,8 +214,11 @@ export function execGit(args: string[], cwd: string): Promise<string> {
 export function execGh(args: string[], cwd: string): Promise<string> {
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
+  // `BAND_GH_BIN` overrides the binary, read on every call, the same way the
+  // GitHub plugin's `runGh` does (tests point it at their `gh` stub).
+  const bin = process.env.BAND_GH_BIN || "gh";
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, env, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
+    execFile(bin, args, { cwd, env, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error(stderr || err.message));
         return;

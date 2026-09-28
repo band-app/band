@@ -7,6 +7,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { PullRequestSummary } from "../../services/_utils/github-graphql";
 
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
@@ -30,6 +31,8 @@ export const branchStatuses = sqliteTable("branch_statuses", {
   gitSyncState: text("git_sync_state").notNull(),
   ciState: text("ci_state").notNull(),
   ciUrl: text("ci_url"),
+  /** The branch's pull request, as JSON; null when it has none. */
+  ciPr: text("ci_pr", { mode: "json" }).$type<PullRequestSummary>(),
   updatedAt: integer("updated_at").notNull(),
 });
 

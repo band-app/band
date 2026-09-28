@@ -59,6 +59,13 @@ interface GitStatus {
 interface CIStatus {
   state: string;
   url?: string | null;
+  pr?: {
+    number: number;
+    title: string;
+    url: string;
+    state: "open" | "merged" | "closed";
+    isDraft: boolean;
+  } | null;
 }
 
 export interface StatusEvent {

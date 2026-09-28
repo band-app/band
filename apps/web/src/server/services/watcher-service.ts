@@ -58,6 +58,7 @@ export class WatcherService {
       ci: {
         state: row.ciState,
         url: row.ciUrl,
+        pr: row.ciPr,
       },
     }));
   }

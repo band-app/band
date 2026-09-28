@@ -107,8 +107,9 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain("query {");
     expect(query).toContain('ws_0: repository(owner: "acme", name: "app")');
     expect(query).toContain(
-      'pullRequests(headRefName: "feature-branch", first: 1, states: [OPEN, MERGED]',
+      'pullRequests(headRefName: "feature-branch", first: 5, states: [OPEN, MERGED, CLOSED]',
     );
+    expect(query).toContain("nodes { number title state url isDraft }");
     expect(query).toContain('ref(qualifiedName: "refs/heads/feature-branch")');
     expect(query).toContain("checkSuites(first: 20)");
     expect(query).toContain("workflowRun {");
@@ -185,8 +186,11 @@ describe("parseBatchedCIResponse", () => {
         pullRequests: {
           nodes: [
             {
+              number: 1,
+              title: "Shipped",
               state: "MERGED",
               url: "https://github.com/o/r/pull/1",
+              isDraft: false,
             },
           ],
         },
@@ -198,6 +202,13 @@ describe("parseBatchedCIResponse", () => {
     expect(result.get("ws_0")).toEqual({
       state: "merged",
       url: "https://github.com/o/r/pull/1",
+      pr: {
+        number: 1,
+        title: "Shipped",
+        url: "https://github.com/o/r/pull/1",
+        state: "merged",
+        isDraft: false,
+      },
     });
   });
 
@@ -250,14 +261,22 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")).toEqual({ state: "none", url: null });
+    expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
   it("returns none with PR URL when PR exists but no workflow runs", () => {
     const data = {
       ws_0: {
         pullRequests: {
-          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/1" }],
+          nodes: [
+            {
+              number: 1,
+              title: "Draft work",
+              state: "OPEN",
+              url: "https://github.com/o/r/pull/1",
+              isDraft: true,
+            },
+          ],
         },
         ref: {
           target: {
@@ -281,6 +300,13 @@ describe("parseBatchedCIResponse", () => {
     expect(result.get("ws_0")).toEqual({
       state: "none",
       url: "https://github.com/o/r/pull/1",
+      pr: {
+        number: 1,
+        title: "Draft work",
+        url: "https://github.com/o/r/pull/1",
+        state: "open",
+        isDraft: true,
+      },
     });
   });
 
@@ -572,7 +598,7 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")).toEqual({ state: "none", url: null });
+    expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
   it("returns cancelled state when workflow is cancelled", () => {
