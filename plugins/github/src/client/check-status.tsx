@@ -37,7 +37,7 @@ export function countChecks(checks: CheckRun[]): CheckCounts {
   for (const check of checks) {
     if (check.state === "success" || check.state === "neutral") counts.passing++;
     else if (check.state === "failure") counts.failing++;
-    else if (check.state === "running" || check.state === "pending") counts.pending++;
+    else if (isUnfinished(check)) counts.pending++;
   }
   return counts;
 }
@@ -65,14 +65,36 @@ export function ReviewStateBadge({ state }: { state: ReviewInfo["state"] }) {
   );
 }
 
+function formatDuration(ms: number): string | null {
+  if (Number.isNaN(ms)) return null;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
 /** How long a check ran, e.g. `2m 14s`, or null while it has not finished. */
 export function checkDuration(check: CheckRun): string | null {
   if (!check.startedAt || !check.completedAt) return null;
-  const seconds = Math.max(
-    0,
-    Math.round((Date.parse(check.completedAt) - Date.parse(check.startedAt)) / 1000),
-  );
-  if (Number.isNaN(seconds)) return null;
-  const minutes = Math.floor(seconds / 60);
-  return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+  return formatDuration(Date.parse(check.completedAt) - Date.parse(check.startedAt));
+}
+
+export function isUnfinished(check: CheckRun): boolean {
+  return check.state === "running" || check.state === "pending";
+}
+
+/** Whether the check has started and not finished, so its elapsed time grows. */
+export function isCountingUp(check: CheckRun): boolean {
+  return isUnfinished(check) && !!check.startedAt && !check.completedAt;
+}
+
+/**
+ * What the Duration line says for a check that has not finished: the time
+ * since GitHub's `startedAt`, or "Queued" when it has not started.
+ */
+export function checkElapsed(check: CheckRun, now: number): string | null {
+  if (isCountingUp(check)) {
+    const elapsed = formatDuration(now - Date.parse(check.startedAt as string));
+    return elapsed && `Running for ${elapsed}`;
+  }
+  return isUnfinished(check) && !check.startedAt ? "Queued" : null;
 }
