@@ -128,12 +128,17 @@ describe("terminal echo while the branch-status poller runs", () => {
       await waitFor(async () => echoes.length >= sent.length || undefined, {
         label: "every held key echoed",
       });
-      // What `cat` prints after the Enter isn't an echo.
-      stopCounting();
-      // End the line: macOS caps a canonical-mode tty line at 1024 bytes.
-      socket.type("\r");
       expect(echoes).toHaveLength(sent.length);
-      return sent.map((at, i) => Math.round(echoes[i] - at));
+      const delays = sent.map((at, i) => Math.round(echoes[i] - at));
+      // End the line: macOS caps a canonical-mode tty line at 1024 bytes.
+      // `cat` prints it back; wait for that too, so the next hold doesn't
+      // count its "a"s as echoes.
+      socket.type("\r");
+      await waitFor(async () => echoes.length >= 2 * sent.length || undefined, {
+        label: "held line printed back",
+      });
+      stopCounting();
+      return delays;
     };
     const slowKeys = (delays: number[]) => delays.filter((ms) => ms >= MAX_ECHO_MS);
 
