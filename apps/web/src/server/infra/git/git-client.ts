@@ -52,6 +52,19 @@ export interface RepoInfo {
 }
 
 /**
+ * The pull request the sidebar's PR badge shows (`PullRequestBadge`). A
+ * workspace has at most one: its branch's open PR, else the most recently
+ * updated merged one, else the most recently updated closed one.
+ */
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged" | "closed";
+  isDraft: boolean;
+}
+
+/**
  * Prefix used by `detachedShaLabel`. Exported so callers that need to
  * recognise the synthetic label (e.g. `workspaces.remove` skipping
  * `git branch -D` for a non-real ref) can do so without re-spelling
@@ -221,7 +234,10 @@ async function execOffThread(
 export function execGh(args: string[], cwd: string): Promise<string> {
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
-  return execOffThread("gh", args, { cwd, env, maxBuffer: MAX_BUFFER });
+  // `BAND_GH_BIN` overrides the binary, read on every call, the same way the
+  // GitHub plugin's `runGh` does (tests point it at their `gh` stub).
+  const bin = process.env.BAND_GH_BIN || "gh";
+  return execOffThread(bin, args, { cwd, env, maxBuffer: MAX_BUFFER });
 }
 
 /**
