@@ -106,6 +106,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
   }
 
+  async refreshBranchStatus(workspaceId: string): Promise<void> {
+    await this.trpc.statuses.refreshBranchStatus.mutate({ workspaceId });
+  }
+
   async runScript(path: string, scriptType: string): Promise<void> {
     await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }

@@ -44,7 +44,15 @@ export interface WorktreeRemoval {
   end(): void;
 }
 
-/** Syncs in progress; each may hold a state snapshot from before a removal. */
+/**
+ * Rows `workspaces.create` saved while a sync was running, by path. That sync
+ * may have loaded state before the save and listed worktrees before
+ * `git worktree add` finished, so it puts these back before its own save.
+ * An entry lasts until every sync running at the save has finished.
+ */
+const addedWorktrees = new Map<string, { project: string; row: WorktreeState }>();
+
+/** Syncs in progress; each may hold a state snapshot from before a removal or a create. */
 const syncsInFlight = new Set<Promise<void>>();
 
 /**
@@ -133,6 +141,13 @@ async function runSync(): Promise<void> {
   if (changed) {
     for (const project of state.projects) {
       project.worktrees = project.worktrees.filter((wt) => !removedWorktrees.has(wt.path));
+    }
+    for (const { project: name, row } of addedWorktrees.values()) {
+      if (removingWorktrees.has(row.path)) continue;
+      const project = state.projects.find((p) => p.name === name);
+      if (project && !project.worktrees.some((wt) => wt.path === row.path)) {
+        project.worktrees.push(row);
+      }
     }
     saveState(state);
   }
@@ -263,6 +278,19 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
 export class SyncService {
   async syncWorktrees(): Promise<void> {
     return syncWorktrees();
+  }
+
+  /**
+   * Call right after saving state with a new worktree row, so a sync already
+   * running can't save its older snapshot over it.
+   */
+  commitWorktreeAdd(project: string, row: WorktreeState): void {
+    if (syncsInFlight.size === 0) return;
+    const entry = { project, row };
+    addedWorktrees.set(row.path, entry);
+    void Promise.allSettled(syncsInFlight).then(() => {
+      if (addedWorktrees.get(row.path) === entry) addedWorktrees.delete(row.path);
+    });
   }
 
   /**

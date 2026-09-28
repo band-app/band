@@ -12,6 +12,7 @@ import {
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
 import { GitClient } from "../infra/git/git-client";
+import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import {
   type ProjectAvatarInfo,
   type ProjectAvatarService,
@@ -106,79 +107,81 @@ export class ProjectService {
       reconcileKindForProject(project);
     }
 
-    const result = await Promise.all(
-      projects.map(async (project) => {
-        // Reads the memoised remote and the on-disk cache only; the GitHub
-        // fetch happens when the browser requests `avatar.src`. Started
-        // here so its `git remote` call overlaps `git worktree list`.
-        const avatar = this.avatars.describe(project).catch(() => null);
-        // Plain projects have a single implicit workspace whose path equals
-        // the project path. They don't have a `.git` directory, so we skip
-        // the `git worktree list` enrichment entirely and rely on the
-        // workspace row that `add` synthesized into state.
-        let worktrees = project.worktrees;
-        if (project.kind === "git") {
-          // state.json is the canonical "tracked workspaces" set — git's view
-          // is just used to enrich each entry with current path/head. We
-          // intersect the two so a workspace removed from state.json (e.g.
-          // by workspaces.remove, which updates state.json synchronously and
-          // defers the slow `git worktree remove` / `git branch -D` to a
-          // background task) disappears from the list immediately, even
-          // before the async cleanup has finished pruning the on-disk
-          // worktree. Without this filter, the list reads stale data from
-          // `git worktree list` and shows just-deleted workspaces until the
-          // background cleanup completes.
-          // Map by PATH (not branch) so we can preserve Band-owned metadata
-          // git doesn't know about — the immutable `name` identity and the
-          // `pinned` flag — when merging git's view with our tracked state.
-          // Path is stable across a git branch switch; the branch is exactly
-          // what changes. Keying by branch here would drop a just-switched
-          // worktree from the list (and reset its `name`/`pinned`) in the
-          // window before the next sync tick reconciles the tracked branch.
-          // This mirrors the path-keyed merge in `sync-service.ts`.
-          const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
-          try {
-            const gitWorktrees = await this.git.listWorktrees(project.path);
-            worktrees = gitWorktrees
-              .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
-              .map((wt) => {
-                const tracked = trackedByPath.get(wt.path);
-                return {
-                  // Carry the stable identity from the tracked row; fall back
-                  // to the branch for worktrees git knows about but state
-                  // doesn't.
-                  name: tracked?.name ?? wt.branch,
-                  branch: wt.branch,
-                  path: wt.path,
-                  head: wt.head,
-                  pinned: tracked?.pinned ?? false,
-                };
-              });
-          } catch {
-            // Fall back to tracked worktrees
-          }
+    // A few projects at a time: each runs `git worktree list` (plus, about
+    // once a minute, the avatar's `git remote`, so up to twice
+    // `GIT_SPAWN_CONCURRENCY` git calls), and the dashboard refetches this
+    // every 30 s.
+    const result = await mapLimited(projects, GIT_SPAWN_CONCURRENCY, async (project) => {
+      // Reads the memoised remote and the on-disk cache only; the GitHub
+      // fetch happens when the browser requests `avatar.src`. Started
+      // here so its `git remote` call overlaps `git worktree list`.
+      const avatar = this.avatars.describe(project).catch(() => null);
+      // Plain projects have a single implicit workspace whose path equals
+      // the project path. They don't have a `.git` directory, so we skip
+      // the `git worktree list` enrichment entirely and rely on the
+      // workspace row that `add` synthesized into state.
+      let worktrees = project.worktrees;
+      if (project.kind === "git") {
+        // state.json is the canonical "tracked workspaces" set — git's view
+        // is just used to enrich each entry with current path/head. We
+        // intersect the two so a workspace removed from state.json (e.g.
+        // by workspaces.remove, which updates state.json synchronously and
+        // defers the slow `git worktree remove` / `git branch -D` to a
+        // background task) disappears from the list immediately, even
+        // before the async cleanup has finished pruning the on-disk
+        // worktree. Without this filter, the list reads stale data from
+        // `git worktree list` and shows just-deleted workspaces until the
+        // background cleanup completes.
+        // Map by PATH (not branch) so we can preserve Band-owned metadata
+        // git doesn't know about — the immutable `name` identity and the
+        // `pinned` flag — when merging git's view with our tracked state.
+        // Path is stable across a git branch switch; the branch is exactly
+        // what changes. Keying by branch here would drop a just-switched
+        // worktree from the list (and reset its `name`/`pinned`) in the
+        // window before the next sync tick reconciles the tracked branch.
+        // This mirrors the path-keyed merge in `sync-service.ts`.
+        const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
+        try {
+          const gitWorktrees = await this.git.listWorktrees(project.path);
+          worktrees = gitWorktrees
+            .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
+            .map((wt) => {
+              const tracked = trackedByPath.get(wt.path);
+              return {
+                // Carry the stable identity from the tracked row; fall back
+                // to the branch for worktrees git knows about but state
+                // doesn't.
+                name: tracked?.name ?? wt.branch,
+                branch: wt.branch,
+                path: wt.path,
+                head: wt.head,
+                pinned: tracked?.pinned ?? false,
+              };
+            });
+        } catch {
+          // Fall back to tracked worktrees
         }
+      }
 
-        return {
-          name: project.name,
-          path: project.path,
-          defaultBranch: project.defaultBranch,
-          label: project.label,
-          kind: project.kind,
-          avatar: await avatar,
-          worktrees: worktrees.map((wt) => {
-            // Identity is by the immutable `name`, not the live branch.
-            const workspaceId = toWorkspaceId(project.name, wt.name);
-            const status = statusMap.get(workspaceId);
-            return {
-              ...wt,
-              workspaceId,
-              agent: status?.agent ?? null,
-            };
-          }),
-        };
-      }),
-    );
+      return {
+        name: project.name,
+        path: project.path,
+        defaultBranch: project.defaultBranch,
+        label: project.label,
+        kind: project.kind,
+        avatar: await avatar,
+        worktrees: worktrees.map((wt) => {
+          // Identity is by the immutable `name`, not the live branch.
+          const workspaceId = toWorkspaceId(project.name, wt.name);
+          const status = statusMap.get(workspaceId);
+          return {
+            ...wt,
+            workspaceId,
+            agent: status?.agent ?? null,
+          };
+        }),
+      };
+    });
 
     return { projects: result, labels: settings.labels ?? [] };
   }

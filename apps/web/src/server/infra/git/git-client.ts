@@ -1,7 +1,7 @@
-import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
+import { execFileOffThread } from "../process/exec-file-worker";
 import { prependBinDirs } from "../process/path";
 
 /**
@@ -194,15 +194,22 @@ export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
  */
 export function execGit(args: string[], cwd: string): Promise<string> {
   const { command, env } = gitCmd();
-  return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, env, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(stderr || err.message));
-        return;
-      }
-      resolve(stdout);
-    });
-  });
+  return execOffThread(command, args, { cwd, env, maxBuffer: MAX_BUFFER });
+}
+
+/**
+ * Run a command from the exec-file worker (`infra/process/exec-file-worker.ts`),
+ * so starting it doesn't block the event loop. Resolves with stdout; rejects
+ * with stderr, or the error message when stderr is empty.
+ */
+async function execOffThread(
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; maxBuffer: number },
+): Promise<string> {
+  const { stdout, stderr, error } = await execFileOffThread(command, args, options);
+  if (error !== null) throw new Error(stderr || error);
+  return stdout;
 }
 
 /**
@@ -214,15 +221,7 @@ export function execGit(args: string[], cwd: string): Promise<string> {
 export function execGh(args: string[], cwd: string): Promise<string> {
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
-  return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, env, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(stderr || err.message));
-        return;
-      }
-      resolve(stdout);
-    });
-  });
+  return execOffThread("gh", args, { cwd, env, maxBuffer: MAX_BUFFER });
 }
 
 /**

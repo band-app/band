@@ -96,6 +96,12 @@ export class WorkspacePage {
     return this.workspaceCard(workspaceId).getByTestId("workspace-card__home-icon");
   }
 
+  /** The "uncommitted changes" mark of a workspace card's git status
+   *  (`GitStatusIndicator`). Scoped to the card. */
+  gitDirtyMark(workspaceId: string): Locator {
+    return this.workspaceCard(workspaceId).getByTestId("workspace-card__git-dirty");
+  }
+
   /** The agent status dot inside a workspace card. `data-testid` set on the
    *  dot `<span>` in `AgentStatusIndicator`, shown only when the agent status
    *  is "working" / "needs_attention". Scoped to the card. */

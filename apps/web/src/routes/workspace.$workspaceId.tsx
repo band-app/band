@@ -131,6 +131,18 @@ function WorkspaceLayout() {
     setActiveWorkspace(decoded);
   }, [decoded, setActiveWorkspace]);
 
+  // Re-read this workspace's git status when it is selected, and when the
+  // window comes back into view, instead of waiting for the next poll tick.
+  const refreshBranchStatus = useDashboardStore((s) => s.refreshBranchStatus);
+  useEffect(() => {
+    refreshBranchStatus(decoded);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshBranchStatus(decoded);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [decoded, refreshBranchStatus]);
+
   // Clear needs_attention status when viewing this workspace
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   useEffect(() => {
