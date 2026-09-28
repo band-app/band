@@ -997,7 +997,10 @@ function ModelSettingsMenu({
         data-testid="chat-pane__model-menu-content"
       >
         {current && (
-          <DropdownMenuItem className="flex items-start gap-2">
+          <DropdownMenuItem
+            data-testid="chat-pane__model-menu-current"
+            className="flex items-start gap-2"
+          >
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="text-sm font-medium">{modelName(current)}</span>
               {current.description && (

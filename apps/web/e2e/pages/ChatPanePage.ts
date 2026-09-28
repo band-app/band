@@ -147,7 +147,7 @@ export class ChatPanePage {
     this.fastModeSwitch = this.fastModeItem.getByRole("switch", { includeHidden: true });
     this.moreModelsSubmenu = page.getByTestId("chat-pane__model-menu-more-models");
     this.moreModelsContent = page.getByTestId("chat-pane__model-menu-more-models-content");
-    this.selectedModelItem = this.modelMenuContent.getByRole("menuitem").first();
+    this.selectedModelItem = page.getByTestId("chat-pane__model-menu-current");
     this.moreModelsRows = this.moreModelsContent.getByRole("menuitem");
     this.effortSubmenuContent = page.getByTestId("chat-pane__model-menu-effort-submenu-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
