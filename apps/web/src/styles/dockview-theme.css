@@ -98,6 +98,19 @@
   content: none;
 }
 
+/* Splitview's `visible` state class also matches Tailwind's `.visible`
+ * utility (`visibility: visible`), which Tailwind generates because the word
+ * appears in scanned source. That turned visibility back on inside a hidden
+ * workspace entry (`visibility: hidden` in MultiWorkspacePanelHost), so its
+ * panes only stayed hidden while `content-visibility: hidden` skipped them.
+ * A workspace holding a paint-retained browser pane drops that skip
+ * (globals.css), and its whole tab strip then painted over the visible
+ * workspace's tabs, and in the desktop app its empty strip space dragged
+ * the window. `inherit` leaves a pane as visible as its workspace. */
+.dv-view.visible {
+  visibility: inherit;
+}
+
 /* More horizontal padding in each tab */
 .dockview-theme-band .dv-tab {
   padding-left: 1rem;
@@ -541,6 +554,14 @@
  * recalc is skipped, so a style change there doesn't reach the region until
  * something forces it. That is why hidden workspaces are locked only after
  * their `[inert]` reset has applied (`MultiWorkspacePanelHost`,
- * `globals.css`). To see the region the renderer computes, turn on the
- * window drag region overlay from the command palette.
+ * `globals.css`).
+ *
+ * Hidden workspaces: two things keep a hidden entry's strip out of the
+ * region. Its boxes compute `visibility: hidden` (the `.dv-view.visible`
+ * rule above stops Tailwind's `.visible` from turning it back on), so the
+ * walk skips them, and the `[inert]` reset in `globals.css` clears their
+ * app-region. The first also stops the strip painting when a paint-retained
+ * browser pane drops the entry's `content-visibility` skip. To see the region
+ * the renderer computes, turn on the window drag region overlay from the
+ * command palette.
  * --------------------------------------------------------------------------- */

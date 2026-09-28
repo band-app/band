@@ -25,6 +25,14 @@
  * workspaces are parked (`data-band-parked`) and the visible one isn't, and
  * that the visible layout stays clear.
  *
+ * A hidden entry's panes must also inherit its `visibility: hidden`.
+ * Dockview's `dv-view visible` state class used to match Tailwind's
+ * `.visible` utility, so they computed `visible`. That only showed in the
+ * desktop app with the CDP screencast setting on: a hidden workspace holding
+ * a browser pane keeps painting, and its whole tab strip covered the shown
+ * workspace's (reproduced and verified with real clicks, see the PR). The e2e
+ * build has no `<webview>`, so these tests check the computed visibility.
+ *
  * Architecture: the real production server against a fresh tmp `~/.band/`,
  * one seeded repo with two worktrees, no tRPC mocking, driven through `WorkspacePage`.
  */
@@ -119,6 +127,11 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   await expect(wp.cachedPanelEntries(WORKSPACE_A)).toHaveCount(1);
   await expect(wp.cachedPanelEntries(WORKSPACE_A)).toHaveAttribute("data-band-parked", "");
   await expect(wp.cachedPanelEntries(WORKSPACE_B)).not.toHaveAttribute("data-band-parked");
+  // A's tabs inherit its `visibility: hidden`. With a paint-retained browser
+  // pane (desktop only) the entry drops its `content-visibility` skip, and a
+  // tab that computed `visible` painted over B's strip.
+  expect(await wp.visibleTabTitlesIn(WORKSPACE_A)).toEqual([]);
+  expect(await wp.visibleTabTitlesIn(WORKSPACE_B)).toHaveLength(3);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 

@@ -204,6 +204,22 @@ export class WorkspacePage {
     );
   }
 
+  /** Titles of the center tab strip's tabs in a workspace's mounted entry
+   *  whose computed `visibility` is `visible`. Tabs of a strip nested inside a
+   *  panel (a terminal's split panes) don't count. A hidden entry's tabs must inherit its
+   *  `visibility: hidden`: when its `content-visibility` skip is dropped (a
+   *  paint-retained browser pane), visibility is all that keeps its tab strip
+   *  from painting over the shown workspace's. */
+  async visibleTabTitlesIn(workspaceId: string): Promise<string[]> {
+    return await this.cachedPanelEntries(workspaceId).evaluate((entry) =>
+      Array.from(
+        entry.querySelectorAll('.dv-tab:has([data-testid^="center-"][data-testid*="-tab--"])'),
+      )
+        .filter((tab) => getComputedStyle(tab).visibility === "visible")
+        .map((tab) => (tab.textContent ?? "").trim()),
+    );
+  }
+
   /** Locator for the chat tab panel's visibility marker inside a specific
    *  workspace's cached panel host (issue #469). The marker testid is set
    *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
