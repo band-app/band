@@ -2437,6 +2437,23 @@ export class WorkspacePage {
     return () => count;
   }
 
+  /** Start counting terminal WebSocket opens per terminal (matched on the
+   *  `terminalId=` query param). Returns a getter taking the terminal id, so
+   *  the ids can be learned after the terminals open. Call BEFORE `goto`.
+   *  Unlike `trackTerminalSocketOpensFor`, other terminals of the same
+   *  workspace reconnecting (a heartbeat timeout after `advanceClock`) don't
+   *  count. */
+  trackTerminalSocketOpensByTerminal(): (terminalId: string) => number {
+    const urls: string[] = [];
+    this.page.on("websocket", (ws) => {
+      if (ws.url().includes("/terminal?")) urls.push(ws.url());
+    });
+    return (terminalId) => {
+      const needle = `terminalId=${encodeURIComponent(terminalId)}`;
+      return urls.filter((url) => url.includes(needle)).length;
+    };
+  }
+
   /** Dispatch a window `online` event in the page — the resume trigger the
    *  terminal client uses to reconnect a dropped socket. Lets a test drive the
    *  reconnect path deterministically instead of waiting on a real network flap. */

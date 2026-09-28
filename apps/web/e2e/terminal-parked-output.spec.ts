@@ -75,6 +75,13 @@ async function serverOutput(workspaceId: string): Promise<string> {
   return output;
 }
 
+/** The last complete line of `seq` output in `output`, or -1. Only `seq`
+ *  prints a line of nothing but digits. */
+function lastSeqNumber(output: string): number {
+  const lines = [...output.slice(-512).matchAll(/^(\d+)\r?\n/gm)];
+  return lines.length ? Number(lines[lines.length - 1][1]) : -1;
+}
+
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   workdirA = makeGitWorkdir("band-parked-output-a-");
@@ -144,13 +151,30 @@ test("a parked terminal that overflows its output queue is resynced when shown",
   writeFileSync(gate, "");
 
   // The whole flood (~4 MB, twice the queue cap) reached A while it was
-  // parked, and without once waiting out the 5 s stall timeout.
+  // parked, and without once waiting out the 5 s stall timeout. A stall
+  // freezes the PTY, so the last `seq` number stops climbing for 5 s; a slow
+  // runner only makes it climb slower. A total-time budget can't tell the two
+  // apart, so measure the longest gap between two polls that saw progress.
+  let lastSeq = -1;
+  let lastProgressAt = Date.now();
+  let longestGap = 0;
   await expect
-    .poll(async () => (await serverOutput(WORKSPACE_A)).includes("PARKED_DONE_42"), {
-      timeout: 4_500,
-      intervals: [100],
-    })
+    .poll(
+      async () => {
+        const output = await serverOutput(WORKSPACE_A);
+        const done = output.includes("PARKED_DONE_42");
+        const seq = lastSeqNumber(output);
+        if (seq > lastSeq || done) {
+          longestGap = Math.max(longestGap, Date.now() - lastProgressAt);
+          lastSeq = seq;
+          lastProgressAt = Date.now();
+        }
+        return done;
+      },
+      { timeout: 30_000, intervals: [100] },
+    )
     .toBe(true);
+  expect(longestGap).toBeLessThan(4_000);
 
   await workspacePage.switchWorkspace(WORKSPACE_A);
   await expect(workspacePage.terminalTabVisibilityMarker(WORKSPACE_A, true)).toBeVisible({
