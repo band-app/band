@@ -54,6 +54,23 @@ function labelOf(el: Element): string {
   );
 }
 
+/** The part of `el` its overflow-clipping ancestors show. Only that part can
+ *  take a click: a tab scrolled out of the strip isn't covered by the drag
+ *  rect it slid under. */
+function visiblePart(el: Element): { left: number; top: number; right: number; bottom: number } {
+  const r = el.getBoundingClientRect();
+  let [left, top, right, bottom] = [r.left, r.top, r.right, r.bottom];
+  for (let a = el.parentElement; a; a = a.parentElement) {
+    if (getComputedStyle(a).overflowX === "visible") continue;
+    const c = a.getBoundingClientRect();
+    left = Math.max(left, c.left);
+    right = Math.min(right, c.right);
+    top = Math.max(top, c.top);
+    bottom = Math.min(bottom, c.bottom);
+  }
+  return { left, top, right, bottom };
+}
+
 export function isInDragRegion(rects: readonly DragRegionRect[], x: number, y: number): boolean {
   let drag = false;
   for (const r of rects) {
@@ -93,8 +110,8 @@ export function snapshotDragRegion(doc: Document = document): DragRegionSnapshot
   for (const el of doc.querySelectorAll(CONTROL_SELECTOR)) {
     if (el.closest(PARKED_SELECTOR) || el.closest("[inert]")) continue;
     if (!el.checkVisibility({ visibilityProperty: true })) continue;
-    const box = el.getBoundingClientRect();
-    if (box.width <= 0 || box.height <= 0) continue;
+    const box = visiblePart(el);
+    if (box.right - box.left <= 0 || box.bottom - box.top <= 0) continue;
     let hit = false;
     for (let x = box.left + 1; x < box.right - 1 && !hit; x += 3) {
       for (let y = box.top + 1; y < box.bottom - 1 && !hit; y += 3) {
@@ -105,8 +122,8 @@ export function snapshotDragRegion(doc: Document = document): DragRegionSnapshot
       covered.push({
         left: box.left,
         top: box.top,
-        width: box.width,
-        height: box.height,
+        width: box.right - box.left,
+        height: box.bottom - box.top,
         label: labelOf(el),
       });
     }

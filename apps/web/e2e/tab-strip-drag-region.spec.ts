@@ -16,6 +16,14 @@
  * union-and-subtract walk over the computed `app-region` values and returns
  * every tab, tab close button, header button or nav button it covers.
  *
+ * Not covered here: a hidden workspace locked with `content-visibility:
+ * hidden` before its descendants took the `[inert]` app-region reset kept
+ * their stale `drag` in Chromium's region. `getComputedStyle` forces the
+ * skipped recalc, so any DOM-level read sees the reset and the walk passes
+ * either way. That cause was reproduced and its fix verified with real
+ * native clicks in Electron 42 (see the PR); these tests only check that
+ * hidden workspaces stay parked and the visible layout stays clear.
+ *
  * Architecture: the real production server against a fresh tmp `~/.band/`,
  * one seeded repo with two worktrees, no tRPC mocking, driven through `WorkspacePage`.
  */
@@ -34,6 +42,9 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { CenterTabStrip } from "./pages/CenterTabStrip";
+import { CommandPalette } from "./pages/CommandPalette";
+import { WindowDragRegionOverlay } from "./pages/WindowDragRegionOverlay";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-tab-strip-drag-region-token";
@@ -133,4 +144,77 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
   await expect(wp.restoreButton).toBeVisible();
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+
+  await wp.restorePanel();
+  await expect(wp.maximizeButtons).toHaveCount(2);
+
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+});
+
+test("an overflowing, scrolled tab strip keeps every visible tab out of the drag region", async ({
+  page,
+}) => {
+  // Nine tabs opened through the "+" menu take longer than the default 30 s.
+  test.setTimeout(90_000);
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  const strip = new CenterTabStrip(page);
+  await wp.goto(WORKSPACE_A);
+  await wp.waitForReady();
+  // Ten ~100px tabs overflow the ~830px center column between the side
+  // panels: the empty strip space (`.dv-void-container`) shrinks to nothing
+  // and the tab list scrolls.
+  for (let i = 0; i < 9; i++) await wp.clickTerminalAddTab(WORKSPACE_A);
+  await expect(wp.terminalTabs()).toHaveCount(10);
+  await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(0);
+
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+
+  await strip.trackpadSwipe(400);
+  await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBeGreaterThan(0);
+
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+
+  // Collapsed sidebar: the tabs now scroll past the sidebar gutter's drag rect.
+  await wp.toggleSidebarViaButton();
+  await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
+  await expect(wp.sidebarGutter).toHaveCount(1);
+  await strip.trackpadSwipe(400);
+
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+
+  // And back: the right sidepanel's expand button returns to the strip.
+  await wp.revealRightPanel();
+  await wp.collapseRightPanelViaHeader();
+  await wp.expandRightPanelViaTabStrip();
+
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+});
+
+test("the palette toggles an overlay of the window drag region", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  const palette = new CommandPalette(page);
+  const overlay = new WindowDragRegionOverlay(page);
+  await wp.goto(WORKSPACE_A);
+  await wp.waitForReady();
+  // B is mounted and hidden behind A: the overlay doesn't read parked entries.
+  await wp.switchWorkspace(WORKSPACE_B);
+  await wp.waitForWorkspaceReady(WORKSPACE_B);
+  await wp.switchWorkspace(WORKSPACE_A);
+  await wp.waitForWorkspaceReady(WORKSPACE_A);
+  await expect(wp.cachedPanelEntries(WORKSPACE_B)).toHaveCount(1);
+  await expect(overlay.root).toHaveCount(0);
+
+  await palette.open();
+  await palette.run("toggle-drag-region-overlay");
+
+  await expect(overlay.root).toBeVisible();
+  // The sidebar title bar, the strip's empty space and the sidepanel header.
+  await expect.poll(() => overlay.dragRects.count()).toBeGreaterThanOrEqual(2);
+  await expect(overlay.noDragRects.first()).toBeAttached();
+  await expect(overlay.coveredControls).toHaveCount(0);
+
+  await palette.open();
+  await palette.run("toggle-drag-region-overlay");
+
+  await expect(overlay.root).toHaveCount(0);
 });

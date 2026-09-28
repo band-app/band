@@ -728,9 +728,25 @@ export class WorkspacePage {
       if (!controls.some((el) => el.classList.contains("dv-tab"))) {
         throw new Error("no visible .dv-tab on the page");
       }
+      // Only the part of a control its overflow-clipping ancestors show can
+      // take a click: a tab scrolled out of the strip isn't covered by the
+      // drag rect it slid under.
+      const visiblePart = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        let [left, top, right, bottom] = [r.left, r.top, r.right, r.bottom];
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          if (getComputedStyle(a).overflowX === "visible") continue;
+          const c = a.getBoundingClientRect();
+          left = Math.max(left, c.left);
+          right = Math.min(right, c.right);
+          top = Math.max(top, c.top);
+          bottom = Math.min(bottom, c.bottom);
+        }
+        return { left, top, right, bottom };
+      };
       const covered: string[] = [];
       for (const el of controls) {
-        const rect = el.getBoundingClientRect();
+        const rect = visiblePart(el);
         let hit = false;
         for (let x = rect.left + 1; x < rect.right - 1 && !hit; x += 3) {
           for (let y = rect.top + 1; y < rect.bottom - 1 && !hit; y += 3) {
