@@ -1,5 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { clientStorage } from "../../lib/client-state";
+import { toWorkspaceId } from "../lib/workspace-id";
+import { useLabelFilter } from "./use-label-filter";
+import { useProjects } from "./use-projects";
 
 /**
  * Per-label "last selected workspace" memory.
@@ -95,4 +98,41 @@ export function useLabelLastWorkspace(): UseLabelLastWorkspaceReturn {
   }, []);
 
   return { getLastWorkspace, setLastWorkspace };
+}
+
+/**
+ * Record each workspace opened while a label is selected as that label's
+ * last workspace, when its project carries the label (a workspace reached
+ * through the ⌘K picker under another label isn't recorded).
+ *
+ * The app shell runs this, not `DashboardShell`: on a phone the dashboard
+ * is a full-screen route that unmounts the moment a workspace is picked, so
+ * an effect inside it never saw the new workspace.
+ *
+ * The `lastSeen` guard skips reruns caused by the label changing while the
+ * workspace stays the same, i.e. right after a label switch and before its
+ * restore navigation lands. Without it the incoming label would briefly get
+ * the outgoing label's workspace and undo the restore. The guard starts
+ * empty so the workspace on screen at load is recorded too, and a lookup
+ * made before the project list has loaded doesn't consume it.
+ */
+export function useRecordLabelLastWorkspace(activeWorkspaceId: string | null): void {
+  const [labelFilter] = useLabelFilter();
+  const { projects } = useProjects();
+  const { setLastWorkspace } = useLabelLastWorkspace();
+  const lastSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeWorkspaceId || !labelFilter) {
+      // ALL has no per-label memory, but a later label switch must still
+      // see the workspace as unchanged.
+      lastSeen.current = activeWorkspaceId;
+      return;
+    }
+    if (lastSeen.current === activeWorkspaceId || projects.length === 0) return;
+    lastSeen.current = activeWorkspaceId;
+    const project = projects.find((p) =>
+      p.worktrees.some((wt) => toWorkspaceId(p.name, wt.name) === activeWorkspaceId),
+    );
+    if (project?.label === labelFilter) setLastWorkspace(labelFilter, activeWorkspaceId);
+  }, [labelFilter, activeWorkspaceId, projects, setLastWorkspace]);
 }

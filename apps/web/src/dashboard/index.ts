@@ -66,6 +66,7 @@ export { LABEL_FILTER_KEY, useLabelFilter } from "./hooks/use-label-filter";
 export {
   LABEL_LAST_WORKSPACE_KEY,
   useLabelLastWorkspace,
+  useRecordLabelLastWorkspace,
 } from "./hooks/use-label-last-workspace";
 export {
   useAddProject,

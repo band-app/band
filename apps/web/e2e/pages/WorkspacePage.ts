@@ -1430,6 +1430,13 @@ export class WorkspacePage {
     return this.page.locator(`.dv-tab:has([data-testid^="${prefix}"])`).first();
   }
 
+  /** The dockview `.dv-tab` wrapper of the `file` leaf tab for `path`; it has
+   *  `dv-active-tab` while that file is the active view in its group. See
+   *  `tabContainer`. */
+  fileTabContainer(path: string): Locator {
+    return this.page.locator(`.dv-tab:has([data-testid="center-file-tab--${path}"])`);
+  }
+
   // ──────────────────────────────────────────────────────────────────────
   // Center-dockview header actions: the "+" new-tab menu (add) and per-tab
   // close (×).
@@ -1684,6 +1691,14 @@ export class WorkspacePage {
     });
   }
 
+  /** Open the app at `/`, the URL the desktop shell loads on every launch
+   *  (and a phone's home-screen icon opens). */
+  async launch(): Promise<void> {
+    await test.step("Launch the app at /", async () => {
+      await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
+    });
+  }
+
   /** Hard-reload the current page (preserves `localStorage`). */
   async reload(): Promise<void> {
     await test.step("Reload the dashboard", async () => {
@@ -1723,6 +1738,20 @@ export class WorkspacePage {
    *  the Changes section is expanded AND there is at least one change. */
   get changesSection(): Locator {
     return this.page.getByTestId("right-sidepanel__changes");
+  }
+
+  /** A tab button in the right sidepanel's header (`TabButton` in
+   *  `RightSidepanel.tsx`), carrying `aria-selected`. */
+  rightSidepanelTab(tab: "explorer" | "changes"): Locator {
+    return this.page.getByTestId(`right-sidepanel__tab--${tab}`);
+  }
+
+  /** Click a right-sidepanel tab and wait until it is the selected one. */
+  async selectRightSidepanelTab(tab: "explorer" | "changes"): Promise<void> {
+    await test.step(`Select the ${tab} tab in the right sidepanel`, async () => {
+      await this.rightSidepanelTab(tab).click();
+      await expect(this.rightSidepanelTab(tab)).toHaveAttribute("aria-selected", "true");
+    });
   }
 
   /** Reveal the right sidepanel by dispatching the same `band:show-right-panel`

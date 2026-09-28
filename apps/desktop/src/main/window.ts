@@ -11,7 +11,9 @@
  *     through the project-list sidebar (see `data-translucent-sidebar` in
  *     apps/web/src/styles/globals.css)
  *   - Hidden inset title bar (overlay) with traffic lights at (13, 16)
- *   - Resize to fill the primary monitor on launch
+ *   - Reopen at the last size, position and maximized / full-screen state
+ *     (`services/window-state.ts`); the first launch, or one whose saved
+ *     bounds are on no connected display, fills the primary monitor
  *   - Drag-drop disabled on the window chrome
  */
 
@@ -21,6 +23,12 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, screen } from "electron";
 import { resolveAppIcon } from "./icon.js";
 import { createLogger } from "./services/log.js";
+import {
+  fitToDisplays,
+  loadWindowState,
+  saveWindowState,
+  type WindowState,
+} from "./services/window-state.js";
 
 const log = createLogger("window");
 
@@ -34,6 +42,58 @@ function preloadPath(): string {
   // Electron's sandbox loader unambiguously treats the file as CommonJS,
   // independent of any package.json `"type"` settings.
   return resolve(__dirname, "..", "..", "preload", "preload", "index.cjs");
+}
+
+/** Save at most this often while the window is dragged or resized. */
+const SAVE_DELAY_MS = 500;
+
+/**
+ * Apply the saved bounds and maximized state, or fill the primary display's
+ * work area like Tauri did. Full screen is applied after the window shows,
+ * because macOS ignores it on a hidden window. Returns the saved state.
+ */
+function restoreWindowState(win: BrowserWindow): WindowState | null {
+  const saved = loadWindowState();
+  const areas = screen.getAllDisplays().map((d) => d.workArea);
+  const bounds = saved ? fitToDisplays(saved.bounds, areas) : null;
+  if (bounds) {
+    win.setBounds(bounds);
+    if (saved?.maximized) win.maximize();
+  } else {
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    win.setBounds({ x: 0, y: 0, width, height });
+  }
+  return saved;
+}
+
+/** Save the window's state as it moves, resizes, (un)maximizes and closes. */
+function trackWindowState(win: BrowserWindow): void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const save = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (win.isDestroyed() || win.isMinimized()) return;
+    try {
+      saveWindowState({
+        bounds: win.getNormalBounds(),
+        maximized: win.isMaximized(),
+        fullScreen: win.isFullScreen(),
+      });
+    } catch (err) {
+      log.warn({ err: String(err) }, "failed to save window state");
+    }
+  };
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(save, SAVE_DELAY_MS);
+  };
+  win.on("resize", later);
+  win.on("move", later);
+  win.on("maximize", save);
+  win.on("unmaximize", save);
+  win.on("enter-full-screen", save);
+  win.on("leave-full-screen", save);
+  win.on("close", save);
 }
 
 export interface CreateMainWindowOptions {
@@ -88,10 +148,8 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
     },
   });
 
-  // Tauri sizes the window to fill the primary monitor on launch. Match it.
-  const primary = screen.getPrimaryDisplay();
-  const { width, height } = primary.workAreaSize;
-  win.setBounds({ x: 0, y: 0, width, height });
+  const saved = restoreWindowState(win);
+  trackWindowState(win);
 
   // The dashboard's zoom is CSS-based (`<html> zoom`, see
   // apps/web/src/lib/zoom.ts) — its Chromium-level zoom must always stay
@@ -107,6 +165,7 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
 
   win.once("ready-to-show", () => {
     win.show();
+    if (saved?.fullScreen) win.setFullScreen(true);
     // Auto-open DevTools in dev so the renderer is inspectable from the
     // first frame. Packaged builds stay quiet — users can toggle DevTools
     // from the View menu (Cmd+Opt+I) on demand.
