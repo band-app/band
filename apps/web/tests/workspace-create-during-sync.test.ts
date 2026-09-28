@@ -17,10 +17,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type GitRemoteStub, startGitRemoteStub } from "./fixtures/git-remote-stub";
-import { listWorktreeNames } from "./helpers/db-read";
+import { listWorktreeNames, readProjectDefaultBranch } from "./helpers/db-read";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -43,18 +42,6 @@ const gitEnv = {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
-}
-
-function readDefaultBranch(tmpHome: string, projectName: string): string | undefined {
-  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
-  try {
-    const row = sqlite
-      .prepare("SELECT default_branch FROM projects WHERE name = ?")
-      .get(projectName) as { default_branch: string } | undefined;
-    return row?.default_branch;
-  } finally {
-    sqlite.close();
-  }
 }
 
 describe("workspaces.create while a worktree sync is running", () => {
@@ -130,7 +117,7 @@ describe("workspaces.create while a worktree sync is running", () => {
     remote.release();
     // The sync saves once it has the remote's default branch.
     await expect
-      .poll(() => readDefaultBranch(tmpHome, "proj"), { timeout: 10_000, interval: 50 })
+      .poll(() => readProjectDefaultBranch(tmpHome, "proj"), { timeout: 10_000, interval: 50 })
       .toBe("trunk");
 
     expect(listWorktreeNames(tmpHome, "proj")).toEqual(["feat/b", "main"]);

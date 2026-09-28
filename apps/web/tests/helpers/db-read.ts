@@ -43,3 +43,16 @@ export function listWorktreeNames(tmpHome: string, projectName: string): string[
     sqlite.close();
   }
 }
+
+/** Persisted `default_branch` of a project, or `undefined` when it has no row. */
+export function readProjectDefaultBranch(tmpHome: string, projectName: string): string | undefined {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    const row = sqlite
+      .prepare("SELECT default_branch FROM projects WHERE name = ?")
+      .get(projectName) as { default_branch: string } | undefined;
+    return row?.default_branch;
+  } finally {
+    sqlite.close();
+  }
+}
