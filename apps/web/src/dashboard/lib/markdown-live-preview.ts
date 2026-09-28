@@ -53,6 +53,7 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { loadLanguage } from "./codemirror-setup";
+import type { MarkdownPreviewWidth } from "./markdown-preview-width";
 import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
 
 /** Blocks the live preview swaps for a rendered version while the cursor is elsewhere. */
@@ -720,7 +721,6 @@ function livePreviewTheme(isDark: boolean): Extension {
         lineHeight: "1.65",
       },
       ".cm-content": {
-        maxWidth: "48rem",
         margin: "0 auto",
         padding: "24px 32px 40vh",
         caretColor: "var(--foreground)",
@@ -970,6 +970,18 @@ const codeLanguages = CODE_LANGUAGES.map(([name, alias]) =>
     },
   }),
 );
+
+/**
+ * Caps the text column for the `narrow` width. 61.25rem is 980px at the
+ * default font size, the width GitHub renders a README at: prose runs about
+ * 120 characters a line at 14px, and a typical table or code block fits
+ * without scrolling. `full` drops the cap and keeps the side padding.
+ */
+export function markdownPreviewWidthTheme(width: MarkdownPreviewWidth): Extension {
+  return EditorView.theme({
+    ".cm-content": { maxWidth: width === "full" ? "none" : "61.25rem" },
+  });
+}
 
 /**
  * All extensions for the editable markdown preview. Used instead of

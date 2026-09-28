@@ -161,6 +161,7 @@ import {
   SidebarGutter,
   useWorkspaceChrome,
 } from "./DesktopTitleBar";
+import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -1481,6 +1482,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
                 >
                   <Code className="size-3.5" />
                 </button>
+                {viewMode !== "source" && <MarkdownWidthToggle />}
               </>
             )}
             {fileActions?.canSave && fileActions.isDirty && (

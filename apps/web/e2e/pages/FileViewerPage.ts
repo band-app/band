@@ -107,6 +107,79 @@ export class FileViewerPage {
     return this.root.getByTestId("file-viewer__markdown-preview");
   }
 
+  /** The markdown preview's width toggle in the file leaf's group header
+   *  (`center-file-leaf__width-toggle`). `aria-pressed` is true in full
+   *  width. The header sits outside the viewer root, so this is page-wide. */
+  get previewWidthToggle(): Locator {
+    return this.page.getByTestId("center-file-leaf__width-toggle");
+  }
+
+  /** Click the width toggle (narrow to full width, or back). */
+  async togglePreviewWidth(): Promise<void> {
+    await test.step("Toggle the markdown preview width", async () => {
+      await this.previewWidthToggle.click();
+    });
+  }
+
+  /** Widths in px of the preview pane and of its text column (CodeMirror's
+   *  `.cm-content`, see the `editor` note above). */
+  async previewWidths(): Promise<{ pane: number; column: number }> {
+    const pane = await this.markdownPreview.evaluate((el) => el.getBoundingClientRect().width);
+    const column = await this.markdownPreview
+      .locator(".cm-content")
+      .evaluate((el) => el.getBoundingClientRect().width);
+    return { pane, column };
+  }
+
+  /** Scroll the preview until the heading `name` (fixture text) is at the
+   *  top. CodeMirror only renders lines near the viewport, so it moves the
+   *  cursor to the document start and wheels down until the heading exists,
+   *  then brings it to the top. */
+  async scrollPreviewToHeading(name: string): Promise<void> {
+    await test.step(`Scroll the markdown preview to "${name}"`, async () => {
+      const heading = this.markdownPreview.getByRole("heading", { name, exact: true });
+      await this.scrollPreviewToTop();
+      await this.markdownPreview.hover();
+      await expect(async () => {
+        if ((await heading.count()) === 0) await this.page.mouse.wheel(0, 600);
+        await expect(heading).toBeAttached({ timeout: 250 });
+      }).toPass({ timeout: 15_000 });
+      await heading.evaluate((el) => el.scrollIntoView({ block: "start" }));
+      await expect
+        .poll(async () => Math.abs(await this.previewHeadingOffset(name)))
+        .toBeLessThan(5);
+    });
+  }
+
+  /** Move the preview's cursor to the document start, which scrolls it to
+   *  the top. */
+  async scrollPreviewToTop(): Promise<void> {
+    await test.step("Scroll the markdown preview to the top", async () => {
+      await this.markdownPreview.getByRole("textbox").first().focus();
+      await this.page.keyboard.press(
+        process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+      );
+      // CodeMirror keeps a small margin above the cursor line.
+      await expect.poll(() => this.previewScrollTop()).toBeLessThan(100);
+    });
+  }
+
+  /** The px distance from the top of the preview's scroll area to the heading
+   *  `name`. Near 0 when the heading is at the top. */
+  async previewHeadingOffset(name: string): Promise<number> {
+    const heading = this.markdownPreview.getByRole("heading", { name, exact: true });
+    const top = await heading.evaluate((el) => el.getBoundingClientRect().top);
+    const scrollerTop = await this.markdownPreview
+      .locator(".cm-scroller")
+      .evaluate((el) => el.getBoundingClientRect().top);
+    return top - scrollerTop;
+  }
+
+  /** The preview scroller's scrollTop in px. */
+  async previewScrollTop(): Promise<number> {
+    return this.markdownPreview.locator(".cm-scroller").evaluate((el) => el.scrollTop);
+  }
+
   /** A heading rendered in the markdown preview. Heading lines carry
    *  `role="heading"` + `aria-level`. */
   previewHeading(level: number, name: string): Locator {

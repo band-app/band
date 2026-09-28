@@ -23,6 +23,7 @@ import {
   languageToExtension,
 } from "../lib/language-map";
 import type { RenderMarkdownBlock } from "../lib/markdown-live-preview";
+import { useMarkdownPreviewWidth } from "../lib/markdown-preview-width";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
@@ -496,6 +497,7 @@ export function FileViewer({
       : undefined;
 
   const showMarkdownToggle = previewType === "markdown" && !!renderMarkdownBlock;
+  const [markdownPreviewWidth] = useMarkdownPreviewWidth();
 
   // Options for the editable markdown preview. Relative image paths resolve
   // against the markdown file's directory through the raw file URL.
@@ -1123,6 +1125,7 @@ export function FileViewer({
                 savedSelection={savedSelection}
                 savedScrollTop={savedScrollTop}
                 markdownPreview={markdownPreview}
+                markdownPreviewWidth={markdownPreviewWidth}
                 readOnly={!canEdit}
               />
             </div>
