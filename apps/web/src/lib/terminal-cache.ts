@@ -798,7 +798,13 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         didConnectOnce = true;
 
         if (dims && autoFocusPending && !isReconnect) {
-          term.focus();
+          // Leave focus in an open dialog (Quick Open, the workspace picker)
+          // the user moved to while the socket connected. Its focus trap
+          // would pull focus back with the query selected, and the next
+          // keystroke would replace everything typed so far.
+          if (!document.activeElement?.closest('[role="dialog"], [role="alertdialog"]')) {
+            term.focus();
+          }
           autoFocusPending = false;
         }
 

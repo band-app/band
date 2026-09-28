@@ -162,6 +162,7 @@ import {
   SidebarGutter,
   useWorkspaceChrome,
 } from "./DesktopTitleBar";
+import { MarkdownWidthToggle } from "./MarkdownWidthToggle";
 import { renderMarkdownBlock } from "./markdown-block-renderer";
 import { NewAgentButton, NewAgentSubmenu } from "./NewAgentMenu";
 import { PanelVisibilityContext, usePanelVisibility } from "./panel-visibility-context";
@@ -1491,6 +1492,7 @@ function FileLeaf({ params, api }: IDockviewPanelProps<FileLeafParams>) {
                 >
                   <Code className="size-3.5" />
                 </button>
+                {viewMode !== "source" && <MarkdownWidthToggle />}
               </>
             )}
             {fileActions?.canSave && fileActions.isDirty && (
@@ -1687,9 +1689,7 @@ function discardableSection(
 }
 
 function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLeafParams>) {
-  // On desktop the diff selection tooltip offers only "Copy reference"; the
-  // "Add to Chat" / "Add to Terminal" routing actions are reserved for the
-  // mobile diff tooltip (#643). Mobile leaves are tagged in `mobileByApiId`.
+  // Mobile leaves (tagged in `mobileByApiId`) always show a unified diff.
   const isMobile = mobileByApiId.has(containerApi.id);
   const { visible } = usePanelVisibility();
   const { workspaceId, filePath, commit } = params;
@@ -1887,7 +1887,6 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
               // Mobile is always unified — no room for a side-by-side split.
               viewMode={isMobile ? "unified" : viewMode}
               onEditorViews={handleEditorViews}
-              copyReferenceOnly={!isMobile}
               lspNavigation={lspNavigation}
             />
           ) : (
@@ -2087,12 +2086,7 @@ function SectionDiffFile({
       </div>
       {!collapsed &&
         (diffQuery.data?.diff ? (
-          <DiffFileContent
-            hunks={diffQuery.data.diff}
-            filename={entry.path}
-            viewMode="unified"
-            copyReferenceOnly
-          />
+          <DiffFileContent hunks={diffQuery.data.diff} filename={entry.path} viewMode="unified" />
         ) : (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {diffQuery.data ? "No textual changes" : "Loading diff…"}

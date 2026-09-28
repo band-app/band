@@ -1253,6 +1253,17 @@ export class WorkspacePage {
     );
   }
 
+  /** Keystrokes the running typing-latency probe has seen echoed and painted
+   *  so far. */
+  async typingLatencySamples(): Promise<number> {
+    return await this.page.evaluate(
+      () =>
+        (
+          window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
+        ).__bandTypingLatency.report().samples,
+    );
+  }
+
   /** Readiness barrier that also works under the WebGL renderer (whose rows
    *  aren't in the DOM): press a key into the focused terminal until the probe
    *  records it echoed and painted, then erase it. */
@@ -1264,12 +1275,7 @@ export class WorkspacePage {
           async () => {
             await this.page.keyboard.press("x");
             await this.page.keyboard.press("Backspace");
-            return await this.page.evaluate(
-              () =>
-                (
-                  window as unknown as { __bandTypingLatency: { report(): TypingLatencyReport } }
-                ).__bandTypingLatency.report().samples,
-            );
+            return await this.typingLatencySamples();
           },
           { timeout: timeoutMs },
         )
@@ -2431,6 +2437,23 @@ export class WorkspacePage {
     return () => count;
   }
 
+  /** Start counting terminal WebSocket opens per terminal (matched on the
+   *  `terminalId=` query param). Returns a getter taking the terminal id, so
+   *  the ids can be learned after the terminals open. Call BEFORE `goto`.
+   *  Unlike `trackTerminalSocketOpensFor`, other terminals of the same
+   *  workspace reconnecting (a heartbeat timeout after `advanceClock`) don't
+   *  count. */
+  trackTerminalSocketOpensByTerminal(): (terminalId: string) => number {
+    const urls: string[] = [];
+    this.page.on("websocket", (ws) => {
+      if (ws.url().includes("/terminal?")) urls.push(ws.url());
+    });
+    return (terminalId) => {
+      const needle = `terminalId=${encodeURIComponent(terminalId)}`;
+      return urls.filter((url) => url.includes(needle)).length;
+    };
+  }
+
   /** Dispatch a window `online` event in the page — the resume trigger the
    *  terminal client uses to reconnect a dropped socket. Lets a test drive the
    *  reconnect path deterministically instead of waiting on a real network flap. */
@@ -2996,6 +3019,20 @@ export class WorkspacePage {
     return () => count;
   }
 
+  /** Start counting terminals whose WebSocket has received a frame. Call this
+   *  BEFORE the terminals to count are opened. The first frame arrives after
+   *  the socket's `open` handler ran, so the count climbing means a new
+   *  terminal finished connecting. Keyed by socket URL (it carries the
+   *  terminal id), so a reconnect of the same terminal doesn't count again. */
+  trackConnectedTerminalSockets(): () => number {
+    const connected = new Set<string>();
+    this.page.on("websocket", (ws) => {
+      if (!ws.url().includes("/terminal?")) return;
+      ws.once("framereceived", () => connected.add(ws.url()));
+    });
+    return () => connected.size;
+  }
+
   /** Install a browser-side wrapper around `window.WebSocket` that records
    *  every terminal socket the page opens in `window.__terminalSockets`.
    *  Must run BEFORE `goto` (uses `addInitScript`). Test-only
@@ -3443,6 +3480,16 @@ export class WorkspacePage {
     await test.step(`Type Quick Open query "${text}"`, async () => {
       await this.quickOpenInput.focus();
       await this.page.keyboard.press("ControlOrMeta+a");
+      await this.page.keyboard.type(text);
+    });
+  }
+
+  /** Keep typing at the caret, without selecting the query first: the way a
+   *  user carries on typing after a pause. Unlike `appendQuickOpen`, it
+   *  doesn't focus the input first, so a focus steal between keystrokes stays
+   *  visible to the test (`quick-open-terminal-focus.spec.ts`). */
+  async continueTypingQuickOpen(text: string): Promise<void> {
+    await test.step(`Keep typing "${text}" into Quick Open`, async () => {
       await this.page.keyboard.type(text);
     });
   }

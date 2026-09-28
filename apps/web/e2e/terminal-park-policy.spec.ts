@@ -219,7 +219,9 @@ test.describe("Terminal parking policy", () => {
     const ws = WS[11];
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await workspacePage.installClock();
-    const socketOpens = workspacePage.trackTerminalSocketOpensFor(ws);
+    // Per terminal: after the 5 minute jump the other tabs' heartbeats see a
+    // stale pong and reconnect, which says nothing about the first tab.
+    const socketOpens = workspacePage.trackTerminalSocketOpensByTerminal();
 
     // Three terminal tabs; the first gets output we look for after a replay.
     await openFirst(workspacePage, ws);
@@ -233,7 +235,7 @@ test.describe("Terminal parking policy", () => {
     const third = (await workspacePage.terminalIds(ws)).find((id) => id !== first && id !== second);
     if (!second || !third) throw new Error("expected three terminal ids");
     for (const id of [first, second, third]) await workspacePage.markTerminalWrapper(id);
-    const opensBefore = socketOpens();
+    const opensBefore = socketOpens(first);
 
     // The first and second tabs are hidden; the second was hidden last, so it
     // is exempt. The third is on screen.
@@ -254,6 +256,6 @@ test.describe("Terminal parking policy", () => {
       )
       .toBe(true);
     expect(await workspacePage.terminalWrapperState(first)).toBe("unmarked");
-    expect(socketOpens()).toBe(opensBefore + 1);
+    expect(socketOpens(first)).toBe(opensBefore + 1);
   });
 });

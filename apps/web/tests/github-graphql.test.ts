@@ -107,7 +107,10 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain("query {");
     expect(query).toContain('ws_0: repository(owner: "acme", name: "app")');
     expect(query).toContain(
-      'pullRequests(headRefName: "feature-branch", first: 1, states: [OPEN, MERGED]',
+      'pullRequests(headRefName: "feature-branch", first: 5, states: [OPEN, MERGED, CLOSED]',
+    );
+    expect(query).toContain(
+      "nodes { number title state url isDraft headRepositoryOwner { login } }",
     );
     expect(query).toContain('ref(qualifiedName: "refs/heads/feature-branch")');
     expect(query).toContain("checkSuites(first: 20)");
@@ -182,11 +185,16 @@ describe("parseBatchedCIResponse", () => {
   it("returns merged status when PR is merged on a feature branch", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
+              number: 1,
+              title: "Shipped",
               state: "MERGED",
               url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
+              isDraft: false,
             },
           ],
         },
@@ -198,17 +206,26 @@ describe("parseBatchedCIResponse", () => {
     expect(result.get("ws_0")).toEqual({
       state: "merged",
       url: "https://github.com/o/r/pull/1",
+      pr: {
+        number: 1,
+        title: "Shipped",
+        url: "https://github.com/o/r/pull/1",
+        state: "merged",
+        isDraft: false,
+      },
     });
   });
 
   it("ignores merged PR on default branch", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
               state: "MERGED",
               url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
             },
           ],
         },
@@ -250,14 +267,24 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")).toEqual({ state: "none", url: null });
+    expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
   it("returns none with PR URL when PR exists but no workflow runs", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
-          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/1" }],
+          nodes: [
+            {
+              number: 1,
+              title: "Draft work",
+              state: "OPEN",
+              url: "https://github.com/o/r/pull/1",
+              headRepositoryOwner: { login: "o" },
+              isDraft: true,
+            },
+          ],
         },
         ref: {
           target: {
@@ -281,6 +308,13 @@ describe("parseBatchedCIResponse", () => {
     expect(result.get("ws_0")).toEqual({
       state: "none",
       url: "https://github.com/o/r/pull/1",
+      pr: {
+        number: 1,
+        title: "Draft work",
+        url: "https://github.com/o/r/pull/1",
+        state: "open",
+        isDraft: true,
+      },
     });
   });
 
@@ -429,8 +463,18 @@ describe("parseBatchedCIResponse", () => {
   it("prefers PR URL over workflow run URL", () => {
     const data = {
       ws_0: {
+        owner: { login: "o" },
         pullRequests: {
-          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/42" }],
+          nodes: [
+            {
+              number: 42,
+              title: "Ready",
+              state: "OPEN",
+              url: "https://github.com/o/r/pull/42",
+              isDraft: false,
+              headRepositoryOwner: { login: "o" },
+            },
+          ],
         },
         ref: {
           target: {
@@ -519,11 +563,13 @@ describe("parseBatchedCIResponse", () => {
         },
       },
       ws_1: {
+        owner: { login: "o" },
         pullRequests: {
           nodes: [
             {
               state: "MERGED",
               url: "https://github.com/o/r/pull/5",
+              headRepositoryOwner: { login: "o" },
             },
           ],
         },
@@ -572,7 +618,7 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")).toEqual({ state: "none", url: null });
+    expect(result.get("ws_0")).toEqual({ state: "none", url: null, pr: null });
   });
 
   it("returns cancelled state when workflow is cancelled", () => {
