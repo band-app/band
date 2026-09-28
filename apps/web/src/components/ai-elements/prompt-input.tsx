@@ -100,7 +100,7 @@ export const PromptInput = ({
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const draftStorageKey = draftKey ? `band-draft:${draftKey}` : null;
-  const [hasText, setHasText] = useState(() => readDraft(draftStorageKey).length > 0);
+  const [hasText, setHasText] = useState(() => readDraft(draftStorageKey).trim().length > 0);
   const [inputValue, setInputValue] = useState(() => readDraft(draftStorageKey));
   const [commandHint, setCommandHint] = useState<string | null>(null);
 
@@ -597,9 +597,12 @@ export const PromptInputSubmit = ({
   const isStreaming = status === "streaming";
   const isBusy = isSubmitting || isStreaming;
 
+  // One button at a time. Typed text or an attachment always gets Send, even
+  // while a turn runs (the server queues it); an empty input during a turn
+  // gets Stop.
   return (
     <div className="flex shrink-0 items-center gap-1">
-      {isStreaming && (
+      {isStreaming && !hasContent ? (
         <button
           type="button"
           data-testid="prompt-input__stop-button"
@@ -609,8 +612,7 @@ export const PromptInputSubmit = ({
         >
           <SquareIcon className="size-4 lg:size-3.5 fill-current" />
         </button>
-      )}
-      {isSubmitting && !hasContent ? (
+      ) : isSubmitting && !hasContent ? (
         <button
           type="button"
           className={cn(
