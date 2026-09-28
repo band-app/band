@@ -192,12 +192,7 @@ async function resolveDetachedBranch(worktreePath: string): Promise<string> {
  * Linuxbrew-if-present on Linux) to `PATH` so a desktop/service launch
  * (which inherits a barebones PATH) still finds the system `git` binary.
  */
-let diagEnv: NodeJS.ProcessEnv | null = null; // DIAG
 export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
-  if (process.env.BAND_DIAG_CACHE_ENV === "1") {
-    diagEnv ??= { ...process.env, PATH: prependBinDirs(process.env.PATH) };
-    return { command: "git", env: diagEnv };
-  }
   const env = { ...process.env };
   env.PATH = prependBinDirs(env.PATH);
   return { command: "git", env };

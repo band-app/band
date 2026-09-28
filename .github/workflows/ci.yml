@@ -608,7 +608,7 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
-      - name: DIAG echo latency variants (isolated)
+      - name: DIAG echo latency, fix vs no fix (isolated)
         continue-on-error: true
         working-directory: apps/web
         env:
@@ -617,13 +617,18 @@ jobs:
         run: |
           export NODE_OPTIONS='--no-warnings=ExperimentalWarning'
           mkdir -p /tmp/echo-prof
-          for pass in 1 2; do
-            BAND_DIAG_VARIANT=base BAND_DIAG_CPU_PROF=/tmp/echo-prof npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true
-            BAND_DIAG_VARIANT=conc1 BAND_DIAG_CONC=1 npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true
-            BAND_DIAG_VARIANT=noemit BAND_DIAG_NO_EMIT=1 npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true
-            BAND_DIAG_VARIANT=cacheenv BAND_DIAG_CACHE_ENV=1 npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true
+          for pass in 1 2 3; do
+            if [ $((pass % 2)) = 1 ]; then order="nofix fix"; else order="fix nofix"; fi
+            for v in $order; do
+              if [ $v = nofix ]; then BAND_DIAG_NOFIX=1 BAND_DIAG_VARIANT=nofix npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true
+              else BAND_DIAG_VARIANT=fix npx vitest run tests/echo-latency-diag.test.ts -t compares 2>&1 | grep -aE "DIAG" || true; fi
+            done
           done
-          env | wc -c
+          for i in 1 2 3 4 5; do npx vitest run tests/terminal-echo-during-branch-poll.test.ts 2>&1 | grep -aE "echoes over|✓ echoes|× echoes" || true; done
+
+      - name: DIAG full suite with the fix
+        continue-on-error: true
+        run: pnpm --filter @band-app/server test
 
       - name: DIAG upload profiles
         if: always()
