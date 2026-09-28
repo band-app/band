@@ -1867,7 +1867,6 @@ function FileDiffLeaf({ params, api, containerApi }: IDockviewPanelProps<DiffLea
               // Mobile is always unified — no room for a side-by-side split.
               viewMode={isMobile ? "unified" : viewMode}
               onEditorViews={handleEditorViews}
-              copyReferenceOnly={!isMobile}
               lspNavigation={lspNavigation}
             />
           ) : (
@@ -2060,12 +2059,7 @@ function SectionDiffFile({
       </div>
       {!collapsed &&
         (diffQuery.data?.diff ? (
-          <DiffFileContent
-            hunks={diffQuery.data.diff}
-            filename={entry.path}
-            viewMode="unified"
-            copyReferenceOnly
-          />
+          <DiffFileContent hunks={diffQuery.data.diff} filename={entry.path} viewMode="unified" />
         ) : (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {diffQuery.data ? "No textual changes" : "Loading diff…"}

@@ -36,6 +36,70 @@ export class TerminalInputSurface extends TerminalSurface {
     };
   }
 
+  /** The 1-based screen cell where `text` starts on the last row that
+   *  contains it, read from xterm's buffer. */
+  private async cellOfText(text: string): Promise<{ col: number; row: number }> {
+    const cell = await this.page.evaluate(
+      ([id, needle]) => {
+        type Line = { translateToString(trim?: boolean): string };
+        type Term = {
+          buffer: { active: { viewportY: number; getLine(y: number): Line | undefined } };
+          rows: number;
+        };
+        const cache = (
+          globalThis as unknown as {
+            __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+          }
+        ).__bandTerminalCache__;
+        const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+        const term = entry?.getTerminal() as Term | null;
+        if (!term) return null;
+        const { viewportY } = term.buffer.active;
+        for (let row = term.rows - 1; row >= 0; row--) {
+          const text = term.buffer.active.getLine(viewportY + row)?.translateToString(true) ?? "";
+          const col = text.indexOf(needle);
+          if (col >= 0) return { col: col + 1, row: row + 1 };
+        }
+        return null;
+      },
+      [this.workspaceId, text] as const,
+    );
+    if (!cell) throw new Error(`"${text}" is not on the terminal screen`);
+    return cell;
+  }
+
+  /** Double-click the word `text` on the screen, selecting it. */
+  async selectWord(text: string): Promise<void> {
+    await test.step(`Select "${text}" in the terminal`, async () => {
+      const { col, row } = await this.cellOfText(text);
+      const { x, y } = await this.cellCenter(col, row);
+      await this.page.mouse.dblclick(x, y);
+    });
+  }
+
+  /** Right-click the word `text` on the screen. */
+  async rightClickWord(text: string): Promise<void> {
+    await test.step(`Right-click "${text}" in the terminal`, async () => {
+      const { col, row } = await this.cellOfText(text);
+      const { x, y } = await this.cellCenter(col, row);
+      await this.page.mouse.click(x, y, { button: "right" });
+    });
+  }
+
+  /** The text xterm has selected. */
+  async readSelection(): Promise<string> {
+    return await this.page.evaluate((id) => {
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const term = entry?.getTerminal() as { getSelection(): string } | null;
+      return term?.getSelection() ?? "";
+    }, this.workspaceId);
+  }
+
   /** Move the pointer to the middle of the 1-based cell (`col`, `row`). */
   async hoverCell(col: number, row: number): Promise<void> {
     await test.step(`Point at terminal cell ${col},${row}`, async () => {
