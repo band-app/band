@@ -165,6 +165,7 @@ const RULES: KeyRule[] = [
   exact("band:commits-panel-height", [rawPart("device")]),
   exact("band:changes-collapsed-sections", [jsonPart("device")]),
   exact("band:diff-view-mode", [rawPart("device")]),
+  exact("band:markdown-preview-width", [rawPart("device")]),
   exact("band:zoom-level", [rawPart("device")]),
   // The workspace a restart opens (`lib/last-workspace.ts`).
   exact("band:last-workspace", [rawPart("device")]),

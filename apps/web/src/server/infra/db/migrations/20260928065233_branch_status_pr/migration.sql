@@ -1,0 +1,1 @@
+ALTER TABLE `branch_statuses` ADD `ci_pr` text;

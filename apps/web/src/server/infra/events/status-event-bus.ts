@@ -17,6 +17,7 @@
 
 import type { AgentSessionRecord } from "../../../shared/agent-sessions";
 import type { ClientStateEntry } from "../../../shared/client-state";
+import type { PullRequestSummary } from "../git/git-client";
 
 /**
  * Per-workspace agent info embedded in a `WorkspaceStatusSnapshot`. The
@@ -59,6 +60,7 @@ interface GitStatus {
 interface CIStatus {
   state: string;
   url?: string | null;
+  pr?: PullRequestSummary | null;
 }
 
 export interface StatusEvent {

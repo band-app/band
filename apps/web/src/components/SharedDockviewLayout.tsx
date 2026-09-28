@@ -108,6 +108,14 @@ function toggleMaximizeActiveGroup(workspaceId: string | null): void {
   }
 }
 
+/** Move focus into the active leaf of a workspace's dockview, after a palette
+ *  command activated it. `WorkspaceCenterDockview` listens for
+ *  `band:focus-active-leaf`. */
+function focusActiveLeaf(workspaceId: string | null): void {
+  if (!workspaceId) return;
+  window.dispatchEvent(new CustomEvent("band:focus-active-leaf", { detail: { workspaceId } }));
+}
+
 /** Reveal the right sidepanel and (optionally) select its Explorer/Changes tab.
  *  `__root` listens for `band:show-right-panel`; `RightSidepanel` listens for
  *  `band:right-sidepanel-set-tab`. */
@@ -344,13 +352,18 @@ export function SharedDockviewLayout() {
             getWorkspaceLeafActions(ws)?.onSplit(kind, groupId, direction);
           }
         },
-        cycleTabs: (direction) =>
-          cycleTabsInActiveGroup(
-            getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null,
-            direction,
-          ),
-        cycleGroups: (direction) =>
-          cycleGridGroups(getWorkspaceDockviewApi(activeWorkspaceIdRef.current) ?? null, direction),
+        cycleTabs: (direction) => {
+          const ws = activeWorkspaceIdRef.current;
+          cycleTabsInActiveGroup(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
+            focusActiveLeaf(ws),
+          );
+        },
+        cycleGroups: (direction) => {
+          const ws = activeWorkspaceIdRef.current;
+          cycleGridGroups(getWorkspaceDockviewApi(ws) ?? null, direction, () =>
+            focusActiveLeaf(ws),
+          );
+        },
 
         toggleMaximize: () => toggleMaximizeActiveGroup(activeWorkspaceIdRef.current),
         openFileExternal: () => {

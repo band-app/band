@@ -225,6 +225,19 @@ export function RightSidepanel({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const workspaceId = parseWorkspaceFromPath(pathname);
 
+  // Save a tab picked through `band:right-sidepanel-set-tab` here as well as
+  // in the inner panel: the sidebar's PR badge picks the Checks tab and then
+  // navigates, and the next workspace's panel (or the first one, when none
+  // is shown yet) mounts with the saved tab.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: RightTab }>).detail?.tab;
+      if (isRightTab(tab)) saveActiveTab(tab);
+    };
+    window.addEventListener("band:right-sidepanel-set-tab", handler);
+    return () => window.removeEventListener("band:right-sidepanel-set-tab", handler);
+  }, []);
+
   if (!workspaceId) {
     return (
       <div className="flex h-full flex-col" data-testid="right-sidepanel">

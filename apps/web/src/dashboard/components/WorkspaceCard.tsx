@@ -25,6 +25,7 @@ import {
 import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
+import { showChecksTab } from "../lib/checks-tab";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { isWorkspaceDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
@@ -39,6 +40,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
+import { PullRequestBadge } from "./PullRequestBadge";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 import { WorkspaceLabel } from "./WorkspaceLabel";
 
@@ -178,6 +180,12 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     }
   };
 
+  const handleOpenChecks = () => {
+    if (isDeleting) return;
+    showChecksTab();
+    if (!isActive) handleClick();
+  };
+
   // `py-1` keeps the row compact with a mouse; on touch devices the
   // `(pointer: coarse)` variant bumps it to a 44px-tall hit target (iOS HIG
   // minimum) so the branch row is easy to tap in the list. `touch-manipulation`
@@ -306,14 +314,25 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             </span>
           )}
           <div
-            className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
+            className={`${isDeleting ? "hidden" : "hidden @[10rem]:flex group-hover:flex group-focus-within:flex"} items-center gap-2 shrink-0 ml-auto pl-2`}
           >
             <SetupStatusIndicator setup={setupStatus} />
             {/* Plain (non-git) projects have no branch state to surface —
                 no dirty/ahead/behind, no CI, no PR — so skip the indicators
                 entirely rather than render perpetually-empty badges. */}
             {!isPlain && branchStatus && <GitStatusIndicator git={branchStatus.git} />}
-            {!isPlain && branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
+            {/* A branch with a PR shows its number, colored by CI state; one
+                without shows only the branch's CI icon, if it has checks. */}
+            {!isPlain && branchStatus?.ci.pr && (
+              <PullRequestBadge
+                pr={branchStatus.ci.pr}
+                ciState={branchStatus.ci.state}
+                onOpenChecks={handleOpenChecks}
+              />
+            )}
+            {!isPlain && branchStatus && !branchStatus.ci.pr && (
+              <CIStatusIndicator ci={branchStatus.ci} />
+            )}
           </div>
         </div>
       </ContextMenuTrigger>

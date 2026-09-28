@@ -71,6 +71,11 @@ export class PluginHost {
     }));
   }
 
+  /** Whether `id` is a bundled plugin that `plugins.disabled` doesn't list. */
+  isEnabled(id: string): boolean {
+    return this.load().some((p) => p.manifest.id === id && p.status !== "disabled");
+  }
+
   /**
    * The review provider for a repository, activating the plugins whose
    * `onProjectRemote` events match its host first. Null when no enabled
