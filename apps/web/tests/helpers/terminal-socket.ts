@@ -16,6 +16,7 @@ export class TerminalSocket {
   attached = false;
   /** Set once the server closes the socket (e.g. the PTY exited). `null` while still open. */
   closeCode: number | null = null;
+  private readonly outputListeners = new Set<(text: string) => void>();
   private constructor(
     private readonly ws: WebSocket,
     maxOutputChars: number,
@@ -23,7 +24,9 @@ export class TerminalSocket {
     ws.on("message", (data: Buffer, isBinary: boolean) => {
       if (isBinary) {
         this.bytes += data.length;
-        this.output += data.toString("utf8");
+        const text = data.toString("utf8");
+        this.output += text;
+        for (const listener of this.outputListeners) listener(text);
         if (this.output.length > maxOutputChars) this.output = this.output.slice(-maxOutputChars);
         return;
       }
@@ -70,6 +73,12 @@ export class TerminalSocket {
     ws.send(JSON.stringify({ type: "attach", cols: 100, rows: 30, flow }));
     await waitFor(async () => (socket.attached ? true : undefined), { label: "attach ack" });
     return socket;
+  }
+
+  /** Call `listener` with each output frame as it arrives. Returns an unsubscribe function. */
+  onOutput(listener: (text: string) => void): () => void {
+    this.outputListeners.add(listener);
+    return () => this.outputListeners.delete(listener);
   }
 
   type(input: string): void {
