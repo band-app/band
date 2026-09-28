@@ -150,6 +150,37 @@ export function noteTypingLatencyDispatch(terminalId: string): void {
 }
 
 /**
+ * The keystrokes whose echo is in `data`: for each typed character in it, the
+ * newest waiting keystroke of that character. Older waiting keystrokes of the
+ * same character are dropped as unmatched. Their echo never came (a tty
+ * drops echo while its output queue is full), and pairing them with this
+ * frame would record one trip round the typed alphabet as latency.
+ */
+function matchEchoes(
+  terminalId: string,
+  pending: Keystroke[],
+  waiting: Keystroke[],
+  data: Uint8Array,
+): Keystroke[] {
+  const newestByByte = new Map<number, Keystroke>();
+  for (const keystroke of waiting) {
+    if (keystroke.byte !== 0 && data.includes(keystroke.byte)) {
+      newestByByte.set(keystroke.byte, keystroke);
+    }
+  }
+  const matched = new Set(newestByByte.values());
+  const lost = waiting.filter((k) => newestByByte.has(k.byte) && !matched.has(k));
+  if (lost.length > 0) {
+    unmatched += lost.length;
+    pendingByTerminal.set(
+      terminalId,
+      pending.filter((k) => !lost.includes(k)),
+    );
+  }
+  return [...matched];
+}
+
+/**
  * Called when an output frame for the terminal comes off its socket. Returns
  * a callback to pass to `term.write` when that frame is the echo of a pending
  * keystroke, `undefined` otherwise.
@@ -159,13 +190,9 @@ export function noteTypingLatencyOutput(
   data: Uint8Array,
 ): (() => void) | undefined {
   if (!active) return undefined;
-  const waiting =
-    pendingByTerminal
-      .get(terminalId)
-      ?.filter((k) => k.dispatchAt !== null && k.arrivalAt === null) ?? [];
-  const matched = matchEcho
-    ? waiting.filter((k) => k.byte !== 0 && data.includes(k.byte))
-    : waiting.slice(0, 1);
+  const pending = pendingByTerminal.get(terminalId) ?? [];
+  const waiting = pending.filter((k) => k.dispatchAt !== null && k.arrivalAt === null);
+  const matched = matchEcho ? matchEchoes(terminalId, pending, waiting, data) : waiting.slice(0, 1);
   if (matched.length === 0) return undefined;
   const arrivalAt = performance.now();
   for (const keystroke of matched) keystroke.arrivalAt = arrivalAt;
