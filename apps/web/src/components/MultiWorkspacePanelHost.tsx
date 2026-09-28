@@ -120,6 +120,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   // in that entry (a terminal refit, DevTools) and forced the recalc. Forcing
   // the recalc here, before the lock, makes the order deterministic. The
   // active entry is unparked before paint, in the same frame it turns visible.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the entries are read from the DOM; a switch or a mount is what changes which are inert
   useLayoutEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
