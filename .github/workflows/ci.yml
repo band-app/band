@@ -608,7 +608,22 @@ jobs:
       - name: Build web (needed by tests)
         run: pnpm build:web
 
-      - name: Test (web)
+      - name: DIAG echo latency (isolated)
+        continue-on-error: true
+        working-directory: apps/web
+        env:
+          BAND_ECHO_DIAG: "1"
+          BAND_ECHO_DIAG_ROUNDS: "5"
+        run: |
+          sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string || true
+          NODE_OPTIONS='--no-warnings=ExperimentalWarning' npx vitest run tests/echo-latency-diag.test.ts
+          for i in 1 2 3 4 5; do NODE_OPTIONS='--no-warnings=ExperimentalWarning' npx vitest run tests/terminal-echo-during-branch-poll.test.ts 2>&1 | grep -E "echoes|✓|×|Tests" || true; done
+
+      - name: DIAG echo latency (inside the full suite)
+        continue-on-error: true
+        env:
+          BAND_ECHO_DIAG: "1"
+          BAND_ECHO_DIAG_ROUNDS: "3"
         run: pnpm --filter @band-app/server test
 
       - name: Save Cargo registry cache
