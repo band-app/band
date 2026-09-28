@@ -18,7 +18,7 @@
  * `ChatPanePage`.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
@@ -34,6 +34,7 @@ import {
 } from "./helpers/server";
 import { trpcMutate } from "./helpers/trpc";
 import { ChatPanePage } from "./pages/ChatPanePage";
+import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-chat-composer-find-token";
 const COMPOSER_PROJECT = "composer";
@@ -47,6 +48,8 @@ const NEEDLE = "zebra-token";
  *  user's prompt in 5. */
 const NEEDLE_TURNS = new Set([1, 5, 9, 17]);
 const TURNS = 20;
+/** A file in the composer workspace, opened beside the chat. */
+const FILE = "notes.ts";
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -60,6 +63,7 @@ test.beforeAll(async () => {
     mkdirSync(path, { recursive: true });
     return { name, path, defaultBranch: "main", worktrees: [{ branch: "main", path }] };
   });
+  writeFileSync(join(projects[0].path, FILE), `const ${NEEDLE.replace("-", "_")} = 1;\n`);
   seedState(tmpHome, { projects });
   seedSettings(tmpHome, {
     tokenSecret: TOKEN,
@@ -148,12 +152,12 @@ test("the mode menu and model trigger carry no icons", async ({ page }) => {
   await chat.waitForReady();
 
   await expect(chat.modelMenuModel).toHaveText("Stub Small");
-  expect(await chat.iconCount(chat.modelMenuButton)).toBe(0);
-  expect(await chat.iconCount(chat.modeMenuButton)).toBe(0);
+  await expect(chat.icons(chat.modelMenuButton)).toHaveCount(0);
+  await expect(chat.icons(chat.modeMenuButton)).toHaveCount(0);
 
   await chat.openModeMenu();
   await expect(chat.modeMenuItems).toHaveText([/Default/, /Plan/]);
-  expect(await chat.iconCount(chat.modeMenuItems)).toBe(0);
+  await expect(chat.icons(chat.modeMenuItems)).toHaveCount(0);
 });
 
 test("the context ring is always shown and reports the agent's usage_update", async ({ page }) => {
@@ -170,8 +174,9 @@ test("the context ring is always shown and reports the agent's usage_update", as
 
   await expect(chat.contextMeter).toHaveAccessibleName("Context window: 25% of 200k");
   await chat.hoverContextMeter();
-  await expect(chat.contextMeterDetails).toContainText("Context: 50,000 / 200,000 (25%)");
-  await expect(chat.contextMeterDetails).toContainText("Cost: $0.042");
+  await expect(chat.contextMeterUsage).toContainText("50,000 / 200,000");
+  await expect(chat.contextMeterUsage).toContainText("25%");
+  await expect(chat.contextMeterCost).toContainText("0.042");
 });
 
 test("Cmd/Ctrl+F finds text in the conversation and steps through the matches", async ({
@@ -182,17 +187,19 @@ test("Cmd/Ctrl+F finds text in the conversation and steps through the matches", 
   await chat.waitForReady();
   await expect(chat.assistantMessage(replyText(TURNS - 1))).toBeVisible({ timeout: 30_000 });
 
-  await chat.openFind();
+  // Cmd/Ctrl+F works after a click in the conversation, not only from the
+  // prompt.
+  await chat.openFindFromMessage(chat.assistantMessage(replyText(TURNS - 1)));
   await chat.find.type(NEEDLE);
-  await expect(chat.find.count).toHaveText(new RegExp(`^\\d/${NEEDLE_TURNS.size}$`));
+  // At the bottom of the list, the first match at or below the viewport is
+  // the last one (turn 17).
+  await expect(chat.find.count).toHaveText(`4/${NEEDLE_TURNS.size}`);
   await expect.poll(async () => (await chat.findHighlights()).current).toBe(NEEDLE);
 
-  // Step until the first match (turn 1, far above the viewport and not
-  // mounted) is current. It scrolls into view and is highlighted.
-  for (let i = 0; i < NEEDLE_TURNS.size; i++) {
-    if ((await chat.find.count.textContent()) === `1/${NEEDLE_TURNS.size}`) break;
-    await chat.find.press("Enter");
-  }
+  // Turn 1 is far above the viewport and not mounted. Enter wraps to it; the
+  // virtualized list scrolls it into view and it is highlighted.
+  await expect(chat.assistantMessage(replyText(1))).toHaveCount(0);
+  await chat.find.press("Enter");
   await expect(chat.find.count).toHaveText(`1/${NEEDLE_TURNS.size}`);
   await expect(chat.assistantMessage(replyText(1))).toBeInViewport();
   await expect
@@ -223,6 +230,36 @@ test("Cmd/Ctrl+F finds text in the conversation and steps through the matches", 
   await expect(chat.find.root).toHaveCount(0);
   await expect(chat.promptInput).toBeFocused();
   await expect.poll(async () => (await chat.findHighlights()).total).toBe(0);
+});
+
+test("Cmd/Ctrl+F in a chat opens the chat's find, not the find of a file beside it", async ({
+  page,
+}) => {
+  const chat = new ChatPanePage(page, server.url, TOKEN);
+  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  await chat.goto(COMPOSER_WORKSPACE);
+  await chat.waitForReady();
+
+  // Split the chat to the right, then open the file in the new group: the
+  // first chat and the file are both on screen.
+  await chat.focusPrompt();
+  await workspace.pressSplitRight();
+  await workspace.openFileLeaf(FILE, COMPOSER_WORKSPACE);
+
+  await chat.openFind();
+  await expect(chat.find.root).toBeVisible();
+  // The file's bar opens a frame after the shortcut, so watch for it for a
+  // while rather than checking once.
+  let fileFindOpened = false;
+  try {
+    await expect
+      .poll(() => workspace.findInFileOrPreviewBar.count(), { timeout: 1500 })
+      .toBeGreaterThan(0);
+    fileFindOpened = true;
+  } catch {
+    // It never opened.
+  }
+  expect(fileFindOpened).toBe(false);
 });
 
 function buildTurns(): SeededTurn[] {

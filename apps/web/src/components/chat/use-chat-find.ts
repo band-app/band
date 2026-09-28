@@ -25,8 +25,8 @@ import type { ChatMessage } from "./transcript";
 import type { VirtualizedMessageListHandle } from "./VirtualizedMessageList";
 
 /** Marks the rendered text a find searches: a user message's text and each
- *  of the agent's text replies. */
-export const CHAT_FIND_TEXT_ATTR = "data-chat-find-text";
+ *  of the agent's text replies (set in ChatView). */
+const CHAT_FIND_TEXT_ATTR = "data-chat-find-text";
 
 const DEFAULT_OPTIONS: SearchOptions = { caseSensitive: false, wholeWord: false, regex: false };
 
@@ -76,10 +76,16 @@ function rangesInRow(row: Element, re: RegExp): Range[] {
       text += (node as Text).data;
     }
     // The last node starting at or before `offset` (before it, for an end).
+    // Spans come in ascending order, so the cursor only moves forward.
+    let cursor = 0;
     const locate = (offset: number, end: boolean): [Text, number] => {
-      let i = nodes.length - 1;
-      while (i > 0 && (end ? starts[i] >= offset : starts[i] > offset)) i -= 1;
-      return [nodes[i], offset - starts[i]];
+      while (
+        cursor < nodes.length - 1 &&
+        (end ? starts[cursor + 1] < offset : starts[cursor + 1] <= offset)
+      ) {
+        cursor += 1;
+      }
+      return [nodes[cursor], offset - starts[cursor]];
     };
     for (const [start, end] of matchSpans(text, re)) {
       const range = document.createRange();
@@ -109,6 +115,13 @@ function paintHighlights(): void {
 
 interface ChatFindMatch {
   messageIndex: number;
+  messageId: string;
+  occurrence: number;
+}
+
+/** A match by identity, so it stays put when older messages load above it. */
+interface MatchKey {
+  messageId: string;
   occurrence: number;
 }
 
@@ -148,7 +161,7 @@ export function useChatFind({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<SearchOptions>(DEFAULT_OPTIONS);
-  const [current, setCurrent] = useState(0);
+  const [current, setCurrent] = useState<MatchKey | null>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
   // Set when the current match should be scrolled into view once painted.
   const revealRef = useRef(false);
@@ -171,7 +184,7 @@ export function useChatFind({
         countCache.current.set(message, cached);
       }
       for (let occurrence = 0; occurrence < cached.count; occurrence++) {
-        out.push({ messageIndex, occurrence });
+        out.push({ messageIndex, messageId: message.id, occurrence });
       }
     });
     return out;
@@ -194,11 +207,30 @@ export function useChatFind({
       }
     }
     const next = found.findIndex((m) => m.messageIndex >= firstVisible);
-    setCurrent(next === -1 ? Math.max(0, found.length - 1) : next);
+    const start = found[next === -1 ? found.length - 1 : next];
+    setCurrent(start ? { messageId: start.messageId, occurrence: start.occurrence } : null);
     revealRef.current = true;
   }, [regex, scrollEl]);
 
-  const currentMatch = matches[Math.min(current, matches.length - 1)];
+  // Where the current match is now. When it's gone (its text changed), the
+  // match at its old position takes over.
+  const lastIndexRef = useRef(0);
+  const currentIndex = useMemo(() => {
+    if (matches.length === 0) return -1;
+    const found = current
+      ? matches.findIndex(
+          (m) => m.messageId === current.messageId && m.occurrence === current.occurrence,
+        )
+      : -1;
+    return found !== -1 ? found : Math.min(lastIndexRef.current, matches.length - 1);
+  }, [matches, current]);
+  lastIndexRef.current = Math.max(0, currentIndex);
+  const currentMatch = currentIndex === -1 ? undefined : matches[currentIndex];
+  // Read through a ref so a streamed token, which rebuilds `matches`, doesn't
+  // recreate `repaint` and the observers below.
+  const currentMatchRef = useRef(currentMatch);
+  currentMatchRef.current = currentMatch;
+  const currentKey = currentMatch ? `${currentMatch.messageId}:${currentMatch.occurrence}` : "";
 
   const repaint = useCallback(() => {
     if (!regex || !scrollEl) {
@@ -206,6 +238,7 @@ export function useChatFind({
       paintHighlights();
       return;
     }
+    const currentMatch = currentMatchRef.current;
     const all: Range[] = [];
     let currentRange: Range | null = null;
     let targetMounted = false;
@@ -235,10 +268,17 @@ export function useChatFind({
       onBeforeScroll?.();
       scrollEl.scrollTop += box.top - view.top - view.height / 2;
     }
-  }, [regex, scrollEl, currentMatch, paneId, listRef, onBeforeScroll]);
+  }, [regex, scrollEl, paneId, listRef, onBeforeScroll]);
 
-  // Repaint when the match moves, and whenever the mounted rows change
-  // (scrolling mounts others, streaming rewrites the last one).
+  // Repaint when the match moves.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `currentKey` is the trigger; `repaint` reads the match through a ref
+  useEffect(() => {
+    const raf = requestAnimationFrame(repaint);
+    return () => cancelAnimationFrame(raf);
+  }, [currentKey, repaint]);
+
+  // Repaint whenever the mounted rows change (scrolling mounts others,
+  // streaming rewrites the last one).
   useEffect(() => {
     let raf = requestAnimationFrame(repaint);
     if (!regex || !scrollEl) return () => cancelAnimationFrame(raf);
@@ -277,12 +317,18 @@ export function useChatFind({
     onClose?.();
   }, [onClose]);
 
-  const step = useCallback((delta: number) => {
-    const total = matchesRef.current.length;
-    if (total === 0) return;
-    setCurrent((c) => (Math.min(c, total - 1) + delta + total) % total);
-    revealRef.current = true;
-  }, []);
+  const step = useCallback(
+    (delta: number) => {
+      const found = matchesRef.current;
+      if (found.length === 0) return;
+      const next = found[(lastIndexRef.current + delta + found.length) % found.length];
+      setCurrent({ messageId: next.messageId, occurrence: next.occurrence });
+      revealRef.current = true;
+      // With one match the key doesn't change, so reveal it from here.
+      requestAnimationFrame(repaint);
+    },
+    [repaint],
+  );
   const findNext = useCallback(() => step(1), [step]);
   const findPrevious = useCallback(() => step(-1), [step]);
 
@@ -309,7 +355,7 @@ export function useChatFind({
     matchInfo: regex
       ? {
           total: matches.length,
-          current: matches.length > 0 ? matches.indexOf(currentMatch) + 1 : 0,
+          current: currentIndex + 1,
         }
       : query
         ? { total: 0, current: 0 }

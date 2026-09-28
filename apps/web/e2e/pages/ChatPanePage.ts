@@ -100,6 +100,10 @@ export class ChatPanePage {
   readonly contextMeter: Locator;
   /** The popover the ring opens on hover: context used and cost. */
   readonly contextMeterDetails: Locator;
+  /** The popover's "used / size (percent)" row. */
+  readonly contextMeterUsage: Locator;
+  /** The popover's cost row, shown when the agent reports a cost. */
+  readonly contextMeterCost: Locator;
   /** The model settings trigger on the right of the composer: model name
    *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
@@ -180,6 +184,8 @@ export class ChatPanePage {
     this.modeMenuItems = page.getByRole("menu").getByRole("menuitem");
     this.contextMeter = page.getByTestId("chat-pane__context-meter").filter({ visible: true });
     this.contextMeterDetails = page.getByTestId("chat-pane__context-meter-details");
+    this.contextMeterUsage = page.getByTestId("chat-pane__context-meter-usage");
+    this.contextMeterCost = page.getByTestId("chat-pane__context-meter-cost");
     this.thinkingIndicator = page.getByTestId("chat-pane__thinking-indicator");
     // System-controlled aria-label set in `ChatView.tsx::SessionHistoryMenu` —
     // doctrine-preferred locator (role + name).
@@ -883,9 +889,9 @@ export class ChatPanePage {
     });
   }
 
-  /** Number of icons (`svg`) inside `locator`. */
-  async iconCount(locator: Locator): Promise<number> {
-    return await locator.locator("svg").count();
+  /** The icons (`svg`) inside `locator`. */
+  icons(locator: Locator): Locator {
+    return locator.locator("svg");
   }
 
   /** Hover the context ring so its details popover opens. */
@@ -928,8 +934,18 @@ export class ChatPanePage {
   /** Press Cmd/Ctrl+F in the prompt to open the chat's find widget. */
   async openFind(): Promise<void> {
     await test.step("Open find in chat with Cmd/Ctrl+F", async () => {
-      await this.promptInput.click();
-      await this.promptInput.press("ControlOrMeta+f");
+      const prompt = this.promptInput.filter({ visible: true });
+      await prompt.click();
+      await prompt.press("ControlOrMeta+f");
+      await expect(this.find.input).toBeFocused();
+    });
+  }
+
+  /** Click `message` in the conversation, then press Cmd/Ctrl+F. */
+  async openFindFromMessage(message: Locator): Promise<void> {
+    await test.step("Click a message and press Cmd/Ctrl+F", async () => {
+      await message.click();
+      await this.page.keyboard.press("ControlOrMeta+f");
       await expect(this.find.input).toBeFocused();
     });
   }

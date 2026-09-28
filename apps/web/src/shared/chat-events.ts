@@ -113,10 +113,9 @@ export interface SessionState {
    *  `model` config option (Gemini CLI). */
   models: LegacyModelState | null;
   commands: AvailableCommand[];
+  /** The agent's latest `usage_update`. `cost` is the last one it reported,
+   *  kept when a later update leaves it out. */
   usage: UsageUpdate | null;
-  /** Cumulative session cost in USD: `usage.cost` when the agent reports
-   *  one, else Band's estimate from the last turn's tokens. */
-  costUsd: number | null;
   title: string | null;
   /** Claude Code only: the model and effort its `default` model and effort
    *  choices run with, as the session reports them or config sets them.

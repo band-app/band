@@ -389,9 +389,7 @@ async function runTask(task: InternalTask): Promise<void> {
     }
   });
 
-  const previousCost = agentSessionService.getSessionState(chatId, {
-    resolveDefaults: false,
-  }).costUsd;
+  const previousCost = agentSessionService.sessionCostUsd(chatId);
   agentSessionService.record(
     chatId,
     {

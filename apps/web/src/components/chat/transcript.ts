@@ -338,9 +338,9 @@ function applyUpdate(
 
     case "usage_update": {
       if (!state.session) return state;
-      const usage = { used: update.used, size: update.size, cost: update.cost ?? null };
-      const cost = update.cost?.currency === "USD" ? update.cost.amount : state.session.costUsd;
-      return { ...state, session: { ...state.session, usage, costUsd: cost } };
+      const cost = update.cost ?? state.session.usage?.cost ?? null;
+      const usage = { used: update.used, size: update.size, cost };
+      return { ...state, session: { ...state.session, usage } };
     }
 
     case "session_info_update":
@@ -573,7 +573,6 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
           ...notice,
         });
       }
-      const cost = event.usage?.costUsd;
       return {
         ...state,
         messages,
@@ -581,8 +580,6 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
         pendingSend: false,
         status: event.error ? "error" : "idle",
         errorMessage: event.error,
-        session:
-          state.session && cost !== undefined ? { ...state.session, costUsd: cost } : state.session,
       };
     }
 
@@ -626,7 +623,6 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
             source: "live",
             commands: [],
             usage: null,
-            costUsd: null,
             title: null,
           }),
           source: "live",

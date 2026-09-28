@@ -80,7 +80,7 @@ import { withResolvedDefaults } from "./chat/claude-default-labels";
 import { MessageActions } from "./chat/MessageActions";
 import { groupEntries } from "./chat/tool-summary";
 import type { ChatMessage, Entry } from "./chat/transcript";
-import { CHAT_FIND_TEXT_ATTR, useChatFind } from "./chat/use-chat-find";
+import { useChatFind } from "./chat/use-chat-find";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import {
   VirtualizedMessageList,
@@ -577,7 +577,7 @@ export function ChatView({
     switch (entry.kind) {
       case "text":
         return entry.text.trim() ? (
-          <div key={entry.id} {...{ [CHAT_FIND_TEXT_ATTR]: "" }}>
+          <div key={entry.id} data-chat-find-text="">
             <MessageResponse>{entry.text}</MessageResponse>
           </div>
         ) : null;
@@ -665,7 +665,7 @@ export function ChatView({
                 <MessageFilePart key={file.url} part={{ type: "file", ...file }} />
               ))}
               {message.text.trim() && (
-                <div {...{ [CHAT_FIND_TEXT_ATTR]: "" }}>
+                <div data-chat-find-text="">
                   <MessageResponse>{message.text}</MessageResponse>
                 </div>
               )}
@@ -1400,13 +1400,15 @@ function ContextMeter({ usage }: { usage: SessionState["usage"] }) {
       >
         <div data-testid="chat-pane__context-meter-details" className="space-y-0.5 text-xs">
           {usage ? (
-            <div>
+            <div data-testid="chat-pane__context-meter-usage">
               Context: {usage.used.toLocaleString()} / {usage.size.toLocaleString()} ({pctRounded}%)
             </div>
           ) : (
             <div>No usage reported yet</div>
           )}
-          {usage?.cost && <div>Cost: {formatCost(usage.cost)}</div>}
+          {usage?.cost && (
+            <div data-testid="chat-pane__context-meter-cost">Cost: {formatCost(usage.cost)}</div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

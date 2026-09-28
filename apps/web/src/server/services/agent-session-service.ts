@@ -412,7 +412,12 @@ function applyLive(rt: Runtime, update: acp.SessionUpdate): void {
       if (rt.live.modes) rt.live.modes = { ...rt.live.modes, currentModeId: update.currentModeId };
       break;
     case "usage_update":
-      rt.live.usage = { used: update.used, size: update.size, cost: update.cost ?? null };
+      // Keep the last reported cost when an update leaves it out.
+      rt.live.usage = {
+        used: update.used,
+        size: update.size,
+        cost: update.cost ?? rt.live.usage?.cost ?? null,
+      };
       break;
     case "session_info_update":
       if (update.title !== undefined) {
@@ -878,6 +883,16 @@ export class AgentSessionService {
     return cost && cost.currency === "USD" ? cost.amount : undefined;
   }
 
+  /** The session's cumulative cost in USD so far: the agent's own figure
+   *  when it reports one, else Band's estimate from the last finished turn.
+   *  The next turn's estimate builds on it. */
+  sessionCostUsd(chatId: string): number | null {
+    const reported = this.reportedCost(chatId);
+    if (reported !== undefined) return reported;
+    const sessionId = chatService.get(chatId)?.activeSessionId;
+    return sessionId ? sessionCost(sessionId) : null;
+  }
+
   /** Runs one prompt turn on the attached session. */
   async prompt(chatId: string, blocks: acp.ContentBlock[]): Promise<acp.PromptResponse> {
     const rt = runtimes.get(chatId);
@@ -1120,11 +1135,7 @@ export class AgentSessionService {
     const sessionId = chat.activeSessionId;
 
     if (rt?.process?.alive && rt.sessionId && rt.sessionId === sessionId) {
-      return {
-        source: "live",
-        ...rt.live,
-        costUsd: this.reportedCost(chatId) ?? sessionCost(sessionId),
-      };
+      return { source: "live", ...rt.live };
     }
 
     const revision = sessionId ? events.currentRevision(sessionId) : 0;
@@ -1165,8 +1176,6 @@ export class AgentSessionService {
             ? commands.update.availableCommands
             : (catalog.get(def.id)?.commands ?? []),
         usage: usageUpdate,
-        costUsd:
-          usageUpdate?.cost?.currency === "USD" ? usageUpdate.cost.amount : sessionCost(sessionId),
         title:
           info?.type === "update" && info.update.sessionUpdate === "session_info_update"
             ? (info.update.title ?? null)
@@ -1204,7 +1213,6 @@ export class AgentSessionService {
           : models,
       commands: cached?.commands ?? [],
       usage: null,
-      costUsd: null,
       title: null,
     };
   }
@@ -1417,6 +1425,8 @@ export class AgentSessionService {
   }
 }
 
+export const agentSessionService = new AgentSessionService();
+
 /** Band's running cost estimate for a session, from its last finished turn. */
 function sessionCost(sessionId: string): number | null {
   const revision = events.currentRevision(sessionId);
@@ -1424,5 +1434,3 @@ function sessionCost(sessionId: string): number | null {
   const row = events.latest(sessionId, revision, { kind: "turn-ended" });
   return row?.event.type === "turn-ended" ? (row.event.usage?.costUsd ?? null) : null;
 }
-
-export const agentSessionService = new AgentSessionService();

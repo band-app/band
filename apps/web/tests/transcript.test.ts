@@ -58,7 +58,6 @@ const SESSION: SessionState = {
   models: null,
   commands: [],
   usage: null,
-  costUsd: null,
   title: null,
 };
 
@@ -303,7 +302,7 @@ describe("transcriptReducer — send and turn lifecycle", () => {
     ]);
   });
 
-  it("settles a finished turn: idle, cost taken from usage, no notice for end_turn", () => {
+  it("settles a finished turn: idle, no notice for end_turn", () => {
     const state = foldEvents(
       { ...INITIAL_TRANSCRIPT, session: SESSION },
       logged([
@@ -319,8 +318,27 @@ describe("transcriptReducer — send and turn lifecycle", () => {
       ]),
     );
     expect(state).toMatchObject({ status: "idle", taskRunning: false, errorMessage: undefined });
-    expect(state.session?.costUsd).toBe(0.25);
     expect(assistant(state).entries.map((e) => e.kind)).toEqual(["text"]);
+  });
+
+  it("keeps the last reported cost when a usage_update leaves it out", () => {
+    const state = foldEvents(
+      { ...INITIAL_TRANSCRIPT, session: SESSION },
+      logged([
+        update({
+          sessionUpdate: "usage_update",
+          used: 1_000,
+          size: 200_000,
+          cost: { amount: 0.5, currency: "USD" },
+        }),
+        update({ sessionUpdate: "usage_update", used: 2_000, size: 200_000 }),
+      ]),
+    );
+    expect(state.session?.usage).toEqual({
+      used: 2_000,
+      size: 200_000,
+      cost: { amount: 0.5, currency: "USD" },
+    });
   });
 
   it("a cancelled turn fails running tools and adds a Stopped notice", () => {
