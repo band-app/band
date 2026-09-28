@@ -32,6 +32,7 @@ import type {
   ChatEventPayload,
   LegacyModelState,
   LoggedChatEvent,
+  ResolvedDefaults,
   SessionState,
 } from "../../shared/chat-events";
 import {
@@ -41,6 +42,12 @@ import {
   type PermissionOutcome,
 } from "../infra/agents/acp-agent-process";
 import { type AcpAgentDefinition, resolveAcpLaunch } from "../infra/agents/acp-launch";
+import {
+  type ClaudeCliArgs,
+  configuredClaudeDefaults,
+  findClaudeCliArgs,
+  reportedClaudeDefaults,
+} from "../infra/agents/claude-defaults";
 import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
 import {
   bandHome,
@@ -115,6 +122,9 @@ interface Runtime {
   live: LiveState;
   pending: Map<string, PendingRequest>;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Claude Code: flags on the command line of the CLI behind the session,
+   *  which a wrapper script may have added. */
+  claudeCli: ClaudeCliArgs | null;
 }
 
 /** What an agent offers before a chat has a session: gathered from probes
@@ -127,6 +137,10 @@ export interface CatalogEntry {
   commands: acp.AvailableCommand[];
   canList: boolean;
   updatedAt: number;
+  /** Claude Code: what `default` choices resolved to in earlier sessions,
+   *  for a chat with no session yet. `effort` is keyed by the model choice
+   *  it ran under. */
+  learnedDefaults?: { model?: string; effort: Record<string, string> };
 }
 
 type Listener = (event: ChatEvent) => void;
@@ -136,13 +150,18 @@ type Listener = (event: ChatEvent) => void;
 const RUNTIMES_KEY = Symbol.for("band.acp.runtimes");
 const LISTENERS_KEY = Symbol.for("band.acp.listeners");
 const CATALOG_KEY = Symbol.for("band.acp.catalog");
+const DEFAULTS_CHANGED_KEY = Symbol.for("band.acp.defaultsChangedAt");
 const g = globalThis as unknown as Record<symbol, unknown>;
 g[RUNTIMES_KEY] ??= new Map<string, Runtime>();
 g[LISTENERS_KEY] ??= new Map<string, Set<Listener>>();
 g[CATALOG_KEY] ??= new Map<string, CatalogEntry>();
+g[DEFAULTS_CHANGED_KEY] ??= new Map<string, number>();
 const runtimes = g[RUNTIMES_KEY] as Map<string, Runtime>;
 const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
 const catalog = g[CATALOG_KEY] as Map<string, CatalogEntry>;
+/** chatId → when the chat's model or effort choice last changed. Transcript
+ *  records from before then no longer describe what `default` runs. */
+const defaultsChangedAt = g[DEFAULTS_CHANGED_KEY] as Map<string, number>;
 
 /** Ids for events broadcast without a log row. Negative, so they never move
  *  a client's gap-fill cursor. */
@@ -239,6 +258,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       live: emptyLive(),
       pending: new Map(),
       idleTimer: null,
+      claudeCli: null,
     };
     runtimes.set(chat.id, rt);
   }
@@ -302,6 +322,73 @@ function remember(def: CodingAgentDefinition, patch: Partial<CatalogEntry>): voi
     ...patch,
     updatedAt: Date.now(),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code defaults
+// ---------------------------------------------------------------------------
+
+function findEffortOption(options: acp.SessionConfigOption[]): acp.SessionConfigOption | undefined {
+  return options.find(
+    (o) => o.type === "select" && (o.category === "thought_level" || o.id === "effort"),
+  );
+}
+
+/**
+ * What a Claude Code chat's `default` model and effort choices run with (see
+ * `infra/agents/claude-defaults.ts`): the session's transcript when its last
+ * turn ran on them, else config, else what an earlier session of the agent
+ * reported. With `learn`, a reported value the config doesn't explain is
+ * kept for chats that have no session yet. Undefined for other agents.
+ */
+function claudeDefaults(
+  chatId: string,
+  chat: ChatSession | undefined,
+  def: CodingAgentDefinition,
+  configOptions: acp.SessionConfigOption[],
+  learn = false,
+): ResolvedDefaults | undefined {
+  if (def.type !== "claude-code") return undefined;
+  const cwd = chat ? workspaceService.resolve(chat.workspaceId)?.worktree.path : undefined;
+  const configured = configuredClaudeDefaults({
+    cwd: cwd ?? bandHome(),
+    env: process.env,
+    cli: runtimes.get(chatId)?.claudeCli ?? undefined,
+  });
+  const reported =
+    cwd && chat?.activeSessionId
+      ? reportedClaudeDefaults({
+          cwd,
+          env: process.env,
+          sessionId: chat.activeSessionId,
+          since: defaultsChangedAt.get(chatId),
+        })
+      : {};
+  const modelOption = findOption(configOptions, "model");
+  const modelChoice = modelOption?.type === "select" ? String(modelOption.currentValue) : undefined;
+  const effortOption = findEffortOption(configOptions);
+  const model = modelChoice === "default" ? reported.model : undefined;
+  const effort =
+    effortOption?.type === "select" && effortOption.currentValue === "default"
+      ? reported.effort
+      : undefined;
+
+  const entry = catalog.get(def.id);
+  if (learn && entry && ((model && !configured.model) || (effort && !configured.effort))) {
+    const learned = entry.learnedDefaults ?? { effort: {} };
+    entry.learnedDefaults = {
+      model: (!configured.model && model) || learned.model,
+      effort:
+        effort && !configured.effort && modelChoice
+          ? { ...learned.effort, [modelChoice]: effort }
+          : learned.effort,
+    };
+  }
+  const learned = entry?.learnedDefaults;
+  return {
+    model: model ?? configured.model ?? learned?.model,
+    effort: effort ?? configured.effort ?? (modelChoice ? learned?.effort[modelChoice] : undefined),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -753,11 +840,16 @@ export class AgentSessionService {
     const rt = runtimeFor(chat, def);
     while (rt.attaching) await rt.attaching.catch(() => undefined);
     const fresh = chatService.get(chatId) ?? chat;
+    const attachedBefore = rt.sessionId;
     rt.attaching = attach(rt, fresh, def, workspace.worktree.path, purpose);
     try {
       await rt.attaching;
     } finally {
       rt.attaching = null;
+    }
+    if (def.type === "claude-code" && rt.sessionId && rt.sessionId !== attachedBefore) {
+      rt.claudeCli = null;
+      void this.readClaudeCli(rt).catch((err) => log.debug({ chatId, err }, "no CLI flags"));
     }
     if (!rt.inTurn && rt.process) scheduleIdle(rt);
     return rt.sessionId;
@@ -798,7 +890,36 @@ export class AgentSessionService {
     } finally {
       rt.inTurn = false;
       if (rt.process) scheduleIdle(rt);
+      this.pushClaudeDefaults(chatId, true);
     }
+  }
+
+  /** Sends a Claude Code chat's session state again once the turn wrote what
+   *  its `default` choices ran with, or the CLI's flags are known. */
+  private pushClaudeDefaults(chatId: string, learn: boolean): void {
+    const chat = chatService.get(chatId);
+    if (!chat || definitionFor(chat).type !== "claude-code") return;
+    const state = this.baseSessionState(chatId);
+    const resolvedDefaults = claudeDefaults(
+      chatId,
+      chat,
+      definitionFor(chat),
+      state.configOptions,
+      learn,
+    );
+    broadcastTransient(chatId, { type: "session-state", state: { ...state, resolvedDefaults } });
+  }
+
+  /** Reads the Claude Code CLI's command line once per attached session, for
+   *  a `--settings` file or flags a wrapper script added. */
+  private async readClaudeCli(rt: Runtime): Promise<void> {
+    const pid = rt.process?.pid;
+    const sessionId = rt.sessionId;
+    if (!pid || !sessionId) return;
+    const args = await findClaudeCliArgs(pid, sessionId);
+    if (!args || rt.sessionId !== sessionId) return;
+    rt.claudeCli = args;
+    this.pushClaudeDefaults(rt.chatId, false);
   }
 
   /**
@@ -915,6 +1036,8 @@ export class AgentSessionService {
               : undefined;
     if (category === "model") chatService.update(chatId, { model: value });
     if (category === "mode") chatService.update(chatId, { mode: value });
+    const isEffort = option?.category === "thought_level" || configId === "effort";
+    if (category === "model" || isEffort) defaultsChangedAt.set(chatId, Date.now());
 
     const live = runtimes.get(chatId);
     const attached =
@@ -962,9 +1085,18 @@ export class AgentSessionService {
    * chat's session, else rebuilt from the log, else the agent catalog with
    * the chat's saved choices applied. A chat the server has no row for yet
    * (a new pane, created lazily on its first message) gets the default
-   * agent's catalog entry.
+   * agent's catalog entry. Claude Code chats also get what their `default`
+   * choices resolve to.
    */
   getSessionState(chatId: string): SessionState {
+    const state = this.baseSessionState(chatId);
+    const chat = chatService.get(chatId);
+    const def = definitionFor(chat ?? { agent: undefined as unknown as string });
+    const resolvedDefaults = claudeDefaults(chatId, chat, def, state.configOptions);
+    return resolvedDefaults ? { ...state, resolvedDefaults } : state;
+  }
+
+  private baseSessionState(chatId: string): SessionState {
     const chat: Pick<ChatSession, "agent" | "activeSessionId" | "model" | "mode"> = chatService.get(
       chatId,
     ) ?? {

@@ -190,6 +190,11 @@ export class AcpAgentProcess {
     }
   }
 
+  /** The agent process id, while it runs. */
+  get pid(): number | undefined {
+    return this.child.pid;
+  }
+
   get alive(): boolean {
     return !this.closed && this.child.exitCode === null && this.child.signalCode === null;
   }

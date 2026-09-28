@@ -87,6 +87,7 @@ import {
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall } from "./ai-elements/tool-call";
+import { withResolvedDefaults } from "./chat/claude-default-labels";
 import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
@@ -201,14 +202,20 @@ function sessionPickers(session: SessionState | null) {
   const effort = rest.find(
     (o) => o !== fast && (o.category === "thought_level" || o.id === "effort"),
   );
+  const model = modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId;
+  // Claude Code: name the "default" choices after what they run with.
+  const labeled = session?.resolvedDefaults
+    ? withResolvedDefaults(models, model, effort, session.resolvedDefaults)
+    : { models, effort, effortLabel: undefined };
   return {
-    models,
-    model: modelOption ? String(modelOption.currentValue) : session?.models?.currentModelId,
+    models: labeled.models,
+    model,
     modelConfigId: modelOption?.id ?? "__legacy_model",
     modes,
     mode: modeOption ? String(modeOption.currentValue) : session?.modes?.currentModeId,
     modeConfigId: modeOption?.id ?? "__legacy_mode",
-    effort,
+    effort: labeled.effort,
+    effortLabel: labeled.effortLabel,
     fast,
     // Everything else the agent lets the user choose.
     others: rest.filter((o) => o !== effort && o !== fast),
@@ -825,6 +832,7 @@ export function ChatView({
                     selectedModel={pickers.model}
                     onSelectModel={handleModelSelect}
                     effort={pickers.effort}
+                    effortLabel={pickers.effortLabel}
                     fast={pickers.fast}
                     others={pickers.others}
                     onConfig={handleConfig}
@@ -928,6 +936,7 @@ function ModelSettingsMenu({
   selectedModel,
   onSelectModel,
   effort,
+  effortLabel,
   fast,
   others,
   onConfig,
@@ -938,6 +947,8 @@ function ModelSettingsMenu({
   selectedModel: string | undefined;
   onSelectModel: (model: string | undefined) => void;
   effort: SelectOption | undefined;
+  /** Shown in the trigger in place of the selected effort's name. */
+  effortLabel?: string;
   fast: SelectOption | undefined;
   others: SelectOption[];
   onConfig: (configId: string, value: string) => void;
@@ -968,7 +979,7 @@ function ModelSettingsMenu({
               data-testid="chat-pane__model-menu-effort"
               className="truncate text-muted-foreground"
             >
-              {effortChoice.name}
+              {effortLabel ?? effortChoice.name}
             </span>
           )}
           {fastOn && <Zap aria-label="Fast mode on" className="size-3 shrink-0" />}

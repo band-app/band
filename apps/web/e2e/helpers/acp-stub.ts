@@ -48,6 +48,7 @@ export interface AcpStubOptions {
 export interface StubChoice {
   value: string;
   name: string;
+  description?: string;
 }
 
 /** Where the stub saves sessions, so a restarted server (or `session/load`)

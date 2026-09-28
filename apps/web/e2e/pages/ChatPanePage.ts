@@ -634,6 +634,16 @@ export class ChatPanePage {
     });
   }
 
+  /** The first row of the open model settings menu: the selected model. */
+  selectedModelRow(): Locator {
+    return this.modelMenuContent.getByRole("menuitem").first();
+  }
+
+  /** A level in the open "Effort" submenu, by display name. */
+  effortOption(name: string): Locator {
+    return this.effortSubmenuContent.getByRole("menuitem", { name, exact: true });
+  }
+
   /** Type a single key in the focused prompt textarea. The prompt
    *  must already be focused — call `focusPrompt()` first. Used by the
    *  mention/slash-dropdown tests where `fill()` would replace the whole
