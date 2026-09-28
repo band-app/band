@@ -8,8 +8,9 @@ import { type DragRegionSnapshot, snapshotDragRegion } from "../lib/drag-region"
 // controls a drag box covers. Toggled from the command palette ("Toggle Window
 // Drag Region Overlay"); the choice stays on this device.
 
-export const DRAG_REGION_OVERLAY_KEY = "band.debug.drag-region-overlay";
-export const TOGGLE_DRAG_REGION_OVERLAY_EVENT = "band:toggle-drag-region-overlay";
+const DRAG_REGION_OVERLAY_KEY = "band.debug.drag-region-overlay";
+// sync-with: the "toggle-drag-region-overlay" command in dashboard/lib/command-registry.ts
+const TOGGLE_DRAG_REGION_OVERLAY_EVENT = "band:toggle-drag-region-overlay";
 
 const REFRESH_MS = 500;
 
@@ -26,20 +27,16 @@ export function WindowDragRegionOverlay() {
   const [snapshot, setSnapshot] = useState<DragRegionSnapshot | null>(null);
 
   useEffect(() => {
-    const toggle = () =>
-      setEnabled((prev) => {
-        const next = !prev;
-        try {
-          if (next) localStorage.setItem(DRAG_REGION_OVERLAY_KEY, "1");
-          else localStorage.removeItem(DRAG_REGION_OVERLAY_KEY);
-        } catch {}
-        return next;
-      });
+    const toggle = () => setEnabled((prev) => !prev);
     window.addEventListener(TOGGLE_DRAG_REGION_OVERLAY_EVENT, toggle);
     return () => window.removeEventListener(TOGGLE_DRAG_REGION_OVERLAY_EVENT, toggle);
   }, []);
 
   useEffect(() => {
+    try {
+      if (enabled) localStorage.setItem(DRAG_REGION_OVERLAY_KEY, "1");
+      else localStorage.removeItem(DRAG_REGION_OVERLAY_KEY);
+    } catch {}
     if (!enabled) {
       setSnapshot(null);
       return;

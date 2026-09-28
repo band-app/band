@@ -355,6 +355,7 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // same app-region styles compute but nothing hit-tests them.
       id: "toggle-drag-region-overlay",
       label: "Toggle Window Drag Region Overlay",
+      // sync-with: TOGGLE_DRAG_REGION_OVERLAY_EVENT in components/WindowDragRegionOverlay.tsx
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-drag-region-overlay")),
     },
     {

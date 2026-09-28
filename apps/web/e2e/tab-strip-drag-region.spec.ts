@@ -21,8 +21,9 @@
  * their stale `drag` in Chromium's region. `getComputedStyle` forces the
  * skipped recalc, so any DOM-level read sees the reset and the walk passes
  * either way. That cause was reproduced and its fix verified with real
- * native clicks in Electron 42 (see the PR); these tests only check that
- * hidden workspaces stay parked and the visible layout stays clear.
+ * native clicks in Electron 42 (see the PR); these tests check that hidden
+ * workspaces are parked (`data-band-parked`) and the visible one isn't, and
+ * that the visible layout stays clear.
  *
  * Architecture: the real production server against a fresh tmp `~/.band/`,
  * one seeded repo with two worktrees, no tRPC mocking, driven through `WorkspacePage`.
@@ -51,6 +52,8 @@ const TOKEN = "e2e-tab-strip-drag-region-token";
 const PROJECT = "drag-region-repo";
 const WORKSPACE_A = toWorkspaceId(PROJECT, "main");
 const WORKSPACE_B = toWorkspaceId(PROJECT, "second");
+// Untouched by the other tests, so its strip has just its default tab.
+const WORKSPACE_C = toWorkspaceId(PROJECT, "third");
 
 // Wide viewport so the desktop layout (sidebar + dockview) renders
 // (>= 1024px in useIsDesktop.ts).
@@ -71,6 +74,8 @@ test.beforeAll(async () => {
   gitInHome(repoPath, ["commit", "-q", "-m", "init"], tmpHome);
   const secondPath = join(tmpHome, `${PROJECT}-second`);
   gitInHome(repoPath, ["worktree", "add", "-q", "-b", "second", secondPath], tmpHome);
+  const thirdPath = join(tmpHome, `${PROJECT}-third`);
+  gitInHome(repoPath, ["worktree", "add", "-q", "-b", "third", thirdPath], tmpHome);
   seedState(tmpHome, {
     projects: [
       {
@@ -80,6 +85,7 @@ test.beforeAll(async () => {
         worktrees: [
           { branch: "main", path: repoPath },
           { branch: "second", path: secondPath },
+          { branch: "third", path: thirdPath },
         ],
       },
     ],
@@ -109,8 +115,10 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   await wp.clickTerminalAddTab(WORKSPACE_B);
   await wp.clickTerminalAddTab(WORKSPACE_B);
   await expect(wp.terminalTabs()).toHaveCount(3);
-  // A is still mounted, hidden behind B.
+  // A is still mounted, hidden behind B and parked; B isn't.
   await expect(wp.cachedPanelEntries(WORKSPACE_A)).toHaveCount(1);
+  await expect(wp.cachedPanelEntries(WORKSPACE_A)).toHaveAttribute("data-band-parked", "");
+  await expect(wp.cachedPanelEntries(WORKSPACE_B)).not.toHaveAttribute("data-band-parked");
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 
@@ -174,18 +182,24 @@ test("an overflowing, scrolled tab strip keeps every visible tab out of the drag
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 
-  // Collapsed sidebar: the tabs now scroll past the sidebar gutter's drag rect.
+  // Collapsed sidebar: the tabs now scroll past the sidebar gutter's drag
+  // rect. The center column is wider now, so check it still overflows, and
+  // start the swipe from the left end.
   await wp.toggleSidebarViaButton();
   await expect.poll(() => wp.sidebarWidth()).toBeLessThan(5);
   await expect(wp.sidebarGutter).toHaveCount(1);
+  await expect.poll(async () => (await strip.readScroll()).maxScrollLeft).toBeGreaterThan(0);
+  await strip.trackpadSwipe(-5000);
+  await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBe(0);
   await strip.trackpadSwipe(400);
+  await expect.poll(async () => (await strip.readScroll()).scrollLeft).toBeGreaterThan(0);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 
-  // And back: the right sidepanel's expand button returns to the strip.
+  // The collapsed right sidepanel puts its expand button in the strip too.
   await wp.revealRightPanel();
   await wp.collapseRightPanelViaHeader();
-  await wp.expandRightPanelViaTabStrip();
+  await expect(wp.rightPanelTogglesInTabStrips).toHaveCount(1);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 });
@@ -194,22 +208,22 @@ test("the palette toggles an overlay of the window drag region", async ({ page }
   const wp = new WorkspacePage(page, server.url, TOKEN);
   const palette = new CommandPalette(page);
   const overlay = new WindowDragRegionOverlay(page);
-  await wp.goto(WORKSPACE_A);
+  await wp.goto(WORKSPACE_B);
   await wp.waitForReady();
-  // B is mounted and hidden behind A: the overlay doesn't read parked entries.
-  await wp.switchWorkspace(WORKSPACE_B);
-  await wp.waitForWorkspaceReady(WORKSPACE_B);
-  await wp.switchWorkspace(WORKSPACE_A);
-  await wp.waitForWorkspaceReady(WORKSPACE_A);
-  await expect(wp.cachedPanelEntries(WORKSPACE_B)).toHaveCount(1);
+  // B, whose strip the earlier tests filled, is mounted and hidden behind C:
+  // the overlay doesn't read parked entries.
+  await wp.switchWorkspace(WORKSPACE_C);
+  await wp.waitForWorkspaceReady(WORKSPACE_C);
+  await expect(wp.cachedPanelEntries(WORKSPACE_B)).toHaveAttribute("data-band-parked", "");
   await expect(overlay.root).toHaveCount(0);
 
   await palette.open();
   await palette.run("toggle-drag-region-overlay");
 
   await expect(overlay.root).toBeVisible();
-  // The sidebar title bar, the strip's empty space and the sidepanel header.
-  await expect.poll(() => overlay.dragRects.count()).toBeGreaterThanOrEqual(2);
+  // The sidebar title bar, C's empty strip space and the sidepanel header;
+  // nothing from B's parked strip.
+  await expect(overlay.dragRects).toHaveCount(3);
   await expect(overlay.noDragRects.first()).toBeAttached();
   await expect(overlay.coveredControls).toHaveCount(0);
 

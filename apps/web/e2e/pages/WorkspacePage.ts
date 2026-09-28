@@ -691,6 +691,10 @@ export class WorkspacePage {
    *  grid. Returns a label per covered control (testid, aria-label, title or
    *  text), and throws when there is no drag rect or no tab, so a renamed
    *  class can't pass vacuously. */
+  // An independent replay of Chromium's walk on purpose, not a call into the
+  // app's `lib/drag-region.ts`: it checks the app rather than sharing its
+  // mistakes. Unlike the app's overlay it also reads parked workspaces, which
+  // makes it the stricter of the two.
   async controlsUnderWindowDragRegion(): Promise<string[]> {
     return await this.page.evaluate(() => {
       const regionOf = (el: Element) => {

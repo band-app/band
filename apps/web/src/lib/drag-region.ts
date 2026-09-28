@@ -81,8 +81,15 @@ export function isInDragRegion(rects: readonly DragRegionRect[], x: number, y: n
 
 export function snapshotDragRegion(doc: Document = document): DragRegionSnapshot {
   const rects: DragRegionRect[] = [];
-  for (const el of doc.querySelectorAll("*")) {
-    if (el.closest(PARKED_SELECTOR)) continue;
+  // Document order, with each parked entry's whole subtree skipped.
+  const walker = doc.createTreeWalker(doc.documentElement, NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (node) =>
+      (node as Element).hasAttribute("data-band-parked")
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  });
+  for (let node = walker.currentNode; node; node = walker.nextNode() as Node) {
+    const el = node as Element;
     const style = getComputedStyle(el);
     const region = appRegionOf(style);
     if (region !== "drag" && region !== "no-drag") continue;

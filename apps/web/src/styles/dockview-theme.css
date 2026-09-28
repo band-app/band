@@ -542,5 +542,5 @@
  * something forces it. That is why hidden workspaces are locked only after
  * their `[inert]` reset has applied (`MultiWorkspacePanelHost`,
  * `globals.css`). To see the region the renderer computes, turn on the
- * window drag region overlay (command palette, desktop app only).
+ * window drag region overlay from the command palette.
  * --------------------------------------------------------------------------- */
