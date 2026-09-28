@@ -421,6 +421,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
   }
 
   // Emit directly to SSE listeners
+  if (process.env.BAND_DIAG_NO_EMIT === "1") return; // DIAG
   emit({
     kind: "branch-status",
     workspaceId: ws.workspaceId,

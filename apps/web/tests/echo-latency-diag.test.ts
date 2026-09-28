@@ -95,7 +95,7 @@ describe.runIf(run)("echo latency diagnostics", () => {
       tmpHome,
       env: {
         BAND_DIAG_ELD_FILE: eldFile,
-        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${probe}`,
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${probe}${process.env.BAND_DIAG_CPU_PROF ? ` --cpu-prof --cpu-prof-interval=200 --cpu-prof-dir=${process.env.BAND_DIAG_CPU_PROF}` : ""}`,
       },
     });
   }, 120_000);
@@ -229,26 +229,36 @@ describe.runIf(run)("echo latency diagnostics", () => {
     };
 
     const results: Record<string, { at: number; ms: number }[]> = { idle: [], poller: [] };
-    let stream: StatusStream | undefined;
+    const perHold: string[] = [];
     const marks: { name: string; t: number }[] = [{ name: "begin", t: now() }];
-    for (let round = 0; round < ROUNDS; round++) {
-      // Idle: no status stream, so the poller is stopped. Wait out a tick
-      // that may still be running from the previous round.
-      await new Promise((r) => setTimeout(r, 6_000));
-      marks.push({ name: `r${round}-idle-hold`, t: now() });
-      results.idle.push(...(await hold()));
-      marks.push({ name: `r${round}-stream-open`, t: now() });
-      stream = await StatusStream.open(server.url, TOKEN);
-      const s = stream;
-      await waitFor(async () => s.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
+    // The poller never stops once a status stream has connected (a permanent
+    // status-bus listener keeps listenerCount above 0), so the only true idle
+    // baseline is before the first stream opens.
+    for (let i = 0; i < 2; i++) {
+      marks.push({ name: `idle${i}`, t: now() });
+      const rows = await hold();
+      results.idle.push(...rows);
+      perHold.push(`idle${i} ${JSON.stringify(summary(rows.map((r) => r.ms)))}`);
+    }
+    marks.push({ name: "stream-open", t: now() });
+    const stream = await StatusStream.open(server.url, TOKEN);
+    if (process.env.BAND_DIAG_NO_EMIT === "1") await new Promise((r) => setTimeout(r, 6_000));
+    else
+      await waitFor(async () => stream.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
         timeoutMs: 30_000,
         label: "first poll tick",
       });
-      marks.push({ name: `r${round}-poller-hold`, t: now() });
-      results.poller.push(...(await hold()));
-      marks.push({ name: `r${round}-closed`, t: now() });
-      stream.close();
+    for (let i = 0; i < ROUNDS; i++) {
+      marks.push({ name: `poller${i}`, t: now() });
+      const rows = await hold();
+      results.poller.push(...rows);
+      perHold.push(`poller${i} ${JSON.stringify(summary(rows.map((r) => r.ms)))}`);
     }
+    stream.close();
+    console.log(
+      `DIAG variant=${process.env.BAND_DIAG_VARIANT ?? "base"} per hold`,
+      perHold.join(" | "),
+    );
     stopSampling();
     socket.type("\x03");
     await socket.close();
@@ -268,7 +278,7 @@ describe.runIf(run)("echo latency diagnostics", () => {
     for (const [name, rows] of Object.entries(results)) {
       const slow = rows.filter((r) => r.ms >= 100);
       console.log(
-        `DIAG echo ${name}`,
+        `DIAG ${process.env.BAND_DIAG_VARIANT ?? "base"} echo ${name}`,
         JSON.stringify({
           ...summary(rows.map((r) => r.ms)),
           slow: slow.map((r) => `${Math.round(r.ms)}[${explain(r.at, r.ms)}]`),

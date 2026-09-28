@@ -7,7 +7,7 @@
  * behind it. With four in flight, the next spawn starts when one exits, so
  * the loop handles other work between them.
  */
-export const GIT_SPAWN_CONCURRENCY = 4;
+export const GIT_SPAWN_CONCURRENCY = Number(process.env.BAND_DIAG_CONC ?? 4); // DIAG
 
 /**
  * `Promise.all(items.map(fn))` with at most `limit` calls of `fn` in flight.
