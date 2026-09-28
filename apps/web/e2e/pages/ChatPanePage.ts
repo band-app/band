@@ -60,6 +60,8 @@ export class ChatPanePage {
   /** The model settings trigger on the right of the composer: model name
    *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
+  /** The model name shown in the model settings trigger. */
+  readonly modelMenuModel: Locator;
   /** The effort value shown in the model settings trigger. */
   readonly modelMenuEffort: Locator;
   /** The open model settings menu. */
@@ -75,6 +77,11 @@ export class ChatPanePage {
   readonly moreModelsSubmenu: Locator;
   /** The open "More models" submenu, listing the other models. */
   readonly moreModelsContent: Locator;
+  /** The first row of the open model settings menu: the selected model. */
+  readonly selectedModelItem: Locator;
+  /** The rows of the open "More models" submenu. For OpenCode these are
+   *  providers, each opening its own submenu. */
+  readonly moreModelsRows: Locator;
   /** The open "Effort" submenu. */
   readonly effortSubmenuContent: Locator;
   /** Stop / cancel button — only present while the current task is in
@@ -132,6 +139,7 @@ export class ChatPanePage {
     this.permissionCards = page.getByTestId("chat-pane__permission");
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
     this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
+    this.modelMenuModel = page.getByTestId("chat-pane__model-menu-model");
     this.modelMenuEffort = page.getByTestId("chat-pane__model-menu-effort");
     this.modelMenuContent = page.getByTestId("chat-pane__model-menu-content");
     this.effortSubmenu = page.getByTestId("chat-pane__model-menu-effort-submenu");
@@ -139,6 +147,8 @@ export class ChatPanePage {
     this.fastModeSwitch = this.fastModeItem.getByRole("switch", { includeHidden: true });
     this.moreModelsSubmenu = page.getByTestId("chat-pane__model-menu-more-models");
     this.moreModelsContent = page.getByTestId("chat-pane__model-menu-more-models-content");
+    this.selectedModelItem = this.modelMenuContent.getByRole("menuitem").first();
+    this.moreModelsRows = this.moreModelsContent.getByRole("menuitem");
     this.effortSubmenuContent = page.getByTestId("chat-pane__model-menu-effort-submenu-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.toolCallContainers = page.getByTestId("tool-call__container");
@@ -281,6 +291,44 @@ export class ChatPanePage {
    *  test data). */
   moreModelsOption(name: string): Locator {
     return this.moreModelsContent.getByRole("menuitem", { name, exact: true });
+  }
+
+  /** A provider row in the open "More models" submenu (OpenCode), by the
+   *  provider part of the model ids (agent test data). */
+  providerSubmenu(providerId: string): Locator {
+    return this.moreModelsContent.getByTestId(`chat-pane__model-menu-provider--${providerId}`);
+  }
+
+  /** The open submenu of one provider's models. */
+  providerModelsContent(providerId: string): Locator {
+    return this.page.getByTestId(`chat-pane__model-menu-provider--${providerId}-content`);
+  }
+
+  /** A model row in one provider's open submenu, by display name. */
+  providerModelOption(providerId: string, name: string): Locator {
+    return this.providerModelsContent(providerId).getByRole("menuitem", { name, exact: true });
+  }
+
+  /** The check mark inside a model or provider row, shown on the selected
+   *  model and on its provider. */
+  selectedCheck(row: Locator): Locator {
+    return row.getByTestId("chat-pane__model-menu-check");
+  }
+
+  /** Open one provider's submenu from the open "More models" submenu. */
+  async openProvider(providerId: string): Promise<void> {
+    await test.step(`Open the ${providerId} provider submenu`, async () => {
+      await this.providerSubmenu(providerId).click();
+      await expect(this.providerModelsContent(providerId)).toBeVisible();
+    });
+  }
+
+  /** Click a model in a provider's open submenu. The menu closes. */
+  async clickProviderModel(providerId: string, name: string): Promise<void> {
+    await test.step(`Click model "${name}" of ${providerId}`, async () => {
+      await this.providerModelOption(providerId, name).click();
+      await expect(this.modelMenuContent).toBeHidden();
+    });
   }
 
   /** Move keyboard focus to the last row of the open "More models" submenu,

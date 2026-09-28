@@ -62,6 +62,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
 import type { SessionState } from "../shared/chat-events";
@@ -826,6 +827,7 @@ export function ChatView({
                   <ModelSettingsMenu
                     models={pickers.models}
                     selectedModel={pickers.model}
+                    groupByProvider={agentType === "opencode"}
                     onSelectModel={handleModelSelect}
                     effort={pickers.effort}
                     fast={pickers.fast}
@@ -929,6 +931,7 @@ const SUBMENU_BESIDE_QUERY = `(min-width: ${2 * MODEL_MENU_WIDTH_PX + 48}px)`;
 function ModelSettingsMenu({
   models,
   selectedModel,
+  groupByProvider,
   onSelectModel,
   effort,
   fast,
@@ -939,6 +942,9 @@ function ModelSettingsMenu({
 }: {
   models: Choice[];
   selectedModel: string | undefined;
+  /** OpenCode: "More models" lists providers, each opening its own models,
+   *  and model names show without their provider. */
+  groupByProvider?: boolean;
   onSelectModel: (model: string | undefined) => void;
   effort: SelectOption | undefined;
   fast: SelectOption | undefined;
@@ -950,6 +956,8 @@ function ModelSettingsMenu({
 }) {
   const current = models.find((m) => m.id === selectedModel) ?? models[0];
   const otherModels = models.filter((m) => m !== current);
+  const modelName = (model: Choice) =>
+    groupByProvider ? modelNameWithoutProvider(model) : model.name;
   const effortChoice = effort && selectChoices(effort).find((c) => c.id === effort.currentValue);
   const fastOn = fast?.currentValue === "on";
   const submenuOffset = useMediaQuery(SUBMENU_BESIDE_QUERY) ? undefined : -MODEL_MENU_WIDTH_PX;
@@ -964,7 +972,7 @@ function ModelSettingsMenu({
           className="inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
         >
           <span data-testid="chat-pane__model-menu-model" className="truncate">
-            {current?.name ?? "Model"}
+            {current ? modelName(current) : "Model"}
           </span>
           {effortChoice && (
             <span
@@ -991,7 +999,7 @@ function ModelSettingsMenu({
         {current && (
           <DropdownMenuItem className="flex items-start gap-2">
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-sm font-medium">{current.name}</span>
+              <span className="text-sm font-medium">{modelName(current)}</span>
               {current.description && (
                 <span className="text-xs text-muted-foreground">{current.description}</span>
               )}
@@ -1062,24 +1070,115 @@ function ModelSettingsMenu({
                 data-testid="chat-pane__model-menu-more-models-content"
                 sideOffset={submenuOffset}
               >
-                {otherModels.map((model) => (
-                  <DropdownMenuItem
-                    key={model.id}
-                    onClick={() => onSelectModel(model.id)}
-                    className="flex flex-col items-start gap-0.5"
-                  >
-                    <span className="text-sm font-medium">{model.name}</span>
-                    {model.description && (
-                      <span className="text-xs text-muted-foreground">{model.description}</span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
+                {groupByProvider ? (
+                  <ProviderModelItems
+                    models={models}
+                    selectedModel={current?.id}
+                    sideOffset={submenuOffset}
+                    onSelectModel={onSelectModel}
+                  />
+                ) : (
+                  otherModels.map((model) => (
+                    <ModelItem key={model.id} model={model} onSelect={onSelectModel} />
+                  ))
+                )}
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
           </DropdownMenuSub>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** A row in a model list. `label` replaces the model's own name. */
+function ModelItem({
+  model,
+  label,
+  selected,
+  onSelect,
+}: {
+  model: Choice;
+  label?: string;
+  selected?: boolean;
+  onSelect: (model: string) => void;
+}) {
+  return (
+    <DropdownMenuItem
+      onClick={() => {
+        if (!selected) onSelect(model.id);
+      }}
+      className="flex items-start gap-2"
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-sm font-medium">{label ?? model.name}</span>
+        {model.description && (
+          <span className="text-xs text-muted-foreground">{model.description}</span>
+        )}
+      </div>
+      {selected && (
+        <Check data-testid="chat-pane__model-menu-check" className="mt-0.5 size-4 shrink-0" />
+      )}
+    </DropdownMenuItem>
+  );
+}
+
+/** The "More models" list for OpenCode: one submenu per provider holding that
+ *  provider's models by name alone. The selected model and its provider carry
+ *  a check. */
+function ProviderModelItems({
+  models,
+  selectedModel,
+  sideOffset,
+  onSelectModel,
+}: {
+  models: Choice[];
+  selectedModel: string | undefined;
+  sideOffset?: number;
+  onSelectModel: (model: string) => void;
+}) {
+  const { groups, ungrouped } = groupModelsByProvider(models);
+  return (
+    <>
+      {groups.map((group) => {
+        const selected = group.models.some((m) => m.id === selectedModel);
+        return (
+          <DropdownMenuSub key={group.id}>
+            <DropdownMenuSubTrigger data-testid={`chat-pane__model-menu-provider--${group.id}`}>
+              <span className="min-w-0 flex-1 truncate">{group.name}</span>
+              {selected && (
+                <Check data-testid="chat-pane__model-menu-check" className="size-4 shrink-0" />
+              )}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuSubContent
+                className="w-64 max-h-[min(400px,var(--radix-dropdown-menu-content-available-height))]"
+                data-testid={`chat-pane__model-menu-provider--${group.id}-content`}
+                sideOffset={sideOffset}
+              >
+                {group.models.map((model) => (
+                  <ModelItem
+                    key={model.id}
+                    model={model}
+                    label={modelNameWithoutProvider(model)}
+                    selected={model.id === selectedModel}
+                    onSelect={onSelectModel}
+                  />
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuPortal>
+          </DropdownMenuSub>
+        );
+      })}
+      {ungrouped.map((model) => (
+        <ModelItem
+          key={model.id}
+          model={model}
+          selected={model.id === selectedModel}
+          onSelect={onSelectModel}
+        />
+      ))}
+    </>
   );
 }
 
