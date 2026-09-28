@@ -590,7 +590,8 @@ export const PromptInputTextarea = ({
   );
 };
 
-/** What the submit button shows: send, or stop while a turn runs. */
+/** What the submit button shows: Stop while a turn runs and the input is
+ *  empty, otherwise Send (which queues during a turn). */
 export type PromptInputStatus = "ready" | "submitted" | "streaming" | "error";
 
 export type PromptInputSubmitProps = ComponentProps<"button"> & {

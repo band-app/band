@@ -99,6 +99,13 @@ test("with no task running, an empty or whitespace-only prompt shows a disabled 
   await chatPane.typeMessage("hello");
   await expect(chatPane.submitButton).toBeEnabled();
   await expect(chatPane.stopButton).toHaveCount(0);
+
+  // A whitespace-only draft restored after a reload still counts as empty.
+  await chatPane.typeMessage("   ");
+  await chatPane.reload();
+  await chatPane.waitForReady();
+  await expect(chatPane.promptInput).toHaveValue("   ");
+  await expect(chatPane.submitButton).toBeDisabled();
 });
 
 test("while a task runs, the prompt's content decides between Stop and Send", async ({ page }) => {
@@ -148,6 +155,7 @@ test("Escape stops a running task even while the prompt shows Send", async ({ pa
   await expect(chatPane.stopButton).toBeVisible();
 
   await chatPane.typeMessage("not sent yet");
+  await expect(chatPane.submitButton).toBeEnabled();
   await expect(chatPane.stopButton).toHaveCount(0);
   await chatPane.pressKey("Escape");
 

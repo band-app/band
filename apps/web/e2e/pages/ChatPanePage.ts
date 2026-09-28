@@ -166,6 +166,13 @@ export class ChatPanePage {
     });
   }
 
+  /** Reload the page, as a user pressing Cmd+R would. */
+  async reload(): Promise<void> {
+    await test.step("Reload the page", async () => {
+      await this.page.reload();
+    });
+  }
+
   /** Wait for the chat pane to be interactive (prompt textarea visible).
    *
    *  The center dockview's default layout is a single TERMINAL tab (no chat),
@@ -577,7 +584,7 @@ export class ChatPanePage {
   }
 
   /** Click the Stop button to cancel the in-flight task. The button is
-   *  only rendered while `status === "streaming"`. */
+   *  only rendered while a task is streaming and the prompt is empty. */
   async clickStop(): Promise<void> {
     await test.step("Click Stop to cancel the in-flight task", async () => {
       await this.stopButton.click();
