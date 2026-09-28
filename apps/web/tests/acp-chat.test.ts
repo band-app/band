@@ -623,6 +623,7 @@ describe("chat over ACP: sessions", () => {
       { workspaceId: WORKSPACE_ID, chatId },
       "query",
     );
+    expect(stubRequests(home, "session/list").length).toBeGreaterThan(0);
     expect(listed.sessions.map((s) => s.sessionId)).toEqual([
       attached?.type === "session-attached" ? attached.sessionId : "",
     ]);

@@ -305,6 +305,16 @@ export class AcpAgentProcess {
     // (the Agent SDK's `includeWorktrees` defaults on), and every Band
     // workspace is a worktree, so keep only the ones started in `cwd`.
     const dir = canonicalPath(cwd);
+    // Sessions share a few worktree paths; resolve each one once.
+    const resolved = new Map<string, string>();
+    const inDir = (s: acp.SessionInfo) => {
+      let path = resolved.get(s.cwd);
+      if (path === undefined) {
+        path = canonicalPath(s.cwd);
+        resolved.set(s.cwd, path);
+      }
+      return path === dir;
+    };
     const sessions: acp.SessionInfo[] = [];
     let cursor: string | null | undefined;
     for (let page = 0; page < 10 && sessions.length < limit; page++) {
@@ -314,7 +324,7 @@ export class AcpAgentProcess {
           this.label,
         ),
       );
-      sessions.push(...res.sessions.filter((s) => canonicalPath(s.cwd) === dir));
+      sessions.push(...res.sessions.filter(inDir));
       cursor = res.nextCursor;
       if (!cursor) break;
     }
