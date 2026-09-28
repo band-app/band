@@ -331,3 +331,64 @@ describe("branch-status events carry the branch's pull request", () => {
     expect(outcome).toBe("refused");
   });
 });
+
+describe("with the GitHub plugin disabled", () => {
+  let tmpHome: string;
+  let server: ServerHandle;
+  let stub: GhStub;
+  let stream: Awaited<ReturnType<typeof openStatusStream>>;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-branch-status-pr-disabled-");
+    const repo = join(tmpHome, PROJECT);
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    writeFileSync(join(repo, "README.md"), "hello\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "init"]);
+    git(repo, [
+      "remote",
+      "add",
+      "origin",
+      `git@github.com:${FAKE_REPO.owner}/${FAKE_REPO.name}.git`,
+    ]);
+    const path = join(tmpHome, "wt-feat-failing");
+    git(repo, ["worktree", "add", "-b", CASES.failing, path]);
+
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: PROJECT,
+          path: repo,
+          defaultBranch: "main",
+          worktrees: [
+            { name: "main", branch: "main", path: repo },
+            { name: CASES.failing, branch: CASES.failing, path },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: TOKEN, plugins: { disabled: ["github"] } });
+
+    stub = await ghStub.start();
+    stub.setBranchStatusQuery(FAKE_REPO, (branch) => REPOSITORIES[branch]);
+    server = await startServer({ tmpHome, env: stub.env });
+    stream = await openStatusStream(server.url);
+  }, 60_000);
+
+  afterAll(async () => {
+    stream?.close();
+    await server?.close();
+    await stub?.stop();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("the poller never runs gh, and the branch reports no PR and no CI state", async () => {
+    expect(await stream.latestCI(toWorkspaceId(PROJECT, CASES.failing))).toEqual({
+      state: "none",
+      url: null,
+      pr: null,
+    });
+    expect(stub.requests).toEqual([]);
+  });
+});

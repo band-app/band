@@ -9,6 +9,7 @@ import {
   type CIStatus,
   parseBatchedCIResponse,
 } from "./_utils/github-graphql";
+import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
 import { syncService } from "./sync-service";
 import { emit } from "./watcher-service";
@@ -368,8 +369,12 @@ async function pollTick() {
   // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
   // tick body just above; freshly-discovered origin changes land in the
   // map before this filter reads it.
+  //
+  // PR and CI state come from GitHub, so with the GitHub plugin disabled
+  // the poller never runs `gh`: a CI tick then stores no CI state and no
+  // PR, and the rows show neither the PR badge nor the CI icon.
   let ciStatuses = new Map<string, CIStatus>();
-  if (queryCI) {
+  if (queryCI && pluginHost.isEnabled("github")) {
     const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
     if (ciWorkspaces.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
