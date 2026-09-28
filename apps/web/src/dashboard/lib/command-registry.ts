@@ -350,15 +350,6 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-right-panel")),
     },
     {
-      // Developer aid: draws the desktop window's drag region over the app
-      // (`WindowDragRegionOverlay`). Offered in the web build too, where the
-      // same app-region styles compute but nothing hit-tests them.
-      id: "toggle-drag-region-overlay",
-      label: "Toggle Window Drag Region Overlay",
-      // sync-with: TOGGLE_DRAG_REGION_OVERLAY_EVENT in components/WindowDragRegionOverlay.tsx
-      action: () => window.dispatchEvent(new CustomEvent("band:toggle-drag-region-overlay")),
-    },
-    {
       id: "switch-workspace",
       label: "Switch Workspace…",
       shortcut: "Cmd+K",

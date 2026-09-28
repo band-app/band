@@ -22,14 +22,13 @@ import { clearPerWorkspaceState } from "./per-workspace-state-store";
 // reference-equal `style` props across renders — React's
 // reconciler short-circuits on `===` before walking individual
 // CSS properties.
-// `content-visibility: hidden` is not here: the layout effect below adds it
-// (`data-band-parked`) only after the entry's descendants have taken the
-// hidden styles.
 const ACTIVE_ENTRY_STYLE: React.CSSProperties = {
   visibility: "visible",
+  contentVisibility: "visible",
 };
 const HIDDEN_ENTRY_STYLE: React.CSSProperties = {
   visibility: "hidden",
+  contentVisibility: "hidden",
   pointerEvents: "none",
 };
 
@@ -108,33 +107,6 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     });
     return () => cancelAnimationFrame(raf);
   }, [activeWorkspaceId]);
-
-  // Park newly hidden entries with `content-visibility: hidden`, one style pass
-  // after they turned `inert`. Chromium skips style recalc inside a
-  // content-visibility:hidden subtree, so locking an entry in the same commit
-  // that makes it `inert` leaves its descendants on their old styles, and the
-  // `[inert]` app-region reset in `globals.css` never reaches them. Chromium
-  // still reads those stale styles when it builds the desktop window's drag
-  // region, so the hidden workspace's empty tab strip kept dragging the window
-  // over the visible workspace's tabs, until anything happened to read a style
-  // in that entry (a terminal refit, DevTools) and forced the recalc. Forcing
-  // the recalc here, before the lock, makes the order deterministic. The
-  // active entry is unparked before paint, in the same frame it turns visible.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the entries are read from the DOM; a switch or a mount is what changes which are inert
-  useLayoutEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    const toPark: HTMLElement[] = [];
-    for (const el of wrapper.children) {
-      if (!(el instanceof HTMLElement) || !el.classList.contains("band-workspace-entry")) continue;
-      if (!el.inert) delete el.dataset.bandParked;
-      else if (el.dataset.bandParked === undefined) toPark.push(el);
-    }
-    if (toPark.length === 0) return;
-    // Reading layout flushes style for the whole document; nothing new is locked yet.
-    void wrapper.offsetWidth;
-    for (const el of toPark) el.dataset.bandParked = "";
-  }, [activeWorkspaceId, mounted]);
 
   // Reconcile the mounted set against the projects query (issue #508). This is
   // the only way a workspace leaves the set. Without it a deleted workspace's
@@ -249,9 +221,8 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             data-testid={`workspace-panel-host__cached-entry--${workspaceId}`}
             // Hide inactive entries with `visibility: hidden` (universal
             // browser support) for the visual effect, AND
-            // `content-visibility: hidden` on top (`data-band-parked`, set by
-            // the layout effect above) as a progressive perf enhancement on
-            // browsers that ship it. Safari hadn't yet
+            // `content-visibility: hidden` on top as a progressive perf
+            // enhancement on browsers that ship it. Safari hadn't yet
             // shipped `content-visibility` as of 18.4, so using it
             // alone would leave every hidden panel visible on Safari
             // and stack them on top of each other — flagged as a

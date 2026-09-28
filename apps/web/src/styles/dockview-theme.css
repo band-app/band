@@ -520,48 +520,18 @@
   -webkit-app-region: drag;
 }
 
-/* ---------------------------------------------------------------------------
- * How the desktop window's drag region works (Electron 42, Chromium 148).
- *
- * What drags the window: in the top row, the sidebar's title bar
- * (`SidebarTitleBar`), the gutter the tab strip reserves under the nav cluster
- * while the sidebar is collapsed (`SidebarGutter`), each top-row group's
- * empty strip space (`.dv-void-container`, the rule above), the right
- * sidepanel's header row (`SidepanelHeader`), and the center drag bar that
- * replaces the strip when no tab is open (`CenterDragBar`). What is carved out
- * with `no-drag`: the nav cluster (`NavControls`, in `AppShell`'s overlay), the
- * sidepanel's tabs and header actions, and the expand button in the drag bar.
- * Tabs, tab close buttons and the strip's header buttons carry no app-region
- * at all: they are safe only because no drag rect covers them.
- *
- * How Chromium computes the region: after every layout, and at paint when a
- * change marked the region dirty (visibility, z-index, stacking context, or
- * a scroll), it walks the layout tree in document order. For each box whose
- * style says `drag` or `no-drag` and whose `visibility` is `visible`, it
- * takes the border box in page coordinates, transforms and scroll offsets
- * included, and adds it (`drag`) or cuts it out (`no-drag`). `overflow`
- * clipping, z-index, `opacity`, `pointer-events` and `inert` don't count, so
- * a box can drag the window where it isn't visible. The renderer sends the
- * result to the browser process only when it changed, and Electron hit-tests
- * each mouse-down against it before the page sees the event: a click inside
- * it moves the window and never reaches dockview.
- *
- * When it goes stale: a change that neither lays out nor marks the region
- * dirty, such as a transform-only animation, leaves the old region in place
- * until the next layout. `app-region` itself invalidates layout, so toggling
- * it is safe. The walk reads each layout object's current style, not
- * `getComputedStyle`: inside a `content-visibility: hidden` subtree style
- * recalc is skipped, so a style change there doesn't reach the region until
- * something forces it. That is why hidden workspaces are locked only after
- * their `[inert]` reset has applied (`MultiWorkspacePanelHost`,
- * `globals.css`).
- *
- * Hidden workspaces: two things keep a hidden entry's strip out of the
- * region. Its boxes compute `visibility: hidden` (the `.dv-view.visible`
- * rule above stops Tailwind's `.visible` from turning it back on), so the
- * walk skips them, and the `[inert]` reset in `globals.css` clears their
- * app-region. The first also stops the strip painting when a paint-retained
- * browser pane drops the entry's `content-visibility` skip. To see the region
- * the renderer computes, turn on the window drag region overlay from the
- * command palette.
- * --------------------------------------------------------------------------- */
+/* How the desktop window's drag region works (Electron 42, Chromium 148).
+ * Drag: the sidebar title bar, the sidebar gutter in the strip while the
+ * sidebar is collapsed, each top-row group's empty strip space (the rule
+ * above), the right sidepanel's header and the center drag bar. No-drag: the
+ * nav cluster, the sidepanel's tabs and header actions. Tabs and strip buttons
+ * have no app-region; they work only because no drag rect covers them.
+ * Chromium walks the layout tree in document order, adds each `drag` border
+ * box whose `visibility` is `visible` and cuts out each `no-drag` one.
+ * Clipping, z-index, `pointer-events` and `inert` don't count, so a box can
+ * drag the window where nothing shows. It recomputes after layout, on scroll,
+ * and at paint after a visibility or z-index change, but not after a
+ * transform-only change. Electron hit-tests every mouse-down against the
+ * result before the page sees it. A hidden workspace's strip stays out
+ * because its boxes compute `visibility: hidden` (`.dv-view.visible` above)
+ * and the `[inert]` reset in `globals.css` clears their app-region. */
