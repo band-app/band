@@ -101,6 +101,21 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
 }
 
 /**
+ * Delete a seeded project and its workspaces from the DB, the way removing
+ * them while Band was closed leaves it. Call it while the server is stopped.
+ */
+export function removeSeededProject(tmpHome: string, name: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite.prepare("DELETE FROM worktrees WHERE project_name = ?").run(name);
+    sqlite.prepare("DELETE FROM projects WHERE name = ?").run(name);
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
  * Delete every client-state row (the UI state the dashboard keeps on the
  * server: center tabs, panel widths, label memory, …). Before client state
  * moved to the server it lived in each browser context's localStorage, so a
