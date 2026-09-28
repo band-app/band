@@ -19,6 +19,8 @@ export interface DashboardState {
 
   openWorkspace: (workspaceId: string) => void;
   clearNeedsAttention: (workspaceId: string) => void;
+  /** Ask the server to re-read the workspace's git status now (badge refresh). */
+  refreshBranchStatus: (workspaceId: string) => void;
   clearError: () => void;
   setError: (error: string) => void;
   replaceAllStatuses: (statuses: WorkspaceStatus[]) => void;
@@ -68,6 +70,10 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
 
     clearNeedsAttention: (workspaceId: string) => {
       adapter.clearNeedsAttention?.(workspaceId).catch(() => {});
+    },
+
+    refreshBranchStatus: (workspaceId: string) => {
+      adapter.refreshBranchStatus?.(workspaceId).catch(() => {});
     },
 
     clearError: () => set({ error: null }),

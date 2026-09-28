@@ -335,6 +335,86 @@ export async function getBatchedCIStatuses(
   return allResults;
 }
 
+/**
+ * Poll one workspace's git status, store it with `newCI` (or the stored CI
+ * status when `null`), and emit it to status stream listeners.
+ */
+async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise<void> {
+  const git = await getGitStatus(ws.worktreePath);
+
+  const db = getDb();
+  let ci: CIStatus = newCI ?? { state: "none" };
+  if (!newCI) {
+    // Keep the stored CI status when this poll didn't query CI
+    const existing = db
+      .select({ ciState: branchStatusesTable.ciState, ciUrl: branchStatusesTable.ciUrl })
+      .from(branchStatusesTable)
+      .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
+      .get();
+    if (existing) {
+      ci = { state: existing.ciState, url: existing.ciUrl };
+    }
+  }
+
+  const now = Date.now();
+
+  // Upsert branch status into DB
+  db.insert(branchStatusesTable)
+    .values({
+      workspaceId: ws.workspaceId,
+      gitDirty: git.dirty,
+      gitConflict: git.conflict,
+      gitAhead: git.ahead,
+      gitBehind: git.behind,
+      gitSyncState: git.sync_state,
+      ciState: ci.state,
+      ciUrl: ci.url ?? null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: branchStatusesTable.workspaceId,
+      set: {
+        gitDirty: git.dirty,
+        gitConflict: git.conflict,
+        gitAhead: git.ahead,
+        gitBehind: git.behind,
+        gitSyncState: git.sync_state,
+        ciState: ci.state,
+        ciUrl: ci.url ?? null,
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  // Emit directly to SSE listeners
+  emit({
+    kind: "branch-status",
+    workspaceId: ws.workspaceId,
+    git,
+    ci,
+  });
+}
+
+/** In-flight on-demand refreshes, so repeated requests share one git call. */
+const refreshesInFlight = new Map<string, Promise<boolean>>();
+
+/**
+ * Poll one workspace now, outside the tick: the dashboard asks when the user
+ * selects a workspace, so its status doesn't wait for the next tick. Returns
+ * `false` when no git workspace has that id.
+ */
+export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boolean> {
+  const inFlight = refreshesInFlight.get(workspaceId);
+  if (inFlight) return inFlight;
+  const ws = getWorkspaces().find((w) => w.workspaceId === workspaceId);
+  if (!ws) return Promise.resolve(false);
+  const refresh = pollWorkspace(ws, null)
+    .then(() => true)
+    .finally(() => refreshesInFlight.delete(workspaceId));
+  refreshesInFlight.set(workspaceId, refresh);
+  return refresh;
+}
+
 async function pollTick() {
   pollerState.tickCount++;
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
@@ -358,8 +438,6 @@ async function pollTick() {
     });
   }
 
-  const db = getDb();
-
   // Fetch CI statuses in batch on CI ticks. Filter to workspaces whose
   // project has an `origin` remote — by construction, an origin-less
   // project has no PR / CI status to report and the GraphQL query would
@@ -375,62 +453,9 @@ async function pollTick() {
     }
   }
 
-  await forEachLimited(workspaces, async (ws) => {
-    const git = await getGitStatus(ws.worktreePath);
-
-    let ci: CIStatus = { state: "none" };
-    if (isCITick) {
-      ci = ciStatuses.get(ws.workspaceId) ?? { state: "none" };
-    } else {
-      // Preserve existing CI status from DB on non-CI ticks
-      const existing = db
-        .select({ ciState: branchStatusesTable.ciState, ciUrl: branchStatusesTable.ciUrl })
-        .from(branchStatusesTable)
-        .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
-        .get();
-      if (existing) {
-        ci = { state: existing.ciState, url: existing.ciUrl };
-      }
-    }
-
-    const now = Date.now();
-
-    // Upsert branch status into DB
-    db.insert(branchStatusesTable)
-      .values({
-        workspaceId: ws.workspaceId,
-        gitDirty: git.dirty,
-        gitConflict: git.conflict,
-        gitAhead: git.ahead,
-        gitBehind: git.behind,
-        gitSyncState: git.sync_state,
-        ciState: ci.state,
-        ciUrl: ci.url ?? null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: branchStatusesTable.workspaceId,
-        set: {
-          gitDirty: git.dirty,
-          gitConflict: git.conflict,
-          gitAhead: git.ahead,
-          gitBehind: git.behind,
-          gitSyncState: git.sync_state,
-          ciState: ci.state,
-          ciUrl: ci.url ?? null,
-          updatedAt: now,
-        },
-      })
-      .run();
-
-    // Emit directly to SSE listeners
-    emit({
-      kind: "branch-status",
-      workspaceId: ws.workspaceId,
-      git,
-      ci,
-    });
-  });
+  await forEachLimited(workspaces, (ws) =>
+    pollWorkspace(ws, isCITick ? (ciStatuses.get(ws.workspaceId) ?? { state: "none" }) : null),
+  );
 
   await fetches;
 }
@@ -512,6 +537,10 @@ export class BranchStatusPoller {
 
   getActivity(): ActivityLevel {
     return getPollerActivity();
+  }
+
+  refreshWorkspace(workspaceId: string): Promise<boolean> {
+    return refreshWorkspaceBranchStatus(workspaceId);
   }
 }
 

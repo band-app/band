@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { branchStatusPoller } from "../../services/branch-status-poller";
 import {
   applyHookNotification,
   getWorkspaceStatus,
@@ -53,6 +54,18 @@ export const statusesRouter = t.router({
 
       return { ok: true };
     }),
+
+  /**
+   * Re-read one workspace's git status now and push it on the status stream.
+   * The dashboard calls this when the user selects a workspace, so its badge
+   * doesn't wait for the next poll tick. `refreshed` is false when no git
+   * workspace has that id.
+   */
+  refreshBranchStatus: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(async ({ input }) => ({
+      refreshed: await branchStatusPoller.refreshWorkspace(input.workspaceId),
+    })),
 
   clearNeedsAttention: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
