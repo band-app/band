@@ -94,7 +94,7 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   await wp.goto(WORKSPACE_A);
   await wp.waitForReady();
   await wp.switchWorkspace(WORKSPACE_B);
-  await wp.waitForReady();
+  await wp.waitForWorkspaceReady(WORKSPACE_B);
   await wp.clickTerminalAddTab(WORKSPACE_B);
   await wp.clickTerminalAddTab(WORKSPACE_B);
   await expect(wp.terminalTabs()).toHaveCount(3);
@@ -122,7 +122,7 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
   await wp.goto(WORKSPACE_A);
   await wp.waitForReady();
   await wp.switchWorkspace(WORKSPACE_B);
-  await wp.waitForReady();
+  await wp.waitForWorkspaceReady(WORKSPACE_B);
   await wp.openChat(WORKSPACE_B);
   await wp.clickChatSplitRight(WORKSPACE_B);
   await expect(wp.centerToolbars).toHaveCount(2);

@@ -1542,16 +1542,25 @@ export class WorkspacePage {
     // button's centre in the hit-test, so a coordinate click lands on the sash
     // (a real user click on the button body still works). Enter on the focused
     // trigger opens the menu with no hit-test.
-    await this.newTabButton(workspaceId).first().focus();
-    await this.page.keyboard.press("Enter");
+    //
     // The menu is portalled to <body>, and with several workspaces cached each
     // dockview contributes its own (closed) menu — so scope to the VISIBLE
     // (open) menu item rather than a bare testid that matches all of them.
-    await this.page
+    const item = this.page
       .getByTestId(`workspace-center__new-tab--${kind}`)
       .filter({ visible: true })
-      .first()
-      .click();
+      .first();
+    // A new terminal grabs focus when its socket first connects. On a slow
+    // runner that can land after the trigger is focused and before Enter, so
+    // Enter goes to the shell and the menu never opens. Reopen the menu
+    // whenever it isn't open instead of waiting on an item that never shows.
+    await expect(async () => {
+      if (!(await item.isVisible())) {
+        await this.newTabButton(workspaceId).first().focus();
+        await this.page.keyboard.press("Enter");
+      }
+      await item.click({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
   }
 
   /** Open the "+" menu and start an agent from its "New agent" submenu: the
@@ -1917,6 +1926,16 @@ export class WorkspacePage {
     await test.step(`Select the right sidepanel ${tab} tab`, async () => {
       await this.rightPanelTab(tab).click();
     });
+  }
+
+  /** Wait until `workspaceId` is the shown workspace: its mounted entry is no
+   *  longer `inert` and its "+" new-tab button is visible. `waitForReady`
+   *  alone can pass on the previous workspace's toolbar right after a switch. */
+  async waitForWorkspaceReady(workspaceId: string): Promise<void> {
+    await expect(this.cachedPanelEntries(workspaceId)).not.toHaveAttribute("inert", {
+      timeout: 15_000,
+    });
+    await expect(this.newTabButton(workspaceId).first()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Wait for the shared dockview to render its header. The app boot is
