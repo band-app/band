@@ -391,9 +391,11 @@ function describe(err: unknown): string {
 }
 
 /**
- * Stops every agent process this server started, and what each one started,
- * and resolves once they have exited. For server shutdown: a detached agent
- * would otherwise outlive the server, and a Codex agent's app-server with it.
+ * Stops every agent process of this server that is still running, with its
+ * whole process group, and resolves once they have exited. For server
+ * shutdown: a detached agent would otherwise outlive the server, and a Codex
+ * agent's app-server with it. An agent that already exited is no longer
+ * tracked, so anything it left behind in its group is not reached.
  */
 export async function stopAllAgentProcesses(): Promise<void> {
   await Promise.all([...liveChildren].map(stopAgentProcess));
