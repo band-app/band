@@ -687,9 +687,7 @@ export function ChatView({
                 renderEntry(part.entry)
               ) : (
                 <ToolGroup key={part.id} tools={part.tools}>
-                  {part.entries.map((e) =>
-                    e.kind === "tool" ? <ToolCall key={e.id} entry={e} /> : renderEntry(e),
-                  )}
+                  {part.entries.map(renderEntry)}
                 </ToolGroup>
               ),
             )}

@@ -54,6 +54,15 @@ beforeAll(async () => {
       { match: "^wait", steps: [{ say: "Working." }, { waitForCancel: true }] },
       { match: "^chunky", steps: [{ say: "one two three four", chunks: 4 }] },
       {
+        // Two chunks of one message, recorded 50 ms apart.
+        match: "^timed",
+        steps: [
+          { say: "first ", messageId: "m-timed" },
+          { sleep: 50 },
+          { say: "second", messageId: "m-timed" },
+        ],
+      },
+      {
         match: "^ask",
         steps: [
           {
@@ -345,6 +354,40 @@ describe("reconnect", () => {
     expect(replayLogged.at(-1)).toMatchObject({ type: "turn-ended" });
     // No history-meta on a gap-fill: the client keeps what it has.
     expect(replay.some((e) => e.type === "history-meta")).toBe(false);
+  });
+
+  it("every logged event carries the time it was recorded, live and on replay", async () => {
+    const chatId = newChatId("times");
+    const live = logged(await runTurn(server.url, chatId, "timed reply"));
+    expect(live.length).toBeGreaterThan(0);
+    for (const e of live) expect(typeof e.createdAt).toBe("number");
+
+    const chunks = live.filter(
+      (e) => e.type === "update" && e.update.sessionUpdate === "agent_message_chunk",
+    );
+    expect(chunks).toHaveLength(2);
+    // The stub slept between the chunks, so they have different times.
+    expect(chunks[1].createdAt).toBeGreaterThan(chunks[0].createdAt ?? Infinity);
+
+    const cold = logged(
+      await collectEvents(server.url, chatId, { until: (e) => e.type === "history-meta" }),
+    );
+    const liveTimes = new Map(live.map((e) => [e.eventId, e.createdAt]));
+    // Replay merges the two chunks into one event, which keeps the last
+    // chunk's id and the first chunk's time.
+    const merged = cold.filter(
+      (e) => e.type === "update" && e.update.sessionUpdate === "agent_message_chunk",
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      eventId: chunks[1].eventId,
+      createdAt: chunks[0].createdAt,
+    });
+    // Every other replayed event has the time the live stream had.
+    for (const e of cold) {
+      if (e === merged[0]) continue;
+      expect(e.createdAt).toBe(liveTimes.get(e.eventId));
+    }
   });
 
   it("a cold subscribe then a reconnect at its last id re-sends nothing", async () => {

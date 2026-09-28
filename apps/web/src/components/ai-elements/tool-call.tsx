@@ -3,7 +3,7 @@ import { ChevronRightIcon, Loader2 } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
 import {
   describeTool,
-  type ShellRun,
+  OUTPUT_LIMIT,
   shellRun,
   summarizeTools,
   type ToolLabel,
@@ -87,8 +87,11 @@ function Label({ label }: { label: ToolLabel }) {
   );
 }
 
-/** A shell call: the command, then the exit code and output. */
-function ShellDetails({ run, failed }: { run: ShellRun; failed: boolean }) {
+/** A shell call: the command, then the exit code and output. Parsed only
+ *  once expanded, so a collapsed row never scans the output. */
+function ShellDetails({ entry, failed }: { entry: ToolEntry; failed: boolean }) {
+  const run = useMemo(() => shellRun(entry), [entry]);
+  if (!run) return null;
   const showExit = run.exitCode !== undefined && (failed || run.exitCode !== 0);
   return (
     <div className={cn("space-y-2 font-mono text-xs", failed && "text-red-400")}>
@@ -108,7 +111,7 @@ function ShellDetails({ run, failed }: { run: ShellRun; failed: boolean }) {
             !failed && "text-muted-foreground",
           )}
         >
-          {run.output.slice(0, 20_000)}
+          {run.output.slice(0, OUTPUT_LIMIT)}
         </pre>
       )}
     </div>
@@ -152,21 +155,15 @@ function ToolDetails({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
  * Expanding it shows a shell call's command, exit code and output, or
  * whatever else the agent reported (diffs, text, raw input and output).
  */
-export const ToolCall = memo(function ToolCall({
-  entry,
-  cwd,
-  className,
-}: {
-  entry: ToolEntry;
-  cwd?: string;
-  className?: string;
-}) {
+export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntry; cwd?: string }) {
   const state = toolState(entry);
   const failed = state === "error";
-  const run = shellRun(entry);
+  const shell = entry.toolKind === "execute";
   const hasBody =
-    run !== null ||
-    entry.content.length > 0 ||
+    shell ||
+    entry.content.some(
+      (c) => c.type === "diff" || (c.type === "content" && c.content.type === "text"),
+    ) ||
     entry.rawInput !== undefined ||
     entry.rawOutput !== undefined;
 
@@ -174,7 +171,7 @@ export const ToolCall = memo(function ToolCall({
     <Collapsible
       data-testid="tool-call__container"
       data-status={state}
-      className={cn("group/tool-call not-prose w-full min-w-0", className)}
+      className="group/tool-call not-prose w-full min-w-0"
     >
       <CollapsibleTrigger
         className={cn(
@@ -192,7 +189,11 @@ export const ToolCall = memo(function ToolCall({
       </CollapsibleTrigger>
 
       <CollapsibleContent className="mt-2 space-y-3 text-popover-foreground">
-        {run ? <ShellDetails run={run} failed={failed} /> : <ToolDetails entry={entry} cwd={cwd} />}
+        {shell ? (
+          <ShellDetails entry={entry} failed={failed} />
+        ) : (
+          <ToolDetails entry={entry} cwd={cwd} />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );

@@ -178,8 +178,13 @@ export interface ShellRun {
   output: string;
 }
 
-/** A code fence around the whole text, which agents add for display. */
-const FENCED = /^```[\w-]*\n([\s\S]*?)\n?```\s*$/;
+/** How much of a command's output the chat pane shows. */
+export const OUTPUT_LIMIT = 20_000;
+
+/** The code fence agents wrap output in for display. Matched as two ends,
+ *  because a long output is cut before its closing fence. */
+const FENCE_OPEN = /^```[\w-]*\n/;
+const FENCE_CLOSE = /\n?```\s*$/;
 /** Claude Code starts a failed command's output with its exit code. */
 const EXIT_LINE = /^Exit code (\d+)\n?/;
 
@@ -218,8 +223,13 @@ export function shellRun(entry: ToolEntry): ShellRun | null {
   const texts = entry.content.flatMap((c) =>
     c.type === "content" && c.content.type === "text" ? [c.content.text] : [],
   );
-  let output = texts.length > 0 ? texts.join("\n") : rawOutputText(entry.rawOutput);
-  output = output.replace(FENCED, "$1");
+  // Only the first 20k characters are shown; don't parse megabytes of
+  // output to show them.
+  let output = (texts.length > 0 ? texts.join("\n") : rawOutputText(entry.rawOutput)).slice(
+    0,
+    OUTPUT_LIMIT + 64,
+  );
+  if (FENCE_OPEN.test(output)) output = output.replace(FENCE_OPEN, "").replace(FENCE_CLOSE, "");
   // Before the command finishes, Claude Code's content is the description.
   if (output === shellDescription(entry)) output = "";
 
@@ -230,5 +240,5 @@ export function shellRun(entry: ToolEntry): ShellRun | null {
     exitCode ??= Number(exitLine[1]);
     output = output.slice(exitLine[0].length);
   }
-  return { command, exitCode, output: output.replace(/\s+$/, "") };
+  return { command, exitCode, output: output.trimEnd() };
 }

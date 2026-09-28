@@ -26,24 +26,24 @@ export function timeAgo(ms: number, now: number): string {
 // One clock for every mounted row (only the rows on screen are mounted), so
 // "just now" turns into "1 minute ago" without a timer per message.
 const TICK_MS = 30_000;
-let now = Date.now();
+let clockNow = Date.now();
 const listeners = new Set<() => void>();
-let timer: number | undefined;
+let clockTimer: number | undefined;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  if (timer === undefined) {
-    now = Date.now();
-    timer = window.setInterval(() => {
-      now = Date.now();
+  if (clockTimer === undefined) {
+    clockNow = Date.now();
+    clockTimer = window.setInterval(() => {
+      clockNow = Date.now();
       for (const l of listeners) l();
     }, TICK_MS);
   }
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) {
-      window.clearInterval(timer);
-      timer = undefined;
+      window.clearInterval(clockTimer);
+      clockTimer = undefined;
     }
   };
 }
@@ -51,8 +51,8 @@ function subscribe(listener: () => void): () => void {
 function useNow(): number {
   return useSyncExternalStore(
     subscribe,
-    () => now,
-    () => now,
+    () => clockNow,
+    () => clockNow,
   );
 }
 

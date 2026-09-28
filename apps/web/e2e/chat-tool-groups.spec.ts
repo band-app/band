@@ -41,10 +41,14 @@ const PROJECT = "toolgroups";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const REPLY = "Fixed the lint errors.";
 
-test.use({ viewport: { width: 1280, height: 800 } });
+// Relative times and the tooltip's exact time are formatted for the
+// browser's locale and zone; pin both.
+test.use({ viewport: { width: 1280, height: 800 }, locale: "en-US", timezoneId: "UTC" });
 
 let server: ServerHandle;
 let tmpHome: string;
+/** The reply's time as the live stream dated it, checked after a reload. */
+let liveReplyTime: string | null = null;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -223,6 +227,16 @@ test.describe("chat tool groups and message actions", () => {
     await expect(chatPane.toolCallCommand("ls node_modules")).toHaveText("$ ls node_modules");
     await expect(chatPane.toolCallOutput("ls node_modules")).toHaveText("@biomejs\ntypescript");
     await expect(chatPane.toolCallExitCode("ls node_modules")).toHaveCount(0);
+
+    // The live stream dates both messages.
+    const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+    await expect(chatPane.messageTime(chatPane.userMessage("fix the lint"))).toHaveAttribute(
+      "datetime",
+      iso,
+    );
+    const replyTime = chatPane.messageTime(chatPane.assistantMessage(REPLY));
+    await expect(replyTime).toHaveAttribute("datetime", iso);
+    liveReplyTime = await replyTime.getAttribute("datetime");
   });
 
   test("a message shows when it was sent and copies its text on hover", async ({ page }) => {
@@ -236,17 +250,19 @@ test.describe("chat tool groups and message actions", () => {
     const reply = chatPane.assistantMessage(REPLY);
     await expect(reply).toBeVisible();
 
+    // Hidden until hovered.
+    await expect(chatPane.messageActions(reply)).toHaveCSS("opacity", "0");
     await chatPane.hoverMessage(reply);
-    await expect(chatPane.messageActions(reply)).toBeVisible();
+    await expect(chatPane.messageActions(reply)).toHaveCSS("opacity", "1");
     await expect(chatPane.messageTime(reply)).toHaveText(/^(just now|1 minute ago)$/);
-    await expect(chatPane.messageTime(reply)).toHaveAttribute(
-      "datetime",
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
-    );
+    // The replay carries the time the live stream had.
+    expect(liveReplyTime).not.toBeNull();
+    await expect(chatPane.messageTime(reply)).toHaveAttribute("datetime", liveReplyTime ?? "");
 
     const tooltip = await chatPane.openMessageTimeTooltip(reply);
-    await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText(String(new Date().getFullYear()));
+    await expect(tooltip).toContainText(
+      new Date(liveReplyTime ?? 0).toLocaleString("en-US", { timeZone: "UTC" }),
+    );
 
     await chatPane.copyMessage(reply);
     await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe(REPLY);

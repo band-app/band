@@ -665,9 +665,6 @@ export class ChatPanePage {
     });
   }
 
-  /** Answer the Nth permission card by clicking the option the agent
-   *  offered. Option names come from the agent (test data), so the button's
-   *  role name is the stable locator. */
   /** The summary line of the tool group at `index`, the button that
    *  expands it. */
   toolGroupSummary(index: number): Locator {
@@ -733,6 +730,9 @@ export class ChatPanePage {
     return this.page.getByRole("tooltip");
   }
 
+  /** Answer the Nth permission card by clicking the option the agent
+   *  offered. Option names come from the agent (test data), so the button's
+   *  role name is the stable locator. */
   async answerPermission(index: number, optionName: string): Promise<void> {
     await test.step(`Answer permission #${index} with "${optionName}"`, async () => {
       await this.permissionCards
