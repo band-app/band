@@ -34,6 +34,7 @@ import {
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
+import { WindowDragRegionOverlay } from "../components/WindowDragRegionOverlay";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useIsFullscreen } from "../hooks/useIsFullscreen";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -975,6 +976,7 @@ function AppShell() {
           >
             <NavControls {...navControlProps} />
           </div>
+          <WindowDragRegionOverlay />
         </div>
       </WorkspaceChromeContext.Provider>
     </ToolbarOverflowProvider>
