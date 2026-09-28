@@ -76,6 +76,8 @@ interface Client {
   held: Set<string>;
   /** terminalId -> characters streamed since the stream socket was last empty. */
   sentSinceEmpty: Map<string, number>;
+  /** Sessions paused by this server's `hold` (its viewers are behind on parsing). */
+  flowHeld: Set<string>;
 }
 
 export interface DaemonOptions {
@@ -206,6 +208,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     for (const client of clients.values()) {
       client.attached.delete(event.terminalId);
       client.held.delete(event.terminalId);
+      client.flowHeld.delete(event.terminalId);
       send(client, "stream", { t: "exit", ...event } satisfies StreamEvent);
     }
     reevaluateIdle();
@@ -382,6 +385,7 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         attached: new Map(),
         held: new Set(),
         sentSinceEmpty: new Map(),
+        flowHeld: new Set(),
       };
       clients.set(clientId, client);
     }
@@ -404,6 +408,8 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
     client.attached.clear();
     // Its stream will never drain now; don't leave its floods paused.
     releaseHolds(client);
+    for (const terminalId of client.flowHeld) pool.releaseOutput(terminalId);
+    client.flowHeld.clear();
     client.control?.destroy();
     client.stream?.destroy();
     // The last server left. With no shells that means exit now; with shells,
@@ -496,8 +502,20 @@ export async function runDaemon(options: DaemonOptions): Promise<number> {
         client.attached.delete(message.terminalId);
         unsubscribe?.();
         if (client.held.delete(message.terminalId)) pool.releaseOutput(message.terminalId);
+        if (client.flowHeld.delete(message.terminalId)) pool.releaseOutput(message.terminalId);
         return;
       }
+      case "hold":
+        // Only a session this client streams: the release paths above are keyed on that.
+        if (!client.attached.has(message.terminalId) || client.flowHeld.has(message.terminalId)) {
+          return;
+        }
+        client.flowHeld.add(message.terminalId);
+        pool.holdOutput(message.terminalId);
+        return;
+      case "release":
+        if (client.flowHeld.delete(message.terminalId)) pool.releaseOutput(message.terminalId);
+        return;
       case "shutdown":
         // Only a server of another protocol version may ask; see acceptConnection.
         return;

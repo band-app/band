@@ -430,8 +430,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       scrollSensitivity: 1.15,
     });
     terminal = term;
-    // All output reaches xterm through this queue: straight through while the
-    // terminal is attached, budgeted while it is parked (terminal-output-queue.ts).
+    // All output reaches xterm through this queue: paced while the terminal is
+    // visible, budgeted while it is parked (terminal-output-queue.ts).
     const output = createTerminalOutputQueue((data, onParsed) => term.write(data, onParsed));
 
     const themeObserver = new MutationObserver(() => {
@@ -729,6 +729,23 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       ws = sock;
       sock.binaryType = "arraybuffer";
 
+      // Parse acknowledgements for this connection's output (`flow: true` in
+      // the attach), batched per task. The server pauses the PTY while too
+      // many bytes are unacknowledged (`api/terminals/output-flow.ts`).
+      let unacked = 0;
+      const sendAck = () => {
+        const bytes = unacked;
+        unacked = 0;
+        if (ws === sock && sock.readyState === WebSocket.OPEN) {
+          sock.send(JSON.stringify({ type: "ack", bytes }));
+        }
+      };
+      const ack = (bytes: number) => {
+        if (ws !== sock || bytes === 0) return;
+        if (unacked === 0) queueMicrotask(sendAck);
+        unacked += bytes;
+      };
+
       sock.onopen = () => {
         reconnectAttempts = 0;
         lastPongAt = Date.now();
@@ -757,7 +774,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           // yet. Fold in the fitted dims when we have them so the server can
           // replay immediately (folding avoids a separate `attach` racing into
           // the gap before the server's persistent listener is installed).
-          const initMsg: Record<string, unknown> = { type: "init" };
+          const initMsg: Record<string, unknown> = { type: "init", flow: true };
           if (paneMetadata.command) initMsg.command = paneMetadata.command;
           if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
           if (paneMetadata.env) initMsg.env = paneMetadata.env;
@@ -797,7 +814,15 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
           // later live frames fall straight through to the write below.
           finishReplay();
           const bytes = new Uint8Array(event.data);
-          output.push(bytes, attached, noteTypingLatencyOutput(terminalId, bytes));
+          const onParsed = noteTypingLatencyOutput(terminalId, bytes);
+          if (attached && !document.hidden) {
+            output.push(bytes, true, { onParsed, onConsumed: () => ack(bytes.byteLength) });
+          } else {
+            // Nobody can see this terminal, so it must never pause the PTY
+            // (another device may be watching it). Its queue has its own cap.
+            ack(bytes.byteLength);
+            output.push(bytes, false, { onParsed });
+          }
         } else {
           try {
             const msg = JSON.parse(event.data as string);
@@ -818,7 +843,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
               output.pushNotice(`\r\n\x1b[31m${safe}\x1b[0m\r\n`);
             }
           } catch {
-            output.push(event.data as string, attached);
+            output.push(event.data as string, attached && !document.hidden);
           }
         }
       };
@@ -899,6 +924,8 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // a single repair — same idiom as `attach`.
     const handleForeground = () => {
       handleResume();
+      // Output that arrived while the page was hidden was queued as parked.
+      if (attached) showParkedOutput();
       scheduleRepair();
     };
     const handleVisibility = () => {
@@ -951,7 +978,10 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // The typing-latency dispatch stamp is taken when the data reaches the
     // socket, which a coalesced write does a turn of the event loop later.
     const noteDispatch = () => noteTypingLatencyDispatch(terminalId);
-    term.onData((data) => inputQueue.write(data, noteDispatch));
+    term.onData((data) => {
+      output.noteInput();
+      inputQueue.write(data, noteDispatch);
+    });
     term.onTitleChange((title) => emitTitle(title));
 
     // Re-apply the active selection after each xterm resize (xterm clears it on
@@ -1005,7 +1035,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (!dims) return;
       attachSent = true;
       awaitingReplay = true;
-      sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows }));
+      sock.send(JSON.stringify({ type: "attach", cols: dims.cols, rows: dims.rows, flow: true }));
       if (replayGuardTimer !== null) clearTimeout(replayGuardTimer);
       replayGuardTimer = setTimeout(clearReplayGuard, REPLAY_GUARD_TIMEOUT_MS);
     };

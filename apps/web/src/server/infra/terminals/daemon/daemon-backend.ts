@@ -103,6 +103,8 @@ export class DaemonTerminalBackend implements TerminalBackend {
    * the same chunk can arrive twice.
    */
   private readonly lastSeq = new Map<string, number>();
+  /** terminalId -> local viewers holding its output (see {@link setGateHeld}). */
+  private readonly holders = new Map<string, number>();
   /** Every session this server has seen, to route requests and report exits on disconnect. */
   private readonly known = new Map<string, KnownSession>();
   private readonly exitListeners = new Set<(event: TerminalExitEvent) => void>();
@@ -214,7 +216,10 @@ export class DaemonTerminalBackend implements TerminalBackend {
     if (!client) return null;
     // Registered before the request: stream chunks can overtake the reply,
     // and the gate holds them until it knows the snapshot's cut.
-    const gate: AttachGate = new AttachGate(() => this.removeGate(terminalId, gate));
+    const gate: AttachGate = new AttachGate(
+      () => this.removeGate(terminalId, gate),
+      (held) => this.setGateHeld(terminalId, held),
+    );
     let viewers = this.gates.get(terminalId);
     if (!viewers) {
       viewers = new Set();
@@ -598,6 +603,21 @@ export class DaemonTerminalBackend implements TerminalBackend {
       } catch (err) {
         log.warn({ err, terminalId: event.terminalId }, "terminal exit listener threw");
       }
+    }
+  }
+
+  /**
+   * One viewer started or stopped holding the terminal's output. The daemon
+   * sees one hold per server, so only the first hold and the last release are
+   * sent. A daemon of an older build ignores both; its sessions keep only the
+   * stream-backlog gate.
+   */
+  private setGateHeld(terminalId: string, held: boolean): void {
+    const holders = (this.holders.get(terminalId) ?? 0) + (held ? 1 : -1);
+    if (holders > 0) this.holders.set(terminalId, holders);
+    else this.holders.delete(terminalId);
+    if (held ? holders === 1 : holders === 0) {
+      this.knownOwner(terminalId)?.notify({ t: held ? "hold" : "release", terminalId });
     }
   }
 

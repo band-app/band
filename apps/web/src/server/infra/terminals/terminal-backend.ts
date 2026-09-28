@@ -76,6 +76,14 @@ export interface TerminalSpawnRequest {
 export interface TerminalAttachment {
   snapshot: string;
   start(onData: (data: string) => void): void;
+  /**
+   * Pause (`true`) or resume reading the terminal's PTY on this viewer's
+   * behalf, for a client that has fallen behind parsing its output. Each
+   * attachment holds at most once; the PTY resumes when no attachment (and no
+   * other holder, such as a backed-up daemon stream) holds it. `detach`
+   * releases a hold that is still set.
+   */
+  setOutputHeld(held: boolean): void;
   detach(): void;
 }
 
@@ -96,8 +104,12 @@ export class AttachGate implements TerminalAttachment {
   private pending: { data: string; seq: number }[] = [];
   private deliver: ((data: string) => void) | null = null;
   private detached = false;
+  private held = false;
 
-  constructor(private readonly onDetach: () => void) {}
+  constructor(
+    private readonly onDetach: () => void,
+    private readonly onHoldChange: (held: boolean) => void,
+  ) {}
 
   /** Record the snapshot and the `seq` of the last chunk it contains. */
   setSnapshot(snapshot: string, seq: number): void {
@@ -124,8 +136,15 @@ export class AttachGate implements TerminalAttachment {
     }
   }
 
+  setOutputHeld(held: boolean): void {
+    if (this.detached || this.held === held) return;
+    this.held = held;
+    this.onHoldChange(held);
+  }
+
   detach(): void {
     if (this.detached) return;
+    this.setOutputHeld(false);
     this.detached = true;
     this.pending = [];
     this.deliver = null;

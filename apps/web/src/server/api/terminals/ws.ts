@@ -6,6 +6,7 @@ import {
   type TerminalAttachment,
   terminalService,
 } from "../../services/terminal-service";
+import { OutputFlow } from "./output-flow";
 import { stripTerminalQueries } from "./strip-queries";
 
 const log = createLogger("terminal-ws");
@@ -190,7 +191,12 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
         const rows = Number.isFinite(parsed.rows) ? (parsed.rows as number) : undefined;
         // Explicit `> 0` (not truthiness) to match `startReplay`'s guard.
         if (cols !== undefined && rows !== undefined && cols > 0 && rows > 0) {
-          pendingMessage = JSON.stringify({ type: "attach", cols, rows });
+          pendingMessage = JSON.stringify({
+            type: "attach",
+            cols,
+            rows,
+            flow: parsed.flow === true,
+          });
         }
       } else {
         // Not an init message — spawn with defaults and queue for processing
@@ -244,6 +250,8 @@ function attachSession(
   // and live bytes can never interleave out of order, and its `seq` cut
   // guarantees no chunk is lost or duplicated in between.
   let attachment: TerminalAttachment | null = null;
+  // Backpressure for the live output below, created with the attachment.
+  let flow: OutputFlow | null = null;
   let closed = false;
   let replayStarted = false;
 
@@ -304,7 +312,7 @@ function attachSession(
   // #613 guard (OSC 10/11 color *sets* replayed from scrollback are report
   // forms it strips too). Sent as a binary frame so the client can
   // distinguish it from JSON control messages.
-  const startReplay = async (cols?: number, rows?: number): Promise<void> => {
+  const startReplay = async (cols?: number, rows?: number, acks = false): Promise<void> => {
     if (replayStarted) return;
     replayStarted = true;
 
@@ -331,20 +339,25 @@ function attachSession(
       return;
     }
     attachment = attached;
+    const output = new OutputFlow(ws, attached);
+    flow = output;
+    // A client that sends `flow: true` acknowledges every binary frame,
+    // snapshot included, once xterm has parsed it.
+    if (acks) output.enableAcks();
+    const sendOutput = (data: string) => {
+      if (ws.readyState !== ws.OPEN) return;
+      const bytes = Buffer.from(data);
+      ws.send(bytes);
+      output.noteSent(bytes.length);
+    };
 
     // PTY output -> WebSocket (binary frames). Started in a `finally` so a
     // synchronous `ws.send` throw on the snapshot (this file documents `ws`
     // throwing) cannot skip the forwarder and wedge an OPEN socket.
     try {
-      if (attached.snapshot.length > 0 && ws.readyState === ws.OPEN) {
-        ws.send(Buffer.from(stripTerminalQueries(attached.snapshot)));
-      }
+      if (attached.snapshot.length > 0) sendOutput(stripTerminalQueries(attached.snapshot));
     } finally {
-      attached.start((data: string) => {
-        if (ws.readyState === ws.OPEN) {
-          ws.send(Buffer.from(data));
-        }
-      });
+      attached.start(sendOutput);
     }
 
     // Acknowledge the attach even when there is no snapshot to send (a fresh
@@ -379,9 +392,13 @@ function attachSession(
             Number.isFinite(parsed.cols) && parsed.cols > 0 ? (parsed.cols as number) : undefined;
           const rows =
             Number.isFinite(parsed.rows) && parsed.rows > 0 ? (parsed.rows as number) : undefined;
-          void startReplay(cols, rows).catch((err) => {
+          void startReplay(cols, rows, parsed.flow === true).catch((err) => {
             log.error("Failed to replay terminal %s: %s", terminalId, err);
           });
+          return;
+        }
+        if (parsed.type === "ack") {
+          if (Number.isFinite(parsed.bytes) && parsed.bytes > 0) flow?.ack(parsed.bytes as number);
           return;
         }
       } catch {
@@ -396,6 +413,7 @@ function attachSession(
     closed = true;
     unsubscribeTitle();
     clearInterval(pingInterval);
+    flow?.dispose();
     attachment?.detach();
     unsubscribeExit();
     log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);

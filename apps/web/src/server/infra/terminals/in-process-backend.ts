@@ -69,7 +69,10 @@ export class InProcessTerminalBackend implements TerminalBackend {
     dims?: { cols: number; rows: number },
   ): Promise<TerminalAttachment | null> {
     let unsubscribe: (() => void) | null = null;
-    const gate = new AttachGate(() => unsubscribe?.());
+    const gate = new AttachGate(
+      () => unsubscribe?.(),
+      (held) => (held ? this.pool.holdOutput(terminalId) : this.pool.releaseOutput(terminalId)),
+    );
     const attached = await this.pool.attach(terminalId, dims, (data, seq) => gate.push(data, seq));
     if (!attached) return null;
     unsubscribe = attached.unsubscribe;
