@@ -20,8 +20,8 @@
  *     the only allowed mock) scripts two turns: the first completes one
  *     tool call and leaves a second in progress when the turn ends; the
  *     second turn completes that second call.
- *   - UI driven through `ChatPanePage` + the `tool-call__container` /
- *     `tool-call__status-dot` test IDs on `ToolCall` / `StatusDot`.
+ *   - UI driven through `ChatPanePage` + the `tool-group__container` /
+ *     `tool-call__container` test IDs on `ToolGroup` / `ToolCall`.
  */
 
 import { mkdirSync } from "node:fs";
@@ -153,6 +153,9 @@ test.describe("chat tool-output routing — issue #509 regression", () => {
     // `data-status` attribute rather than the Tailwind class: status is
     // the user-observable signal; classes are an implementation detail.
     await expect(chatPane.assistantMessage("Reading the README.")).toBeVisible();
+    // The two consecutive calls fold into one group; expand it to see them.
+    await expect(chatPane.toolGroups).toHaveCount(1);
+    await chatPane.expandToolGroup(0);
     await expect(chatPane.toolCallContainers).toHaveCount(2);
     await expect(chatPane.toolCallContainers.nth(0)).toHaveAttribute("data-status", "complete");
     await expect(chatPane.toolCallContainers.nth(1)).toHaveAttribute("data-status", "in-progress");
@@ -164,14 +167,10 @@ test.describe("chat tool-output routing — issue #509 regression", () => {
 
     // The update landed on the existing card: still two cards, both
     // complete, none lingering in progress.
+    await chatPane.expandToolGroup(0);
     await expect(chatPane.toolCallContainers).toHaveCount(2);
     await expect(chatPane.toolCallContainers.nth(0)).toHaveAttribute("data-status", "complete");
     await expect(chatPane.toolCallContainers.nth(1)).toHaveAttribute("data-status", "complete");
-
-    // Status dots must mirror the container status. Pinning both surfaces
-    // guards against a regression that updates one and forgets the other.
-    await expect(chatPane.toolCallStatusDots).toHaveCount(2);
-    await expect(chatPane.toolCallStatusDots.nth(0)).toHaveAttribute("data-status", "complete");
-    await expect(chatPane.toolCallStatusDots.nth(1)).toHaveAttribute("data-status", "complete");
+    await expect(chatPane.toolGroups).toHaveCount(1);
   });
 });

@@ -92,17 +92,15 @@ export class ChatPanePage {
   readonly submitButton: Locator;
   /** Queued-message bubbles, found by their drag handle. */
   readonly queuedMessages: Locator;
-  /** All tool-call container rows in the conversation (one per ACP
-   *  `tool_call`). Each carries a `data-status`
-   *  attribute mirroring the StatusDot branch
-   *  (`in-progress` / `complete` / `error`) — tests assert against
-   *  that rather than the underlying Tailwind classes. */
+  /** All rendered tool-call rows in the conversation (one per ACP
+   *  `tool_call`). A call inside a collapsed group isn't rendered until
+   *  the group is expanded. Each carries a `data-status` attribute
+   *  (`in-progress` / `complete` / `error`); tests assert against that
+   *  rather than the underlying Tailwind classes. */
   readonly toolCallContainers: Locator;
-  /** Status dots inside each tool-call row. Same `data-status` shape
-   *  as `toolCallContainers`; both surfaces are pinned in the issue
-   *  #509 regression spec so a future change that updates one and
-   *  forgets the other still trips the test. */
-  readonly toolCallStatusDots: Locator;
+  /** Groups of consecutive tool calls, each collapsed to one summary
+   *  line until clicked. */
+  readonly toolGroups: Locator;
   /** The `@`-mention file dropdown — opens when the user types `@` in
    *  the prompt. ARIA name is system-controlled in
    *  `file-mention-suggestions.tsx`. */
@@ -159,7 +157,7 @@ export class ChatPanePage {
     this.submitButton = page.getByTestId("prompt-input__submit-button").filter({ visible: true });
     this.queuedMessages = page.getByRole("button", { name: "Reorder queued message" });
     this.toolCallContainers = page.getByTestId("tool-call__container");
-    this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
+    this.toolGroups = page.getByTestId("tool-group__container");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
     this.slashCommandDropdown = page.getByRole("listbox", { name: "Slash commands" });
     this.scroller = page.getByTestId("chat-pane__scroller");
@@ -670,6 +668,71 @@ export class ChatPanePage {
   /** Answer the Nth permission card by clicking the option the agent
    *  offered. Option names come from the agent (test data), so the button's
    *  role name is the stable locator. */
+  /** The summary line of the tool group at `index`, the button that
+   *  expands it. */
+  toolGroupSummary(index: number): Locator {
+    return this.toolGroups.nth(index).getByTestId("tool-group__summary");
+  }
+
+  /** Expands the tool group at `index`; a no-op when it's already open. */
+  async expandToolGroup(index: number): Promise<void> {
+    const summary = this.toolGroupSummary(index);
+    if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click();
+    await expect(summary).toHaveAttribute("aria-expanded", "true");
+  }
+
+  /** The rendered tool-call row whose description contains `text`. */
+  toolCall(text: string): Locator {
+    return this.toolCallContainers.filter({ hasText: text });
+  }
+
+  async expandToolCall(text: string): Promise<void> {
+    const trigger = this.toolCall(text).getByRole("button").first();
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  }
+
+  /** The `$ command` block of an expanded shell call. */
+  toolCallCommand(text: string): Locator {
+    return this.toolCall(text).getByTestId("tool-call__command");
+  }
+
+  /** The "Exit code N" line of an expanded shell call. */
+  toolCallExitCode(text: string): Locator {
+    return this.toolCall(text).getByTestId("tool-call__exit-code");
+  }
+
+  /** The output of an expanded shell call. */
+  toolCallOutput(text: string): Locator {
+    return this.toolCall(text).getByTestId("tool-call__output");
+  }
+
+  /** Hovers a message so its copy action and timestamp show. */
+  async hoverMessage(message: Locator): Promise<void> {
+    await message.hover();
+  }
+
+  /** A message's hover row (copy action and time sent). */
+  messageActions(message: Locator): Locator {
+    return message.getByTestId("message-actions");
+  }
+
+  messageTime(message: Locator): Locator {
+    return message.getByTestId("message-actions__time");
+  }
+
+  async copyMessage(message: Locator): Promise<void> {
+    await this.hoverMessage(message);
+    await message.getByRole("button", { name: "Copy message" }).click();
+  }
+
+  /** Hovers a message's time and returns the tooltip with the exact time. */
+  async openMessageTimeTooltip(message: Locator): Promise<Locator> {
+    await this.hoverMessage(message);
+    await this.messageTime(message).hover();
+    return this.page.getByRole("tooltip");
+  }
+
   async answerPermission(index: number, optionName: string): Promise<void> {
     await test.step(`Answer permission #${index} with "${optionName}"`, async () => {
       await this.permissionCards

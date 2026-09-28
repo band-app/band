@@ -282,8 +282,9 @@ export type SyntheticChatEvent =
 
 export type ChatEventPayload = LoggedChatEvent | SyntheticChatEvent;
 
-/** A payload tagged with its event id (also on the SSE `id:` line). */
-export type ChatEvent = ChatEventPayload & { eventId: number };
+/** A payload tagged with its event id (also on the SSE `id:` line).
+ *  `createdAt` is when the server recorded or sent it (epoch ms). */
+export type ChatEvent = ChatEventPayload & { eventId: number; createdAt?: number };
 
 export type ChatEventType = ChatEventPayload["type"];
 

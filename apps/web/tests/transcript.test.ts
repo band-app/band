@@ -481,3 +481,35 @@ describe("transcriptReducer — subscription and cursor", () => {
     expect(paged).toMatchObject({ hasOlder: false, oldestEventId: 1 });
   });
 });
+
+describe("transcriptReducer — message times", () => {
+  it("dates each message with the event that started it", () => {
+    const events = logged([
+      { type: "prompt", taskId: "t", text: "hi" },
+      { type: "turn-started", taskId: "t" },
+      say("Hel"),
+      say("lo"),
+    ]).map((e, i) => ({ ...e, createdAt: 1_000 + i }));
+    const state = foldEvents(INITIAL_TRANSCRIPT, events);
+    // The assistant message keeps its first chunk's time as more stream in.
+    expect(state.messages.map((m) => m.createdAt)).toEqual([1_000, 1_002]);
+  });
+
+  it("takes the server's time when it confirms an optimistic send", () => {
+    const sent = transcriptReducer(INITIAL_TRANSCRIPT, {
+      type: "local-send",
+      id: "local-1",
+      text: "hello",
+      createdAt: 500,
+    });
+    expect(sent.messages[0].createdAt).toBe(500);
+    const confirmed = transcriptReducer(sent, {
+      type: "prompt",
+      taskId: "t",
+      text: "hello",
+      eventId: 1,
+      createdAt: 700,
+    });
+    expect(confirmed.messages[0]).toMatchObject({ id: "local-1", createdAt: 700 });
+  });
+});

@@ -239,7 +239,13 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
       // queued shows up in the queue list instead.
       const willQueue = busyRef.current;
       if (!willQueue) {
-        dispatch({ type: "local-send", id: `pending-${++localId}`, text, files: wireFiles });
+        dispatch({
+          type: "local-send",
+          id: `pending-${++localId}`,
+          text,
+          files: wireFiles,
+          createdAt: Date.now(),
+        });
       }
       const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
         method: "POST",

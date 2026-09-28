@@ -87,8 +87,10 @@ import {
 } from "./ai-elements/prompt-input";
 import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
-import { ToolCall } from "./ai-elements/tool-call";
+import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { withResolvedDefaults } from "./chat/claude-default-labels";
+import { MessageActions } from "./chat/MessageActions";
+import { groupEntries } from "./chat/tool-summary";
 import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatSubscription } from "./chat/use-chat-subscription";
 import { VirtualizedMessageList } from "./chat/VirtualizedMessageList";
@@ -657,6 +659,13 @@ export function ChatView({
               ))}
               {message.text.trim() && <MessageResponse>{message.text}</MessageResponse>}
             </MessageContent>
+            {!message.pending && (
+              <MessageActions
+                text={message.text.trim()}
+                createdAt={message.createdAt}
+                align="end"
+              />
+            )}
           </Message>
         );
       }
@@ -667,12 +676,28 @@ export function ChatView({
       );
       const showThinking = isLastMessage && isStreaming && !waiting;
       if (message.entries.length === 0 && !showThinking) return null;
+      const copyText = message.entries
+        .flatMap((e) => (e.kind === "text" && e.text.trim() ? [e.text.trim()] : []))
+        .join("\n\n");
       return (
         <Message from="assistant" className={entering ? "chat-message-enter" : undefined}>
           <MessageContent>
-            {message.entries.map(renderEntry)}
+            {groupEntries(message.entries).map((part) =>
+              part.kind === "entry" ? (
+                renderEntry(part.entry)
+              ) : (
+                <ToolGroup key={part.id} tools={part.tools}>
+                  {part.entries.map((e) =>
+                    e.kind === "tool" ? <ToolCall key={e.id} entry={e} /> : renderEntry(e),
+                  )}
+                </ToolGroup>
+              ),
+            )}
             {showThinking && <ThinkingIndicator />}
           </MessageContent>
+          {!(isLastMessage && isStreaming) && (
+            <MessageActions text={copyText} createdAt={message.createdAt} align="start" />
+          )}
         </Message>
       );
     },

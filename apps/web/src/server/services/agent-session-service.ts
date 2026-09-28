@@ -296,18 +296,20 @@ function record(rt: Runtime, event: LoggedChatEvent, turnStart = false): void {
     broadcastTransient(rt.chatId, event);
     return;
   }
+  const createdAt = Date.now();
   const id = events.append({
     chatId: rt.chatId,
     sessionId: rt.sessionId,
     revision: rt.revision,
     event,
     turnStart,
+    createdAt,
   });
-  emit(rt.chatId, { ...event, eventId: id } as ChatEvent);
+  emit(rt.chatId, { ...event, eventId: id, createdAt } as ChatEvent);
 }
 
 function broadcastTransient(chatId: string, event: ChatEventPayload): void {
-  emit(chatId, { ...event, eventId: transientId-- } as ChatEvent);
+  emit(chatId, { ...event, eventId: transientId--, createdAt: Date.now() } as ChatEvent);
 }
 
 function remember(def: CodingAgentDefinition, patch: Partial<CatalogEntry>): void {

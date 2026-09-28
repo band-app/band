@@ -75,8 +75,16 @@ export type ChatMessage =
       pending?: boolean;
       /** Built from replayed `user_message_chunk`s rather than a prompt. */
       replayed?: boolean;
+      /** When it was sent (epoch ms). */
+      createdAt?: number;
     }
-  | { role: "assistant"; id: string; entries: Entry[] };
+  | {
+      role: "assistant";
+      id: string;
+      entries: Entry[];
+      /** When its first event was recorded (epoch ms). */
+      createdAt?: number;
+    };
 
 export type ChatStatus = "idle" | "submitting" | "streaming" | "error";
 
@@ -120,7 +128,7 @@ export const INITIAL_TRANSCRIPT: TranscriptState = {
 /** Client-side actions that aren't server events. */
 export type TranscriptAction =
   | ChatEvent
-  | { type: "local-send"; id: string; text: string; files?: ChatEventFile[] }
+  | { type: "local-send"; id: string; text: string; files?: ChatEventFile[]; createdAt?: number }
   | { type: "local-send-failed"; message: string }
   | { type: "local-answer"; requestId: string; answer: string }
   | { type: "local-prepend"; messages: ChatMessage[]; hasOlder: boolean; oldestEventId: number };
@@ -399,7 +407,14 @@ export function transcriptReducer(
         ...state,
         messages: [
           ...state.messages,
-          { role: "user", id: action.id, text: action.text, files: action.files, pending: true },
+          {
+            role: "user",
+            id: action.id,
+            text: action.text,
+            files: action.files,
+            pending: true,
+            ...(action.createdAt !== undefined && { createdAt: action.createdAt }),
+          },
         ],
         status: "submitting",
         taskRunning: true,
@@ -482,8 +497,25 @@ export function transcriptReducer(
   }
   const lastEventId =
     action.eventId > 0 ? Math.max(state.lastEventId ?? 0, action.eventId) : state.lastEventId;
-  const next = applyLogged(state, action);
+  const next = stampNew(state.messages, applyLogged(state, action), action.createdAt);
   return next === state && lastEventId === state.lastEventId ? state : { ...next, lastEventId };
+}
+
+/** Dates the messages an event appended with the event's time. Logged
+ *  events only ever append messages at the end. */
+function stampNew(
+  before: ChatMessage[],
+  state: TranscriptState,
+  createdAt: number | undefined,
+): TranscriptState {
+  if (createdAt === undefined || state.messages === before) return state;
+  let messages = state.messages;
+  for (let i = before.length; i < messages.length; i++) {
+    if (messages[i].createdAt !== undefined) continue;
+    if (messages === state.messages) messages = messages.slice();
+    messages[i] = { ...messages[i], createdAt };
+  }
+  return messages === state.messages ? state : { ...state, messages };
 }
 
 function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState {
@@ -500,7 +532,12 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
         const messages = state.messages.slice();
         const m = messages[pending];
         if (m.role === "user")
-          messages[pending] = { ...m, files: event.files ?? m.files, pending: false };
+          messages[pending] = {
+            ...m,
+            files: event.files ?? m.files,
+            pending: false,
+            createdAt: event.createdAt ?? m.createdAt,
+          };
         return { ...state, messages };
       }
       return {
