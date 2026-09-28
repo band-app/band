@@ -513,6 +513,12 @@ describe("tRPC — git refusals", () => {
     });
   });
 
+  const BEHIND_REMOTE = {
+    ok: false,
+    reason: "behind-remote",
+    message: "Push rejected: the remote branch has commits you don't have. Pull first.",
+  };
+
   it("workspaces.gitPush reports a non-fast-forward rejection", async () => {
     const res = await trpcMutate(
       server.url,
@@ -521,11 +527,18 @@ describe("tRPC — git refusals", () => {
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(200);
-    expect(await trpcData(res)).toEqual({
-      ok: false,
-      reason: "behind-remote",
-      message: "Push rejected: the remote branch has commits you don't have. Pull first.",
-    });
+    expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
+  });
+
+  it("workspace.gitPush reports the same rejection", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPush",
+      { workspaceId: "ahead-main" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    expect(await trpcData(res)).toEqual(BEHIND_REMOTE);
   });
 
   it("workspace.gitCommit reports a clean working tree", async () => {

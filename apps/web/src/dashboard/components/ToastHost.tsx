@@ -62,8 +62,7 @@ function NoticeToast({ notice }: { notice: Notice }) {
 
   return (
     <ToastCard
-      testId="toast-host__notice"
-      tone={notice.tone}
+      testId={`toast-host__notice--${notice.tone}`}
       onClose={() => dismissNotice(notice.id)}
     >
       <div className="flex gap-2.5 pr-6">

@@ -8,13 +8,10 @@ import type { ReactNode } from "react";
  */
 export function ToastCard({
   testId,
-  tone,
   onClose,
   children,
 }: {
   testId: string;
-  /** `info` or `error` for a dashboard notice, exposed as `data-tone`. */
-  tone?: string;
   onClose?: () => void;
   children: ReactNode;
 }) {
@@ -22,7 +19,6 @@ export function ToastCard({
     <output
       aria-live="polite"
       data-testid={testId}
-      data-tone={tone}
       className="pointer-events-auto relative block rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg animate-in fade-in-0 slide-in-from-bottom-2 duration-200"
     >
       {onClose && (

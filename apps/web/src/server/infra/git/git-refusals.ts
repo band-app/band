@@ -32,11 +32,11 @@ export async function pullRefusal(err: unknown, cwd: string): Promise<Refusal | 
     .filter(Boolean);
   const files = listed.length > 0 ? listed : await changedTrackedFiles(cwd);
   const which = files.length > 0 ? ` (${formatFileList(files)})` : "";
-  return {
-    ok: false,
-    reason: "local-changes",
-    message: `Pull skipped: commit or stash your local changes first${which}.`,
-  };
+  // A plain `git stash` leaves untracked files in place, so they get their own advice.
+  const advice = /untracked working tree files would be overwritten/i.test(stderr)
+    ? "move or delete these untracked files first"
+    : "commit or stash your local changes first";
+  return { ok: false, reason: "local-changes", message: `Pull skipped: ${advice}${which}.` };
 }
 
 /**

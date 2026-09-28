@@ -4,7 +4,7 @@
  * `data-testid`s are set in `ToastHost.tsx` and `ToastCard.tsx`.
  */
 
-import type { Locator, Page } from "@playwright/test";
+import { type Locator, type Page, test } from "@playwright/test";
 
 /** A toast's edges and the viewport it sits in, in CSS px. */
 export interface ToastPlacement {
@@ -21,10 +21,24 @@ export class ToastHostPage {
   readonly host: Locator;
   /** Every dashboard notice in the stack (git refusals, errors). */
   readonly notices: Locator;
+  readonly infoNotices: Locator;
+  readonly errorNotices: Locator;
+  /** The dialog an error notice's "Details" button opens. */
+  readonly detailsDialog: Locator;
 
   constructor(private readonly page: Page) {
     this.host = page.getByTestId("toast-host");
-    this.notices = this.host.getByTestId("toast-host__notice");
+    this.notices = this.host.getByTestId(/^toast-host__notice--/);
+    this.infoNotices = this.host.getByTestId("toast-host__notice--info");
+    this.errorNotices = this.host.getByTestId("toast-host__notice--error");
+    this.detailsDialog = page.getByRole("dialog");
+  }
+
+  /** Open the details dialog of the first error notice. */
+  async openErrorDetails(): Promise<void> {
+    await test.step("Open the error notice's details", async () => {
+      await this.errorNotices.first().getByRole("button", { name: "Details" }).click();
+    });
   }
 
   /** Where `toast` sits on screen. */
