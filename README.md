@@ -33,7 +33,7 @@ Download the latest signed `.dmg` from [GitHub Releases](https://github.com/band
 
 Auto-update is built in (via `electron-updater`): the app checks daily and prompts before installing.
 
-The desktop app is fully self-contained — it ships its own Node.js runtime (Electron's bundled Node 22.x) and runs the web server under that. End users do **not** need to install Node.js separately.
+The desktop app is fully self-contained — it ships its own Node.js runtime (Electron's bundled Node 24.x) and runs the web server under that. End users do **not** need to install Node.js separately.
 
 ### Nightly
 
@@ -72,7 +72,7 @@ packages/
 
 The packaged desktop app ships its own Node runtime via Electron, so end users only need macOS. The prerequisites below apply when **building from source**.
 
-- [Node.js](https://nodejs.org) v22.5+ — required to drive `pnpm install`, run the test suite, and build the web bundle (we use the built-in `node:sqlite` module)
+- [Node.js](https://nodejs.org) 24, the version in `.nvmrc` (`nvm use` or `fnm use` picks it up). It drives `pnpm install`, the test suite and the web bundle build. CI, release and nightly all run this version because it is the Node the desktop app ships. Avoid Node 26: Electron's installer exits before extracting the binary, and the jsdom tests break on Node's built-in `localStorage`.
 - [pnpm](https://pnpm.io) v10+
 - [Rust](https://rustup.rs) (for the CLI)
 - macOS
