@@ -1,12 +1,6 @@
 import {
   Button,
   cn,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -17,8 +11,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
+import { Check, ChevronsDownUp, FolderPlus, Plus, Settings, Tag } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useToastObstruction } from "../../lib/toast-obstructions";
 import { useCapabilities } from "../context";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
@@ -89,11 +84,9 @@ export function DashboardShell({
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
-  const error = useDashboardStore((s) => s.error);
-  const clearError = useDashboardStore((s) => s.clearError);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const actionBarObstructionRef = useToastObstruction();
   const [labelFilter, persistLabelFilter] = useLabelFilter();
   const { getLastWorkspace, setLastWorkspace } = useLabelLastWorkspace();
   const capabilities = useCapabilities();
@@ -552,32 +545,13 @@ export function DashboardShell({
         </div>
       )}
 
-      {error && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
-          <button
-            type="button"
-            className="truncate text-left cursor-pointer hover:underline"
-            onClick={() => setShowErrorDialog(true)}
-          >
-            {error}
-          </button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-destructive shrink-0"
-            onClick={clearError}
-          >
-            <X />
-          </Button>
-        </div>
-      )}
-
       {/* Persistent bottom action bar. Left: a single Settings button (gear
           icon + label) that opens the Settings dialog. Right: the
           Resources/Usage icons + 3-dot overflow supplied by the caller
           (`bottomActions` — a <ToolbarActionBar />), kept outside the
           `dashboard/` seam. */}
       <div
+        ref={actionBarObstructionRef}
         className="shrink-0 flex h-9 items-center justify-between gap-1 border-t border-border px-2"
         data-testid="project-list__action-bar"
       >
@@ -593,39 +567,6 @@ export function DashboardShell({
         </Button>
         <div className="flex items-center gap-0.5">{bottomActions}</div>
       </div>
-
-      <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">Error</DialogTitle>
-            <DialogDescription>Click the error text to select it.</DialogDescription>
-          </DialogHeader>
-          <pre className="whitespace-pre-wrap break-words text-sm bg-muted/50 rounded-md p-3 max-h-64 overflow-auto select-all cursor-text">
-            {error}
-          </pre>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (error) navigator.clipboard.writeText(error);
-              }}
-            >
-              Copy
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => {
-                setShowErrorDialog(false);
-                clearError();
-              }}
-            >
-              Dismiss
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <AddProjectDialog
         open={showAddDialog}

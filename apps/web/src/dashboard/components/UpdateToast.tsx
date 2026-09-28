@@ -1,12 +1,13 @@
 import { Button, Spinner } from "@band-app/ui";
-import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
+import { CircleAlert, CircleCheck, Download, RotateCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { openExternalUrl } from "../../lib/open-external-url";
 import type { UpdateRelease } from "../adapter";
 import { useAppUpdate } from "../hooks/use-app-update";
+import { ToastCard } from "./ToastCard";
 
 /**
- * Bottom-right toast for the desktop auto-updater. Shows "Checking for
+ * Toast for the desktop auto-updater, shown in the bottom-right stack. Shows "Checking for
  * updates…" and the result of a user-initiated check, and any update a
  * background check finds, then follows it through download and restart.
  * Renders nothing outside the desktop shell.
@@ -119,23 +120,9 @@ export function UpdateToast() {
   }
 
   return (
-    <output
-      aria-live="polite"
-      data-testid="update-toast"
-      className="fixed right-4 bottom-4 left-4 z-50 block rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg animate-in fade-in-0 slide-in-from-bottom-2 duration-200 sm:left-auto sm:w-80"
-    >
-      {closable && (
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={dismiss}
-          className="absolute top-2 right-2 rounded-sm p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          <X className="size-3.5" />
-        </button>
-      )}
+    <ToastCard testId="update-toast" onClose={closable ? dismiss : undefined}>
       {body}
-    </output>
+    </ToastCard>
   );
 }
 
