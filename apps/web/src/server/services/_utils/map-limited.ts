@@ -1,7 +1,7 @@
 /**
- * Most git subprocesses one fan-out (a poller tick, a `projects.list`) runs
- * at once. `child_process` spawns on the event loop, and each spawn blocks it
- * for ~2-7 ms on macOS. Starting a git call for every workspace at once
+ * Most git subprocesses one fan-out (a poller pass, a `projects.list`) runs
+ * at once; the cap is per fan-out, not per process. `child_process` spawns
+ * on the event loop, and each spawn blocks it for ~2-7 ms on macOS. Starting a git call for every workspace at once
  * (72 workspaces, ~110 spawns per branch-status tick) held the loop for
  * ~750 ms every 5 s, and the terminal WebSocket's keystroke echo waited
  * behind it. With four in flight, the next spawn starts when one exits, so

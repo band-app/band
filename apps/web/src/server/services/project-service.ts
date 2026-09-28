@@ -107,8 +107,10 @@ export class ProjectService {
       reconcileKindForProject(project);
     }
 
-    // A few projects at a time: each runs `git worktree list`, and the
-    // dashboard refetches this every 30 s (see `GIT_SPAWN_CONCURRENCY`).
+    // A few projects at a time: each runs `git worktree list` (plus, about
+    // once a minute, the avatar's `git remote`, so up to twice
+    // `GIT_SPAWN_CONCURRENCY` git calls), and the dashboard refetches this
+    // every 30 s.
     const result = await mapLimited(projects, GIT_SPAWN_CONCURRENCY, async (project) => {
       // Reads the memoised remote and the on-disk cache only; the GitHub
       // fetch happens when the browser requests `avatar.src`. Started

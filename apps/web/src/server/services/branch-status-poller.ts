@@ -347,10 +347,13 @@ async function pollTick() {
 
   if (workspaces.length === 0) return;
 
-  // On CI ticks, do git fetch in parallel per unique project path
+  // On CI ticks, git fetch each unique project path. A fetch waits on the
+  // network for seconds, so it runs alongside the status pass below instead
+  // of ahead of it; the counts it changes show up on the next tick.
+  let fetches: Promise<void> = Promise.resolve();
   if (isCITick) {
     const uniqueProjectPaths = [...new Set(workspaces.map((w) => w.projectPath))];
-    await forEachLimited(uniqueProjectPaths, async (projectPath) => {
+    fetches = forEachLimited(uniqueProjectPaths, async (projectPath) => {
       await execGit(["fetch", "--quiet", "--all"], projectPath).catch(() => {});
     });
   }
@@ -428,6 +431,8 @@ async function pollTick() {
       ci,
     });
   });
+
+  await fetches;
 }
 
 /**

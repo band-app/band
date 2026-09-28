@@ -82,6 +82,12 @@ describe("branch status git fields", () => {
     git(diverged, ["reset", "-q", "--hard", "HEAD~1"]);
     commit(diverged, "d.txt", "ours\n");
 
+    // An upstream that is configured but was deleted from the remote.
+    const gone = worktree("gone");
+    git(gone, ["push", "-q", "-u", "origin", "gone"]);
+    git(gone, ["push", "-q", "origin", "--delete", "gone"]);
+    git(gone, ["fetch", "-q", "--prune"]);
+
     // A merge stopped on a conflict in README.md.
     const conflict = worktree("conflict");
     git(repo, ["branch", "conflict-other", "main"]);
@@ -95,7 +101,7 @@ describe("branch status git fields", () => {
       // Expected: the merge stops on the conflict.
     }
 
-    const branches = ["main", "local", "dirty", "ahead", "behind", "diverged", "conflict"];
+    const branches = ["main", "local", "dirty", "ahead", "behind", "diverged", "gone", "conflict"];
     seedState(tmpHome, {
       projects: [
         {
@@ -130,7 +136,7 @@ describe("branch status git fields", () => {
     const stream = await StatusStream.open(server.url, TOKEN);
     const status = (branch: string) => stream.latest(toWorkspaceId(PROJECT, branch));
     try {
-      await waitFor(async () => stream.branchStatuses.size >= 7 || undefined, {
+      await waitFor(async () => stream.branchStatuses.size >= 8 || undefined, {
         timeoutMs: 20_000,
         label: "a branch status for every workspace",
       });
@@ -146,6 +152,7 @@ describe("branch status git fields", () => {
         behind: 1,
         sync_state: "diverged",
       });
+      expect(status("gone")).toEqual({ ...clean, sync_state: "untracked" });
       expect(status("conflict")).toEqual({
         ...clean,
         dirty: true,

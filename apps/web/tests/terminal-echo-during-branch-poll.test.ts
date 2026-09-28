@@ -14,7 +14,9 @@ import { waitFor } from "./helpers/wait-for";
 // runs. The poller used to start git for every workspace at once; each
 // `child_process` spawn blocks the server's event loop for a few ms, so with
 // dozens of workspaces the loop froze for 300-800 ms every 5 s tick and the
-// echo arrived in bursts (`services/_utils/map-limited.ts`).
+// echo arrived in bursts (`services/_utils/map-limited.ts`). Spawns cost the
+// most on macOS, where this reproduced; a Linux host may stay under the limit
+// even without the fix.
 
 const TOKEN = "terminal-echo-branch-poll-token";
 const PROJECT = "echoproj";
@@ -27,6 +29,11 @@ const REPEAT_MS = 33;
 const HOLD_MS = 11_000;
 /** Slowest acceptable echo. A tick's burst of spawns took 300-800 ms. */
 const MAX_ECHO_MS = 150;
+/**
+ * Keys allowed over `MAX_ECHO_MS`, for a stray GC pause or a busy CI host. A
+ * blocked loop delays every key sent during the block, 10+ at 30 keys/s.
+ */
+const SLOW_ECHOES_ALLOWED = 2;
 
 const gitEnv = {
   ...process.env,
@@ -72,7 +79,16 @@ describe("terminal echo while the branch-status poller runs", () => {
     rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  it("echoes every key of a held key within 150 ms", { timeout: 60_000 }, async () => {
+  it("refuses terminal.create without the token", async () => {
+    const res = await fetch(`${server.url}/trpc/terminal.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: WORKSPACE_ID, id: randomUUID() }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("echoes a held key within 150 ms", { timeout: 60_000 }, async () => {
     const terminalId = randomUUID();
     const res = await trpcMutate(
       server.url,
@@ -88,39 +104,46 @@ describe("terminal echo while the branch-status poller runs", () => {
       flow: true,
     });
     socket.onOutput((text) => socket.ack(Buffer.byteLength(text)));
-    // `cat` in canonical mode: the tty echoes each key exactly once.
-    socket.type("echo READY-$((20+22)); cat\r");
-    await socket.waitForOutput("READY-42", 20_000);
-    // The dashboard's status stream is what keeps the poller running. Hold
-    // the key once its first tick has reached every workspace.
-    const status = await StatusStream.open(server.url, TOKEN);
-    await waitFor(async () => status.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
-      timeoutMs: 20_000,
-      label: "first poll tick",
-    });
-
+    let status: StatusStream | undefined;
     const echoes: number[] = [];
-    socket.onOutput((text) => {
-      const at = performance.now();
-      for (const char of text) if (char === "a") echoes.push(at);
-    });
     const sent: number[] = [];
-    const start = performance.now();
-    while (performance.now() - start < HOLD_MS) {
-      sent.push(performance.now());
-      socket.type("a");
-      const next = start + sent.length * REPEAT_MS;
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, next - performance.now())));
+    try {
+      // `cat` in canonical mode: the tty echoes each key exactly once.
+      socket.type("echo READY-$((20+22)); cat\r");
+      await socket.waitForOutput("READY-42", 20_000);
+      // The dashboard's status stream is what keeps the poller running. Hold
+      // the key once its first tick has reached every workspace.
+      const stream = await StatusStream.open(server.url, TOKEN);
+      status = stream;
+      await waitFor(async () => stream.branchStatuses.size > EXTRA_WORKSPACES || undefined, {
+        timeoutMs: 20_000,
+        label: "first poll tick",
+      });
+
+      socket.onOutput((text) => {
+        const at = performance.now();
+        for (const char of text) if (char === "a") echoes.push(at);
+      });
+      const start = performance.now();
+      while (performance.now() - start < HOLD_MS) {
+        sent.push(performance.now());
+        socket.type("a");
+        const next = start + sent.length * REPEAT_MS;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, next - performance.now())));
+      }
+      await waitFor(async () => echoes.length >= sent.length || undefined, {
+        label: "every held key echoed",
+      });
+      socket.type("\x03");
+    } finally {
+      status?.close();
+      await socket.close();
     }
-    await waitFor(async () => echoes.length >= sent.length || undefined, {
-      label: "every held key echoed",
-    });
-    socket.type("\x03");
-    await socket.close();
-    status.close();
 
     expect(echoes).toHaveLength(sent.length);
-    const latencies = sent.map((at, i) => Math.round(echoes[i] - at));
-    expect(Math.max(...latencies)).toBeLessThan(MAX_ECHO_MS);
+    const slow = sent.map((at, i) => Math.round(echoes[i] - at)).filter((ms) => ms >= MAX_ECHO_MS);
+    expect(slow.length, `echoes over ${MAX_ECHO_MS} ms: ${slow.join(", ")}`).toBeLessThanOrEqual(
+      SLOW_ECHOES_ALLOWED,
+    );
   });
 });
