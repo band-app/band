@@ -54,6 +54,7 @@ import {
 import { tags } from "@lezer/highlight";
 import { loadLanguage } from "./codemirror-setup";
 import { frontmatterWidget, type SyntaxNode, tableWidget } from "./markdown-table-widget";
+import { quietFocus } from "./quiet-focus";
 
 /** Blocks the live preview swaps for a rendered version while the cursor is elsewhere. */
 export type RenderedBlockKind = "table" | "frontmatter" | "mermaid";
@@ -133,17 +134,38 @@ function inFrontmatter(state: EditorState, name: string, to: number): boolean {
 //
 // Markers are revealed only while the editor has focus, so an unfocused
 // preview (the state it opens in) reads as fully rendered even though the
-// selection starts at position 0.
+// selection starts at position 0. A quiet focus (a tab switch, see
+// quiet-focus.ts) doesn't reveal either, until the cursor moves or the text
+// changes.
 
 const setFocused = StateEffect.define<boolean>();
 
-const focusedField = StateField.define<boolean>({
-  create: () => false,
+interface FocusState {
+  focused: boolean;
+  quiet: boolean;
+}
+
+const focusedField = StateField.define<FocusState>({
+  create: () => ({ focused: false, quiet: false }),
   update(value, tr) {
-    for (const e of tr.effects) if (e.is(setFocused)) return e.value;
-    return value;
+    let { focused, quiet } = value;
+    for (const e of tr.effects) {
+      if (e.is(quietFocus)) quiet = true;
+      else if (e.is(setFocused)) {
+        focused = e.value;
+        if (!focused) quiet = false;
+      }
+    }
+    if (quiet && (tr.docChanged || tr.selection)) quiet = false;
+    return focused === value.focused && quiet === value.quiet ? value : { focused, quiet };
   },
 });
+
+/** True while the editor has focus the user put there (see `FocusState`). */
+function isFocusLive(state: EditorState): boolean {
+  const { focused, quiet } = state.field(focusedField);
+  return focused && !quiet;
+}
 
 const focusTracking = EditorView.focusChangeEffect.of((_state, focusing) =>
   setFocused.of(focusing),
@@ -167,7 +189,7 @@ const searchRevealField = StateField.define<boolean>({
  * the editor has focus, or find just selected a match.
  */
 function touches(state: EditorState, from: number, to: number): boolean {
-  if (!state.field(focusedField) && !state.field(searchRevealField)) return false;
+  if (!isFocusLive(state) && !state.field(searchRevealField)) return false;
   return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
@@ -378,7 +400,9 @@ function renderedBlocks(opts: RenderedBlocksOptions): Extension {
       if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state)) {
         return buildBlockDecorations(tr.state, opts);
       }
-      if (!tr.selection && !tr.effects.some((e) => e.is(setFocused))) return value;
+      if (!tr.selection && !tr.effects.some((e) => e.is(setFocused) || e.is(quietFocus))) {
+        return value;
+      }
       // A cursor move only matters when it enters or leaves a block, so skip
       // the full-tree rebuild while every block keeps its rendered state.
       const changed = value.blocks.some(
@@ -653,6 +677,7 @@ function inlineDecorations(opts: InlineOptions): Extension {
           update.viewportChanged ||
           update.selectionSet ||
           update.focusChanged ||
+          update.startState.field(focusedField) !== update.state.field(focusedField) ||
           syntaxTree(update.startState) !== syntaxTree(update.state)
         ) {
           this.decorations = buildInlineDecorations(update.view, opts);
