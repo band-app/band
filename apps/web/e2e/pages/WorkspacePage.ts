@@ -607,6 +607,12 @@ export class WorkspacePage {
     });
   }
 
+  /** Read the persisted label filter from localStorage: a label id, or
+   *  `null` for All. */
+  async readLabelFilter(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), LABEL_FILTER_KEY);
+  }
+
   /** Read the persisted per-label "last workspace" map from
    *  localStorage. Returns an empty object when nothing has been
    *  recorded yet. */
@@ -913,17 +919,34 @@ export class WorkspacePage {
     });
   }
 
-  /** Press ⌘0..9 with focus in `workspaceId`'s terminal, where a workspace
-   *  switch leaves it. `index` as in `pressLabelShortcut`. */
-  async pressLabelShortcutInTerminal(workspaceId: string, index: number): Promise<void> {
+  /** Press ⌘0..9 (or Ctrl+0..9) with focus in `workspaceId`'s terminal,
+   *  where a workspace switch leaves it. `index` as in `pressLabelShortcut`. */
+  async pressLabelShortcutInTerminal(
+    workspaceId: string,
+    index: number,
+    modifier: "Meta" | "Control" = "Meta",
+  ): Promise<void> {
     if (index < 0 || index > 9) {
       throw new Error(`pressLabelShortcutInTerminal: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Meta+${index} (label shortcut) in the terminal`, async () => {
+    await test.step(`Press ${modifier}+${index} (label shortcut) in the terminal`, async () => {
       await this.cachedPanelEntries(workspaceId)
         .getByRole("textbox", { name: "Terminal input" })
         .first()
-        .press(`Meta+${index}`);
+        .press(`${modifier}+${index}`);
+    });
+  }
+
+  /** Press Ctrl+0..9 with focus on the project list, a non-editable target
+   *  (Ctrl+digit is skipped in an editable one). Focus and key are two
+   *  steps, so the caller must know no workspace switch is still moving
+   *  focus into its tab. `index` as in `pressLabelShortcut`. */
+  async pressLabelShortcutFromProjectList(index: number): Promise<void> {
+    if (index < 0 || index > 9) {
+      throw new Error(`pressLabelShortcutFromProjectList: index must be 0..9, got ${index}`);
+    }
+    await test.step(`Press Control+${index} (label shortcut) on the project list`, async () => {
+      await this.projectListRoot().press(`Control+${index}`);
     });
   }
 

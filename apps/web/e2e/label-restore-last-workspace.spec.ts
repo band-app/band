@@ -21,7 +21,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { git } from "./helpers/git";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -65,10 +65,10 @@ test.beforeAll(async () => {
   const project = (name: string, label: string) => {
     const path = join(tmpHome, name);
     mkdirSync(path, { recursive: true });
-    git(path, ["init", "-b", "main"]);
+    gitInHome(path, ["init", "-b", "main"], tmpHome);
     writeFileSync(join(path, "README.md"), `# ${name}\n`);
-    git(path, ["add", "."]);
-    git(path, ["commit", "-m", "initial"]);
+    gitInHome(path, ["add", "."], tmpHome);
+    gitInHome(path, ["commit", "-m", "initial"], tmpHome);
     return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
   };
   seedState(tmpHome, {
@@ -220,20 +220,24 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
 
     // Build up: ⌘1 → Personal, then click a Personal workspace.
     await workspacePage.pressLabelShortcut(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
     await workspacePage.switchWorkspace(WS_PERSONAL_1);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
     // ⌘2 → Work, click a Work workspace.
     await workspacePage.pressLabelShortcut(2);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
     await workspacePage.switchWorkspace(WS_WORK_2);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Round-trip: ⌘1 should restore Personal → WS_PERSONAL_1.
     await workspacePage.pressLabelShortcut(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
     // ⌘2 should restore Work → WS_WORK_2.
     await workspacePage.pressLabelShortcut(2);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Final state of the map mirrors what the click-path test produces.
@@ -263,6 +267,34 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
     await workspacePage.pressLabelShortcutInTerminal(WS_PERSONAL_1, 2);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
     await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
+  });
+
+  test("Ctrl+1..9 is left to the terminal and switches labels from the sidebar", async ({
+    page,
+  }) => {
+    // Off macOS the shortcut is Ctrl+digit, and a terminal sends Ctrl+3..8
+    // to the shell as control characters, so the terminal keeps Ctrl+digit.
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WS_PERSONAL_1);
+    await workspacePage.selectLabelFilter(LABEL_PERSONAL);
+    await workspacePage.selectLabelFilter(LABEL_WORK);
+    await workspacePage.switchWorkspace(WS_WORK_2);
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+
+    // Ctrl+1 in the terminal must not switch to Personal (which would
+    // restore WS_PERSONAL_1). ⌘0 after it proves the keys were handled:
+    // it shows All and, like any switch to All, stays on the workspace.
+    await workspacePage.pressLabelShortcutInTerminal(WS_WORK_2, 1, "Control");
+    await workspacePage.pressLabelShortcutInTerminal(WS_WORK_2, 0);
+    await expect.poll(() => workspacePage.readLabelFilter()).toBeNull();
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+
+    // From the sidebar, Ctrl+1 switches to Personal and restores its
+    // workspace. Focus already sits in the terminal (the switch above put
+    // it there), so nothing moves it off the sidebar before the key.
+    await workspacePage.pressLabelShortcutFromProjectList(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
   });
 
   test("per-label memory survives a full page reload", async ({ page }) => {
