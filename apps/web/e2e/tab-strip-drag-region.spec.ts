@@ -4,17 +4,26 @@
  * On desktop the center tab strip is the window's top row, and the empty part
  * of each top-row group's strip (`.dv-void-container`) is `app-region: drag`.
  * Chromium builds the window's drag region from every element in document
- * order, visible or not, so any drag rect that lands on a tab makes clicking
- * the tab start a window drag in the desktop app, and dockview never sees the
- * click or the tab's HTML5 drag. That happened with several workspaces open:
- * hidden workspaces stay mounted at the same place as the visible one, and
- * their strips' empty space covered the visible workspace's tabs.
+ * order whose `visibility` is `visible`, whether or not it shows (z-index,
+ * `inert` and `pointer-events` don't count), so any drag rect that lands on a
+ * tab makes clicking the tab start a window drag in the desktop app, and
+ * dockview never sees the click or the tab's HTML5 drag. That happened with
+ * several workspaces open: hidden workspaces stay mounted at the same place
+ * as the visible one, and their strips' empty space covered the visible
+ * workspace's tabs.
  *
  * Electron is the only place that hit-tests the drag region, and the e2e
  * harness boots the web build in plain Chromium, so these tests assert the
  * DOM-level projection: `controlsUnderWindowDragRegion()` replays Chromium's
  * union-and-subtract walk over the computed `app-region` values and returns
  * every tab, tab close button, header button or nav button it covers.
+ *
+ * A hidden entry's panes must also compute `visibility: hidden`. Dockview's
+ * `dv-view visible` state class used to match Tailwind's `.visible` utility,
+ * so they computed `visible`. In the desktop app with the CDP screencast
+ * setting on, a hidden workspace holding a browser pane keeps painting, and
+ * its whole tab strip then covered the shown workspace's. The e2e build has
+ * no `<webview>`, so the test checks the computed visibility.
  *
  * Architecture: the real production server against a fresh tmp `~/.band/`,
  * one seeded repo with two worktrees, no tRPC mocking, driven through `WorkspacePage`.
@@ -100,6 +109,9 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   await expect(wp.terminalTabs()).toHaveCount(3);
   // A is still mounted, hidden behind B.
   await expect(wp.cachedPanelEntries(WORKSPACE_A)).toHaveCount(1);
+  // A's tab inherits its `visibility: hidden`, B's tabs are visible.
+  expect(await wp.centerTabVisibilitiesIn(WORKSPACE_A)).toEqual(["hidden"]);
+  expect(await wp.centerTabVisibilitiesIn(WORKSPACE_B)).toEqual(["visible", "visible", "visible"]);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 

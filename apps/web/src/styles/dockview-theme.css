@@ -98,6 +98,19 @@
   content: none;
 }
 
+/* Splitview's `visible` state class also matches Tailwind's `.visible`
+ * utility (`visibility: visible`), which Tailwind generates because the word
+ * appears in scanned source. That turned visibility back on inside a hidden
+ * workspace entry (`visibility: hidden` in MultiWorkspacePanelHost), so its
+ * panes only stayed hidden while `content-visibility: hidden` skipped them.
+ * A workspace holding a paint-retained browser pane drops that skip
+ * (globals.css), and its whole tab strip then painted over the visible
+ * workspace's tabs, and in the desktop app its empty strip space dragged
+ * the window. `inherit` leaves a pane as visible as its workspace. */
+.dv-view.visible {
+  visibility: inherit;
+}
+
 /* More horizontal padding in each tab */
 .dockview-theme-band .dv-tab {
   padding-left: 1rem;
@@ -506,3 +519,19 @@
 .dockview-center-desktop [data-band-top-row] > .dv-tabs-and-actions-container .dv-void-container {
   -webkit-app-region: drag;
 }
+
+/* How the desktop window's drag region works (Electron 42, Chromium 148).
+ * Drag: the sidebar title bar, the sidebar gutter in the strip while the
+ * sidebar is collapsed, each top-row group's empty strip space (the rule
+ * above), the right sidepanel's header and the center drag bar. No-drag: the
+ * nav cluster, the sidepanel's tabs and header actions. Tabs and strip buttons
+ * have no app-region; they work only because no drag rect covers them.
+ * Chromium walks the layout tree in document order, adds each `drag` border
+ * box whose `visibility` is `visible` and cuts out each `no-drag` one.
+ * Clipping, z-index, `pointer-events` and `inert` don't count, so a box can
+ * drag the window where nothing shows. It recomputes after layout, on scroll,
+ * and at paint after a visibility or z-index change, but not after a
+ * transform-only change. Electron hit-tests every mouse-down against the
+ * result before the page sees it. A hidden workspace's strip stays out
+ * because its boxes compute `visibility: hidden` (`.dv-view.visible` above)
+ * and the `[inert]` reset in `globals.css` clears their app-region. */

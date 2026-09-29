@@ -204,6 +204,21 @@ export class WorkspacePage {
     );
   }
 
+  /** The computed `visibility` of each tab in a workspace's center tab
+   *  strip, in strip order. Tabs of a strip nested inside a panel (a
+   *  terminal's split panes) don't count. A hidden entry's tabs must inherit
+   *  its `visibility: hidden`: when its `content-visibility` skip is dropped
+   *  (a paint-retained browser pane), visibility is all that keeps its tab
+   *  strip from painting over the shown workspace's. */
+  async centerTabVisibilitiesIn(workspaceId: string): Promise<string[]> {
+    return await this.cachedPanelEntries(workspaceId).evaluate((entry) =>
+      Array.from(
+        entry.querySelectorAll('.dv-tab:has([data-testid^="center-"][data-testid*="-tab--"])'),
+        (tab) => getComputedStyle(tab).visibility,
+      ),
+    );
+  }
+
   /** Locator for the chat tab panel's visibility marker inside a specific
    *  workspace's cached panel host (issue #469). The marker testid is set
    *  by `ChatTabContent` in `DockviewChatContainer.tsx` and encodes the
@@ -744,12 +759,15 @@ export class WorkspacePage {
    *  gets its click in the desktop app: the mousedown starts a window drag.
    *  Replays Chromium's computation: walk every element in document order,
    *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
-   *  z-index, `inert` and `pointer-events` irrelevant, so a hidden but still
-   *  laid-out workspace counts. Only Electron hit-tests that region, so this
-   *  is the DOM-level projection of it; each control is sampled on a 3px
-   *  grid. Returns a label per covered control (testid, aria-label, title or
-   *  text), and throws when there is no drag rect or no tab, so a renamed
-   *  class can't pass vacuously. */
+   *  z-index, `inert` and `pointer-events` irrelevant. Unlike Chromium it
+   *  also counts rects whose `visibility` is `hidden`, on purpose: a hidden
+   *  but still laid-out workspace's strip must stay out of the region through
+   *  its `[inert]` app-region reset alone, not only through its visibility.
+   *  Only Electron hit-tests that region, so this is the DOM-level
+   *  projection of it; each control is sampled on a 3px grid. Returns a
+   *  label per covered control (testid, aria-label, title or text), and
+   *  throws when there is no drag rect or no tab, so a renamed class can't
+   *  pass vacuously. */
   async controlsUnderWindowDragRegion(): Promise<string[]> {
     return await this.page.evaluate(() => {
       const regionOf = (el: Element) => {
