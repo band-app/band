@@ -584,6 +584,48 @@ describe("queue", () => {
     );
   });
 
+  it("a reordered queue keeps each message's model and mode", async () => {
+    const chatId = newChatId("queue-reorder");
+    const configCallsBefore = stubRequests(server.home, "session/set_config_option").length;
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 3,
+    });
+    const submit = (prompt: string, extra: Record<string, string>) =>
+      trpc<{ queuedMessageId?: string }>(server.url, "tasks.submit", {
+        workspaceId: WORKSPACE_ID,
+        chatId,
+        prompt,
+        ...extra,
+      });
+
+    await submit("slow first", {});
+    const onLarge = await submit("on large", { model: "stub-large" });
+    const inPlan = await submit("in plan", { mode: "plan" });
+    // Swap them the way the chat pane's drag-reorder does: the wire shape,
+    // which carries no model or mode.
+    await trpc(server.url, "queue.set", {
+      workspaceId: WORKSPACE_ID,
+      chatId,
+      messages: [
+        { id: inPlan.queuedMessageId, text: "in plan" },
+        { id: onLarge.queuedMessageId, text: "on large" },
+      ],
+    });
+
+    const events = await done;
+    expect(promptTexts(events)).toEqual(["slow first", "in plan", "on large"]);
+    expect(agentText(events)).toBe(
+      'slow doneHeard "in plan" on stub-small.Heard "on large" on stub-large.',
+    );
+    const configCalls = stubRequests(server.home, "session/set_config_option")
+      .slice(configCallsBefore)
+      .map((r) => ({ configId: r.params.configId, value: r.params.value }));
+    expect(configCalls).toEqual([
+      { configId: "mode", value: "plan" },
+      { configId: "model", value: "stub-large" },
+    ]);
+  });
+
   it("chats.send during a turn queues the message", async () => {
     const chatId = newChatId("queue-chats-send");
     const { events: done } = await openStream(server.url, chatId, {
@@ -611,12 +653,22 @@ describe("queue", () => {
   it("a message sent after a stop goes behind the messages still queued", async () => {
     const chatId = newChatId("queue-after-stop");
     const actions: Promise<unknown>[] = [];
+    // Stop only once the turn is under way AND "left in queue" is queued,
+    // so the stop can't land before the second message arrives.
+    let working = false;
+    let queuedBehind = false;
     let aborted = false;
     let ended = 0;
     const { events: done } = await openStream(server.url, chatId, {
       until: (_e, all) => all.filter(turnEnded).length === 3,
       onEvent: (e) => {
-        if (!aborted && e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
+        if (e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
+          working = true;
+        }
+        if (e.type === "queue-updated" && e.messages.some((m) => m.text === "left in queue")) {
+          queuedBehind = true;
+        }
+        if (!aborted && working && queuedBehind) {
           aborted = true;
           actions.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
         }

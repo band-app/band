@@ -9,9 +9,10 @@ import { WorkspaceNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
 import {
-  getQueuedMessages,
+  hasQueuedMessages,
+  peekQueuedMessage,
   pushQueuedMessage,
-  shiftQueuedMessage,
+  removeQueuedMessage,
 } from "./_utils/queued-message-store";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
@@ -329,7 +330,7 @@ export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResu
   }
 
   const running = tasks.get(chatId)?.status === "running";
-  if (!running && getQueuedMessages(chatId).length === 0) {
+  if (!running && !hasQueuedMessages(chatId)) {
     return { queued: false, task: submitTask(options) };
   }
 
@@ -513,7 +514,9 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
 
 /** Starts the chat's next queued message, if any. */
 function drainQueue(workspaceId: string, chatId: string): boolean {
-  const queued = shiftQueuedMessage(chatId);
+  // Removed only once its turn has started, so a failed start leaves it
+  // at the head of the queue for the next attempt.
+  const queued = peekQueuedMessage(chatId);
   if (!queued) return false;
   try {
     // Queued payloads already carry the saved file's absolute path (every
@@ -530,6 +533,7 @@ function drainQueue(workspaceId: string, chatId: string): boolean {
       model: queued.model,
       codingAgentId: queued.codingAgentId,
     });
+    removeQueuedMessage(chatId, queued.id);
     return true;
   } catch (err) {
     log.warn({ chatId, err }, "failed to auto-start queued task");

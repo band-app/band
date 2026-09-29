@@ -209,6 +209,17 @@ export function getQueuedMessages(chatId: string): QueuedMessage[] {
   return (store.get(chatId) ?? []).map(cloneMessage);
 }
 
+/** Whether the chat pane has any queued messages. */
+export function hasQueuedMessages(chatId: string): boolean {
+  return (store.get(chatId)?.length ?? 0) > 0;
+}
+
+/** The first queued message for a chat pane, left in place, or null. */
+export function peekQueuedMessage(chatId: string): QueuedMessage | null {
+  const first = store.get(chatId)?.[0];
+  return first ? cloneMessage(first) : null;
+}
+
 /**
  * Remove and return the first queued message for a chat pane, or null
  * if the queue is empty.

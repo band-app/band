@@ -277,8 +277,9 @@ export type TasksRouter = typeof tasksRouter;
  * TypeScript to treat the line as terminal control flow (same convention
  * as the cronjobs router).
  *
- *   - `TaskConflictError` → 409 `CONFLICT` (a task is already running for
- *     this chat pane)
+ *   - `TaskConflictError` → 409 `CONFLICT`, from `rerun` only: a task is
+ *     already running for this chat pane. `submit` queues the message
+ *     instead (`submitOrQueueTask`).
  *   - `WorkspaceNotFoundError` → 404 `NOT_FOUND`. Matched by `instanceof`
  *     rather than message-string (the legacy router did
  *     `err.message.startsWith("Workspace not found")`, which was fragile
