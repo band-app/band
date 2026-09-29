@@ -9,12 +9,21 @@ export interface AgentInfo {
   codingAgentId?: string;
 }
 
+/** One chat's or terminal's agent status, shown on its center tab. */
+export interface TabAgentStatus {
+  chatId?: string;
+  terminalId?: string;
+  status: "working" | "needs_attention";
+}
+
 export interface WorkspaceStatus {
   workspaceId: string;
   project: string;
   branch: string;
   worktreePath: string;
   agent?: AgentInfo;
+  /** Chats and terminals whose agent is working or needs attention. */
+  tabStatuses?: TabAgentStatus[];
 }
 
 /**

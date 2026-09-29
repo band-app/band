@@ -177,19 +177,18 @@ export class WorkspaceStatusSourceQueries {
   }
 
   /** Every source in the workspace. */
-  listForWorkspace(
-    workspaceId: string,
-  ): Pick<WorkspaceStatusSourceRow, "sourceId" | "status" | "updatedAt">[] {
+  listForWorkspace(workspaceId: string): WorkspaceStatusSourceRow[] {
     const db = getDb();
     return db
-      .select({
-        sourceId: workspaceStatusSourcesTable.sourceId,
-        status: workspaceStatusSourcesTable.status,
-        updatedAt: workspaceStatusSourcesTable.updatedAt,
-      })
+      .select()
       .from(workspaceStatusSourcesTable)
       .where(eq(workspaceStatusSourcesTable.workspaceId, workspaceId))
       .all();
+  }
+
+  /** Every source in every workspace. */
+  listAll(): WorkspaceStatusSourceRow[] {
+    return getDb().select().from(workspaceStatusSourcesTable).all();
   }
 
   /** Delete one source; returns whether a row existed. */

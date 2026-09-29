@@ -183,6 +183,7 @@ export type {
   Settings,
   SetupState,
   SetupStatus,
+  TabAgentStatus,
   TerminalLayoutNode,
   TerminalPaneConfig,
   WorkspaceBranchStatus,

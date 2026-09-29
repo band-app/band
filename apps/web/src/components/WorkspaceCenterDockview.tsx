@@ -88,11 +88,13 @@ import {
   SearchBar,
   serializeViewPosition,
   storeViewMode,
+  type TabAgentStatus,
   type TerminalInsertDetail,
   toFileUri,
   toLspServerLang,
   useAdapter,
   useCapabilities,
+  useDashboardStore,
   useSearch,
   useSettingsQuery,
   useWorkspacePath,
@@ -206,19 +208,101 @@ const TAB_TITLE_CLASS = "min-w-0 flex-1 truncate text-xs";
 // Inner icon+title wrapper (grows to fill, leaving the close button pinned right).
 const TAB_CONTENT_WRAP = "flex min-w-0 flex-1 items-center gap-1.5";
 
-// Tab root fills the dockview `.dv-tab` wrapper (which is pinned to a fixed
-// 120px in dockview-theme.css). `group` drives close-on-hover; the active-tab
-// bottom accent is a CSS box-shadow on `.dv-active-tab` so it lands on the tab
-// strip's bottom edge rather than floating inside the tab.
+// Tab root fills the dockview `.dv-tab` wrapper. `group` drives
+// close-on-hover; the active tab's pill background is CSS on `.dv-active-tab`
+// (see `.dockview-center-tabs` in dockview-theme.css).
 const TAB_ROOT_CLASS = "dv-default-tab group flex w-full items-center gap-1.5";
 
 // Close button: always shown on the active tab; hidden on inactive tabs until
 // the tab is hovered (the tab root carries the `group` class). Keeps the tab
 // strip uncluttered while the active tab stays closable at a glance.
 const CLOSE_BTN_BASE =
-  "ml-0.5 inline-flex size-4 items-center justify-center rounded-sm transition-opacity hover:bg-accent";
+  "absolute inset-0 inline-flex items-center justify-center rounded-sm transition-opacity hover:bg-accent";
 function closeButtonClass(isActive: boolean): string {
   return `${CLOSE_BTN_BASE} ${isActive ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`;
+}
+
+/** The slot at the end of a tab. An inactive tab shows its `indicator` (agent
+ *  status, unsaved dot) at rest; the close X takes the same place on hover and
+ *  on the active tab, so the tab's width never changes. */
+function TabEndSlot({
+  isActive,
+  indicator,
+  onClose,
+  closeTitle,
+  closeTestId,
+}: {
+  isActive: boolean;
+  indicator?: React.ReactNode;
+  onClose: (e: React.MouseEvent) => void;
+  closeTitle: string;
+  closeTestId?: string;
+}) {
+  return (
+    <span className="relative ml-0.5 inline-flex size-4 shrink-0 items-center justify-center">
+      {indicator && !isActive ? (
+        <span className="inline-flex items-center justify-center transition-opacity group-hover:opacity-0">
+          {indicator}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        className={closeButtonClass(isActive)}
+        onClick={onClose}
+        title={closeTitle}
+        data-testid={closeTestId}
+      >
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
+
+type TabAgentStatusKind = TabAgentStatus["status"];
+
+/** Spinner while the agent works, a dot when it needs the user. */
+function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
+  if (status === "working") {
+    return (
+      <Loader2
+        role="img"
+        aria-label="Agent running"
+        data-testid={testId}
+        data-status={status}
+        className="size-3 animate-spin text-muted-foreground"
+      />
+    );
+  }
+  return (
+    <span
+      role="img"
+      aria-label="Needs your attention"
+      data-testid={testId}
+      data-status={status}
+      className="size-2 rounded-full bg-status-needs-attention"
+    />
+  );
+}
+
+/** The agent status of a chat, from the workspace's status snapshot. */
+function useChatTabStatus(workspaceId: string, chatId: string): TabAgentStatusKind | undefined {
+  return useDashboardStore(
+    (s) => s.statuses.get(workspaceId)?.tabStatuses?.find((t) => t.chatId === chatId)?.status,
+  );
+}
+
+/** The agent status of a terminal tab: the most urgent one reported from any
+ *  of its split panes. */
+function useTerminalTabStatus(workspaceId: string, leafId: string): TabAgentStatusKind | undefined {
+  return useDashboardStore((s) => {
+    let found: TabAgentStatusKind | undefined;
+    for (const t of s.statuses.get(workspaceId)?.tabStatuses ?? []) {
+      if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
+      if (t.status === "needs_attention") return t.status;
+      found = t.status;
+    }
+    return found;
+  });
 }
 
 /** Track a tab's active state via its dockview panel api. */
@@ -251,8 +335,8 @@ function useTabPreview(api: IDockviewPanelHeaderProps["api"], initialPreview?: b
 
 const bandTheme: DockviewTheme = {
   name: "band",
-  // `dockview-center-tabs` scopes the unified-center tab CSS (fixed 120px tab
-  // width + active-tab bottom accent) so it never touches the legacy nested
+  // `dockview-center-tabs` scopes the unified-center tab CSS (title-sized
+  // tabs, the active-tab pill) so it never touches the legacy nested
   // chat/terminal tab strips still used by the mobile layout.
   className: "dockview-theme-band dockview-center-tabs",
 };
@@ -2237,6 +2321,7 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
   const [agentType, setAgentType] = useState<string | undefined>(initialCache.agentType);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const isActive = useTabActive(props.api);
+  const agentStatus = useChatTabStatus(workspaceId, chatId);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => {
@@ -2338,14 +2423,19 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatLeafParams>) {
               {title}
             </span>
           </div>
-          <button
-            type="button"
-            className={closeButtonClass(isActive)}
-            onClick={handleClose}
-            title="Close tab"
-          >
-            <X className="size-3" />
-          </button>
+          <TabEndSlot
+            isActive={isActive}
+            indicator={
+              agentStatus && (
+                <TabStatusIndicator
+                  status={agentStatus}
+                  testId={`center-chat-tab__status--${chatId}`}
+                />
+              )
+            }
+            onClose={handleClose}
+            closeTitle="Close tab"
+          />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent data-testid="center-chat-tab__context-menu">
@@ -2375,6 +2465,7 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TermLeafParams>) {
   const terminalId = props.params.terminalId;
   const containerApi = props.containerApi;
   const isActive = useTabActive(props.api);
+  const agentStatus = useTerminalTabStatus(props.params.workspaceId, terminalId);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? "Terminal"));
@@ -2403,14 +2494,19 @@ function TerminalTab(props: IDockviewPanelHeaderProps<TermLeafParams>) {
               {title}
             </span>
           </div>
-          <button
-            type="button"
-            className={closeButtonClass(isActive)}
-            onClick={handleClose}
-            title="Close terminal"
-          >
-            <X className="size-3" />
-          </button>
+          <TabEndSlot
+            isActive={isActive}
+            indicator={
+              agentStatus && (
+                <TabStatusIndicator
+                  status={agentStatus}
+                  testId={`center-term-tab__status--${terminalId}`}
+                />
+              )
+            }
+            onClose={handleClose}
+            closeTitle="Close terminal"
+          />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent data-testid="center-term-tab__context-menu">
@@ -2472,14 +2568,7 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserLeafParams>) {
           {title}
         </span>
       </div>
-      <button
-        type="button"
-        className={closeButtonClass(isActive)}
-        onClick={handleClose}
-        title="Close tab"
-      >
-        <X className="size-3" />
-      </button>
+      <TabEndSlot isActive={isActive} onClose={handleClose} closeTitle="Close tab" />
     </div>
   );
 }
@@ -2573,31 +2662,23 @@ function FileTab(props: IDockviewPanelHeaderProps<FileLeafParams>) {
             {title}
           </span>
         </div>
-        {/* VS Code-style close slot. When the file is dirty and the tab is NOT
-            active, render a filled dot in the same slot as the close X: the dot
-            is visible at rest and fades out on hover (`group-hover:opacity-0`),
-            while the X (via `closeButtonClass` on an inactive tab:
-            `opacity-0 group-hover:opacity-100`) fades in on hover — so they
-            swap cleanly. On the active tab the X is always shown (opacity-70),
-            so the dot is suppressed entirely to avoid overlapping the X. */}
-        {dirty && !isActive ? (
-          <span
-            aria-hidden
-            data-testid={`center-file-tab__dirty--${filePath}`}
-            className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center opacity-100 transition-opacity group-hover:opacity-0"
-          >
-            <span className="size-2 rounded-full bg-foreground/70" />
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className={closeButtonClass(isActive)}
-          onClick={handleClose}
-          title="Close file"
-          data-testid={`center-file-tab__close--${filePath}`}
-        >
-          <X className="size-3" />
-        </button>
+        {/* VS Code-style: an unsaved inactive file shows a dot where the X
+            goes; hovering swaps the dot for the X. */}
+        <TabEndSlot
+          isActive={isActive}
+          indicator={
+            dirty && (
+              <span
+                aria-hidden
+                data-testid={`center-file-tab__dirty--${filePath}`}
+                className="size-2 rounded-full bg-foreground/70"
+              />
+            )
+          }
+          onClose={handleClose}
+          closeTitle="Close file"
+          closeTestId={`center-file-tab__close--${filePath}`}
+        />
       </div>
     </TabPathContextMenu>
   );
@@ -2632,14 +2713,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
           <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
           <span className={TAB_TITLE_CLASS}>{SECTION_LABELS[allOf]}</span>
         </div>
-        <button
-          type="button"
-          className={closeButtonClass(isActive)}
-          onClick={handleClose}
-          title="Close diff"
-        >
-          <X className="size-3" />
-        </button>
+        <TabEndSlot isActive={isActive} onClose={handleClose} closeTitle="Close diff" />
       </div>
     );
   }
@@ -2661,14 +2735,7 @@ function DiffTab(props: IDockviewPanelHeaderProps<DiffLeafParams>) {
             {title}
           </span>
         </div>
-        <button
-          type="button"
-          className={closeButtonClass(isActive)}
-          onClick={handleClose}
-          title="Close diff"
-        >
-          <X className="size-3" />
-        </button>
+        <TabEndSlot isActive={isActive} onClose={handleClose} closeTitle="Close diff" />
       </div>
     </TabPathContextMenu>
   );
