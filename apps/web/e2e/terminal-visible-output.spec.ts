@@ -13,9 +13,10 @@
  *  - a DEC 2026 synchronized-output frame whose end marker never comes must
  *    still reach the screen (xterm stops deferring its render after 1 s);
  *  - back-to-back synchronized frames, each output chunk ending one frame and
- *    beginning the next, must reach xterm chunk by chunk. The page used to
- *    hold visible output while a frame was open, and in that pattern a frame
- *    is always open, so only a 250 ms timer let redraws through.
+ *    beginning the next, must each reach the screen. xterm skips a render
+ *    while a frame is open, and in that pattern one always is once a chunk is
+ *    parsed, so unless the queue holds back the unfinished tail frame, only
+ *    xterm's 1 s timeout paints.
  *
  * DOM renderer so the rendered rows are readable. Real server, real PTYs.
  */
@@ -120,11 +121,11 @@ test("a synchronized-output frame that never ends still reaches the screen", asy
   );
 });
 
-test("back-to-back synchronized frames reach xterm one chunk at a time", async ({ page }) => {
+test("back-to-back synchronized frames each reach the screen", async ({ page }) => {
   test.setTimeout(60_000);
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
   await openTerminal(workspacePage);
-  await workspacePage.recordParsedTopRow(WORKSPACE, "FRAME_(\\d+)");
+  await workspacePage.recordRenderedTopRow(WORKSPACE, "FRAME_(\\d+)");
 
   // 60 redraws of the top row, ~20 ms apart, the way a fullscreen TUI repaints
   // on each wheel tick: every chunk carries one frame's content, its end
@@ -138,9 +139,9 @@ test("back-to-back synchronized frames reach xterm one chunk at a time", async (
     { attempts: 1, renderTimeoutMs: 20_000 },
   );
 
-  // Parsed chunk by chunk, xterm sees nearly every frame on its own. Held
-  // until a timer, it saw one frame per ~250 ms: 14 of the 60 before the fix.
-  const frames = await workspacePage.readParsedTopRowMatches();
+  // Measured: all 60 render with the tail held. With no hold, and with whole
+  // chunks held until a timer (whose release also ended inside a frame), 1.
+  const frames = await workspacePage.readRenderedTopRowMatches();
   expect(frames).toContain("159");
   expect(frames.length).toBeGreaterThanOrEqual(30);
 });

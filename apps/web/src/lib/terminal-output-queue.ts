@@ -24,12 +24,33 @@
 // dropped); the caller acknowledges those bytes to the server, which pauses
 // the PTY while too many are unparsed (`api/terminals/output-flow.ts`).
 //
-// DEC 2026 synchronized output needs nothing here: xterm defers rendering
-// while a frame is open (up to 1 s), so a redraw parsed across several turns
-// still paints once. Holding the bytes back in this queue instead stalled
-// fullscreen TUIs, whose chunks often end one frame and begin the next: the
-// chunk looked like an open frame, and only a timer let it through.
+// DEC 2026 synchronized output: xterm skips any render that comes while a
+// frame is open and tries again on the next animation frame. A TUI redrawing
+// back to back (Claude Code scrolling) reaches us as several 1 KB messages per
+// frame, so if each were parsed as it came, xterm would be inside a frame at
+// nearly every animation frame and paint only in the gaps, or after its 1 s
+// timeout. So the visible queue writes everything up to the last end marker
+// and holds only the unfinished tail frame until its end arrives. Holding a
+// whole chunk whenever it ended inside a frame (the earlier version) held the
+// finished frame before it too, and only a timer let those through.
 // ---------------------------------------------------------------------------
+
+/** `ESC [ ? 2026`, the start of both the begin (`h`) and end (`l`) markers. */
+const SYNC_PREFIX = [0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36];
+const SYNC_BEGIN_FINAL = 0x68;
+const SYNC_END_FINAL = 0x6c;
+const SYNC_MARKER_BYTES = SYNC_PREFIX.length + 1;
+/**
+ * Longest the unfinished tail of a frame waits for its end marker. A TUI
+ * writes a frame in one go, so its end follows within a few ms; this only
+ * covers a lost end marker or a PTY paused mid-frame.
+ */
+const SYNC_TAIL_HOLD_MS = 100;
+/**
+ * A held tail larger than this is written without waiting for its end, so it
+ * can never keep the server's unacknowledged-bytes hold (256 KB) from lifting.
+ */
+const SYNC_TAIL_MAX_BYTES = 64 * 1024;
 
 /** Delay before the first drain after parked output arrives, so bursts coalesce. */
 const BACKGROUND_FLUSH_DELAY_MS = 50;
@@ -114,6 +135,44 @@ interface QueueState {
   overflowed: boolean;
   /** Written to xterm by the foreground drain and not yet parsed. */
   inFlight: number;
+  /** Visible output held back: an unfinished DEC 2026 frame, or a marker cut in two. */
+  held: { data: Uint8Array; callbacks: OutputCallbacks | undefined }[];
+  heldBytes: number;
+  /** `held` starts with a frame's begin marker (not just a cut-off marker). */
+  frameOpen: boolean;
+  holdTimer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Where DEC 2026 markers sit in a run of output bytes. */
+interface SyncScan {
+  /** The last complete marker, or null when there is none. */
+  last: "begin" | "end" | null;
+  /** Start of the last begin marker, when `last` is "begin". */
+  beginAt: number;
+  /** Start of a marker cut off by the end of the bytes; the length if none. */
+  partialAt: number;
+}
+
+function scanSyncMarkers(bytes: Uint8Array): SyncScan {
+  const scan: SyncScan = { last: null, beginAt: -1, partialAt: bytes.byteLength };
+  for (let i = bytes.indexOf(0x1b); i !== -1; i = bytes.indexOf(0x1b, i + 1)) {
+    const available = Math.min(SYNC_MARKER_BYTES, bytes.byteLength - i);
+    let k = 1;
+    while (k < available && k < SYNC_PREFIX.length && bytes[i + k] === SYNC_PREFIX[k]) k++;
+    if (k < Math.min(available, SYNC_PREFIX.length)) continue;
+    if (available < SYNC_MARKER_BYTES) {
+      scan.partialAt = i;
+      break;
+    }
+    const final = bytes[i + SYNC_PREFIX.length];
+    if (final === SYNC_BEGIN_FINAL) {
+      scan.last = "begin";
+      scan.beginAt = i;
+    } else if (final === SYNC_END_FINAL) {
+      scan.last = "end";
+    }
+  }
+  return scan;
 }
 
 /** Parked queues with pending output, in the order they became pending. */
@@ -242,12 +301,26 @@ export function createTerminalOutputQueue(
     bytes: 0,
     overflowed: false,
     inFlight: 0,
+    held: [],
+    heldBytes: 0,
+    frameOpen: false,
+    holdTimer: null,
+  };
+
+  const takeHeld = () => {
+    if (state.holdTimer !== null) clearTimeout(state.holdTimer);
+    state.holdTimer = null;
+    const held = state.held;
+    state.held = [];
+    state.heldBytes = 0;
+    state.frameOpen = false;
+    return held;
   };
 
   const reset = () => {
     pending.delete(state);
     foregroundPending.delete(state);
-    const dropped = state.chunks;
+    const dropped = [...state.chunks, ...takeHeld()];
     state.chunks = [];
     state.bytes = 0;
     for (const chunk of dropped) chunk.callbacks?.onConsumed?.();
@@ -258,20 +331,91 @@ export function createTerminalOutputQueue(
     state.bytes += chunkBytes(data);
   };
 
+  /** Queue everything held, ahead of whatever is queued next. */
+  const releaseHeld = () => {
+    for (const piece of takeHeld()) enqueue(piece.data, piece.callbacks);
+  };
+
+  const writeWhileRoom = () => {
+    // Room in xterm: write now, so a keystroke's echo isn't a task late.
+    if (canWriteForeground(state)) writeForeground(state);
+    if (canWriteForeground(state)) {
+      foregroundPending.add(state);
+      scheduleForegroundDrain();
+    }
+  };
+
+  const hold = (data: Uint8Array, callbacks: OutputCallbacks | undefined) => {
+    state.held.push({ data, callbacks });
+    state.heldBytes += data.byteLength;
+    state.holdTimer ??= setTimeout(() => {
+      state.holdTimer = null;
+      releaseHeld();
+      writeWhileRoom();
+    }, SYNC_TAIL_HOLD_MS);
+  };
+
+  /**
+   * Queue visible output up to the last DEC 2026 end marker, and hold the
+   * rest when it is an unfinished frame (or ends in a cut-off marker). The
+   * chunk's callbacks go with its last byte, so it is acknowledged once all
+   * of it has been parsed.
+   */
+  const enqueueVisible = (data: Uint8Array, callbacks: OutputCallbacks | undefined) => {
+    if (data.byteLength === 0) {
+      enqueue(data, callbacks);
+      return;
+    }
+    // The last held bytes, in case a marker started there.
+    const last = state.held[state.held.length - 1]?.data;
+    const tail = last
+      ? last.subarray(Math.max(0, last.byteLength - (SYNC_MARKER_BYTES - 1)))
+      : null;
+    let bytes = data;
+    if (tail && tail.byteLength > 0) {
+      bytes = new Uint8Array(tail.byteLength + data.byteLength);
+      bytes.set(tail);
+      bytes.set(data, tail.byteLength);
+    }
+    const offset = tail?.byteLength ?? 0;
+    const scan = scanSyncMarkers(bytes);
+    // Where in `data` the held part starts; `data.byteLength` holds nothing.
+    let splitAt: number;
+    if (scan.last === "begin") {
+      splitAt = Math.max(0, scan.beginAt - offset);
+      // Everything before a begin that started in this chunk is complete.
+      if (scan.beginAt >= offset) releaseHeld();
+      state.frameOpen = true;
+    } else if (scan.last === "end" || !state.frameOpen) {
+      releaseHeld();
+      splitAt = Math.max(0, scan.partialAt - offset);
+    } else {
+      splitAt = 0;
+    }
+    if (splitAt > 0)
+      enqueue(data.subarray(0, splitAt), splitAt === data.byteLength ? callbacks : undefined);
+    if (splitAt < data.byteLength) {
+      hold(data.subarray(splitAt), callbacks);
+      if (state.heldBytes > SYNC_TAIL_MAX_BYTES) releaseHeld();
+    }
+  };
+
   return {
     push(data, foreground, callbacks) {
       if (foreground) {
         // Parked output queued before the terminal was shown goes first.
         if (pending.has(state)) this.flush();
-        enqueue(data, callbacks);
-        // Room in xterm: write now, so a keystroke's echo isn't a task late.
-        if (canWriteForeground(state)) writeForeground(state);
-        if (canWriteForeground(state)) {
-          foregroundPending.add(state);
-          scheduleForegroundDrain();
+        if (typeof data === "string") {
+          releaseHeld();
+          enqueue(data, callbacks);
+        } else {
+          enqueueVisible(data, callbacks);
         }
+        writeWhileRoom();
         return;
       }
+      // A parked terminal isn't painted: nothing to hold for.
+      releaseHeld();
       if (state.overflowed) {
         callbacks?.onConsumed?.();
         return;
@@ -286,6 +430,7 @@ export function createTerminalOutputQueue(
       scheduleDrain(BACKGROUND_FLUSH_DELAY_MS);
     },
     pushNotice(text) {
+      releaseHeld();
       if (state.chunks.length === 0) {
         write(text);
         return;
