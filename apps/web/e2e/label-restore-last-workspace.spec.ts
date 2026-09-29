@@ -8,17 +8,20 @@
  *   - Real production binary runs against a fresh tmp `~/.band/`.
  *     Migrations apply against the throwaway SQLite DB on boot.
  *   - No tRPC mocks. Two labels are seeded into `settings.json`, four
- *     projects (two per label) into the SQLite DB. Background git calls
- *     fail gracefully against the bogus paths but every UI surface
- *     this test touches (sidebar, label dropdown, workspace navigation
+ *     projects (two per label) into the SQLite DB, each a one-commit
+ *     git repo in the tmp home so its terminal can start. Every UI
+ *     surface this test touches (sidebar, label dropdown, workspace navigation
  *     via URL) lives on top of the real backend's `projects.list` and
  *     `settings.get` responses.
  *   - All interactions go through `WorkspacePage` per the doctrine — no
  *     raw `getByTestId` / `page.goto` in the test body.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -58,36 +61,22 @@ let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
+  // Real repos: a terminal can't start in a missing directory.
+  const project = (name: string, label: string) => {
+    const path = join(tmpHome, name);
+    mkdirSync(path, { recursive: true });
+    gitInHome(path, ["init", "-b", "main"], tmpHome);
+    writeFileSync(join(path, "README.md"), `# ${name}\n`);
+    gitInHome(path, ["add", "."], tmpHome);
+    gitInHome(path, ["commit", "-m", "initial"], tmpHome);
+    return { name, path, defaultBranch: "main", label, worktrees: [{ branch: "main", path }] };
+  };
   seedState(tmpHome, {
     projects: [
-      {
-        name: PROJECT_PERSONAL_1,
-        path: `/tmp/fake/${PROJECT_PERSONAL_1}`,
-        defaultBranch: "main",
-        label: LABEL_PERSONAL,
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_PERSONAL_1}` }],
-      },
-      {
-        name: PROJECT_PERSONAL_2,
-        path: `/tmp/fake/${PROJECT_PERSONAL_2}`,
-        defaultBranch: "main",
-        label: LABEL_PERSONAL,
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_PERSONAL_2}` }],
-      },
-      {
-        name: PROJECT_WORK_1,
-        path: `/tmp/fake/${PROJECT_WORK_1}`,
-        defaultBranch: "main",
-        label: LABEL_WORK,
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_WORK_1}` }],
-      },
-      {
-        name: PROJECT_WORK_2,
-        path: `/tmp/fake/${PROJECT_WORK_2}`,
-        defaultBranch: "main",
-        label: LABEL_WORK,
-        worktrees: [{ branch: "main", path: `/tmp/fake/${PROJECT_WORK_2}` }],
-      },
+      project(PROJECT_PERSONAL_1, LABEL_PERSONAL),
+      project(PROJECT_PERSONAL_2, LABEL_PERSONAL),
+      project(PROJECT_WORK_1, LABEL_WORK),
+      project(PROJECT_WORK_2, LABEL_WORK),
     ],
   });
   seedSettings(tmpHome, {
@@ -217,35 +206,38 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
   test("keyboard shortcut path shares the same restore logic as the dropdown", async ({ page }) => {
     // Per the issue: "Keyboard shortcut path AND click path should both
     // use the same restore logic — don't fix only one." This test
-    // verifies that the ⌘1..9 (Cmd+1..9 / Ctrl+1..9) digit accelerators
-    // drive the same `setLabelFilter` orchestration as the dropdown by
-    // exercising a round-trip via the listener registered in
-    // `DashboardShell`'s `useEffect`.
+    // verifies that the ⌘1..9 digit accelerators drive the same
+    // `setLabelFilter` orchestration as the dropdown by exercising a
+    // round-trip via the listener registered in `DashboardShell`'s
+    // `useEffect`.
     //
-    // `WorkspacePage.pressLabelShortcut` handles the focus-and-press
-    // dance (the chat textarea autofocuses on the workspace route, and
-    // the keydown handler in DashboardShell skips when focus is on an
-    // editable element); see the page-object method for the rationale.
+    // Each press goes to whatever holds focus, as a user's would: the
+    // sidebar card just clicked, or the terminal a workspace switch moves
+    // focus into a frame or more later. ⌘+digit works from both.
 
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await workspacePage.goto(WS_PERSONAL_1);
 
-    // Build up: Ctrl+1 → Personal, then click a Personal workspace.
+    // Build up: ⌘1 → Personal, then click a Personal workspace.
     await workspacePage.pressLabelShortcut(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
     await workspacePage.switchWorkspace(WS_PERSONAL_1);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
-    // Ctrl+2 → Work, click a Work workspace.
+    // ⌘2 → Work, click a Work workspace.
     await workspacePage.pressLabelShortcut(2);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
     await workspacePage.switchWorkspace(WS_WORK_2);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
-    // Round-trip: Ctrl+1 should restore Personal → WS_PERSONAL_1.
+    // Round-trip: ⌘1 should restore Personal → WS_PERSONAL_1.
     await workspacePage.pressLabelShortcut(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
-    // Ctrl+2 should restore Work → WS_WORK_2.
+    // ⌘2 should restore Work → WS_WORK_2.
     await workspacePage.pressLabelShortcut(2);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Final state of the map mirrors what the click-path test produces.
@@ -255,6 +247,54 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
         [LABEL_PERSONAL]: WS_PERSONAL_1,
         [LABEL_WORK]: WS_WORK_2,
       });
+  });
+
+  test("⌘1..9 switches labels with focus in the terminal", async ({ page }) => {
+    // A workspace switch moves focus into the workspace's terminal, so that
+    // is where a user presses ⌘1..9 next. ⌘+digit types nothing into a
+    // terminal, so the shortcut must not be skipped there.
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WS_PERSONAL_1);
+    await workspacePage.selectLabelFilter(LABEL_PERSONAL);
+    await workspacePage.selectLabelFilter(LABEL_WORK);
+    await workspacePage.switchWorkspace(WS_WORK_2);
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+
+    await workspacePage.pressLabelShortcutInTerminal(WS_WORK_2, 1);
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
+
+    await workspacePage.pressLabelShortcutInTerminal(WS_PERSONAL_1, 2);
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Work");
+  });
+
+  test("Ctrl+1..9 is left to the terminal and switches labels from the sidebar", async ({
+    page,
+  }) => {
+    // Off macOS the shortcut is Ctrl+digit, and a terminal sends Ctrl+3..8
+    // to the shell as control characters, so the terminal keeps Ctrl+digit.
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    await workspacePage.goto(WS_PERSONAL_1);
+    await workspacePage.selectLabelFilter(LABEL_PERSONAL);
+    await workspacePage.selectLabelFilter(LABEL_WORK);
+    await workspacePage.switchWorkspace(WS_WORK_2);
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+
+    // Ctrl+1 in the terminal must not switch to Personal (which would
+    // restore WS_PERSONAL_1). ⌘0 after it proves the keys were handled:
+    // it shows All and, like any switch to All, stays on the workspace.
+    await workspacePage.pressLabelShortcutInTerminal(WS_WORK_2, 1, "Control");
+    await workspacePage.pressLabelShortcutInTerminal(WS_WORK_2, 0);
+    await expect.poll(() => workspacePage.readLabelFilter()).toBeNull();
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
+
+    // From the sidebar, Ctrl+1 switches to Personal and restores its
+    // workspace. Focus already sits in the terminal (the switch above put
+    // it there), so nothing moves it off the sidebar before the key.
+    await workspacePage.pressLabelShortcutFromProjectList(1);
+    await expect(workspacePage.labelFilterTrigger()).toHaveText("Personal");
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
   });
 
   test("per-label memory survives a full page reload", async ({ page }) => {

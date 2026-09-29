@@ -364,8 +364,8 @@ export class WorkspacePage {
    *  terminals.
    *
    *  Routes the keypress through the project-list root (focusable, non-
-   *  editable) — the same stable anchor `pressLabelShortcut` and the
-   *  workspace-picker shortcuts use — so an editable focus target (chat
+   *  editable) — the same stable anchor the workspace-picker shortcuts
+   *  use — so an editable focus target (chat
    *  textarea / terminal) can't swallow the key. Uses the "Equal" physical key
    *  so `e.key` resolves to "=" (the literal the handler matches),
    *  unambiguously separated from the modifier. */
@@ -607,6 +607,12 @@ export class WorkspacePage {
     });
   }
 
+  /** Read the persisted label filter from localStorage: a label id, or
+   *  `null` for All. */
+  async readLabelFilter(): Promise<string | null> {
+    return await this.page.evaluate((key) => localStorage.getItem(key), LABEL_FILTER_KEY);
+  }
+
   /** Read the persisted per-label "last workspace" map from
    *  localStorage. Returns an empty object when nothing has been
    *  recorded yet. */
@@ -627,13 +633,10 @@ export class WorkspacePage {
   }
 
   /** Sidebar project-list root — the keyboard nav anchor in
-   *  `ProjectList.tsx` (a `tabindex=-1` div). `DashboardShell`'s
-   *  keydown handler skips the Cmd+1..9 / Ctrl+1..9 label shortcuts
-   *  when `e.target.tagName` is `INPUT` / `TEXTAREA` / `SELECT` /
-   *  `contentEditable`, so tests that fire the shortcut must route the
-   *  keystroke through a non-editable target. The project list root
-   *  fits the bill — it's both keyboard-focusable and intentionally
-   *  not editable. */
+   *  `ProjectList.tsx` (a `tabindex=-1` div). Shortcuts that skip an
+   *  editable target (Ctrl+= zoom, for example) route the keystroke
+   *  through it: it's both keyboard-focusable and intentionally not
+   *  editable. */
   projectListRoot(): Locator {
     return this.page.getByTestId("project-list__root");
   }
@@ -898,20 +901,52 @@ export class WorkspacePage {
     });
   }
 
-  /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
-   *  Uses `projectListRoot.press(...)` so Playwright moves focus there
-   *  before dispatching the key, bypassing the chat textarea autofocus
-   *  on the workspace route. The keydown bubbles to the window listener
-   *  in `DashboardShell` where the shortcut is wired up. `index` is
-   *  0-based; 0 picks "All" (⌘0), 1..9 pick the Nth label (⌘1..9). */
+  /** Press the ⌘0..9 label shortcut as a real user keypress, wherever focus
+   *  is. `DashboardShell`'s window listener takes ⌘+digit from any element,
+   *  the terminal input included, so no focus has to be set up first: a
+   *  workspace switch moves focus into the new workspace's tab a frame or
+   *  more later, and a focus set here could be taken before the key.
+   *  Waits for the label filter trigger first: it renders once the labels
+   *  have loaded, and the listener ignores a digit with no label behind it.
+   *  `index` 0 picks "All", 1..9 pick the Nth label. */
   async pressLabelShortcut(index: number): Promise<void> {
     if (index < 0 || index > 9) {
       throw new Error(`pressLabelShortcut: index must be 0..9, got ${index}`);
     }
-    await test.step(`Press Control+${index} (label shortcut)`, async () => {
-      const root = this.projectListRoot();
-      await root.waitFor({ state: "visible" });
-      await root.press(`Control+${index}`);
+    await test.step(`Press Meta+${index} (label shortcut)`, async () => {
+      await this.labelFilterTrigger().waitFor({ state: "visible" });
+      await this.page.keyboard.press(`Meta+${index}`);
+    });
+  }
+
+  /** Press ⌘0..9 (or Ctrl+0..9) with focus in `workspaceId`'s terminal,
+   *  where a workspace switch leaves it. `index` as in `pressLabelShortcut`. */
+  async pressLabelShortcutInTerminal(
+    workspaceId: string,
+    index: number,
+    modifier: "Meta" | "Control" = "Meta",
+  ): Promise<void> {
+    if (index < 0 || index > 9) {
+      throw new Error(`pressLabelShortcutInTerminal: index must be 0..9, got ${index}`);
+    }
+    await test.step(`Press ${modifier}+${index} (label shortcut) in the terminal`, async () => {
+      await this.cachedPanelEntries(workspaceId)
+        .getByRole("textbox", { name: "Terminal input" })
+        .first()
+        .press(`${modifier}+${index}`);
+    });
+  }
+
+  /** Press Ctrl+0..9 with focus on the project list, a non-editable target
+   *  (Ctrl+digit is skipped in an editable one). Focus and key are two
+   *  steps, so the caller must know no workspace switch is still moving
+   *  focus into its tab. `index` as in `pressLabelShortcut`. */
+  async pressLabelShortcutFromProjectList(index: number): Promise<void> {
+    if (index < 0 || index > 9) {
+      throw new Error(`pressLabelShortcutFromProjectList: index must be 0..9, got ${index}`);
+    }
+    await test.step(`Press Control+${index} (label shortcut) on the project list`, async () => {
+      await this.projectListRoot().press(`Control+${index}`);
     });
   }
 
