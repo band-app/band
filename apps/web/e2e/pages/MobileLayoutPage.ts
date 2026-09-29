@@ -177,6 +177,14 @@ export class MobileLayoutPage {
     });
   }
 
+  /** Close a plugin tab's bottom sheet, back to the editor. */
+  async closePluginSheet(slug: string): Promise<void> {
+    await test.step(`Close the ${slug} sheet`, async () => {
+      await this.page.keyboard.press("Escape");
+      await expect(this.pluginSheetBody(slug)).toBeHidden();
+    });
+  }
+
   /** Dismiss the add-to-Home-Screen-again notice. */
   async dismissReinstallNotice(): Promise<void> {
     await test.step("Dismiss the reinstall notice", async () => {

@@ -8,7 +8,8 @@
  * Also covers the mobile header: the workspace label on two rows (worktree
  * over project, the Pinned section's `WorkspaceLabel`), the project-list
  * fly-out's top row as tall as the header, and the GitHub plugin's Checks tab
- * as a header button and sheet, opened by the PR badge too.
+ * as a row in the header's panel menu and a sheet, opened by the PR badge
+ * too. A sheet opened in one workspace doesn't carry over to the next.
  *
  * Proof of "not remounted": a mark set on the workspace's mounted entry
  * survives the round trip, the chat still shows its messages, and the page
@@ -178,6 +179,28 @@ test("switching away and back does not remount the chat or replay its messages",
   expect(fullReplays()).toHaveLength(1);
 });
 
+test("a sheet opened in one workspace does not carry over to the next", async ({ page }) => {
+  const workspace = new WorkspacePage(page, server.url, TOKEN);
+  const layout = new MobileLayoutPage(page, server.url, TOKEN);
+  const checks = new PrChecksPanelPage(page, server.url, TOKEN);
+
+  await workspace.gotoAndWaitForPlugins(WS_ALPHA);
+  await workspace.waitForMobileReady();
+  await workspace.tapPrBadgeInFlyout(WS_BETA);
+  await expect(checks.number).toHaveText("#802");
+  await layout.closePluginSheet(CHECKS);
+
+  // Back in the workspace the badge was tapped from: no sheet is open.
+  await workspace.switchWorkspaceFromFlyout(WS_ALPHA);
+  await expect(layout.headerWorkspaceName).toHaveText(ALPHA);
+  await expect(layout.pluginSheetBody(CHECKS)).toBeHidden();
+
+  // And the badge's request was used up: the Checks sheet doesn't come back.
+  await workspace.switchWorkspaceFromFlyout(WS_BETA);
+  await expect(layout.headerWorkspaceName).toHaveText(BETA);
+  await expect(layout.pluginSheetBody(CHECKS)).toBeHidden();
+});
+
 test("the project-list fly-out's top row is as tall as the header", async ({ page }) => {
   const workspace = new WorkspacePage(page, server.url, TOKEN);
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
@@ -192,7 +215,7 @@ test("the project-list fly-out's top row is as tall as the header", async ({ pag
   expect(topBar.bottom).toBe(header.bottom);
 });
 
-test("the Checks tab opens from the header", async ({ page }) => {
+test("the Checks tab opens from the header's panel menu", async ({ page }) => {
   const workspace = new WorkspacePage(page, server.url, TOKEN);
   const layout = new MobileLayoutPage(page, server.url, TOKEN);
   const checks = new PrChecksPanelPage(page, server.url, TOKEN);

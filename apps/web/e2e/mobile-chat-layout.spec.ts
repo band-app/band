@@ -445,6 +445,8 @@ test.describe("in a phone browser tab", () => {
     await expect(layout.menuItem("explorer")).toBeVisible();
     await expect(layout.changesItemBadge).toHaveText("1");
     await layout.closeSheet();
+    // The count shows only in the drawer; the 3-dot button is just its icon.
+    await expect(layout.menuButton).toHaveText("");
     await expect(layout.menuBody).toBeHidden();
 
     // Picking a panel swaps the drawer for the panel's sheet; closing that

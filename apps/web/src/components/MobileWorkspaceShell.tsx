@@ -80,9 +80,9 @@ function useAppHeight() {
   return { height, offsetTop, keyboardOpen };
 }
 
-/** Live Changes sections for the mobile Changes sheet + header badge. Tracks
- *  the same compare branch the user picked, mirroring the desktop
- *  RightSidepanel query so the badge count matches the lists. */
+/** Live Changes sections for the mobile Changes sheet and the count on the
+ *  menu's Changes row. Tracks the same compare branch the user picked,
+ *  mirroring the desktop RightSidepanel query so the count matches the lists. */
 function useChangesSummary(workspaceId: string) {
   const changesQuery = useWorkspaceChanges(workspaceId, { refetchInterval: 15_000 });
   return { changes: changesQuery.data, changeCount: countChangedPaths(changesQuery.data) };
@@ -105,9 +105,10 @@ function useWorkspaceNames(workspaceId: string): { name: string; projectName: st
 }
 
 // Which mobile view is showing. "editor" is the dockview; the others open a
-// bottom sheet over it: "menu" lists the panels below, "explorer" / "changes" hold a tree and return to
-// "editor" on select or dismiss, `plugin:<pluginId>.<tabId>` holds a plugin's
-// `workspace.sideTabs` tab (named as in `RightSidepanel`).
+// bottom sheet over it: "menu" lists the panels below, "explorer" / "changes"
+// hold a tree and return to "editor" on select or dismiss, and
+// `plugin:<pluginId>.<tabId>` holds a plugin's `workspace.sideTabs` tab (named
+// as in `RightSidepanel`).
 type MobileView = "editor" | "menu" | "explorer" | "changes" | `plugin:${string}`;
 
 function isMobileView(value: unknown): value is MobileView {
