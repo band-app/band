@@ -516,7 +516,11 @@
 .dockview-theme-band.dockview-center-desktop {
   --dv-tabs-and-actions-container-height: 38px;
 }
-.dockview-center-desktop [data-band-top-row] > .dv-tabs-and-actions-container .dv-void-container {
+.band-workspace-entry:not([inert])
+  .dockview-center-desktop
+  [data-band-top-row]
+  > .dv-tabs-and-actions-container
+  .dv-void-container {
   -webkit-app-region: drag;
 }
 
@@ -532,6 +536,8 @@
  * drag the window where nothing shows. It recomputes after layout, on scroll,
  * and at paint after a visibility or z-index change, but not after a
  * transform-only change. Electron hit-tests every mouse-down against the
- * result before the page sees it. A hidden workspace's strip stays out
- * because its boxes compute `visibility: hidden` (`.dv-view.visible` above)
- * and the `[inert]` reset in `globals.css` clears their app-region. */
+ * result before the page sees it. Hidden workspaces stay mounted and laid out
+ * at the same place as the shown one, so only the shown workspace sets any
+ * app-region: the rule above matches only a non-`inert` workspace entry, and
+ * the sidebar gutter and center drag bar read `WindowDragContext`
+ * (`DesktopTitleBar.tsx`), which is false inside a hidden entry. */

@@ -761,8 +761,8 @@ export class WorkspacePage {
    *  add each `app-region: drag` rect and subtract each `no-drag` rect, with
    *  z-index, `inert` and `pointer-events` irrelevant. Unlike Chromium it
    *  also counts rects whose `visibility` is `hidden`, on purpose: a hidden
-   *  but still laid-out workspace's strip must stay out of the region through
-   *  its `[inert]` app-region reset alone, not only through its visibility.
+   *  but still laid-out workspace's strip must stay out of the region by
+   *  setting no app-region at all, not only through its visibility.
    *  Only Electron hit-tests that region, so this is the DOM-level
    *  projection of it; each control is sampled on a 3px grid. Returns a
    *  label per covered control (testid, aria-label, title or text), and
@@ -824,6 +824,32 @@ export class WorkspacePage {
         );
       }
       return covered;
+    });
+  }
+
+  /** Elements inside a hidden (`inert`) workspace entry whose computed
+   *  app-region is `drag` or `no-drag`, as a label each (testid, class or tag).
+   *  Only the shown workspace may set an app-region, so this should be empty.
+   *  Throws when no hidden entry is mounted, so it can't pass vacuously. */
+  async appRegionsInHiddenWorkspaces(): Promise<string[]> {
+    return await this.page.evaluate(() => {
+      const entries = document.querySelectorAll(
+        '[data-testid^="workspace-panel-host__cached-entry--"][inert]',
+      );
+      if (entries.length === 0) throw new Error("no hidden workspace entry is mounted");
+      const found: string[] = [];
+      for (const entry of entries) {
+        for (const el of [entry, ...entry.querySelectorAll("*")]) {
+          const style = getComputedStyle(el);
+          const region =
+            style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
+          if (region !== "drag" && region !== "no-drag") continue;
+          found.push(
+            `${region} ${el.getAttribute("data-testid") ?? (el.className || el.tagName.toLowerCase())}`,
+          );
+        }
+      }
+      return found;
     });
   }
 
