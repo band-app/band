@@ -104,6 +104,9 @@ export class ChatPanePage {
   readonly contextMeterUsage: Locator;
   /** The popover's cost row, shown when the agent reports a cost. */
   readonly contextMeterCost: Locator;
+  /** The composer textarea by test id. Its placeholder changes while a
+   *  question card waits, so `promptInput` can't find it then. */
+  readonly composer: Locator;
   /** The model settings trigger on the right of the composer: model name
    *  plus effort, opening the model / effort / fast mode menu. */
   readonly modelMenuButton: Locator;
@@ -197,6 +200,7 @@ export class ChatPanePage {
     this.notices = page.getByTestId("chat-pane__notice");
     this.permissionCards = page.getByTestId("chat-pane__permission");
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
+    this.composer = page.getByTestId("chat__composer");
     this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
     this.modelMenuModel = page.getByTestId("chat-pane__model-menu-model");
     this.modelMenuEffort = page.getByTestId("chat-pane__model-menu-effort");
@@ -857,23 +861,65 @@ export class ChatPanePage {
     });
   }
 
-  /** Pick a choice in the Nth elicitation form by its title (agent-supplied
-   *  test data). */
+  /** The stepper entries of the Nth elicitation form, one per question.
+   *  Each carries `data-state` (`done` / `current` / `upcoming`). */
+  elicitationSteps(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-step");
+  }
+
+  /** The Nth elicitation form's heading ("<agent> has 3 questions"). */
+  elicitationHeading(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-heading");
+  }
+
+  /** The question the Nth elicitation form shows right now. */
+  elicitationQuestion(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-question");
+  }
+
+  /** An option row of the Nth elicitation form, by its title (agent-supplied
+   *  test data). A toggle button: `aria-pressed="true"` once picked. */
+  elicitationChoice(index: number, choiceTitle: string): Locator {
+    return this.elicitationForms.nth(index).getByRole("button", { name: choiceTitle, exact: true });
+  }
+
+  /** Pick a choice in the Nth elicitation form by clicking its row. */
   async pickElicitationChoice(index: number, choiceTitle: string): Promise<void> {
     await test.step(`Pick "${choiceTitle}" in elicitation #${index}`, async () => {
-      await this.elicitationForms
-        .nth(index)
-        .getByRole("button", { name: choiceTitle, exact: true })
-        .click();
+      await this.elicitationChoice(index, choiceTitle).click();
     });
   }
 
-  /** Submit the Nth elicitation form. "Submit" is a constant label in
-   *  `elicitation-form.tsx`, so role + name is the locator. */
-  async submitElicitation(index: number): Promise<void> {
-    await test.step(`Submit elicitation #${index}`, async () => {
-      await this.elicitationForms.nth(index).getByRole("button", { name: "Submit" }).click();
+  /** Type into the Nth elicitation form's free-text row. */
+  async typeElicitationNote(index: number, text: string): Promise<void> {
+    await test.step(`Type a note in elicitation #${index}`, async () => {
+      await this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-note").fill(text);
     });
+  }
+
+  /** Press a key wherever focus is. The question card takes focus when it
+   *  appears, so this is how its shortcuts (1-9, Enter, Esc) get exercised. */
+  async pressKeyInPage(key: string): Promise<void> {
+    await test.step(`Press "${key}"`, async () => {
+      await this.page.keyboard.press(key);
+    });
+  }
+
+  /** Click one of the Nth elicitation form's footer buttons: "Next",
+   *  "Back", "Skip all", "Skip" or "Submit" (constant labels in
+   *  `elicitation-form.tsx`). */
+  async clickElicitationButton(
+    index: number,
+    name: "Next" | "Back" | "Skip all" | "Skip" | "Submit",
+  ): Promise<void> {
+    await test.step(`Click "${name}" in elicitation #${index}`, async () => {
+      await this.elicitationForms.nth(index).getByRole("button", { name, exact: true }).click();
+    });
+  }
+
+  /** Submit the Nth elicitation form (its last question's "Submit"). */
+  async submitElicitation(index: number): Promise<void> {
+    await this.clickElicitationButton(index, "Submit");
   }
 
   /** Open the model settings menu and choose another model from its
