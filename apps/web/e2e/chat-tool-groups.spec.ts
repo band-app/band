@@ -10,6 +10,8 @@
  *   - Expanding a shell call shows `$ command`, "Exit code N" and the
  *     output, from Claude Code's fenced text (exit code in its first line)
  *     or from Codex's `rawOutput.formatted_output` / `exit_code`.
+ *   - Hovering a finished group's summary shows how long its calls took,
+ *     from the first call's start to the last one's end.
  *   - Hovering a message shows how long ago it was sent, with the exact
  *     time in a tooltip, and copies its text. The time comes from the
  *     event log, so it survives a reload (the cold replay path).
@@ -40,6 +42,9 @@ const TOKEN = "e2e-chat-tool-groups-token";
 const PROJECT = "toolgroups";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const REPLY = "Fixed the lint errors.";
+/** The scenario sleeps 300 ms inside the pull call, so its duration and
+ *  the group's have at least three digits of milliseconds. */
+const TOOK = /^(\d{3}ms|\d+(\.\d)?s)$/;
 
 // Relative times and the tooltip's exact time are formatted for the
 // browser's locale and zone; pin both.
@@ -49,6 +54,8 @@ let server: ServerHandle;
 let tmpHome: string;
 /** The reply's time as the live stream dated it, checked after a reload. */
 let liveReplyTime: string | null = null;
+/** The group's duration as the live stream timed it, checked after a reload. */
+let liveGroupDuration: string | null = null;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -89,6 +96,8 @@ test.beforeAll(async () => {
                 rawInput: { command: "git pull", description: "Pull latest changes from branch" },
               },
             },
+            // Gives the group a duration the tooltip can't round to 0ms.
+            { sleep: 300 },
             {
               toolUpdate: {
                 toolCallId: "tc-pull",
@@ -190,9 +199,16 @@ test.describe("chat tool groups and message actions", () => {
     );
     await expect(chatPane.toolCallContainers).toHaveCount(0);
 
+    // The finished group shows how long it took once hovered.
+    await expect(chatPane.toolGroupDuration(0)).toHaveText(TOOK);
+    await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "0");
+    await chatPane.hoverToolGroup(0);
+    await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "1");
+    liveGroupDuration = await chatPane.toolGroupDuration(0).textContent();
+
     // Expanded: a row per call, in order, the failed one marked.
     await chatPane.expandToolGroup(0);
-    await expect(chatPane.toolCallContainers).toHaveText([
+    await expect(chatPane.toolCallLabels()).toHaveText([
       "Pull latest changes from branch",
       "Read package.json",
       "Failed to run biome lint fix",
@@ -206,6 +222,15 @@ test.describe("chat tool groups and message actions", () => {
       "data-status",
       "complete",
     );
+
+    // Each call has its own duration, shown once its row is hovered. A
+    // call reported finished in its first event wasn't timed, so it has none.
+    const pull = chatPane.toolCallDuration("Pull latest changes from branch");
+    await expect(pull).toHaveText(TOOK);
+    await expect(pull).toHaveCSS("opacity", "0");
+    await chatPane.hoverToolCall("Pull latest changes from branch");
+    await expect(pull).toHaveCSS("opacity", "1");
+    await expect(chatPane.toolCallDuration("Read package.json")).toHaveCount(0);
 
     // The failed call: command, exit code, and the output without the
     // exit-code line or the code fence.
@@ -272,5 +297,9 @@ test.describe("chat tool groups and message actions", () => {
     await chatPane.copyMessage(prompt);
     await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("fix the lint");
     await expect(chatPane.messageTime(prompt)).toHaveText(/^(just now|1 minute ago)$/);
+
+    // The group's duration comes from the logged event times too.
+    expect(liveGroupDuration).not.toBeNull();
+    await expect(chatPane.toolGroupDuration(0)).toHaveText(liveGroupDuration ?? "");
   });
 });
