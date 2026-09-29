@@ -31,6 +31,7 @@ import {
   SidebarTitleBar,
   WorkspaceChromeContext,
 } from "../components/DesktopTitleBar";
+import { MobileWorkspaceShell } from "../components/MobileWorkspaceShell";
 import { RightSidepanel } from "../components/RightSidepanel";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarActionBar, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -822,8 +823,16 @@ function AppShell() {
     [sidebarVisible, navOverlayWidth, rightVisible, activeWorkspaceId, toggleRightPanel],
   );
 
+  // Mobile: the route's own page (the full-screen project list on `/`) and,
+  // over it, the workspace layout, which keeps every visited workspace
+  // mounted across route changes the way `SharedDockviewLayout` does below.
   if (!useDesktopLayout) {
-    return <Outlet />;
+    return (
+      <>
+        <Outlet />
+        <MobileWorkspaceShell />
+      </>
+    );
   }
 
   return (

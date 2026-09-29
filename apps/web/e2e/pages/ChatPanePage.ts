@@ -633,6 +633,21 @@ export class ChatPanePage {
     return this.page.getByTestId("file-preview-overlay__content");
   }
 
+  /** Start recording the chat event streams the page opens
+   *  (`/api/chats/<id>/events`). The getter returns the streams that started
+   *  from the beginning of the log, with no `lastEventId` cursor: a chat view
+   *  mounted from scratch opens one and replays every message, a view that
+   *  stayed mounted resumes from its cursor. Call BEFORE `goto`. */
+  trackFullReplays(): () => string[] {
+    const urls: string[] = [];
+    this.page.on("request", (req) => {
+      const url = new URL(req.url());
+      if (!/^\/api\/chats\/[^/]+\/events$/.test(url.pathname)) return;
+      if (!url.searchParams.has("lastEventId")) urls.push(url.pathname);
+    });
+    return () => [...urls];
+  }
+
   /** Locator for a user-role message bubble carrying the given text.
    *  Scoped to the `chat-pane__user-message` data-testid container so a
    *  future change that renders user text inside an assistant bubble

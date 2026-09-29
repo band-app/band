@@ -3,7 +3,8 @@ import { cn } from "@band-app/ui";
 /**
  * Two-row workspace label: the workspace name on the first line with the
  * project name stacked beneath it. Shared by the Pinned section cards
- * (`WorkspaceCard` with `showProjectName`) and the ⌘K workspace picker
+ * (`WorkspaceCard` with `showProjectName`), the mobile workspace header
+ * (`MobileWorkspaceShell`) and the ⌘K workspace picker
  * (`WorkspacePickerDialog`) so both render the same compact, scannable block
  * instead of a long, mid-truncated `project/name` string on one line.
  *
@@ -44,11 +45,17 @@ export function WorkspaceLabel({
   const isSidebar = tone === "sidebar";
 
   return (
-    <div className="flex flex-col min-w-0 leading-tight">
-      <span className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}>
+    <div data-testid="workspace-label" className="flex flex-col min-w-0 leading-tight">
+      <span
+        data-testid="workspace-label__name"
+        className={cn(isSidebar ? "text-[13px]" : "text-sm", "truncate", nameClass)}
+      >
         {name}
       </span>
-      <span className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", projectClass)}>
+      <span
+        data-testid="workspace-label__project"
+        className={cn(isSidebar ? "text-[11px]" : "text-xs", "truncate", projectClass)}
+      >
         {projectName}
       </span>
     </div>

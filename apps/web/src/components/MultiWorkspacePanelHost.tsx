@@ -8,7 +8,9 @@ import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
 // ---------------------------------------------------------------------------
 // Keeps every visited workspace's center dockview mounted, so switching back to
-// any of them is instant: no remount, no layout restore, no refetch. Mirrors
+// any of them is instant: no remount, no chat replay, no layout restore, no
+// refetch. Used by both layouts: `SharedDockviewLayout` (desktop) and
+// `MobileWorkspaceShell` (mobile). Mirrors
 // orca's `mountedWorktreeIdsRef` (use-terminal-workspace-foundation.ts): a
 // workspace joins the set on first activation and leaves it only when it stops
 // existing (deleted, worktree removed). There is no LRU and no cap. Memory is

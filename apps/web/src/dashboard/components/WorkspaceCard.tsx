@@ -182,7 +182,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
 
   const handleOpenChecks = () => {
     if (isDeleting) return;
-    showChecksTab();
+    showChecksTab(workspaceId);
     if (!isActive) handleClick();
   };
 
