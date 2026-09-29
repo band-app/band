@@ -22,11 +22,13 @@ import {
 import {
   WorkspaceStatusQueries,
   WorkspaceStatusSourceQueries,
+  type WorkspaceStatusSourceRow,
 } from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
 import {
   emit,
   subscribe,
+  type TabAgentStatus,
   type WorkspaceAgentInfo,
   type WorkspaceStatusSnapshot,
 } from "../infra/events/status-event-bus";
@@ -153,11 +155,22 @@ export function worktreesDir(): string {
  * so callers don't churn paths.
  */
 export function loadCurrentStatuses(): WorkspaceStatus[] {
-  return workspaceStatusQueries.loadCurrent();
+  const sourcesByWorkspace = new Map<string, WorkspaceStatusSourceRow[]>();
+  for (const source of statusSourceQueries.listAll()) {
+    const list = sourcesByWorkspace.get(source.workspaceId);
+    if (list) list.push(source);
+    else sourcesByWorkspace.set(source.workspaceId, [source]);
+  }
+  return workspaceStatusQueries.loadCurrent().map((status) => ({
+    ...status,
+    tabStatuses: toTabStatuses(sourcesByWorkspace.get(status.workspaceId) ?? []),
+  }));
 }
 
 export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null {
-  return workspaceStatusQueries.getByWorkspaceId(workspaceId);
+  const status = workspaceStatusQueries.getByWorkspaceId(workspaceId);
+  if (!status) return null;
+  return { ...status, tabStatuses: listTabStatuses(workspaceId) };
 }
 
 export function upsertWorkspaceStatus(
@@ -269,6 +282,7 @@ export function upsertWorkspaceStatus(
       summary: mergedAgent.agentSummary ?? undefined,
       codingAgentId: mergedAgent.codingAgentId ?? undefined,
     },
+    tabStatuses: listTabStatuses(workspaceId),
   };
 }
 
@@ -311,24 +325,67 @@ const STALE_HOOK_WORKING_MS = 15 * 60_000;
 /** Higher wins when sources disagree; statuses not listed rank lowest. */
 const STATUS_PRIORITY: Record<string, number> = { needs_attention: 3, working: 2, waiting: 1 };
 
+const CHAT_SOURCE_PREFIX = "chat:";
+
 /** Source id of a chat pane's ACP turns. */
 export function chatStatusSource(chatId: string): string {
-  return `chat:${chatId}`;
+  return `${CHAT_SOURCE_PREFIX}${chatId}`;
 }
 
 /** Source id of `statuses.update`, which sets a status by hand. */
 export const MANUAL_STATUS_SOURCE = "manual";
 
+/** A hook source that said `working` and then went quiet stops counting. */
+function isStaleSource(
+  { sourceId, status, updatedAt }: WorkspaceStatusSourceRow,
+  staleBefore: number,
+): boolean {
+  return sourceId.startsWith("hook:") && status === "working" && updatedAt < staleBefore;
+}
+
 function deriveWorkspaceStatus(workspaceId: string): string {
   const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
   let best: string | null = null;
-  for (const { sourceId, status, updatedAt } of statusSourceQueries.listForWorkspace(workspaceId)) {
-    if (sourceId.startsWith("hook:") && status === "working" && updatedAt < staleBefore) continue;
+  for (const source of statusSourceQueries.listForWorkspace(workspaceId)) {
+    if (isStaleSource(source, staleBefore)) continue;
+    const { status } = source;
     if (best === null || (STATUS_PRIORITY[status] ?? 0) > (STATUS_PRIORITY[best] ?? 0)) {
       best = status;
     }
   }
   return best ?? "waiting";
+}
+
+/**
+ * The status each chat and terminal shows on its tab: a chat's own ACP
+ * source, and every hook session reported from a Band terminal (the
+ * higher-priority status when a terminal has several). Idle sources are
+ * left out.
+ */
+function toTabStatuses(sources: WorkspaceStatusSourceRow[]): TabAgentStatus[] {
+  const staleBefore = Date.now() - STALE_HOOK_WORKING_MS;
+  const byTab = new Map<string, TabAgentStatus>();
+  for (const source of sources) {
+    const { status } = source;
+    if (status !== "working" && status !== "needs_attention") continue;
+    if (isStaleSource(source, staleBefore)) continue;
+    let tab: TabAgentStatus;
+    if (source.sourceId.startsWith(CHAT_SOURCE_PREFIX)) {
+      tab = { chatId: source.sourceId.slice(CHAT_SOURCE_PREFIX.length), status };
+    } else if (source.terminalId) {
+      tab = { terminalId: source.terminalId, status };
+    } else {
+      continue;
+    }
+    const key = tab.chatId ? `chat:${tab.chatId}` : `terminal:${tab.terminalId}`;
+    const prev = byTab.get(key);
+    if (!prev || STATUS_PRIORITY[status] > STATUS_PRIORITY[prev.status]) byTab.set(key, tab);
+  }
+  return [...byTab.values()];
+}
+
+function listTabStatuses(workspaceId: string): TabAgentStatus[] {
+  return toTabStatuses(statusSourceQueries.listForWorkspace(workspaceId));
 }
 
 /**

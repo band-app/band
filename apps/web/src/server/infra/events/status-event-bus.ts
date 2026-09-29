@@ -47,6 +47,23 @@ export interface WorkspaceStatusSnapshot {
   branch: string;
   worktreePath: string;
   agent?: WorkspaceAgentInfo;
+  /**
+   * The chats and terminals in the workspace whose agent is `working` or
+   * `needs_attention`, for the center tab strip. Absent where the snapshot
+   * comes straight from the row (the projects list).
+   */
+  tabStatuses?: TabAgentStatus[];
+}
+
+/**
+ * One chat's or terminal's agent status: a chat pane's ACP turn
+ * (`chatId`), or a hook-reporting CLI session in a Band terminal
+ * (`terminalId`).
+ */
+export interface TabAgentStatus {
+  chatId?: string;
+  terminalId?: string;
+  status: "working" | "needs_attention";
 }
 
 interface GitStatus {

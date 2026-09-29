@@ -1007,6 +1007,62 @@ export class WorkspacePage {
       .first();
   }
 
+  /** The agent status indicator in the end slot of the first visible chat or
+   *  terminal tab (`center-chat-tab__status--<id>` /
+   *  `center-term-tab__status--<id>`). Its `data-status` is `working` (a
+   *  spinner) or `needs_attention` (a dot). Rendered only while the tab is
+   *  inactive. */
+  tabStatus(panelComponent: "chat" | "terminal"): Locator {
+    const prefix = this.centerTabTestidPrefix(panelComponent).replace(/--$/, "__status--");
+    return this.tab(panelComponent).getByTestId(new RegExp(`^${prefix}`));
+  }
+
+  /** The close (×) button of the first visible chat or terminal tab. */
+  tabCloseButton(panelComponent: "chat" | "terminal"): Locator {
+    const name = panelComponent === "chat" ? "Close tab" : "Close terminal";
+    return this.tab(panelComponent).getByRole("button", { name });
+  }
+
+  /** Hover the first visible tab of a kind. */
+  async hoverTab(panelComponent: "chat" | "terminal" | "browser"): Promise<void> {
+    await test.step(`Hover the ${panelComponent} tab`, async () => {
+      await this.tab(panelComponent).hover();
+    });
+  }
+
+  /** The terminal id of the first visible terminal tab, read from its
+   *  `center-term-tab--<terminalId>` testid. */
+  async firstTerminalTabId(): Promise<string> {
+    const testid = await this.tab("terminal").getAttribute("data-testid");
+    return (testid ?? "").slice(this.centerTabTestidPrefix("terminal").length);
+  }
+
+  /** Post a Claude Code hook from a Band terminal through the real
+   *  `statuses.notify` mutation, the way `band notify` forwards one. Auth via
+   *  the `band_token` cookie, matching the other tRPC HTTP helpers. */
+  async reportTerminalHook(opts: {
+    cwd: string;
+    terminalId: string;
+    sessionId: string;
+    hook: Record<string, unknown>;
+  }): Promise<void> {
+    await test.step(`Report a ${String(opts.hook.hook_event_name)} hook from ${opts.terminalId}`, async () => {
+      const res = await this.page.request.post(`${this.baseUrl}/trpc/statuses.notify`, {
+        headers: { "Content-Type": "application/json", Cookie: `band_token=${this.token}` },
+        data: {
+          cwd: opts.cwd,
+          agent: "claude-code",
+          dispatch: "terminal",
+          terminalId: opts.terminalId,
+          payload: { session_id: opts.sessionId, cwd: opts.cwd, ...opts.hook },
+        },
+      });
+      if (!res.ok()) {
+        throw new Error(`reportTerminalHook failed: ${res.status()} ${await res.text()}`);
+      }
+    });
+  }
+
   /** Locate the per-path `file` leaf tab opened from the sidepanel Explorer
    *  (`center-file-tab--<path>`, set in `WorkspaceCenterDockview.tsx`). */
   fileTab(path: string): Locator {

@@ -90,10 +90,12 @@ function TabButton({
       title={label}
       data-testid={testid}
       style={NO_DRAG_STYLE}
-      className={`flex h-full min-w-0 max-w-[120px] flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors ${
+      // Same pill as the center tab strip (`.dockview-center-tabs` in
+      // dockview-theme.css): grey when selected, lighter on hover.
+      className={`flex h-7 min-w-0 max-w-[120px] flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
         active
-          ? "border-primary text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
+          ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground hover:shadow-[inset_0_0_0_1px_var(--border)]"
       }`}
     >
       <Icon className="size-3.5 shrink-0" />
@@ -199,7 +201,7 @@ function SidepanelHeader({
       data-testid="right-sidepanel__header"
     >
       {children ? (
-        <div role="tablist" className="flex min-w-0 flex-1">
+        <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 pl-1.5">
           {children}
         </div>
       ) : (

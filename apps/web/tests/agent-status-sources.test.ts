@@ -401,3 +401,107 @@ describe("server restart", () => {
     }
   });
 });
+
+describe("tab statuses", () => {
+  let server: ServerHandle;
+  let repo: string;
+
+  beforeAll(async () => {
+    server = await startAcpServer({
+      turns: [
+        { match: "^long", steps: [{ say: "Working." }, { waitForCancel: true }] },
+        { steps: [{ say: "Done." }] },
+      ],
+    });
+    repo = join(server.home, "repo");
+    mkdirSync(repo, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await server?.close();
+  });
+
+  async function tabStatuses(): Promise<unknown[] | undefined> {
+    const data = await trpc<{ tabStatuses?: unknown[] } | null>(
+      server.url,
+      "statuses.get",
+      { workspaceId: WORKSPACE_ID },
+      "query",
+    );
+    return data?.tabStatuses;
+  }
+
+  it("lists a running chat as working, then drops it when the user stops it", async () => {
+    const chatId = newChatId();
+    let replied!: () => void;
+    const inTurn = new Promise<void>((resolve) => {
+      replied = resolve;
+    });
+    const stream = await openStream(server.url, chatId, {
+      until: turnEnded,
+      onEvent: (e) => {
+        if (e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") replied();
+      },
+    });
+    await sendMessage(server.url, chatId, "long task");
+    await inTurn;
+
+    expect(await tabStatuses()).toEqual([{ chatId, status: "working" }]);
+
+    await trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId });
+    await stream.events;
+    expect(await tabStatuses()).toEqual([]);
+  });
+
+  it("lists a finished chat as needing attention until the user acknowledges it", async () => {
+    const chatId = newChatId();
+    await runTurn(server.url, chatId, "hello");
+
+    expect(await tabStatuses()).toEqual([{ chatId, status: "needs_attention" }]);
+
+    await clearAttention(server.url);
+    expect(await tabStatuses()).toEqual([]);
+  });
+
+  it("lists a terminal by the most urgent hook session running in it", async () => {
+    const terminalId = randomUUID();
+    await trpc(server.url, "terminal.create", { workspaceId: WORKSPACE_ID, id: terminalId });
+
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      dispatch: "terminal",
+      terminalId,
+      payload: claudeHook(repo, "tab-a", { hook_event_name: "PreToolUse", tool_name: "Bash" }),
+    });
+    expect(await tabStatuses()).toEqual([{ terminalId, status: "working" }]);
+
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      dispatch: "terminal",
+      terminalId,
+      payload: claudeHook(repo, "tab-b", { hook_event_name: "Stop" }),
+    });
+    expect(await tabStatuses()).toEqual([{ terminalId, status: "needs_attention" }]);
+
+    await trpc(server.url, "terminal.kill", { terminalId });
+    await expect.poll(() => tabStatuses()).toEqual([]);
+  });
+
+  it("leaves out a hook session that runs outside a Band terminal", async () => {
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      payload: claudeHook(repo, "tab-c", { hook_event_name: "PreToolUse", tool_name: "Read" }),
+    });
+    expect(await workspaceStatus(server.url)).toBe("working");
+    expect(await tabStatuses()).toEqual([]);
+
+    await notify(server.url, {
+      cwd: repo,
+      agent: "claude-code",
+      payload: claudeHook(repo, "tab-c", { hook_event_name: "SessionEnd" }),
+    });
+  });
+});
