@@ -282,6 +282,7 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
         onSessionDiscovered={state.onSessionDiscovered}
         onSwitchSession={state.onSwitchSession}
         agentType={state.agentType}
+        agentLabel={state.agentLabel}
         codingAgentId={state.codingAgentId}
         visible={visible}
         wsActive={wsActive}
