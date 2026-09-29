@@ -23,8 +23,10 @@ function blank(entry: Entry): boolean {
 
 /**
  * Splits an assistant message's entries into parts. A run of two or more
- * tool calls becomes one group; thinking and empty text between them stay
- * in the group, thinking before the first or after the last call doesn't.
+ * tool calls becomes one group, and so does a lone shell command, so one
+ * command reads "Ran 1 command" like a run of several. Thinking and empty
+ * text between the calls stay in the group, thinking before the first or
+ * after the last call doesn't.
  */
 export function groupEntries(entries: Entry[]): MessagePart[] {
   const parts: MessagePart[] = [];
@@ -36,7 +38,8 @@ export function groupEntries(entries: Entry[]): MessagePart[] {
     let last = run.length - 1;
     while (last >= 0 && run[last].kind !== "tool") last--;
     const tools = run.filter((e): e is ToolEntry => e.kind === "tool");
-    if (tools.length < 2) {
+    const loneCommand = tools.length === 1 && tools[0].toolKind === "execute";
+    if (tools.length < 2 && !loneCommand) {
       for (const entry of run) parts.push({ kind: "entry", entry });
     } else {
       for (const entry of run.slice(0, first)) parts.push({ kind: "entry", entry });
