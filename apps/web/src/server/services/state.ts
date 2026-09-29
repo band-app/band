@@ -149,10 +149,10 @@ export function worktreesDir(): string {
 }
 
 /**
- * Read-side helpers — thin delegates to `WorkspaceStatusQueries` in the
- * infra tier (issue #535, follow-up 7). The query class owns the SQL +
- * row → snapshot mapping; this module retains the legacy export surface
- * so callers don't churn paths.
+ * Read-side helpers over `WorkspaceStatusQueries` in the infra tier (issue
+ * #535, follow-up 7). The query class owns the SQL + row → snapshot
+ * mapping; these add each snapshot's `tabStatuses`, derived from the
+ * workspace's rows in `workspace_status_sources`.
  */
 export function loadCurrentStatuses(): WorkspaceStatus[] {
   const sourcesByWorkspace = new Map<string, WorkspaceStatusSourceRow[]>();

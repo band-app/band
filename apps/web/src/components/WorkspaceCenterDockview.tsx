@@ -88,6 +88,7 @@ import {
   SearchBar,
   serializeViewPosition,
   storeViewMode,
+  type TabAgentStatus,
   type TerminalInsertDetail,
   toFileUri,
   toLspServerLang,
@@ -257,10 +258,10 @@ function TabEndSlot({
   );
 }
 
-type TabAgentStatus = "working" | "needs_attention";
+type TabAgentStatusKind = TabAgentStatus["status"];
 
 /** Spinner while the agent works, a dot when it needs the user. */
-function TabStatusIndicator({ status, testId }: { status: TabAgentStatus; testId: string }) {
+function TabStatusIndicator({ status, testId }: { status: TabAgentStatusKind; testId: string }) {
   if (status === "working") {
     return (
       <Loader2
@@ -284,7 +285,7 @@ function TabStatusIndicator({ status, testId }: { status: TabAgentStatus; testId
 }
 
 /** The agent status of a chat, from the workspace's status snapshot. */
-function useChatTabStatus(workspaceId: string, chatId: string): TabAgentStatus | undefined {
+function useChatTabStatus(workspaceId: string, chatId: string): TabAgentStatusKind | undefined {
   return useDashboardStore(
     (s) => s.statuses.get(workspaceId)?.tabStatuses?.find((t) => t.chatId === chatId)?.status,
   );
@@ -292,9 +293,9 @@ function useChatTabStatus(workspaceId: string, chatId: string): TabAgentStatus |
 
 /** The agent status of a terminal tab: the most urgent one reported from any
  *  of its split panes. */
-function useTerminalTabStatus(workspaceId: string, leafId: string): TabAgentStatus | undefined {
+function useTerminalTabStatus(workspaceId: string, leafId: string): TabAgentStatusKind | undefined {
   return useDashboardStore((s) => {
-    let found: TabAgentStatus | undefined;
+    let found: TabAgentStatusKind | undefined;
     for (const t of s.statuses.get(workspaceId)?.tabStatuses ?? []) {
       if (!t.terminalId || (ownerOfTerminal(t.terminalId) ?? t.terminalId) !== leafId) continue;
       if (t.status === "needs_attention") return t.status;

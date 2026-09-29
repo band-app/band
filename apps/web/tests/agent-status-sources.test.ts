@@ -463,6 +463,35 @@ describe("tab statuses", () => {
     expect(await tabStatuses()).toEqual([]);
   });
 
+  /** The `snapshot` event a status stream subscriber gets first. */
+  async function streamSnapshot(): Promise<{
+    statuses: { workspaceId: string; tabStatuses?: unknown[] }[];
+  }> {
+    const ac = new AbortController();
+    const res = await fetch(`${server.url}/trpc/status.stream`, {
+      headers: { Cookie: `band_token=${TEST_TOKEN}` },
+      signal: ac.signal,
+    });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) throw new Error(`status stream ended before a snapshot: ${buf}`);
+        buf += decoder.decode(value, { stream: true });
+        for (const line of buf.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const data = JSON.parse(line.slice("data: ".length));
+          if (data?.kind === "snapshot") return data;
+        }
+      }
+    } finally {
+      ac.abort();
+    }
+  }
+
   it("lists a terminal by the most urgent hook session running in it", async () => {
     const terminalId = randomUUID();
     await trpc(server.url, "terminal.create", { workspaceId: WORKSPACE_ID, id: terminalId });
@@ -485,6 +514,12 @@ describe("tab statuses", () => {
     });
     expect(await tabStatuses()).toEqual([{ terminalId, status: "needs_attention" }]);
 
+    // A client that connects now gets the same statuses in its first snapshot.
+    const snapshot = await streamSnapshot();
+    expect(snapshot.statuses.find((st) => st.workspaceId === WORKSPACE_ID)?.tabStatuses).toEqual([
+      { terminalId, status: "needs_attention" },
+    ]);
+
     await trpc(server.url, "terminal.kill", { terminalId });
     await expect.poll(() => tabStatuses()).toEqual([]);
   });
@@ -503,5 +538,6 @@ describe("tab statuses", () => {
       agent: "claude-code",
       payload: claudeHook(repo, "tab-c", { hook_event_name: "SessionEnd" }),
     });
+    expect(await workspaceStatus(server.url)).toBe("waiting");
   });
 });
