@@ -258,6 +258,15 @@ export class TerminalScrollProbe {
     }, this.workspaceId);
   }
 
+  /** Wheel reports sent since `start()`. */
+  async readReportsSent(): Promise<number> {
+    return await this.page.evaluate(() =>
+      (
+        window as unknown as { __scrollProbe: { sends: { reports: number }[] } }
+      ).__scrollProbe.sends.reduce((sum, s) => sum + s.reports, 0),
+    );
+  }
+
   /** xterm's modes and active buffer, as JSON. */
   async readModes(): Promise<string> {
     return await this.page.evaluate((id) => {

@@ -216,11 +216,7 @@ test.describe("Terminal scroll smoothness (benchmark)", () => {
         DURATION_MS,
       );
       // Let the last reports reach the screen.
-      const reportsSent = await page.evaluate(() =>
-        (
-          window as unknown as { __scrollProbe: { sends: { reports: number }[] } }
-        ).__scrollProbe.sends.reduce((sum, s) => sum + s.reports, 0),
-      );
+      const reportsSent = await probe.readReportsSent();
       await expect.poll(() => probe.readTopOffset(), { timeout: 10_000 }).toBe(reportsSent);
       const report = await probe.stop(0);
       await workspacePage.pressKeyInPane(0, "q");
@@ -236,8 +232,9 @@ test.describe("Terminal scroll smoothness (benchmark)", () => {
  * transcript is left alone) and wheel up through its transcript. Opt in with
  * `BENCH_CLAUDE_SESSION=<id> BENCH_CLAUDE_CWD=<project dir>`; the shell runs it
  * with your real HOME, so it uses your settings (set `"tui": "fullscreen"`)
- * and login. `BENCH_CLAUDE_ENV` adds env vars, e.g.
- * `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`. Nothing is sent to the model.
+ * and login. Panes set `CLAUDE_CODE_FORCE_SYNC_OUTPUT=1`; `BENCH_CLAUDE_ENV`
+ * adds env vars, e.g. `CLAUDE_CODE_FORCE_SYNC_OUTPUT=` to measure Claude's
+ * full-screen repaints without scroll regions. Nothing is sent to the model.
  */
 test.describe("Claude Code scroll smoothness (benchmark)", () => {
   const session = process.env.BENCH_CLAUDE_SESSION;
@@ -258,8 +255,8 @@ test.describe("Claude Code scroll smoothness (benchmark)", () => {
     const debugFile = join(tmpHome, "claude-debug.txt");
     await workspacePage.typeInPane(
       0,
-      `clear; cd ${cwd} && HOME=${process.env.HOME} ${process.env.BENCH_CLAUDE_ENV ?? ""} ` +
-        `claude --resume ${session} --fork-session --debug-file ${debugFile}`,
+      `clear; cd '${cwd}' && HOME='${process.env.HOME}' ${process.env.BENCH_CLAUDE_ENV ?? ""} ` +
+        `claude --resume ${session} --fork-session --debug-file '${debugFile}'`,
     );
     // Wait for Claude to turn on mouse tracking, then to finish drawing.
     await expect
@@ -306,7 +303,7 @@ test.describe("Claude Code scroll smoothness (benchmark)", () => {
     const report = await probe.stop(0);
     const profile = await stopProfile?.();
     print(
-      `claude ${process.env.BENCH_CLAUDE_ENV ?? "(default env)"}`,
+      `claude ${process.env.BENCH_CLAUDE_ENV ?? "(CLAUDE_CODE_FORCE_SYNC_OUTPUT=1)"}`,
       report,
       profile ?? undefined,
     );

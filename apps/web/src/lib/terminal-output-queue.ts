@@ -99,14 +99,16 @@ export interface OutputCallbacks {
 export interface TerminalOutputQueue {
   /**
    * Deliver one chunk of output. Foreground chunks go through the visible
-   * terminals' paced drain, and are written at once when xterm has room;
-   * background chunks are queued for the parked drain. Byte order is kept
-   * either way.
+   * terminals' paced drain, and are written at once when xterm has room,
+   * except bytes after the last DEC 2026 end marker, which wait until their
+   * frame ends, 100 ms pass or 64 KB build up; background chunks are queued
+   * for the parked drain. Byte order is kept either way.
    */
   push(data: Chunk, foreground: boolean, callbacks?: OutputCallbacks): void;
   /**
    * Deliver a client-side notice (an error, `[Process completed]`). It must
-   * survive an overflow, so it is written at once when nothing is queued, and
+   * survive an overflow, so it is written at once when nothing is queued or
+   * held, and
    * otherwise queued behind the output it follows, past the cap, so it drains
    * behind it instead of forcing the whole queue through.
    */
@@ -331,6 +333,20 @@ export function createTerminalOutputQueue(
     state.bytes += chunkBytes(data);
   };
 
+  /** The last `SYNC_MARKER_BYTES - 1` held bytes, across held pieces. */
+  const heldTail = () => {
+    const want = Math.min(SYNC_MARKER_BYTES - 1, state.heldBytes);
+    const tail = new Uint8Array(want);
+    let end = want;
+    for (let i = state.held.length - 1; i >= 0 && end > 0; i--) {
+      const piece = state.held[i].data;
+      const take = Math.min(end, piece.byteLength);
+      tail.set(piece.subarray(piece.byteLength - take), end - take);
+      end -= take;
+    }
+    return tail;
+  };
+
   /** Queue everything held, ahead of whatever is queued next. */
   const releaseHeld = () => {
     for (const piece of takeHeld()) enqueue(piece.data, piece.callbacks);
@@ -367,17 +383,14 @@ export function createTerminalOutputQueue(
       return;
     }
     // The last held bytes, in case a marker started there.
-    const last = state.held[state.held.length - 1]?.data;
-    const tail = last
-      ? last.subarray(Math.max(0, last.byteLength - (SYNC_MARKER_BYTES - 1)))
-      : null;
+    const tail = heldTail();
     let bytes = data;
-    if (tail && tail.byteLength > 0) {
+    if (tail.byteLength > 0) {
       bytes = new Uint8Array(tail.byteLength + data.byteLength);
       bytes.set(tail);
       bytes.set(data, tail.byteLength);
     }
-    const offset = tail?.byteLength ?? 0;
+    const offset = tail.byteLength;
     const scan = scanSyncMarkers(bytes);
     // Where in `data` the held part starts; `data.byteLength` holds nothing.
     let splitAt: number;
@@ -386,6 +399,9 @@ export function createTerminalOutputQueue(
       // Everything before a begin that started in this chunk is complete.
       if (scan.beginAt >= offset) releaseHeld();
       state.frameOpen = true;
+    } else if (scan.last === null && scan.partialAt < offset) {
+      // A marker that started in the held bytes is still cut off: keep going.
+      splitAt = 0;
     } else if (scan.last === "end" || !state.frameOpen) {
       releaseHeld();
       splitAt = Math.max(0, scan.partialAt - offset);
@@ -414,12 +430,13 @@ export function createTerminalOutputQueue(
         writeWhileRoom();
         return;
       }
-      // A parked terminal isn't painted: nothing to hold for.
-      releaseHeld();
       if (state.overflowed) {
+        for (const piece of takeHeld()) piece.callbacks?.onConsumed?.();
         callbacks?.onConsumed?.();
         return;
       }
+      // A parked terminal isn't painted: nothing to hold for.
+      releaseHeld();
       enqueue(data, callbacks);
       if (state.bytes > MAX_QUEUED_BYTES) {
         reset();
@@ -430,7 +447,13 @@ export function createTerminalOutputQueue(
       scheduleDrain(BACKGROUND_FLUSH_DELAY_MS);
     },
     pushNotice(text) {
-      releaseHeld();
+      if (state.held.length > 0) {
+        // Behind the held tail, which nothing else would now flush.
+        releaseHeld();
+        enqueue(text, undefined);
+        writeWhileRoom();
+        return;
+      }
       if (state.chunks.length === 0) {
         write(text);
         return;
