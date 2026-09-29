@@ -71,6 +71,28 @@ export function toolState(entry: ToolEntry): ToolState {
   return "complete";
 }
 
+/** How long the calls ran, from the first start to the last end (ms).
+ *  Undefined while one runs or when a call has no times. */
+export function toolDuration(tools: ToolEntry[]): number | undefined {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const t of tools) {
+    if (t.startedAt === undefined || t.endedAt === undefined) return undefined;
+    start = Math.min(start, t.startedAt);
+    end = Math.max(end, t.endedAt);
+  }
+  return tools.length > 0 ? Math.max(0, end - start) : undefined;
+}
+
+/** "340ms", "4.2s", "42s", "3m 5s". */
+export function formatToolDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

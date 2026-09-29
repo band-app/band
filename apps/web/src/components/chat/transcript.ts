@@ -42,6 +42,10 @@ export interface ToolEntry {
   locations: ToolCallLocation[];
   rawInput?: unknown;
   rawOutput?: unknown;
+  /** When the call was first reported (epoch ms). */
+  startedAt?: number;
+  /** When it was first reported completed or failed (epoch ms). */
+  endedAt?: number;
 }
 
 export type Entry =
@@ -209,10 +213,15 @@ function mapEntries(
   return changed ? next : messages;
 }
 
+/** Whether a tool call status means the call is over. */
+const finished = (status: ToolCallStatus | null | undefined) =>
+  status === "completed" || status === "failed";
+
 function applyUpdate(
   state: TranscriptState,
   update: SessionUpdate,
   eventId: number,
+  createdAt: number | undefined,
 ): TranscriptState {
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
@@ -249,6 +258,11 @@ function applyUpdate(
     }
 
     case "tool_call": {
+      const at = findTool(state.messages, update.toolCallId);
+      const message = at ? state.messages[at[0]] : undefined;
+      const prev = at && message?.role === "assistant" ? message.entries[at[1]] : undefined;
+      const existing = prev?.kind === "tool" ? prev : undefined;
+      const startedAt = existing?.startedAt ?? createdAt;
       const entry: ToolEntry = {
         kind: "tool",
         id: update.toolCallId,
@@ -260,8 +274,9 @@ function applyUpdate(
         locations: update.locations ?? [],
         rawInput: update.rawInput,
         rawOutput: update.rawOutput,
+        startedAt,
+        endedAt: finished(update.status) ? (existing?.endedAt ?? createdAt) : undefined,
       };
-      const at = findTool(state.messages, update.toolCallId);
       // A repeated tool_call replaces the one already shown.
       if (at) {
         return {
@@ -287,6 +302,7 @@ function applyUpdate(
             title: update.title ?? update.name ?? "Tool call",
           } as SessionUpdate,
           eventId,
+          createdAt,
         );
       }
       return {
@@ -304,6 +320,7 @@ function applyUpdate(
                   locations: update.locations ?? e.locations,
                   rawInput: update.rawInput !== undefined ? update.rawInput : e.rawInput,
                   rawOutput: update.rawOutput !== undefined ? update.rawOutput : e.rawOutput,
+                  endedAt: e.endedAt ?? (finished(update.status) ? createdAt : undefined),
                 }
               : e,
           ),
@@ -521,7 +538,7 @@ function stampNew(
 function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState {
   switch (event.type) {
     case "update":
-      return applyUpdate(state, event.update, event.eventId);
+      return applyUpdate(state, event.update, event.eventId, event.createdAt);
 
     case "prompt": {
       // Confirm the optimistic bubble in place, so its row doesn't remount.

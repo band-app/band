@@ -1,12 +1,14 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
-import { ChevronRightIcon, Loader2 } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
 import {
   describeTool,
+  formatToolDuration,
   OUTPUT_LIMIT,
   shellRun,
   summarizeTools,
   type ToolLabel,
+  toolDuration,
   toolState,
 } from "../chat/tool-summary";
 import type { ToolEntry } from "../chat/transcript";
@@ -73,6 +75,36 @@ function Diff({
  *  collapsible's Tailwind group, so a group's rows don't turn with it. */
 function Chevron({ openClass }: { openClass: string }) {
   return <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", openClass)} />;
+}
+
+/** A row's trigger with how long its calls took beside it, shown while
+ *  the row is hovered or focused (always on touch screens). The duration
+ *  sits outside the trigger so it isn't part of the button's name, and
+ *  keeps its width while hidden so the row doesn't shift; a long label
+ *  truncates before it. Nothing until every call has finished. */
+function ToolRow({
+  tools,
+  testId,
+  children,
+}: {
+  tools: ToolEntry[];
+  testId: string;
+  children: ReactNode;
+}) {
+  const ms = toolDuration(tools);
+  return (
+    <div className="group/tool-row flex max-w-full min-w-0 items-center gap-1.5 text-sm">
+      {children}
+      {ms !== undefined && (
+        <span
+          data-testid={testId}
+          className="shrink-0 tabular-nums text-muted-foreground/70 opacity-0 transition-opacity group-hover/tool-row:opacity-100 group-has-[:focus-visible]/tool-row:opacity-100 [@media(hover:none)]:opacity-100"
+        >
+          {formatToolDuration(ms)}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function Label({ label }: { label: ToolLabel }) {
@@ -173,20 +205,24 @@ export const ToolCall = memo(function ToolCall({ entry, cwd }: { entry: ToolEntr
       data-status={state}
       className="group/tool-call not-prose w-full min-w-0"
     >
-      <CollapsibleTrigger
-        className={cn(
-          "flex max-w-full items-center gap-1.5 text-left text-sm",
-          failed ? "text-red-400" : "text-muted-foreground",
-          hasBody && (failed ? "hover:text-red-300" : "hover:text-foreground"),
-        )}
-        disabled={!hasBody}
-      >
-        {state === "in-progress" && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
-        <span className="truncate">
-          <Label label={describeTool(entry)} />
-        </span>
-        {hasBody && <Chevron openClass="group-data-[state=open]/tool-call:rotate-90" />}
-      </CollapsibleTrigger>
+      <ToolRow tools={[entry]} testId="tool-call__duration">
+        <CollapsibleTrigger
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 text-left",
+            failed ? "text-red-400" : "text-muted-foreground",
+            hasBody && (failed ? "hover:text-red-300" : "hover:text-foreground"),
+          )}
+          disabled={!hasBody}
+        >
+          <span
+            data-testid="tool-call__label"
+            className={cn("truncate", state === "in-progress" && "tool-shimmer")}
+          >
+            <Label label={describeTool(entry)} />
+          </span>
+          {hasBody && <Chevron openClass="group-data-[state=open]/tool-call:rotate-90" />}
+        </CollapsibleTrigger>
+      </ToolRow>
 
       <CollapsibleContent className="mt-2 space-y-3 text-popover-foreground">
         {shell ? (
@@ -217,14 +253,15 @@ export const ToolGroup = memo(function ToolGroup({
       data-testid="tool-group__container"
       className="group/tool-group not-prose w-full min-w-0"
     >
-      <CollapsibleTrigger
-        data-testid="tool-group__summary"
-        className="flex max-w-full items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground"
-      >
-        <span className="truncate">{summarizeTools(tools)}</span>
-        {running && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
-        <Chevron openClass="group-data-[state=open]/tool-group:rotate-90" />
-      </CollapsibleTrigger>
+      <ToolRow tools={tools} testId="tool-group__duration">
+        <CollapsibleTrigger
+          data-testid="tool-group__summary"
+          className="flex min-w-0 items-center gap-1.5 text-left text-muted-foreground hover:text-foreground"
+        >
+          <span className={cn("truncate", running && "tool-shimmer")}>{summarizeTools(tools)}</span>
+          <Chevron openClass="group-data-[state=open]/tool-group:rotate-90" />
+        </CollapsibleTrigger>
+      </ToolRow>
       <CollapsibleContent className="mt-2 divide-y divide-border/40 overflow-hidden rounded-lg border border-border/40 [&>*]:px-3 [&>*]:py-2">
         {children}
       </CollapsibleContent>

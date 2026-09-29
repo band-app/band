@@ -1,5 +1,5 @@
 import { cn } from "@band-app/ui";
-import { CornerDownLeft, FileIcon, Loader2, Plus, SquareIcon, X } from "lucide-react";
+import { CircleStop, CornerDownLeft, FileIcon, Loader2, Plus, X } from "lucide-react";
 import type {
   ComponentProps,
   DragEvent,
@@ -653,16 +653,16 @@ export const PromptInputSubmit = ({
           type="button"
           data-testid="prompt-input__stop-button"
           aria-label="Stop generation"
-          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
+          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
           onClick={onStop}
         >
-          <SquareIcon className="size-4 lg:size-3.5 fill-current" />
+          <CircleStop className="size-4 lg:size-3.5" />
         </button>
       ) : isSubmitting && !hasContent ? (
         <button
           type="button"
           className={cn(
-            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md bg-foreground/50 text-background transition-colors",
+            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors",
             className,
           )}
           disabled
@@ -679,9 +679,10 @@ export const PromptInputSubmit = ({
           className={cn(
             "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-md transition-colors",
             hasContent
-              ? isBusy
-                ? "bg-primary text-primary-foreground hover:bg-primary/80"
-                : "bg-foreground text-background hover:bg-foreground/80"
+              ? cn(
+                  "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+                  isBusy ? "text-primary" : "text-foreground",
+                )
               : "text-muted-foreground",
             className,
           )}

@@ -756,11 +756,29 @@ export class ChatPanePage {
     return this.toolGroups.nth(index).getByTestId("tool-group__summary");
   }
 
+  /** How long the tool group at `index` took, beside its summary.
+   *  Transparent until the row is hovered. */
+  toolGroupDuration(index: number): Locator {
+    return this.toolGroups.nth(index).getByTestId("tool-group__duration");
+  }
+
+  async hoverToolGroup(index: number): Promise<void> {
+    await test.step(`Hover tool group ${index}`, async () => {
+      await this.toolGroupSummary(index).hover();
+    });
+  }
+
   /** Expands the tool group at `index`; a no-op when it's already open. */
   async expandToolGroup(index: number): Promise<void> {
     const summary = this.toolGroupSummary(index);
     if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click();
     await expect(summary).toHaveAttribute("aria-expanded", "true");
+  }
+
+  /** The description of each rendered tool-call row, without the
+   *  duration beside it. */
+  toolCallLabels(): Locator {
+    return this.toolCallContainers.getByTestId("tool-call__label");
   }
 
   /** The rendered tool-call row whose description contains `text`. */

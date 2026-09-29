@@ -10,6 +10,8 @@
  *   - Expanding a shell call shows `$ command`, "Exit code N" and the
  *     output, from Claude Code's fenced text (exit code in its first line)
  *     or from Codex's `rawOutput.formatted_output` / `exit_code`.
+ *   - Hovering a finished group's summary shows how long its calls took,
+ *     from the first call's start to the last one's end.
  *   - Hovering a message shows how long ago it was sent, with the exact
  *     time in a tooltip, and copies its text. The time comes from the
  *     event log, so it survives a reload (the cold replay path).
@@ -40,6 +42,8 @@ const TOKEN = "e2e-chat-tool-groups-token";
 const PROJECT = "toolgroups";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const REPLY = "Fixed the lint errors.";
+/** The group runs for at least the scenario's 300 ms sleep. */
+const TOOK = /^(\d{3}ms|\d+(\.\d)?s)$/;
 
 // Relative times and the tooltip's exact time are formatted for the
 // browser's locale and zone; pin both.
@@ -89,6 +93,8 @@ test.beforeAll(async () => {
                 rawInput: { command: "git pull", description: "Pull latest changes from branch" },
               },
             },
+            // Gives the group a duration the tooltip can't round to 0ms.
+            { sleep: 300 },
             {
               toolUpdate: {
                 toolCallId: "tc-pull",
@@ -190,9 +196,15 @@ test.describe("chat tool groups and message actions", () => {
     );
     await expect(chatPane.toolCallContainers).toHaveCount(0);
 
+    // The finished group shows how long it took once hovered.
+    await expect(chatPane.toolGroupDuration(0)).toHaveText(TOOK);
+    await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "0");
+    await chatPane.hoverToolGroup(0);
+    await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "1");
+
     // Expanded: a row per call, in order, the failed one marked.
     await chatPane.expandToolGroup(0);
-    await expect(chatPane.toolCallContainers).toHaveText([
+    await expect(chatPane.toolCallLabels()).toHaveText([
       "Pull latest changes from branch",
       "Read package.json",
       "Failed to run biome lint fix",
@@ -272,5 +284,8 @@ test.describe("chat tool groups and message actions", () => {
     await chatPane.copyMessage(prompt);
     await expect.poll(async () => (await workspace.readCopied()).at(-1)).toBe("fix the lint");
     await expect(chatPane.messageTime(prompt)).toHaveText(/^(just now|1 minute ago)$/);
+
+    // The group's duration comes from the logged event times too.
+    await expect(chatPane.toolGroupDuration(0)).toHaveText(TOOK);
   });
 });

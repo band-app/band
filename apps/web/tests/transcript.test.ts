@@ -9,10 +9,12 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { formatToolDuration, toolDuration } from "../src/components/chat/tool-summary";
 import {
   type ChatMessage,
   foldEvents,
   INITIAL_TRANSCRIPT,
+  type ToolEntry,
   type TranscriptState,
   transcriptReducer,
 } from "../src/components/chat/transcript";
@@ -529,5 +531,70 @@ describe("transcriptReducer — message times", () => {
       createdAt: 700,
     });
     expect(confirmed.messages[0]).toMatchObject({ id: "local-1", createdAt: 700 });
+  });
+});
+
+describe("transcriptReducer — tool call times", () => {
+  const tools = (state: TranscriptState) =>
+    assistant(state).entries.filter((e): e is ToolEntry => e.kind === "tool");
+
+  it("times a call from its tool_call to the update that finishes it", () => {
+    const events = logged([
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "npm test",
+        status: "pending",
+      }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "in_progress" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" }),
+      // Output arriving after the call finished doesn't move its end.
+      update({ sessionUpdate: "tool_call_update", toolCallId: "t1", rawOutput: "ok" }),
+    ]).map((e, i) => ({ ...e, createdAt: [1_000, 1_200, 5_200, 9_000][i] }));
+    const state = foldEvents(INITIAL_TRANSCRIPT, events);
+    expect(tools(state)).toMatchObject([{ id: "t1", startedAt: 1_000, endedAt: 5_200 }]);
+    expect(toolDuration(tools(state))).toBe(4_200);
+  });
+
+  it("keeps the start when the agent repeats a tool_call", () => {
+    const events = logged([
+      update({ sessionUpdate: "tool_call", toolCallId: "t1", title: "ls", status: "pending" }),
+      update({ sessionUpdate: "tool_call", toolCallId: "t1", title: "ls -a", status: "failed" }),
+    ]).map((e, i) => ({ ...e, createdAt: 2_000 + i * 300 }));
+    const state = foldEvents(INITIAL_TRANSCRIPT, events);
+    expect(tools(state)).toMatchObject([{ title: "ls -a", startedAt: 2_000, endedAt: 2_300 }]);
+  });
+
+  it("spans a group from its first start to its last end, and has none while a call runs", () => {
+    const events = logged([
+      update({ sessionUpdate: "tool_call", toolCallId: "a", title: "a", status: "in_progress" }),
+      update({ sessionUpdate: "tool_call", toolCallId: "b", title: "b", status: "in_progress" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "a", status: "completed" }),
+    ]).map((e, i) => ({ ...e, createdAt: [0, 500, 3_000][i] }));
+    const running = foldEvents(INITIAL_TRANSCRIPT, events);
+    expect(toolDuration(tools(running))).toBeUndefined();
+
+    const done = transcriptReducer(running, {
+      type: "update",
+      update: { sessionUpdate: "tool_call_update", toolCallId: "b", status: "completed" },
+      eventId: 4,
+      createdAt: 65_400,
+    });
+    expect(toolDuration(tools(done))).toBe(65_400);
+    expect(formatToolDuration(65_400)).toBe("1m 5s");
+  });
+
+  it("formats short and medium durations", () => {
+    expect([340, 4_249, 42_400].map(formatToolDuration)).toEqual(["340ms", "4.2s", "42s"]);
+  });
+
+  it("has no duration for calls logged without times", () => {
+    const state = foldEvents(
+      INITIAL_TRANSCRIPT,
+      logged([
+        update({ sessionUpdate: "tool_call", toolCallId: "t1", title: "ls", status: "completed" }),
+      ]),
+    );
+    expect(toolDuration(tools(state))).toBeUndefined();
   });
 });
