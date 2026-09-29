@@ -157,9 +157,7 @@ function QueuedMessage({
                 e.preventDefault();
                 save();
               } else if (e.key === "Escape") {
-                // Keep Escape from also stopping the running turn.
                 e.preventDefault();
-                e.stopPropagation();
                 setEditing(false);
               }
             }}

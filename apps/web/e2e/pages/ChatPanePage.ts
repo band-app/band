@@ -139,7 +139,7 @@ export class ChatPanePage {
   readonly submitButton: Locator;
   /** Queued messages (sent while a turn runs), in queue order. */
   readonly queuedMessages: Locator;
-  /** The "Queued · sent when <agent> finishes" divider above them. */
+  /** The "Queued · sent when the agent finishes" divider above them. */
   readonly queueDivider: Locator;
   /** The inline editor a queued message turns into while it is edited. */
   readonly queuedEditor: Locator;

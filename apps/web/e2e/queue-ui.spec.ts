@@ -116,13 +116,19 @@ async function queueMessage(chatPane: ChatPanePage, text: string): Promise<void>
   await expect(chatPane.queuedMessage(text)).toBeVisible();
 }
 
-/** The text of every prompt the agent received, in order. */
-function promptsSent(): string[] {
-  return stubRequests(tmpHome, "session/prompt").map((r) =>
+/**
+ * The text of every prompt the agent received after this test's held turn
+ * started, in order. The tests in this file share one agent log, and the
+ * turn's own prompt carries Band's instructions after its text.
+ */
+function promptsAfterHeldTurn(): string[] {
+  const prompts = stubRequests(tmpHome, "session/prompt").map((r) =>
     (r.params.prompt as { type: string; text?: string }[])
       .flatMap((block) => (block.type === "text" && block.text ? [block.text] : []))
       .join(""),
   );
+  const start = prompts.findLastIndex((p) => p.startsWith("start a long task"));
+  return prompts.slice(start + 1);
 }
 
 test("messages sent during a turn queue under a divider and go out when it ends", async ({
@@ -148,7 +154,7 @@ test("messages sent during a turn queue under a divider and go out when it ends"
   await expect(chatPane.queuedActions(withFile)).toHaveCSS("opacity", "1");
 
   await chatPane.deleteQueuedMessage("fix the bug");
-  expect(await chatPane.queuedMessageTexts()).toEqual(["use the screenshot"]);
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["use the screenshot"]);
   await expect(chatPane.queuedMessage("fix the bug")).toHaveCount(0);
 
   // Ending the turn sends what's left of the queue as a normal user message.
@@ -157,7 +163,7 @@ test("messages sent during a turn queue under a divider and go out when it ends"
   await expect(chatPane.userMessage("use the screenshot")).toBeVisible();
   await expect(chatPane.queuedMessages).toHaveCount(0);
   await expect(chatPane.queueDivider).toHaveCount(0);
-  expect(promptsSent()).not.toContain("fix the bug");
+  expect(promptsAfterHeldTurn()).toEqual(["use the screenshot"]);
 });
 
 test("editing a queued message inline saves with Enter or the send button and discards on Escape or a click outside", async ({
@@ -188,16 +194,16 @@ test("editing a queued message inline saves with Enter or the send button and di
   await chatPane.pressInQueuedEditor("l");
   await chatPane.pressInQueuedEditor("Enter");
   await expect(chatPane.queuedEditor).toHaveCount(0);
-  expect(await chatPane.queuedMessageTexts()).toEqual(["saved by enter\nl"]);
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["saved by enter\nl"]);
 
   await chatPane.editQueuedMessage("saved by enter", "saved by button");
   await chatPane.saveQueuedEdit();
-  expect(await chatPane.queuedMessageTexts()).toEqual(["saved by button"]);
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["saved by button"]);
 
   // The edit reached the server: the edited text is what the agent gets.
   await chatPane.answerPermission(0, "Allow");
   await expect(chatPane.assistantMessage("Heard saved by button")).toBeVisible();
-  expect(promptsSent()).toContain("saved by button");
+  expect(promptsAfterHeldTurn()).toEqual(["saved by button"]);
 });
 
 test("dragging a queued message's bubble reorders the queue and the order it is sent in", async ({
@@ -212,18 +218,20 @@ test("dragging a queued message's bubble reorders the queue and the order it is 
   await chatPane.dragQueuedMessage("gamma", "alpha");
   await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["gamma", "alpha", "beta"]);
 
-  // The new order is the server's, not just the optimistic local one.
-  await chatPane.reload();
-  await chatPane.waitForReady();
-  await expect(chatPane.permissionCards).toHaveCount(1);
-  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["gamma", "alpha", "beta"]);
+  // The new order is the server's, not just the optimistic local one. A
+  // reload can land before `queue.set` does, so reload until it shows.
+  await expect
+    .poll(async () => {
+      await chatPane.reload();
+      await chatPane.waitForReady();
+      await expect(chatPane.permissionCards).toHaveCount(1);
+      await expect(chatPane.queuedMessages).toHaveCount(3);
+      return chatPane.queuedMessageTexts();
+    })
+    .toEqual(["gamma", "alpha", "beta"]);
 
   await chatPane.answerPermission(0, "Allow");
   await expect(chatPane.assistantMessage("Heard beta")).toBeVisible();
   await expect(chatPane.queuedMessages).toHaveCount(0);
-  expect(promptsSent().filter((p) => ["alpha", "beta", "gamma"].includes(p))).toEqual([
-    "gamma",
-    "alpha",
-    "beta",
-  ]);
+  expect(promptsAfterHeldTurn()).toEqual(["gamma", "alpha", "beta"]);
 });
