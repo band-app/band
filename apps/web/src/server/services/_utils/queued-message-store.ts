@@ -44,7 +44,18 @@ export interface QueuedFile {
   filename?: string;
 }
 
-export interface QueuedMessage {
+/**
+ * Per-turn choices a sender asked for (`band chats send --mode/--model/
+ * --agent`), applied when the message is drained. Server-only, like
+ * `QueuedFile.path`: the wire shape drops them.
+ */
+export interface QueuedTurnOptions {
+  mode?: string;
+  model?: string;
+  codingAgentId?: string;
+}
+
+export interface QueuedMessage extends QueuedTurnOptions {
   /** Stable identifier so the client can cancel a specific entry by id. */
   id: string;
   text: string;
@@ -117,9 +128,16 @@ function notify(chatId: string): void {
 
 function cloneMessage(msg: QueuedMessage): QueuedMessage {
   return {
-    id: msg.id,
-    text: msg.text,
+    ...msg,
     files: msg.files ? msg.files.map((f) => ({ ...f })) : undefined,
+  };
+}
+
+function turnOptions(input: QueuedTurnOptions): QueuedTurnOptions {
+  return {
+    ...(input.mode !== undefined && { mode: input.mode }),
+    ...(input.model !== undefined && { model: input.model }),
+    ...(input.codingAgentId !== undefined && { codingAgentId: input.codingAgentId }),
   };
 }
 
@@ -131,7 +149,7 @@ export function subscribeQueue(listener: QueueListener): () => void {
   };
 }
 
-export interface PushQueuedMessageInput {
+export interface PushQueuedMessageInput extends QueuedTurnOptions {
   text: string;
   files?: QueuedFile[];
 }
@@ -145,6 +163,7 @@ export function pushQueuedMessage(chatId: string, input: PushQueuedMessageInput)
     id: randomUUID(),
     text: input.text,
     files: input.files && input.files.length > 0 ? input.files.map((f) => ({ ...f })) : undefined,
+    ...turnOptions(input),
   };
   const msgs = store.get(chatId);
   if (msgs) {
@@ -158,7 +177,9 @@ export function pushQueuedMessage(chatId: string, input: PushQueuedMessageInput)
 
 /**
  * Replace the entire queue for a chat pane. Each input message may
- * provide its own id; otherwise a new one is generated.
+ * provide its own id; otherwise a new one is generated. A message that
+ * keeps the id of one already queued keeps its turn options, since the
+ * client never sees them (a drag-reorder round-trips the wire shape).
  */
 export function setQueuedMessages(
   chatId: string,
@@ -167,11 +188,17 @@ export function setQueuedMessages(
   if (messages.length === 0) {
     store.delete(chatId);
   } else {
-    const stored: QueuedMessage[] = messages.map((m) => ({
-      id: m.id ?? randomUUID(),
-      text: m.text,
-      files: m.files && m.files.length > 0 ? m.files.map((f) => ({ ...f })) : undefined,
-    }));
+    const previous = new Map((store.get(chatId) ?? []).map((m) => [m.id, m]));
+    const stored: QueuedMessage[] = messages.map((m) => {
+      const kept = m.id !== undefined ? previous.get(m.id) : undefined;
+      return {
+        id: m.id ?? randomUUID(),
+        text: m.text,
+        files: m.files && m.files.length > 0 ? m.files.map((f) => ({ ...f })) : undefined,
+        ...(kept && turnOptions(kept)),
+        ...turnOptions(m),
+      };
+    });
     store.set(chatId, stored);
   }
   notify(chatId);

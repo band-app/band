@@ -546,6 +546,99 @@ describe("queue", () => {
       data: pixel.toString("base64"),
     });
   });
+
+  const promptTexts = (events: ChatEvent[]) =>
+    logged(events).flatMap((e) => (e.type === "prompt" ? [e.text] : []));
+
+  it("tasks.submit during a turn queues the message and runs it with its own model", async () => {
+    const chatId = newChatId("queue-submit");
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 3,
+    });
+    const submit = (prompt: string, extra: Record<string, string> = {}) =>
+      trpc<Record<string, unknown>>(server.url, "tasks.submit", {
+        workspaceId: WORKSPACE_ID,
+        chatId,
+        prompt,
+        ...extra,
+      });
+
+    const first = await submit("slow first");
+    expect(first).toMatchObject({ queued: false, workspaceId: WORKSPACE_ID, chatId });
+    expect(first.id).toMatch(/^tsk_/);
+    const second = await submit("second on large", { model: "stub-large" });
+    expect(second).toEqual({
+      queued: true,
+      id: null,
+      queuedMessageId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      workspaceId: WORKSPACE_ID,
+      chatId,
+      sessionId: null,
+    });
+    expect(await submit("third")).toMatchObject({ queued: true, id: null });
+
+    const events = await done;
+    expect(promptTexts(events)).toEqual(["slow first", "second on large", "third"]);
+    expect(agentText(events)).toBe(
+      'slow doneHeard "second on large" on stub-large.Heard "third" on stub-large.',
+    );
+  });
+
+  it("chats.send during a turn queues the message", async () => {
+    const chatId = newChatId("queue-chats-send");
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 2,
+    });
+    const send = (message: string) =>
+      trpc<Record<string, unknown>>(server.url, "chats.send", {
+        workspaceId: WORKSPACE_ID,
+        chatId,
+        message,
+      });
+
+    expect(await send("slow first")).toMatchObject({ queued: false });
+    expect(await send("sent by chats.send")).toEqual({
+      queued: true,
+      queuedMessageId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      taskId: null,
+      sessionId: null,
+    });
+
+    const events = await done;
+    expect(promptTexts(events)).toEqual(["slow first", "sent by chats.send"]);
+  });
+
+  it("a message sent after a stop goes behind the messages still queued", async () => {
+    const chatId = newChatId("queue-after-stop");
+    const actions: Promise<unknown>[] = [];
+    let aborted = false;
+    let ended = 0;
+    const { events: done } = await openStream(server.url, chatId, {
+      until: (_e, all) => all.filter(turnEnded).length === 3,
+      onEvent: (e) => {
+        if (!aborted && e.type === "update" && e.update.sessionUpdate === "agent_message_chunk") {
+          aborted = true;
+          actions.push(trpc(server.url, "tasks.abort", { workspaceId: WORKSPACE_ID, chatId }));
+        }
+        // The stopped turn leaves "left in queue" waiting; send one more.
+        if (turnEnded(e) && ++ended === 1) {
+          actions.push(sendMessage(server.url, chatId, "sent after stop"));
+        }
+      },
+    });
+    expect(await sendMessage(server.url, chatId, "wait for stop")).toMatchObject({
+      queued: false,
+    });
+    expect(await sendMessage(server.url, chatId, "left in queue")).toMatchObject({
+      queued: true,
+    });
+
+    const events = await done;
+    const results = await Promise.all(actions);
+    expect(results[1]).toEqual({ ok: true, queued: true });
+    expect(events.find(turnEnded)).toMatchObject({ stopReason: "cancelled" });
+    expect(promptTexts(events)).toEqual(["wait for stop", "left in queue", "sent after stop"]);
+  });
 });
 
 describe("attachments", () => {

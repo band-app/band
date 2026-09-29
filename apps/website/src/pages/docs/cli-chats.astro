@@ -53,6 +53,13 @@ band chats create --name "planning" --agent claude-code \
     streams to the dashboard; use <code>band chats watch</code> to follow it from the CLI.
   </p>
 
+  <p>
+    If the agent is still working, the message is queued instead of rejected. Queued
+    messages run in the order they were sent, each once the turn ahead of it finishes, and
+    the command prints <code>queued &lt;id&gt;</code>. They show in the chat pane, where you
+    can edit, reorder or cancel them.
+  </p>
+
   <pre><code># From inside a workspace directory: workspace and chat auto-resolved.
 band chats send --message "Fix the failing tests"
 
