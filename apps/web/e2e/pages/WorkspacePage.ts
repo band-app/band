@@ -3040,8 +3040,10 @@ export class WorkspacePage {
    *  of `pattern` (a regex source, first capture group) on the top row of a
    *  workspace terminal's screen, into `window.__parsedTopRowMatches`. Shows
    *  which of a series of redraws of that row reached xterm one by one,
-   *  rather than several at once in a batch. Same one-terminal-per-workspace
-   *  assumption as `terminalCols`. */
+   *  rather than several at once in a batch. Choppy painting has no
+   *  deterministic DOM signal, so parse granularity stands in for it; prefer
+   *  a rendered-text assertion wherever one works. Same
+   *  one-terminal-per-workspace assumption as `terminalCols`. */
   async recordParsedTopRow(workspaceId: string, pattern: string): Promise<void> {
     await test.step(`Record parsed top-row matches of /${pattern}/ in ${workspaceId}`, async () => {
       const installed = await this.page.evaluate(

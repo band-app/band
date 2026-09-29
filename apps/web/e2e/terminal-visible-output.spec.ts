@@ -3,8 +3,8 @@
  *
  * A visible terminal writes through a paced drain and acknowledges each
  * chunk once xterm has parsed it; the server pauses the PTY while more than
- * 256 KB is unacknowledged (`api/terminals/output-flow.ts`). These cover the
- * two ways that could leave a pane stuck:
+ * 256 KB is unacknowledged (`api/terminals/output-flow.ts`). These cover ways
+ * visible output could stall or arrive in batches:
  *
  *  - a flood far past the hold threshold must run to the end at full speed
  *    over the same socket. If the page stopped acknowledging, every 256 KB
@@ -139,7 +139,7 @@ test("back-to-back synchronized frames reach xterm one chunk at a time", async (
   );
 
   // Parsed chunk by chunk, xterm sees nearly every frame on its own. Held
-  // until a timer, it sees one frame per ~250 ms (under 10 of the 60).
+  // until a timer, it saw one frame per ~250 ms: 14 of the 60 before the fix.
   const frames = await workspacePage.readParsedTopRowMatches();
   expect(frames).toContain("159");
   expect(frames.length).toBeGreaterThanOrEqual(30);
