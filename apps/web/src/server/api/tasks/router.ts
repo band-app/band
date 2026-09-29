@@ -10,12 +10,28 @@ import { loadState } from "../../services/state";
 import { type TaskAttachment, TaskConflictError, taskService } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
-interface SubmitResult {
-  id: string;
-  workspaceId: string;
-  chatId: string;
-  sessionId: string | undefined;
-}
+/**
+ * `queued` is true when the chat was busy: the message waits in the chat's
+ * queue and runs in order once the turns ahead of it finish. It has no task
+ * yet, so `id` and `sessionId` are null and `queuedMessageId` names the
+ * queue entry.
+ */
+type SubmitResult =
+  | {
+      queued: false;
+      id: string;
+      workspaceId: string;
+      chatId: string;
+      sessionId: string | undefined;
+    }
+  | {
+      queued: true;
+      id: null;
+      queuedMessageId: string;
+      workspaceId: string;
+      chatId: string;
+      sessionId: null;
+    };
 
 interface RerunResult {
   workspaceId: string;
@@ -146,7 +162,7 @@ export const tasksRouter = t.router({
       }
 
       try {
-        const task = taskService.submitTask({
+        const result = taskService.submitOrQueueTask({
           workspaceId: input.workspaceId,
           chatId,
           prompt: input.prompt,
@@ -156,7 +172,19 @@ export const tasksRouter = t.router({
           model: input.model,
           codingAgentId: input.codingAgentId,
         });
+        if (result.queued) {
+          return {
+            queued: true,
+            id: null,
+            queuedMessageId: result.queuedMessageId,
+            workspaceId: input.workspaceId,
+            chatId,
+            sessionId: null,
+          };
+        }
+        const { task } = result;
         return {
+          queued: false,
           id: task.id,
           workspaceId: task.workspaceId,
           chatId: task.chatId,
@@ -249,8 +277,9 @@ export type TasksRouter = typeof tasksRouter;
  * TypeScript to treat the line as terminal control flow (same convention
  * as the cronjobs router).
  *
- *   - `TaskConflictError` → 409 `CONFLICT` (a task is already running for
- *     this chat pane)
+ *   - `TaskConflictError` → 409 `CONFLICT`, from `rerun` only: a task is
+ *     already running for this chat pane. `submit` queues the message
+ *     instead (`submitOrQueueTask`).
  *   - `WorkspaceNotFoundError` → 404 `NOT_FOUND`. Matched by `instanceof`
  *     rather than message-string (the legacy router did
  *     `err.message.startsWith("Workspace not found")`, which was fragile

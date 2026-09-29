@@ -22,7 +22,7 @@ import { z } from "zod";
 import { sessionIdSchema } from "../../services/_utils/session-id";
 import { agentSessionService, ChatNotFoundError } from "../../services/agent-session-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
-import { TaskConflictError, taskService } from "../../services/task-service";
+import { taskService } from "../../services/task-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -243,23 +243,26 @@ export const chatsRouter = t.router({
       if (!chat) {
         chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
       }
-      try {
-        const task = taskService.submitTask({
-          workspaceId: chat.workspaceId,
-          chatId: chat.id,
-          prompt: input.message,
-          sessionId: input.sessionId,
-        });
-        return { taskId: task.id, sessionId: task.sessionId };
-      } catch (err) {
-        if (err instanceof TaskConflictError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Task already running for this chat pane",
-          });
-        }
-        throw err;
+      // A busy chat queues the message; it runs once the turns ahead finish.
+      const result = taskService.submitOrQueueTask({
+        workspaceId: chat.workspaceId,
+        chatId: chat.id,
+        prompt: input.message,
+        sessionId: input.sessionId,
+      });
+      if (result.queued) {
+        return {
+          queued: true as const,
+          queuedMessageId: result.queuedMessageId,
+          taskId: null,
+          sessionId: null,
+        };
       }
+      return {
+        queued: false as const,
+        taskId: result.task.id,
+        sessionId: result.task.sessionId,
+      };
     }),
 
   stop: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {

@@ -8,7 +8,12 @@ import type { ChatEvent, TurnUsage } from "../../shared/chat-events";
 import { WorkspaceNotFoundError } from "../errors";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 import { mimeTypeFromFilename } from "./_utils/mime-types";
-import { shiftQueuedMessage } from "./_utils/queued-message-store";
+import {
+  hasQueuedMessages,
+  peekQueuedMessage,
+  pushQueuedMessage,
+  removeQueuedMessage,
+} from "./_utils/queued-message-store";
 import { agentSessionService, findOption } from "./agent-session-service";
 import { chatService } from "./chat-service";
 import {
@@ -306,6 +311,40 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
   return toTaskInfo(task);
 }
 
+export type SubmitOrQueueResult =
+  | { queued: false; task: TaskInfo }
+  | { queued: true; queuedMessageId: string };
+
+/**
+ * Starts the turn now, or queues the message when the chat is busy: a turn
+ * is running, or earlier messages are still waiting, so a new message never
+ * jumps ahead of them. Queued messages run in order as each turn completes.
+ * A queue left behind by a stopped or failed turn starts draining again
+ * when the next message arrives. `sessionId` applies only to a turn that
+ * starts now.
+ */
+export function submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResult {
+  const { workspaceId, chatId } = options;
+  if (!workspaceService.resolve(workspaceId)) {
+    throw new WorkspaceNotFoundError(workspaceId);
+  }
+
+  const running = tasks.get(chatId)?.status === "running";
+  if (!running && !hasQueuedMessages(chatId)) {
+    return { queued: false, task: submitTask(options) };
+  }
+
+  const queued = pushQueuedMessage(chatId, {
+    text: options.prompt,
+    files: options.attachments,
+    mode: options.mode,
+    model: options.model,
+    codingAgentId: options.codingAgentId,
+  });
+  if (!running) drainQueue(workspaceId, chatId);
+  return { queued: true, queuedMessageId: queued.id };
+}
+
 async function runTask(task: InternalTask): Promise<void> {
   const { chatId } = task;
   chatService.updateStatus(chatId, "running");
@@ -463,7 +502,7 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
   persistTask(task);
   if (tasks.get(task.chatId) === task) tasks.delete(task.chatId);
 
-  if (status === "completed" && drainQueue(task)) return;
+  if (status === "completed" && drainQueue(task.workspaceId, task.chatId)) return;
 
   chatService.updateStatus(task.chatId, status === "completed" ? "idle" : "error");
   const stopped = outcome === "cancelled" || task.cancelRequested === true;
@@ -474,8 +513,10 @@ function finishTask(task: InternalTask, outcome: "completed" | "failed" | "cance
 }
 
 /** Starts the chat's next queued message, if any. */
-function drainQueue(task: InternalTask): boolean {
-  const queued = shiftQueuedMessage(task.chatId);
+function drainQueue(workspaceId: string, chatId: string): boolean {
+  // Removed only once its turn has started, so a failed start leaves it
+  // at the head of the queue for the next attempt.
+  const queued = peekQueuedMessage(chatId);
   if (!queued) return false;
   try {
     // Queued payloads already carry the saved file's absolute path (every
@@ -484,14 +525,18 @@ function drainQueue(task: InternalTask): boolean {
       .filter((f) => f.path)
       .map((f) => ({ path: f.path, mediaType: f.mediaType, url: f.url, filename: f.filename }));
     submitTask({
-      workspaceId: task.workspaceId,
-      chatId: task.chatId,
+      workspaceId,
+      chatId,
       prompt: queued.text,
       attachments,
+      mode: queued.mode,
+      model: queued.model,
+      codingAgentId: queued.codingAgentId,
     });
+    removeQueuedMessage(chatId, queued.id);
     return true;
   } catch (err) {
-    log.warn({ chatId: task.chatId, err }, "failed to auto-start queued task");
+    log.warn({ chatId, err }, "failed to auto-start queued task");
     return false;
   }
 }
@@ -553,6 +598,10 @@ export class TaskService {
 
   submitTask(options: SubmitTaskOptions): TaskInfo {
     return submitTask(options);
+  }
+
+  submitOrQueueTask(options: SubmitTaskOptions): SubmitOrQueueResult {
+    return submitOrQueueTask(options);
   }
 
   abortTask(chatId: string): boolean {

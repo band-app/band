@@ -1347,7 +1347,9 @@ fn format_labels_cell(labels: &serde_json::Value) -> String {
 }
 
 /// Send a message to a workspace chat, defaulting to the workspace's active
-/// chat panel when no `chat_id` is provided. Returns the task id.
+/// chat panel when no `chat_id` is provided. Returns the task id, or
+/// `queued <queue entry id>` when the chat is busy and the server queued
+/// the message behind the running turn.
 ///
 /// Calls `tasks.submit` server-side, which resolves the default chat via
 /// `getOrCreateDefaultChat` — honoring the saved chat layout's active panel,
@@ -1385,17 +1387,35 @@ fn cmd_chats_send(
 
     let data = client.trpc_mutate("tasks.submit", &input)?;
 
-    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
     let ws = data
         .get("workspaceId")
         .and_then(|w| w.as_str())
         .unwrap_or("");
     let resolved_chat_id = data.get("chatId").and_then(|c| c.as_str()).unwrap_or("");
 
+    if data.get("queued").and_then(serde_json::Value::as_bool) == Some(true) {
+        let queued_id = data
+            .get("queuedMessageId")
+            .and_then(|q| q.as_str())
+            .unwrap_or("");
+        return Ok(CommandResult {
+            text: format!("queued {queued_id}\n"),
+            json: serde_json::json!({
+                "id": null,
+                "queued": true,
+                "queuedMessageId": queued_id,
+                "workspaceId": ws,
+                "chatId": resolved_chat_id,
+            }),
+        });
+    }
+
+    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
     Ok(CommandResult {
         text: format!("{id}\n"),
         json: serde_json::json!({
             "id": id,
+            "queued": false,
             "workspaceId": ws,
             "chatId": resolved_chat_id,
         }),
@@ -3063,7 +3083,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
-            "notes": "Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
+            "notes": "Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.\nJSON output: `{\"id\": \"tsk_...\", \"queued\": false, \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`, or `{\"id\": null, \"queued\": true, \"queuedMessageId\": \"...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}` when queued.\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
         }),
         serde_json::json!({
             "name": "chats watch",

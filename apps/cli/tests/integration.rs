@@ -20,6 +20,12 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
+        Self::with_server_env(&[])
+    }
+
+    /// Like `new`, with extra environment variables for the web server
+    /// (e.g. `BAND_TEST_ACP_AGENT` to run chats on the scripted stub agent).
+    fn with_server_env(server_env: &[(&str, &str)]) -> Self {
         let tmp = tempfile::tempdir().expect("create tempdir");
         // Canonicalize the temp HOME up front. On macOS `tempfile::tempdir()`
         // hands back `/var/folders/...` while git (and `fs::canonicalize`)
@@ -85,6 +91,7 @@ impl TestEnv {
             .env("HOME", &home_dir)
             .env("PORT", port.to_string())
             .env("NODE_ENV", "production")
+            .envs(server_env.iter().copied())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1534,34 +1541,77 @@ fn chat_json_output_includes_chat_id() {
 }
 
 #[test]
-fn chat_conflict_returns_error() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/conflict"]);
-
-    // Submit first task — will start running
-    let out1 = env.band(&[
-        "chats",
-        "send",
-        "--workspace",
-        "my-project-feat-conflict",
-        "--message",
-        "first task",
+fn chat_send_while_agent_runs_queues_the_message() {
+    // Run chats on the scripted stub agent, whose "wait" turn runs until it
+    // is cancelled, so the first message is still running when the others
+    // arrive.
+    let scenario_dir = tempfile::tempdir().expect("create scenario dir");
+    let scenario = scenario_dir.path().join("acp-scenario.json");
+    fs::write(
+        &scenario,
+        r#"{"turns":[{"match":"^wait","steps":[{"say":"Working."},{"waitForCancel":true}]}]}"#,
+    )
+    .unwrap();
+    let stub_agent = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/web/tests/fixtures/acp-stub-agent.mjs");
+    let env = TestEnv::with_server_env(&[
+        ("BAND_TEST_ACP_AGENT", stub_agent.to_str().unwrap()),
+        ("BAND_TEST_ACP_SCENARIO", scenario.to_str().unwrap()),
     ]);
-    assert!(out1.status.success(), "stderr: {}", stderr(&out1));
 
-    // Immediately submit a second task — should fail with conflict
-    let out2 = env.band(&[
-        "chats",
-        "send",
-        "--workspace",
-        "my-project-feat-conflict",
-        "--message",
-        "second task",
-    ]);
-    // Might succeed (if first finished fast) or fail with conflict
-    // We just verify it doesn't crash and returns a reasonable response
-    let _ = out2;
+    env.band(&["workspaces", "create", "my-project", "feat/queue"]);
+    let send = |message: &str, json: bool| {
+        let mut args = vec![
+            "chats",
+            "send",
+            "--workspace",
+            "my-project-feat-queue",
+            "--message",
+            message,
+        ];
+        if json {
+            args.extend(["--output", "json"]);
+        }
+        env.band(&args)
+    };
+
+    let first = send("wait here", false);
+    assert!(first.status.success(), "stderr: {}", stderr(&first));
+    assert!(
+        stdout(&first).starts_with("tsk_"),
+        "expected a task id: {}",
+        stdout(&first)
+    );
+
+    let second = send("second message", true);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&second))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&second)));
+    assert_eq!(json["queued"], true, "json: {json}");
+    assert_eq!(json["id"], serde_json::Value::Null, "json: {json}");
+    assert_eq!(json["workspaceId"], "my-project-feat-queue", "json: {json}");
+    assert!(
+        json["chatId"].as_str().unwrap_or("").starts_with("chat_"),
+        "json: {json}"
+    );
+    let queued_id = json["queuedMessageId"].as_str().unwrap_or("");
+    assert!(!queued_id.is_empty(), "json: {json}");
+
+    let third = send("third message", false);
+    assert!(third.status.success(), "stderr: {}", stderr(&third));
+    let text = stdout(&third);
+    let third_id = text.strip_prefix("queued ").unwrap_or_else(|| {
+        panic!("expected `queued <id>`: {text}");
+    });
+    assert!(
+        !third_id.is_empty() && third_id != queued_id,
+        "stdout: {text}"
+    );
+
+    // End the waiting turn so the stub agent exits with the server.
+    let chat_id = json["chatId"].as_str().unwrap();
+    let stop = env.band(&["chats", "stop", chat_id]);
+    assert!(stop.status.success(), "stderr: {}", stderr(&stop));
 }
 
 // --- Cronjobs tests ---

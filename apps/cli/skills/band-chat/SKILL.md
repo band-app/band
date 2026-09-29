@@ -59,8 +59,8 @@ band chats send [chat_id] --message <string> [--workspace <string>] [--mode <str
 
 Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new "Chat" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.
 
-Returns the task ID.
-JSON output: `{"id": "tsk_...", "workspaceId": "...", "chatId": "chat_..."}`
+Returns the task ID. When the chat is busy (a turn is running, or earlier messages are still queued), the message is queued instead and runs in order once the turns ahead of it finish; the command then prints `queued <queue entry id>`. Queued messages show in the chat pane, where they can be edited, reordered or cancelled.
+JSON output: `{"id": "tsk_...", "queued": false, "workspaceId": "...", "chatId": "chat_..."}`, or `{"id": null, "queued": true, "queuedMessageId": "...", "workspaceId": "...", "chatId": "chat_..."}` when queued.
 
 Replaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`).
 

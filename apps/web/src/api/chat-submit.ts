@@ -3,8 +3,9 @@
  *
  * Submit a user message. Decoupled from observation: the client sees the
  * turn on its chat event stream (`GET /api/chats/:chatId/events`). Returns
- * `200 { ok: true, queued }` once the turn is in flight, or queued when one
- * is already running for this chat (the subscriber gets `queue-updated`).
+ * `200 { ok: true, queued }` once the turn is in flight, or queued behind the
+ * running turn and any earlier queued messages (the subscriber gets
+ * `queue-updated`).
  *
  * Attached files are saved under `~/.band/uploads` first and reach the agent
  * as ACP `resource_link` / `image` blocks (see `task-service`).
@@ -12,13 +13,11 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import { pushQueuedMessage } from "../server/services/_utils/queued-message-store";
 import { SESSION_ID_PATTERN } from "../server/services/_utils/session-id";
 import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
   type TaskAttachment,
-  TaskConflictError,
   taskService,
   WorkspaceNotFoundError,
 } from "../server/services/task-service";
@@ -96,7 +95,7 @@ export async function handleChatSubmit(
   }
 
   try {
-    taskService.submitTask({
+    const result = taskService.submitOrQueueTask({
       workspaceId,
       chatId,
       prompt: text,
@@ -106,20 +105,12 @@ export async function handleChatSubmit(
       model,
       codingAgentId,
     });
-    log.info({ chatId, workspaceId }, "chat-submit: task started");
-    sendJson(res, 200, { ok: true, queued: false });
+    log.info(
+      { chatId, workspaceId },
+      result.queued ? "chat-submit: chat busy, message queued" : "chat-submit: task started",
+    );
+    sendJson(res, 200, { ok: true, queued: result.queued });
   } catch (err) {
-    if (err instanceof TaskConflictError) {
-      // A turn is running; queue the message. The drain in task-service
-      // rebuilds the attachments from the saved paths.
-      pushQueuedMessage(chatId, {
-        text,
-        ...(attachments.length > 0 && { files: attachments }),
-      });
-      log.info({ chatId, workspaceId }, "chat-submit: task busy, message queued");
-      sendJson(res, 200, { ok: true, queued: true });
-      return;
-    }
     if (err instanceof WorkspaceNotFoundError) {
       sendJson(res, 404, { error: err.message });
       return;
