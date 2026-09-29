@@ -3,7 +3,7 @@
  * each message has a hover row with a copy action and the time it was sent.
  *
  *   - Collapsed, a group is one line: "Ran 3 commands (1 failed), read
- *     package.json".
+ *     package.json". A lone shell command is a group too: "Ran 1 command".
  *   - Expanded, each call is a row with a short description (Claude Code's
  *     `rawInput.description`, or the title). A failed call reads "Failed
  *     to …" and carries `data-status="error"`.
@@ -42,6 +42,8 @@ const TOKEN = "e2e-chat-tool-groups-token";
 const PROJECT = "toolgroups";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const REPLY = "Fixed the lint errors.";
+const STATUS_REPLY = "The tree is clean.";
+const README_REPLY = "The README is short.";
 /** The scenario sleeps 300 ms inside the pull call, so its duration and
  *  the group's have at least three digits of milliseconds. */
 const TOOK = /^(\d{3}ms|\d+(\.\d)?s)$/;
@@ -167,6 +169,49 @@ test.beforeAll(async () => {
             { say: REPLY },
           ],
         },
+        {
+          match: "check the status",
+          steps: [
+            {
+              tool: {
+                toolCallId: "tc-status",
+                title: "git status",
+                kind: "execute",
+                status: "pending",
+                rawInput: { command: "git status", description: "Show working tree status" },
+              },
+            },
+            {
+              toolUpdate: {
+                toolCallId: "tc-status",
+                status: "completed",
+                content: [
+                  {
+                    type: "content",
+                    content: { type: "text", text: "```console\nnothing to commit\n```" },
+                  },
+                ],
+              },
+            },
+            { say: STATUS_REPLY },
+          ],
+        },
+        {
+          match: "read the readme",
+          steps: [
+            {
+              tool: {
+                toolCallId: "tc-readme",
+                title: "Read README.md",
+                kind: "read",
+                status: "completed",
+                locations: [{ path: join(repoDir, "README.md") }],
+                rawInput: { file_path: join(repoDir, "README.md") },
+              },
+            },
+            { say: README_REPLY },
+          ],
+        },
       ],
     }),
   });
@@ -178,7 +223,7 @@ test.afterAll(async () => {
 });
 
 test.describe("chat tool groups and message actions", () => {
-  // The second test reads the chat the first one ran.
+  // Later tests read the chat the first one ran.
   test.describe.configure({ mode: "serial" });
 
   test("folds consecutive tool calls into one summary and shows each call's details", async ({
@@ -301,5 +346,44 @@ test.describe("chat tool groups and message actions", () => {
     // The group's duration comes from the logged event times too.
     expect(liveGroupDuration).not.toBeNull();
     await expect(chatPane.toolGroupDuration(0)).toHaveText(liveGroupDuration ?? "");
+  });
+
+  test("a lone shell command folds into a group of one", async ({ page }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(WORKSPACE);
+    await chatPane.waitForReady();
+    await expect(chatPane.assistantMessage(REPLY)).toBeVisible();
+
+    await chatPane.typeMessage("check the status");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage(STATUS_REPLY)).toBeVisible();
+
+    // The earlier turn's group, then this one's.
+    await expect(chatPane.toolGroups).toHaveCount(2);
+    await expect(chatPane.toolGroupSummary(1)).toHaveText("Ran 1 command");
+    await expect(chatPane.toolCallContainers).toHaveCount(0);
+
+    await chatPane.expandToolGroup(1);
+    await expect(chatPane.toolCallLabels()).toHaveText(["Show working tree status"]);
+    await chatPane.expandToolCall("Show working tree status");
+    await expect(chatPane.toolCallCommand("Show working tree status")).toHaveText("$ git status");
+    await expect(chatPane.toolCallOutput("Show working tree status")).toHaveText(
+      "nothing to commit",
+    );
+  });
+
+  test("a lone read stays a row of its own", async ({ page }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(WORKSPACE);
+    await chatPane.waitForReady();
+    await expect(chatPane.assistantMessage(STATUS_REPLY)).toBeVisible();
+
+    await chatPane.typeMessage("read the readme");
+    await chatPane.submit();
+    await expect(chatPane.assistantMessage(README_REPLY)).toBeVisible();
+
+    // No third group: the read is shown without expanding anything.
+    await expect(chatPane.toolGroups).toHaveCount(2);
+    await expect(chatPane.toolCallLabels()).toHaveText(["Read README.md"]);
   });
 });
