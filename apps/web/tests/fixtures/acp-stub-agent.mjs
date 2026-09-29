@@ -61,6 +61,16 @@
  *   { "stop": "end_turn" | ... , "usage": { ...PromptResponse.usage } }
  *   { "fail": "message" }                   the prompt request errors
  *   { "exit": code }                        the process exits mid-turn
+ *   { "later": [steps], "afterMs": ms }     run steps `ms` after this point,
+ *                                           outside any turn, the way an
+ *                                           agent-started turn (a wakeup, a
+ *                                           task notification) streams
+ *   { "asyncTask": { ...update } }          an AIR `async_task_*` update
+ *                                           (`sessionUpdate` defaults to
+ *                                           `async_task_spawned`), sent only
+ *                                           when the client listed the
+ *                                           `asyncTasks` capability, like
+ *                                           the Claude adapter
  *
  * A turn without a `stop` step ends with `end_turn`. In any text,
  * `{{prompt}}` is replaced with the prompt's first line and `{{model}}` with
@@ -79,6 +89,8 @@ const scenario = env.BAND_TEST_ACP_SCENARIO
   : { turns: [] };
 const caps = env.BAND_TEST_ACP_CAPS ? JSON.parse(env.BAND_TEST_ACP_CAPS) : {};
 const stateDir = env.BAND_TEST_ACP_STATE;
+/** Whether the client listed the AIR `asyncTasks` capability. */
+let clientAsyncTasks = false;
 if (stateDir) mkdirSync(stateDir, { recursive: true });
 
 function logRequest(method, params) {
@@ -229,6 +241,18 @@ async function runSteps(cx, sessionId, steps, signal, record) {
       await notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: step.think } });
     } else if (step.update) {
       await notify(step.update);
+    } else if (step.asyncTask) {
+      if (clientAsyncTasks) {
+        await notify({ sessionUpdate: "async_task_spawned", ...step.asyncTask });
+      }
+    } else if (step.later) {
+      const later = step.later;
+      const t = setTimeout(() => {
+        runSteps(cx, sessionId, later, new AbortController().signal, record)
+          .catch((err) => process.stderr.write(`later steps failed: ${err}\n`))
+          .finally(() => save(sessionId));
+      }, step.afterMs ?? 0);
+      t.unref?.();
     } else if (step.tool) {
       await notify({ sessionUpdate: "tool_call", ...step.tool });
     } else if (step.toolUpdate) {
@@ -279,6 +303,8 @@ acp
   .agent({ name: "band-acp-stub" })
   .onRequest("initialize", (ctx) => {
     logRequest("initialize", ctx.params);
+    const air = ctx.params.clientCapabilities?._meta?.jetbrains?.air;
+    clientAsyncTasks = air?.version >= 1 && (air.capabilities ?? []).includes("asyncTasks");
     if (env.BAND_TEST_ACP_FAIL_START) throw new acp.RequestError(-32000, env.BAND_TEST_ACP_FAIL_START);
     return {
       protocolVersion: acp.PROTOCOL_VERSION,

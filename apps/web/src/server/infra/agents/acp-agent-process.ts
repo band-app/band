@@ -53,13 +53,85 @@ const CLIENT_CAPABILITIES: acp.ClientCapabilities = {
   // disabled when the client can't render one.
   elicitation: { form: {} },
   session: { notices: {} },
+  // JetBrains AIR extension: the Claude adapter reports background work
+  // (background Bash, Monitor, workflows) as `async_task_*` updates only to
+  // a client that lists `asyncTasks`. Band uses them to keep the process
+  // alive while that work runs.
+  _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
 };
+
+/** An AIR `async_task_*` update. Not part of ACP's `SessionUpdate` union,
+ *  so the SDK's validator would reject it; Band takes it off the stream
+ *  first (see `splitAsyncTasks`). Only the fields Band reads are typed. */
+export type AsyncTaskUpdate =
+  | {
+      sessionUpdate: "async_task_spawned";
+      asyncTaskId: string;
+      name?: string;
+      taskType?: string;
+      toolCallId?: string;
+    }
+  | {
+      sessionUpdate: "async_task_state_update";
+      asyncTaskId: string;
+      state: "running" | "paused" | "completed" | "failed" | "stopped";
+      toolCallId?: string;
+    }
+  | { sessionUpdate: "async_task_progress"; asyncTaskId: string };
+
+export interface AsyncTaskNotification {
+  sessionId: string;
+  update: AsyncTaskUpdate;
+}
+
+function asAsyncTaskNotification(message: unknown): AsyncTaskNotification | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as { method?: unknown; params?: unknown };
+  if (m.method !== acp.methods.client.session.update) return null;
+  const params = m.params as { sessionId?: unknown; update?: unknown } | undefined;
+  const update = params?.update as { sessionUpdate?: unknown; asyncTaskId?: unknown } | undefined;
+  if (
+    typeof params?.sessionId !== "string" ||
+    typeof update?.sessionUpdate !== "string" ||
+    !update.sessionUpdate.startsWith("async_task_") ||
+    typeof update.asyncTaskId !== "string"
+  ) {
+    return null;
+  }
+  return params as AsyncTaskNotification;
+}
+
+/** Hands `async_task_*` updates to `onAsyncTask` and passes every other
+ *  message on to the SDK unchanged. */
+function splitAsyncTasks(
+  readable: ReadableStream<acp.AnyMessage>,
+  onAsyncTask: (notification: AsyncTaskNotification) => void,
+): ReadableStream<acp.AnyMessage> {
+  return readable.pipeThrough(
+    new TransformStream<acp.AnyMessage, acp.AnyMessage>({
+      transform(message, controller) {
+        const task = asAsyncTaskNotification(message);
+        if (!task) {
+          controller.enqueue(message);
+          return;
+        }
+        try {
+          onAsyncTask(task);
+        } catch (err) {
+          log.warn({ err }, "async task handler threw");
+        }
+      },
+    }),
+  );
+}
 
 export type PermissionOutcome = acp.RequestPermissionResponse["outcome"];
 
 export interface AcpAgentHandlers {
   /** Every `session/update`, for any session on this process. */
   onUpdate(notification: acp.SessionNotification): void;
+  /** Every AIR `async_task_*` update (see `CLIENT_CAPABILITIES`). */
+  onAsyncTask?(notification: AsyncTaskNotification): void;
   /** `session/request_permission`. `signal` aborts when the agent cancels
    *  the request or the connection closes. */
   onPermission(
@@ -173,10 +245,14 @@ export class AcpAgentProcess {
       throw new Error(`Could not start ${label}: ${(err as Error).message}`);
     }
 
-    const stream = acp.ndJsonStream(
+    const wire = acp.ndJsonStream(
       Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
       Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
     );
+    const stream = {
+      writable: wire.writable,
+      readable: splitAsyncTasks(wire.readable, (n) => handlers.onAsyncTask?.(n)),
+    };
     const connection = acp
       .client({ name: "band" })
       .onNotification(acp.methods.client.session.update, (ctx) => {
