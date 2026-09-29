@@ -421,7 +421,7 @@ test.describe("an iOS home-screen app added with the old status bar", () => {
 test.describe("in a phone browser tab", () => {
   test.use({ viewport: PHONE });
 
-  test("Explorer and Changes are header buttons that open their sheet and return to the editor", async ({
+  test("a 3-dot header menu opens Explorer and Changes in their sheet, which return to the editor", async ({
     page,
   }) => {
     const layout = new MobileLayoutPage(page, server.url, TOKEN);
@@ -432,24 +432,29 @@ test.describe("in a phone browser tab", () => {
     await expect(layout.legacyBottomBar).toHaveCount(0);
     const header = await layout.readLayout(layout.header);
     const title = await layout.readLayout(layout.workspaceSwitcher);
-    for (const button of [layout.explorerButton, layout.changesButton]) {
-      const box = await layout.readLayout(button);
-      expect(box.top).toBeGreaterThanOrEqual(header.top);
-      expect(box.bottom).toBeLessThanOrEqual(header.bottom);
-      expect(box.left).toBeGreaterThanOrEqual(title.right);
-      expect(box.right).toBeLessThanOrEqual(PHONE.width);
-    }
-    await expect(layout.changesBadge).toHaveText("1");
+    const menu = await layout.readLayout(layout.menuButton);
+    expect(menu.top).toBeGreaterThanOrEqual(header.top);
+    expect(menu.bottom).toBeLessThanOrEqual(header.bottom);
+    expect(menu.left).toBeGreaterThanOrEqual(title.right);
+    expect(menu.right).toBeLessThanOrEqual(PHONE.width);
 
-    // The modal sheet hides the header from the accessibility tree while open.
+    // The menu is a bottom drawer listing the panels, Changes with its count.
+    await layout.openMenu();
+    const drawer = await layout.readLayout(layout.menuBody);
+    expect(drawer.bottom).toBe(PHONE.height);
+    await expect(layout.menuItem("explorer")).toBeVisible();
+    await expect(layout.changesItemBadge).toHaveText("1");
+    await layout.closeSheet();
+    await expect(layout.menuBody).toBeHidden();
+
+    // Picking a panel swaps the drawer for the panel's sheet; closing that
+    // returns to the editor.
     await layout.openSheet("changes");
     await layout.closeSheet();
-    await expect(layout.changesButton).toHaveAttribute("aria-pressed", "false");
     await expect(chat.promptInput).toBeVisible();
 
     await layout.openSheet("explorer");
     await layout.closeSheet();
-    await expect(layout.explorerButton).toHaveAttribute("aria-pressed", "false");
     await expect(chat.promptInput).toBeVisible();
   });
 

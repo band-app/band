@@ -44,6 +44,7 @@ export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { SettingsRow, SettingsSection } from "./components/settings";
 export { WorkspaceCard } from "./components/WorkspaceCard";
+export { WorkspaceLabel } from "./components/WorkspaceLabel";
 export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context

@@ -2179,14 +2179,21 @@ export class WorkspacePage {
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
-  /** Wait for the mobile workspace layout to be interactive. The mobile route
-   *  (`MobileWorkspaceLayout`) doesn't render the dockview's header Maximize
-   *  buttons, so `waitForReady` won't work — instead we anchor on the mobile
-   *  header's Explorer button (`mobile-workspace__header-explorer`), which is
-   *  always present once the mobile layout has mounted. */
+  /** Wait for the mobile workspace layout to be interactive. The mobile
+   *  layout (`MobileWorkspaceShell`) doesn't render the dockview's header
+   *  Maximize buttons, so `waitForReady` won't work. Instead we anchor on the
+   *  mobile header's panel menu button (`mobile-workspace__header-menu`) and
+   *  on the shown dockview's "+" new-tab button. The header renders before
+   *  the dockview has loaded its layout, and a file opened into a dockview
+   *  that isn't ready yet is dropped. */
   async waitForMobileReady(): Promise<void> {
     await this.page
-      .getByTestId("mobile-workspace__header-explorer")
+      .getByTestId("mobile-workspace__header-menu")
+      .waitFor({ state: "visible", timeout: 15_000 });
+    await this.page
+      .getByTestId("workspace-center__new-tab-button")
+      .filter({ visible: true })
+      .first()
       .waitFor({ state: "visible", timeout: 15_000 });
   }
 
@@ -2337,7 +2344,7 @@ export class WorkspacePage {
 
   /** The mobile workspace header's title button. Its aria-label
    *  ("Switch workspace") is system-controlled (set in
-   *  `workspace.$workspaceId.tsx` MobileWorkspaceLayout), so
+   *  `MobileWorkspaceShell.tsx`), so
    *  `getByRole({ name })` is the preferred locator. Tapping it opens the
    *  WorkspacePickerDialog. */
   get switchWorkspaceButton(): Locator {
@@ -2346,13 +2353,13 @@ export class WorkspacePage {
 
   /** The mobile header's hamburger button — opens the project-list fly-out
    *  drawer *over* the current workspace (no route change). aria-label set in
-   *  MobileWorkspaceLayout. */
+   *  `MobileWorkspaceShell.tsx`. */
   get projectListTrigger(): Locator {
     return this.page.getByTestId("mobile-workspace__project-list-trigger");
   }
 
   /** The left project-list fly-out drawer (a `Sheet side="left"` wrapping the
-   *  DashboardShell). data-testid set in MobileWorkspaceLayout. */
+   *  DashboardShell). data-testid set in `MobileWorkspaceShell.tsx`. */
   get projectListFlyout(): Locator {
     return this.page.getByTestId("project-list-flyout");
   }
@@ -2381,6 +2388,31 @@ export class WorkspacePage {
     await test.step("Open the project-list fly-out", async () => {
       await this.projectListTrigger.click();
       await this.projectListFlyout.waitFor({ state: "visible", timeout: 15_000 });
+    });
+  }
+
+  /** Switch workspace on mobile the way a user does: open the project-list
+   *  fly-out and tap the workspace's card in it. An in-app navigation, so
+   *  the mounted set of `MobileWorkspaceShell` survives it. */
+  async switchWorkspaceFromFlyout(workspaceId: string): Promise<void> {
+    await test.step(`Switch workspace to ${workspaceId} from the project-list fly-out`, async () => {
+      await this.openProjectListFlyout();
+      await this.projectListFlyout
+        .getByTestId(`project-list__workspace-card--${workspaceId}`)
+        .click();
+      await expect(this.projectListFlyout).toBeHidden();
+    });
+  }
+
+  /** Tap the PR badge of a workspace's card in the project-list fly-out,
+   *  which shows that workspace's Checks tab. */
+  async tapPrBadgeInFlyout(workspaceId: string): Promise<void> {
+    await test.step(`Tap the PR badge of ${workspaceId} in the project-list fly-out`, async () => {
+      await this.openProjectListFlyout();
+      await this.projectListFlyout
+        .getByTestId(`project-list__workspace-card--${workspaceId}`)
+        .getByTestId("workspace-card__pr-badge")
+        .click();
     });
   }
 

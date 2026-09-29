@@ -27,7 +27,7 @@ export interface ViewportInfo {
 
 /**
  * The elements that sit on a screen edge (the mobile workspace header with its
- * Explorer / Changes buttons, the editor area and the tree sheets, the
+ * panel menu button, the editor area and the tree sheets, the
  * dashboard action bar in each of its three homes, the Settings drawer footer)
  * and the chat composer controls that must fit a phone-width screen. Measures them for layout assertions; the
  * chat itself is driven through `ChatPanePage`, the fly-out through
@@ -39,9 +39,21 @@ export class MobileLayoutPage {
   readonly header: Locator;
   /** The workspace switcher button in the middle of the header. */
   readonly workspaceSwitcher: Locator;
-  readonly explorerButton: Locator;
-  readonly changesButton: Locator;
-  readonly changesBadge: Locator;
+  /** The header label's first row: the workspace (worktree) name. */
+  readonly headerWorkspaceName: Locator;
+  /** The header label's second row: the project name. */
+  readonly headerProjectName: Locator;
+  /** The header label, both rows. */
+  readonly headerLabel: Locator;
+  /** The top row of the project-list fly-out (label filter, add project). */
+  readonly flyoutTopBar: Locator;
+  /** The vertical 3-dot button at the right of the header; it opens the
+   *  panel menu (Explorer, Changes, plugin tabs) as a bottom drawer. */
+  readonly menuButton: Locator;
+  /** The body of the panel menu's bottom drawer. */
+  readonly menuBody: Locator;
+  /** The changed-file count on the menu's Changes row. */
+  readonly changesItemBadge: Locator;
   /** The editor area under the header; it reaches the bottom screen edge. */
   readonly main: Locator;
   /** The bottom tab bar the mobile workspace used to have. */
@@ -76,9 +88,15 @@ export class MobileLayoutPage {
   ) {
     this.header = page.getByTestId("mobile-workspace__header");
     this.workspaceSwitcher = page.getByTestId("mobile-workspace__switcher");
-    this.explorerButton = page.getByTestId("mobile-workspace__header-explorer");
-    this.changesButton = page.getByTestId("mobile-workspace__header-changes");
-    this.changesBadge = page.getByTestId("mobile-workspace__header-changes-badge");
+    this.headerWorkspaceName = this.workspaceSwitcher.getByTestId("workspace-label__name");
+    this.headerProjectName = this.workspaceSwitcher.getByTestId("workspace-label__project");
+    this.headerLabel = this.workspaceSwitcher.getByTestId("workspace-label");
+    this.flyoutTopBar = page
+      .getByTestId("project-list-flyout")
+      .getByTestId("project-list__top-bar");
+    this.menuButton = page.getByTestId("mobile-workspace__header-menu");
+    this.menuBody = page.getByTestId("mobile-workspace__menu-body");
+    this.changesItemBadge = page.getByTestId("mobile-workspace__menu-changes-badge");
     this.main = page.getByTestId("mobile-workspace__main");
     this.legacyBottomBar = page.getByTestId("mobile-workspace__bottom-bar");
     this.dashboardActionBar = page
@@ -118,12 +136,44 @@ export class MobileLayoutPage {
     });
   }
 
-  /** Open the Explorer or Changes bottom sheet from its header button. */
+  /** A row of the panel menu: `explorer`, `changes`, or a plugin tab's
+   *  `<pluginId>-<tabId>` slug (the GitHub Checks tab is
+   *  `github-pull-request`). */
+  menuItem(item: string): Locator {
+    return this.page.getByTestId(`mobile-workspace__menu-${item}`);
+  }
+
+  /** Open the panel menu's bottom drawer from the header's 3-dot button. */
+  async openMenu(): Promise<void> {
+    await test.step("Open the workspace panel menu", async () => {
+      await this.menuButton.click();
+      await expect(this.menuBody).toBeVisible();
+    });
+  }
+
+  /** Open the Explorer or Changes bottom sheet through the panel menu. */
   async openSheet(sheet: "explorer" | "changes"): Promise<void> {
     await test.step(`Open the ${sheet} sheet`, async () => {
-      await (sheet === "explorer" ? this.explorerButton : this.changesButton).click();
+      await this.openMenu();
+      await this.menuItem(sheet).click();
       const body = sheet === "explorer" ? this.explorerSheetBody : this.changesSheetBody;
       await expect(body).toBeVisible();
+      await expect(this.menuBody).toBeHidden();
+    });
+  }
+
+  /** The body of a plugin tab's bottom sheet. */
+  pluginSheetBody(slug: string): Locator {
+    return this.page.getByTestId(`mobile-workspace__plugin--${slug}-body`);
+  }
+
+  /** Open a plugin tab's bottom sheet through the panel menu. */
+  async openPluginSheet(slug: string): Promise<void> {
+    await test.step(`Open the ${slug} sheet`, async () => {
+      await this.openMenu();
+      await this.menuItem(slug).click();
+      await expect(this.pluginSheetBody(slug)).toBeVisible();
+      await expect(this.menuBody).toBeHidden();
     });
   }
 
@@ -144,12 +194,14 @@ export class MobileLayoutPage {
     });
   }
 
-  /** Close the open Explorer / Changes sheet, back to the editor. */
+  /** Close the open panel menu / Explorer / Changes sheet, back to the
+   *  editor. */
   async closeSheet(): Promise<void> {
     await test.step("Close the bottom sheet", async () => {
       await this.page.keyboard.press("Escape");
       await expect(this.explorerSheetBody).toBeHidden();
       await expect(this.changesSheetBody).toBeHidden();
+      await expect(this.menuBody).toBeHidden();
     });
   }
 

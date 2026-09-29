@@ -53,6 +53,10 @@ interface DashboardShellProps {
    *  `hideTitleBar`. Set by the mobile project-list fly-out, which reaches the
    *  bottom screen edge with no AppShell below it to pad the inset. */
   padBottomInset?: boolean;
+  /** Make the top row (label filter, collapse all, add project) as tall as
+   *  the mobile workspace header, so the two line up. Set by the mobile
+   *  project-list fly-out. */
+  matchMobileHeader?: boolean;
 }
 
 // Desktop-shell detection. The Electron preload
@@ -80,6 +84,7 @@ export function DashboardShell({
   bottomActions,
   hideTitleBar,
   padBottomInset,
+  matchMobileHeader,
 }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
@@ -350,7 +355,14 @@ export function DashboardShell({
         </div>
       )}
 
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border">
+      {/* sync-with: the `h-12` of `mobile-workspace__header` in MobileWorkspaceShell. */}
+      <div
+        data-testid="project-list__top-bar"
+        className={cn(
+          "flex shrink-0 items-center justify-between border-b border-border",
+          matchMobileHeader ? "h-12" : "h-9",
+        )}
+      >
         <div className="flex min-w-0 items-center">
           <div className="flex items-center gap-1 pl-2">
             {labels.length > 0 && (
