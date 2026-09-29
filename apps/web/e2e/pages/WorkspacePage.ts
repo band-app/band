@@ -3036,6 +3036,58 @@ export class WorkspacePage {
     );
   }
 
+  /** Start recording, each time xterm finishes parsing a write, every match
+   *  of `pattern` (a regex source, first capture group) on the top row of a
+   *  workspace terminal's screen, into `window.__parsedTopRowMatches`. Shows
+   *  which of a series of redraws of that row reached xterm one by one,
+   *  rather than several at once in a batch. Same one-terminal-per-workspace
+   *  assumption as `terminalCols`. */
+  async recordParsedTopRow(workspaceId: string, pattern: string): Promise<void> {
+    await test.step(`Record parsed top-row matches of /${pattern}/ in ${workspaceId}`, async () => {
+      const installed = await this.page.evaluate(
+        ([id, source]) => {
+          type Term = {
+            onWriteParsed(listener: () => void): unknown;
+            buffer: {
+              active: {
+                baseY: number;
+                getLine(y: number): { translateToString(trim: boolean): string } | undefined;
+              };
+            };
+          };
+          const cache = (
+            globalThis as unknown as {
+              __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+            }
+          ).__bandTerminalCache__;
+          const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+          const term = entry?.getTerminal() as Term | null;
+          if (!term) return false;
+          const regex = new RegExp(source);
+          const seen = new Set<string>();
+          (globalThis as unknown as { __parsedTopRowMatches: Set<string> }).__parsedTopRowMatches =
+            seen;
+          term.onWriteParsed(() => {
+            const buffer = term.buffer.active;
+            const match = buffer.getLine(buffer.baseY)?.translateToString(true).match(regex);
+            if (match) seen.add(match[1]);
+          });
+          return true;
+        },
+        [workspaceId, pattern] as const,
+      );
+      if (!installed) throw new Error("terminal not loaded");
+    });
+  }
+
+  /** The distinct matches `recordParsedTopRow` has recorded so far. */
+  async readParsedTopRowMatches(): Promise<string[]> {
+    return await this.page.evaluate(() => [
+      ...((globalThis as unknown as { __parsedTopRowMatches?: Set<string> })
+        .__parsedTopRowMatches ?? []),
+    ]);
+  }
+
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM
    *  renderer's `.xterm-rows` (one `<div>` per visual row). Unlike
    *  `readTerminalRenderedText` (which joins everything into one string), this

@@ -22,10 +22,13 @@
 // xterm's write buffer, and a keystroke's echo parsed only after all of it.
 // Each chunk's `onConsumed` fires once xterm has parsed it (or it is
 // dropped); the caller acknowledges those bytes to the server, which pauses
-// the PTY while too many are unparsed (`api/terminals/output-flow.ts`). The
-// visible drain also holds a DEC 2026 synchronized-output frame until its end
-// marker arrives, so xterm parses a TUI's redraw in one go instead of across
-// several turns.
+// the PTY while too many are unparsed (`api/terminals/output-flow.ts`).
+//
+// DEC 2026 synchronized output needs nothing here: xterm defers rendering
+// while a frame is open (up to 1 s), so a redraw parsed across several turns
+// still paints once. Holding the bytes back in this queue instead stalled
+// fullscreen TUIs, whose chunks often end one frame and begin the next: the
+// chunk looked like an open frame, and only a timer let it through.
 // ---------------------------------------------------------------------------
 
 /** Delay before the first drain after parked output arrives, so bursts coalesce. */
@@ -62,20 +65,6 @@ const FOREGROUND_IN_FLIGHT_BYTES = 128 * 1024;
  * resync. Orca's floor for the same cap.
  */
 const MAX_QUEUED_BYTES = 2 * 1024 * 1024;
-/**
- * Longest a visible terminal holds an unfinished DEC 2026 frame, so a lost or
- * missing end marker can't stall output. Orca's values: 250 ms normally, 32 ms
- * right after a keystroke so a split frame never delays echo noticeably.
- */
-const SYNC_FRAME_HOLD_MS = 250;
-const SYNC_FRAME_HOLD_AFTER_INPUT_MS = 32;
-/** How long after a keystroke output counts as its echo (orca's interactive window). */
-const INPUT_ECHO_WINDOW_MS = 100;
-
-/** `ESC [ ? 2026 h` / `ESC [ ? 2026 l`: begin / end synchronized update. */
-const SYNC_BEGIN = [0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x68];
-const SYNC_END_FINAL = 0x6c;
-const SYNC_MARKER_BYTES = SYNC_BEGIN.length;
 
 type Chunk = string | Uint8Array;
 
@@ -101,8 +90,6 @@ export interface TerminalOutputQueue {
    * behind it instead of forcing the whole queue through.
    */
   pushNotice(text: string): void;
-  /** The user typed into the terminal; a split frame is held only briefly now. */
-  noteInput(): void;
   /**
    * The terminal became visible: move everything parked onto the visible
    * drain, which writes the first part now and paces the rest. Returns `false`
@@ -127,12 +114,6 @@ interface QueueState {
   overflowed: boolean;
   /** Written to xterm by the foreground drain and not yet parsed. */
   inFlight: number;
-  /** An unfinished DEC 2026 frame is queued; don't write until it ends or times out. */
-  syncHeld: boolean;
-  syncTimer: ReturnType<typeof setTimeout> | null;
-  /** Trailing bytes of the last foreground chunk, in case a marker spans two. */
-  markerTail: Uint8Array;
-  lastInputAt: number;
 }
 
 /** Parked queues with pending output, in the order they became pending. */
@@ -215,7 +196,7 @@ function drain(): void {
 }
 
 function canWriteForeground(queue: QueueState): boolean {
-  return queue.chunks.length > 0 && !queue.syncHeld && queue.inFlight < FOREGROUND_IN_FLIGHT_BYTES;
+  return queue.chunks.length > 0 && queue.inFlight < FOREGROUND_IN_FLIGHT_BYTES;
 }
 
 /** Hand one piece of a visible queue to xterm, counting it until it parses. */
@@ -242,7 +223,7 @@ function drainForeground(): void {
   while (writes < FOREGROUND_MAX_WRITES_PER_DRAIN && foregroundPending.size > 0) {
     const queue = foregroundPending.values().next().value as QueueState;
     foregroundPending.delete(queue);
-    // A held or full queue is re-added by its timer or its write callback.
+    // A full queue is re-added by its write callback.
     if (!canWriteForeground(queue)) continue;
     writeForeground(queue);
     writes++;
@@ -250,37 +231,6 @@ function drainForeground(): void {
     if (performance.now() - startedAt >= DRAIN_TIME_BUDGET_MS) break;
   }
   scheduleForegroundDrain();
-}
-
-/**
- * Whether a DEC 2026 frame is still open after `data`: the last begin marker
- * comes after the last end marker. `tail` is the end of the previous chunk,
- * so a marker split across two frames is still seen. Returns `null` when the
- * chunk contains no marker at all.
- */
-function syncFrameOpenAfter(tail: Uint8Array, data: Uint8Array): boolean | null {
-  let bytes = data;
-  if (tail.byteLength > 0) {
-    bytes = new Uint8Array(tail.byteLength + data.byteLength);
-    bytes.set(tail);
-    bytes.set(data, tail.byteLength);
-  }
-  let open: boolean | null = null;
-  for (let i = bytes.indexOf(0x1b); i !== -1; i = bytes.indexOf(0x1b, i + 1)) {
-    if (i + SYNC_MARKER_BYTES > bytes.byteLength) break;
-    let prefix = true;
-    for (let k = 1; k < SYNC_MARKER_BYTES - 1; k++) {
-      if (bytes[i + k] !== SYNC_BEGIN[k]) {
-        prefix = false;
-        break;
-      }
-    }
-    if (!prefix) continue;
-    const final = bytes[i + SYNC_MARKER_BYTES - 1];
-    if (final === SYNC_BEGIN[SYNC_MARKER_BYTES - 1]) open = true;
-    else if (final === SYNC_END_FINAL) open = false;
-  }
-  return open;
 }
 
 export function createTerminalOutputQueue(
@@ -292,52 +242,15 @@ export function createTerminalOutputQueue(
     bytes: 0,
     overflowed: false,
     inFlight: 0,
-    syncHeld: false,
-    syncTimer: null,
-    markerTail: new Uint8Array(0),
-    lastInputAt: Number.NEGATIVE_INFINITY,
-  };
-
-  const releaseSyncHold = () => {
-    if (state.syncTimer !== null) clearTimeout(state.syncTimer);
-    state.syncTimer = null;
-    state.syncHeld = false;
   };
 
   const reset = () => {
     pending.delete(state);
     foregroundPending.delete(state);
-    releaseSyncHold();
-    state.markerTail = new Uint8Array(0);
     const dropped = state.chunks;
     state.chunks = [];
     state.bytes = 0;
     for (const chunk of dropped) chunk.callbacks?.onConsumed?.();
-  };
-
-  /** Track DEC 2026 frames in visible output; true while one is unfinished. */
-  const updateSyncHold = (data: Chunk) => {
-    if (typeof data === "string") return;
-    const open = syncFrameOpenAfter(state.markerTail, data);
-    const tailFrom = Math.max(0, data.byteLength - (SYNC_MARKER_BYTES - 1));
-    state.markerTail = data.slice(tailFrom);
-    if (open === false) {
-      releaseSyncHold();
-      return;
-    }
-    if (open !== true || state.syncHeld) return;
-    state.syncHeld = true;
-    const recentInput = performance.now() - state.lastInputAt < INPUT_ECHO_WINDOW_MS;
-    state.syncTimer = setTimeout(
-      () => {
-        // The end marker never came: write what we have, the rest as it arrives.
-        state.syncTimer = null;
-        state.syncHeld = false;
-        foregroundPending.add(state);
-        scheduleForegroundDrain();
-      },
-      recentInput ? SYNC_FRAME_HOLD_AFTER_INPUT_MS : SYNC_FRAME_HOLD_MS,
-    );
   };
 
   const enqueue = (data: Chunk, callbacks: OutputCallbacks | undefined) => {
@@ -351,7 +264,6 @@ export function createTerminalOutputQueue(
         // Parked output queued before the terminal was shown goes first.
         if (pending.has(state)) this.flush();
         enqueue(data, callbacks);
-        updateSyncHold(data);
         // Room in xterm: write now, so a keystroke's echo isn't a task late.
         if (canWriteForeground(state)) writeForeground(state);
         if (canWriteForeground(state)) {
@@ -379,9 +291,6 @@ export function createTerminalOutputQueue(
         return;
       }
       enqueue(text, undefined);
-    },
-    noteInput() {
-      state.lastInputAt = performance.now();
     },
     flush() {
       if (state.overflowed) return false;

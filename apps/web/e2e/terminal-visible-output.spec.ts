@@ -11,7 +11,11 @@
  *    would wait out the server's 5 s stall timeout, and this ~4 MB flood
  *    would take over a minute;
  *  - a DEC 2026 synchronized-output frame whose end marker never comes must
- *    still reach the screen once the hold times out.
+ *    still reach the screen (xterm stops deferring its render after 1 s);
+ *  - back-to-back synchronized frames, each output chunk ending one frame and
+ *    beginning the next, must reach xterm chunk by chunk. The page used to
+ *    hold visible output while a frame was open, and in that pattern a frame
+ *    is always open, so only a 250 ms timer let redraws through.
  *
  * DOM renderer so the rendered rows are readable. Real server, real PTYs.
  */
@@ -114,4 +118,29 @@ test("a synchronized-output frame that never ends still reaches the screen", asy
     /SYNC_OPEN_42/,
     { attempts: 1, renderTimeoutMs: 10_000 },
   );
+});
+
+test("back-to-back synchronized frames reach xterm one chunk at a time", async ({ page }) => {
+  test.setTimeout(60_000);
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await openTerminal(workspacePage);
+  await workspacePage.recordParsedTopRow(WORKSPACE, "FRAME_(\\d+)");
+
+  // 60 redraws of the top row, ~20 ms apart, the way a fullscreen TUI repaints
+  // on each wheel tick: every chunk carries one frame's content, its end
+  // marker and the next frame's begin marker.
+  await workspacePage.runInTerminalUntilRendered(
+    WORKSPACE,
+    "clear; printf '\\033[?2026h'; for i in $(seq 100 159); do " +
+      "printf '\\033[HFRAME_%s\\033[?2026l\\033[?2026h' $i; sleep 0.02; done; " +
+      "printf '\\033[?2026l\\nFRAMES_DONE_%s\\n' $((40+2))",
+    /FRAMES_DONE_42/,
+    { attempts: 1, renderTimeoutMs: 20_000 },
+  );
+
+  // Parsed chunk by chunk, xterm sees nearly every frame on its own. Held
+  // until a timer, it sees one frame per ~250 ms (under 10 of the 60).
+  const frames = await workspacePage.readParsedTopRowMatches();
+  expect(frames).toContain("159");
+  expect(frames.length).toBeGreaterThanOrEqual(30);
 });
