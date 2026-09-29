@@ -1503,6 +1503,33 @@ export class WorkspacePage {
     });
   }
 
+  /** Send wheel events at (`x`, `y`) every `intervalMs` for `durationMs`,
+   *  without waiting for the page to handle each one, the way the OS keeps
+   *  delivering input while the page is busy. */
+  async wheelPaced(
+    x: number,
+    y: number,
+    deltaY: number,
+    intervalMs: number,
+    durationMs: number,
+  ): Promise<void> {
+    await test.step(`Wheel ${deltaY} px every ${intervalMs} ms for ${durationMs} ms`, async () => {
+      await this.page.mouse.move(x, y);
+      const cdp = await this.page.context().newCDPSession(this.page);
+      const sent: Promise<unknown>[] = [];
+      const startedAt = Date.now();
+      for (let i = 0; Date.now() - startedAt < durationMs; i++) {
+        sent.push(
+          cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY }),
+        );
+        const next = startedAt + (i + 1) * intervalMs;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, next - Date.now())));
+      }
+      await Promise.all(sent);
+      await cdp.detach();
+    });
+  }
+
   /** Move focus into the nth terminal pane (activates it in the nested split). */
   async focusPane(index: number): Promise<void> {
     await test.step(`Focus terminal pane ${index}`, async () => {
@@ -1545,6 +1572,14 @@ export class WorkspacePage {
       await this.page.keyboard.press("Enter");
       await this.page.keyboard.type(line);
       await this.page.keyboard.press("Enter");
+    });
+  }
+
+  /** Press one key in the nth terminal pane. */
+  async pressKeyInPane(index: number, key: string): Promise<void> {
+    await test.step(`Press "${key}" in terminal pane ${index}`, async () => {
+      await this.paneInput(index).focus();
+      await this.page.keyboard.press(key);
     });
   }
 
@@ -3034,6 +3069,50 @@ export class WorkspacePage {
       },
       [workspaceId, rows, cols] as const,
     );
+  }
+
+  /** Start recording, each time xterm renders, every match of `pattern` (a
+   *  regex source, first capture group) in the top row the DOM renderer drew,
+   *  into `window.__renderedTopRowMatches`. Shows which of a series of redraws
+   *  of that row reached the screen, rather than being skipped. Needs the DOM
+   *  renderer. Same one-terminal-per-workspace assumption as `terminalCols`. */
+  async recordRenderedTopRow(workspaceId: string, pattern: string): Promise<void> {
+    await test.step(`Record rendered top-row matches of /${pattern}/ in ${workspaceId}`, async () => {
+      const installed = await this.page.evaluate(
+        ([id, source]) => {
+          type Term = { element?: HTMLElement; onRender(listener: () => void): unknown };
+          const cache = (
+            globalThis as unknown as {
+              __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+            }
+          ).__bandTerminalCache__;
+          const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+          const term = entry?.getTerminal() as Term | null;
+          const rows = term?.element?.querySelector(".xterm-rows");
+          if (!term || !rows) return false;
+          const regex = new RegExp(source);
+          const seen = new Set<string>();
+          (
+            globalThis as unknown as { __renderedTopRowMatches: Set<string> }
+          ).__renderedTopRowMatches = seen;
+          term.onRender(() => {
+            const match = rows.firstElementChild?.textContent?.match(regex);
+            if (match) seen.add(match[1]);
+          });
+          return true;
+        },
+        [workspaceId, pattern] as const,
+      );
+      if (!installed) throw new Error("terminal not loaded");
+    });
+  }
+
+  /** The distinct matches `recordRenderedTopRow` has recorded so far. */
+  async readRenderedTopRowMatches(): Promise<string[]> {
+    return await this.page.evaluate(() => [
+      ...((globalThis as unknown as { __renderedTopRowMatches?: Set<string> })
+        .__renderedTopRowMatches ?? []),
+    ]);
   }
 
   /** Read a workspace terminal's rendered text ROW BY ROW from the DOM

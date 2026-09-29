@@ -394,6 +394,13 @@ export class TerminalPool {
     // Hint foreground/background colors so CLI tools (vim, bat, etc.) don't send
     // OSC 11 queries whose responses leak as visible garbage in the terminal.
     env.COLORFGBG = "15;0";
+    // Claude Code decides at startup, from TERM_PROGRAM alone, whether it may
+    // scroll with DECSTBM scroll regions; Band's xterm isn't on its list, so
+    // it repainted the whole screen on every wheel tick (5x the bytes of a
+    // region scroll in a long session, and choppy). This tells it that the
+    // terminal supports DEC 2026 synchronized output, which xterm.js does,
+    // and unlocks the scroll regions. Claude ignores it inside tmux.
+    env.CLAUDE_CODE_FORCE_SYNC_OUTPUT = "1";
     // Remove PORT so workspace dev servers don't inherit the Band server's port
     delete env.PORT;
 

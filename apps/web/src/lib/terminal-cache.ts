@@ -1002,10 +1002,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // The typing-latency dispatch stamp is taken when the data reaches the
     // socket, which a coalesced write does a turn of the event loop later.
     const noteDispatch = () => noteTypingLatencyDispatch(terminalId);
-    term.onData((data) => {
-      output.noteInput();
-      inputQueue.write(data, noteDispatch);
-    });
+    term.onData((data) => inputQueue.write(data, noteDispatch));
     term.onTitleChange((title) => emitTitle(title));
 
     // Re-apply the active selection after each xterm resize (xterm clears it on

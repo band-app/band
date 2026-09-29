@@ -1156,4 +1156,43 @@ describe("terminal WebSocket — color env vars stripped from spawned panes", ()
 
     expect(live.toString()).toContain("NC=unset FC=unset CC=unset");
   }, 30_000);
+
+  // Claude Code only scrolls with DECSTBM scroll regions when it is sure of
+  // synchronized output before its first frame, which it decides from
+  // TERM_PROGRAM. Without this, it repaints the whole screen per wheel tick.
+  it("tells Claude Code the pane supports synchronized output", async () => {
+    const terminalId = "claude-sync-output-env";
+    const wsUrl = `ws://127.0.0.1:${server.port}/terminal?workspaceId=workspace-main&terminalId=${terminalId}`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } });
+    // `""` keeps the shell's echo of the typed line from matching.
+    const COMMAND = `echo "CFS""=\${CLAUDE_CODE_FORCE_SYNC_OUTPUT:-unset}"\r`;
+
+    let live = Buffer.alloc(0);
+    let sentCommand = false;
+
+    await new Promise<void>((resolve, reject) => {
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ type: "attach", cols: 80, rows: 24 }));
+      });
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!sentCommand) {
+          sentCommand = true;
+          ws.send(COMMAND);
+          return;
+        }
+        if (!isBinary) return;
+        live = Buffer.concat([live, data]);
+        if (live.includes(Buffer.from("CFS="))) resolve();
+      });
+      ws.on("error", reject);
+      setTimeout(() => reject(new Error("No CFS= output within 10 s")), 10_000);
+    });
+
+    await new Promise<void>((r) => {
+      ws.on("close", () => r());
+      ws.close();
+    });
+
+    expect(live.toString()).toContain("CFS=1");
+  }, 30_000);
 });
