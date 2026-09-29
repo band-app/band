@@ -127,6 +127,7 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
   // A's strip now carries a sidebar gutter too, and it must set no region.
+  await expect(wp.sidebarGutterIn(WORKSPACE_A)).toHaveCount(1);
   expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
 });
 
@@ -139,6 +140,8 @@ test("a hidden workspace with every tab closed sets no app-region", async ({ pag
   await expect(wp.centerDragBar).toBeVisible();
   await wp.switchWorkspace(WORKSPACE_B);
   await wp.waitForWorkspaceReady(WORKSPACE_B);
+  // A still renders its drag bar, now hidden.
+  await expect(wp.centerDragBarIn(WORKSPACE_A)).toHaveCount(1);
 
   expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);

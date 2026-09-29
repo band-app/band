@@ -246,6 +246,17 @@ export class WorkspacePage {
     );
   }
 
+  /** The center drag bar inside a workspace's cached entry, hidden or shown.
+   *  Lets a test confirm a hidden workspace still renders one. */
+  centerDragBarIn(workspaceId: string): Locator {
+    return this.cachedPanelEntries(workspaceId).getByTestId("workspace-center__drag-bar");
+  }
+
+  /** The sidebar gutter inside a workspace's cached entry, hidden or shown. */
+  sidebarGutterIn(workspaceId: string): Locator {
+    return this.cachedPanelEntries(workspaceId).getByTestId("workspace-center__sidebar-gutter");
+  }
+
   /** Right-click the workspace card to open its context menu, then click
    *  "Delete workspace". The deletion goes through the real
    *  `useRemoveWorkspace` mutation — same path the user takes — so the
@@ -845,7 +856,7 @@ export class WorkspacePage {
             style.getPropertyValue("app-region") || style.getPropertyValue("-webkit-app-region");
           if (region !== "drag" && region !== "no-drag") continue;
           found.push(
-            `${region} ${el.getAttribute("data-testid") ?? (el.className || el.tagName.toLowerCase())}`,
+            `${region} ${el.getAttribute("data-testid") ?? (el.getAttribute("class") || el.tagName.toLowerCase())}`,
           );
         }
       }
