@@ -137,8 +137,12 @@ export class ChatPanePage {
   readonly stopButton: Locator;
   /** Send button. The composer shows either this or Stop, never both. */
   readonly submitButton: Locator;
-  /** Queued-message bubbles, found by their drag handle. */
+  /** Queued messages (sent while a turn runs), in queue order. */
   readonly queuedMessages: Locator;
+  /** The "Queued · sent when the agent finishes" divider above them. */
+  readonly queueDivider: Locator;
+  /** The inline editor a queued message turns into while it is edited. */
+  readonly queuedEditor: Locator;
   /** All rendered tool-call rows in the conversation (one per ACP
    *  `tool_call`). A call inside a collapsed group isn't rendered until
    *  the group is expanded. Each carries a `data-status` attribute
@@ -211,7 +215,9 @@ export class ChatPanePage {
     this.effortSubmenuContent = page.getByTestId("chat-pane__model-menu-effort-submenu-content");
     this.stopButton = page.getByTestId("prompt-input__stop-button");
     this.submitButton = page.getByTestId("prompt-input__submit-button").filter({ visible: true });
-    this.queuedMessages = page.getByRole("button", { name: "Reorder queued message" });
+    this.queuedMessages = page.getByTestId("chat-pane__queued-message");
+    this.queueDivider = page.getByTestId("chat-pane__queue-divider");
+    this.queuedEditor = page.getByTestId("chat-pane__queued-editor");
     this.toolCallContainers = page.getByTestId("tool-call__container");
     this.toolGroups = page.getByTestId("tool-group__container");
     this.fileMentionDropdown = page.getByRole("listbox", { name: "File mentions" });
@@ -843,6 +849,81 @@ export class ChatPanePage {
     await this.hoverMessage(message);
     await this.messageTime(message).hover();
     return this.page.getByRole("tooltip");
+  }
+
+  /** The queued message with this text (test data). */
+  queuedMessage(text: string): Locator {
+    return this.queuedMessages.filter({ hasText: text });
+  }
+
+  /** The attachment chips inside a queued message. */
+  queuedAttachments(message: Locator): Locator {
+    return message.getByTestId("chat-pane__queued-attachment");
+  }
+
+  /** A queued message's hover row: edit and delete. */
+  queuedActions(message: Locator): Locator {
+    return message.getByTestId("chat-pane__queued-actions");
+  }
+
+  /** The text of every queued message, top to bottom. */
+  async queuedMessageTexts(): Promise<string[]> {
+    const texts = this.queuedMessages.getByTestId("chat-pane__queued-text");
+    return (await texts.allInnerTexts()).map((t) => t.trim());
+  }
+
+  async deleteQueuedMessage(text: string): Promise<void> {
+    await test.step(`Delete queued message "${text}"`, async () => {
+      const message = this.queuedMessage(text);
+      await message.hover();
+      await message.getByRole("button", { name: "Delete queued message" }).click();
+    });
+  }
+
+  /** Opens the inline editor of a queued message and replaces its text. */
+  async editQueuedMessage(text: string, next: string): Promise<void> {
+    await test.step(`Edit queued message "${text}" to "${next}"`, async () => {
+      const message = this.queuedMessage(text);
+      await message.hover();
+      await message.getByRole("button", { name: "Edit queued message" }).click();
+      await this.queuedEditor.getByRole("textbox", { name: "Edit queued message" }).fill(next);
+    });
+  }
+
+  /** Presses a key in the open queued-message editor (Enter, Shift+Enter, Escape). */
+  async pressInQueuedEditor(key: string): Promise<void> {
+    await test.step(`Press ${key} in the queued-message editor`, async () => {
+      await this.queuedEditor.getByRole("textbox", { name: "Edit queued message" }).press(key);
+    });
+  }
+
+  /** Clicks the editor's send button (aria-label "Save", a constant in
+   *  `QueuedMessages.tsx`). */
+  async saveQueuedEdit(): Promise<void> {
+    await test.step("Click Save in the queued-message editor", async () => {
+      await this.queuedEditor.getByRole("button", { name: "Save", exact: true }).click();
+    });
+  }
+
+  /** Clicks into the composer, moving focus out of the queued-message editor. */
+  async clickOutsideQueuedEditor(): Promise<void> {
+    await test.step("Click outside the queued-message editor", async () => {
+      await this.promptInput.click();
+    });
+  }
+
+  /** Drags a queued message's bubble onto another one. */
+  async dragQueuedMessage(text: string, ontoText: string): Promise<void> {
+    await test.step(`Drag queued message "${text}" onto "${ontoText}"`, async () => {
+      await this.queuedMessage(text).getByTestId("chat-pane__queued-bubble").hover();
+      await this.page.mouse.down();
+      const target = await this.queuedMessage(ontoText).boundingBox();
+      if (!target) throw new Error(`queued message "${ontoText}" has no box`);
+      await this.page.mouse.move(target.x + target.width / 2, target.y + target.height / 4, {
+        steps: 12,
+      });
+      await this.page.mouse.up();
+    });
   }
 
   /** Answer the Nth permission card by clicking the option the agent

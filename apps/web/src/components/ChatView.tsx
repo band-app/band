@@ -3,14 +3,7 @@
 // folds the server's event stream through `transcriptReducer`.
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import {
-  Badge,
-  Button,
   cn,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -24,27 +17,13 @@ import {
   PopoverContent,
   PopoverTrigger,
   Switch,
-  Textarea,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import {
-  closestCenter,
-  DndContext,
-  type DragEndEvent,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { Bot, Brain, Check, Clock, GripHorizontal, Loader2, Plus, X, Zap } from "lucide-react";
+import type { DragEndEvent } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
+import { Bot, Brain, Check, Clock, Loader2, Plus, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AgentIcon, SearchBar } from "@/dashboard";
@@ -78,6 +57,7 @@ import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { ToolCall, ToolGroup } from "./ai-elements/tool-call";
 import { withResolvedDefaults } from "./chat/claude-default-labels";
 import { MessageActions } from "./chat/MessageActions";
+import { QueuedMessages, type QueuedMessageView } from "./chat/QueuedMessages";
 import { groupEntries } from "./chat/tool-summary";
 import type { ChatMessage, Entry } from "./chat/transcript";
 import { useChatFind } from "./chat/use-chat-find";
@@ -139,12 +119,6 @@ function ConversationSkeleton() {
       </Message>
     </output>
   );
-}
-
-interface QueuedFilePart {
-  mediaType: string;
-  url: string;
-  filename?: string;
 }
 
 interface Choice {
@@ -405,7 +379,6 @@ export function ChatView({
 
   // Queue view with drag-reorder. `optimisticQueue` holds the local order
   // until the server's next `queue-updated` confirms it.
-  type QueuedMessageView = { id: string; text: string; files?: QueuedFilePart[] };
   const [optimisticQueue, setOptimisticQueue] = useState<QueuedMessageView[] | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queue`
   useEffect(() => {
@@ -494,11 +467,6 @@ export function ChatView({
       trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
     },
     [queue, workspaceId, chatId],
-  );
-
-  // A small activation distance so a click doesn't start a drag.
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
   const handleReorderQueued = useCallback(
@@ -809,27 +777,12 @@ export function ChatView({
               </Message>
             )}
             {queuedMessagesView.length > 0 && (
-              <DndContext
-                sensors={dndSensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleReorderQueued}
-              >
-                <SortableContext
-                  items={queuedMessagesView.map((m) => m.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {queuedMessagesView.map((m) => (
-                    <QueuedMessageBubble
-                      key={m.id}
-                      id={m.id}
-                      text={m.text}
-                      files={m.files}
-                      onCancel={() => handleCancelQueued(m.id)}
-                      onEdit={(newText) => handleEditQueued(m.id, newText)}
-                    />
-                  ))}
-                </SortableContext>
-              </DndContext>
+              <QueuedMessages
+                messages={queuedMessagesView}
+                onDelete={handleCancelQueued}
+                onEdit={handleEditQueued}
+                onReorder={handleReorderQueued}
+              />
             )}
           </ConversationContent>
           <ConversationScrollButton />
@@ -1521,126 +1474,5 @@ function SessionHistoryMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function QueuedMessageBubble({
-  id,
-  text,
-  files,
-  onCancel,
-  onEdit,
-}: {
-  id: string;
-  text: string;
-  files?: QueuedFilePart[];
-  onCancel: () => void;
-  onEdit: (text: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
-
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
-  const sortableStyle = {
-    transform: CSS.Translate.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : undefined,
-  };
-
-  // When the dialog opens, reset the draft to the latest text. We don't
-  // sync continuously so the user's in-progress edits aren't clobbered
-  // if the queue subscription pushes an unchanged update mid-edit.
-  const openEditor = useCallback(() => {
-    setDraft(text);
-    setEditing(true);
-  }, [text]);
-
-  const handleSave = useCallback(() => {
-    const next = draft.trim();
-    if (!next) return;
-    if (next !== text) onEdit(next);
-    setEditing(false);
-  }, [draft, text, onEdit]);
-
-  return (
-    <>
-      <div
-        ref={setNodeRef}
-        style={sortableStyle}
-        className="group is-user flex w-full max-w-[90%] flex-col items-end ml-auto justify-end opacity-60"
-      >
-        <div className="flex min-w-0 max-w-full w-fit flex-col overflow-hidden rounded-md bg-secondary text-foreground">
-          {/* Drag handle pinned to the top border — separate from the
-              bubble body so click-to-edit doesn't conflict with reorder
-              gestures. Acts as a visual "grip" rail across the top. */}
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            aria-label="Reorder queued message"
-            className="flex w-full items-center justify-center border-b border-border/30 bg-muted/30 py-0.5 text-muted-foreground/60 cursor-grab touch-none transition-colors hover:bg-muted/50 hover:text-muted-foreground active:cursor-grabbing"
-          >
-            <GripHorizontal className="size-3.5" />
-          </button>
-          <div className="flex flex-col gap-2 break-words text-sm px-3 py-2">
-            {files?.map((file) => (
-              <MessageFilePart key={`queued-file-${file.url}`} part={{ type: "file", ...file }} />
-            ))}
-            <button
-              type="button"
-              onClick={openEditor}
-              className="-mx-1 cursor-pointer rounded px-1 text-left transition-colors hover:bg-foreground/5"
-              title="Click to edit"
-            >
-              <MessageResponse className="text-sm">{text}</MessageResponse>
-            </button>
-            <div className="flex items-center justify-end gap-2 mt-1">
-              <Badge variant="outline" className="text-xs text-muted-foreground">
-                <Clock className="size-3" />
-                Queued
-              </Badge>
-              <button
-                type="button"
-                onClick={onCancel}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-              >
-                <X className="size-3" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <Dialog open={editing} onOpenChange={setEditing}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>Edit queued message</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="min-h-[120px] text-sm"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                handleSave();
-              }
-            }}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={!draft.trim()}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
   );
 }

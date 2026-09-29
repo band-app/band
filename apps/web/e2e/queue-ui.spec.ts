@@ -1,4 +1,26 @@
+/**
+ * Messages sent while the agent is still running queue at the end of the
+ * transcript:
+ *
+ *   - They render under a "Queued · sent when the agent finishes" divider, in
+ *     order, with an attachment chip for each attached file.
+ *   - Hovering one shows edit and delete.
+ *   - Edit turns the message into an inline editor: Enter or the send
+ *     button saves, Shift+Enter adds a line, Escape or clicking outside
+ *     discards, and Escape doesn't stop the turn.
+ *   - Dragging a message's bubble reorders the queue, and the messages go
+ *     out in the new order once the running turn ends.
+ *
+ * Real server, no tRPC mocking. The ACP stub agent holds the "start" turn on
+ * a permission request, so the queue stays put until the test answers it;
+ * the answer ends the turn and the server sends the queue.
+ */
+
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
+import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -8,22 +30,70 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { WorkspacePage } from "./pages/WorkspacePage";
+import { ChatPanePage } from "./pages/ChatPanePage";
 
-const TOKEN = "e2e-queue-test-token";
+const TOKEN = "e2e-queue-ui-token";
+// One project per test, so each gets a fresh chat and queue.
+const PROJECTS = ["queuerender", "queueedit", "queuereorder"];
+const [RENDER_WS, EDIT_WS, REORDER_WS] = PROJECTS.map((p) => toWorkspaceId(p, "main"));
+// A 1x1 PNG, the smallest image the composer accepts as an attachment.
+const PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+test.use({ viewport: { width: 1280, height: 800 } });
 
 let server: ServerHandle;
 let tmpHome: string;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
-  seedState(tmpHome, { projects: [] });
-  seedSettings(tmpHome, { tokenSecret: TOKEN });
-  server = await startServer({ tmpHome });
+  seedState(tmpHome, {
+    projects: PROJECTS.map((name) => {
+      const repoDir = join(tmpHome, name);
+      mkdirSync(repoDir, { recursive: true });
+      return {
+        name,
+        path: repoDir,
+        defaultBranch: "main",
+        worktrees: [{ branch: "main", path: repoDir }],
+      };
+    }),
+  });
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    defaultCodingAgent: "claude-code",
+    codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+  });
+  server = await startServer({
+    tmpHome,
+    env: acpStubEnv(tmpHome, {
+      turns: [
+        {
+          match: "^start",
+          steps: [
+            { say: "working " },
+            {
+              permission: {
+                toolCall: {
+                  toolCallId: "tc-hold",
+                  title: "Hold the turn",
+                  kind: "execute",
+                  status: "pending",
+                },
+                options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+              },
+              after: { allow: [{ say: "first turn done" }] },
+            },
+          ],
+        },
+        { steps: [{ say: "Heard {{prompt}}" }] },
+      ],
+    }),
+  });
 });
 
-// UI state lives on the server now: start each test from none, like the
-// fresh localStorage each test's browser context used to give it.
 test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
@@ -31,139 +101,137 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-// ---------------------------------------------------------------------------
-// Helpers — call the real server's queue store via tRPC HTTP API
-// ---------------------------------------------------------------------------
-
-async function trpcMutate(procedure: string, input: unknown): Promise<void> {
-  const res = await fetch(`${server.url}/trpc/${procedure}?token=${TOKEN}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${text}`);
-  }
+/** Opens the chat and starts a turn that waits on a permission answer. */
+async function startHeldTurn(chatPane: ChatPanePage, workspaceId: string): Promise<void> {
+  await chatPane.goto(workspaceId);
+  await chatPane.waitForReady();
+  await chatPane.typeMessage("start a long task");
+  await chatPane.submit();
+  await expect(chatPane.permissionCards).toHaveCount(1);
 }
 
-async function pushQueue(workspaceId: string, text: string, chatId?: string): Promise<void> {
-  await trpcMutate("queue.push", { workspaceId, text, chatId });
+async function queueMessage(chatPane: ChatPanePage, text: string): Promise<void> {
+  await chatPane.typeMessage(text);
+  await chatPane.submit();
+  await expect(chatPane.queuedMessage(text)).toBeVisible();
 }
 
-async function clearQueue(workspaceId: string, chatId?: string): Promise<void> {
-  await trpcMutate("queue.clear", { workspaceId, chatId });
+/**
+ * The text of every prompt the agent received after this test's held turn
+ * started, in order. The tests in this file share one agent log, and the
+ * turn's own prompt carries Band's instructions after its text.
+ */
+function promptsAfterHeldTurn(): string[] {
+  const prompts = stubRequests(tmpHome, "session/prompt").map((r) =>
+    (r.params.prompt as { type: string; text?: string }[])
+      .flatMap((block) => (block.type === "text" && block.text ? [block.text] : []))
+      .join(""),
+  );
+  const start = prompts.findLastIndex((p) => p.startsWith("start a long task"));
+  return prompts.slice(start + 1);
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+test("messages sent during a turn queue under a divider and go out when it ends", async ({
+  page,
+}) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  await startHeldTurn(chatPane, RENDER_WS);
+  await expect(chatPane.queueDivider).toHaveCount(0);
 
-test("queued messages render with text, Queued badge, and Cancel button", async ({ page }) => {
-  const wsId = "test-ws-render";
+  await queueMessage(chatPane, "fix the bug");
+  await chatPane.attachFile({ name: "pixel.png", mimeType: "image/png", buffer: PIXEL_PNG });
+  await queueMessage(chatPane, "use the screenshot");
 
-  // The default layout is a single terminal, so open the chat the queue targets.
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(wsId);
-  const chatId = await workspacePage.openChatAndGetId(wsId);
+  await expect(chatPane.queueDivider).toBeVisible();
+  expect(await chatPane.queuedMessageTexts()).toEqual(["fix the bug", "use the screenshot"]);
+  const withFile = chatPane.queuedMessage("use the screenshot");
+  await expect(chatPane.queuedAttachments(withFile)).toHaveText(["pixel.png"]);
+  await expect(chatPane.queuedAttachments(chatPane.queuedMessage("fix the bug"))).toHaveCount(0);
 
-  // Push messages after we know the chatId so they reach the correct queue
-  await pushQueue(wsId, "fix the bug", chatId);
-  await pushQueue(wsId, "add tests", chatId);
+  // The actions show on hover.
+  await expect(chatPane.queuedActions(withFile)).toHaveCSS("opacity", "0");
+  await withFile.hover();
+  await expect(chatPane.queuedActions(withFile)).toHaveCSS("opacity", "1");
 
-  // Both queued message texts should be visible
-  await expect(page.getByText("fix the bug")).toBeVisible();
-  await expect(page.getByText("add tests")).toBeVisible();
+  await chatPane.deleteQueuedMessage("fix the bug");
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["use the screenshot"]);
+  await expect(chatPane.queuedMessage("fix the bug")).toHaveCount(0);
 
-  // Both should show the "Queued" badge
-  const queuedBadges = page.getByText("Queued");
-  await expect(queuedBadges).toHaveCount(2);
-
-  // Both should have a Cancel button
-  const cancelButtons = page.getByRole("button", { name: "Cancel" });
-  await expect(cancelButtons).toHaveCount(2);
-
-  await clearQueue(wsId, chatId);
+  // Ending the turn sends what's left of the queue as a normal user message.
+  await chatPane.answerPermission(0, "Allow");
+  await expect(chatPane.assistantMessage("Heard use the screenshot")).toBeVisible();
+  await expect(chatPane.userMessage("use the screenshot")).toBeVisible();
+  await expect(chatPane.queuedMessages).toHaveCount(0);
+  await expect(chatPane.queueDivider).toHaveCount(0);
+  expect(promptsAfterHeldTurn()).toEqual(["use the screenshot"]);
 });
 
-test("empty queue renders no queued message bubbles", async ({ page }) => {
-  const wsId = "test-ws-empty";
+test("editing a queued message inline saves with Enter or the send button and discards on Escape or a click outside", async ({
+  page,
+}) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  await startHeldTurn(chatPane, EDIT_WS);
+  await queueMessage(chatPane, "draft one");
 
-  // The default layout is a single terminal, so open a chat to observe.
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(wsId);
-  await workspacePage.openChat(wsId);
+  // Escape discards the edit and leaves the running turn alone.
+  await chatPane.editQueuedMessage("draft one", "discarded by escape");
+  await expect(chatPane.queuedEditor).toBeVisible();
+  await chatPane.pressInQueuedEditor("Escape");
+  await expect(chatPane.queuedMessage("draft one")).toBeVisible();
+  await expect(chatPane.queuedEditor).toHaveCount(0);
+  await expect(chatPane.permissionCards).toHaveCount(1);
+  await expect(chatPane.stopButton).toBeVisible();
 
-  // Wait for the chat to load — the prompt input should be visible
-  await expect(page.getByPlaceholder("Type a message")).toBeVisible();
+  await chatPane.editQueuedMessage("draft one", "discarded by a click outside");
+  await chatPane.clickOutsideQueuedEditor();
+  await expect(chatPane.queuedMessage("draft one")).toBeVisible();
+  await expect(chatPane.queuedEditor).toHaveCount(0);
 
-  // No "Queued" badge should appear
-  await expect(page.getByText("Queued")).not.toBeVisible();
+  // Shift+Enter adds a line and keeps the editor open; Enter saves.
+  await chatPane.editQueuedMessage("draft one", "saved by enter");
+  await chatPane.pressInQueuedEditor("Shift+Enter");
+  await expect(chatPane.queuedEditor).toBeVisible();
+  await chatPane.pressInQueuedEditor("l");
+  await chatPane.pressInQueuedEditor("Enter");
+  await expect(chatPane.queuedEditor).toHaveCount(0);
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["saved by enter\nl"]);
+
+  await chatPane.editQueuedMessage("saved by enter", "saved by button");
+  await chatPane.saveQueuedEdit();
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["saved by button"]);
+
+  // The edit reached the server: the edited text is what the agent gets.
+  await chatPane.answerPermission(0, "Allow");
+  await expect(chatPane.assistantMessage("Heard saved by button")).toBeVisible();
+  expect(promptsAfterHeldTurn()).toEqual(["saved by button"]);
 });
 
-test("cancel button calls queue.remove and bubble disappears", async ({ page }) => {
-  const wsId = "test-ws-cancel";
+test("dragging a queued message's bubble reorders the queue and the order it is sent in", async ({
+  page,
+}) => {
+  const chatPane = new ChatPanePage(page, server.url, TOKEN);
+  await startHeldTurn(chatPane, REORDER_WS);
+  await queueMessage(chatPane, "alpha");
+  await queueMessage(chatPane, "beta");
+  await queueMessage(chatPane, "gamma");
 
-  // The default layout is a single terminal, so open the chat the queue targets.
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(wsId);
-  const chatId = await workspacePage.openChatAndGetId(wsId);
+  await chatPane.dragQueuedMessage("gamma", "alpha");
+  await expect.poll(() => chatPane.queuedMessageTexts()).toEqual(["gamma", "alpha", "beta"]);
 
-  await pushQueue(wsId, "first message", chatId);
-  await pushQueue(wsId, "second message", chatId);
+  // The new order is the server's, not just the optimistic local one. A
+  // reload can land before `queue.set` does, so reload until it shows.
+  await expect
+    .poll(async () => {
+      await chatPane.reload();
+      await chatPane.waitForReady();
+      await expect(chatPane.permissionCards).toHaveCount(1);
+      await expect(chatPane.queuedMessages).toHaveCount(3);
+      return chatPane.queuedMessageTexts();
+    })
+    .toEqual(["gamma", "alpha", "beta"]);
 
-  // Both messages should be visible initially
-  await expect(page.getByText("first message")).toBeVisible();
-  await expect(page.getByText("second message")).toBeVisible();
-
-  // Click Cancel on the first message
-  const cancelButtons = page.getByRole("button", { name: "Cancel" });
-  await cancelButtons.first().click();
-
-  // After cancel, the first message should disappear
-  await expect(page.getByText("first message")).not.toBeVisible();
-
-  // Second message should still be visible
-  await expect(page.getByText("second message")).toBeVisible();
-
-  // Only one "Queued" badge should remain
-  await expect(page.getByText("Queued")).toHaveCount(1);
-
-  await clearQueue(wsId, chatId);
-});
-
-test("multiple queued messages render in array order", async ({ page }) => {
-  const wsId = "test-ws-order";
-
-  // The default layout is a single terminal, so open the chat the queue targets.
-  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(wsId);
-  const chatId = await workspacePage.openChatAndGetId(wsId);
-
-  await pushQueue(wsId, "alpha", chatId);
-  await pushQueue(wsId, "beta", chatId);
-  await pushQueue(wsId, "gamma", chatId);
-
-  // All three messages should be visible
-  await expect(page.getByText("alpha")).toBeVisible();
-  await expect(page.getByText("beta")).toBeVisible();
-  await expect(page.getByText("gamma")).toBeVisible();
-
-  // Three "Queued" badges
-  await expect(page.getByText("Queued")).toHaveCount(3);
-
-  // Verify DOM order: alpha should come before beta, beta before gamma
-  const bubbleTexts = await page
-    .locator("[class*='is-user']")
-    .filter({ has: page.getByText("Queued") })
-    .allTextContents();
-
-  const alphaIdx = bubbleTexts.findIndex((t) => t.includes("alpha"));
-  const betaIdx = bubbleTexts.findIndex((t) => t.includes("beta"));
-  const gammaIdx = bubbleTexts.findIndex((t) => t.includes("gamma"));
-
-  expect(alphaIdx).toBeLessThan(betaIdx);
-  expect(betaIdx).toBeLessThan(gammaIdx);
-
-  await clearQueue(wsId, chatId);
+  await chatPane.answerPermission(0, "Allow");
+  await expect(chatPane.assistantMessage("Heard beta")).toBeVisible();
+  await expect(chatPane.queuedMessages).toHaveCount(0);
+  expect(promptsAfterHeldTurn()).toEqual(["gamma", "alpha", "beta"]);
 });
