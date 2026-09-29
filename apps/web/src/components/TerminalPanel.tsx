@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import {
   SearchBar,
   type SearchBarHandle,
@@ -88,13 +88,18 @@ export function TerminalPanel({
   const state = useSyncExternalStore(entry.subscribe, entry.getSnapshot);
 
   // Attach when visible, park when hidden. Park (not dispose) on unmount.
-  useEffect(() => {
+  // Layout effects, so the wrapper is back in the live box (and fitted, see
+  // `attach`) before the browser paints the commit that revealed it; a passive
+  // effect let the incoming workspace paint one frame with an empty terminal.
+  // The unmount park is a layout effect too, so in a commit that remounts the
+  // panel it still runs before the new instance's attach.
+  useLayoutEffect(() => {
     const el = liveRef.current;
     if (!el) return;
     if (visible) entry.attach(el, { autoFocus });
     else entry.detach();
   }, [visible, entry, autoFocus]);
-  useEffect(() => () => entry.detach(), [entry]);
+  useLayoutEffect(() => () => entry.detach(), [entry]);
 
   // Route title changes to the dockview tab; replays the last known title so a
   // title set while this panel was unmounted/parked isn't lost.

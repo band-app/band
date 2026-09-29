@@ -178,12 +178,13 @@ const MAX_LAYOUT_FRAMES = 5;
 // enough (see `runParkingPass`). A cold-parked terminal's PTY survives on the
 // server; revealing it creates a fresh entry that reconnects and replays.
 //
-// WebGL contexts: Chromium caps live contexts per page (about 16) and drops the
-// oldest when a new one is created. Each warm terminal keeps its context while
-// parked, and the policy's warm set is larger than that cap: up to 6 hidden
-// terminals in each of 4 warm hidden workspaces plus the active workspace's,
-// and more during the 30 s grace window. So with WebGL on, a large working set
-// does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
+// WebGL contexts: Chromium caps live contexts per page (16 by default) and
+// drops the oldest when a new one is created. Each warm terminal keeps its
+// context while parked, and the policy's warm set is larger than 16: up to 6
+// hidden terminals in each of 4 warm hidden workspaces plus the active
+// workspace's, and more during the 30 s grace window. The desktop app raises
+// the cap to 128 (`max-active-webgl-contexts` in `apps/desktop/src/main/
+// index.ts`); in a plain browser a large working set does lose contexts. That is not fatal: `onContextLoss` disposes the addon; a
 // parked terminal is only marked suspect and rebuilds on its next `attach`, and
 // only an attached one rebuilds at once, so a loss costs one glyph re-raster on
 // reveal. There is deliberately no user setting for this.
@@ -452,6 +453,20 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
 
     const fit = new XFitAddon();
     term.loadAddon(fit);
+    // Pixel size of the live box at the last fit. A reveal whose box kept its
+    // size skips the fit (see `repairAndFit`).
+    let lastFitBox: { width: number; height: number } | null = null;
+    const fitToBox = () => {
+      fit.fit();
+      lastFitBox = liveContainer
+        ? { width: liveContainer.clientWidth, height: liveContainer.clientHeight }
+        : null;
+    };
+    const boxResizedSinceFit = (): boolean =>
+      !lastFitBox ||
+      !liveContainer ||
+      liveContainer.clientWidth !== lastFitBox.width ||
+      liveContainer.clientHeight !== lastFitBox.height;
     term.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
 
     const fileLinkProviderDisposable = term.registerLinkProvider(
@@ -1028,7 +1043,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // container's size or a 0×0 pre-layout frame).
     const fittedDims = (): { cols: number; rows: number } | null => {
       if (!attached || !hostIsVisible()) return null;
-      fit.fit();
+      fitToBox();
       if (term.cols <= 0 || term.rows <= 0) return null;
       return { cols: term.cols, rows: term.rows };
     };
@@ -1062,7 +1077,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       reconcileRafId = requestAnimationFrame(() => {
         reconcileRafId = null;
         if (!attached || !hostIsVisible()) return;
-        fit.fit();
+        fitToBox();
         sendPtyResize();
       });
     };
@@ -1093,7 +1108,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
         webglAddon = null;
         attachWebGL();
       }
-      fit.fit();
+      fitToBox();
     };
     const handleDprChange = (): boolean => {
       const currentDpr = window.devicePixelRatio;
@@ -1120,7 +1135,11 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       // scatter the request-driven flow exists to prevent.
       if (awaitingReplay) return;
       const dprChanged = handleDprChange();
-      if (!dprChanged) fit.fit();
+      // A reveal moves the wrapper out of the fixed-size parking box, which
+      // fires this observer even when the live box kept its size since the
+      // last fit. Skip that one, for the reason given at `repairAndFit`.
+      if (!dprChanged && !boxResizedSinceFit()) return;
+      if (!dprChanged) fitToBox();
       sendPtyResize();
     });
     resizeObserver.observe(wrapper);
@@ -1150,16 +1169,25 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     // Full repair used on (re)attach: re-measure geometry, rebuild the WebGL
     // surface if suspect, then force an unconditional repaint of every row so a
     // stale/unchanged-dimension frame can't survive (mirrors superset).
+    //
+    // The fit is skipped when the live box has the same pixel size as at the
+    // last fit and the surface wasn't rebuilt, which is the common workspace
+    // switch-back (orca's `pane-reveal-fit.ts`). A reattached WebGL surface's
+    // cell metrics can briefly differ, so a fit there could propose a grid one
+    // column off, reflow the buffer and snap back, and xterm's rewrap isn't a
+    // perfect inverse. A zoom or font change while parked marks the surface
+    // suspect, so it still refits here, on the DOM renderer too.
     repairAndFit = () => {
       if (!attached || !hostIsVisible()) return;
       const dprChanged = handleDprChange();
       if (!dprChanged) {
-        if (webglSuspect && useWebGL) {
+        const rebuild = webglSuspect && useWebGL;
+        if (rebuild) {
           webglAddon?.dispose();
           webglAddon = null;
           attachWebGL();
         }
-        fit.fit();
+        if (webglSuspect || boxResizedSinceFit()) fitToBox();
       }
       webglSuspect = false;
       if (term.rows > 0) term.refresh(0, term.rows - 1);
@@ -1261,7 +1289,18 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (attachOpts?.autoFocus) autoFocusPending = true;
       // Move the persistent wrapper into the live box (no-op if already there).
       if (wrapper.parentElement !== container) container.appendChild(wrapper);
-      scheduleRepair();
+      // A box that already has a size is fitted and refreshed now, so the
+      // frame that reveals it (the caller is a layout effect) paints the
+      // terminal. A box still at 0×0 right after mount waits on the rAF retry.
+      if (hostIsVisible()) {
+        if (repairRafId !== null) {
+          cancelAnimationFrame(repairRafId);
+          repairRafId = null;
+        }
+        repairAndFit();
+      } else {
+        scheduleRepair();
+      }
     },
 
     detach() {

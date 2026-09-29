@@ -2570,6 +2570,61 @@ export class WorkspacePage {
     );
   }
 
+  /** Start recording, once per animation frame, what a workspace's terminal
+   *  looks like from the frame its cached entry turns visible (a switch to
+   *  it). rAF callbacks run right before paint, so each record is what that
+   *  frame painted: whether the terminal wrapper sits in the live box (not the
+   *  parking container), whether its rendered rows contain `marker` (DOM
+   *  renderer), and the combined opacity of the wrapper and its ancestors.
+   *  Stops after `frames` visible frames. Read with `readRevealFrames`. */
+  async startRevealFrameProbe(workspaceId: string, marker: string, frames = 20): Promise<void> {
+    await this.page.evaluate(
+      ([id, text, limit]) => {
+        type Frame = { attached: boolean; hasMarker: boolean; opacity: number };
+        const w = window as unknown as { __bandRevealFrames?: Frame[] };
+        const recorded: Frame[] = [];
+        w.__bandRevealFrames = recorded;
+        const tick = () => {
+          const entry = document.querySelector<HTMLElement>(
+            `[data-testid="workspace-panel-host__cached-entry--${id}"]`,
+          );
+          if (entry?.style.visibility === "visible") {
+            const wrapper = document.querySelector<HTMLElement>(`[data-workspace-id="${id}"]`);
+            const attached = !!wrapper && entry.contains(wrapper);
+            let opacity = 1;
+            for (let el: Element | null = attached ? wrapper : entry; el; el = el.parentElement) {
+              opacity *= Number.parseFloat(getComputedStyle(el).opacity);
+            }
+            recorded.push({
+              attached,
+              hasMarker: !!wrapper?.querySelector(".xterm-rows")?.textContent?.includes(text),
+              opacity,
+            });
+          }
+          if (recorded.length < limit) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      },
+      [workspaceId, marker, frames] as const,
+    );
+  }
+
+  /** Frames recorded so far by `startRevealFrameProbe`, first visible frame first. */
+  async readRevealFrames(): Promise<{ attached: boolean; hasMarker: boolean; opacity: number }[]> {
+    return await this.page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __bandRevealFrames?: {
+              attached: boolean;
+              hasMarker: boolean;
+              opacity: number;
+            }[];
+          }
+        ).__bandRevealFrames ?? [],
+    );
+  }
+
   /** Force a genuine WebGL context loss on the workspace's terminal canvas via
    *  the `WEBGL_lose_context` extension. This fires the real `webglcontextlost`
    *  event that xterm's WebglAddon listens for, driving the ONE client repair
