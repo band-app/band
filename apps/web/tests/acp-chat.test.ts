@@ -78,7 +78,8 @@ describe("chat over ACP", () => {
     expect(agentText(events)).toBe('Heard "hello there" on stub-small.');
     expect(events.at(-1)).toMatchObject({ type: "turn-ended", stopReason: "end_turn" });
 
-    // What Band told the agent: no fs, no terminal (#649), form elicitation.
+    // What Band told the agent: no fs, no terminal (#649), form elicitation,
+    // AIR async tasks.
     const [init] = stubRequests(server.home, "initialize");
     expect(init.params).toEqual({
       protocolVersion: expect.any(Number),
@@ -89,6 +90,7 @@ describe("chat over ACP", () => {
         elicitation: { form: {} },
         session: { notices: {} },
         auth: { terminal: false },
+        _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
       },
     });
     // The agent runs in the workspace, with chat dispatch for nested `band`

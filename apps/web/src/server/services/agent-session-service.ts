@@ -55,14 +55,17 @@ import {
   resolveAgentDefinition,
   SettingsQueries,
 } from "../infra/db/queries/settings";
+import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { type ChatSession, chatService } from "./chat-service";
 import { workspaceService } from "./workspace-service";
 
 const log = createLogger("agent-sessions");
 
-/** An agent process with no turn running and nothing pending is stopped
- *  after this long. The next prompt reattaches its session. */
+/** An agent process with no turn running, nothing pending and no work of
+ *  its own (see `PendingWork`) is stopped after it sends nothing for this
+ *  long. The next prompt reattaches its session. `BAND_AGENT_IDLE_TIMEOUT_MS`
+ *  overrides it. */
 const IDLE_TIMEOUT_MS = 15 * 60_000;
 /** After `session/cancel`, how long a turn gets to stop before its agent
  *  process is killed. */
@@ -121,6 +124,8 @@ interface Runtime {
   turnSeq: number;
   live: LiveState;
   pending: Map<string, PendingRequest>;
+  /** Work the agent process runs on its own, which holds off the idle stop. */
+  work: PendingWork;
   idleTimer: ReturnType<typeof setTimeout> | null;
   /** Claude Code: flags on the command line of the CLI behind the session,
    *  which a wrapper script may have added. */
@@ -257,6 +262,7 @@ function runtimeFor(chat: ChatSession, def: CodingAgentDefinition): Runtime {
       turnSeq: 0,
       live: emptyLive(),
       pending: new Map(),
+      work: new PendingWork(),
       idleTimer: null,
       claudeCli: null,
     };
@@ -274,19 +280,48 @@ function stopRuntime(rt: Runtime): void {
   runtimes.delete(rt.chatId);
 }
 
-function scheduleIdle(rt: Runtime): void {
+function idleTimeoutMs(): number {
+  const override = Number(process.env.BAND_AGENT_IDLE_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : IDLE_TIMEOUT_MS;
+}
+
+/** (Re)starts the idle countdown. Every update from the agent restarts it,
+ *  so a turn the agent started itself is never cut off. */
+function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
   if (rt.idleTimer) clearTimeout(rt.idleTimer);
   rt.idleTimer = setTimeout(() => {
     rt.idleTimer = null;
     if (rt.inTurn || rt.pending.size > 0 || rt.attaching) return;
+    const now = Date.now();
+    const holds = rt.work.outstanding(now);
+    if (holds.length > 0) {
+      // Count down again once the last hold lapses. Work that ends earlier
+      // says so in an update, which restarts the countdown then.
+      const until = Math.max(...holds.map((h) => h.until));
+      log.info(
+        {
+          chatId: rt.chatId,
+          work: holds.map((h) => ({ reason: h.reason, until: new Date(h.until).toISOString() })),
+        },
+        "idle agent has pending work; not stopping it",
+      );
+      scheduleIdle(rt, until - now + idleTimeoutMs());
+      return;
+    }
     log.info({ chatId: rt.chatId }, "stopping idle agent");
     rt.process?.close();
     rt.process = null;
     rt.sessionId = null;
     // The next use builds a fresh runtime and reattaches the session.
     if (runtimes.get(rt.chatId) === rt) runtimes.delete(rt.chatId);
-  }, IDLE_TIMEOUT_MS);
+  }, delayMs);
   rt.idleTimer.unref?.();
+}
+
+/** Something arrived from the agent: outside a Band turn (which has its own
+ *  end), the idle countdown starts over. An attach re-arms it when done. */
+function agentActive(rt: Runtime): void {
+  if (!rt.inTurn && !rt.attaching && rt.process) scheduleIdle(rt);
 }
 
 /** Appends an event to the runtime's session log and broadcasts it. Before
@@ -439,6 +474,11 @@ function routeUpdate(rt: Runtime, notification: acp.SessionNotification): void {
   }
   const update = notification.update;
   applyLive(rt, update);
+  // An attach's replay is history, not work in flight.
+  if (!rt.attaching) {
+    rt.work.observeUpdate(update, rt.inTurn);
+    agentActive(rt);
+  }
   if (rt.routing === "drop") return;
   if (update.sessionUpdate === "user_message_chunk") {
     // During a turn Band started, the prompt is already logged; an agent
@@ -528,6 +568,11 @@ function requestElicitation(
 function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
   return {
     onUpdate: (n) => routeUpdate(rt, n),
+    onAsyncTask: (n) => {
+      if (n.sessionId !== rt.sessionId || rt.attaching) return;
+      rt.work.observeAsyncTask(n.update);
+      agentActive(rt);
+    },
     onPermission: (req, signal) => requestPermission(rt, req, signal),
     onElicitation: (req, signal) => requestElicitation(rt, req, signal),
     onExit: (code, stderr) => {
@@ -536,6 +581,8 @@ function handlersFor(rt: Runtime, generation: number): AcpAgentHandlers {
       // stderr can hold auth details; keep it out of info-level logs.
       log.debug({ chatId: rt.chatId, stderr: stderr.slice(-500) }, "agent stderr");
       for (const p of [...rt.pending.values()]) p.cancel();
+      // Whatever the process was running died with it.
+      rt.work.clear();
       // `sessionId` stays: the failed turn still logs its end there. With
       // no process, the next `ensureSession` reattaches.
       rt.process = null;
