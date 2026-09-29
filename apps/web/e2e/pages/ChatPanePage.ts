@@ -200,7 +200,7 @@ export class ChatPanePage {
     this.notices = page.getByTestId("chat-pane__notice");
     this.permissionCards = page.getByTestId("chat-pane__permission");
     this.elicitationForms = page.getByTestId("chat-pane__elicitation");
-    this.composer = page.getByTestId("chat__composer");
+    this.composer = page.getByTestId("chat__composer").filter({ visible: true });
     this.modelMenuButton = page.getByTestId("chat-pane__model-menu");
     this.modelMenuModel = page.getByTestId("chat-pane__model-menu-model");
     this.modelMenuEffort = page.getByTestId("chat-pane__model-menu-effort");

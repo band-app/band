@@ -11,6 +11,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -157,12 +158,19 @@ export function ElicitationForm({
   const [values, setValues] = useState<Record<string, Value>>({});
   const [index, setIndex] = useState(0);
   const [sending, setSending] = useState(false);
+  // `sending` only reaches the handlers on the next render; a repeated Enter
+  // can arrive before that.
+  const sendingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const answered = entry.answer !== undefined;
   const disabled = answered || sending;
   const step = steps[index] as Step | undefined;
   const isLast = index >= steps.length - 1;
   const agentName = agentLabel?.trim() || "The agent";
+  // AskUserQuestion's message is boilerplate ("Please answer the following
+  // questions."), but any other form's message is the context for its fields.
+  const intro =
+    steps.length !== 1 && !fields.some((f) => f.customFor) ? entry.request.message : undefined;
 
   // Take the keyboard when the questions arrive, unless the user is busy
   // somewhere else. The composer is disabled meanwhile, so it can't keep it.
@@ -190,10 +198,13 @@ export function ElicitationForm({
 
   const submit = useCallback(
     async (action: "accept" | "decline", from: Record<string, Value>) => {
+      if (sendingRef.current) return;
+      sendingRef.current = true;
       setSending(true);
       try {
         await onAnswer(action, action === "accept" ? toContent(fields, from) : undefined);
       } finally {
+        sendingRef.current = false;
         setSending(false);
       }
     },
@@ -258,7 +269,7 @@ export function ElicitationForm({
     }
   };
 
-  const heading = `${agentName} has ${steps.length === 1 ? "a question" : `${steps.length} questions`}`;
+  const heading = `${agentName} has ${steps.length <= 1 ? "a question" : `${steps.length} questions`}`;
 
   return (
     <div
@@ -301,6 +312,7 @@ export function ElicitationForm({
         )}
       </div>
 
+      {!answered && intro && <p className="px-5 pt-4 text-sm">{intro}</p>}
       {!answered && step && (
         <StepBody
           step={step}
@@ -396,6 +408,7 @@ function StepBody({
   onSet: (key: string, value: Value | undefined) => void;
 }) {
   const { field, note } = step;
+  const idPrefix = useId();
   const question = message ?? field.description ?? field.title ?? field.key;
   // With a single question the description isn't the question, so it's a hint.
   const detail = message ? field.description : undefined;
@@ -421,7 +434,7 @@ function StepBody({
               ? current.includes(choice.value)
               : current === choice.value;
             const descriptionId = choice.description
-              ? `${field.key}-${choice.value}-description`
+              ? `${idPrefix}-${field.key}-${i}-description`
               : undefined;
             return (
               <button
