@@ -493,7 +493,8 @@ export function SharedDockviewLayout() {
         // bar. The find-in-file registry is keyed by visibility, not focus, so
         // without this guard a split layout (file + terminal both visible)
         // would open the file's find whenever ⌘F was pressed in the terminal.
-        if (terminalFocused) return;
+        // A focused chat pane has its own find bar (ChatView).
+        if (terminalFocused || document.activeElement?.closest("[data-chat-pane]")) return;
         e.preventDefault();
         const fn = ws ? findInFileRegistry.current.get(ws) : undefined;
         if (fn) fn();

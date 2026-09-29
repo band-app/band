@@ -187,6 +187,15 @@ button,
   }
 }
 
+/* Find in the chat pane (components/chat/use-chat-find.ts). */
+::highlight(chat-find) {
+  background-color: rgb(250 204 21 / 0.35);
+}
+::highlight(chat-find-current) {
+  background-color: rgb(249 115 22 / 0.8);
+  color: black;
+}
+
 pre {
   overflow-x: auto;
 }

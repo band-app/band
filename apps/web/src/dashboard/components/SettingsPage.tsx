@@ -29,7 +29,6 @@ import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { useRestartTerminalDaemon } from "../hooks/use-terminal-daemon";
 import { useAgentMode } from "../lib/agent-mode";
-import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
@@ -165,9 +164,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       }
     >
   >({});
-  // Experimental flags live in localStorage (per-device) rather than the
-  // settings store, so they don't participate in `isDirty` / Save.
-  const [contextMeterEnabled, setContextMeterEnabled] = useExperimentalContextMeter();
 
   const adapter = useAdapter();
 
@@ -749,17 +745,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-              </SettingsRow>
-              <SettingsRow
-                htmlFor="agents-context-meter"
-                label="Context window meter"
-                description="Show a context-usage donut next to the session-history button in the chat input. Token counting accuracy varies by agent — disable if numbers look wrong."
-              >
-                <Switch
-                  id="agents-context-meter"
-                  checked={contextMeterEnabled}
-                  onCheckedChange={setContextMeterEnabled}
-                />
               </SettingsRow>
               <Accordion type="multiple" className="w-full">
                 {KNOWN_AGENTS.map((known) => {

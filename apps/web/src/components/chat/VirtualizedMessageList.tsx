@@ -40,13 +40,20 @@ import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import {
   memo,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { useStickToBottomContext } from "use-stick-to-bottom";
+
+/** Lets the chat find bar bring a message that isn't mounted into view. */
+export interface VirtualizedMessageListHandle {
+  scrollToIndex: (index: number) => void;
+}
 
 export interface VirtualizedMessageListProps<T> {
   /** Items to virtualize. Stable identity per item via `getKey`. */
@@ -72,6 +79,7 @@ export interface VirtualizedMessageListProps<T> {
    * is the TanStack-recommended starting point.
    */
   overscan?: number;
+  listRef?: Ref<VirtualizedMessageListHandle>;
 }
 
 export function VirtualizedMessageList<T>({
@@ -80,6 +88,7 @@ export function VirtualizedMessageList<T>({
   renderItem,
   estimateSize = 220,
   overscan = 5,
+  listRef,
 }: VirtualizedMessageListProps<T>) {
   const { scrollRef, scrollToBottom } = useStickToBottomContext();
 
@@ -226,6 +235,12 @@ export function VirtualizedMessageList<T>({
       virtualizer.scrollToIndex(newIndex, { align: "start" });
     }
   }, [items]);
+
+  useImperativeHandle(
+    listRef,
+    () => ({ scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: "center" }) }),
+    [virtualizer],
+  );
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalSize = virtualizer.getTotalSize();
