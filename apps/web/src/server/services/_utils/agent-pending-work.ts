@@ -13,7 +13,8 @@
  *   - Tool calls, named by `_meta.claudeCode.toolName`: `ScheduleWakeup`
  *     (`delaySeconds`), `CronCreate`, `Monitor` (`timeout_ms`) and `Bash`
  *     with `run_in_background`. The last two also become async tasks; the
- *     tool call holds only until the task is announced.
+ *     tool call holds only until the task is announced (a background
+ *     command's call, at most until it completes).
  *   - A tool call the agent starts outside a Band turn, until it completes.
  *
  * Every hold ends at a deadline, at most `MAX_HOLD_MS` away, so work whose
@@ -52,26 +53,34 @@ function finiteNumber(value: unknown): number | undefined {
 
 export class PendingWork {
   private readonly holds = new Map<string, PendingWorkHold>();
+  /** Tool calls an async task was announced for. */
+  private readonly taskToolCalls = new Set<string>();
 
   /** Notes what a `session/update` starts or ends. `inTurn` is whether a
    *  Band-started turn is running. */
   observeUpdate(update: acp.SessionUpdate, inTurn: boolean, now = Date.now()): void {
     if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return;
     const key = `tool:${update.toolCallId}`;
+    // An async task tracks this call now; a late update must not hold again.
+    if (this.taskToolCalls.has(update.toolCallId)) return;
     if (update.status === "failed") {
       this.holds.delete(key);
       return;
     }
+    const held = this.holds.get(key);
+    if (update.status === "completed") {
+      if (held?.untilCompleted) this.holds.delete(key);
+      return;
+    }
+    // A call's first hold stands: the adapter repeats `rawInput` on later
+    // updates, which must not push a wakeup's time back.
+    if (held) return;
     const hold = this.toolHold(update, now);
     if (hold) {
       this.set(key, hold, now);
       return;
     }
-    if (update.status === "completed") {
-      if (this.holds.get(key)?.untilCompleted) this.holds.delete(key);
-      return;
-    }
-    if (!inTurn && update.sessionUpdate === "tool_call" && !this.holds.has(key)) {
+    if (!inTurn && update.sessionUpdate === "tool_call") {
       this.set(key, { reason: "tool call", until: now + MAX_HOLD_MS, untilCompleted: true }, now);
     }
   }
@@ -80,7 +89,10 @@ export class PendingWork {
   observeAsyncTask(update: AsyncTaskUpdate, now = Date.now()): void {
     const key = `task:${update.asyncTaskId}`;
     if (update.sessionUpdate === "async_task_spawned") {
-      if (update.toolCallId) this.holds.delete(`tool:${update.toolCallId}`);
+      if (update.toolCallId) {
+        this.taskToolCalls.add(update.toolCallId);
+        this.holds.delete(`tool:${update.toolCallId}`);
+      }
       this.set(
         key,
         { reason: `${update.taskType ?? "background"} task`, until: now + MAX_HOLD_MS },
@@ -105,6 +117,7 @@ export class PendingWork {
 
   clear(): void {
     this.holds.clear();
+    this.taskToolCalls.clear();
   }
 
   private toolHold(update: ToolUpdate, now: number): PendingWorkHold | null {
@@ -125,8 +138,11 @@ export class PendingWork {
       }
       case "Bash":
       case "PowerShell":
+        // Until the call completes: the adapter announces the command's
+        // async task first, which holds from then on. An agent that never
+        // announces one gets no hold past the call.
         return input.run_in_background === true
-          ? { reason: "background command", until: now + MAX_HOLD_MS }
+          ? { reason: "background command", until: now + MAX_HOLD_MS, untilCompleted: true }
           : null;
       default:
         return null;

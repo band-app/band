@@ -25,6 +25,7 @@ import {
   stubRequests,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
+import { isAlive } from "./helpers/terminal-daemon";
 
 const IDLE_TIMEOUT_MS = 2_000;
 /** Longer than the idle timeout, so an early stop loses the update. */
@@ -56,15 +57,6 @@ function chatAgentPid(home: string): number {
   return prompt.pid;
 }
 
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Waits for the agent text after the turn, streamed with no turn running. */
 async function outOfTurnText(
   server: ServerHandle,
@@ -88,7 +80,7 @@ describe("agent idle stop", () => {
     expect(agentText(turn)).toBe("Done.");
     const pid = chatAgentPid(server.home);
 
-    await expect.poll(() => isRunning(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
   });
 
   it("keeps the agent alive until its background task ends, then stops it", async () => {
@@ -151,10 +143,92 @@ describe("agent idle stop", () => {
     expect(agentText(later)).toBe("The build finished.");
     // The task updates themselves aren't ACP and never reach the chat.
     expect(
-      later.some((e) => e.type === "update" && e.update.sessionUpdate.startsWith("async")),
+      [...turn, ...later].some(
+        (e) => e.type === "update" && e.update.sessionUpdate.startsWith("async"),
+      ),
     ).toBe(false);
 
-    await expect.poll(() => isRunning(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
+  });
+
+  it("keeps the agent alive while an async task with no tool call runs", async () => {
+    const server = await boot([
+      {
+        steps: [
+          {
+            asyncTask: {
+              asyncTaskId: "task-monitor",
+              name: "errors in deploy.log",
+              taskType: "monitor",
+              description: "errors in deploy.log",
+              showInTranscript: true,
+              canStop: true,
+            },
+          },
+          { say: "Watching the deploy log." },
+          {
+            afterMs: WORK_MS,
+            later: [
+              {
+                asyncTask: {
+                  sessionUpdate: "async_task_state_update",
+                  asyncTaskId: "task-monitor",
+                  state: "stopped",
+                },
+              },
+              { say: "The monitor ended." },
+            ],
+          },
+        ],
+      },
+    ]);
+    const chatId = newChatId();
+
+    const turn = await runTurn(server.url, chatId, "watch the deploy log");
+    const pid = chatAgentPid(server.home);
+
+    const later = await outOfTurnText(server, chatId, turn, "The monitor ended.");
+    expect(agentText(later)).toBe("The monitor ended.");
+
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
+  });
+
+  it("keeps the agent alive through a tool call of an agent-started turn", async () => {
+    const server = await boot([
+      {
+        steps: [
+          { say: "Done for now." },
+          {
+            // After the turn's response, so Band sees no turn running.
+            afterMs: 500,
+            later: [
+              {
+                tool: {
+                  toolCallId: "followup-test",
+                  title: "pnpm test",
+                  kind: "execute",
+                  status: "in_progress",
+                  rawInput: { command: "pnpm test" },
+                  _meta: { claudeCode: { toolName: "Bash" } },
+                },
+              },
+              { sleep: WORK_MS },
+              { toolUpdate: { toolCallId: "followup-test", status: "completed" } },
+              { say: "Tests passed." },
+            ],
+          },
+        ],
+      },
+    ]);
+    const chatId = newChatId();
+
+    const turn = await runTurn(server.url, chatId, "follow up on your own");
+    const pid = chatAgentPid(server.home);
+
+    const later = await outOfTurnText(server, chatId, turn, "Tests passed.");
+    expect(agentText(later)).toBe("Tests passed.");
+
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
   });
 
   it("keeps the agent alive until a scheduled wakeup fires, then stops it", async () => {
@@ -185,7 +259,7 @@ describe("agent idle stop", () => {
     const later = await outOfTurnText(server, chatId, turn, "Woke up: CI is green.");
     expect(agentText(later)).toBe("Woke up: CI is green.");
 
-    await expect.poll(() => isRunning(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
   });
 
   it("does not hold for a wakeup whose tool call failed", async () => {
@@ -214,7 +288,7 @@ describe("agent idle stop", () => {
     const pid = chatAgentPid(server.home);
 
     // Stopped after the idle timeout, well before the 60 s wakeup.
-    await expect.poll(() => isRunning(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
   });
 
   it("restarts the idle countdown on every update of an agent-started turn", async () => {
@@ -234,6 +308,6 @@ describe("agent idle stop", () => {
     const later = await outOfTurnText(server, chatId, turn, "four ");
     expect(agentText(later)).toBe("one two three four ");
 
-    await expect.poll(() => isRunning(pid), { timeout: 15_000 }).toBe(false);
+    await expect.poll(() => isAlive(pid), { timeout: 15_000 }).toBe(false);
   });
 });

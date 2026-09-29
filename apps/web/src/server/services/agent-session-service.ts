@@ -70,6 +70,8 @@ const IDLE_TIMEOUT_MS = 15 * 60_000;
 /** After `session/cancel`, how long a turn gets to stop before its agent
  *  process is killed. */
 const CANCEL_GRACE_MS = 15_000;
+/** The longest delay `setTimeout` keeps; a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 /** How long a probe waits after `session/new` for the agent's commands. */
 const PROBE_SETTLE_MS = 1_500;
 
@@ -289,6 +291,7 @@ function idleTimeoutMs(): number {
  *  so a turn the agent started itself is never cut off. */
 function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
   if (rt.idleTimer) clearTimeout(rt.idleTimer);
+  const delay = Math.min(delayMs, MAX_TIMER_MS);
   rt.idleTimer = setTimeout(() => {
     rt.idleTimer = null;
     if (rt.inTurn || rt.pending.size > 0 || rt.attaching) return;
@@ -314,7 +317,7 @@ function scheduleIdle(rt: Runtime, delayMs = idleTimeoutMs()): void {
     rt.sessionId = null;
     // The next use builds a fresh runtime and reattaches the session.
     if (runtimes.get(rt.chatId) === rt) runtimes.delete(rt.chatId);
-  }, delayMs);
+  }, delay);
   rt.idleTimer.unref?.();
 }
 
