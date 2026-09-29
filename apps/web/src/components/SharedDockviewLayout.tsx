@@ -19,6 +19,7 @@ import { useRecentFiles } from "../hooks/useRecentFiles";
 import { cycleGridGroups, cycleTabsInActiveGroup } from "../lib/dockview-section-actions";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
+import { WindowDragContext } from "./DesktopTitleBar";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
 import { getPerWorkspaceState, subscribePerWorkspaceState } from "./per-workspace-state-store";
 import {
@@ -740,11 +741,14 @@ export function SharedDockviewLayout() {
       <div className="absolute inset-0">
         <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage />}>
           {(workspaceId, wsActive) => (
-            <WorkspaceCenterDockview
-              workspaceId={workspaceId}
-              visible={wsActive}
-              wsActive={wsActive}
-            />
+            // Only the shown workspace puts app-regions on the page.
+            <WindowDragContext.Provider value={wsActive}>
+              <WorkspaceCenterDockview
+                workspaceId={workspaceId}
+                visible={wsActive}
+                wsActive={wsActive}
+              />
+            </WindowDragContext.Provider>
           )}
         </MultiWorkspacePanelHost>
       </div>

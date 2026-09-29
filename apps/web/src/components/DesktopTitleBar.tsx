@@ -17,6 +17,18 @@ export const NO_DRAG_STYLE: React.CSSProperties = {
   WebkitAppRegion: "no-drag",
 } as React.CSSProperties;
 
+/** Whether drag surfaces under this provider may set an app-region. False
+ *  inside a hidden workspace: its entry stays mounted and laid out at the
+ *  same place as the shown one, so any `drag` or `no-drag` box in it would
+ *  still count in the window's drag region and cover or cut into the shown
+ *  workspace's top row. Only the shown workspace sets app-regions; everything
+ *  outside a workspace (sidebar, right sidepanel) keeps the default. */
+export const WindowDragContext = createContext(true);
+
+function useWindowDrag(): boolean {
+  return useContext(WindowDragContext);
+}
+
 export interface PanelItem {
   id: string;
   label: string;
@@ -251,12 +263,13 @@ export function SidebarTitleBar() {
  *  sidebar's own title bar). */
 export function SidebarGutter() {
   const chrome = useWorkspaceChrome();
+  const drag = useWindowDrag();
   if (!chrome || chrome.sidebarVisible) return null;
   return (
     <div
       data-testid="workspace-center__sidebar-gutter"
       className="h-full shrink-0"
-      style={{ ...DRAG_STYLE, width: chrome.navOverlayWidth }}
+      style={{ ...(drag ? DRAG_STYLE : undefined), width: chrome.navOverlayWidth }}
     />
   );
 }
@@ -268,15 +281,19 @@ export function SidebarGutter() {
 export function CenterDragBar({ className = "" }: { className?: string }) {
   const chrome = useWorkspaceChrome();
   const onToggleRightPanel = chrome?.onToggleRightPanel;
+  const drag = useWindowDrag();
   return (
     <div
       data-testid="workspace-center__drag-bar"
       className={`flex h-[38px] shrink-0 items-center border-b border-border bg-background pr-2 ${className}`}
-      style={DRAG_STYLE}
+      style={drag ? DRAG_STYLE : undefined}
     >
       <SidebarGutter />
       {onToggleRightPanel && !chrome.rightPanelVisible && (
-        <div className="ml-auto flex shrink-0 items-center" style={NO_DRAG_STYLE}>
+        <div
+          className="ml-auto flex shrink-0 items-center"
+          style={drag ? NO_DRAG_STYLE : undefined}
+        >
           <RightPanelToggle onToggle={onToggleRightPanel} visible={false} />
         </div>
       )}

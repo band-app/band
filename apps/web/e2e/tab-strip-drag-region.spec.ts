@@ -114,6 +114,7 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   expect(await wp.centerTabVisibilitiesIn(WORKSPACE_B)).toEqual(["visible", "visible", "visible"]);
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+  expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
 
   // With both side panels collapsed the strip also carries the sidebar gutter
   // (a drag rect) and the right sidepanel's expand button.
@@ -124,6 +125,25 @@ test("a hidden workspace's tab strip doesn't cover the visible workspace's tabs"
   await expect(wp.sidebarGutter).toHaveCount(1);
   await expect(wp.rightPanelTogglesInTabStrips).toHaveCount(1);
 
+  expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+  // A's strip now carries a sidebar gutter too, and it must set no region.
+  await expect(wp.sidebarGutterIn(WORKSPACE_A)).toHaveCount(1);
+  expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
+});
+
+test("a hidden workspace with every tab closed sets no app-region", async ({ page }) => {
+  const wp = new WorkspacePage(page, server.url, TOKEN);
+  // Closing A's only tab replaces its strip with the center drag bar.
+  await wp.goto(WORKSPACE_A);
+  await wp.waitForReady();
+  await wp.closeTerminalTab(WORKSPACE_A);
+  await expect(wp.centerDragBar).toBeVisible();
+  await wp.switchWorkspace(WORKSPACE_B);
+  await wp.waitForWorkspaceReady(WORKSPACE_B);
+  // A still renders its drag bar, now hidden.
+  await expect(wp.centerDragBarIn(WORKSPACE_A)).toHaveCount(1);
+
+  expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
 });
 
@@ -145,4 +165,5 @@ test("split and maximized top-row groups keep their tabs and buttons out of the 
   await expect(wp.restoreButton).toBeVisible();
 
   expect(await wp.controlsUnderWindowDragRegion()).toEqual([]);
+  expect(await wp.appRegionsInHiddenWorkspaces()).toEqual([]);
 });
