@@ -72,7 +72,8 @@ export function toolState(entry: ToolEntry): ToolState {
 }
 
 /** How long the calls ran, from the first start to the last end (ms).
- *  Undefined while one runs or when a call has no times. */
+ *  Undefined while one runs, when a call has no times, and when the span
+ *  is zero: a call reported finished in its first event wasn't timed. */
 export function toolDuration(tools: ToolEntry[]): number | undefined {
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
@@ -81,13 +82,15 @@ export function toolDuration(tools: ToolEntry[]): number | undefined {
     start = Math.min(start, t.startedAt);
     end = Math.max(end, t.endedAt);
   }
-  return tools.length > 0 ? Math.max(0, end - start) : undefined;
+  return end > start ? end - start : undefined;
 }
 
 /** "340ms", "4.2s", "42s", "3m 5s". */
 export function formatToolDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  // Compare rounded values, so 999.6 ms reads "1.0s" rather than "1000ms".
+  if (Math.round(ms) < 1000) return `${Math.round(ms)}ms`;
+  const tenths = Math.round(ms / 100);
+  if (tenths < 100) return `${(tenths / 10).toFixed(1)}s`;
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;

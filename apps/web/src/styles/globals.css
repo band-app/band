@@ -189,24 +189,27 @@ button,
 
 /* A running tool call's label (ai-elements/tool-call.tsx): a lighter band
    sweeps across the text instead of a spinner. The gradient is clipped to
-   the glyphs, so child spans with their own color go transparent too. */
-.tool-shimmer {
-  background:
-    linear-gradient(
-      90deg,
-      var(--muted-foreground) 40%,
-      var(--foreground) 50%,
-      var(--muted-foreground) 60%
-    )
-    0 0 / 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: tool-shimmer 2s linear infinite;
-}
+   the glyphs, so child spans with their own color go transparent too.
+   With reduced motion the label keeps its normal colors. */
+@media (prefers-reduced-motion: no-preference) {
+  .tool-shimmer {
+    background:
+      linear-gradient(
+        90deg,
+        var(--muted-foreground) 40%,
+        var(--foreground) 50%,
+        var(--muted-foreground) 60%
+      )
+      0 0 / 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: tool-shimmer 2s linear infinite;
+  }
 
-.tool-shimmer,
-.tool-shimmer * {
-  color: transparent;
+  .tool-shimmer,
+  .tool-shimmer * {
+    color: transparent;
+  }
 }
 
 @keyframes tool-shimmer {
@@ -215,17 +218,6 @@ button,
   }
   to {
     background-position: 0 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tool-shimmer {
-    animation: none;
-    background: none;
-  }
-  .tool-shimmer,
-  .tool-shimmer * {
-    color: inherit;
   }
 }
 

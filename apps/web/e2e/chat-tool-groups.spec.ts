@@ -42,7 +42,8 @@ const TOKEN = "e2e-chat-tool-groups-token";
 const PROJECT = "toolgroups";
 const WORKSPACE = toWorkspaceId(PROJECT, "main");
 const REPLY = "Fixed the lint errors.";
-/** The group runs for at least the scenario's 300 ms sleep. */
+/** The scenario sleeps 300 ms inside the pull call, so its duration and
+ *  the group's have at least three digits of milliseconds. */
 const TOOK = /^(\d{3}ms|\d+(\.\d)?s)$/;
 
 // Relative times and the tooltip's exact time are formatted for the
@@ -53,6 +54,8 @@ let server: ServerHandle;
 let tmpHome: string;
 /** The reply's time as the live stream dated it, checked after a reload. */
 let liveReplyTime: string | null = null;
+/** The group's duration as the live stream timed it, checked after a reload. */
+let liveGroupDuration: string | null = null;
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -201,6 +204,7 @@ test.describe("chat tool groups and message actions", () => {
     await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "0");
     await chatPane.hoverToolGroup(0);
     await expect(chatPane.toolGroupDuration(0)).toHaveCSS("opacity", "1");
+    liveGroupDuration = await chatPane.toolGroupDuration(0).textContent();
 
     // Expanded: a row per call, in order, the failed one marked.
     await chatPane.expandToolGroup(0);
@@ -218,6 +222,15 @@ test.describe("chat tool groups and message actions", () => {
       "data-status",
       "complete",
     );
+
+    // Each call has its own duration, shown once its row is hovered. A
+    // call reported finished in its first event wasn't timed, so it has none.
+    const pull = chatPane.toolCallDuration("Pull latest changes from branch");
+    await expect(pull).toHaveText(TOOK);
+    await expect(pull).toHaveCSS("opacity", "0");
+    await chatPane.hoverToolCall("Pull latest changes from branch");
+    await expect(pull).toHaveCSS("opacity", "1");
+    await expect(chatPane.toolCallDuration("Read package.json")).toHaveCount(0);
 
     // The failed call: command, exit code, and the output without the
     // exit-code line or the code fence.
@@ -286,6 +299,7 @@ test.describe("chat tool groups and message actions", () => {
     await expect(chatPane.messageTime(prompt)).toHaveText(/^(just now|1 minute ago)$/);
 
     // The group's duration comes from the logged event times too.
-    await expect(chatPane.toolGroupDuration(0)).toHaveText(TOOK);
+    expect(liveGroupDuration).not.toBeNull();
+    await expect(chatPane.toolGroupDuration(0)).toHaveText(liveGroupDuration ?? "");
   });
 });

@@ -386,8 +386,13 @@ function applyUpdate(
   }
 }
 
-/** A stopped turn leaves nothing spinning. */
-function settle(messages: ChatMessage[], failed: boolean): ChatMessage[] {
+/** A stopped turn leaves nothing spinning; a call it cuts off ends at
+ *  `endedAt`, the turn's end. */
+function settle(
+  messages: ChatMessage[],
+  failed: boolean,
+  endedAt: number | undefined,
+): ChatMessage[] {
   return mapEntries(
     messages,
     (e) => {
@@ -395,7 +400,7 @@ function settle(messages: ChatMessage[], failed: boolean): ChatMessage[] {
         return { ...e, answer: "cancelled" };
       }
       if (failed && e.kind === "tool" && (e.status === "pending" || e.status === "in_progress")) {
-        return { ...e, status: "failed" };
+        return { ...e, status: "failed", endedAt: e.endedAt ?? endedAt };
       }
       return e;
     },
@@ -577,7 +582,7 @@ function applyLogged(state: TranscriptState, event: ChatEvent): TranscriptState 
 
     case "turn-ended": {
       const failed = event.error !== undefined || event.stopReason === "cancelled";
-      let messages = settle(state.messages, failed);
+      let messages = settle(state.messages, failed, event.createdAt);
       const notice = event.error
         ? { level: "error" as const, text: event.error }
         : event.stopReason

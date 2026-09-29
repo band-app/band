@@ -584,8 +584,29 @@ describe("transcriptReducer — tool call times", () => {
     expect(formatToolDuration(65_400)).toBe("1m 5s");
   });
 
-  it("formats short and medium durations", () => {
-    expect([340, 4_249, 42_400].map(formatToolDuration)).toEqual(["340ms", "4.2s", "42s"]);
+  it("formats durations, rounding before it picks a unit", () => {
+    expect(
+      [340, 999.4, 999.6, 4_249, 9_949, 9_950, 42_400, 59_499, 60_000].map(formatToolDuration),
+    ).toEqual(["340ms", "999ms", "1.0s", "4.2s", "9.9s", "10s", "42s", "59s", "1m 0s"]);
+  });
+
+  it("ends a call the turn cut off when the turn ends", () => {
+    const events = logged([
+      update({ sessionUpdate: "tool_call", toolCallId: "t1", title: "sleep", status: "pending" }),
+      { type: "turn-ended", taskId: "t", stopReason: "cancelled" },
+    ]).map((e, i) => ({ ...e, createdAt: [1_000, 3_500][i] }));
+    const state = foldEvents(INITIAL_TRANSCRIPT, events);
+    expect(tools(state)).toMatchObject([{ status: "failed", startedAt: 1_000, endedAt: 3_500 }]);
+    expect(toolDuration(tools(state))).toBe(2_500);
+  });
+
+  it("has no duration for a call reported finished in its first event", () => {
+    const events = logged([
+      update({ sessionUpdate: "tool_call", toolCallId: "t1", title: "ls", status: "completed" }),
+    ]).map((e) => ({ ...e, createdAt: 1_000 }));
+    const state = foldEvents(INITIAL_TRANSCRIPT, events);
+    expect(tools(state)).toMatchObject([{ startedAt: 1_000, endedAt: 1_000 }]);
+    expect(toolDuration(tools(state))).toBeUndefined();
   });
 
   it("has no duration for calls logged without times", () => {

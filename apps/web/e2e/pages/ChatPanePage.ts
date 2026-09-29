@@ -781,6 +781,18 @@ export class ChatPanePage {
     return this.toolCallContainers.getByTestId("tool-call__label");
   }
 
+  /** How long the tool-call row whose description contains `text` took.
+   *  Transparent until the row is hovered. */
+  toolCallDuration(text: string): Locator {
+    return this.toolCall(text).getByTestId("tool-call__duration");
+  }
+
+  async hoverToolCall(text: string): Promise<void> {
+    await test.step(`Hover tool call "${text}"`, async () => {
+      await this.toolCall(text).getByTestId("tool-call__label").hover();
+    });
+  }
+
   /** The rendered tool-call row whose description contains `text`. */
   toolCall(text: string): Locator {
     return this.toolCallContainers.filter({ hasText: text });
