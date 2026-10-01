@@ -97,8 +97,7 @@ test("the document stays at scroll 0 while the chat transcript scrolls", async (
   // Tap the prompt, the way a tap that opens the keyboard does. Headless
   // WebKit doesn't scroll the document on focus, so this only checks the
   // starting point; the scroll below is what the layout has to undo.
-  await chat.promptInput.tap();
-  await expect(chat.promptInput).toBeFocused();
+  await chat.tapPrompt();
   await expect.poll(() => layout.readDocumentScroll()).toEqual({ x: 0, y: 0 });
 
   // iOS scrolls the document while the keyboard is up. The scroll lands, and

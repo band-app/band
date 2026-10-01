@@ -1228,6 +1228,15 @@ export class ChatPanePage {
     });
   }
 
+  /** Tap the prompt textarea, as a phone user does to open the keyboard,
+   *  and wait until it has focus. */
+  async tapPrompt(): Promise<void> {
+    await test.step("Tap the prompt", async () => {
+      await this.promptInput.tap();
+      await expect(this.promptInput).toBeFocused();
+    });
+  }
+
   /** Locate a `band-file:` anchor by its visible accessible name —
    *  the inline-code path the rendered link wraps (e.g. the
    *  pattern `src/main.rs:42`). Kept around for tests that need to
