@@ -957,15 +957,69 @@ export class ChatPanePage {
     });
   }
 
-  /** The stepper entries of the Nth elicitation form, one per question.
-   *  Each carries `data-state` (`done` / `current` / `upcoming`). */
-  elicitationSteps(index: number): Locator {
+  /** The Nth elicitation form's pager position ("2 of 3"). Absent on a
+   *  form with a single question. */
+  elicitationPager(index: number): Locator {
     return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-step");
   }
 
-  /** The Nth elicitation form's heading ("<agent> has 3 questions"). */
-  elicitationHeading(index: number): Locator {
-    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-heading");
+  /** The pager's ‹ (previous question) button of the Nth elicitation form. */
+  elicitationPrevButton(index: number): Locator {
+    return this.elicitationForms
+      .nth(index)
+      .getByRole("button", { name: "Previous question", exact: true });
+  }
+
+  /** The pager's › (next question) button of the Nth elicitation form. */
+  elicitationNextQuestionButton(index: number): Locator {
+    return this.elicitationForms
+      .nth(index)
+      .getByRole("button", { name: "Next question", exact: true });
+  }
+
+  /** The X in the Nth elicitation form's header, which declines the form. */
+  elicitationCloseButton(index: number): Locator {
+    return this.elicitationForms
+      .nth(index)
+      .getByRole("button", { name: "Dismiss questions", exact: true });
+  }
+
+  /** The number badges of the Nth elicitation form's option rows. */
+  elicitationChoiceNumbers(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-choice-number");
+  }
+
+  /** The dividers between the Nth elicitation form's option rows. */
+  elicitationDividers(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-divider");
+  }
+
+  /** The Nth elicitation form's bottom row: the "Something else" box (when
+   *  the question has one), Skip, and Next / Submit when needed. Carries
+   *  `data-highlighted="true"` while the keyboard highlight is on it. */
+  elicitationOtherRow(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-other");
+  }
+
+  /** The pencil badge at the start of the "Something else" row. */
+  elicitationOtherIcon(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-other-icon");
+  }
+
+  /** The Nth elicitation form's free-text box ("Something else"). */
+  elicitationNote(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-note");
+  }
+
+  /** A button in the Nth elicitation form's bottom row by its constant
+   *  label, for asserting whether it is shown. */
+  elicitationButton(index: number, name: "Next" | "Skip" | "Submit"): Locator {
+    return this.elicitationOtherRow(index).getByRole("button", { name, exact: true });
+  }
+
+  /** The key hint under the Nth elicitation form, shown while it waits. */
+  elicitationHint(index: number): Locator {
+    return this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-hint");
   }
 
   /** The question the Nth elicitation form shows right now. */
@@ -974,7 +1028,8 @@ export class ChatPanePage {
   }
 
   /** An option row of the Nth elicitation form, by its title (agent-supplied
-   *  test data). A toggle button: `aria-pressed="true"` once picked. */
+   *  test data). A toggle button: `aria-pressed="true"` once picked, and
+   *  `data-highlighted="true"` while the keyboard highlight is on it. */
   elicitationChoice(index: number, choiceTitle: string): Locator {
     return this.elicitationForms.nth(index).getByRole("button", { name: choiceTitle, exact: true });
   }
@@ -989,33 +1044,45 @@ export class ChatPanePage {
   /** Type into the Nth elicitation form's free-text row. */
   async typeElicitationNote(index: number, text: string): Promise<void> {
     await test.step(`Type a note in elicitation #${index}`, async () => {
-      await this.elicitationForms.nth(index).getByTestId("chat-pane__elicitation-note").fill(text);
+      await this.elicitationNote(index).fill(text);
     });
   }
 
   /** Press a key wherever focus is. The question card takes focus when it
-   *  appears, so this is how its shortcuts (1-9, Enter, Esc) get exercised. */
+   *  appears, so this is how its shortcuts (1-9, ↑↓, Enter, Esc) get exercised. */
   async pressKeyInPage(key: string): Promise<void> {
     await test.step(`Press "${key}"`, async () => {
       await this.page.keyboard.press(key);
     });
   }
 
-  /** Click one of the Nth elicitation form's footer buttons: "Next",
-   *  "Back", "Skip all", "Skip" or "Submit" (constant labels in
-   *  `elicitation-form.tsx`). */
-  async clickElicitationButton(
-    index: number,
-    name: "Next" | "Back" | "Skip all" | "Skip" | "Submit",
-  ): Promise<void> {
+  /** Click one of the Nth elicitation form's bottom-row buttons: "Next",
+   *  "Skip" or "Submit" (constant labels in `elicitation-form.tsx`). */
+  async clickElicitationButton(index: number, name: "Next" | "Skip" | "Submit"): Promise<void> {
     await test.step(`Click "${name}" in elicitation #${index}`, async () => {
-      await this.elicitationForms.nth(index).getByRole("button", { name, exact: true }).click();
+      await this.elicitationButton(index, name).click();
     });
   }
 
-  /** Submit the Nth elicitation form (its last question's "Submit"). */
-  async submitElicitation(index: number): Promise<void> {
-    await this.clickElicitationButton(index, "Submit");
+  /** Go to the previous question of the Nth elicitation form (pager ‹). */
+  async clickElicitationPrev(index: number): Promise<void> {
+    await test.step(`Previous question in elicitation #${index}`, async () => {
+      await this.elicitationPrevButton(index).click();
+    });
+  }
+
+  /** Go to the next question of the Nth elicitation form (pager ›). */
+  async clickElicitationNextQuestion(index: number): Promise<void> {
+    await test.step(`Next question in elicitation #${index}`, async () => {
+      await this.elicitationNextQuestionButton(index).click();
+    });
+  }
+
+  /** Dismiss the Nth elicitation form with the X in its header. */
+  async closeElicitation(index: number): Promise<void> {
+    await test.step(`Dismiss elicitation #${index}`, async () => {
+      await this.elicitationCloseButton(index).click();
+    });
   }
 
   /** Open the model settings menu and choose another model from its

@@ -220,8 +220,6 @@ interface ChatViewProps {
    */
   onSwitchSession?: (sessionId: string | undefined, summary?: string) => Promise<void> | void;
   agentType?: string;
-  /** The agent's name from Settings > Coding agents ("Claude Code"). */
-  agentLabel?: string;
   codingAgentId?: string;
   visible?: boolean;
   /** Workspace is active (even if the chat tab isn't the focused tab). */
@@ -239,7 +237,6 @@ export function ChatView({
   onSessionDiscovered,
   onSwitchSession,
   agentType,
-  agentLabel,
   codingAgentId,
   visible,
   wsActive,
@@ -549,70 +546,66 @@ export function ChatView({
     return () => io.disconnect();
   }, [scrollEl, hasMore, loadingHistory, loadOlder]);
 
-  const renderEntry = useCallback(
-    (entry: Entry) => {
-      switch (entry.kind) {
-        case "text":
-          return entry.text.trim() ? (
-            <div key={entry.id} data-chat-find-text="">
-              <MessageResponse>{entry.text}</MessageResponse>
-            </div>
-          ) : null;
-        case "thought":
-          return (
-            <details key={entry.id} className="group/thought text-muted-foreground">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs">
-                <Brain className="size-3.5" />
-                Thinking
-              </summary>
-              <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/50 pl-3 text-xs">
-                {entry.text}
-              </div>
-            </details>
-          );
-        case "tool":
-          return <ToolCall key={entry.id} entry={entry} />;
-        case "permission":
-          return (
-            <PermissionRequest
-              key={entry.id}
-              entry={entry}
-              onAnswer={(optionId) => actionsRef.current.answerPermission(entry.id, optionId)}
-            />
-          );
-        case "elicitation":
-          return (
-            <ElicitationForm
-              key={entry.id}
-              entry={entry}
-              agentLabel={agentLabel}
-              onAnswer={(action, content) =>
-                actionsRef.current.answerElicitation(entry.id, action, content)
-              }
-            />
-          );
-        case "file":
-          return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
-        case "notice":
-          return (
-            <div
-              key={entry.id}
-              data-testid="chat-pane__notice"
-              data-level={entry.level}
-              className={cn(
-                "text-sm",
-                entry.level === "error" && "text-destructive",
-                entry.level === "warning" && "text-amber-600 dark:text-amber-400",
-                entry.level === "info" && "text-muted-foreground",
-              )}
-            >
+  const renderEntry = useCallback((entry: Entry) => {
+    switch (entry.kind) {
+      case "text":
+        return entry.text.trim() ? (
+          <div key={entry.id} data-chat-find-text="">
+            <MessageResponse>{entry.text}</MessageResponse>
+          </div>
+        ) : null;
+      case "thought":
+        return (
+          <details key={entry.id} className="group/thought text-muted-foreground">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs">
+              <Brain className="size-3.5" />
+              Thinking
+            </summary>
+            <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/50 pl-3 text-xs">
               {entry.text}
             </div>
-          );
-      }
-    },
-    [agentLabel],
-  );
+          </details>
+        );
+      case "tool":
+        return <ToolCall key={entry.id} entry={entry} />;
+      case "permission":
+        return (
+          <PermissionRequest
+            key={entry.id}
+            entry={entry}
+            onAnswer={(optionId) => actionsRef.current.answerPermission(entry.id, optionId)}
+          />
+        );
+      case "elicitation":
+        return (
+          <ElicitationForm
+            key={entry.id}
+            entry={entry}
+            onAnswer={(action, content) =>
+              actionsRef.current.answerElicitation(entry.id, action, content)
+            }
+          />
+        );
+      case "file":
+        return <MessageFilePart key={entry.id} part={{ type: "file", ...entry.file }} />;
+      case "notice":
+        return (
+          <div
+            key={entry.id}
+            data-testid="chat-pane__notice"
+            data-level={entry.level}
+            className={cn(
+              "text-sm",
+              entry.level === "error" && "text-destructive",
+              entry.level === "warning" && "text-amber-600 dark:text-amber-400",
+              entry.level === "info" && "text-muted-foreground",
+            )}
+          >
+            {entry.text}
+          </div>
+        );
+    }
+  }, []);
 
   const renderMessageItem = useCallback(
     (message: ChatMessage, messageIndex: number) => {

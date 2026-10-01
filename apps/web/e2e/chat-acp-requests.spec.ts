@@ -5,11 +5,13 @@
  *     button per option the agent offered. Clicking one answers the request,
  *     marks the card answered, and the agent continues on that branch.
  *   - A form `elicitation/create` (Claude Code's AskUserQuestion) renders as
- *     a question card, one question at a time. Picking choices (by click or
- *     number key), moving on (Next / Enter), going Back and skipping (Esc)
- *     send the values back on the last question, and the agent's reply shows
- *     what it received. Skip all declines. The composer is disabled while
- *     the card waits.
+ *     a question card, one question at a time, with the question as its
+ *     title, a "‹ 1 of 3 ›" pager and an X. Picking a single-choice option
+ *     (by click, number key, or ↑↓ + Enter) moves on; multi-select and
+ *     "Something else" answers move on with Next or Enter; Skip and Esc
+ *     leave a question unanswered. The last question sends the values, and
+ *     the agent's reply shows what it received. The X declines. The
+ *     composer is disabled while the card waits.
  *   - The model picker is built from the session's `model` config option.
  *     Choosing another model sends `session/set_config_option`, and the next
  *     turn runs on that model.
@@ -38,10 +40,19 @@ import {
 import { ChatPanePage } from "./pages/ChatPanePage";
 
 const TOKEN = "e2e-chat-acp-requests-token";
-/** A label no agent ships with, so the question card's heading can only
- *  have taken it from settings. */
+/** A label no agent ships with, so its absence from the question card shows
+ *  the old "<agent> has N questions" heading is gone. */
 const AGENT_LABEL = "Stub Helper";
-const PROJECTS = ["acppermission", "acpelicit", "acpquestions", "acpskipall", "acpmodel"] as const;
+const PROJECTS = [
+  "acppermission",
+  "acpelicit",
+  "acpquestions",
+  "acpkeys",
+  "acpskip",
+  "acpskipall",
+  "acpconfirm",
+  "acpmodel",
+] as const;
 
 /** The form Claude Code's ACP adapter sends for an AskUserQuestion call with
  *  several questions: one `question_<n>` select per question (header as
@@ -176,6 +187,18 @@ test.beforeAll(async () => {
           match: "^skip me",
           steps: [{ elicitation: THREE_QUESTIONS, after: { decline: [{ say: "Skipped all." }] } }],
         },
+        {
+          match: "^confirm",
+          // A form with no fields: only its message, answered with Submit.
+          steps: [
+            {
+              elicitation: {
+                message: "Ready to continue?",
+                requestedSchema: { type: "object", properties: {} },
+              },
+            },
+          ],
+        },
         // Anything else gets the stub's default reply, which names the model.
       ],
     }),
@@ -217,7 +240,9 @@ test.describe("Chat pane — ACP agent requests", () => {
     await expect(chatPane.permissionCards.nth(1)).toHaveAttribute("data-answered", "true");
   });
 
-  test("an elicitation form sends the picked choice back to the agent", async ({ page }) => {
+  test("a single question is the card's title, has no pager, and a pick sends it", async ({
+    page,
+  }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     await chatPane.goto(toWorkspaceId("acpelicit", "main"));
     await chatPane.waitForReady();
@@ -226,16 +251,20 @@ test.describe("Chat pane — ACP agent requests", () => {
     await chatPane.submit();
     await expect(chatPane.elicitationForms).toHaveCount(1);
     await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "false");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which color should the button be?");
+    await expect(chatPane.elicitationPager(0)).toHaveCount(0);
+    await expect(chatPane.elicitationCloseButton(0)).toBeVisible();
+    // A single-choice question has no Submit: the pick sends it.
+    await expect(chatPane.elicitationButton(0, "Submit")).toHaveCount(0);
 
     await chatPane.pickElicitationChoice(0, "Blue");
-    await chatPane.submitElicitation(0);
 
     // The stub echoes the values it received.
     await expect(chatPane.assistantMessage('Answer: {"color":"blue"}')).toBeVisible();
     await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
   });
 
-  test("a set of questions steps through one at a time and sends every answer on the last one", async ({
+  test("a set of questions pages through one at a time and the last pick sends every answer", async ({
     page,
   }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
@@ -245,50 +274,180 @@ test.describe("Chat pane — ACP agent requests", () => {
     await chatPane.typeMessage("quiz me");
     await chatPane.submit();
     await expect(chatPane.elicitationForms).toHaveCount(1);
-    // Named after the chat's agent as configured in settings.
-    await expect(chatPane.elicitationHeading(0)).toContainText(AGENT_LABEL);
     await expect(chatPane.elicitationQuestion(0)).toHaveText("___ Hund bellt.");
-    await expect(chatPane.elicitationSteps(0)).toHaveCount(3);
-    await expect(chatPane.elicitationSteps(0).nth(0)).toHaveAttribute("data-state", "current");
-    await expect(chatPane.elicitationSteps(0).nth(1)).toHaveAttribute("data-state", "upcoming");
+    // No "<agent> has 3 questions" heading: the configured agent name is nowhere on the card.
+    await expect(chatPane.elicitationForms.nth(0)).not.toContainText(AGENT_LABEL);
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-index", "1");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-count", "3");
+    await expect(chatPane.elicitationPrevButton(0)).toBeDisabled();
+    await expect(chatPane.elicitationCloseButton(0)).toBeVisible();
+    // Numbered option rows split by dividers, then the "Something else" row.
+    await expect(chatPane.elicitationChoiceNumbers(0)).toHaveText(["1", "2", "3"]);
+    await expect(chatPane.elicitationDividers(0)).toHaveCount(2);
+    await expect(chatPane.elicitationOtherIcon(0)).toBeVisible();
+    await expect(chatPane.elicitationNote(0)).toBeVisible();
+    await expect(chatPane.elicitationButton(0, "Skip")).toBeVisible();
+    await expect(chatPane.elicitationHint(0)).toBeVisible();
+    await expect(chatPane.elicitationButton(0, "Next")).toHaveCount(0);
     // The composer waits for the answers.
     await expect(chatPane.composer).toBeDisabled();
 
-    // A number key picks that option; Enter moves on.
+    // A number key picks that option and moves on.
     await chatPane.pressKeyInPage("3");
-    await expect(chatPane.elicitationChoice(0, "Das")).toHaveAttribute("aria-pressed", "true");
-    await chatPane.pressKeyInPage("Enter");
     await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
-    await expect(chatPane.elicitationSteps(0).nth(0)).toHaveAttribute("data-state", "done");
-    await expect(chatPane.elicitationSteps(0).nth(1)).toHaveAttribute("data-state", "current");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-index", "2");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-count", "3");
 
-    // Back returns to the first question with its pick kept.
-    await chatPane.clickElicitationButton(0, "Back");
+    // ‹ returns to the first question with its pick kept; › comes back.
+    await chatPane.clickElicitationPrev(0);
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("___ Hund bellt.");
     await expect(chatPane.elicitationChoice(0, "Das")).toHaveAttribute("aria-pressed", "true");
-    await chatPane.clickElicitationButton(0, "Next");
+    await expect(chatPane.elicitationPrevButton(0)).toBeDisabled();
+    await chatPane.clickElicitationNextQuestion(0);
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
 
-    // Pick-any: two options and a note.
+    // Pick-any stays on its question until Next.
     await chatPane.pickElicitationChoice(0, "an");
     await chatPane.pickElicitationChoice(0, "von");
     await chatPane.typeElicitationNote(0, "also nach");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
+
+    // › to the last question and ‹ back keeps the picks on this one.
+    await chatPane.clickElicitationNextQuestion(0);
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("ein ___ Tag");
+    await chatPane.clickElicitationPrev(0);
+    await expect(chatPane.elicitationChoice(0, "an")).toHaveAttribute("aria-pressed", "true");
+    await expect(chatPane.elicitationChoice(0, "von")).toHaveAttribute("aria-pressed", "true");
+    await expect(chatPane.elicitationNote(0)).toHaveValue("also nach");
+
     await chatPane.clickElicitationButton(0, "Next");
     await expect(chatPane.elicitationQuestion(0)).toHaveText("ein ___ Tag");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-index", "3");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-count", "3");
+    await expect(chatPane.elicitationNextQuestionButton(0)).toBeDisabled();
 
-    // Esc skips the last question, which sends the answers.
-    await chatPane.pressKeyInPage("1");
-    await expect(chatPane.elicitationChoice(0, "schöner")).toHaveAttribute("aria-pressed", "true");
-    await chatPane.pressKeyInPage("Escape");
+    // A click on the last question sends the answers right away.
+    await chatPane.pickElicitationChoice(0, "schöner");
 
     await expect(
       chatPane.assistantMessage(
-        'Answer: {"question_0":"Das","question_1":["an","von"],"question_1_custom":"also nach"}',
+        'Answer: {"question_0":"Das","question_1":["an","von"],"question_1_custom":"also nach","question_2":"schöner"}',
+      ),
+    ).toBeVisible();
+    await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
+    await expect(chatPane.elicitationHint(0)).toHaveCount(0);
+    await expect(chatPane.composer).toBeEnabled();
+  });
+
+  test("arrow keys move a highlight through the options and Enter picks it", async ({ page }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId("acpkeys", "main"));
+    await chatPane.waitForReady();
+
+    await chatPane.typeMessage("quiz me");
+    await chatPane.submit();
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("___ Hund bellt.");
+
+    // ↓ runs through the options and the "Something else" row, then wraps.
+    await chatPane.pressKeyInPage("ArrowDown");
+    await expect(chatPane.elicitationChoice(0, "Der")).toHaveAttribute("data-highlighted", "true");
+    await chatPane.pressKeyInPage("ArrowDown");
+    await chatPane.pressKeyInPage("ArrowDown");
+    await expect(chatPane.elicitationChoice(0, "Das")).toHaveAttribute("data-highlighted", "true");
+    await chatPane.pressKeyInPage("ArrowDown");
+    await expect(chatPane.elicitationOtherRow(0)).toHaveAttribute("data-highlighted", "true");
+    await chatPane.pressKeyInPage("ArrowDown");
+    await expect(chatPane.elicitationChoice(0, "Der")).toHaveAttribute("data-highlighted", "true");
+    await chatPane.pressKeyInPage("ArrowUp");
+    await chatPane.pressKeyInPage("ArrowUp");
+    await expect(chatPane.elicitationChoice(0, "Das")).toHaveAttribute("data-highlighted", "true");
+
+    // Enter picks the highlighted single-choice option and moves on.
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
+
+    // On a pick-any question Enter on the highlight and number keys toggle
+    // without moving on.
+    await chatPane.pressKeyInPage("ArrowDown");
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationChoice(0, "an")).toHaveAttribute("aria-pressed", "true");
+    await chatPane.pressKeyInPage("4");
+    await expect(chatPane.elicitationChoice(0, "auf")).toHaveAttribute("aria-pressed", "true");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
+
+    // Enter on the "Something else" row puts the cursor in its box, where
+    // numbers and arrows are just typing. ↑ from the first option wraps to it.
+    await chatPane.pressKeyInPage("ArrowUp");
+    await expect(chatPane.elicitationOtherRow(0)).toHaveAttribute("data-highlighted", "true");
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationNote(0)).toBeFocused();
+    await chatPane.pressKeyInPage("2");
+    await chatPane.pressKeyInPage("ArrowUp");
+    await expect(chatPane.elicitationNote(0)).toHaveValue("2");
+    await expect(chatPane.elicitationChoice(0, "über")).toHaveAttribute("aria-pressed", "false");
+    await expect(chatPane.elicitationOtherRow(0)).toHaveAttribute("data-highlighted", "true");
+
+    // Esc in the box only leaves it: the text stays and the question doesn't change.
+    await chatPane.pressKeyInPage("Escape");
+    await expect(chatPane.elicitationNote(0)).not.toBeFocused();
+    await expect(chatPane.elicitationNote(0)).toHaveValue("2");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationNote(0)).toBeFocused();
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("ein ___ Tag");
+
+    // With nothing highlighted, a stray Enter on a single-choice question
+    // only highlights the first option; it doesn't send.
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationChoice(0, "schöner")).toHaveAttribute(
+      "data-highlighted",
+      "true",
+    );
+    await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "false");
+
+    // A typed answer on the last question sends with Submit.
+    await chatPane.typeElicitationNote(0, "sonniger");
+    await chatPane.clickElicitationButton(0, "Submit");
+    await expect(
+      chatPane.assistantMessage(
+        'Answer: {"question_0":"Das","question_1":["an","auf"],"question_1_custom":"2","question_2_custom":"sonniger"}',
       ),
     ).toBeVisible();
     await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
     await expect(chatPane.composer).toBeEnabled();
   });
 
-  test("Skip all declines the whole set of questions", async ({ page }) => {
+  test("Skip and Esc leave a question unanswered, and a typed answer moves on with Next", async ({
+    page,
+  }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId("acpskip", "main"));
+    await chatPane.waitForReady();
+
+    await chatPane.typeMessage("quiz me");
+    await chatPane.submit();
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("___ Hund bellt.");
+
+    // Typing "Something else" on a single-choice question brings up Next.
+    await chatPane.typeElicitationNote(0, "Ein");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("___ Hund bellt.");
+    await chatPane.clickElicitationButton(0, "Next");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Which prepositions go with denken?");
+
+    // Esc drops this question's picks and moves on without sending.
+    await chatPane.pickElicitationChoice(0, "über");
+    await chatPane.pressKeyInPage("Escape");
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("ein ___ Tag");
+    await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "false");
+
+    // Skip on the last question skips it and sends the answers.
+    await chatPane.clickElicitationButton(0, "Skip");
+    await expect(chatPane.assistantMessage('Answer: {"question_0_custom":"Ein"}')).toBeVisible();
+    await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
+  });
+
+  test("the X declines the whole set of questions", async ({ page }) => {
     const chatPane = new ChatPanePage(page, server.url, TOKEN);
     await chatPane.goto(toWorkspaceId("acpskipall", "main"));
     await chatPane.waitForReady();
@@ -297,11 +456,34 @@ test.describe("Chat pane — ACP agent requests", () => {
     await chatPane.submit();
     await expect(chatPane.elicitationForms).toHaveCount(1);
     await chatPane.pickElicitationChoice(0, "Der");
-    await chatPane.clickElicitationButton(0, "Skip all");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-index", "2");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-count", "3");
+    // A number key toggles a pick-any option; Enter then moves on.
+    await chatPane.pressKeyInPage("1");
+    await expect(chatPane.elicitationChoice(0, "an")).toHaveAttribute("aria-pressed", "true");
+    await chatPane.pressKeyInPage("Enter");
+    await expect(chatPane.elicitationPager(0)).toHaveAttribute("data-index", "3");
+    await chatPane.closeElicitation(0);
 
     await expect(chatPane.assistantMessage("Skipped all.")).toBeVisible();
     await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
     await expect(chatPane.composer).toBeEnabled();
+  });
+
+  test("a form with no fields shows its message and answers with Submit", async ({ page }) => {
+    const chatPane = new ChatPanePage(page, server.url, TOKEN);
+    await chatPane.goto(toWorkspaceId("acpconfirm", "main"));
+    await chatPane.waitForReady();
+
+    await chatPane.typeMessage("confirm it");
+    await chatPane.submit();
+    await expect(chatPane.elicitationQuestion(0)).toHaveText("Ready to continue?");
+    await expect(chatPane.elicitationCloseButton(0)).toBeVisible();
+    await expect(chatPane.elicitationPager(0)).toHaveCount(0);
+
+    await chatPane.clickElicitationButton(0, "Submit");
+    await expect(chatPane.assistantMessage("Answer: {}")).toBeVisible();
+    await expect(chatPane.elicitationForms.nth(0)).toHaveAttribute("data-answered", "true");
   });
 
   test("choosing another model in the model menu runs the next turn on that model", async ({
