@@ -348,6 +348,13 @@ const bandDesktopTheme: DockviewTheme = {
   className: `${bandTheme.className} dockview-center-desktop`,
 };
 
+// Mobile layout: taller tabs and "+" button, sized for a finger (44px, iOS's
+// minimum tap target). See `.dockview-center-mobile` in dockview-theme.css.
+const bandMobileTheme: DockviewTheme = {
+  ...bandTheme,
+  className: `${bandTheme.className} dockview-center-mobile`,
+};
+
 // ---------------------------------------------------------------------------
 // Per-workspace dockview api registry
 // ---------------------------------------------------------------------------
@@ -4557,7 +4564,7 @@ export const WorkspaceCenterDockview = memo(function WorkspaceCenterDockview({
     <div ref={containerRef} className="relative flex h-full w-full flex-col overflow-hidden">
       <PanelVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
-          theme={mobile ? bandTheme : bandDesktopTheme}
+          theme={mobile ? bandMobileTheme : bandDesktopTheme}
           className="h-full"
           components={components}
           tabComponents={tabComponents}

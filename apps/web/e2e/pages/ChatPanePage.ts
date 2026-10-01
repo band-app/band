@@ -607,6 +607,14 @@ export class ChatPanePage {
     });
   }
 
+  /** Submit the typed message with the send button, the way a phone user
+   *  does: there, Enter inserts a newline. */
+  async tapSend(): Promise<void> {
+    await test.step("Tap the send button", async () => {
+      await this.submitButton.tap();
+    });
+  }
+
   /** Attach a file to the prompt through the composer's file input, the
    *  input the paperclip button opens. Scoped to the visible composer, since
    *  other visited workspaces keep their chats mounted. */
@@ -690,6 +698,11 @@ export class ChatPanePage {
         (el as HTMLDivElement).scrollTop = 0;
       });
     });
+  }
+
+  /** The visible chat transcript's `scrollTop`, in CSS px. */
+  async readScrollTop(): Promise<number> {
+    return await this.scroller.filter({ visible: true }).evaluate((el) => el.scrollTop);
   }
 
   /** Scroll the chat container to the bottom — used to verify stick-to-bottom

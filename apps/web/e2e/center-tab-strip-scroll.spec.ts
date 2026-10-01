@@ -11,6 +11,9 @@
  *     strip and leaves the active tab alone; a tap still switches tabs.
  *     dockview activates a tab on pointerdown, so the drag used to switch to
  *     the tab under the finger and never scrolled.
+ *  3. Size: on a phone each tab, the "+" and the ⋮ button is at least 44px tall,
+ *     iOS's minimum tap target; the desktop strip stays 38px, the height of
+ *     the window's title bar row.
  *
  * Each file holds its own name, so the editor line that is visible tells which
  * tab is active. Real production binary, no tRPC mocks, page objects only.
@@ -99,6 +102,17 @@ test.describe("desktop", () => {
       .toBe(true);
     await expect.poll(() => strip.isTabFullyShown(workspacePage.fileTab(FILES[0]))).toBe(false);
   });
+
+  test("the tab strip keeps the window's 38px title bar height", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForReady();
+    await workspacePage.openFileViaQuickOpen(FILES[0]);
+    await expect(workspacePage.fileTab(FILES[0])).toBeVisible();
+
+    expect((await strip.strip.boundingBox())?.height).toBe(38);
+  });
 });
 
 test.describe("phone", () => {
@@ -136,6 +150,26 @@ test.describe("phone", () => {
 
     await strip.tap(workspacePage.fileTab(FILES[2]));
     await expect(workspacePage.fileLeafLine(FILES[2])).toBeVisible();
+  });
+
+  test("each tab and the strip's buttons are at least 44px tall", async ({ page }) => {
+    const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+    const strip = new CenterTabStrip(page);
+    await workspacePage.goto(WORKSPACE);
+    await workspacePage.waitForMobileReady();
+    await workspacePage.openFileViaQuickOpen(FILES[0]);
+    await workspacePage.openFileViaQuickOpen(FILES[1]);
+    await expect(workspacePage.fileLeafLine(FILES[1])).toBeVisible();
+
+    // The active and an inactive tab.
+    for (const file of FILES.slice(0, 2)) {
+      expect(await strip.readTabTapHeight(workspacePage.fileTab(file))).toBeGreaterThanOrEqual(44);
+    }
+    for (const button of [strip.newTabButton, strip.tabActionsButton]) {
+      const box = await button.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+    }
   });
 
   test("tapping a tab's close button closes that tab", async ({ page }) => {

@@ -59,6 +59,17 @@ function useAppHeight() {
   useLayoutEffect(() => {
     const vv = window.visualViewport;
     const update = () => {
+      // iOS scrolls the document to reveal a focused input even with
+      // `overflow: hidden` on html and body, and lets a drag scroll it by up
+      // to the keyboard's height. A scrolled document adds to the visual
+      // viewport's own pan, which opens a gap between the composer and the
+      // keyboard and slides the header under iOS 26's top-edge blur. Undo it,
+      // so `offsetTop` is the only shift. Panes scroll their own elements.
+      // Skipped while a Radix dialog or sheet locks the page
+      // (`data-scroll-locked`): those are sized to the window, and iOS
+      // scrolls the document to keep their focused input above the keyboard.
+      const scrolled = window.scrollX !== 0 || window.scrollY !== 0;
+      if (scrolled && !document.body.hasAttribute("data-scroll-locked")) window.scrollTo(0, 0);
       setHeight(vv ? vv.height : window.innerHeight);
       setOffsetTop(vv ? vv.offsetTop : 0);
       setKeyboardOpen(vv ? window.innerHeight - vv.height > KEYBOARD_MIN_HEIGHT_PX : false);
@@ -69,12 +80,18 @@ function useAppHeight() {
       vv.addEventListener("scroll", update);
     }
     window.addEventListener("resize", update);
+    window.addEventListener("scroll", update);
+    // A scroll iOS made while a sheet held the lock is undone once it lets go.
+    const scrollLock = new MutationObserver(update);
+    scrollLock.observe(document.body, { attributeFilter: ["data-scroll-locked"] });
     return () => {
+      scrollLock.disconnect();
       if (vv) {
         vv.removeEventListener("resize", update);
         vv.removeEventListener("scroll", update);
       }
       window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update);
     };
   }, []);
   return { height, offsetTop, keyboardOpen };
