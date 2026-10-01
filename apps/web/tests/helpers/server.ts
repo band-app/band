@@ -178,9 +178,13 @@ export async function waitForProcessGroupExit(pgid: number, timeoutMs = 5_000): 
   await waitUntil(Date.now() + 1_000);
 }
 
+/** The line `start-server.ts` logs once it is bound, with the port it got. */
+export const LISTENING_BANNER = /Web server listening on http:\/\/[^\s:]+:(\d+)/;
+
 /**
  * Boot the production server bundle in a child process. Resolves
- * when the server logs `"listening"` to stdout; rejects if it exits
+ * when the server logs its "Web server listening on ..." banner, with
+ * the URL of the port it actually bound; rejects if it exits
  * first or doesn't bind within 15 s. The returned `close()` signals
  * the whole process group with `SIGTERM` and falls back to `SIGKILL`
  * after 5 s so a server stuck in a DB lock — or a grandchild stuck on
@@ -238,11 +242,17 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
       stderr += chunk.toString();
     });
 
+    let stdout = "";
     child.stdout!.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes("listening") && !settled) {
+      if (settled) return;
+      stdout += chunk.toString();
+      // The server moves to the next port when `PORT` is taken by the time it
+      // binds (`listenWithFallback`), so use the port its banner reports.
+      const boundPort = LISTENING_BANNER.exec(stdout)?.[1];
+      if (boundPort) {
         settled = true;
         resolve({
-          url: `http://127.0.0.1:${port}`,
+          url: `http://127.0.0.1:${boundPort}`,
           home: tmpHome,
           close: async (closeOpts) => {
             await new Promise<void>((r) => {

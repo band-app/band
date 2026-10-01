@@ -106,6 +106,8 @@ test.beforeAll(async () => {
   // the client's EventSource reconnects to it.
   port = await getRandomPort();
   server = await startServer({ tmpHome, port, env: stubEnv });
+  // The server takes the next port if this one was claimed before it bound.
+  port = Number(new URL(server.url).port);
 });
 
 test.afterAll(async () => {

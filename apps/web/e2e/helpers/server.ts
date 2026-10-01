@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
+import { LISTENING_BANNER } from "../../tests/helpers/server";
 import { stopTerminalDaemon } from "../../tests/helpers/terminal-daemon";
 import { ACP_STUB_AGENT_PATH } from "./acp-stub";
 
@@ -239,17 +240,22 @@ export async function startServer(
       if (!closeOpts?.keepTerminalDaemon) await stopTerminalDaemon(home);
     };
 
+    let stdout = "";
     child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
+      if (settled) return;
+      stdout += chunk.toString();
+      // The server moves to the next port when `PORT` is taken by the time it
+      // binds (`listenWithFallback`), so use the port its banner reports.
+      const boundPort = LISTENING_BANNER.exec(stdout)?.[1];
+      if (boundPort) {
         settled = true;
         resolve({
-          url: `http://127.0.0.1:${port}`,
+          url: `http://127.0.0.1:${boundPort}`,
           home,
           close,
           restart: async () => {
             await close({ keepTerminalDaemon: true });
-            return startServer({ ...opts, tmpHome: home, port });
+            return startServer({ ...opts, tmpHome: home, port: Number(boundPort) });
           },
         });
       }
