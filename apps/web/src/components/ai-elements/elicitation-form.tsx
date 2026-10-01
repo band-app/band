@@ -1,14 +1,9 @@
 import { Button, cn } from "@band-app/ui";
+import { CheckIcon, ChevronLeft, ChevronRight, Loader2, PencilIcon, XIcon } from "lucide-react";
 import {
-  ArrowRight,
-  CheckIcon,
-  Loader2,
-  MessageCircleQuestionMark,
-  PencilIcon,
-} from "lucide-react";
-import {
+  Fragment,
   type KeyboardEvent,
-  type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useId,
@@ -119,58 +114,57 @@ function toContent(fields: Field[], values: Record<string, Value>): Record<strin
   return content;
 }
 
-function isAnswered(step: Step, values: Record<string, Value>): boolean {
-  return (
-    values[step.field.key] !== undefined || (!!step.note && values[step.note.key] !== undefined)
-  );
-}
-
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-sans text-xs text-muted-foreground">
-      {children}
-    </kbd>
-  );
-}
-
 /**
  * An ACP form elicitation: the agent needs structured input from the user,
  * such as Claude Code's AskUserQuestion (one select field per question, each
- * with its own optional free-text box). Shows one question at a time with a
- * stepper of all of them. Next moves on and, on the last question, sends
- * `accept` with the values; Skip all sends `decline`.
+ * with its own optional free-text box). Shows one question at a time as the
+ * card's title, with a "‹ 2 of 3 ›" pager and an X that sends `decline`.
  *
- * Keys: a number picks that option, Enter goes to the next question, Esc
- * skips the current one.
+ * Picking an option of a single-choice question moves on and, on the last
+ * question, sends `accept` with the values. Multi-select, free-text and typed
+ * "Something else" answers move on with Next (Submit on the last question) or
+ * Enter. Skip leaves the question unanswered and moves on.
+ *
+ * Keys: ↑↓ move a highlight through the options and the "Something else"
+ * row, Enter picks the highlighted option, a number picks that option, Esc
+ * skips the current question (in the "Something else" box it only leaves
+ * the box).
  */
 export function ElicitationForm({
   entry,
-  agentLabel,
   onAnswer,
 }: {
   entry: ElicitationEntry;
-  /** The chat's agent as named in Settings > Coding agents. */
-  agentLabel?: string;
   onAnswer: (action: "accept" | "decline", content?: Record<string, Value>) => Promise<void>;
 }) {
   const fields = useMemo(() => fieldsOf(entry), [entry]);
   const steps = useMemo(() => stepsOf(fields), [fields]);
   const [values, setValues] = useState<Record<string, Value>>({});
   const [index, setIndex] = useState(0);
+  /** The highlighted row: an option, or `choices.length` for "Something else". */
+  const [highlight, setHighlight] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   // `sending` only reaches the handlers on the next render; a repeated Enter
   // can arrive before that.
   const sendingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const answered = entry.answer !== undefined;
   const disabled = answered || sending;
   const step = steps[index] as Step | undefined;
   const isLast = index >= steps.length - 1;
-  const agentName = agentLabel?.trim() || "The agent";
+  const single = steps.length === 1;
   // AskUserQuestion's message is boilerplate ("Please answer the following
   // questions."), but any other form's message is the context for its fields.
   const intro =
-    steps.length !== 1 && !fields.some((f) => f.customFor) ? entry.request.message : undefined;
+    steps.length > 1 && !fields.some((f) => f.customFor) ? entry.request.message : undefined;
+  const hasInput =
+    !!step && (step.field.kind === "text" || step.field.kind === "number" || !!step.note);
+  const rowCount = step ? step.field.choices.length + (hasInput ? 1 : 0) : 0;
+  // A single-choice pick moves on by itself; everything else needs a button.
+  const needsNext =
+    !!step &&
+    (step.field.kind !== "single" || (!!step.note && values[step.note.key] !== undefined));
 
   // Take the keyboard when the questions arrive, unless the user is busy
   // somewhere else. The composer is disabled meanwhile, so it can't keep it.
@@ -211,13 +205,24 @@ export function ElicitationForm({
     [onAnswer, fields],
   );
 
+  const focusCard = useCallback(() => rootRef.current?.focus({ preventScroll: true }), []);
+
+  const goTo = useCallback((i: number) => {
+    // The new question replaces the rows, and with them a focused option or
+    // the "Something else" box: keep the keyboard on the card.
+    const root = rootRef.current;
+    if (root?.contains(document.activeElement)) root.focus({ preventScroll: true });
+    setIndex(i);
+    setHighlight(null);
+  }, []);
+
   const next = useCallback(
     (from: Record<string, Value> = values) => {
       if (disabled) return;
       if (isLast) void submit("accept", from);
-      else setIndex((i) => i + 1);
+      else goTo(index + 1);
     },
-    [disabled, isLast, submit, values],
+    [disabled, isLast, submit, values, goTo, index],
   );
 
   const skip = useCallback(() => {
@@ -231,9 +236,12 @@ export function ElicitationForm({
 
   const pick = useCallback(
     (field: Field, choice: Choice) => {
+      if (disabled) return;
       const current = values[field.key];
       if (field.kind === "single") {
-        set(field.key, current === choice.value ? undefined : choice.value);
+        const from = { ...values, [field.key]: choice.value };
+        setValues(from);
+        next(from);
         return;
       }
       const list = Array.isArray(current) ? current : [];
@@ -244,7 +252,7 @@ export function ElicitationForm({
           : [...list, choice.value],
       );
     },
-    [values, set],
+    [disabled, values, set, next],
   );
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -254,22 +262,60 @@ export function ElicitationForm({
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      skip();
+      // In the "Something else" box Esc only leaves the box, keeping the text.
+      if (typing) rootRef.current?.focus({ preventScroll: true });
+      else skip();
     } else if (e.key === "Enter") {
-      // Other buttons (Back, Skip all, Next) keep their own Enter.
-      if (target.tagName === "BUTTON" && !target.hasAttribute("data-choice")) return;
+      // Buttons, option rows included, keep their own Enter.
+      if (target.tagName === "BUTTON") return;
       if (e.nativeEvent.isComposing) return;
       e.preventDefault();
+      // A held Enter would run through the next questions unanswered.
+      if (e.repeat) return;
+      if (!typing && highlight !== null) {
+        const choice = step.field.choices[highlight];
+        if (choice) pick(step.field, choice);
+        else inputRef.current?.focus();
+        return;
+      }
+      // A single-choice question with nothing typed has no answer to move on
+      // with: a stray Enter only starts the highlight, on the current pick.
+      if (!needsNext) {
+        if (!typing) {
+          const picked = step.field.choices.findIndex((c) => c.value === values[step.field.key]);
+          setHighlight(Math.max(0, picked));
+        }
+        return;
+      }
       next();
-    } else if (!typing && /^[1-9]$/.test(e.key)) {
-      const choice = step.field.choices[Number(e.key) - 1];
+    } else if (typing) {
+      return;
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rowCount > 0) {
+      e.preventDefault();
+      // An option row reached with Tab would otherwise keep Enter for itself.
+      if (target !== rootRef.current) rootRef.current?.focus({ preventScroll: true });
+      const down = e.key === "ArrowDown";
+      setHighlight((h) =>
+        h === null ? (down ? 0 : rowCount - 1) : (h + (down ? 1 : -1) + rowCount) % rowCount,
+      );
+    } else if (/^[1-9]$/.test(e.key)) {
+      const i = Number(e.key) - 1;
+      const choice = step.field.choices[i];
       if (!choice) return;
       e.preventDefault();
+      // A number key leaves the highlight where it is, so on a pick-any
+      // question with nothing highlighted the next Enter moves on.
       pick(step.field, choice);
     }
   };
 
-  const heading = `${agentName} has ${steps.length <= 1 ? "a question" : `${steps.length} questions`}`;
+  // A form with no fields is only its message, answered with Submit.
+  const question =
+    step && !single
+      ? (step.field.description ?? step.field.title ?? step.field.key)
+      : entry.request.message;
+  // With a single question the description isn't the question, so it's a hint.
+  const detail = single ? step?.field.description : undefined;
 
   return (
     <div
@@ -278,157 +324,176 @@ export function ElicitationForm({
       onKeyDown={onKeyDown}
       data-testid="chat-pane__elicitation"
       data-answered={answered ? "true" : "false"}
-      className="not-prose overflow-hidden rounded-xl border border-border bg-card outline-none"
+      className="not-prose outline-none"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2.5 text-base font-medium">
-          <MessageCircleQuestionMark className="size-4.5 shrink-0 text-muted-foreground" />
-          <span data-testid="chat-pane__elicitation-heading">{heading}</span>
-        </div>
-        {steps.length > 1 && (
-          <ol className="flex flex-wrap items-center gap-1 text-sm">
-            {steps.map((s, i) => {
-              const state =
-                i === index && !answered ? "current" : isAnswered(s, values) ? "done" : "upcoming";
-              return (
-                <li
-                  key={s.field.key}
-                  data-testid="chat-pane__elicitation-step"
-                  data-state={state}
-                  aria-current={state === "current" ? "step" : undefined}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full px-2.5 py-1",
-                    state === "current" && "bg-muted font-medium text-foreground",
-                    state === "done" && "text-foreground",
-                    state === "upcoming" && "text-muted-foreground",
-                  )}
-                >
-                  {state === "done" ? <CheckIcon className="size-3.5" /> : <span>{i + 1}</span>}
-                  {s.field.title ?? `Question ${i + 1}`}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </div>
-
-      {!answered && intro && <p className="px-5 pt-4 text-sm">{intro}</p>}
-      {!answered && step && (
-        <StepBody
-          step={step}
-          message={steps.length === 1 ? entry.request.message : undefined}
-          values={values}
-          disabled={disabled}
-          onPick={pick}
-          onSet={set}
-        />
-      )}
-      {answered && (
-        <Summary
-          steps={steps}
-          values={values}
-          single={steps.length === 1}
-          message={entry.request.message}
-        />
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/40 px-4 py-3">
+      <div className="overflow-hidden rounded-2xl border border-border bg-muted/60">
         {answered ? (
-          <span className="text-sm text-muted-foreground">
-            {entry.answer === "accept"
-              ? "Answer sent to the agent"
-              : entry.answer === "decline"
-                ? "Skipped"
-                : "Not answered"}
-          </span>
+          <>
+            <p className="px-5 py-3 text-sm text-muted-foreground">
+              {entry.answer === "accept"
+                ? "Answer sent to the agent"
+                : entry.answer === "decline"
+                  ? "Skipped"
+                  : "Not answered"}
+            </p>
+            <Summary
+              steps={steps}
+              values={values}
+              single={single}
+              message={entry.request.message}
+            />
+          </>
         ) : (
           <>
-            <div className="hidden items-center gap-1.5 text-sm text-muted-foreground sm:flex">
-              {step && step.field.choices.length > 0 && (
-                <>
-                  <Kbd>
-                    {step.field.choices.length === 1
-                      ? "1"
-                      : `1–${Math.min(step.field.choices.length, 9)}`}
-                  </Kbd>
-                  <span className="mr-1.5">pick</span>
-                </>
-              )}
-              <Kbd>↵</Kbd>
-              <span className="mr-1.5">{isLast ? "submit" : "next"}</span>
-              <Kbd>Esc</Kbd>
-              <span>skip</span>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={disabled}
-                onClick={() => void submit("decline", values)}
-              >
-                {steps.length > 1 ? "Skip all" : "Skip"}
-              </Button>
-              {steps.length > 1 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || index === 0}
-                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            <div className="flex items-start gap-3 pt-3 pr-3 pb-2 pl-5">
+              <div className="min-w-0 flex-1 space-y-1 pt-1">
+                {intro && <p className="text-sm text-muted-foreground">{intro}</p>}
+                <p
+                  data-testid="chat-pane__elicitation-question"
+                  aria-live="polite"
+                  className="text-lg leading-snug font-medium text-foreground"
                 >
-                  Back
+                  {question}
+                </p>
+                {detail && <p className="text-sm text-muted-foreground">{detail}</p>}
+                {step?.field.kind === "multi" && (
+                  <p className="text-sm text-muted-foreground">Pick any</p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                {steps.length > 1 && (
+                  <div className="flex items-center text-sm">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Previous question"
+                      disabled={disabled || index === 0}
+                      onClick={() => goTo(index - 1)}
+                    >
+                      <ChevronLeft />
+                    </Button>
+                    <span
+                      data-testid="chat-pane__elicitation-step"
+                      data-index={index + 1}
+                      data-count={steps.length}
+                      className="tabular-nums"
+                    >
+                      {index + 1} of {steps.length}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Next question"
+                      disabled={disabled || isLast}
+                      onClick={() => goTo(index + 1)}
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Dismiss questions"
+                  disabled={disabled}
+                  onClick={() => void submit("decline", values)}
+                >
+                  <XIcon className="size-4" />
                 </Button>
-              )}
-              <Button size="sm" disabled={disabled} onClick={() => next()}>
-                {sending && <Loader2 className="size-3.5 animate-spin" />}
-                {isLast ? "Submit" : "Next"}
-                {!isLast && <ArrowRight className="size-3.5" />}
-              </Button>
+              </div>
             </div>
+            {step ? (
+              <StepBody
+                step={step}
+                question={question}
+                values={values}
+                disabled={disabled}
+                sending={sending}
+                highlight={highlight}
+                hasInput={hasInput}
+                needsNext={needsNext}
+                isLast={isLast}
+                inputRef={inputRef}
+                onFocusCard={focusCard}
+                onHighlight={setHighlight}
+                onPick={pick}
+                onSet={set}
+                onSkip={skip}
+                onNext={() => next()}
+              />
+            ) : (
+              <div
+                data-testid="chat-pane__elicitation-other"
+                className="flex justify-end px-3 pb-3"
+              >
+                <Button size="sm" disabled={disabled} onClick={() => void submit("accept", {})}>
+                  {sending && <Loader2 className="size-3.5 animate-spin" />}
+                  Submit
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
+      {!answered && step && (
+        <p
+          data-testid="chat-pane__elicitation-hint"
+          className="mt-2 hidden text-center text-xs text-muted-foreground sm:block"
+        >
+          {rowCount > 0 && "↑↓ to navigate · "}Enter to select · Esc to skip
+        </p>
+      )}
     </div>
   );
 }
 
 function StepBody({
   step,
-  message,
+  question,
   values,
   disabled,
+  sending,
+  highlight,
+  hasInput,
+  needsNext,
+  isLast,
+  inputRef,
+  onFocusCard,
+  onHighlight,
   onPick,
   onSet,
+  onSkip,
+  onNext,
 }: {
   step: Step;
-  /** The form's message, shown as the question when there is only one. */
-  message?: string;
+  question: string;
   values: Record<string, Value>;
   disabled: boolean;
+  sending: boolean;
+  highlight: number | null;
+  /** The bottom row has a free-text box: "Something else", or the answer. */
+  hasInput: boolean;
+  needsNext: boolean;
+  isLast: boolean;
+  inputRef: RefObject<HTMLInputElement | null>;
+  /** Puts the keyboard on the card, where ↑↓, numbers, Enter and Esc work. */
+  onFocusCard: () => void;
+  onHighlight: (row: number) => void;
   onPick: (field: Field, choice: Choice) => void;
   onSet: (key: string, value: Value | undefined) => void;
+  onSkip: () => void;
+  onNext: () => void;
 }) {
   const { field, note } = step;
   const idPrefix = useId();
-  const question = message ?? field.description ?? field.title ?? field.key;
-  // With a single question the description isn't the question, so it's a hint.
-  const detail = message ? field.description : undefined;
-  const hint =
-    field.kind === "single" ? "Pick one" : field.kind === "multi" ? "Pick any" : undefined;
   const current = values[field.key];
-  const text = (key: string) => (typeof values[key] === "string" ? (values[key] as string) : "");
+  const inputKey = note ? note.key : field.key;
+  const text = typeof values[inputKey] === "string" ? (values[inputKey] as string) : "";
 
   return (
-    <div className="space-y-3 px-5 py-4">
-      <div className="space-y-1">
-        <p data-testid="chat-pane__elicitation-question" className="text-sm font-semibold">
-          {question}
-        </p>
-        {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </div>
-
+    <div className="px-3 pb-3">
       {field.choices.length > 0 && (
-        <fieldset aria-label={question} className="space-y-2">
+        <fieldset aria-label={question}>
           {field.choices.map((choice, i) => {
             const selected = Array.isArray(current)
               ? current.includes(choice.value)
@@ -437,48 +502,63 @@ function StepBody({
               ? `${idPrefix}-${field.key}-${i}-description`
               : undefined;
             return (
-              <button
-                key={choice.value}
-                type="button"
-                data-choice=""
-                aria-pressed={selected}
-                aria-label={choice.title}
-                aria-describedby={descriptionId}
-                disabled={disabled}
-                onClick={() => onPick(field, choice)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                  selected
-                    ? "border-foreground bg-muted/40 ring-1 ring-foreground"
-                    : "border-border bg-background hover:bg-muted/50",
-                  disabled && "cursor-not-allowed opacity-50",
+              <Fragment key={choice.value}>
+                {i > 0 && (
+                  <div
+                    data-testid="chat-pane__elicitation-divider"
+                    className="mx-2 h-px bg-border"
+                  />
                 )}
-              >
-                <span
+                <button
+                  type="button"
+                  data-choice=""
+                  data-highlighted={highlight === i ? "true" : undefined}
+                  aria-pressed={selected}
+                  aria-label={choice.title}
+                  aria-describedby={descriptionId}
+                  disabled={disabled}
+                  // A click puts the keyboard on the card, not on the row.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onFocusCard();
+                  }}
+                  onFocus={() => onHighlight(i)}
+                  onClick={() => onPick(field, choice)}
                   className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-medium",
-                    selected ? "bg-foreground text-background" : "bg-muted text-muted-foreground",
+                    "my-0.5 flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-foreground/5",
+                    highlight === i && "bg-foreground/10 hover:bg-foreground/10",
+                    disabled && "cursor-not-allowed opacity-50",
                   )}
                 >
-                  {i + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm">{choice.title}</span>
-                  {choice.description && (
-                    <span id={descriptionId} className="block text-xs text-muted-foreground">
-                      {choice.description}
-                    </span>
-                  )}
-                </span>
-                {selected && <CheckIcon className="size-4 shrink-0" />}
-              </button>
+                  <span
+                    data-testid="chat-pane__elicitation-choice-number"
+                    className={cn(
+                      "flex size-8 shrink-0 items-center justify-center rounded-lg border text-sm tabular-nums",
+                      selected
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border bg-card text-foreground",
+                    )}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm">{choice.title}</span>
+                    {choice.description && (
+                      <span id={descriptionId} className="block text-xs text-muted-foreground">
+                        {choice.description}
+                      </span>
+                    )}
+                  </span>
+                  {selected && <CheckIcon className="size-4 shrink-0" />}
+                </button>
+              </Fragment>
             );
           })}
         </fieldset>
       )}
 
       {field.kind === "boolean" && (
-        <label className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+        <label className="flex w-full items-center gap-3 rounded-lg px-2 py-2">
           <input
             type="checkbox"
             disabled={disabled}
@@ -489,23 +569,53 @@ function StepBody({
         </label>
       )}
 
-      {(field.kind === "text" || field.kind === "number" || note) && (
-        <label className="flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 focus-within:border-foreground">
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <PencilIcon className="size-3.5" />
-          </span>
-          {/* A number is kept as typed ("-", "1.") and converted on submit. */}
-          <input
-            type={field.kind === "number" ? "number" : "text"}
-            data-testid="chat-pane__elicitation-note"
-            disabled={disabled}
-            placeholder={note ? "Something else, or add a note…" : "Type your answer…"}
-            value={text(note ? note.key : field.key)}
-            onChange={(e) => onSet(note ? note.key : field.key, e.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </label>
-      )}
+      <div
+        data-testid="chat-pane__elicitation-other"
+        data-highlighted={hasInput && highlight === field.choices.length ? "true" : undefined}
+        className={cn(
+          "mt-1 flex items-center gap-3 rounded-xl bg-background px-2 py-2",
+          hasInput && highlight === field.choices.length && "ring-1 ring-ring",
+          hasInput && "has-[input:focus]:ring-1 has-[input:focus]:ring-ring",
+        )}
+      >
+        {hasInput ? (
+          <label className="flex min-w-0 flex-1 items-center gap-3">
+            <span
+              data-testid="chat-pane__elicitation-other-icon"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground"
+            >
+              <PencilIcon className="size-3.5" />
+            </span>
+            {/* A number is kept as typed ("-", "1.") and converted on submit. */}
+            <input
+              ref={inputRef}
+              type={field.kind === "number" ? "number" : "text"}
+              data-testid="chat-pane__elicitation-note"
+              disabled={disabled}
+              placeholder={note ? "Something else" : "Type your answer…"}
+              value={text}
+              onFocus={() => onHighlight(field.choices.length)}
+              onChange={(e) => onSet(inputKey, e.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </label>
+        ) : (
+          <div className="flex-1" />
+        )}
+        {/* A single-choice pick sends from the row, with no Submit to spin. */}
+        {sending && !needsNext && (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        )}
+        <Button size="sm" variant="outline" disabled={disabled} onClick={onSkip}>
+          Skip
+        </Button>
+        {needsNext && (
+          <Button size="sm" disabled={disabled} onClick={onNext}>
+            {sending && <Loader2 className="size-3.5 animate-spin" />}
+            {isLast ? "Submit" : "Next"}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -538,9 +648,9 @@ function Summary({
   });
   if (rows.length === 0) return null;
   return (
-    <dl className="space-y-2 px-5 py-4 text-sm">
+    <dl className="divide-y divide-border border-t border-border px-5 text-sm">
       {rows.map((r) => (
-        <div key={r.key}>
+        <div key={r.key} className="py-2.5">
           <dt className="text-muted-foreground">{r.question}</dt>
           <dd className="font-medium">{r.answer}</dd>
         </div>
