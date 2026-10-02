@@ -104,6 +104,12 @@ export const Route = createRootRoute({
       { name: "apple-mobile-web-app-status-bar-style", content: "black" },
       { name: "theme-color", content: "#1e1e1e" },
     ],
+    links: [
+      // `scope: "/"` keeps every Band URL inside the home-screen app; see
+      // `server/api/web-app-manifest.ts`. iOS reads it at install time.
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
+    ],
   }),
   component: RootLayout,
   notFoundComponent: NotFound,

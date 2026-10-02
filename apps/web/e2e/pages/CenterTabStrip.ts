@@ -22,9 +22,24 @@ export class CenterTabStrip {
   readonly list: Locator;
   /** dockview's hidden-tabs dropdown in the visible workspace's dockview. */
   readonly overflowDropdown: Locator;
+  /** The strip row: the tabs plus the header actions on either side. */
+  readonly strip: Locator;
+  /** The "+" button that opens the new-tab menu. */
+  readonly newTabButton: Locator;
+  /** The phone strip's ⋮ button holding the active tab's actions. */
+  readonly tabActionsButton: Locator;
 
   constructor(private readonly page: Page) {
     this.list = page.locator(".dockview-center-tabs .dv-tabs-container").filter({ visible: true });
+    this.strip = page
+      .locator(".dockview-center-tabs .dv-tabs-and-actions-container")
+      .filter({ visible: true });
+    this.newTabButton = page
+      .getByTestId("workspace-center__new-tab-button")
+      .filter({ visible: true });
+    this.tabActionsButton = page
+      .getByTestId("workspace-center__tab-actions-button")
+      .filter({ visible: true });
     this.overflowDropdown = page
       .locator(".dockview-center-tabs .dv-tabs-overflow-dropdown-root")
       .filter({ visible: true });
@@ -35,6 +50,16 @@ export class CenterTabStrip {
       scrollLeft: el.scrollLeft,
       maxScrollLeft: el.scrollWidth - el.clientWidth,
     }));
+  }
+
+  /** The height of the area a finger can tap to pick `tab`: dockview's
+   *  `.dv-tab` wrapper around the tab Band renders. */
+  async readTabTapHeight(tab: Locator): Promise<number> {
+    return await tab.evaluate((el) => {
+      const wrapper = el.closest(".dv-tab");
+      if (!wrapper) throw new Error("tab is not inside a dockview .dv-tab");
+      return wrapper.getBoundingClientRect().height;
+    });
   }
 
   /** Whether `tab` lies entirely inside the strip's visible area. */

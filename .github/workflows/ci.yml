@@ -185,12 +185,13 @@ jobs:
         with:
           # When editing path/key here, mirror in "Save Playwright browsers cache".
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
 
       # `--with-deps` still installs the apt packages on a cache hit; the hit
-      # only skips the browser download.
-      - name: Install Playwright Chromium
-        run: pnpm --filter @band-app/server exec playwright install --with-deps chromium
+      # only skips the browser download. WebKit runs the iPhone-profile specs
+      # (`e2e/mobile-document-scroll.spec.ts`).
+      - name: Install Playwright Chromium and WebKit
+        run: pnpm --filter @band-app/server exec playwright install --with-deps chromium webkit
 
       - name: Save Playwright browsers cache
         if: |
@@ -203,7 +204,7 @@ jobs:
         with:
           # When editing path/key here, mirror in "Restore Playwright browsers cache".
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
 
       - name: Test e2e (web)
         run: pnpm --filter @band-app/server test:e2e

@@ -14,6 +14,7 @@ import { createContext } from "./src/server/api/context.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
+import { handleWebAppManifest } from "./src/server/api/web-app-manifest.ts";
 import { stopAllAgentProcesses } from "./src/server/infra/agents/acp-agent-process.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
@@ -586,7 +587,11 @@ async function main() {
       return;
     }
 
-    // Auth check runs first (no-op in dev when no token is configured)
+    // The web app manifest and its icons, before auth: iOS fetches them
+    // without the session cookie when the app is added to the home screen.
+    if (handleWebAppManifest(req, res, isDev ? join(SERVER_ROOT, "public") : clientDir)) return;
+
+    // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
     // Serve uploaded files (images, attachments)

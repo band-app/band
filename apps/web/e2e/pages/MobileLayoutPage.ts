@@ -245,6 +245,59 @@ export class MobileLayoutPage {
     );
   }
 
+  /** The href of the `<link rel="manifest">` in the page head. */
+  async readManifestHref(): Promise<string | null> {
+    return await this.page.evaluate(
+      () => document.querySelector('link[rel="manifest"]')?.getAttribute("href") ?? null,
+    );
+  }
+
+  /** How far the document itself has scrolled. The mobile layout keeps it at
+   *  0; only the panes inside scroll. */
+  async readDocumentScroll(): Promise<{ x: number; y: number }> {
+    return await this.page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+  }
+
+  /** The document's scroll two frames from now, after the scroll events the
+   *  last scroll queued have run. */
+  async readDocumentScrollAfterFrames(): Promise<{ x: number; y: number }> {
+    return await this.page.evaluate(
+      () =>
+        new Promise<{ x: number; y: number }>((resolve) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => resolve({ x: window.scrollX, y: window.scrollY })),
+          ),
+        ),
+    );
+  }
+
+  /** Give the document room to scroll, as iOS does while the software
+   *  keyboard is up: it lets the page scroll by up to the keyboard's height
+   *  even when nothing overflows. Headless WebKit has no keyboard, so a tall
+   *  element appended after the body stands in for that range. */
+  async addKeyboardScrollRange(height: number): Promise<void> {
+    await test.step(`Give the document ${height}px of scroll range`, async () => {
+      await this.page.evaluate((h) => {
+        const spacer = document.createElement("div");
+        spacer.style.height = `${h}px`;
+        document.documentElement.append(spacer);
+      }, height);
+    });
+  }
+
+  /** Scroll the document, as iOS does to reveal a focused input or after a
+   *  fling outside the panes, and report `scrollY` right after the call,
+   *  before any scroll listener has run. `readDocumentScroll` and
+   *  `readDocumentScrollAfterFrames` tell where the document settles. */
+  async scrollDocument(y: number): Promise<{ scrolledTo: number }> {
+    return await test.step(`Scroll the document to ${y}px`, async () => {
+      return await this.page.evaluate((top) => {
+        window.scrollTo(0, top);
+        return { scrolledTo: window.scrollY };
+      }, y);
+    });
+  }
+
   async readViewport(): Promise<ViewportInfo> {
     return await this.page.evaluate(() => ({
       width: window.innerWidth,

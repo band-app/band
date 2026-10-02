@@ -536,6 +536,36 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * Mobile layout (`dockview-center-mobile`, WorkspaceCenterDockview's theme on
+ * a phone): each tab and the strip's "+" and "Tab actions" buttons are 44px
+ * tall, iOS's minimum tap target. The strip is 53px: 44px of tab, its 4px
+ * inset above and below, and the strip's 1px bottom border. `zoom` scales a
+ * tab's label and icons together (12px text becomes about 14px) without
+ * restyling each tab kind.
+ * --------------------------------------------------------------------------- */
+.dockview-theme-band.dockview-center-mobile {
+  --dv-tabs-and-actions-container-height: 53px;
+}
+.dockview-center-mobile .dv-tab {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  min-width: 120px;
+}
+.dockview-center-mobile .dv-tab .dv-default-tab {
+  zoom: 1.2;
+}
+.dockview-center-mobile .dv-left-actions-container button,
+.dockview-center-mobile .dv-right-actions-container button {
+  width: 44px;
+  height: 44px;
+}
+.dockview-center-mobile .dv-left-actions-container button svg,
+.dockview-center-mobile .dv-right-actions-container button svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------------------------------------------------------------------------
  * Desktop layout (`dockview-center-desktop`, WorkspaceCenterDockview's theme
  * when not mobile): there is no title bar over the center column, so the tab
  * strip is the window's top row. It matches the 38px height of the sidebar's
