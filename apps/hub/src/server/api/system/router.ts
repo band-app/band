@@ -110,7 +110,7 @@ export const systemRouter = t.router({
         .filter((p) => p.kind === "git")
         .map(async (project) => {
           try {
-            const list = await systemService.listWorktrees(project.path);
+            const list = await systemService.listWorktrees(project.name, project.path);
             // `listWorktrees` guarantees a non-empty branch for non-bare
             // worktrees: detached HEADs (mid-rebase, mid-bisect, or
             // explicit `git checkout <sha>`) are labelled with the
@@ -158,7 +158,7 @@ export const systemRouter = t.router({
 
       let worktreePaths: { branch: string; path: string }[];
       try {
-        const list = await systemService.listWorktrees(project.path);
+        const list = await systemService.listWorktrees(project.name, project.path);
         // See `resourcesProjects` above — `listWorktrees` already
         // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list
@@ -181,7 +181,7 @@ export const systemRouter = t.router({
       const worktrees = await Promise.all(
         worktreePaths.map(async (wt) => {
           try {
-            const sizeBytes = await systemService.duBytes(wt.path);
+            const sizeBytes = await systemService.duBytes(project.name, wt.path);
             return { branch: wt.branch, path: wt.path, sizeBytes };
           } catch (err) {
             return {

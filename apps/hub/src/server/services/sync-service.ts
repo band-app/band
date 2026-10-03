@@ -1,4 +1,6 @@
-import { execGit, getRepoInfo, listWorktrees } from "../infra/git/git-client";
+import { getRepoInfo } from "../infra/git/git-client";
+import { gitRunner } from "../infra/host/git-run";
+import { hostRegistry } from "../infra/host/registry";
 import {
   loadState,
   type ProjectState,
@@ -59,7 +61,9 @@ const syncsInFlight = new Set<Promise<void>>();
  * Detect the remote's default branch from the local origin/HEAD ref.
  * Returns null if the ref doesn't exist (e.g. origin/HEAD was never set).
  */
-async function detectRemoteDefaultBranch(projectPath: string): Promise<string | null> {
+async function detectRemoteDefaultBranch(project: ProjectState): Promise<string | null> {
+  const projectPath = project.path;
+  const execGit = gitRunner(hostRegistry.hostForProject(project.name));
   try {
     const ref = (await execGit(["symbolic-ref", "refs/remotes/origin/HEAD"], projectPath)).trim();
     // ref is like "refs/remotes/origin/main" — extract the branch name
@@ -169,7 +173,9 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
 
   let diskWorktrees: WorktreeState[];
   try {
-    const gitWorktrees = await listWorktrees(project.path);
+    const gitWorktrees = await hostRegistry
+      .hostForProject(project.name)
+      .worktree.list(project.path);
     // Preserve Band-owned metadata (the immutable `name` identity and the
     // `pinned` flag) across a sync. We key by PATH, not branch: the worktree
     // path is stable across a git branch switch, but the branch is exactly
@@ -225,7 +231,7 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   }
 
   // Sync default branch with remote's HEAD
-  const remoteBranch = await detectRemoteDefaultBranch(project.path);
+  const remoteBranch = await detectRemoteDefaultBranch(project);
   if (remoteBranch && remoteBranch !== project.defaultBranch) {
     project.defaultBranch = remoteBranch;
     mutated = true;
@@ -245,7 +251,9 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   // UPDATE leaves the worktrees table alone. The in-memory `project`
   // object is mutated too so the rest of the sync (and any caller that
   // re-reads the state object) sees the fresh value.
-  const hasOrigin = (await getRepoInfo(project.path)) !== null;
+  const hasOrigin =
+    (await getRepoInfo(project.path, gitRunner(hostRegistry.hostForProject(project.name)))) !==
+    null;
   if (hasOrigin !== project.hasOrigin) {
     // DB write first, in-memory mirror second. If `setProjectHasOrigin`
     // throws (SQLite locked, disk full), the in-memory value stays in

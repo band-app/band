@@ -4,7 +4,9 @@ import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { eq } from "drizzle-orm";
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
-import { execGh, execGit, getRepoInfo, type RepoInfo } from "../infra/git/git-client";
+import { getRepoInfo, type RepoInfo } from "../infra/git/git-client";
+import { ghRunner, gitRunner } from "../infra/host/git-run";
+import { hostRegistry } from "../infra/host/registry";
 import {
   buildBatchedCIQuery,
   type CIStatus,
@@ -138,7 +140,7 @@ async function forEachLimited<T>(items: readonly T[], task: (item: T) => Promise
  * header only when the branch has a resolvable upstream, and one line per
  * changed path (`u <XY>` for unmerged ones).
  */
-async function getGitStatus(worktreePath: string): Promise<GitStatus> {
+async function getGitStatus(project: string, worktreePath: string): Promise<GitStatus> {
   const status: GitStatus = {
     dirty: false,
     conflict: false,
@@ -149,7 +151,10 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 
   let porcelain: string;
   try {
-    porcelain = await execGit(["status", "--porcelain=v2", "--branch"], worktreePath);
+    porcelain = await gitRunner(hostRegistry.hostForProject(project))(
+      ["status", "--porcelain=v2", "--branch"],
+      worktreePath,
+    );
   } catch {
     // git status failed - leave defaults
     return status;
@@ -208,9 +213,11 @@ export async function getBatchedCIStatuses(
   // identical `git remote get-url origin` subprocesses. One probe per
   // unique project per tick is all we need.
   const uniqueProjectPaths = [...new Set(workspaces.map((ws) => ws.projectPath))];
+  const projectByPath = new Map(workspaces.map((ws) => [ws.projectPath, ws.project]));
   const repoInfoByPath = new Map<string, RepoInfo | null>();
   await forEachLimited(uniqueProjectPaths, async (path) => {
-    repoInfoByPath.set(path, await getRepoInfo(path));
+    const host = hostRegistry.hostForProject(projectByPath.get(path) as string);
+    repoInfoByPath.set(path, await getRepoInfo(path, gitRunner(host)));
   });
 
   // Caller already filtered to `hasOrigin === true`, so a null result
@@ -281,7 +288,7 @@ export async function getBatchedCIStatuses(
     }
 
     try {
-      const output = await execGh(ghArgs, cwd);
+      const output = await ghRunner(hostRegistry.hostForProject(group[0].ws.project))(ghArgs, cwd);
       const response = JSON.parse(output) as {
         data: Record<string, unknown>;
       };
@@ -381,7 +388,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
   const poll = ++pollCount;
   latestPollByWorkspace.set(ws.workspaceId, poll);
   if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
-  const git = await getGitStatus(ws.worktreePath);
+  const git = await getGitStatus(ws.project, ws.worktreePath);
   // Store and emit in an event-loop turn of its own. Git replies from the
   // exec-file worker arrive in batches, and handling a batch in one turn
   // held off terminal I/O on a slow host.
@@ -492,9 +499,12 @@ async function pollTick() {
   // of ahead of it; the counts it changes show up on the next tick.
   let fetches: Promise<void> = Promise.resolve();
   if (isCITick) {
-    const uniqueProjectPaths = [...new Set(workspaces.map((w) => w.projectPath))];
-    fetches = forEachLimited(uniqueProjectPaths, async (projectPath) => {
-      await execGit(["fetch", "--quiet", "--all"], projectPath).catch(() => {});
+    const projectByPath = new Map(workspaces.map((w) => [w.projectPath, w.project]));
+    fetches = forEachLimited([...projectByPath], async ([projectPath, project]) => {
+      await gitRunner(hostRegistry.hostForProject(project))(
+        ["fetch", "--quiet", "--all"],
+        projectPath,
+      ).catch(() => {});
     });
   }
 

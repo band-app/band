@@ -4,7 +4,7 @@
  * (issue #535, follow-up 1) so the router contains validation + delegation
  * only.
  *
- * Every git shell-out goes through `infra/git/git-client.ts::execGit` —
+ * Every git shell-out goes through the workspace's host (`host.git.exec`) —
  * the service layer never spawns git itself.
  */
 
@@ -13,7 +13,7 @@ import { readFile, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
-import { execGit } from "../infra/git/git-client";
+import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import {
   workspaceService as defaultWorkspaceService,
   type WorkspaceService,
@@ -192,6 +192,7 @@ export interface ChangesResult {
  * tree when the workspace has no commits yet (so brand-new repos don't 500).
  */
 async function resolveDiffContext(
+  execGit: CommandRun,
   cwd: string,
   defaultBranch: string,
   diffMode: DiffMode,
@@ -489,6 +490,7 @@ async function countUntrackedLines(absPath: string): Promise<number | null> {
  * work never shows up here.
  */
 async function compareWithBase(
+  execGit: CommandRun,
   cwd: string,
   compareBranch: string,
 ): Promise<{ status: BranchCompareStatus; mergeBase: string | null; entries: ChangeEntry[] }> {
@@ -541,7 +543,12 @@ const PATHS_PER_GIT_CALL = 500;
  * `*` or `:/` would widen a single-file discard to the whole worktree, and a
  * file named `app/[slug]/page.tsx` would also match `app/s/page.tsx`.
  */
-async function execGitOnPaths(args: string[], paths: string[], cwd: string): Promise<void> {
+async function execGitOnPaths(
+  execGit: CommandRun,
+  args: string[],
+  paths: string[],
+  cwd: string,
+): Promise<void> {
   for (let i = 0; i < paths.length; i += PATHS_PER_GIT_CALL) {
     await execGit(
       ["--literal-pathspecs", ...args, "--", ...paths.slice(i, i + PATHS_PER_GIT_CALL)],
@@ -551,7 +558,7 @@ async function execGitOnPaths(args: string[], paths: string[], cwd: string): Pro
 }
 
 /** Whether the repo has a commit checked out (false before the first one). */
-async function hasHead(cwd: string): Promise<boolean> {
+async function hasHead(execGit: CommandRun, cwd: string): Promise<boolean> {
   try {
     await execGit(["rev-parse", "--verify", "--quiet", "HEAD"], cwd);
     return true;
@@ -581,6 +588,7 @@ export class DiffService {
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     const defaultBranch = workspace.project.defaultBranch;
     const limit = options.limit ?? DEFAULT_BRANCH_LIMIT;
     const query = options.query?.trim().toLowerCase() ?? "";
@@ -651,8 +659,10 @@ export class DiffService {
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     const defaultBranch = workspace.project.defaultBranch;
     const { compareBranch, headBranch, mergeBase } = await resolveDiffContext(
+      execGit,
       cwd,
       defaultBranch,
       options.diffMode ?? "branch",
@@ -743,6 +753,7 @@ export class DiffService {
     const defaultBranch = workspace.project.defaultBranch;
     const compareBranch = options.compareBranch ?? defaultBranch;
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     const hasGit = existsSync(join(cwd, ".git"));
     if (workspace.project.kind === "plain" || !hasGit) {
       return {
@@ -776,7 +787,7 @@ export class DiffService {
         execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
           .then((out) => out.trim())
           .catch(() => defaultBranch),
-        compareWithBase(cwd, compareBranch),
+        compareWithBase(execGit, cwd, compareBranch),
       ]);
 
     const status = parseStatusV2(statusOutput);
@@ -830,6 +841,7 @@ export class DiffService {
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     // Enforce path-traversal + .git guard at the public entry — git's
     // own output is repo-internal by definition, but the caller hands
     // us this string and we don't trust it.
@@ -868,20 +880,20 @@ export class DiffService {
   /** `git add` the paths — stage all of an unstaged/untracked/conflicted
    *  file's changes (for a conflict this marks it resolved). */
   async stageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
-    const cwd = this.worktreeFor(workspaceId, paths);
-    await execGitOnPaths(["add", "-A"], paths, cwd);
+    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
+    await execGitOnPaths(execGit, ["add", "-A"], paths, cwd);
     return { ok: true };
   }
 
   /** Move the paths' staged changes back to the working tree. */
   async unstageFiles(workspaceId: string, paths: string[]): Promise<{ ok: true }> {
-    const cwd = this.worktreeFor(workspaceId, paths);
-    if (await hasHead(cwd)) {
-      await execGitOnPaths(["restore", "--staged"], paths, cwd);
+    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
+    if (await hasHead(execGit, cwd)) {
+      await execGitOnPaths(execGit, ["restore", "--staged"], paths, cwd);
     } else {
       // No commits yet: there is nothing to restore from, so drop the paths
       // from the index instead.
-      await execGitOnPaths(["rm", "--cached", "-r", "-q"], paths, cwd);
+      await execGitOnPaths(execGit, ["rm", "--cached", "-r", "-q"], paths, cwd);
     }
     return { ok: true };
   }
@@ -900,18 +912,23 @@ export class DiffService {
     options: { paths: string[]; section: "unstaged" | "staged" | "untracked" },
   ): Promise<{ ok: true }> {
     const { paths, section } = options;
-    const cwd = this.worktreeFor(workspaceId, paths);
+    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
     switch (section) {
       case "unstaged":
-        await execGitOnPaths(["restore", "--worktree"], paths, cwd);
+        await execGitOnPaths(execGit, ["restore", "--worktree"], paths, cwd);
         break;
       case "staged":
-        if (await hasHead(cwd)) {
-          await execGitOnPaths(["restore", "--staged", "--worktree", "--source=HEAD"], paths, cwd);
+        if (await hasHead(execGit, cwd)) {
+          await execGitOnPaths(
+            execGit,
+            ["restore", "--staged", "--worktree", "--source=HEAD"],
+            paths,
+            cwd,
+          );
         } else {
           // No commits yet, so every staged file is new: drop it from the
           // index and delete it, as restoring from HEAD would.
-          await execGitOnPaths(["rm", "--cached", "-r", "-q"], paths, cwd);
+          await execGitOnPaths(execGit, ["rm", "--cached", "-r", "-q"], paths, cwd);
           await Promise.all(paths.map((p) => rm(assertWorktreeRelative(cwd, p), { force: true })));
         }
         break;
@@ -945,12 +962,12 @@ export class DiffService {
   }
 
   /** Resolve the workspace's worktree and check every path stays inside it. */
-  private worktreeFor(workspaceId: string, paths: string[]): string {
+  private worktreeFor(workspaceId: string, paths: string[]): { cwd: string; execGit: CommandRun } {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
     const cwd = workspace.worktree.path;
     for (const p of paths) assertWorktreeRelative(cwd, p);
-    return cwd;
+    return { cwd, execGit: gitRunner(workspace.host) };
   }
 }
 

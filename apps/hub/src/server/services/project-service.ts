@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import type { Host } from "@band-app/host-api";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { TRPCError } from "@trpc/server";
 import {
@@ -11,7 +12,8 @@ import {
 } from "../infra/db/queries/projects";
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
-import { GitClient } from "../infra/git/git-client";
+import { gitRunner } from "../infra/host/git-run";
+import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import {
   type ProjectAvatarInfo,
@@ -27,7 +29,7 @@ import { type SettingsService, settingsService } from "./settings-service";
  * Owns the lifecycle of `ProjectState` rows: add, list, promote (plain →
  * git), reorder, label, remove. Each operation is a thin orchestration of
  * the infra adapters it depends on (`ProjectQueries` for the DB,
- * `GitClient` for the shell-out to git, `SettingsService` for the
+ * the project's host for the shell-out to git, `SettingsService` for the
  * label / worktrees-dir lookup) — no SQL or `execFile` calls live here.
  *
  * Cross-domain teardown (cronjob cleanup on project removal, worktree
@@ -39,7 +41,6 @@ import { type SettingsService, settingsService } from "./settings-service";
 export class ProjectService {
   constructor(
     private readonly queries: ProjectQueries = new ProjectQueries(),
-    private readonly git: GitClient = new GitClient(),
     private readonly settings: SettingsService = settingsService,
     private readonly statusQueries: WorkspaceStatusQueries = new WorkspaceStatusQueries(),
     private readonly avatars: ProjectAvatarService = projectAvatarService,
@@ -142,7 +143,9 @@ export class ProjectService {
         // This mirrors the path-keyed merge in `sync-service.ts`.
         const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
         try {
-          const gitWorktrees = await this.git.listWorktrees(project.path);
+          const gitWorktrees = await hostRegistry
+            .hostForProject(project.name)
+            .worktree.list(project.path);
           worktrees = gitWorktrees
             .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
             .map((wt) => {
@@ -204,7 +207,7 @@ export class ProjectService {
    */
   async gitInit(path: string): Promise<void> {
     const resolvedPath = resolve(path);
-    await this.git.init(resolvedPath);
+    await hostRegistry.hostForProject(basename(resolvedPath)).git.exec(["init"], resolvedPath);
   }
 
   /**
@@ -252,11 +255,11 @@ export class ProjectService {
     let worktrees: WorktreeState[] = [];
 
     if (kind === "git") {
-      const branch = await this.git.currentBranch(resolvedPath);
+      const branch = await currentBranch(hostRegistry.hostForProject(name), resolvedPath);
       if (branch) defaultBranch = branch;
 
       try {
-        const gitWorktrees = await this.git.listWorktrees(resolvedPath);
+        const gitWorktrees = await hostRegistry.hostForProject(name).worktree.list(resolvedPath);
         worktrees = gitWorktrees
           .filter((wt) => !wt.isBare)
           // Seed `name` = branch at registration; from here it's immutable
@@ -361,7 +364,7 @@ export class ProjectService {
     // folder has `.git` so the recorded kind flips to "git"
     // automatically. So the non-atomic ordering is intentional and
     // self-correcting; don't reorder.
-    await this.git.init(project.path, "main");
+    await hostRegistry.hostForProject(project.name).git.exec(["init", "-b", "main"], project.path);
 
     project.kind = "git";
     project.defaultBranch = "main";
@@ -448,3 +451,16 @@ export class ProjectService {
  * eventually lands.
  */
 export const projectService = new ProjectService();
+
+/**
+ * The short symbolic ref of HEAD (the current branch name), or `null` when
+ * HEAD is detached or git fails. The caller falls back to `"main"`.
+ */
+async function currentBranch(host: Host, cwd: string): Promise<string | null> {
+  try {
+    const output = (await gitRunner(host)(["symbolic-ref", "--short", "HEAD"], cwd)).trim();
+    return output || null;
+  } catch {
+    return null;
+  }
+}
