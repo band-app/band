@@ -16,7 +16,7 @@ import {
 
 export interface HubIpcDeps {
   getChoice: () => HubChoice;
-  /** Save the choice and reload the window against it. Resolves once the switch is under way. */
+  /** Schedules the switch. The reload runs after the IPC reply. */
   switchTo: (choice: HubChoice) => void;
 }
 

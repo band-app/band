@@ -7,7 +7,7 @@
  * separate from `settings.json`, which the hub owns and writes.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bandHome } from "./log.js";
 
@@ -91,6 +91,7 @@ export function saveHubChoice(choice: HubChoice): void {
   mkdirSync(bandHome(), { recursive: true });
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(choice), { mode: 0o600 });
+  chmodSync(tmp, 0o600);
   renameSync(tmp, file);
 }
 

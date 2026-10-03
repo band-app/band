@@ -242,9 +242,12 @@ function startActivityMonitorForLocalHub(win: BrowserWindow): void {
  * Save the choice and reload the window against it. A failure (the local hub
  * won't start) restores the previous choice and says so.
  */
+let switchingHub = false;
+
 async function switchHub(choice: HubChoice): Promise<void> {
   const win = state.mainWindow;
-  if (!win || win.isDestroyed()) return;
+  if (!win || win.isDestroyed() || switchingHub) return;
+  switchingHub = true;
   const previous = state.hubChoice;
   try {
     if (choice.mode === "remote") {
@@ -254,11 +257,13 @@ async function switchHub(choice: HubChoice): Promise<void> {
       if (app.isPackaged) await killPort(state.port);
     }
     const url = await connectHub(choice);
-    saveHubChoice(choice);
     state.hubChoice = choice;
     startActivityMonitorForLocalHub(win);
-    log.info({ mode: choice.mode }, "switched hub");
     await win.loadURL(url);
+    // Save only once the window loaded, so a failed switch is not what the
+    // next launch connects to.
+    saveHubChoice(choice);
+    log.info({ mode: choice.mode }, "switched hub");
   } catch (err) {
     log.error({ err: String(err) }, "switching hub failed");
     dialog.showErrorBox(
@@ -273,6 +278,8 @@ async function switchHub(choice: HubChoice): Promise<void> {
     } catch (restoreErr) {
       log.error({ err: String(restoreErr) }, "restoring the previous hub failed");
     }
+  } finally {
+    switchingHub = false;
   }
 }
 
