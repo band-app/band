@@ -61,7 +61,14 @@ export default defineConfig(({ command }) => ({
     __BAND_BUILD_DATE__: JSON.stringify(buildInfo.date),
     __BAND_BUILD_CHANNEL__: JSON.stringify(buildInfo.channel),
   },
-  plugins: [tanstackStart(), react(), tailwindcss()],
+  plugins: [
+    // SPA mode: the build prerenders the root route's shell (`shellComponent`)
+    // to `dist/client/_shell.html`; start-server.ts serves it for every app
+    // route, so no request is server-rendered.
+    tanstackStart({ spa: { enabled: true } }),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": resolve(import.meta.dirname, "./src"),
@@ -76,8 +83,8 @@ export default defineConfig(({ command }) => ({
   ssr:
     command === "build"
       ? {
-          // Bundle all dependencies into server.js so the Electron DMG
-          // doesn't need node_modules at runtime.
+          // Bundle all dependencies into the server build the shell
+          // prerender loads, so `vite build` needs no external lookup.
           noExternal: true,
           // node-pty is a native addon that cannot be bundled
           external: ["node-pty"],

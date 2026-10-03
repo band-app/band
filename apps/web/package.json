@@ -7,7 +7,6 @@
   },
   "files": [
     "dist/client",
-    "dist/server",
     "dist/start-server.mjs",
     "dist/terminal-daemon.mjs",
     "dist/openapi.json",
@@ -24,7 +23,7 @@
   ],
   "scripts": {
     "dev": "NODE_ENV=development tsx watch start-server.ts",
-    "build": "vite build && ./scripts/build-server.sh",
+    "build": "node scripts/build-client.mjs && ./scripts/build-server.sh",
     "start": "node dist/start-server.mjs",
     "pretest": "pnpm build",
     "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",

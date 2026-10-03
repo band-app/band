@@ -1,5 +1,13 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +21,15 @@ const skipSdkChecks = process.env.NPM_PUBLISH === "1";
 describe("build output", () => {
   it("contains the server bundle", () => {
     expect(existsSync(join(dist, "start-server.mjs"))).toBe(true);
+  });
+
+  // SPA mode: the build prerenders the shell, and the server bundle has no
+  // server-rendering path to import.
+  it("contains the prerendered SPA shell and no server entry import", () => {
+    expect(existsSync(join(dist, "client/_shell.html"))).toBe(true);
+    expect(readFileSync(join(dist, "start-server.mjs"), "utf8")).not.toContain(
+      "./server/server.js",
+    );
   });
 
   // The server forks this from next to its own bundle; the desktop app and
@@ -275,6 +292,50 @@ describe("published @band-app/server runs via the bin shim", () => {
     const spec = (await res.json()) as { openapi?: string; info?: { title?: string } };
     expect(spec.openapi).toMatch(/^3\./);
     expect(spec.info?.title).toBeDefined();
+  });
+
+  it("serves the static shell for / and for a deep link", async () => {
+    const shell = readFileSync(join(packageRoot, "dist/client/_shell.html"), "utf8");
+    for (const path of ["/", "/workspace/some-workspace"]) {
+      const res = await fetch(`${baseUrl}${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("content-type"), path).toContain("text/html");
+      expect(await res.text(), path).toBe(shell);
+    }
+  });
+
+  it("answers HEAD for a deep link without a body", async () => {
+    const head = await fetch(`${baseUrl}/workspace/some-workspace`, {
+      method: "HEAD",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-type")).toContain("text/html");
+    expect(await head.text()).toBe("");
+  });
+
+  it("answers a non-GET page request with 404", async () => {
+    const post = await fetch(`${baseUrl}/workspace/some-workspace`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(post.status).toBe(404);
+  });
+
+  it("requires auth for the shell", async () => {
+    for (const path of ["/", "/workspace/x", "/_shell.html"]) {
+      const res = await fetch(`${baseUrl}${path}`);
+      expect(res.status, path).toBe(401);
+    }
+  });
+
+  it("answers a missing asset with 404, not the shell", async () => {
+    const res = await fetch(`${baseUrl}/assets/does-not-exist.js`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
   });
 });
 

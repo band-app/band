@@ -954,7 +954,11 @@ export class ChatPanePage {
       await this.page.mouse.move(target.x + target.width / 2, target.y + target.height / 4, {
         steps: 12,
       });
+      // The drop sends `queue.set`. Wait for the server's answer so a reload
+      // right after the drag can't cancel the request in flight.
+      const saved = this.page.waitForResponse((r) => r.url().includes("/trpc/queue.set"));
       await this.page.mouse.up();
+      await saved;
     });
   }
 

@@ -346,9 +346,9 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
 // ---------------------------------------------------------------------------
 // Node IncomingMessage ↔ Web Request adapters.
 //
-// Both the unified Vite-middleware fallback path and the prod sirv fallback
-// path need to hand a `Request` to the TanStack `server-entry` `fetch`
-// adapter, so factor the conversion out instead of duplicating it.
+// The tRPC handler and the dev Vite SSR fallback hand a `Request` to a
+// `fetch` adapter, so the conversion lives here. Prod serves a static shell
+// and renders nothing per request.
 // ---------------------------------------------------------------------------
 
 async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
@@ -521,19 +521,19 @@ async function main() {
   // navigation without a process restart.
   //
   // In prod (`node dist/start-server.mjs`) Vite isn't installed in the
-  // dependency closure — the bundle uses `sirv` for hashed asset serving
-  // plus a single eager import of the prebuilt SSR bundle.
-  //
-  // Both branches end up calling the same `serverEntryHandler(request)`
-  // contract: `(Request) => Promise<Response>`. The SSR fallback below
-  // doesn't know which branch produced it.
+  // dependency closure. The UI is a static SPA: `sirv` serves the hashed
+  // assets from `dist/client` and every other GET gets the prerendered
+  // `_shell.html`. Nothing is server-rendered on request.
   // -----------------------------------------------------------------------
   // biome-ignore lint/suspicious/noExplicitAny: vite is dev-only, no runtime types in prod
   let viteServer: any = null;
   let viteMiddlewares:
     | ((req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => void)
     | null = null;
-  let serverEntryHandler: (req: Request) => Promise<Response>;
+  // Dev only: Vite's `ssrLoadModule` renders the shell on request. Prod
+  // never renders; it serves the prebuilt shell (`shellHtml`).
+  let serverEntryHandler: ((req: Request) => Promise<Response>) | null = null;
+  let shellHtml: Buffer | null = null;
 
   // Create the http server early in both modes so we can pass it to Vite
   // as the HMR ws host below. The request handler is a closure that
@@ -831,11 +831,26 @@ async function main() {
     //
     // In dev, Vite's middleware chain handles static assets, source
     // transforms, and HMR client injection — anything it doesn't claim
-    // falls through to our SSR fallback. In prod, `sirv` handles hashed
-    // immutable assets and falls through to SSR for SPA-style routes.
-    // Either way, the fallback calls the unified `serverEntryHandler`.
+    // falls through to our renderer fallback. In prod, `sirv` handles hashed
+    // immutable assets and falls through to the static shell for app routes.
     // -----------------------------------------------------------------------
-    const ssrFallback = async () => {
+    const rendererFallback = async () => {
+      if (!serverEntryHandler) {
+        // Prod: a missing hashed asset must 404, not come back as HTML.
+        const isPage = (req.method === "GET" || req.method === "HEAD") && shellHtml;
+        if (!isPage || req.url?.startsWith("/assets/")) {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not found");
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Length": shellHtml!.length,
+          "Cache-Control": "no-cache",
+        });
+        res.end(req.method === "HEAD" ? undefined : shellHtml);
+        return;
+      }
       try {
         const request = await nodeRequestToWeb(req);
         const response = await serverEntryHandler(request);
@@ -856,18 +871,18 @@ async function main() {
     };
 
     if (viteMiddlewares) {
-      viteMiddlewares(req, res, ssrFallback);
+      viteMiddlewares(req, res, rendererFallback);
       return;
     }
     // In prod `assets` is set inside `main()` before we accept the first
     // request, so the non-null assertion is structural; in dev we take
     // the branch above.
-    assets!(req, res, ssrFallback);
+    assets!(req, res, rendererFallback);
   }
 
   // -----------------------------------------------------------------------
   // Wire up the renderer transport (Vite-as-middleware in dev, sirv +
-  // prebuilt SSR bundle in prod). Done AFTER `createServer()` so we can
+  // static shell in prod). Done AFTER `createServer()` so we can
   // hand the http server to Vite's `hmr.server` option — that lets
   // Vite's HMR WebSocket ride on our listener via the `vite-hmr`
   // subprotocol, with our own `httpServer.on("upgrade", …)` handler
@@ -922,10 +937,13 @@ async function main() {
       immutable: true,
       gzip: true,
       etag: true,
+      // The shell isn't content-hashed; never let a direct GET cache it.
+      setHeaders: (res, pathname) => {
+        if (pathname.startsWith("/_shell")) res.setHeader("Cache-Control", "no-cache");
+      },
     });
-    const mod = await import("./server/server.js");
-    const server = mod.default as { fetch: (req: Request) => Promise<Response> };
-    serverEntryHandler = (request) => server.fetch(request);
+    // SPA mode: the build prerenders the shell, so prod has no server entry.
+    shellHtml = readFileSync(join(clientDir, "_shell.html"));
   }
 
   // ---------------------------------------------------------------------------

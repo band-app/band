@@ -111,6 +111,7 @@ export const Route = createRootRoute({
       { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
     ],
   }),
+  shellComponent: RootDocument,
   component: RootLayout,
   notFoundComponent: NotFound,
 });
@@ -996,7 +997,7 @@ function AppShell() {
   );
 }
 
-function RootLayout() {
+function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
@@ -1009,20 +1010,26 @@ function RootLayout() {
         <script dangerouslySetInnerHTML={{ __html: TRANSLUCENT_SIDEBAR_INIT_SCRIPT }} />
       </head>
       <body>
-        <DashboardProvider adapter={adapter} capabilities={capabilities}>
-          <ThemeSync />
-          <TranslucentSidebarSync />
-          <ZoomSync />
-          <ReloadSync />
-          <TooltipProvider>
-            <ClientStateGate>
-              <AppShell />
-            </ClientStateGate>
-            <ToastHost />
-          </TooltipProvider>
-        </DashboardProvider>
+        {children}
         <Scripts />
       </body>
     </html>
+  );
+}
+
+function RootLayout() {
+  return (
+    <DashboardProvider adapter={adapter} capabilities={capabilities}>
+      <ThemeSync />
+      <TranslucentSidebarSync />
+      <ZoomSync />
+      <ReloadSync />
+      <TooltipProvider>
+        <ClientStateGate>
+          <AppShell />
+        </ClientStateGate>
+        <ToastHost />
+      </TooltipProvider>
+    </DashboardProvider>
   );
 }
