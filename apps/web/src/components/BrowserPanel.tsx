@@ -81,6 +81,7 @@ interface RegisterGuestResult {
 function createWebview(src: string, partition: string): BrowserWebview {
   const webview = document.createElement("webview") as BrowserWebview;
   webview.setAttribute("partition", partition);
+  webview.setAttribute("data-testid", "browser-pane__webview");
   webview.setAttribute("allowpopups", "");
   // Opaque page canvas: a page without its own background paints white, as
   // in Chrome, instead of showing Band's theme through. Fullscreen requests

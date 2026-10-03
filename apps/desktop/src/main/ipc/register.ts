@@ -76,8 +76,11 @@ export interface RegisterOptions {
 export function registerIpc(opts: RegisterOptions): () => void {
   const handlers: Array<readonly [string, (args: unknown) => unknown]> = [];
 
-  const handle = <T>(channel: string, fn: (args: T) => unknown): void => {
-    const wrapped = (_e: unknown, args: T) => fn(args);
+  const handle = <T>(
+    channel: string,
+    fn: (args: T, event: Electron.IpcMainInvokeEvent) => unknown,
+  ): void => {
+    const wrapped = (event: Electron.IpcMainInvokeEvent, args: T) => fn(args, event);
     ipcMain.handle(channel, wrapped);
     handlers.push([channel, wrapped as (args: unknown) => unknown]);
   };

@@ -346,6 +346,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       web: ${{ steps.filter.outputs.web }}
       docker: ${{ steps.filter.outputs.docker }}
+      desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -380,6 +381,7 @@ jobs:
             echo "cli=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "docker=true" >> "$GITHUB_OUTPUT"
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
             exit 0
           }
 
@@ -422,6 +424,14 @@ jobs:
             echo "web=true" >> "$GITHUB_OUTPUT"
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Desktop: the Electron app, the UI it loads over app://, the hub it
+          # spawns or talks to, and what they share.
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/desktop/|apps/web/(src/|e2e-desktop/|public/|scripts/|package\.json$|playwright\.desktop\.config\.ts$)|apps/hub/|packages/|plugins/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
           fi
 
           # Docker: the image builds the Rust CLI, the hub and the UI, so it
@@ -694,6 +704,60 @@ jobs:
         with:
           path: apps/cli/target
           key: cargo-cli-release-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+
+  # Drives the real Electron app with Playwright's `_electron`: the bundled UI
+  # over app://, the local hub it spawns, a remote hub on another port, the hub
+  # picker, the CSP and the navigation guard. Needs a display, which the macOS
+  # runner has.
+  desktop-macos:
+    name: Desktop e2e (macOS)
+    runs-on: macos-latest
+    needs: macos-changes
+    if: needs.macos-changes.outputs.desktop == 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The hub's tests and the e2e helpers shell out to a real `band` binary.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Build the hub and the UI
+        run: pnpm build:web
+
+      - name: Build desktop (TypeScript main + preload)
+        run: pnpm --filter @band-app/desktop build
+
+      - name: Test e2e (desktop)
+        run: pnpm --filter @band-app/web test:e2e:desktop
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-desktop-test-results
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   deploy-docs:
     name: Deploy Docs

@@ -17,10 +17,17 @@ import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "ele
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserGuestManager } from "../browser/guest-manager.js";
 import { Events } from "../shared/ipc-channels.js";
-import { APP_ORIGIN, APP_SCHEME, APP_SCHEME_PRIVILEGES, createAppHandler } from "./app-protocol.js";
+import {
+  APP_SCHEME,
+  APP_SCHEME_PRIVILEGES,
+  appHostForHub,
+  appOriginForHost,
+  createAppHandler,
+  LOCAL_APP_HOST,
+} from "./app-protocol.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
-import { registerHubConfigSync } from "./ipc/hub.js";
+import { isTrustedSender, registerHubConfigSync } from "./ipc/hub.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
@@ -61,6 +68,8 @@ interface AppState {
   hubChoice: HubChoice;
   /** The built UI served over `app://`, or null when there is no build. */
   uiDir: string | null;
+  /** The `app://` host the window is loaded under: one per hub, so storage is separate. */
+  appHost: string;
   /** What the preload tells the UI (`window.__BAND_HUB__`). Null: the page is its hub's own. */
   rendererHub: { url: string; token?: string } | null;
 }
@@ -81,6 +90,7 @@ const state: AppState = {
   webDir: "",
   hubChoice: loadHubChoice(),
   uiDir: null,
+  appHost: LOCAL_APP_HOST,
   rendererHub: null,
 };
 
@@ -168,6 +178,14 @@ function installCrashHandlers(): void {
   });
 }
 
+/** Origins whose frames may ask for the hub's token and use the hub IPC. */
+function trustedUiOrigins(): string[] {
+  const origins = [appOriginForHost(state.appHost)];
+  const dev = devWebUrl();
+  if (dev) origins.push(`${new URL(dev).protocol}//${new URL(dev).host}`);
+  return origins;
+}
+
 /** The dev server's URL, when the orchestrating script supplied one for an unpackaged run. */
 function devWebUrl(): string | null {
   const url = process.env.BAND_DEV_WEB_URL;
@@ -194,7 +212,8 @@ async function connectHub(choice: HubChoice): Promise<string> {
       throw new Error("The UI build was not found, which a remote hub needs. Run `pnpm build`.");
     }
     state.rendererHub = { url: choice.url, token: choice.token };
-    return `${APP_ORIGIN}/`;
+    state.appHost = appHostForHub(choice.url);
+    return `${appOriginForHost(state.appHost)}/`;
   }
 
   const devUrl = devWebUrl();
@@ -224,7 +243,8 @@ async function connectHub(choice: HubChoice): Promise<string> {
   }
   if (state.uiDir) {
     state.rendererHub = { url: `http://localhost:${state.port}`, token };
-    return `${APP_ORIGIN}/`;
+    state.appHost = LOCAL_APP_HOST;
+    return `${appOriginForHost(state.appHost)}/`;
   }
   state.rendererHub = null;
   return `http://localhost:${state.port}/?token=${encodeURIComponent(token)}`;
@@ -391,10 +411,16 @@ async function bootstrap(): Promise<void> {
     appPath: app.getAppPath(),
   });
   if (state.uiDir) {
-    session.defaultSession.protocol.handle(APP_SCHEME, createAppHandler(state.uiDir));
+    session.defaultSession.protocol.handle(
+      APP_SCHEME,
+      createAppHandler(state.uiDir, {
+        host: () => state.appHost,
+        hubOrigin: () => state.rendererHub?.url ?? null,
+      }),
+    );
   }
   // Answer the preload's hub-config read before any page can ask.
-  const unregisterHubConfig = registerHubConfigSync(() => state.rendererHub, devWebUrl());
+  const unregisterHubConfig = registerHubConfigSync(() => state.rendererHub, trustedUiOrigins);
 
   const url = await connectHub(state.hubChoice);
   log.info({ url, hub: state.hubChoice.mode }, "loading url");
@@ -460,6 +486,8 @@ async function bootstrap(): Promise<void> {
     getWebDir: () => state.webDir,
     isLocalHub: () => state.hubChoice.mode === "local",
     hub: {
+      isTrustedSender: (event) =>
+        state.mainWindow !== null && isTrustedSender(event, state.mainWindow, trustedUiOrigins()),
       getChoice: () => state.hubChoice,
       // The reload replaces the page that asked, so it runs after the reply.
       switchTo: (choice) => {

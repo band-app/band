@@ -7,6 +7,7 @@
     "build": "node scripts/build-client.mjs",
     "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
     "test:e2e": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test",
+    "test:e2e:desktop": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test --config playwright.desktop.config.ts",
     "test:e2e:ui": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test --ui"
   },
   "dependencies": {

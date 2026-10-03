@@ -1,7 +1,7 @@
 /**
  * The `app://` scheme that serves the bundled UI.
  *
- * The window loads `app://band/` instead of the hub's URL, so the UI works
+ * The window loads `app://<host>/` instead of the hub's URL, so the UI works
  * with any hub. Files come from the UI build directory. A path with no file
  * extension that matches no file gets the SPA shell (`_shell.html`), so a
  * reload or a deep link such as `app://band/workspace/<id>` keeps its route,
@@ -12,12 +12,61 @@
  * plain `Request`. `index.ts` registers it with `protocol.handle`.
  */
 
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 
 export const APP_SCHEME = "app";
-export const APP_HOST = "band";
-export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
+
+/**
+ * Each hub gets its own host, so each has its own origin and its own
+ * localStorage, drafts and tabs: `app://local` for the bundled hub and
+ * `app://h-<12 hex of sha256(origin)>` for a remote one. State cached for one
+ * hub is never uploaded to another after a switch.
+ */
+export const LOCAL_APP_HOST = "local";
+const APP_HOST_PATTERN = /^(local|h-[0-9a-f]{12})$/;
+
+/** The host the UI is served under for a hub (`null`: the bundled one). */
+export function appHostForHub(hubOrigin: string | null): string {
+  if (hubOrigin === null) return LOCAL_APP_HOST;
+  return `h-${createHash("sha256").update(hubOrigin).digest("hex").slice(0, 12)}`;
+}
+
+export function isAppHost(host: string): boolean {
+  return APP_HOST_PATTERN.test(host);
+}
+
+export function appOriginForHost(host: string): string {
+  return `${APP_SCHEME}://${host}`;
+}
+
+/**
+ * Content-Security-Policy for `app://` pages. The page may talk only to
+ * itself and to its hub (`connect-src` lists the hub's http and ws origins),
+ * and load frames and media from that hub too. Inline scripts are allowed
+ * because the SPA shell carries inline bootstrap scripts, and workers and wasm
+ * because the editor and syntax highlighter use them. Remote images are
+ * allowed for markdown. Plugins, `<base>` and form posts elsewhere are not.
+ */
+export function buildCsp(hubOrigin: string | null): string {
+  const hub = hubOrigin ? [hubOrigin, hubOrigin.replace(/^http/, "ws")] : [];
+  const self = (...extra: string[]) => ["'self'", ...extra].join(" ");
+  return [
+    "default-src 'self'",
+    `script-src ${self("'unsafe-inline'", "'wasm-unsafe-eval'")}`,
+    `style-src ${self("'unsafe-inline'")}`,
+    `img-src ${self("data:", "blob:", "https:", ...(hubOrigin ? [hubOrigin] : []))}`,
+    `font-src ${self("data:")}`,
+    `connect-src ${self(...hub)}`,
+    `worker-src ${self("blob:")}`,
+    `media-src ${self("blob:", "data:", ...(hubOrigin ? [hubOrigin] : []))}`,
+    `frame-src ${self("blob:", ...(hubOrigin ? [hubOrigin] : []))}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}
 
 /**
  * Privileges for `protocol.registerSchemesAsPrivileged`: only what a standard
@@ -76,10 +125,12 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-function fileResponse(body: Buffer, file: string, immutable: boolean): Response {
+function fileResponse(body: Buffer, file: string, immutable: boolean, csp: string): Response {
   return new Response(new Uint8Array(body), {
     status: 200,
     headers: {
+      "Content-Security-Policy": csp,
+      "X-Content-Type-Options": "nosniff",
       "Content-Type": CONTENT_TYPES[extname(file).toLowerCase()] ?? "application/octet-stream",
       // Hashed assets never change. The shell and the manifest do.
       "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
@@ -87,27 +138,38 @@ function fileResponse(body: Buffer, file: string, immutable: boolean): Response 
   });
 }
 
+export interface AppHandlerOptions {
+  /** The host the window is loaded under now. Requests for any other host are refused. */
+  host: () => string;
+  /** The current hub's origin, for the CSP's `connect-src`. Null before a hub is chosen. */
+  hubOrigin: () => string | null;
+}
+
 /** The `protocol.handle("app", …)` callback for the UI build in `uiDir`. */
-export function createAppHandler(uiDir: string): (request: Request) => Promise<Response> {
+export function createAppHandler(
+  uiDir: string,
+  opts: AppHandlerOptions,
+): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });
     }
-    if (url.host !== APP_HOST) return new Response("Not found", { status: 404 });
+    if (url.host !== opts.host()) return new Response("Not found", { status: 404 });
+    const csp = buildCsp(opts.hubOrigin());
 
     const file = resolveInside(uiDir, url.pathname === "/" ? `/${SHELL}` : url.pathname);
     if (!file) return new Response("Bad request", { status: 400 });
 
     if (await isFile(file)) {
       const immutable = url.pathname.startsWith("/assets/");
-      return fileResponse(await readFile(file), file, immutable);
+      return fileResponse(await readFile(file), file, immutable, csp);
     }
     if (extname(url.pathname) !== "") return new Response("Not found", { status: 404 });
 
     const shell = join(uiDir, SHELL);
     try {
-      return fileResponse(await readFile(shell), shell, false);
+      return fileResponse(await readFile(shell), shell, false, csp);
     } catch {
       return new Response("UI build missing", { status: 500 });
     }

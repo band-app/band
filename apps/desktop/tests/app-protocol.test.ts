@@ -12,12 +12,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
-import { APP_ORIGIN, createAppHandler, resolveInside } from "../src/main/app-protocol.ts";
+import {
+  appHostForHub,
+  appOriginForHost,
+  buildCsp,
+  createAppHandler,
+  isAppHost,
+  LOCAL_APP_HOST,
+  resolveInside,
+} from "../src/main/app-protocol.ts";
 
 describe("app:// handler", () => {
   let root: string;
   let outside: string;
   let handle: (request: Request) => Promise<Response>;
+  let host = LOCAL_APP_HOST;
+  let hubOrigin: string | null = "http://localhost:4567";
 
   before(async () => {
     const base = await mkdtemp(join(tmpdir(), "band-desktop-app-protocol-"));
@@ -30,7 +40,7 @@ describe("app:// handler", () => {
     await writeFile(join(root, "icons", "band-192.png"), "png");
     await writeFile(join(root, "manifest.webmanifest"), "{}");
     await writeFile(outside, "do not serve");
-    handle = createAppHandler(root);
+    handle = createAppHandler(root, { host: () => host, hubOrigin: () => hubOrigin });
   });
 
   after(async () => {
@@ -38,7 +48,7 @@ describe("app:// handler", () => {
   });
 
   const get = (path: string, init?: RequestInit) =>
-    handle(new Request(`${APP_ORIGIN}${path}`, init));
+    handle(new Request(`${appOriginForHost(host)}${path}`, init));
 
   test("the root path serves the shell", async () => {
     const res = await get("/");
@@ -83,9 +93,61 @@ describe("app:// handler", () => {
     assert.equal(resolveInside(root, "/%E0%A4%A"), null);
   });
 
-  test("only GET and HEAD, and only the band host", async () => {
+  test("only GET and HEAD, and only the host the window is loaded under", async () => {
     assert.equal((await get("/", { method: "POST", body: "x" })).status, 405);
-    const other = await handle(new Request("app://evil/"));
-    assert.equal(other.status, 404);
+    assert.equal((await handle(new Request("app://evil/"))).status, 404);
+    assert.equal((await handle(new Request("app://h-0123456789ab/"))).status, 404);
+  });
+
+  test("every response carries a CSP that names the current hub", async () => {
+    for (const path of ["/", "/assets/main-abc123.js", "/workspace/x"]) {
+      const csp = (await get(path)).headers.get("content-security-policy") ?? "";
+      assert.match(
+        csp,
+        /connect-src 'self' http:\/\/localhost:4567 ws:\/\/localhost:4567(;|$)/,
+        path,
+      );
+      assert.equal((await get(path)).headers.get("x-content-type-options"), "nosniff");
+    }
+  });
+
+  test("a switch to a remote hub changes the host and the CSP", async () => {
+    hubOrigin = "https://hub.example.com";
+    host = appHostForHub(hubOrigin);
+    try {
+      assert.equal((await get("/")).status, 200);
+      const csp = (await get("/")).headers.get("content-security-policy") ?? "";
+      assert.match(
+        csp,
+        /connect-src 'self' https:\/\/hub\.example\.com wss:\/\/hub\.example\.com(;|$)/,
+      );
+      assert.ok(!csp.includes("localhost"));
+      // The old host no longer answers.
+      assert.equal((await handle(new Request("app://local/"))).status, 404);
+    } finally {
+      host = LOCAL_APP_HOST;
+      hubOrigin = "http://localhost:4567";
+    }
+  });
+});
+
+describe("app hosts and CSP", () => {
+  test("each hub gets its own stable host", () => {
+    const a = appHostForHub("https://a.example.com");
+    assert.match(a, /^h-[0-9a-f]{12}$/);
+    assert.equal(a, appHostForHub("https://a.example.com"));
+    assert.notEqual(a, appHostForHub("https://b.example.com"));
+    assert.equal(appHostForHub(null), "local");
+    assert.ok(isAppHost(a) && isAppHost("local"));
+    assert.ok(!isAppHost("band") && !isAppHost("h-xyz"));
+  });
+
+  test("the CSP lets the page talk to itself only, plus its hub", () => {
+    const csp = buildCsp("http://localhost:4567");
+    assert.match(csp, /default-src 'self'/);
+    assert.match(csp, /object-src 'none'/);
+    assert.match(csp, /frame-src 'self' blob: http:\/\/localhost:4567/);
+    const none = buildCsp(null);
+    assert.match(none, /connect-src 'self'(;|$)/);
   });
 });
