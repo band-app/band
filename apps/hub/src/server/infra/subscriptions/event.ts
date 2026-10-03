@@ -20,8 +20,15 @@ export const subscriptionEventSchema = z.object({
   summary: z.string(),
   /** When the event happened, in epoch milliseconds. */
   at: z.number().int().min(0).max(8.64e15),
-  /** Caused by Band's own action (for example a push from a workspace). */
+  /** Caused by Band's own action (for example a push from a workspace). Never delivered. */
   self: z.boolean().optional(),
+  /** The commit a push put on a branch. Lets the source tell whether Band pushed it. */
+  sha: z.string().optional(),
+  /**
+   * Set on a CI failure: true when Band pushed the commit (the agent may fix
+   * it), false when someone else did (the message says not to fix it).
+   */
+  fix: z.boolean().optional(),
 });
 
 export type SubscriptionEvent = z.infer<typeof subscriptionEventSchema>;

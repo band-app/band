@@ -115,9 +115,15 @@ export function parseGithubDelivery(
   if (!body || !repo) return { type: "ignored" };
   const actor = str(obj(body.sender)?.login) || "unknown";
   const action = str(body.action);
-  const event = (key: string, kind: string, url: string, summary: string): GithubParse => ({
+  const event = (
+    key: string,
+    kind: string,
+    url: string,
+    summary: string,
+    sha?: string,
+  ): GithubParse => ({
     type: "events",
-    events: [{ id: delivery, source: "github", kind, key, url, actor, summary, at: now }],
+    events: [{ id: delivery, source: "github", kind, key, url, actor, summary, at: now, sha }],
   });
 
   switch (eventType) {
@@ -133,6 +139,8 @@ export function parseGithubDelivery(
         "pull_request",
         str(pr.html_url),
         `${actor} ${verb} ${repo}#${number}${title ? `: ${title}` : ""}`,
+        // A synchronize is a push to the PR's branch, so its head is the pushed commit.
+        action === "synchronize" ? str(obj(pr.head)?.sha) || undefined : undefined,
       );
     }
     case "pull_request_review": {
@@ -191,6 +199,7 @@ export function parseGithubDelivery(
         "push",
         str(body.compare) || `https://github.com/${repo}/tree/${branch}`,
         `${actor} pushed ${sha.slice(0, 7)} to ${repo}@${branch}`,
+        sha,
       );
     }
     case "check_run":
@@ -225,11 +234,14 @@ export const CHECK_RUNS_PER_PAGE = 100;
 /**
  * Cursor's CI semantics: nothing while any check is still running (the
  * caller waits for the next completion), then one verdict for the commit.
+ * `bandPushed` says whether Band pushed the commit; a failure on one it
+ * didn't is marked `fix: false`, so the agent only reports it.
  */
 export function aggregateChecks(
   checks: CheckRun[],
   trigger: CheckTrigger,
   now = Date.now(),
+  bandPushed = false,
 ): SubscriptionEvent | undefined {
   if (checks.length === 0 || checks.some((c) => c.status !== "completed")) return undefined;
   const failed = checks.filter((c) => c.conclusion && FAILED_CONCLUSIONS.has(c.conclusion));
@@ -262,6 +274,7 @@ export function aggregateChecks(
     actor: "github-checks",
     summary,
     at: now,
+    ...(state === "failure" && { fix: bandPushed }),
   };
 }
 
