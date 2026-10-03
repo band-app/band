@@ -59,7 +59,12 @@ describe("app:// handler", () => {
   });
 
   test("deep links and reloads inside the app get the shell (route kept)", async () => {
-    for (const path of ["/workspace/abc", "/workspace/a%20b/", "/some/unknown/route"]) {
+    for (const path of [
+      "/workspace/abc",
+      "/workspace/a%20b/",
+      "/some/unknown/route",
+      "/workspace/band-release-1.2",
+    ]) {
       const res = await get(path);
       assert.equal(res.status, 200, path);
       assert.equal(await res.text(), "<html>shell</html>", path);

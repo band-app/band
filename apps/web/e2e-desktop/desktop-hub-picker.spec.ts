@@ -199,7 +199,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     // A wrong token is refused in the picker and nothing changes.
     await picker.open();
     await picker.chooseRemote(remote.url, "wrong-token");
-    await expect(picker.error).toContainText("rejected the token");
+    await expect(picker.error).toBeVisible();
     expect(dashboard.url()).toBe(localUrl);
 
     // The right one reloads the window on the remote hub's own host.

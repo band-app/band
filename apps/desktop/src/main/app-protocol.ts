@@ -138,6 +138,27 @@ function fileResponse(body: Buffer, file: string, immutable: boolean, csp: strin
   });
 }
 
+const ASSET_EXTENSIONS = new Set([
+  ".js",
+  ".mjs",
+  ".css",
+  ".map",
+  ".wasm",
+  ".json",
+  ".webmanifest",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".ico",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".txt",
+]);
+
 export interface AppHandlerOptions {
   /** The host the window is loaded under now. Requests for any other host are refused. */
   host: () => string;
@@ -165,7 +186,11 @@ export function createAppHandler(
       const immutable = url.pathname.startsWith("/assets/");
       return fileResponse(await readFile(file), file, immutable, csp);
     }
-    if (extname(url.pathname) !== "") return new Response("Not found", { status: 404 });
+    // A missing asset is a 404. Any other path is a route, including ones whose
+    // last segment has a dot (a workspace id like "band-release-1.2").
+    if (url.pathname.startsWith("/assets/") || ASSET_EXTENSIONS.has(extname(url.pathname))) {
+      return new Response("Not found", { status: 404 });
+    }
 
     const shell = join(uiDir, SHELL);
     try {

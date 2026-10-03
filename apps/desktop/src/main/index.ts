@@ -423,7 +423,7 @@ async function bootstrap(): Promise<void> {
   const unregisterHubConfig = registerHubConfigSync(() => state.rendererHub, trustedUiOrigins);
 
   const url = await connectHub(state.hubChoice);
-  log.info({ url, hub: state.hubChoice.mode }, "loading url");
+  log.info({ url: url.split("?")[0], hub: state.hubChoice.mode }, "loading url");
   state.mainWindow = createMainWindow({ url });
 
   // Surface preload load failures, which otherwise fail silently and leave

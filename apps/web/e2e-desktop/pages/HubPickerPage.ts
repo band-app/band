@@ -14,7 +14,7 @@ export class HubPickerPage {
   readonly error: Locator;
   private readonly settingsButton: Locator;
 
-  constructor(private readonly page: Page) {
+  constructor(page: Page) {
     this.settingsButton = page.getByTestId("project-list__settings-button");
     this.dialog = page.getByRole("dialog", { name: "Settings" });
     this.mode = page.getByTestId("settings__hub-mode");
