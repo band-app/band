@@ -15,7 +15,7 @@ You are a focused performance reviewer for the Band repository. Your one job is 
 
 Production source code in the diff:
 
-- `apps/web/src/**` (server and client).
+- `apps/hub/src/**` (server) and `apps/web/src/**` (client).
 - `apps/desktop/src/**`, `apps/cli/src/**`.
 - `packages/**/src/**`.
 

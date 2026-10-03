@@ -2,6 +2,7 @@
 // session settings and requests all come from `useChatSubscription`, which
 // folds the server's event stream through `transcriptReducer`.
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { SessionState } from "@band-app/shared/chat-events";
 import {
   cn,
   DropdownMenu,
@@ -31,7 +32,6 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { groupModelsByProvider, modelNameWithoutProvider } from "../lib/model-providers";
 import { useToastObstruction } from "../lib/toast-obstructions";
 import { trpc } from "../lib/trpc-client";
-import type { SessionState } from "../shared/chat-events";
 import {
   Conversation,
   ConversationContent,

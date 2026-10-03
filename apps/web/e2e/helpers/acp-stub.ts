@@ -4,7 +4,7 @@
  *
  * Every coding agent runs as an Agent Client Protocol subprocess. When the
  * server boots with `BAND_TEST_ACP_AGENT` set, every agent launches
- * `apps/web/tests/fixtures/acp-stub-agent.mjs` instead, which replies from a
+ * `apps/hub/tests/fixtures/acp-stub-agent.mjs` instead, which replies from a
  * scenario file with no network and no login. `startServer` in
  * `./server.ts` sets that variable by default, so a spec only calls
  * `acpStubEnv()` when it needs a scenario, persisted sessions, the request
@@ -14,11 +14,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Absolute path to `apps/web/tests/fixtures/acp-stub-agent.mjs`. */
+/** Absolute path to `apps/hub/tests/fixtures/acp-stub-agent.mjs`. */
 export const ACP_STUB_AGENT_PATH = join(
   import.meta.dirname,
   "..",
   "..",
+  "..",
+  "hub",
   "tests",
   "fixtures",
   "acp-stub-agent.mjs",

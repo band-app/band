@@ -10,7 +10,7 @@
 //
 // - chat ids are prefixed `chat_`, browser ids `browser_`, terminal ids are
 //   bare uuids (matches the server's `randomUUID()` fallback — see
-//   `apps/web/src/server/api/terminals/router.ts`). Don't change the shapes:
+//   `apps/hub/src/server/api/terminals/router.ts`). Don't change the shapes:
 //   they are the dockview panel ids AND the server-side record ids.
 // - "fresh" trackers let an add-tab action tell the freshly-mounted renderer
 //   to skip loading server-side session/history and start blank.

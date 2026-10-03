@@ -1,4 +1,11 @@
-import type { AgentMode } from "../shared/agent-sessions";
+import type { AgentMode } from "@band-app/shared/agent-sessions";
+
+export type { FormatFileResult } from "@band-app/shared/format-file-result";
+export type {
+  TerminalLayoutNode,
+  TerminalPaneConfig,
+  WorkspaceTerminalConfig,
+} from "@band-app/shared/terminal-config";
 
 export type AgentStatusType = "working" | "needs_attention" | "waiting";
 
@@ -131,62 +138,6 @@ export interface SetupStatus {
   script: "setup" | "teardown";
   error?: string;
 }
-
-// ---------------------------------------------------------------------------
-// Workspace terminal configuration (recursive split-tree layout)
-// ---------------------------------------------------------------------------
-
-export interface TerminalPaneConfig {
-  name?: string;
-  command?: string;
-  cwd?: string;
-  env?: Record<string, string>;
-  focus?: boolean;
-}
-
-export type TerminalLayoutNode =
-  | { pane: TerminalPaneConfig }
-  | {
-      direction: "horizontal" | "vertical";
-      split?: number;
-      children: [TerminalLayoutNode, TerminalLayoutNode];
-    };
-
-export interface WorkspaceTerminalConfig {
-  layout: TerminalLayoutNode;
-}
-
-// ---------------------------------------------------------------------------
-// Format-file result returned by `adapter.formatWorkspaceFile`
-// ---------------------------------------------------------------------------
-//
-// Mirrors the discriminated-union shape returned by the `workspace.formatFile`
-// tRPC procedure. The procedure is pure: the client passes in editor content
-// and gets back the formatted string. Disk persistence is the caller's
-// responsibility (typically via the existing save flow).
-//
-// `skipped: true` means Prettier has no parser for the file (or it's covered
-// by `.prettierignore`) — editors fire format-on-shortcut regardless of file
-// type, so unsupported files are a soft no-op rather than an error.
-// `skipped: false` reports the parser used, the formatted content, and a
-// `changed` flag so the caller can decide whether to bother updating its
-// editor buffer.
-
-export type FormatFileResult =
-  | {
-      skipped: true;
-      file: string;
-      reason: string;
-      durationMs: number;
-    }
-  | {
-      skipped: false;
-      file: string;
-      parser: string;
-      formatted: string;
-      changed: boolean;
-      durationMs: number;
-    };
 
 export type CodingAgentType = "claude-code" | "codex" | "gemini-cli" | "cursor-cli" | "opencode";
 

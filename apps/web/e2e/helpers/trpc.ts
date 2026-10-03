@@ -4,7 +4,7 @@
  * Centralises the "POST /trpc/<procedure>" idiom so multiple specs
  * share one implementation instead of each copying it inline. Auth
  * is carried via the `band_token` Cookie (matching the
- * `defaultHeaders` pattern in `apps/web/tests/chat-events.test.ts`)
+ * `defaultHeaders` pattern in `apps/hub/tests/chat-events.test.ts`)
  * rather than a `?token=` query param — keeps secrets out of the
  * server access logs and proxy logs.
  */

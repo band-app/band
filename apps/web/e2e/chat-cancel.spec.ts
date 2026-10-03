@@ -18,7 +18,7 @@
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home.
  *   - NO tRPC mocking. `tasks.abort` runs for real and sends ACP
  *     `session/cancel` to the agent subprocess.
- *   - The ACP stub agent at `apps/web/tests/fixtures/acp-stub-agent.mjs`
+ *   - The ACP stub agent at `apps/hub/tests/fixtures/acp-stub-agent.mjs`
  *     (stdio subprocess stub, the only allowed mock) streams a message
  *     chunk immediately, then blocks until Band sends `session/cancel`.
  *     That gives us time to click Stop while the task is still mid-stream

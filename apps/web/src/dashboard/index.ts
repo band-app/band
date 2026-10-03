@@ -1,5 +1,11 @@
 // Types
 
+export {
+  type FileLocation,
+  formatFileLocation,
+  parseFileLocation,
+} from "@band-app/shared/file-location";
+export { toWorkspaceId } from "@band-app/shared/workspace-id";
 // Adapter
 export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
 // Components
@@ -115,7 +121,6 @@ export {
 export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
 export { buildCommands, formatShortcut, isMacPlatform } from "./lib/command-registry";
 export { getFileIcon, getFolderIcon } from "./lib/file-icon";
-export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
 export {
   extensionToLanguage,
@@ -142,7 +147,6 @@ export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export type { SSEEvent } from "./lib/sse";
-export { toWorkspaceId } from "./lib/workspace-id";
 // Query
 export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";

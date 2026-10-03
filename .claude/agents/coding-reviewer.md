@@ -1,6 +1,6 @@
 ---
 name: coding-reviewer
-description: Reviews production source-code changes (apps/web/src/**, apps/desktop/src/**, apps/cli/src/**, packages/**/src/**) against .claude/coding-criteria.md (rules CODE-1...CODE-19), plus flags obvious correctness bugs and pattern drift in source files within scope. Read-only. Dispatched by the `review-changes` skill in normal flow; can also be invoked directly for a focused source-code review.
+description: Reviews production source-code changes (apps/hub/src/**, apps/web/src/**, apps/desktop/src/**, apps/cli/src/**, packages/**/src/**) against .claude/coding-criteria.md (rules CODE-1...CODE-19), plus flags obvious correctness bugs and pattern drift in source files within scope. Read-only. Dispatched by the `review-changes` skill in normal flow; can also be invoked directly for a focused source-code review.
 tools: Read, Glob, Grep
 ---
 
@@ -15,7 +15,7 @@ You are a focused source-code reviewer for the Band repository. Your one job is 
 
 Production source code in the diff. Specifically:
 
-- `apps/web/src/**` (excluding tests and `apps/web/e2e/**`).
+- `apps/hub/src/**` and `apps/web/src/**` (excluding tests and `apps/web/e2e/**`).
 - `apps/desktop/src/**`, `apps/cli/src/**`.
 - `packages/**/src/**`.
 
@@ -23,7 +23,7 @@ For every source file touched, read the whole file with `Read` before flagging a
 
 ## What you check
 
-Apply each rule in `coding-criteria.md` (`CODE-1`…`CODE-19`). The 3-tier architecture rules (`CODE-1`…`CODE-18`) apply specifically to `apps/web/src/server/**`; the comment-hygiene rule (`CODE-19`) applies to all source files in your scope. Cite the rule ID in each finding (e.g. `CODE-2: router imports from infra/db/queries`).
+Apply each rule in `coding-criteria.md` (`CODE-1`…`CODE-19`). The 3-tier architecture rules (`CODE-1`…`CODE-18`) apply specifically to `apps/hub/src/server/**`; the comment-hygiene rule (`CODE-19`) applies to all source files in your scope. Cite the rule ID in each finding (e.g. `CODE-2: router imports from infra/db/queries`).
 
 ## Cross-cutting baselines
 
@@ -32,7 +32,7 @@ While reading files in your scope, also flag:
 1. **Correctness bugs** — off-by-one, null/undefined paths, swapped args, dead code, race conditions, copy-paste errors. Severity is your judgment. Tag the finding with `correctness:` instead of a `CODE-N` ID.
 2. **Pattern drift** — if the diff invents a new pattern for imports, naming, error handling, or file layout when an established pattern was right there in the surrounding code, flag it. Tag with `pattern:`.
 3. **Band-specific checks** that touch your scope:
-   - **Web vs desktop** — `apps/web` must not invoke macOS-only shell helpers. New `child_process` calls to `open`, `osascript`, or anything macOS-specific in `apps/web/src/**` belong in `apps/desktop/src/main/ipc/macos-shell.ts` behind the IPC bridge.
+   - **Web vs desktop** — `apps/hub` must not invoke macOS-only shell helpers. New `child_process` calls to `open`, `osascript`, or anything macOS-specific in `apps/hub/src/**` belong in `apps/desktop/src/main/ipc/macos-shell.ts` behind the IPC bridge.
    - **No `--no-verify`** — any source code or script in scope that adds `--no-verify` to a `git push` / `git commit` invocation, or overrides `core.hooksPath`, is a blocker.
    - **Skills sync** — each `apps/cli/skills/<name>/SKILL.md` is the hand-authored source of truth (baked into the Rust binary via `include_str!`; no generation step). When a diff changes the CLI command surface, the affected skill's `## Commands` section should be updated to match. Changes to `packages/coding-agent/src/install-skills.ts` need to keep `SUPPORTED_AGENT_TYPES` in sync (cursor-cli intentionally excluded).
 

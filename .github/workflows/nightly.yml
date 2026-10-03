@@ -98,7 +98,7 @@ jobs:
           # both the Electron build and the in-app About panel report it.
           node -e "
             const fs = require('fs');
-            for (const path of ['package.json', 'apps/desktop/package.json', 'apps/web/package.json']) {
+            for (const path of ['package.json', 'apps/desktop/package.json', 'apps/web/package.json', 'apps/hub/package.json']) {
               const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
               pkg.version = process.env.NIGHTLY_VERSION;
               fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
@@ -114,7 +114,7 @@ jobs:
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       # Build the CLI before running the JS tests. Some tests (e.g.
-      # `apps/web/tests/cli-skills.test.ts`) shell out to `band skills install`
+      # `apps/hub/tests/cli-skills.test.ts`) shell out to `band skills install`
       # to verify the production sync path against the real binary. The cargo
       # cache key only hashes `apps/cli/Cargo.lock`, so a source-only change
       # (skill templates, command surface) restores a stale binary that
@@ -128,6 +128,7 @@ jobs:
       - name: Test
         run: |
           pnpm --filter @band-app/server test
+          pnpm --filter @band-app/web test
           cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Build frontend

@@ -9,7 +9,7 @@
 #     hardened-runtime entitlements, notarization via notarytool, deep-sign
 #     hook for nested native binaries under `Resources/web/`.
 #     Windows + Linux are out of scope for this phase: the runtime in
-#     `apps/desktop/src/main/` and the bundled web server (apps/web,
+#     `apps/desktop/src/main/` and the bundled hub (apps/hub,
 #     `"os": ["darwin", "linux"]`) currently assume a Unix-y host (POSIX
 #     shell for `shellPath`, `lsof` for port reclamation). The bundled web
 #     server is spawned via Electron's embedded Node runtime
@@ -47,10 +47,14 @@ directories:
 # the runtime resolvers in `services/web-paths.ts` and `services/cli-paths.ts`,
 # which read `process.resourcesPath` in packaged builds.
 extraResources:
-  # Bundled web server. Mirrors the Tauri `bundle.resources` map that ships
-  # `apps/web/dist/` into `Resources/web/`.
-  - from: ../web/dist
+  # Bundled hub (the API server). Mirrors the Tauri `bundle.resources` map
+  # that shipped the server's `dist/` into `Resources/web/`.
+  - from: ../hub/dist
     to: web/dist
+  # The built UI, placed beside the hub bundle. The hub serves it from
+  # `client/` next to `start-server.mjs` when `apps/web` is absent.
+  - from: ../web/dist/client
+    to: web/dist/client
   # Bundled CLI sidecar. Populated by `apps/desktop/scripts/copy-cli-binary.mjs`
   # before electron-builder runs (see root `build:cli:desktop`). The runtime
   # path resolver expects this exact relative location.

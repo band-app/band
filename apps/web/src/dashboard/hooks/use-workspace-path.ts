@@ -1,5 +1,5 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { useMemo } from "react";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useProjects } from "./use-projects";
 
 /**

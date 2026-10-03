@@ -1,3 +1,4 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,7 +27,6 @@ import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { showChecksTab } from "../lib/checks-tab";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { isWorkspaceDeleting } from "../stores/dashboard-store";
 import { useDashboardStore } from "../stores/index";
 import type {

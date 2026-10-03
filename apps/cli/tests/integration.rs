@@ -6,7 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// The CLI now delegates all state operations to the web server.
-/// These tests start a real web server (from apps/web/dist), seed it
+/// These tests start a real web server (from apps/hub/dist), seed it
 /// with a temp HOME, then run CLI commands against it.
 struct TestEnv {
     /// The .band directory (used as `BAND_HOME` for the CLI)
@@ -80,10 +80,10 @@ impl TestEnv {
 
         // Start the web server
         let web_dist =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist/start-server.mjs");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/hub/dist/start-server.mjs");
         assert!(
             web_dist.exists(),
-            "Web server not built. Run: pnpm -F @band-app/server build"
+            "Web server not built. Run: pnpm build:web"
         );
 
         let mut child = Command::new("node")
@@ -1157,7 +1157,7 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
 /// (cwd resolution + forward + that the server actually maps something) — it is
 /// a wiring smoke-test, NOT a behaviour contract. The event-specific contract
 /// (which event maps to which status) is owned entirely by the web server's
-/// tests (`apps/web/tests/needs-attention.test.ts`), next to the adapter that
+/// tests (`apps/hub/tests/needs-attention.test.ts`), next to the adapter that
 /// owns the mapping — so adding a new agent never touches the CLI or these tests.
 #[test]
 fn notify_forwards_payload_to_server() {
@@ -1553,7 +1553,7 @@ fn chat_send_while_agent_runs_queues_the_message() {
     )
     .unwrap();
     let stub_agent = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/web/tests/fixtures/acp-stub-agent.mjs");
+        .join("../../apps/hub/tests/fixtures/acp-stub-agent.mjs");
     let env = TestEnv::with_server_env(&[
         ("BAND_TEST_ACP_AGENT", stub_agent.to_str().unwrap()),
         ("BAND_TEST_ACP_SCENARIO", scenario.to_str().unwrap()),

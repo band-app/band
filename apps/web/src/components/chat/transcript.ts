@@ -28,7 +28,7 @@ import type {
   ChatEventFile,
   QueuedChatMessage,
   SessionState,
-} from "../../shared/chat-events";
+} from "@band-app/shared/chat-events";
 
 export interface ToolEntry {
   kind: "tool";

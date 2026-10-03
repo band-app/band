@@ -7,7 +7,7 @@
  * When the machine sleeps (or the network drops), the terminal WebSocket
  * dies. The server has always kept the PTY alive across a socket close and
  * reuses it by `terminalId` on reconnect (see
- * `apps/web/src/server/api/terminals/ws.ts`). The missing half was the
+ * `apps/hub/src/server/api/terminals/ws.ts`). The missing half was the
  * client: `TerminalPanel` only printed "[Terminal disconnected]" and never
  * reconnected, so after a wake the pane was dead until the user manually
  * closed and reopened the tab. The fix adds client auto-reconnect (with an

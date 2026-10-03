@@ -1,8 +1,8 @@
 # Web App Architecture
 
-> **Status: shipped.** The 3-tier migration completed in Phase 8 (issue #319). Server logic now lives under `apps/web/src/server/{api,services,infra}/`, with the canonical tRPC entry point at `apps/web/src/server/api/router.ts`. The legacy `apps/web/src/trpc/` directory has been removed, and the only remaining content under `apps/web/src/lib/` is browser-side utilities (clipboard helpers, dockview state, the tRPC client wrapper, etc.). New code MUST follow this layout — see the per-tier rules below.
+> **Status: shipped.** The 3-tier migration completed in Phase 8 (issue #319). Server logic now lives under `apps/hub/src/server/{api,services,infra}/`, with the canonical tRPC entry point at `apps/hub/src/server/api/router.ts`. The legacy `apps/web/src/trpc/` directory has been removed, and the only remaining content under `apps/web/src/lib/` is browser-side utilities (clipboard helpers, dockview state, the tRPC client wrapper, etc.). New code MUST follow this layout — see the per-tier rules below.
 
-The web server (`apps/web`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
+The hub (`apps/hub`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
 
 ```
 API (routers)  -->  Services (business logic)  -->  Infra (DB, git, external clients)
@@ -22,7 +22,7 @@ This document is the narrative — the *why*, the examples, the rationale. The c
 ## Directory Structure
 
 ```
-apps/web/src/server/
+apps/hub/src/server/
   api/
     projects/
       router.ts

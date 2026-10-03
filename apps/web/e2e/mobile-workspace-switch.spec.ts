@@ -25,14 +25,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { branchRepository, prNode, workflowSuite } from "../tests/fixtures/branch-status-data";
-import { type GhStub, ghStub } from "../tests/fixtures/gh-stub";
+import {
+  branchRepository,
+  prNode,
+  workflowSuite,
+} from "../../hub/tests/fixtures/branch-status-data";
+import { type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
   checkRunNode,
   FAKE_REPO,
   pullRequestNode,
   reviewQueryData,
-} from "../tests/fixtures/github-review-data";
+} from "../../hub/tests/fixtures/github-review-data";
 import { acpStubEnv } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
 import {

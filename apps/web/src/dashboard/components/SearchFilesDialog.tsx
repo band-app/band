@@ -1,3 +1,4 @@
+import { formatFileLocation } from "@band-app/shared/file-location";
 import {
   Command,
   CommandEmpty,
@@ -13,7 +14,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { getFileIcon } from "../lib/file-icon";
-import { formatFileLocation } from "../lib/file-location";
 import type { ContentSearchMatch } from "../types";
 import { SearchBar, type SearchBarHandle, type SearchOptions } from "./SearchBar";
 

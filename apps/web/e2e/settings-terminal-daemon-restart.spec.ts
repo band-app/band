@@ -7,7 +7,7 @@
  * `terminal-cache.ts`). The daemon lifecycle (which process gets killed,
  * that a retired daemon is untouched, that a reopened terminal is
  * cold-restored) is covered at the tRPC/WS layer in
- * `apps/web/tests/terminal-restart-daemon.test.ts` and
+ * `apps/hub/tests/terminal-restart-daemon.test.ts` and
  * `terminal-cold-restore.test.ts` — this spec covers only the DOM-observable
  * half: clicking the button in Settings actually ends the terminal.
  */

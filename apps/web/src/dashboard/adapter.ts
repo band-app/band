@@ -1,5 +1,5 @@
-import type { AgentMode } from "../shared/agent-sessions";
-import type { GitOpResult } from "../shared/git-op-result";
+import type { AgentMode } from "@band-app/shared/agent-sessions";
+import type { GitOpResult } from "@band-app/shared/git-op-result";
 import type {
   BrowserProfileInfo,
   CIStatus,

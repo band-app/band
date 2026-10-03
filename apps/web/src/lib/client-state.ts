@@ -23,15 +23,15 @@
  * pushes them on the next load.
  */
 
-import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import {
   CLIENT_STATE_MAX_VALUE_BYTES,
   type ClientStateEntry,
   type ClientStateScope,
   type ClientStateWriteResult,
   type DeviceType,
-} from "../shared/client-state";
-import { type KeyPart, matchKey } from "../shared/client-state-keys";
+} from "@band-app/shared/client-state";
+import { type KeyPart, matchKey } from "@band-app/shared/client-state-keys";
+import { DESKTOP_QUERY } from "../hooks/useIsDesktop";
 import { isDesktop } from "./is-desktop";
 
 /**

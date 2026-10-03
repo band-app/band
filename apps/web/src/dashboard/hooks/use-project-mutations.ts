@@ -1,7 +1,7 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAdapter } from "../context";
 import { readAgentMode } from "../lib/agent-mode";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { queryKeys } from "../query-client";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type { ProjectInfo } from "../types";

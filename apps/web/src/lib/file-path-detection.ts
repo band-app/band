@@ -9,7 +9,7 @@
 // in isolation.
 // ---------------------------------------------------------------------------
 
-import { parseFileLocation } from "../dashboard/lib/file-location";
+import { parseFileLocation } from "@band-app/shared/file-location";
 
 // ---------------------------------------------------------------------------
 // Known file extensions (derived from dashboard/lib/file-icon.ts)

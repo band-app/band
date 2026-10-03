@@ -29,7 +29,7 @@
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home,
  *     pinned to a fixed port so the restart rebinds the same address.
  *   - NO tRPC mocking, no `page.route()` on our own routes.
- *   - The ACP stub agent (`apps/web/tests/fixtures/acp-stub-agent.mjs`)
+ *   - The ACP stub agent (`apps/hub/tests/fixtures/acp-stub-agent.mjs`)
  *     streams one message chunk immediately (→ status `streaming`,
  *     indicator + Stop visible), then blocks until cancelled, so the turn
  *     is still running when we kill the server.

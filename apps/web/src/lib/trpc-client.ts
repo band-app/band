@@ -1,5 +1,5 @@
+import type { AppRouter } from "@band-app/server";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
-import type { AppRouter } from "../server/api/router";
 
 const wsClient = createWSClient({
   url: () => {

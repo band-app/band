@@ -30,6 +30,8 @@ const TOKEN = "e2e-reports-dialog-token";
 const MIGRATIONS_FOLDER = join(
   import.meta.dirname,
   "..",
+  "..",
+  "hub",
   "src",
   "server",
   "infra",

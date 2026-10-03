@@ -13,14 +13,14 @@
  *     bubble optimistically; the server's `prompt` event confirms it.
  */
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { trpc } from "../../lib/trpc-client";
 import {
   CHAT_EVENT_TYPES,
   type ChatEvent,
   type ChatEventFile,
   type SessionState,
-} from "../../shared/chat-events";
+} from "@band-app/shared/chat-events";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { trpc } from "../../lib/trpc-client";
 import {
   type ChatMessage,
   foldEvents,

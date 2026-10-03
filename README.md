@@ -113,12 +113,12 @@ Produces a `.dmg` (and `.zip` for `electron-updater` diff downloads) at `apps/de
 
 ## Web Server
 
-The web server (`apps/web`) is the backend for the dashboard. It handles:
+The hub (`apps/hub`) is the backend for the dashboard; the UI lives in `apps/web`. It handles:
 
 - **Git operations** — diff, commit, branch management via tRPC
 - **LSP** — spawns and proxies language servers (TypeScript, etc.) over WebSocket
 - **Coding agents** — manages agent sessions and task execution
-- **File serving** — serves the dashboard frontend
+- **File serving** — serves the built dashboard frontend (`apps/web/dist/client`, or `--ui-dir`)
 
 ```bash
 # Development:

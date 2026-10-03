@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import { LISTENING_BANNER } from "../../tests/helpers/server";
-import { stopTerminalDaemon } from "../../tests/helpers/terminal-daemon";
+import { LISTENING_BANNER } from "../../../hub/tests/helpers/server";
+import { stopTerminalDaemon } from "../../../hub/tests/helpers/terminal-daemon";
 import { ACP_STUB_AGENT_PATH } from "./acp-stub";
 
-const PROJECT_ROOT = join(import.meta.dirname, "../..");
-const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
+// The server under test is the hub bundle (`apps/hub/dist/start-server.mjs`);
+// it serves the UI from `apps/web/dist/client` by default.
+const HUB_ROOT = join(import.meta.dirname, "../../../hub");
+const MIGRATIONS_FOLDER = join(HUB_ROOT, "src/server/infra/db/migrations");
 
 export interface ServerHandle {
   url: string;
@@ -165,7 +167,7 @@ export async function startServer(
   const port = opts.port ?? (await getRandomPort());
 
   return new Promise((resolve, reject) => {
-    // The production bundle runs under Node (see apps/web/README.md) and
+    // The production bundle runs under Node (see apps/hub/README.md) and
     // uses Node's built-in `node:sqlite` for storage. Vitest integration
     // tests use the same spawn pattern via `tests/helpers/server-runtime.ts`.
     //
@@ -179,7 +181,7 @@ export async function startServer(
     // in its own group lets us signal the WHOLE TREE via the negative
     // pid trick in `close()` below.
     const child = spawn("node", ["dist/start-server.mjs"], {
-      cwd: PROJECT_ROOT,
+      cwd: HUB_ROOT,
       env: {
         ...process.env,
         HOME: home,

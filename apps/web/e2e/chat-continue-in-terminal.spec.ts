@@ -6,7 +6,7 @@
  *   - REAL production `dist/start-server.mjs` boots against a fresh tmp
  *     `$HOME`. No tRPC mocking.
  *   - The only stub is the ACP stub agent
- *     (`apps/web/tests/fixtures/acp-stub-agent.mjs`), the boundary stub for
+ *     (`apps/hub/tests/fixtures/acp-stub-agent.mjs`), the boundary stub for
  *     the agent subprocess (Agent Client Protocol over stdio). Sending one
  *     message opens an ACP session (`session/new`) and attaches the chat to
  *     it, exactly the way a real agent run would. The stub's request log
@@ -21,7 +21,7 @@
  * "Copy session ID" copies the underlying session id, and "Continue in
  * terminal" spawns a terminal and surfaces the Terminal panel. The exact
  * resume argv (`claude --resume <id>`) is pinned by the backend integration
- * test (`apps/web/tests/chat-continue-in-terminal.test.ts`).
+ * test (`apps/hub/tests/chat-continue-in-terminal.test.ts`).
  */
 
 import { mkdirSync } from "node:fs";

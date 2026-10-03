@@ -23,6 +23,6 @@ Only the latest release is supported with security updates.
 This policy covers the Band codebase including:
 
 - Electron desktop app (`apps/desktop`)
-- Web server (`apps/web`)
+- Hub, the API server (`apps/hub`), and the web UI (`apps/web`)
 - CLI (`apps/cli`)
 - VS Code extension (`extensions/vscode`)

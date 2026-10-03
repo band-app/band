@@ -113,7 +113,7 @@ This project uses **integration tests** as the primary testing approach. Do not 
 - **The real binary runs inside the test.** Backend and frontend tests both boot the production server process — no shallow renders, no in-memory React mounts, no test-only build flags.
 - **Real infrastructure.** Use test containers for databases, temporary directories for file-based state, real servers on random ports.
 - **External services get Express stubs.** Mock only services your process calls *out* to (third-party APIs, GitHub, agent binaries) using an Express stub on a random port + an env-var override read at request time. Do **not** use [MSW](https://mswjs.io/) — it misses subprocess-originated traffic. Do **not** use `page.route()` to intercept your own backend's routes from a Playwright test.
-- **Test framework matches the package.** `node:test` + `node:assert/strict` is the default for new code. The web app (`apps/web`) uses `vitest`.
+- **Test framework matches the package.** `node:test` + `node:assert/strict` is the default for new code. The web app (`apps/web`) and the hub (`apps/hub`) use `vitest`.
 - **Never modify production code to make a test pass.** The only allowed production-code change a test may introduce is a `data-testid` attribute on a JSX element, or refactoring an outbound URL to be read from an env var at request time so the test can override it.
 
 For the full doctrine — backend + frontend test patterns, Express-stub examples, page-object conventions, and worked examples — see [`CLAUDE.md`](CLAUDE.md#testing-strategy) and the [`write-integration-test`](.claude/skills/write-integration-test/SKILL.md) skill. Those are the authoritative sources; this section is a summary.

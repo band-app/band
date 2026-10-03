@@ -33,7 +33,7 @@ allowBuilds:
 # `macos-latest` (Apple Silicon → darwin-arm64), but `electron-builder` emits
 # both x64 and arm64 DMGs from the same `apps/web/dist`. Without this list,
 # pnpm only installs `@vscode/ripgrep-darwin-arm64` and the x64 DMG starts up
-# missing its ripgrep binary (see apps/web/scripts/build-server.sh).
+# missing its ripgrep binary (see apps/hub/scripts/build-server.sh).
 #
 # `current` keeps the host platform/arch installed; the extra entries make
 # pnpm also install x64 binaries so build-server.sh can copy them into the

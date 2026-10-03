@@ -16,7 +16,7 @@
  *     all completed hides the widget.
  *
  * Real server, no tRPC mocking; the ACP stub agent
- * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub.
+ * (`apps/hub/tests/fixtures/acp-stub-agent.mjs`) is the only stub.
  */
 
 import { mkdirSync } from "node:fs";

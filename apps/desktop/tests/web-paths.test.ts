@@ -1,7 +1,7 @@
 /**
  * Integration test for resolveWebDir.
  *
- * The function walks up from `appPath` to find `apps/web/dist/start-server.mjs`.
+ * The function walks up from `appPath` to find `apps/hub/dist/start-server.mjs`.
  * We construct a real directory tree in tmp and assert the resolution.
  */
 
@@ -14,12 +14,12 @@ import { describe, test } from "node:test";
 import { resolveWebDir } from "../src/main/services/web-paths.ts";
 
 describe("resolveWebDir", () => {
-  test("dev: walks up from appPath to find apps/web bundle", async () => {
+  test("dev: walks up from appPath to find apps/hub bundle", async () => {
     const repo = await mkdtemp(join(tmpdir(), "band-desktop-paths-"));
     try {
-      // Lay out: repo/apps/desktop/dist/main and repo/apps/web/dist/start-server.mjs
+      // Lay out: repo/apps/desktop/dist/main and repo/apps/hub/dist/start-server.mjs
       await mkdir(join(repo, "apps", "desktop", "dist", "main"), { recursive: true });
-      const webDir = join(repo, "apps", "web");
+      const webDir = join(repo, "apps", "hub");
       await mkdir(join(webDir, "dist"), { recursive: true });
       await writeFile(join(webDir, "dist", "start-server.mjs"), "// fake");
 

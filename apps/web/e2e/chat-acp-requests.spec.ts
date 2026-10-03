@@ -17,7 +17,7 @@
  *     turn runs on that model.
  *
  * Real server, no tRPC mocking. The ACP stub agent
- * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub: its
+ * (`apps/hub/tests/fixtures/acp-stub-agent.mjs`) is the only stub: its
  * scenario scripts the requests, and its default reply names the session's
  * current model (`Heard "<prompt>" on <model>.`). Each test opens its own
  * workspace so it gets a fresh chat.

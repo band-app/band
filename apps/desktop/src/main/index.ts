@@ -219,7 +219,7 @@ async function bootstrap(): Promise<void> {
   // retention in `BrowserPanel.tsx` keys off the same setting).
   // Port intentionally !== 9222 so it doesn't collide with a Chrome a
   // developer might have running. The renderer-side constant in
-  // `apps/web/src/server/infra/browser-host/host-state.ts::DESKTOP_CDP_PORT` mirrors the
+  // `apps/hub/src/server/infra/browser-host/host-state.ts::DESKTOP_CDP_PORT` mirrors the
   // default (9223) used by the screencast `/cdp` proxy. The env-var
   // override below is for developers running a second Band instance
   // alongside their daily-driver build — set `BAND_CDP_PORT=9224` (or

@@ -6,7 +6,7 @@ This supersedes [docs/experiments/federation.md](../experiments/federation.md).
 
 ## Context
 
-Today one Band server per machine owns everything: the database, the API, chat, scheduling and every git, file, process and terminal operation (`apps/web/src/server/`). `federation.md` proposed connecting several of these servers as symmetric peers, each the authority for the workspaces on its machine.
+Today one Band server per machine owns everything: the database, the API, chat, scheduling and every git, file, process and terminal operation (`apps/hub/src/server/`). `federation.md` proposed connecting several of these servers as symmetric peers, each the authority for the workspaces on its machine.
 
 Several planned features need a place that is always on and reachable from every device and every machine:
 

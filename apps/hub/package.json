@@ -1,0 +1,78 @@
+{
+  "name": "@band-app/server",
+  "version": "0.1.0",
+  "type": "module",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "band-server": "./bin/band-server.mjs"
+  },
+  "files": [
+    "dist/client",
+    "dist/start-server.mjs",
+    "dist/terminal-daemon.mjs",
+    "dist/openapi.json",
+    "dist/migrations",
+    "bin"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "scripts": {
+    "dev": "NODE_ENV=development tsx watch --exclude '../web/**' start-server.ts",
+    "build": "./scripts/build-server.sh",
+    "start": "node dist/start-server.mjs",
+    "prepack": "node scripts/copy-ui.mjs",
+    "postpack": "node scripts/copy-ui.mjs --clean",
+    "pretest": "pnpm --filter @band-app/web build && pnpm build",
+    "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
+    "postinstall": "node -e \"process.platform!=='win32'&&require('child_process').execSync('chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true',{stdio:'ignore'})\""
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.81.2",
+    "@agentclientprotocol/codex-acp": "1.13.1",
+    "@agentclientprotocol/sdk": "1.5.0",
+    "@vscode/ripgrep": "^1.18.0",
+    "@xterm/addon-serialize": "0.15.0-beta.300",
+    "@xterm/addon-unicode11": "0.10.0-beta.300",
+    "@xterm/headless": "6.1.0-beta.302",
+    "fzf": "0.5.2",
+    "node-pty": "^1.1.0",
+    "prettier": "^3.8.3",
+    "typescript-language-server": "^5.1.3"
+  },
+  "devDependencies": {
+    "@band-app/coding-agent": "workspace:^",
+    "@band-app/logger": "workspace:^",
+    "@band-app/plugin-api": "workspace:^",
+    "@band-app/plugin-github": "workspace:^",
+    "@band-app/shared": "workspace:^",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@trpc/client": "^11.12.0",
+    "@trpc/openapi": "11.16.0-alpha",
+    "@trpc/server": "^11.12.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.13",
+    "@types/ws": "^8.18.0",
+    "croner": "^10.0.1",
+    "drizzle-kit": "1.0.0-rc.1",
+    "drizzle-orm": "1.0.0-rc.1",
+    "esbuild": "^0.25.0",
+    "express": "^5.2.1",
+    "sirv": "^3.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.18",
+    "ws": "^8.18.0",
+    "zod": "^3.25.67"
+  }
+}

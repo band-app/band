@@ -1,6 +1,6 @@
+import type { AppRouter } from "@band-app/server";
 import type { Page } from "@playwright/test";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "../../src/server/api/router";
 
 // ---------------------------------------------------------------------------
 // Type helpers — map dot-notation paths to procedure input/output types

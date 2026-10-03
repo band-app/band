@@ -11,7 +11,7 @@ apps/desktop/out
 apps/desktop/dist
 apps/web/test-results
 apps/web/playwright-report
-apps/web/.band
+apps/hub/.band
 **/*.log
 .band
 .claude

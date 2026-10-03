@@ -1,4 +1,9 @@
 import {
+  formatFileLocation,
+  isAbsoluteFilePath,
+  parseFileLocation,
+} from "@band-app/shared/file-location";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -15,7 +20,6 @@ import { FileInput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { getFileIcon } from "../lib/file-icon";
-import { formatFileLocation, isAbsoluteFilePath, parseFileLocation } from "../lib/file-location";
 import { shouldBailAutoOpen } from "../lib/quick-open-bail";
 
 interface QuickOpenDialogProps {

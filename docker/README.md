@@ -1,6 +1,6 @@
 # Band server on Linux — Docker test harness
 
-Runs the **standalone `@band-app/server`** (web-only, no Electron desktop app)
+Runs the **standalone `@band-app/server`** (API server plus UI, no Electron desktop app)
 on a stock Debian container with **no zsh and no Homebrew** — the exact
 environment the Linux-compatibility work (issue #594) targets. Use it to
 verify the server boots and the smoke flow works on Linux from a macOS host.

@@ -16,7 +16,7 @@
  *
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home.
  *   - NO tRPC mocking. The chat events stream is the production SSE path.
- *   - The ACP stub agent (`apps/web/tests/fixtures/acp-stub-agent.mjs`,
+ *   - The ACP stub agent (`apps/hub/tests/fixtures/acp-stub-agent.mjs`,
  *     the only allowed mock) scripts two turns: the first completes one
  *     tool call and leaves a second in progress when the turn ends; the
  *     second turn completes that second call.

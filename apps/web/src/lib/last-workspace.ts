@@ -9,9 +9,9 @@
  * it, so a device that was last on `/` stays there.
  */
 
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { LABEL_FILTER_KEY } from "../dashboard/hooks/use-label-filter";
 import { readLabelLastWorkspaces } from "../dashboard/hooks/use-label-last-workspace";
-import { toWorkspaceId } from "../dashboard/lib/workspace-id";
 import type { ProjectInfo } from "../dashboard/types";
 import { clientStorage } from "./client-state";
 

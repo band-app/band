@@ -1,3 +1,4 @@
+import type { AgentMode } from "@band-app/shared/agent-sessions";
 import {
   Accordion,
   AccordionContent,
@@ -23,7 +24,6 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, FolderOpen, Plus, RefreshCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AgentMode } from "../../shared/agent-sessions";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
