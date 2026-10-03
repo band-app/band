@@ -5,6 +5,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { resumeCliInvocation } from "@band-app/coding-agent";
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { slugifyBranchName } from "@band-app/shared/branch-name";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
@@ -17,6 +18,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
+import { hostRegistry } from "../infra/host/registry";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
@@ -81,6 +83,8 @@ const log = createLogger("workspace-service");
 export interface ResolvedWorkspace {
   project: ProjectState;
   worktree: WorktreeState;
+  /** The machine the workspace lives on. */
+  host: Host;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +323,7 @@ export class WorkspaceService {
         // Identity is by the immutable `name`, so the resolve keeps working
         // after a git branch switch (which moves `worktree.branch`).
         if (toWorkspaceId(project.name, worktree.name) === workspaceId) {
-          return { project, worktree };
+          return { project, worktree, host: hostRegistry.hostFor(workspaceId) };
         }
       }
     }

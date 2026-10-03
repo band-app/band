@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
+import type { SpawnOptions, TerminalExitEvent, TerminalListEntry } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import type { Terminal as HeadlessTerminal } from "@xterm/headless";
@@ -21,6 +22,8 @@ import {
 } from "./terminal-history";
 
 const log = createLogger("terminal-pool");
+
+export type { SpawnOptions, TerminalExitEvent, TerminalListEntry };
 
 const MAX_SCROLLBACK_SIZE = 100_000;
 
@@ -103,22 +106,6 @@ class OutputTail {
 }
 
 /**
- * Options for spawning a new PTY session.
- *
- * The shape is shared between the tRPC `terminal.create` mutation, the
- * WebSocket handler (`server/api/terminals/ws.ts`), and the service tier —
- * all of them pass user-supplied options straight through to the pool.
- */
-export interface SpawnOptions {
-  /** Shell command to auto-run after the PTY spawns. */
-  command?: string;
-  /** Working directory, resolved relative to the workspace root. */
-  cwd?: string;
-  /** Extra environment variables merged into the base env. */
-  env?: Record<string, string>;
-}
-
-/**
  * Per-spawn settings that come from the caller rather than the user.
  */
 export interface SpawnExtras {
@@ -138,19 +125,6 @@ export interface SpawnExtras {
    * launch.
    */
   baseEnv?: Record<string, string | undefined>;
-}
-
-/**
- * Fired once per session when its PTY exits, for natural exits and explicit
- * kills alike.
- */
-export interface TerminalExitEvent {
-  terminalId: string;
-  workspaceId: string;
-  exitCode: number;
-  /** True when the exit came from {@link TerminalPool.kill} / `killWorkspace` / `killAll`. */
-  killed: boolean;
-  cleanupOnExit: boolean;
 }
 
 /** Live output chunk plus its per-session sequence number (1-based, gap-free). */
@@ -215,20 +189,6 @@ export interface TerminalSession {
     sessionCommand?: string;
     lastCheckpointAt: number;
   };
-}
-
-/**
- * Metadata returned by `TerminalPool.list` — the subset of `TerminalSession`
- * fields that are safe to surface over tRPC (no live `IPty` reference).
- */
-export interface TerminalListEntry {
-  terminalId: string;
-  workspaceId: string;
-  pid: number;
-  scrollbackLength: number;
-  title: string;
-  /** Prune the tab when the shell exits on its own (see `SpawnExtras.cleanupOnExit`). */
-  cleanupOnExit: boolean;
 }
 
 export interface TerminalPoolOptions {

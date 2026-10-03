@@ -1,0 +1,323 @@
+import type { UsageReader } from "@band-app/coding-agent";
+import type { TerminalBackend } from "./pty";
+
+/**
+ * A machine that owns workspaces. Every git, file, process, PTY, search, LSP
+ * and agent operation for a workspace goes through the workspace's host, so
+ * the hub never touches a worker's disk directly.
+ *
+ * The hub resolves a host with `HostRegistry.hostFor(workspaceId)`. Today the
+ * only implementation is `LocalHost`, which runs in the hub process.
+ *
+ * Failure convention: a method rejects with an `Error` when the operation
+ * fails (a non-zero exit, a missing file). Methods return `null` only where
+ * the doc says "or null".
+ */
+export interface Host {
+  /** Stable id. `local` for the machine the hub runs on. */
+  readonly id: string;
+  info(): Promise<HostInfo>;
+  readonly git: HostGit;
+  readonly worktree: HostWorktree;
+  readonly fs: HostFs;
+  readonly search: HostSearch;
+  readonly lsp: HostLsp;
+  readonly acp: HostAcp;
+  /** Same interface the hub's terminal service already uses. */
+  readonly pty: TerminalBackend;
+  readonly scripts: HostScripts;
+  /** Runs a binary on the host with `PATH` extended to the usual tool directories. */
+  exec(bin: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
+  readonly agentEnv: HostAgentEnv;
+}
+
+// ---------------------------------------------------------------------------
+// Info and capabilities
+// ---------------------------------------------------------------------------
+
+/** What a host can do. A host that lacks one rejects the matching calls. */
+export interface HostCapabilities {
+  git: boolean;
+  /** `gh` is installed and runnable. */
+  gh: boolean;
+  fsWatch: boolean;
+  search: boolean;
+  lsp: boolean;
+  pty: boolean;
+  acp: boolean;
+}
+
+export interface HostInfo {
+  id: string;
+  /** Operating system, as `process.platform` reports it. */
+  os: NodeJS.Platform;
+  /** CPU architecture, as `process.arch` reports it. */
+  arch: string;
+  hostname: string;
+  /** Free-form tags used for placement (`gpu`, `epic-approved`). */
+  labels: string[];
+  /** Directories workspaces may live under. Empty means unrestricted. */
+  roots: string[];
+  /** Tool versions found on the host (`node`, `git`). */
+  versions: Record<string, string>;
+  capabilities: HostCapabilities;
+}
+
+// ---------------------------------------------------------------------------
+// Streams and exec
+// ---------------------------------------------------------------------------
+
+/**
+ * A stream of values. Breaking out of a `for await` loop stops it, and
+ * where a method takes a `signal`, aborting it ends the stream too.
+ */
+export type Stream<T> = AsyncIterable<T>;
+
+export interface ExecOptions {
+  cwd?: string;
+  /** Merged over the host's environment. */
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
+/** Output of a command that exited with code 0. A non-zero exit rejects. */
+export interface ExecResult {
+  stdout: string;
+  /** Empty for `git.exec` and `git.gh`, which report stderr only on failure. */
+  stderr: string;
+}
+
+// ---------------------------------------------------------------------------
+// git and worktrees
+// ---------------------------------------------------------------------------
+
+export interface HostGit {
+  /** Runs `git ARGS` in `cwd`. Rejects with git's stderr on a non-zero exit. */
+  exec(args: string[], cwd: string): Promise<ExecResult>;
+  /** Runs `gh ARGS` in `cwd`. Rejects with gh's stderr on a non-zero exit. */
+  gh(args: string[], cwd: string): Promise<ExecResult>;
+}
+
+export interface WorktreeSpec {
+  /** Path of the project's main checkout. */
+  repoPath: string;
+  /** Absolute path of the new worktree. */
+  path: string;
+  /** New branch to create in the worktree. */
+  branch: string;
+  /** Commit-ish the branch starts from. Defaults to the checkout's HEAD. */
+  base?: string;
+}
+
+export interface Worktree {
+  path: string;
+  branch: string;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  /** Branch name, or `detached-<short sha>` for a detached HEAD. */
+  branch: string;
+  head: string;
+  isBare: boolean;
+}
+
+export interface HostWorktree {
+  create(spec: WorktreeSpec): Promise<Worktree>;
+  /** Removes the worktree directory and its git metadata, even when it has local changes. */
+  remove(spec: { repoPath: string; path: string }): Promise<void>;
+  list(repoPath: string): Promise<WorktreeInfo[]>;
+}
+
+// ---------------------------------------------------------------------------
+// fs
+// ---------------------------------------------------------------------------
+
+export type FsEntryKind = "file" | "directory" | "symlink" | "other";
+
+export interface FsStat {
+  kind: FsEntryKind;
+  size: number;
+  /** Epoch milliseconds. */
+  mtimeMs: number;
+}
+
+export interface FsEntry {
+  name: string;
+  kind: FsEntryKind;
+}
+
+export interface FileChange {
+  /** Path relative to the watched root, with `/` separators. */
+  path: string;
+  /** `rename` covers creation, deletion and moves, as in `fs.watch`. */
+  kind: "change" | "rename";
+}
+
+export interface WatchOptions {
+  /** Defaults to true. */
+  recursive?: boolean;
+  /** Ends the stream when aborted. */
+  signal?: AbortSignal;
+}
+
+export interface HostFs {
+  /** Rejects when the path does not exist. */
+  stat(path: string): Promise<FsStat>;
+  readFile(path: string): Promise<Uint8Array>;
+  /** Creates the file or replaces its content. The parent directory must exist. */
+  writeFile(path: string, data: string | Uint8Array): Promise<void>;
+  list(path: string): Promise<FsEntry[]>;
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Removes a file or directory tree. Rejects when the path is missing unless `force` is set. */
+  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  /** Copies a file or, with `recursive`, a directory tree. */
+  copy(from: string, to: string, options?: { recursive?: boolean }): Promise<void>;
+  /** Disk space the path occupies, in bytes. */
+  du(path: string): Promise<number>;
+  /** Yields changes under `root` until aborted or the consumer stops iterating. */
+  watch(root: string, options?: WatchOptions): Stream<FileChange>;
+}
+
+// ---------------------------------------------------------------------------
+// search
+// ---------------------------------------------------------------------------
+
+export interface SearchQuery {
+  /** A literal string, or a regex when `regex` is true. */
+  query: string;
+  /** Defaults to false. */
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+}
+
+export interface SearchMatch {
+  /** Path relative to the search root. */
+  file: string;
+  /** 1-based. */
+  line: number;
+  content: string;
+}
+
+export interface HostSearch {
+  stream(query: SearchQuery, root: string): Stream<SearchMatch>;
+  /** Files under `root` that git or ripgrep would not ignore, relative to `root`. */
+  listFiles(root: string): Promise<string[]>;
+}
+
+// ---------------------------------------------------------------------------
+// lsp and acp
+// ---------------------------------------------------------------------------
+
+/** A byte pipe to a process on the host. */
+export interface Duplex {
+  write(chunk: Uint8Array | string): void;
+  readonly output: Stream<Uint8Array>;
+  /** Closes the pipe. The process may outlive it when other clients share it. */
+  close(): void;
+}
+
+export interface HostLsp {
+  /** Opens a stdio connection to the language server for `lang` in the workspace. */
+  connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
+}
+
+/** What it takes to start an agent's ACP adapter. */
+export interface AcpLaunch {
+  command: string;
+  args: string[];
+  /** Merged over the host's environment at spawn. */
+  env: Record<string, string>;
+}
+
+/** The parts of a settings agent definition the launcher reads. */
+export interface AcpAgentDefinition {
+  type: string;
+  label?: string;
+  /** User-configured binary path. */
+  command?: string;
+}
+
+export interface AgentExit {
+  code: number | null;
+  signal: string | null;
+}
+
+/** A running agent process, seen from the hub. */
+export interface AgentStdio {
+  pid: number | undefined;
+  stdin: { write(chunk: Uint8Array | string): void; end(): void };
+  stdout: Stream<Uint8Array>;
+  stderr: Stream<Uint8Array>;
+  /** Resolves once, when the process ends. */
+  exit: Promise<AgentExit>;
+  kill(signal?: NodeJS.Signals): void;
+}
+
+export interface HostAcp {
+  /** The launch for an agent, or a message saying why it can't start (for example, not installed). */
+  resolveLaunch(def: AcpAgentDefinition): Promise<AcpLaunch | string>;
+  /** Starts the adapter in `cwd`. Rejects when the process cannot start. */
+  spawn(launch: AcpLaunch, cwd: string): Promise<AgentStdio>;
+}
+
+// ---------------------------------------------------------------------------
+// scripts
+// ---------------------------------------------------------------------------
+
+export type ScriptLabel = "setup" | "teardown";
+
+/** A `.band/config.json` script prepared to run in a workspace terminal. */
+export interface ScriptPlan {
+  /** Shell line for `SpawnOptions.command` of a terminal in the workspace. */
+  command: string;
+  /** Resolves with the script's exit code. Never rejects. */
+  exited: Promise<number>;
+  /** Stops watching and removes the script's temp dir. Idempotent. */
+  dispose(): void;
+}
+
+export interface HostScripts {
+  /**
+   * Reads the workspace's `.band/config.json` (worktree first, then the
+   * project checkout) and prepares its `setup` or `teardown` script. Resolves
+   * `null` when the config has no such script.
+   */
+  prepare(workspace: {
+    projectPath: string;
+    worktreePath: string;
+    label: ScriptLabel;
+  }): Promise<ScriptPlan | null>;
+  /** Copies the project's `copyFiles` and `.worktreeinclude` files into the worktree. Returns the relative paths copied. */
+  copyFiles(projectPath: string, worktreePath: string): Promise<string[]>;
+}
+
+// ---------------------------------------------------------------------------
+// agent environment
+// ---------------------------------------------------------------------------
+
+export interface AgentDescriptor {
+  agentType: string;
+  /** The definition's configured binary, if any. */
+  command?: string;
+}
+
+export interface ClaudeDefaults {
+  model: string | undefined;
+  effort: string | undefined;
+}
+
+export interface HostAgentEnv {
+  /** The model and effort Claude Code would use in `cwd` according to its config files and environment. */
+  claudeDefaults(cwd: string): Promise<ClaudeDefaults>;
+  /** The newest Claude Code session id recorded for `cwd`, or null. */
+  latestClaudeSession(cwd: string): Promise<string | null>;
+  /** The usage reader for an agent, or `undefined` when it keeps no on-disk usage data. */
+  usageReader(agent: AgentDescriptor): Promise<UsageReader | undefined>;
+  /** Installs Band's skills for the coding agents found on the host. */
+  installSkills(skills: string[]): Promise<void>;
+  /** Installs agent hooks that report to `hubRelayUrl`. */
+  installHooks(hubRelayUrl: string): Promise<void>;
+}
