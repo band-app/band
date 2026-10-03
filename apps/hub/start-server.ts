@@ -248,11 +248,8 @@ const { handleAuth, expectedToken } = createAuthMiddleware(isDev ? undefined : p
 // settings plus `BAND_CORS_ORIGINS`. Read on every request so an edit applies
 // without a restart.
 function allowedOrigins(): string[] {
-  const fromSettings = (loadSettings() as { corsAllowedOrigins?: unknown }).corsAllowedOrigins;
   return [
-    ...(Array.isArray(fromSettings)
-      ? fromSettings.filter((o): o is string => typeof o === "string")
-      : []),
+    ...parseOriginList((loadSettings().corsAllowedOrigins ?? []).join(",")),
     ...parseOriginList(process.env.BAND_CORS_ORIGINS),
   ];
 }

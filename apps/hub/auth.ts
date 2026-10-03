@@ -91,6 +91,10 @@ export function createAuthMiddleware(token: string | undefined) {
     if (!expectedToken) return false;
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
+    // A page with an opaque origin (`file://`, a sandboxed frame on any site)
+    // can send the ambient cookie, so the cookie doesn't count for it. It
+    // must send the token.
+    const cookieAllowed = req.headers.origin !== "null";
 
     // Health check endpoint (auth-protected)
     if (url.pathname === "/api/health" && req.method === "GET") {
@@ -99,7 +103,7 @@ export function createAuthMiddleware(token: string | undefined) {
       if (
         tokensEqual(queryToken, expectedToken) ||
         tokensEqual(bearerToken(req), expectedToken) ||
-        tokensEqual(cookies.band_token, expectedToken)
+        (cookieAllowed && tokensEqual(cookies.band_token, expectedToken))
       ) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -132,7 +136,7 @@ export function createAuthMiddleware(token: string | undefined) {
 
     // Check cookie
     const cookies = parseCookies(req);
-    if (tokensEqual(cookies.band_token, expectedToken)) {
+    if (cookieAllowed && tokensEqual(cookies.band_token, expectedToken)) {
       return false; // Authenticated — continue to normal handler
     }
 

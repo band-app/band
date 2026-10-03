@@ -21,6 +21,7 @@ import {
   cleanupTmpHome,
   createTmpHome,
   getRandomPort,
+  resetClientState,
   type ServerHandle,
   seedSettings,
   seedState,
@@ -68,6 +69,9 @@ test.beforeAll(async () => {
     },
   });
 });
+
+// Both tests share one hub, so start each from no saved UI state.
+test.beforeEach(() => resetClientState(tmpHome));
 
 test.afterAll(async () => {
   await ui?.close();

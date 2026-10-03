@@ -55,9 +55,20 @@ describe("HTTP auth", () => {
 
   it("accepts the token in the query for asset GETs and rejects a wrong one", async () => {
     const ok = await fetch(`${server.url}/api/uploads/missing.png?token=${TOKEN}`);
-    expect(ok.status).not.toBe(401);
+    expect(ok.status).toBe(404);
     const bad = await fetch(`${server.url}/api/uploads/missing.png?token=wrong`);
     expect(bad.status).toBe(401);
+  });
+
+  it("ignores the cookie from an opaque origin but accepts its Bearer token", async () => {
+    const withCookie = await fetch(`${server.url}/trpc/projects.list`, {
+      headers: { Cookie: `band_token=${TOKEN}`, Origin: "null" },
+    });
+    expect(withCookie.status).toBe(401);
+    const withBearer = await fetch(`${server.url}/trpc/projects.list`, {
+      headers: { ...bearer, Origin: "null" },
+    });
+    expect(withBearer.status).toBe(200);
   });
 
   it("returns 401 for an unauthenticated POST", async () => {

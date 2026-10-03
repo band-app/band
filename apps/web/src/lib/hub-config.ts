@@ -124,7 +124,9 @@ export function crossOriginHub(): { origin: string; token?: string } | null {
   if (!config) return null;
   const origin = normalizeUrl(config.url);
   if (!origin || origin === window.location.origin) return null;
-  return { origin, token: config.token };
+  // A token outside the subprotocol token set would make `new WebSocket` throw.
+  const token = config.token && /^[\w.~-]+$/.test(config.token) ? config.token : undefined;
+  return { origin, token };
 }
 
 /** Absolute URL for a hub path (`/trpc`, `/api/...`). Unchanged when same-origin. */
