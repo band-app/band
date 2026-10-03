@@ -18,6 +18,7 @@ import { closeDb } from "../src/server/infra/db/connection";
 import type { SubscriptionEvent } from "../src/server/infra/subscriptions/event";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
+import { loadState, saveState } from "../src/server/services/state";
 import { subscriptionService } from "../src/server/services/subscription-service";
 import { submitOrQueueTask } from "../src/server/services/task-service";
 import { workspaceService } from "../src/server/services/workspace-service";
@@ -273,5 +274,67 @@ describe("subscriptions", () => {
     expect(subscriptionService.list({ workspaceId: FEATURE })).toHaveLength(1);
     await workspaceService.remove({ project: PROJECT, name: "feat" });
     expect(subscriptionService.list({ workspaceId: FEATURE })).toHaveLength(0);
+  });
+
+  describe("when the delivery throws", () => {
+    /**
+     * Takes the main worktree out of the state file, which makes
+     * `submitOrQueueTask` throw "workspace not found", and returns a
+     * function that puts it back.
+     */
+    function hideMainWorkspace(): () => void {
+      const before = loadState();
+      const state = loadState();
+      const project = state.projects.find((p) => p.name === PROJECT);
+      if (!project) throw new Error("seeded project is missing");
+      project.worktrees = project.worktrees.filter((wt) => wt.name !== "main");
+      saveState(state);
+      return () => saveState(before);
+    }
+
+    it("keeps the events and delivers them on a retry", async () => {
+      const key = uniqueKey();
+      const { sub } = subscribeChat(key);
+      const restore = hideMainWorkspace();
+      subscriptionService.ingest(event(key, { summary: "sent while the workspace was gone" }));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(promptsAbout(key)).toHaveLength(0);
+      expect(subscriptionService.listEvents(sub.id)[0]?.deliveredAt).toBeNull();
+
+      restore();
+      const [message] = await waitFor(
+        () => {
+          const found = promptsAbout(key);
+          return found.length > 0 ? found : undefined;
+        },
+        { timeoutMs: 10_000 },
+      );
+      expect(message).toContain("sent while the workspace was gone");
+      expect(promptsAbout(key)).toHaveLength(1);
+      expect(subscriptionService.listEvents(sub.id)[0]?.deliveredAt).not.toBeNull();
+      expect(subscriptionService.list({ chatId: sub.chatId })[0]?.wakeups).toBe(1);
+    });
+
+    it("forgets the events after the last attempt, so the source can send them again", async () => {
+      const key = uniqueKey();
+      const { sub } = subscribeChat(key);
+      const restore = hideMainWorkspace();
+      const evt = event(key, { summary: "sent again by the source" });
+      subscriptionService.ingest(evt);
+      await waitFor(
+        () => (subscriptionService.listEvents(sub.id).length === 0 ? true : undefined),
+        {
+          timeoutMs: 15_000,
+        },
+      );
+      expect(promptsAbout(key)).toHaveLength(0);
+
+      restore();
+      subscriptionService.ingest(evt);
+      await waitFor(() => (promptsAbout(key).length === 1 ? true : undefined), {
+        timeoutMs: 10_000,
+      });
+      expect(promptsAbout(key)[0]).toContain("sent again by the source");
+    });
   });
 });

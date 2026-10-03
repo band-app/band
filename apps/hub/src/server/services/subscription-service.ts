@@ -19,6 +19,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** No subscription outlives this, whatever `expiresAt` asks for. */
 export const MAX_SUBSCRIPTION_DAYS = 180;
 const SWEEP_INTERVAL_MS = 60_000;
+/** Tries to start a delivery this many times before giving the events up. */
+const MAX_DELIVERY_ATTEMPTS = 3;
 /** A burst this large is delivered at once instead of waiting out the window. */
 const MAX_PENDING_EVENTS = 50;
 
@@ -49,6 +51,8 @@ export class SubscriptionChatNotFoundError extends Error {
 interface Pending {
   events: SubscriptionEvent[];
   timer: NodeJS.Timeout;
+  /** Deliveries of this batch that failed so far. */
+  attempts: number;
 }
 
 interface RuntimeState {
@@ -204,7 +208,7 @@ export class SubscriptionService {
     }
     const timer = setTimeout(() => this.flush(sub.id), sub.coalesceSeconds * 1000);
     timer.unref();
-    state.pending.set(sub.id, { events: [event], timer });
+    state.pending.set(sub.id, { events: [event], timer, attempts: 0 });
   }
 
   private flush(id: string): void {
@@ -223,7 +227,7 @@ export class SubscriptionService {
         prompt: buildSubscriptionMessage(sub.filterKey, pending.events),
       });
     } catch (err) {
-      log.warn({ err, subscriptionId: id, chatId: sub.chatId }, "could not deliver subscription");
+      this.retryOrDrop(sub, pending, err);
       return;
     }
     this.queries.markDelivered(
@@ -242,6 +246,32 @@ export class SubscriptionService {
     if (wakeups >= sub.maxWakeups) {
       this.removeAll([id], "max-wakeups");
     }
+  }
+
+  /**
+   * A failed delivery (for example the workspace can't be resolved) keeps
+   * its events and tries again after a coalesce window, up to
+   * MAX_DELIVERY_ATTEMPTS. After that the events' rows are deleted, so the
+   * source can send them again, instead of staying marked as seen forever.
+   */
+  private retryOrDrop(sub: Subscription, pending: Pending, err: unknown): void {
+    const attempts = pending.attempts + 1;
+    const rowIds = pending.events.map((e) => `${sub.id}:${e.id}`);
+    if (attempts >= MAX_DELIVERY_ATTEMPTS) {
+      log.warn(
+        { err, subscriptionId: sub.id, chatId: sub.chatId, events: rowIds.length },
+        "giving up delivering subscription events",
+      );
+      this.queries.removeEvents(rowIds);
+      return;
+    }
+    log.warn(
+      { err, subscriptionId: sub.id, chatId: sub.chatId, attempts },
+      "could not deliver subscription, will retry",
+    );
+    const timer = setTimeout(() => this.flush(sub.id), Math.max(sub.coalesceSeconds, 1) * 1000);
+    timer.unref();
+    state.pending.set(sub.id, { events: pending.events, timer, attempts });
   }
 
   private sweepExpired(): void {

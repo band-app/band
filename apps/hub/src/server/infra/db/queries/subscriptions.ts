@@ -102,6 +102,12 @@ export class SubscriptionQueries {
       .run();
   }
 
+  /** Forgets events, so a source that sends the same event id again is accepted. */
+  removeEvents(eventIds: string[]): void {
+    if (eventIds.length === 0) return;
+    getDb().delete(subscriptionEvents).where(inArray(subscriptionEvents.eventId, eventIds)).run();
+  }
+
   events(subscriptionId: string): SubscriptionEventRecord[] {
     return getDb()
       .select()
