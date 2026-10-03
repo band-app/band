@@ -1,5 +1,5 @@
-import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
+import type { FsStat, HostFs } from "@band-app/host-api";
 import { formatFileLocation } from "@band-app/shared/file-location";
 import { WorkspaceNotFoundError } from "../errors";
 import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
@@ -67,7 +67,7 @@ export class EditorService {
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
     }
-    return formatFile(workspace.worktree.path, filePath, content);
+    return formatFile(workspace.worktree.path, filePath, content, { fs: workspace.host.fs });
   }
 
   // -------------------------------------------------------------------------
@@ -123,7 +123,11 @@ export class EditorService {
       throw new EditorOpenError("NOT_FOUND", `Workspace '${targetWorkspaceId}' not found`);
     }
 
-    const resolved = await this.resolveTarget(workspace.worktree.path, input.filePath);
+    const resolved = await this.resolveTarget(
+      workspace.host.fs,
+      workspace.worktree.path,
+      input.filePath,
+    );
 
     // `stat` follows to a directory too. Without the `isFile`
     // guard, `band open /path/to/some-dir` would pass through to the
@@ -190,7 +194,11 @@ export class EditorService {
     if (!workspace) {
       throw new WorkspaceNotFoundError(input.workspaceId);
     }
-    const resolved = await this.resolveTarget(workspace.worktree.path, input.filePath);
+    const resolved = await this.resolveTarget(
+      workspace.host.fs,
+      workspace.worktree.path,
+      input.filePath,
+    );
     return {
       exists: resolved.exists,
       isFile: resolved.isFile,
@@ -206,6 +214,7 @@ export class EditorService {
    * segment-aware containment check against the canonicalized worktree root.
    */
   private async resolveTarget(
+    fs: HostFs,
     root: string,
     filePath: string,
   ): Promise<{
@@ -227,7 +236,7 @@ export class EditorService {
     // so the tRPC query handler never parks the event loop on sync I/O.
     let canonicalRoot = root;
     try {
-      canonicalRoot = await realpath(root);
+      canonicalRoot = await fs.realpath(root);
     } catch {
       // worktree may have been deleted out from under us — leave as-is
     }
@@ -237,11 +246,11 @@ export class EditorService {
     // canonicalize that, then re-append the trailing segments. That
     // keeps the in-workspace check accurate for paths the user wants to
     // *create* as well.
-    const canonicalTarget = await canonicalizeMaybeMissing(absoluteTarget);
+    const canonicalTarget = await canonicalizeMaybeMissing(fs, absoluteTarget);
 
-    let targetStat: import("node:fs").Stats | null = null;
+    let targetStat: FsStat | null = null;
     try {
-      targetStat = await stat(canonicalTarget);
+      targetStat = await fs.stat(canonicalTarget, { followSymlinks: true });
     } catch {
       // ENOENT or another IO error — reported via `exists: false`.
     }
@@ -264,7 +273,7 @@ export class EditorService {
     return {
       canonicalTarget,
       exists: !!targetStat,
-      isFile: !!targetStat?.isFile(),
+      isFile: targetStat?.kind === "file",
       inside,
       relativePath,
     };
@@ -293,10 +302,10 @@ export class EditorOpenError extends Error {
  * that does resolve, canonicalize that, then re-append the trailing
  * segments. Async (fs/promises) so callers don't block the event loop.
  */
-async function canonicalizeMaybeMissing(p: string): Promise<string> {
+async function canonicalizeMaybeMissing(fs: HostFs, p: string): Promise<string> {
   try {
     // Succeeds iff `p` exists and every component resolves.
-    return await realpath(p);
+    return await fs.realpath(p);
   } catch {
     // Missing / unresolvable — fall through to the walk-up below.
   }
@@ -304,7 +313,7 @@ async function canonicalizeMaybeMissing(p: string): Promise<string> {
   for (let i = parts.length - 1; i > 0; i--) {
     const prefix = parts.slice(0, i).join(sep) || sep;
     try {
-      const canonicalPrefix = await realpath(prefix);
+      const canonicalPrefix = await fs.realpath(prefix);
       // `path.join` collapses the duplicate separator that arises when
       // `canonicalPrefix === "/"`.
       return join(canonicalPrefix, ...parts.slice(i));

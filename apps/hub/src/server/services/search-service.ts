@@ -4,7 +4,8 @@
  * of `api/workspace/router.ts` (issue #535, follow-up 1) so the router
  * contains validation + delegation only.
  *
- * The shell-out lives in `infra/search/ripgrep-client.ts`; this service
+ * The shell-out lives in `infra/search/ripgrep-client.ts`, reached through
+ * the workspace's host (`host.search`); this service
  * applies the business decisions on top of the raw match stream (limit
  * cap, cancellation on cap-hit, workspace resolution).
  *
@@ -18,7 +19,6 @@
  */
 
 import { WorkspaceNotFoundError } from "../errors";
-import { listFiles, streamMatches } from "../infra/search/ripgrep-client";
 import { scoreFiles } from "./_utils/fuzzy-score";
 import {
   workspaceService as defaultWorkspaceService,
@@ -70,7 +70,7 @@ export class SearchService {
     // the previous 50-entry cap could push a wanted match off the list
     // entirely when the user typed a short query.
     const limit = options.limit ?? 200;
-    const files = await listFiles(workspace.worktree.path);
+    const files = await workspace.host.search.listFiles(workspace.worktree.path);
 
     if (!options.query) {
       // Empty query → just return the raw listing capped to `limit`.
@@ -87,7 +87,7 @@ export class SearchService {
 
   /**
    * Find-in-files. The shell-out itself lives in
-   * `infra/search/ripgrep-client.ts`; this method drives it with the
+   * `infra/search/ripgrep-client.ts` and runs on the workspace's host; this method drives it with the
    * service's `limit` policy (stop iterating + let the child be torn
    * down via the async-iterator's `return()` once the cap is hit).
    *
@@ -107,13 +107,15 @@ export class SearchService {
 
     const limit = options.limit ?? 100;
     const results: SearchContentMatch[] = [];
-    const iter = streamMatches({
-      query: options.query,
-      cwd: workspace.worktree.path,
-      caseSensitive: options.caseSensitive,
-      wholeWord: options.wholeWord,
-      regex: options.regex,
-    });
+    const iter = workspace.host.search.stream(
+      {
+        query: options.query,
+        caseSensitive: options.caseSensitive,
+        wholeWord: options.wholeWord,
+        regex: options.regex,
+      },
+      workspace.worktree.path,
+    );
 
     for await (const match of iter) {
       results.push(match);

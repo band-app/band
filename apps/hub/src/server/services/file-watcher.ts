@@ -1,11 +1,11 @@
-import { type FSWatcher, watch as fsWatch } from "node:fs";
+import type { Host } from "@band-app/host-api";
 import { workspaceService } from "./workspace-service";
 
 // ---------------------------------------------------------------------------
 // Server-side file watcher
 // ---------------------------------------------------------------------------
 //
-// One recursive `fs.watch` per workspace, started on demand when a client
+// One recursive watch (`host.fs.watch`) per workspace, started on demand when a client
 // subscribes for that workspace's file changes and stopped when the last
 // subscriber disconnects. The watcher emits a coalesced `(workspaceId,
 // parentDir)` event so the client FileBrowser can invalidate its
@@ -23,8 +23,8 @@ import { workspaceService } from "./workspace-service";
 //     filtered out so the watcher doesn't drown the client in noise.
 //   * Events are coalesced per (workspaceId, parentDir) with a short
 //     debounce — a rapid burst (e.g. `git checkout`) maps to one refresh.
-//   * `fs.watch` may emit `null` filenames or throw if the worktree was
-//     deleted; we swallow both.
+//   * A watch may fail to start or end if the worktree was deleted; we
+//     swallow the first and tell listeners about the second.
 // ---------------------------------------------------------------------------
 
 // Directory segments whose contents we never report to the client. Keeping
@@ -79,7 +79,8 @@ export type FileChangeListener = (path: string | null) => void;
 export type Unsubscribe = () => void;
 
 interface WatchEntry {
-  watcher: FSWatcher;
+  /** Aborting it ends the host's change stream and so releases the OS watch handle. */
+  controller: AbortController;
   listeners: Set<FileChangeListener>;
   pendingTimers: Map<string, ReturnType<typeof setTimeout>>;
 }
@@ -116,17 +117,48 @@ function scheduleEmit(workspaceId: string, dirPath: string): void {
   entry.pendingTimers.set(dirPath, timer);
 }
 
-function stopWatcher(workspaceId: string): void {
-  const entry = watchers.get(workspaceId);
-  if (!entry) return;
-  try {
-    entry.watcher.close();
-  } catch {
-    // Already closed — nothing to do.
-  }
+function stopWatcher(workspaceId: string, entry: WatchEntry): void {
+  entry.controller.abort();
   for (const timer of entry.pendingTimers.values()) clearTimeout(timer);
   entry.pendingTimers.clear();
-  watchers.delete(workspaceId);
+  // A newer entry may have replaced this one.
+  if (watchers.get(workspaceId) === entry) watchers.delete(workspaceId);
+}
+
+/** Feeds the host's change stream into `scheduleEmit` until it ends or the entry stops. */
+async function pumpChanges(
+  workspaceId: string,
+  entry: WatchEntry,
+  host: Host,
+  root: string,
+): Promise<void> {
+  try {
+    // `recursive` needs Node ≥ 22 on Linux (macOS and Windows always had it).
+    // Band's web server already requires Node ≥ 22.5
+    // (`apps/hub/package.json#engines`), so this is safe on every platform.
+    for await (const change of host.fs.watch(root, {
+      recursive: true,
+      signal: entry.controller.signal,
+    })) {
+      const relative = change.path;
+      if (!relative || isIgnoredPath(relative)) continue;
+      scheduleEmit(workspaceId, parentDirOf(relative));
+    }
+  } catch {
+    // The worktree may have been deleted between resolve and the watch
+    // start. Treat it as a silent no-op, as a failed start always was.
+    // A subscriber that joined before the failure surfaced must still end.
+    for (const listener of entry.listeners) listener(null);
+    stopWatcher(workspaceId, entry);
+    return;
+  }
+  if (entry.controller.signal.aborted) return;
+  // The stream ended on its own, as a watch does when the watched directory
+  // is removed. Wake every current subscriber with a `null` sentinel so
+  // their tRPC generators can finish cleanly instead of parking forever
+  // waiting for an event from a dead watcher.
+  for (const listener of entry.listeners) listener(null);
+  stopWatcher(workspaceId, entry);
 }
 
 /**
@@ -149,50 +181,16 @@ export function subscribeToFileChanges(
     if (!ws) return () => {};
     const root = ws.worktree.path;
 
-    let watcher: FSWatcher;
-    try {
-      // NOTE: `recursive: true` is only supported on macOS and Windows
-      // for Node ≤ 21; Linux gained it in Node 22.0. Band's web server
-      // already requires Node ≥ 22.5 (`apps/hub/package.json#engines`),
-      // so this is safe across all supported platforms.
-      watcher = fsWatch(root, { recursive: true, persistent: false }, (_event, filename) => {
-        // `filename` may be null on some platforms or under heavy churn —
-        // the change is real but we can't pinpoint where, so skip. Without
-        // `encoding: "buffer"` Node returns a string, but we accept both
-        // for safety.
-        if (filename == null) return;
-        const relative = typeof filename === "string" ? filename : Buffer.from(filename).toString();
-        if (!relative || isIgnoredPath(relative)) return;
-        scheduleEmit(workspaceId, parentDirOf(relative));
-      });
-    } catch {
-      // The worktree may have been deleted between resolveWorkspace and
-      // fs.watch. Treat this subscription as a silent no-op.
-      return () => {};
-    }
-
-    entry = { watcher, listeners: new Set(), pendingTimers: new Map() };
+    entry = { controller: new AbortController(), listeners: new Set(), pendingTimers: new Map() };
     watchers.set(workspaceId, entry);
-    // Recursive watches can emit unrecoverable errors (e.g. when the
-    // watched directory is removed). Wake every current subscriber with
-    // a `null` sentinel so their tRPC generators can finish cleanly
-    // instead of parking forever waiting for an event from a dead
-    // watcher. Closing over `entry` directly (rather than re-resolving
-    // through the map) keeps the notification flow obvious and survives
-    // any future change to how `watchers` is keyed.
-    const localEntry = entry;
-    watcher.on("error", () => {
-      for (const listener of localEntry.listeners) listener(null);
-      stopWatcher(workspaceId);
-    });
+    void pumpChanges(workspaceId, entry, ws.host, root);
   }
 
   entry.listeners.add(listener);
 
+  const subscribed = entry;
   return () => {
-    const current = watchers.get(workspaceId);
-    if (!current) return;
-    current.listeners.delete(listener);
-    if (current.listeners.size === 0) stopWatcher(workspaceId);
+    subscribed.listeners.delete(listener);
+    if (subscribed.listeners.size === 0) stopWatcher(workspaceId, subscribed);
   };
 }
