@@ -40,6 +40,7 @@ import {
 } from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
 import {
   startUsageScanner,
@@ -408,6 +409,49 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
 // and renders nothing per request.
 // ---------------------------------------------------------------------------
 
+const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
+
+async function handleSubscriptionWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  subscriptionId: string,
+): Promise<void> {
+  const send = (status: number, body: Record<string, unknown>) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  // Check the token before buffering a body from an unauthenticated sender.
+  const verdict = subscriptionService.authorizeWebhook(
+    subscriptionId,
+    tokenFromHeaders(req.headers),
+  );
+  if (verdict === "not-found") return send(404, { error: "Unknown subscription" });
+  if (verdict === "unauthorized") return send(401, { error: "Invalid token" });
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).byteLength;
+    if (size > MAX_WEBHOOK_BODY_BYTES) {
+      send(413, { error: "Request body too large" });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    subscriptionService.deliverWebhook(
+      subscriptionId,
+      req.headers,
+      Buffer.concat(chunks).toString("utf8"),
+    );
+  } catch (err) {
+    // Log the error only: the request headers carry the token.
+    console.error("webhook delivery failed", subscriptionId, err);
+    return send(500, { error: "Delivery failed" });
+  }
+  send(202, { ok: true });
+}
+
 async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
   // `Host` is optional in HTTP/1.0 — without the fallback `new URL(...,
   // "http://undefined")` would yield a bogus base. Default to localhost
@@ -652,6 +696,23 @@ async function main() {
     // without the session cookie when the app is added to the home screen.
     if (handleWebAppManifest(req, res, isDev ? join(uiRoot, "public") : clientDir)) return;
 
+    // Generic webhook source: POST /api/hooks/<subscriptionId>. Before the
+    // server's auth check, because senders outside Band can't hold its token;
+    // the subscription's own secret authenticates the request.
+    const hookMatch = req.url?.match(/^\/api\/hooks\/([^/?]+)(?:\?|$)/);
+    if (hookMatch && req.method === "POST") {
+      let subscriptionId: string;
+      try {
+        subscriptionId = decodeURIComponent(hookMatch[1]);
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Bad subscription id" }));
+        return;
+      }
+      await handleSubscriptionWebhook(req, res, subscriptionId);
+      return;
+    }
+
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
@@ -881,7 +942,7 @@ async function main() {
         endpoint: "/trpc",
         req: request,
         router: appRouter,
-        createContext,
+        createContext: ({ req }) => createContext({ req }),
       });
       pipeWebResponseToNodeRes(response, res);
       return;

@@ -614,7 +614,12 @@ async function ensureProcess(
   rt.starting = (async () => {
     const launch = await resolveAcpLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
-    const proc = await AcpAgentProcess.start(launch, cwd, def.label, handlersFor(rt, generation));
+    // Lets the agent say which chat it runs in, for `subscriptions.create`.
+    const withChat = {
+      ...launch,
+      env: { ...launch.env, BAND_CHAT_ID: rt.chatId, BAND_WORKSPACE_ID: rt.workspaceId },
+    };
+    const proc = await AcpAgentProcess.start(withChat, cwd, def.label, handlersFor(rt, generation));
     remember(def, { agentName: proc.agentName, canList: proc.canList });
     return proc;
   })();

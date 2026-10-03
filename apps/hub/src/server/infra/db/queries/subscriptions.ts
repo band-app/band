@@ -21,6 +21,17 @@ export interface SubscriptionRecord {
   expiresAt: number;
   createdBy: SubscriptionCreator;
   createdAt: number;
+  /** Source settings: a webhook's `secretHash`, a timer's `at` or `cron`. */
+  config: SubscriptionConfig;
+}
+
+export interface SubscriptionConfig {
+  /** Hex SHA-256 of a webhook's secret token. */
+  secretHash?: string;
+  /** One-off timer: epoch milliseconds. */
+  at?: number;
+  /** Recurring timer: cron expression, seconds field optional. */
+  cron?: string;
 }
 
 export interface SubscriptionEventRecord {
@@ -39,14 +50,27 @@ function toRecord(row: Row): SubscriptionRecord {
   } catch {
     kinds = [];
   }
-  return { ...row, kinds };
+  let config: SubscriptionConfig = {};
+  try {
+    const parsed: unknown = JSON.parse(row.config);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      config = parsed as SubscriptionConfig;
+    }
+  } catch {
+    config = {};
+  }
+  return { ...row, kinds, config };
 }
 
 export class SubscriptionQueries {
   insert(record: SubscriptionRecord): void {
     getDb()
       .insert(subscriptions)
-      .values({ ...record, kinds: JSON.stringify(record.kinds) })
+      .values({
+        ...record,
+        kinds: JSON.stringify(record.kinds),
+        config: JSON.stringify(record.config),
+      })
       .run();
   }
 

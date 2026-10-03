@@ -118,7 +118,7 @@ function writeEnvEchoVendorCli(tmpHome: string, name: string): string {
   return writeVendorCliScript(
     tmpHome,
     name,
-    `printf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\n`,
+    `printf 'ENV_BAND_DISPATCH:%s|\\n' "$BAND_DISPATCH"\nprintf 'ENV_BAND_SERVER_URL:%s|\\n' "$BAND_SERVER_URL"\nprintf 'ENV_BAND_WORKSPACE_ID:%s|\\n' "$BAND_WORKSPACE_ID"\n`,
   );
 }
 
@@ -609,7 +609,10 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     // The agent that ran the chat turn was spawned with the chat dispatch
     // target, and the server advertised its own bound URL so a nested CLI
     // call reaches it regardless of which port it claimed.
-    expect(prompt.env).toEqual({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
+    // It also learns which chat and workspace it runs in.
+    expect(prompt.env).toMatchObject({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
+    expect(prompt.env.BAND_CHAT_ID).toBeTruthy();
+    expect(prompt.env.BAND_WORKSPACE_ID).toBe(toWorkspaceId("dispproj", "feat/nested"));
   });
 });
 
@@ -802,7 +805,9 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
         const out = await readTerminalOutput(server.url, data.terminalId!, TOKEN);
         // Require BOTH echoed lines so a split PTY flush can't resolve the
         // poll before the second line is captured.
-        return out?.includes("ENV_BAND_DISPATCH:terminal|") && out.includes("ENV_BAND_SERVER_URL:")
+        return out?.includes("ENV_BAND_DISPATCH:terminal|") &&
+          out.includes("ENV_BAND_SERVER_URL:") &&
+          out.includes("ENV_BAND_WORKSPACE_ID:")
           ? out
           : undefined;
       },
@@ -814,6 +819,11 @@ describe("terminal PTY env — BAND_DISPATCH=terminal", () => {
     // Symmetric with the chat-path assertion: the PTY child also reaches
     // THIS server, so a nested `band` CLI call resolves to the right port.
     expect(output).toContain(`ENV_BAND_SERVER_URL:${server.url}|`);
+    // The terminal learns its workspace, so an agent there can omit
+    // `workspaceId` when it creates a subscription.
+    expect(output).toContain(
+      `ENV_BAND_WORKSPACE_ID:${toWorkspaceId("termenvproj", "feat/termenv")}|`,
+    );
   });
 });
 
