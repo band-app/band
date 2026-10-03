@@ -27,8 +27,8 @@ let terminalBackend: TerminalBackend | null = null;
 /**
  * Called by `TerminalService` whenever it picks the local backend, so
  * `local.pty` is the backend the terminal service uses. Returns the backend it
- * replaced. The registry can't import the
- * service, which depends on the workspace service that depends on the registry.
+ * replaced. The registry can't import the service, which depends on the
+ * workspace service that depends on the registry.
  */
 export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBackend | null {
   const previous = terminalBackend;

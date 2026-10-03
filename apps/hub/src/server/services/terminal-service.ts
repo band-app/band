@@ -363,7 +363,7 @@ export class TerminalService {
     );
     for (const workspaceId of deleted) {
       log.info({ workspaceId }, "killing terminals of a deleted workspace");
-      await this.ptyOf(this.hostOfWorkspace(workspaceId)).killWorkspace(workspaceId);
+      await this.killWorkspace(workspaceId);
     }
   }
 
