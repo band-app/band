@@ -15,6 +15,7 @@ import {
   type Text,
 } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin } from "@codemirror/view";
+import { HubWebSocket, hubWsUrl } from "../../lib/hub-config";
 
 // ---------------------------------------------------------------------------
 // LSP language ID mapping (CodeMirror language name -> LSP languageId)
@@ -321,7 +322,7 @@ interface CloseableTransport extends Transport {
 
 function createWebSocketTransport(url: string): Promise<CloseableTransport> {
   return new Promise<CloseableTransport>((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new HubWebSocket(url);
     let handlers: ((value: string) => void)[] = [];
 
     ws.onopen = () => {
@@ -830,8 +831,7 @@ export async function createDiffLspNavigation(
  * Build the WebSocket URL for connecting to the LSP proxy.
  */
 export function buildLspWsUrl(workspaceId: string, lang: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/lsp?workspaceId=${encodeURIComponent(workspaceId)}&lang=${encodeURIComponent(lang)}`;
+  return `${hubWsUrl("/lsp")}?workspaceId=${encodeURIComponent(workspaceId)}&lang=${encodeURIComponent(lang)}`;
 }
 
 /**

@@ -186,7 +186,7 @@ describe("tRPC — projects CRUD", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("projects.list returns empty list initially", async () => {
@@ -338,7 +338,7 @@ describe("tRPC — git init project validation", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("projects.checkPath returns isGitRepo true for a git repo", async () => {
@@ -393,7 +393,7 @@ describe("tRPC — settings CRUD", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("settings.get returns defaults when only tokenSecret is seeded", async () => {
@@ -474,7 +474,7 @@ describe("tRPC — settings with the retired maxCachedWorkspaces key", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("settings.get still requires auth", async () => {
@@ -546,7 +546,7 @@ describe("tRPC — workspace operations", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   // -- workspace create / remove --
@@ -1931,7 +1931,7 @@ describe("tRPC — statuses", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("statuses.get returns null for non-existent workspace", async () => {
@@ -2019,7 +2019,7 @@ describe("tRPC — system checks", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("cli.check returns a valid status string", async () => {
@@ -2065,7 +2065,7 @@ describe("tRPC — services activity", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("services.getActivity defaults to 'active'", async () => {
@@ -2122,7 +2122,7 @@ describe("tRPC — browser history", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   // Each test gets its own workspaceId so suites stay independent — the
@@ -2570,7 +2570,7 @@ describe("tRPC — auth enforcement", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   // Queries

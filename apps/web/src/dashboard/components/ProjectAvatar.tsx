@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from "react";
+import { hubAssetUrl } from "../../lib/hub-config";
 import type { ProjectAvatarInfo } from "../types";
 
 interface ProjectAvatarProps {
@@ -31,7 +32,7 @@ export function ProjectAvatar({ avatar, fallback, className, testId }: ProjectAv
       {state !== true && fallback}
       {state !== false && (
         <img
-          src={avatar.src}
+          src={hubAssetUrl(avatar.src)}
           alt={avatar.label}
           hidden={state !== true}
           draggable={false}
