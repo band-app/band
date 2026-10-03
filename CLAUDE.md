@@ -67,6 +67,8 @@ Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/
 
 - `apps/hub/tests/pty-error-hints.test.ts` calls `hintForPtySpawnError` (`infra/terminals/pty-error-hints.ts`) directly instead of forcing a real spawn failure through the public interface. It's a pure function (raw error text in, a short user-facing hint out) with no external state to fake, and forcing the one thing that would exercise it end to end — a native `pty.spawn` call throwing synchronously after a successful node-pty preload — isn't practical to do deterministically: verified empirically that even an unusable shell path (a non-executable file) doesn't make node-pty throw synchronously, it spawns and the failure surfaces later as a PTY exit event the hint function never sees, and the other real trigger (EMFILE/ENFILE resource exhaustion) isn't safe to force in a test process. Do not add a `TerminalPool`/`TerminalService` test-only hook to make this reachable through `terminal.create` instead — the pure-function test is the intended coverage for this mapping.
 
+- `apps/desktop/tests/app-protocol.test.ts`, `hub-choice.test.ts` and `ui-paths.test.ts` cover the `app://` handler, the hub choice storage and validation (against a real HTTP server on another port) and the UI path lookup, with no Electron. What stays untested, because the e2e harness runs the web build in plain Chromium: `connectHub` and `switchHub` in `apps/desktop/src/main/index.ts` (spawning or not spawning the local hub, reloading the window), the preload's `__BAND_HUB__` read, the `protocol.handle` registration, and `HubSettings.tsx`. Verify changes there against a real desktop build.
+
 ## Git Hooks & CI
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.
@@ -86,6 +88,15 @@ The hub serves the built UI from `--ui-dir <path>` or `BAND_UI_DIR`. By default 
 ## Architecture: Hub vs Desktop App
 
 The hub (`apps/hub`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
+
+## Architecture: desktop hub picker
+
+The desktop window loads the bundled UI from `app://band/` (`apps/desktop/src/main/app-protocol.ts`, a standard, secure, `supportFetchAPI` scheme; a path with no extension and no file gets `_shell.html`, so reloads and deep links keep their route). The UI build comes from `resources/web/dist/client` when packaged and `apps/web/dist/client` in a repo build (`services/ui-paths.ts`); with no build the window falls back to loading the hub's own URL. With `BAND_DEV_WEB_URL` set in an unpackaged run, local mode still loads the dev server.
+
+- The hub is `local` (default: Electron spawns `apps/hub`) or `remote` (a URL and token, nothing spawned). The choice lives in `~/.band/desktop-hub.json` (mode 0600, `services/hub-choice.ts`). A remote `http:` URL is accepted only for loopback, because the secure `app://` page can't make plain `http:`/`ws:` requests to other hosts.
+- The preload reads `{ url, token }` with a synchronous IPC (`band_hub_config`, answered only to `app://band` frames, `ipc/hub.ts`) and exposes it as `window.__BAND_HUB__`, which `apps/web/src/lib/hub-config.ts` already reads. The renderer never gets the saved remote token back: `hub_get_choice` returns only `hasToken`.
+- Settings > Hub (`HubSettings.tsx`, desktop only) calls `hub_set_choice`. The main process checks the remote hub with `GET /api/health` and the Bearer token, then `switchHub` in `index.ts` stops or starts the local hub and reloads the window.
+- The PWA manifest is `apps/web/public/manifest.webmanifest`. The hub still answers it before auth, for iOS.
 
 ## Architecture: browser profiles
 

@@ -1,4 +1,4 @@
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 
@@ -19,21 +19,6 @@ const WEB_APP_MANIFEST_PATH = "/manifest.webmanifest";
 /** Icons under `public/icons/` (copied to `dist/client/icons/` by the build). */
 const ICON_FILES = ["band-192.png", "band-512.png", "apple-touch-icon.png"] as const;
 
-const WEB_APP_MANIFEST = {
-  name: "Band",
-  short_name: "Band",
-  id: "/",
-  start_url: "/",
-  scope: "/",
-  display: "standalone",
-  theme_color: "#1e1e1e",
-  background_color: "#1e1e1e",
-  icons: [
-    { src: "/icons/band-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-    { src: "/icons/band-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-  ],
-};
-
 /** Answers the manifest and its icons. Returns false for any other request.
  *  `publicDir` is the directory holding `icons/`: `public/` in dev,
  *  `dist/client/` in production. */
@@ -46,11 +31,20 @@ export function handleWebAppManifest(
   const pathname = req.url?.split("?")[0];
 
   if (pathname === WEB_APP_MANIFEST_PATH) {
-    res.writeHead(200, {
-      "Content-Type": "application/manifest+json",
-      "Cache-Control": "no-cache",
-    });
-    res.end(req.method === "HEAD" ? undefined : JSON.stringify(WEB_APP_MANIFEST));
+    // The manifest is a UI asset (`apps/web/public/manifest.webmanifest`), also
+    // served by the desktop app's `app://` scheme. The hub only answers it
+    // before auth, for iOS.
+    try {
+      const body = readFileSync(join(publicDir, "manifest.webmanifest"));
+      res.writeHead(200, {
+        "Content-Type": "application/manifest+json",
+        "Cache-Control": "no-cache",
+      });
+      res.end(req.method === "HEAD" ? undefined : body);
+    } catch {
+      res.writeHead(404);
+      res.end("Not found");
+    }
     return true;
   }
 

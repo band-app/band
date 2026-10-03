@@ -17,14 +17,18 @@ import { app, BrowserWindow, dialog, powerMonitor, protocol, session } from "ele
 import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserGuestManager } from "../browser/guest-manager.js";
 import { Events } from "../shared/ipc-channels.js";
+import { APP_ORIGIN, APP_SCHEME, APP_SCHEME_PRIVILEGES, createAppHandler } from "./app-protocol.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
+import { registerHubConfigSync } from "./ipc/hub.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
+import { type HubChoice, loadHubChoice, saveHubChoice } from "./services/hub-choice.js";
 import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
-import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
+import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
+import { resolveUiDir } from "./services/ui-paths.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
 import { isUpdaterEnabled, UpdateController } from "./updater.js";
@@ -53,6 +57,12 @@ interface AppState {
   port: number;
   /** Empty string in dev mode where we don't own the server. */
   webDir: string;
+  /** The hub the window talks to. "local" spawns the bundled hub. */
+  hubChoice: HubChoice;
+  /** The built UI served over `app://`, or null when there is no build. */
+  uiDir: string | null;
+  /** What the preload tells the UI (`window.__BAND_HUB__`). Null: the page is its hub's own. */
+  rendererHub: { url: string; token?: string } | null;
 }
 
 /** powerMonitor listeners survive window close; wire them at most once. */
@@ -69,6 +79,9 @@ const state: AppState = {
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
+  hubChoice: loadHubChoice(),
+  uiDir: null,
+  rendererHub: null,
 };
 
 /**
@@ -155,18 +168,39 @@ function installCrashHandlers(): void {
   });
 }
 
+/** The dev server's URL, when the orchestrating script supplied one for an unpackaged run. */
+function devWebUrl(): string | null {
+  const url = process.env.BAND_DEV_WEB_URL;
+  return !app.isPackaged && url ? url : null;
+}
+
 /**
- * Resolve the URL to load. In dev, the orchestrating script supplies
- * `BAND_DEV_WEB_URL` after vite is up. In release we spawn the bundled web
- * server ourselves and embed `?token=` from `~/.band/settings.json`.
+ * Connect to the chosen hub and return the URL the window should load.
  *
- * Sets `state.webDir` and `state.port` as a side-effect so the IPC handlers
- * (and the cleanup path) can reference them later.
+ *   - Remote: spawn nothing. The window loads the bundled UI from `app://`,
+ *     which the preload points at the remote hub.
+ *   - Local, packaged or from a repo build: spawn the bundled hub, then load
+ *     the bundled UI pointed at it. With no UI build (an old checkout), load
+ *     the hub's own URL, which serves the UI itself.
+ *   - Local, in dev with `BAND_DEV_WEB_URL`: load the dev server, which is its
+ *     own hub, as before.
+ *
+ * Sets `state.webDir`, `state.port` and `state.rendererHub` as side effects so
+ * the IPC handlers, the preload and the cleanup path can reference them.
  */
-async function resolveDashboardUrl(): Promise<string> {
-  const devUrl = process.env.BAND_DEV_WEB_URL;
-  if (!app.isPackaged && devUrl) {
+async function connectHub(choice: HubChoice): Promise<string> {
+  if (choice.mode === "remote") {
+    if (!state.uiDir) {
+      throw new Error("The UI build was not found, which a remote hub needs. Run `pnpm build`.");
+    }
+    state.rendererHub = { url: choice.url, token: choice.token };
+    return `${APP_ORIGIN}/`;
+  }
+
+  const devUrl = devWebUrl();
+  if (devUrl) {
     state.port = Number.parseInt(new URL(devUrl).port || "3456", 10);
+    state.rendererHub = null;
     return devUrl;
   }
 
@@ -175,13 +209,71 @@ async function resolveDashboardUrl(): Promise<string> {
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
   });
-  const { port, token } = await ensureWebserverRunning({
-    webDir: state.webDir,
-    managed: state.managed,
-    isPackaged: app.isPackaged,
-  });
-  state.port = port;
-  return `http://localhost:${port}/?token=${encodeURIComponent(token)}`;
+  let token: string;
+  if (state.managed.isRunning() && tryGetToken()) {
+    // Switching back to local while the hub we spawned is still up.
+    token = tryGetToken() as string;
+  } else {
+    const started = await ensureWebserverRunning({
+      webDir: state.webDir,
+      managed: state.managed,
+      isPackaged: app.isPackaged,
+    });
+    state.port = started.port;
+    token = started.token;
+  }
+  if (state.uiDir) {
+    state.rendererHub = { url: `http://localhost:${state.port}`, token };
+    return `${APP_ORIGIN}/`;
+  }
+  state.rendererHub = null;
+  return `http://localhost:${state.port}/?token=${encodeURIComponent(token)}`;
+}
+
+function startActivityMonitorForLocalHub(win: BrowserWindow): void {
+  state.activityMonitor?.stop();
+  state.activityMonitor =
+    state.hubChoice.mode === "local"
+      ? startActivityMonitor({ mainWindow: win, port: state.port })
+      : null;
+}
+
+/**
+ * Save the choice and reload the window against it. A failure (the local hub
+ * won't start) restores the previous choice and says so.
+ */
+async function switchHub(choice: HubChoice): Promise<void> {
+  const win = state.mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const previous = state.hubChoice;
+  try {
+    if (choice.mode === "remote") {
+      state.activityMonitor?.stop();
+      state.activityMonitor = null;
+      await state.managed.kill();
+      if (app.isPackaged) await killPort(state.port);
+    }
+    const url = await connectHub(choice);
+    saveHubChoice(choice);
+    state.hubChoice = choice;
+    startActivityMonitorForLocalHub(win);
+    log.info({ mode: choice.mode }, "switched hub");
+    await win.loadURL(url);
+  } catch (err) {
+    log.error({ err: String(err) }, "switching hub failed");
+    dialog.showErrorBox(
+      "Couldn't switch hub",
+      `${err instanceof Error ? err.message : String(err)}\n\nKeeping the previous hub.`,
+    );
+    try {
+      state.hubChoice = previous;
+      const url = await connectHub(previous);
+      startActivityMonitorForLocalHub(win);
+      if (!win.isDestroyed()) await win.loadURL(url);
+    } catch (restoreErr) {
+      log.error({ err: String(restoreErr) }, "restoring the previous hub failed");
+    }
+  }
 }
 
 async function cleanupOnce(): Promise<void> {
@@ -197,10 +289,11 @@ async function cleanupOnce(): Promise<void> {
   state.browserManager?.destroyAll();
   await state.managed.kill();
 
-  // Only force-free the port in packaged builds where we own the server.
+  // Only force-free the port in packaged builds where we own the server
+  // (never with a remote hub selected, when there is no local server).
   // In dev the orchestrating script (or an external dev:web invocation)
   // owns it — blindly killing 3456 could nuke another Band instance.
-  if (app.isPackaged) {
+  if (app.isPackaged && state.hubChoice.mode === "local") {
     await killPort(state.port);
   }
 }
@@ -261,6 +354,8 @@ async function bootstrap(): Promise<void> {
   // `app.whenReady()`.
   protocol.registerSchemesAsPrivileged([
     { scheme: "band-action", privileges: { standard: false, supportFetchAPI: false } },
+    // `app://band/` serves the bundled UI (see `app-protocol.ts`).
+    { scheme: APP_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
   ]);
 
   await app.whenReady();
@@ -283,8 +378,19 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  const url = await resolveDashboardUrl();
-  log.info({ url }, "loading url");
+  state.uiDir = resolveUiDir({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  if (state.uiDir) {
+    session.defaultSession.protocol.handle(APP_SCHEME, createAppHandler(state.uiDir));
+  }
+  // Answer the preload's hub-config read before any page can ask.
+  const unregisterHubConfig = registerHubConfigSync(() => state.rendererHub, devWebUrl());
+
+  const url = await connectHub(state.hubChoice);
+  log.info({ url, hub: state.hubChoice.mode }, "loading url");
   state.mainWindow = createMainWindow({ url });
 
   // Surface preload load failures, which otherwise fail silently and leave
@@ -342,9 +448,17 @@ async function bootstrap(): Promise<void> {
   // (default or browser profile) it uses.
   session.defaultSession.protocol.handle("band-action", () => new Response(null, { status: 204 }));
 
-  state.unregisterIpc = registerIpc({
+  const unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,
-    webDir: state.webDir,
+    getWebDir: () => state.webDir,
+    isLocalHub: () => state.hubChoice.mode === "local",
+    hub: {
+      getChoice: () => state.hubChoice,
+      // The reload replaces the page that asked, so it runs after the reply.
+      switchTo: (choice) => {
+        setImmediate(() => void switchHub(choice));
+      },
+    },
     managed: state.managed,
     browserManager: state.browserManager,
     cliPaths: {
@@ -354,6 +468,10 @@ async function bootstrap(): Promise<void> {
     },
     updates,
   });
+  state.unregisterIpc = () => {
+    unregisterIpc();
+    unregisterHubConfig();
+  };
 
   // Background update checks: 10s after launch so the dashboard has loaded,
   // then hourly. They surface in the toast only when they find an update.
@@ -365,10 +483,7 @@ async function bootstrap(): Promise<void> {
   // Watch focus + AC/battery state and tell the web server to widen the
   // branch-status poller interval whenever the user isn't actively using
   // Band. Best-effort; failures are logged but don't block startup.
-  state.activityMonitor = startActivityMonitor({
-    mainWindow: state.mainWindow,
-    port: state.port,
-  });
+  startActivityMonitorForLocalHub(state.mainWindow);
 
   state.mainWindow.on("close", () => {
     void cleanupOnce();
