@@ -1,3 +1,6 @@
+> **Status: superseded** by [docs/architecture/hub-workers.md](../architecture/hub-workers.md) (2026-10-03).
+> Band is moving to one central hub with outbound-connected workers instead of a peer mesh. The text below is kept as written.
+
 # Experiment: federation / remote machines
 
 **Status:** Direction confirmed, no code yet · **Date:** 2026-05-27 · **Owner:** TBD
