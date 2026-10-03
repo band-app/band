@@ -7,6 +7,8 @@ const log = createLogger("script-run");
 /** How often {@link prepareScriptRun} checks for the exit-code file, in case `fs.watch` misses it. */
 const POLL_MS = 1_000;
 
+const decoder = new TextDecoder();
+
 /**
  * A `.band/config.json` `setup` / `teardown` command prepared to run inside
  * a workspace terminal.
@@ -78,7 +80,7 @@ export async function prepareScriptRun(
     if (disposed) return;
     host.fs.readFile(exitFile).then(
       (bytes) => {
-        const text = new TextDecoder().decode(bytes);
+        const text = decoder.decode(bytes);
         if (disposed) return;
         const code = Number.parseInt(text.trim(), 10);
         resolveExited(Number.isNaN(code) ? 1 : code);

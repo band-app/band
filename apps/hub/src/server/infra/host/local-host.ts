@@ -1,7 +1,8 @@
 import { execFile, spawn } from "node:child_process";
-import { watch as fsWatch, globSync } from "node:fs";
+import { watch as fsWatch } from "node:fs";
 import {
   cp,
+  glob as fsGlob,
   lstat,
   mkdir,
   mkdtemp,
@@ -232,7 +233,11 @@ const localFs: HostFs = {
   },
   writeFile: (path, data, options) => writeFile(path, data, { mode: options?.mode }),
   realpath: (path) => realpath(path),
-  glob: async (pattern, cwd) => globSync(pattern, { cwd }),
+  async glob(pattern, cwd) {
+    const matches: string[] = [];
+    for await (const match of fsGlob(pattern, { cwd })) matches.push(match);
+    return matches;
+  },
   mkdtemp: (prefix) => mkdtemp(join(tmpdir(), prefix)),
   async list(path) {
     const entries = await readdir(path, { withFileTypes: true });

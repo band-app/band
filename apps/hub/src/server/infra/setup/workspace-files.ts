@@ -46,10 +46,8 @@ const MAX_COPY_FILES_MATCHES = 500;
  *
  * Async so the two `git ls-files` spawns in Option B don't block the
  * shared event loop (SSE / streaming connections live on it) while the
- * create path waits on git. The per-file copy fan-out itself stays
- * synchronous — it's a handful of `copyFileSync` calls bounded by
- * `MAX_COPY_FILES_MATCHES`, dominated by the git work, not worth the
- * overhead of going async per file.
+ * create path waits on git. The per-file copy fan-out is async too, through
+ * `host.fs`, and bounded by `MAX_COPY_FILES_MATCHES`.
  */
 export async function copyWorkspaceFiles(
   host: Host,
