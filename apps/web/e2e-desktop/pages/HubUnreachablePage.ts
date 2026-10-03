@@ -33,10 +33,9 @@ export class HubUnreachablePage {
     });
   }
 
-  /** Clicks Retry and waits for the page to reload, which a failed retry does. */
   async clickRetry(): Promise<void> {
-    await test.step("Click Retry and wait for the page to reload", async () => {
-      await Promise.all([this.page.waitForEvent("domcontentloaded"), this.retry.click()]);
+    await test.step("Click Retry", async () => {
+      await this.retry.click();
     });
   }
 

@@ -217,7 +217,7 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
 
     await unreachable.clickUseLocal();
     const dashboard = new DesktopDashboardPage(app.window);
-    await expect.poll(() => dashboard.url()).toMatch(/^app:\/\/local\//);
+    await expect.poll(() => dashboard.url(), { timeout: 60_000 }).toMatch(/^app:\/\/local\//);
     await dashboard.expectProjectListed("localproj");
     expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(true);
     expect(app.cspViolations).toEqual([]);

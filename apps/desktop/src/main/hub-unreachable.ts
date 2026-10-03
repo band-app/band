@@ -8,6 +8,7 @@
 
 export type HubFallbackAction = "retry" | "use-local";
 
+const PAGE_PREFIX = "data:text/html;charset=utf-8,";
 const RETRY_URL = "band-action://hub-retry";
 const USE_LOCAL_URL = "band-action://hub-use-local";
 
@@ -43,7 +44,7 @@ export function hubUnreachableUrl(hubUrl: string, reason: string): string {
   <a href="${USE_LOCAL_URL}" data-testid="hub-unreachable__use-local">Use local</a>
 </div>
 </main></body></html>`;
-  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  return `${PAGE_PREFIX}${encodeURIComponent(html)}`;
 }
 
 /**
@@ -51,7 +52,7 @@ export function hubUnreachableUrl(hubUrl: string, reason: string): string {
  * can ask: a click from any other page, such as the bundled UI, is not one.
  */
 export function hubFallbackAction(currentUrl: string, targetUrl: string): HubFallbackAction | null {
-  if (!currentUrl.startsWith("data:text/html")) return null;
+  if (!currentUrl.startsWith(PAGE_PREFIX)) return null;
   if (targetUrl === RETRY_URL) return "retry";
   if (targetUrl === USE_LOCAL_URL) return "use-local";
   return null;

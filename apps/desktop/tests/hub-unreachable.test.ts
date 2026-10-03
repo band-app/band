@@ -20,6 +20,7 @@ describe("hub unreachable page", () => {
     );
     assert.ok(!html.includes("<script>x"));
     assert.ok(html.includes("&lt;script&gt;"));
+    assert.ok(html.includes("a &quot;b&quot;"));
   });
 
   test("turns the two links into actions, from this page only", () => {
@@ -27,6 +28,7 @@ describe("hub unreachable page", () => {
     assert.equal(hubFallbackAction(page, "band-action://hub-use-local"), "use-local");
     assert.equal(hubFallbackAction(page, "band-action://other"), null);
     assert.equal(hubFallbackAction("app://local/", "band-action://hub-retry"), null);
+    assert.equal(hubFallbackAction("data:text/html,<p>x</p>", "band-action://hub-retry"), null);
     assert.equal(hubFallbackAction("https://evil.example/", "band-action://hub-use-local"), null);
   });
 });

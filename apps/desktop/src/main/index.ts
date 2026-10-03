@@ -396,7 +396,9 @@ async function cleanupOnce(): Promise<void> {
   // (never with a remote hub selected, when there is no local server).
   // In dev the orchestrating script (or an external dev:web invocation)
   // owns it — blindly killing 3456 could nuke another Band instance.
-  if (app.isPackaged && state.hubChoice.mode === "local") {
+  // A hub this run spawned is also ours with a remote choice saved: "Use local"
+  // on the unreachable-hub page starts one and keeps the saved remote choice.
+  if (app.isPackaged && (state.hubChoice.mode === "local" || state.managed.isRunning())) {
     await killPort(state.port);
   }
 }
