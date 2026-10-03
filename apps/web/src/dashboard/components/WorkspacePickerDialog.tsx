@@ -1,3 +1,4 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import {
   Command,
   CommandEmpty,
@@ -16,7 +17,6 @@ import { useCapabilities } from "../context";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import { useProjects } from "../hooks/use-projects";
 import { getRecentWorkspaceOrder, recordWorkspaceAccess } from "../lib/recent-workspaces";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { WorkspaceLabel } from "./WorkspaceLabel";

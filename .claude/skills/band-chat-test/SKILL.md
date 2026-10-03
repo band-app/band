@@ -1,6 +1,6 @@
 ---
 name: band-chat-test
-description: Drive a Band coding-agent chat from the CLI against a local dev server for verification or smoke testing. Use when you need to exercise a chat / agent adapter end-to-end without clicking through the dashboard — e.g. verifying a coding agent's ACP integration (`apps/web/src/server/infra/agents/`), regression-testing after a refactor, or capturing structured agent output to assert on. Handles the dev-vs-prod port mismatch (the CLI defaults to port 3456 but `pnpm dev:web` typically lands on 3457/3458 because the production Band server is already on 3456) by pointing the CLI at the dev server via `BAND_SERVER_URL`. Triggers include "smoke-test the codex adapter", "verify the agent works end-to-end", "test the chat from the CLI", "drive a chat from the terminal".
+description: Drive a Band coding-agent chat from the CLI against a local dev server for verification or smoke testing. Use when you need to exercise a chat / agent adapter end-to-end without clicking through the dashboard — e.g. verifying a coding agent's ACP integration (`apps/hub/src/server/infra/agents/`), regression-testing after a refactor, or capturing structured agent output to assert on. Handles the dev-vs-prod port mismatch (the CLI defaults to port 3456 but `pnpm dev:web` typically lands on 3457/3458 because the production Band server is already on 3456) by pointing the CLI at the dev server via `BAND_SERVER_URL`. Triggers include "smoke-test the codex adapter", "verify the agent works end-to-end", "test the chat from the CLI", "drive a chat from the terminal".
 allowed-tools: Bash, Read
 ---
 
@@ -10,7 +10,7 @@ Drive a coding-agent chat session end-to-end from the terminal — start the dev
 
 This skill is for **verification**, not for ordinary day-to-day work. Day-to-day chat use is documented in the sibling `band-chat` skill (the global CLI skill auto-generated from the schema). Use this skill when:
 
-- You changed how Band talks to an agent over ACP (`apps/web/src/server/infra/agents/*`, `agent-session-service.ts`) and want to prove it works
+- You changed how Band talks to an agent over ACP (`apps/hub/src/server/infra/agents/*`, `agent-session-service.ts`) and want to prove it works
 - A reviewer asked you to demonstrate runtime behaviour
 - You need to capture an agent transcript for a PR or bug report
 
@@ -169,4 +169,4 @@ If you created a one-off chat pane during the test and want to tidy up, list and
 
 ## Notes on event shapes
 
-Every agent runs as an Agent Client Protocol subprocess (claude-agent-acp, codex-acp, `opencode acp`, `gemini --acp`, `agent acp`). The stream forwards each ACP `session/update` unchanged as an `update` event; Band adds `prompt`, `turn-started`, `turn-ended`, `permission`, `elicitation`, `request-resolved`, `session-attached`, `file` and `notice`. The wire schema is `apps/web/src/shared/chat-events.ts`; what each agent sends is the ACP spec plus the agent's own quirks (see the comments in `apps/web/src/server/infra/agents/acp-launch.ts`).
+Every agent runs as an Agent Client Protocol subprocess (claude-agent-acp, codex-acp, `opencode acp`, `gemini --acp`, `agent acp`). The stream forwards each ACP `session/update` unchanged as an `update` event; Band adds `prompt`, `turn-started`, `turn-ended`, `permission`, `elicitation`, `request-resolved`, `session-attached`, `file` and `notice`. The wire schema is `packages/shared/src/chat-events.ts`; what each agent sends is the ACP spec plus the agent's own quirks (see the comments in `apps/hub/src/server/infra/agents/acp-launch.ts`).

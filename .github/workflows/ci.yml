@@ -170,7 +170,9 @@ jobs:
         run: pnpm build:web
 
       - name: Test (web)
-        run: pnpm --filter @band-app/server test
+        run: |
+          pnpm --filter @band-app/server test
+          pnpm --filter @band-app/web test
 
       # Keyed on the Playwright version, with no restore-keys, so a bump
       # starts clean instead of carrying old browser builds forward.
@@ -191,7 +193,7 @@ jobs:
       # only skips the browser download. WebKit runs the iPhone-profile specs
       # (`e2e/mobile-document-scroll.spec.ts`).
       - name: Install Playwright Chromium and WebKit
-        run: pnpm --filter @band-app/server exec playwright install --with-deps chromium webkit
+        run: pnpm --filter @band-app/web exec playwright install --with-deps chromium webkit
 
       - name: Save Playwright browsers cache
         if: |
@@ -207,7 +209,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-webkit
 
       - name: Test e2e (web)
-        run: pnpm --filter @band-app/server test:e2e
+        run: pnpm --filter @band-app/web test:e2e
 
       # Playwright writes per-failure error-context.md snapshots (+ any traces)
       # into test-results/. Without this upload a CI-only e2e flake leaves
@@ -399,7 +401,7 @@ jobs:
           # path-reconciliation bug: the CLI + its test harness, the server
           # sync/workspace services, the workspaces query layer, and this
           # workflow file itself.
-          if grep -qE '^(apps/cli/|apps/web/src/server/services/(sync-service|workspace-service)\.ts$|apps/web/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if grep -qE '^(apps/cli/|apps/hub/src/server/services/(sync-service|workspace-service)\.ts$|apps/hub/src/server/infra/db/queries/workspaces\.ts$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "cli=true" >> "$GITHUB_OUTPUT"
           else
             echo "cli=false" >> "$GITHUB_OUTPUT"
@@ -407,14 +409,14 @@ jobs:
 
           # Web: what the vitest suite exercises beyond the React UI: the
           # server (terminals, the terminal daemon, workspaces and git live
-          # under src/server/), the code it shares with the client, the tests
+          # under apps/hub/src/server/), the code it shares with the client (packages/shared), the tests
           # and their build, the workspace packages and plugins the server
           # loads, the CLI the tests shell out to, the lockfile and Node
           # version, and this workflow file. A change only to the React UI
           # (components, dashboard, routes) or to e2e specs stays Linux-only.
           # Pushes to main always run it. (A here-string, not a pipe: under
           # pipefail, `grep -q` exiting early would fail the pipe on a big diff.)
-          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/web/(src/(server|shared|lib)/|tests/|scripts/|start-server\.ts$|terminal-daemon\.ts$|package\.json$|vitest\.config\.ts$)|packages/|plugins/|apps/cli/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(apps/hub/|apps/web/(src/lib/|tests/|scripts/|package\.json$|vitest\.config\.ts$)|packages/|plugins/|apps/cli/|pnpm-lock\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
             echo "web=true" >> "$GITHUB_OUTPUT"
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
@@ -473,7 +475,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build the web server bundle the integration tests drive: each test
-      # boots `apps/web/dist/start-server.mjs` (a real node Band server) and
+      # boots `apps/hub/dist/start-server.mjs` (a real node Band server) and
       # runs CLI commands against it. The CLI binary itself is compiled by the
       # `cargo test` step below via `env!("CARGO_BIN_EXE_band")` (test profile),
       # so — unlike the `check`/`release` jobs — there is deliberately NO
@@ -610,7 +612,9 @@ jobs:
         run: pnpm build:web
 
       - name: Test (web)
-        run: pnpm --filter @band-app/server test
+        run: |
+          pnpm --filter @band-app/server test
+          pnpm --filter @band-app/web test
 
       - name: Save Cargo registry cache
         if: |

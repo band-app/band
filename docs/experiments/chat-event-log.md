@@ -1,6 +1,6 @@
 # Experiment: chat as a single event-log subscription (Path B)
 
-> **Superseded by issue #648.** The event-log model described here still holds (one SSE subscription, server as the single writer, a pure client reducer), but the events are now Agent Client Protocol payloads recorded in the `chat_events` table rather than AI-SDK chunks in an in-memory ring buffer, and history comes from Band's log or `session/load` instead of the agents' JSONL files. See `apps/web/src/shared/chat-events.ts`.
+> **Superseded by issue #648.** The event-log model described here still holds (one SSE subscription, server as the single writer, a pure client reducer), but the events are now Agent Client Protocol payloads recorded in the `chat_events` table rather than AI-SDK chunks in an in-memory ring buffer, and history comes from Band's log or `session/load` instead of the agents' JSONL files. See `packages/shared/src/chat-events.ts`.
 
 **Status**: shipped — landed in the PR for issue #478 (see the implementation
 checklist near the end of this doc, with every box now ticked).

@@ -1,3 +1,4 @@
+import { slugifyBranchName } from "@band-app/shared/branch-name";
 import {
   Button,
   Dialog,
@@ -11,7 +12,6 @@ import {
   Textarea,
 } from "@band-app/ui";
 import { useState } from "react";
-import { slugifyBranchName } from "../../lib/branch-name";
 import { useCreateWorkspace } from "../hooks/use-project-mutations";
 import { useProjects } from "../hooks/use-projects";
 

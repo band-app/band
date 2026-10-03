@@ -30,8 +30,7 @@
  * no async — exactly the shape where stub-based contract tests give the
  * highest signal-to-noise. Per-container behaviour (the focus-target callbacks
  * + visibility wiring) is covered by manual QA against the running app, same
- * as the rest of the dockview UI. See `apps/web/tests/browser-layout.test.ts`
- * for the same pattern applied to the browser tab-strip helpers.
+ * as the rest of the dockview UI.
  */
 
 import { describe, expect, it, vi } from "vitest";

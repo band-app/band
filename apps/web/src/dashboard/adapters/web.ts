@@ -1,6 +1,6 @@
+import type { AgentMode } from "@band-app/shared/agent-sessions";
+import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
-import type { AgentMode } from "../../shared/agent-sessions";
-import type { GitOpResult } from "../../shared/git-op-result";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {

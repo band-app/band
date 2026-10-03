@@ -69,7 +69,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  apps/web:
+  apps/hub:
     dependencies:
       '@agentclientprotocol/claude-agent-acp':
         specifier: 0.81.2
@@ -83,18 +83,12 @@ importers:
       '@vscode/ripgrep':
         specifier: ^1.18.0
         version: 1.18.0
-      '@xterm/addon-search':
-        specifier: 0.17.0-beta.300
-        version: 0.17.0-beta.300(patch_hash=eee5338dd2621ece46e79c61ec06766cd7fadaf79ffdb24e2a8ab68e97ef31f0)(@xterm/xterm@6.1.0-beta.303)
       '@xterm/addon-serialize':
         specifier: 0.15.0-beta.300
         version: 0.15.0-beta.300(patch_hash=851eac3d75e6d8c013b9f4c053e61d824b23965cb19ecc28e335e05059f3a294)(@xterm/xterm@6.1.0-beta.303)
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
         version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
-      '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.299
-        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303)
       '@xterm/headless':
         specifier: 6.1.0-beta.302
         version: 6.1.0-beta.302
@@ -107,19 +101,10 @@ importers:
       prettier:
         specifier: ^3.8.3
         version: 3.8.3
-      react-resizable-panels:
-        specifier: ^4.9.0
-        version: 4.9.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       typescript-language-server:
         specifier: ^5.1.3
         version: 5.1.3
-      vscode-jsonrpc:
-        specifier: 8.2.0
-        version: 8.2.0
     devDependencies:
-      '@babel/runtime':
-        specifier: ^7.29.2
-        version: 7.29.2
       '@band-app/coding-agent':
         specifier: workspace:^
         version: link:../../packages/coding-agent
@@ -132,6 +117,103 @@ importers:
       '@band-app/plugin-github':
         specifier: workspace:^
         version: link:../../plugins/github
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
+      '@trpc/client':
+        specifier: ^11.12.0
+        version: 11.12.0(@trpc/server@11.12.0(typescript@5.9.3))(typescript@5.9.3)
+      '@trpc/openapi':
+        specifier: 11.16.0-alpha
+        version: 11.16.0-alpha(@trpc/server@11.12.0(typescript@5.9.3))(typescript@5.9.3)(zod@3.25.76)
+      '@trpc/server':
+        specifier: ^11.12.0
+        version: 11.12.0(typescript@5.9.3)
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
+      croner:
+        specifier: ^10.0.1
+        version: 10.0.1
+      drizzle-kit:
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1
+      drizzle-orm:
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(bun-types@1.3.13)(zod@3.25.76)
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      sirv:
+        specifier: ^3.0.0
+        version: 3.0.2
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vite:
+        specifier: ^7.0.0
+        version: 7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.13)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+
+  apps/web:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@4.6.5)
+      '@xterm/addon-search':
+        specifier: 0.17.0-beta.300
+        version: 0.17.0-beta.300(patch_hash=eee5338dd2621ece46e79c61ec06766cd7fadaf79ffdb24e2a8ab68e97ef31f0)(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/addon-unicode11':
+        specifier: 0.10.0-beta.300
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303)
+      '@xterm/addon-webgl':
+        specifier: 0.20.0-beta.299
+        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303)
+      react-resizable-panels:
+        specifier: ^4.9.0
+        version: 4.9.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      vscode-jsonrpc:
+        specifier: 8.2.0
+        version: 8.2.0
+    devDependencies:
+      '@babel/runtime':
+        specifier: ^7.29.2
+        version: 7.29.2
+      '@band-app/plugin-api':
+        specifier: workspace:^
+        version: link:../../packages/plugin-api
+      '@band-app/plugin-github':
+        specifier: workspace:^
+        version: link:../../plugins/github
+      '@band-app/server':
+        specifier: workspace:^
+        version: link:../hub
+      '@band-app/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
       '@band-app/ui':
         specifier: workspace:^
         version: link:../../packages/ui
@@ -225,9 +307,6 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.29.0
-        version: 1.29.0(zod@3.25.76)
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2
@@ -264,15 +343,9 @@ importers:
       '@trpc/client':
         specifier: ^11.12.0
         version: 11.12.0(@trpc/server@11.12.0(typescript@5.9.3))(typescript@5.9.3)
-      '@trpc/openapi':
-        specifier: 11.16.0-alpha
-        version: 11.16.0-alpha(@trpc/server@11.12.0(typescript@5.9.3))(typescript@5.9.3)(zod@3.25.76)
       '@trpc/server':
         specifier: ^11.12.0
         version: 11.12.0(typescript@5.9.3)
-      '@types/express':
-        specifier: ^5.0.6
-        version: 5.0.6
       '@types/node':
         specifier: ^22.19.13
         version: 22.19.13
@@ -282,9 +355,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
-      '@types/ws':
-        specifier: ^8.18.0
-        version: 8.18.1
       '@uiw/codemirror-theme-vscode':
         specifier: ^4.25.9
         version: 4.25.9(@codemirror/language@6.12.2)(@codemirror/state@6.6.0)(@codemirror/view@6.40.0)
@@ -306,24 +376,12 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      croner:
-        specifier: ^10.0.1
-        version: 10.0.1
       dockview:
         specifier: ^6.0.6
         version: 6.0.6(react@19.2.4)
-      drizzle-kit:
-        specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1
       drizzle-orm:
         specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(bun-types@1.3.13)(zod@3.25.76)
-      esbuild:
-        specifier: ^0.25.0
-        version: 0.25.12
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1
+        version: 1.0.0-rc.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(bun-types@1.3.13)(zod@4.6.5)
       jsdom:
         specifier: ^29.0.2
         version: 29.0.2
@@ -354,9 +412,6 @@ importers:
       remark-breaks:
         specifier: ^4.0.0
         version: 4.0.0
-      sirv:
-        specifier: ^3.0.0
-        version: 3.0.2
       streamdown:
         specifier: ^2.3.0
         version: 2.3.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -366,9 +421,6 @@ importers:
       tailwindcss:
         specifier: ^4.0.0
         version: 4.2.1
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -384,12 +436,6 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@22.19.13)(jiti@2.6.1)(jsdom@29.0.2)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
-      ws:
-        specifier: ^8.18.0
-        version: 8.19.0
-      zod:
-        specifier: ^3.25.67
-        version: 3.25.76
       zustand:
         specifier: ^5.0.0
         version: 5.0.11(@types/react@19.2.14)(immer@11.1.8)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
@@ -433,6 +479,12 @@ importers:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+
+  packages/shared:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: 1.5.0
+        version: 1.5.0(zod@4.6.5)
 
   packages/ui:
     dependencies:
@@ -7642,20 +7694,16 @@ snapshots:
 
   '@agentclientprotocol/codex-acp@1.13.1':
     dependencies:
-      '@agentclientprotocol/sdk': 1.5.0(zod@4.3.6)
+      '@agentclientprotocol/sdk': 1.5.0(zod@4.6.5)
       '@openai/codex': 0.156.1
       diff: 9.0.0
       open: 11.0.4
       vscode-jsonrpc: 9.0.2
-      zod: 4.3.6
+      zod: 4.6.5
 
   '@agentclientprotocol/sdk@1.5.0(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
-
-  '@agentclientprotocol/sdk@1.5.0(zod@4.3.6)':
-    dependencies:
-      zod: 4.3.6
 
   '@agentclientprotocol/sdk@1.5.0(zod@4.6.5)':
     dependencies:
@@ -11920,6 +11968,14 @@ snapshots:
       better-sqlite3: 12.8.0
       bun-types: 1.3.13
       zod: 3.25.76
+
+  drizzle-orm@1.0.0-rc.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(bun-types@1.3.13)(zod@4.6.5):
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.0
+      '@types/better-sqlite3': 7.6.13
+      better-sqlite3: 12.8.0
+      bun-types: 1.3.13
+      zod: 4.6.5
 
   dset@3.1.4: {}
 

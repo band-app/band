@@ -5,7 +5,7 @@
  * dropdown lists them with `session/list`, and picking one attaches the chat
  * to it, which replays it with `session/load` (or reads it back from Band's
  * own event log when Band recorded it). The ACP stub agent
- * (`apps/web/tests/fixtures/acp-stub-agent.mjs`) is the only stub; it keeps
+ * (`apps/hub/tests/fixtures/acp-stub-agent.mjs`) is the only stub; it keeps
  * its sessions in the test's tmp home, so they survive the agent process.
  *
  * What's covered here:

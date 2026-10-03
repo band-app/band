@@ -1,6 +1,6 @@
 # Coding Criteria
 
-The source of truth for what a Band PR review checks on **source-code changes** under `apps/web/src/server/**`. Each criterion has a stable ID (`CODE-N`) — cite the ID when you flag a violation so the author can look it up.
+The source of truth for what a Band PR review checks on **source-code changes** under `apps/hub/src/server/**`. Each criterion has a stable ID (`CODE-N`) — cite the ID when you flag a violation so the author can look it up.
 
 This file is loaded by:
 
@@ -14,9 +14,9 @@ Output format and severity vocabulary are defined inline in `.claude/agents/codi
 
 ## 1. Structural placement
 
-Server code lives under `apps/web/src/server/{api,services,infra}/`. The canonical tRPC entry point is `apps/web/src/server/api/router.ts`. `apps/web/src/lib/` is browser-side only.
+Server code lives under `apps/hub/src/server/{api,services,infra}/`. The canonical tRPC entry point is `apps/hub/src/server/api/router.ts`. `apps/web/src/lib/` is browser-side only.
 
-- **CODE-1** *(blocker)* — New server code is placed under `apps/web/src/server/{api,services,infra}/`. New code under `apps/web/src/trpc/` or under `apps/web/src/lib/` (for server logic) is a blocker.
+- **CODE-1** *(blocker)* — New server code is placed under `apps/hub/src/server/{api,services,infra}/`. New code under `apps/web/src/trpc/` or under `apps/web/src/lib/` (for server logic) is a blocker.
 - **CODE-2** *(blocker)* — Tier imports go in one direction only:
   - Routers (`api/**`) may import from `services/**`. They may **not** import from `infra/**` (no DB, no git, no tunnels, no PTY).
   - Services (`services/**`) may import from `infra/**` and other services. They may **not** import from `api/**`.
@@ -28,7 +28,7 @@ Server code lives under `apps/web/src/server/{api,services,infra}/`. The canonic
 
 Routers are the entry point for client requests. Their entire job is: validate input, call one or more services, return the response.
 
-- **CODE-4** *(nit)* — Each router file lives at `apps/web/src/server/api/<domain>/router.ts` — one sub-router per domain (`projects/router.ts`, `workspaces/router.ts`). New top-level files in `api/` other than the merge file `api/router.ts` are a nit.
+- **CODE-4** *(nit)* — Each router file lives at `apps/hub/src/server/api/<domain>/router.ts` — one sub-router per domain (`projects/router.ts`, `workspaces/router.ts`). New top-level files in `api/` other than the merge file `api/router.ts` are a nit.
 - **CODE-5** *(suggestion)* — Router domains mirror the CLI command structure (projects, workspaces, chats, tasks, cronjobs, terminals, browsers, sessions, settings, tunnel, editor, browser-host, cli, hooks, skills, prereqs, statuses, modes, models, system). A new domain that doesn't correspond to a CLI surface is a suggestion — surface it so the human can decide.
 - **CODE-6** *(nit)* — Procedures use Zod for input validation. A new procedure with no `.input(z.…)` and a non-trivial argument shape is a nit.
 - **CODE-7** *(blocker)* — Cross-domain operations compose services in the router (e.g. `projects.delete` calls `TaskService.abortAllForProject`, `WorkspaceService.removeAllForProject`, then `ProjectService.delete`). A router that orchestrates business logic via raw query/client calls instead of services is a blocker.
@@ -38,7 +38,7 @@ Routers are the entry point for client requests. Their entire job is: validate i
 
 Services are classes with explicit constructor dependencies on infra adapters and other services. All business logic lives here.
 
-- **CODE-9** *(nit)* — Each service is `apps/web/src/server/services/<domain>-service.ts` exporting a class named `<Domain>Service` (e.g. `workspace-service.ts` → `WorkspaceService`). New services that break this naming pattern are a nit.
+- **CODE-9** *(nit)* — Each service is `apps/hub/src/server/services/<domain>-service.ts` exporting a class named `<Domain>Service` (e.g. `workspace-service.ts` → `WorkspaceService`). New services that break this naming pattern are a nit.
 - **CODE-10** *(nit)* — Dependencies are injected via the constructor with default `new …()` arguments — e.g. `constructor(private workspaceQueries = new WorkspaceQueries(), private git = new GitClient()) {}`. A service that does `import { db } from "..."` or instantiates infra inside a method (instead of declaring it as a constructor field) is a nit — the explicit constructor list is how reviewers see the dependency surface.
 - **CODE-11** *(blocker)* — Services may depend on infra (queries, clients) and on other services. A service that imports from `api/**` is a blocker.
 - **CODE-12** *(nit)* — Method names are actions: `create`, `delete`, `duplicate`, `list`, `listByProject`, `removeAllForProject`. Names like `handleCreateWorkspace`, `processWorkspaceDeletion`, `doWorkspaceWork` are a nit.
@@ -48,7 +48,7 @@ Services are classes with explicit constructor dependencies on infra adapters an
 
 Infra is the lowest level: DB queries, git, file system, tunnels, terminals, LSP, CDP proxies, agent pools. No business logic.
 
-- **CODE-14** *(nit)* — DB query classes live at `apps/web/src/server/infra/db/queries/<domain>.ts` exporting `<Domain>Queries` (`workspaces.ts` → `WorkspaceQueries`). Schema lives at `infra/db/schema.ts`. The DB singleton is `infra/db/connection.ts`. A new top-level `infra/db/<file>.ts` outside of `queries/` (for non-schema/non-connection content) is a nit.
+- **CODE-14** *(nit)* — DB query classes live at `apps/hub/src/server/infra/db/queries/<domain>.ts` exporting `<Domain>Queries` (`workspaces.ts` → `WorkspaceQueries`). Schema lives at `infra/db/schema.ts`. The DB singleton is `infra/db/connection.ts`. A new top-level `infra/db/<file>.ts` outside of `queries/` (for non-schema/non-connection content) is a nit.
 - **CODE-15** *(blocker)* — Query classes are **thin**: Drizzle operations only, no business logic, no validation beyond what Drizzle does, no orchestration of multiple tables for an invariant. Branching on entity state, derived values, or enforcement logic inside a query method is a blocker — push it into the service.
 - **CODE-16** *(nit)* — External-system clients live at `infra/<system>/<system>-client.ts` exporting a `<System>Client` class (`infra/git/git-client.ts` → `GitClient`). For pools/managers the suffix is `Pool` or `Manager` (`TerminalPool`, `AgentPool`, `LspManager`). Scattered top-level `execGit()`/`execGh()` functions are a nit — group related operations into a class.
 - **CODE-17** *(blocker)* — Infra files import only from `node:*`, npm packages, and other `infra/**` files. An import from `services/**` or `api/**` is a blocker.

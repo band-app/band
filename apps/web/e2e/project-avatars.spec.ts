@@ -15,8 +15,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { type GitHubStub, githubStub } from "../tests/fixtures/github-stub";
-import { AVATAR_PNG } from "../tests/fixtures/github-test-data";
+import { type GitHubStub, githubStub } from "../../hub/tests/fixtures/github-stub";
+import { AVATAR_PNG } from "../../hub/tests/fixtures/github-test-data";
 import { gitInHome } from "./helpers/git";
 import {
   cleanupTmpHome,

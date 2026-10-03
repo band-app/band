@@ -413,7 +413,7 @@ Run inside the workspace:
   git fetch origin main
   git rebase origin/main
 
-Resolve conflicts. For the 3-tier refactor series the conflict pattern is usually in 'apps/web/src/trpc/router.ts' (drop the moved domain's key) and 'apps/web/src/server/api/router.ts' (add the new sub-router to mergeRouters). Re-run tests for the affected domain to confirm the rebase didn't break behavior.
+Resolve conflicts. For the 3-tier refactor series the conflict pattern is usually in 'apps/web/src/trpc/router.ts' (drop the moved domain's key) and 'apps/hub/src/server/api/router.ts' (add the new sub-router to mergeRouters). Re-run tests for the affected domain to confirm the rebase didn't break behavior.
 
 Then: /review-and-apply, 'git push --force-with-lease', stop. The orchestrator will re-check on the next tick and case (c)/(d)/(e) will pick up from there."
 ```

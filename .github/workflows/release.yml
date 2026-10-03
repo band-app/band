@@ -111,7 +111,7 @@ jobs:
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       # Build the CLI before running the JS tests. Some tests (e.g.
-      # `apps/web/tests/cli-skills.test.ts`) shell out to `band skills install`
+      # `apps/hub/tests/cli-skills.test.ts`) shell out to `band skills install`
       # to verify the production sync path against the real binary. The cargo
       # cache key only hashes `apps/cli/Cargo.lock`, so a source-only change
       # (skill templates, command surface) restores a stale binary that
@@ -131,6 +131,7 @@ jobs:
       - name: Test
         run: |
           pnpm --filter @band-app/server test
+          pnpm --filter @band-app/web test
           cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
       - name: Build frontend
@@ -225,7 +226,7 @@ jobs:
             apps/desktop/dist-builder/latest-mac.yml
 
       - name: Publish to npm
-        working-directory: apps/web
+        working-directory: apps/hub
         run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

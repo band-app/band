@@ -10,8 +10,8 @@
  * list, so the phone never drops the desktop's browser tabs.
  */
 
+import { CENTER_TABS_PREFIX } from "@band-app/shared/client-state-keys";
 import type { DockviewApi } from "dockview";
-import { CENTER_TABS_PREFIX } from "../shared/client-state-keys";
 import { clientStorage } from "./client-state";
 
 export type CenterTabKind = "chat" | "term" | "browser" | "file" | "diff";

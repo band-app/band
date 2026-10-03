@@ -10,7 +10,7 @@ same xterm.js commit.
 | `@xterm/addon-serialize@0.15.0-beta.300` | The server replays a terminal on reconnect with `serialize()`. Unpatched, it loses bold after dim text (`\e[1;22m` clears the bold it just set), drops OSC 8 hyperlinks, writes `\e[0C`/`\e[0D` (which move one column, not zero) at some wrapped-row boundaries, and does not reproduce empty cells with inverse video. |
 | `@xterm/addon-search@0.17.0-beta.300` | The find bar overflows the stack or freezes on one very long wrapped line, and whole-word or regex search can stop at the first rejected match on a line. Submitted upstream as [xtermjs/xterm.js#6149](https://github.com/xtermjs/xterm.js/pull/6149); drop the patch once a release includes it. |
 
-Tests: `apps/web/tests/terminal-ws.test.ts` (the serialized replay keeps bold
+Tests: `apps/hub/tests/terminal-ws.test.ts` (the serialized replay keeps bold
 after dim, OSC 8 links, and an inverse wide-glyph padding cell) and
 `apps/web/e2e/terminal-find-search-addon.spec.ts` (a line wrapped across 8,000
 rows, and whole word). The zero-count cursor move has no test: it needs a
@@ -81,9 +81,9 @@ Upstream publishes each package only when its own output changes, so packages
 built from one commit carry different beta numbers. Match them by the `commit`
 field in each tarball's `package.json` (`npm view @xterm/addon-search@<v>
 commit`), not by the version string. Keep every `@xterm/*` package in
-`apps/web/package.json` on the same commit.
+`apps/web/package.json` (`@xterm/addon-search`) and `apps/hub/package.json` (`@xterm/addon-serialize`) on the same commit.
 
-1. Bump the versions in `apps/web/package.json`.
+1. Bump the versions in `apps/web/package.json` and `apps/hub/package.json`.
 2. Rename both files of each patch, and update `version`, `sourcePatch` and
    `patch` in `xterm-upstream.json` and the keys in `pnpm-workspace.yaml`.
 3. Set `upstream.commit` to the new commit and `toolchain` to what its

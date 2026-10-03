@@ -1,0 +1,117 @@
+/**
+ * Root tRPC router for the web server's 3-tier architecture.
+ *
+ * Per `docs/web-architecture.md`, the API tier lives under
+ * `apps/hub/src/server/api/`. Each domain (projects, workspaces, chats,
+ * tasks, …) owns a sub-router under `apps/hub/src/server/api/<domain>/router.ts`
+ * and this file merges them via `t.mergeRouters(…)`.
+ *
+ * **Phase 8 (issue #319) completed the migration.** The legacy router at
+ * `apps/web/src/trpc/router.ts` and the supporting `trpc/context.ts` /
+ * `trpc/openapi.ts` were deleted; every sub-router now lives under
+ * `server/api/<domain>/router.ts`. The merge below is the single source of
+ * truth for the tRPC wire surface, and there is no longer a "legacy half"
+ * to compose against.
+ *
+ * Migrated sub-routers by phase (issue numbers track when each domain was
+ * lifted, not landing order):
+ *
+ *   - Phase 1 (issue #312): `settings.*`.
+ *   - Phase 2 (issue #313): `projects.*`.
+ *   - Phase 3 (issue #314): `workspaces.*`.
+ *   - Phase 4 (issue #315): `cronjobs.*`.
+ *   - Phase 5 (issue #316): `chats.*`, `browsers.*`. (The `chatLayout.*` /
+ *     `browserLayout.*` layout-tree namespaces added here were retired in
+ *     issue #643 Phase 4 once clients moved center-layout persistence into
+ *     localStorage.)
+ *   - Phase 6 (issue #317): `tasks.*`, `sessions.*`.
+ *   - Phase 7 (issue #318): `terminals/` (exposes `terminal`; the
+ *     `terminalLayout` namespace was retired in issue #643 Phase 4).
+ *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
+ *     `editor.*`, `tunnel.*`, `prereqs.*`, `modes.*`,
+ *     `models.*`, `statuses.*`, `status.*`.
+ *   - Phase 8 (issue #319): the final inline sub-routers — `workspace.*`
+ *     (singular: file ops, diff, search, git commands, agent switching),
+ *     `chat.*` (singular: approval-answer pass-through), `history.*`
+ *     (per-workspace browser history), and `queue.*` (queued message
+ *     store). With these gone, the legacy `apps/web/src/trpc/` directory
+ *     was removed entirely.
+ *
+ * Every sub-router must be built with the same tRPC builder (see
+ * `./trpc.ts`) for `mergeRouters` to accept them.
+ */
+
+import { agentSessionsRouter } from "./agent-sessions/router";
+import { browserHostRouter, hostRouter } from "./browser-host/router";
+import { browserProfilesRouter } from "./browser-profiles/router";
+import { browsersRouter } from "./browsers/router";
+import { chatRouter } from "./chat/router";
+import { chatsRouter } from "./chats/router";
+import { cliRouter } from "./cli/router";
+import { clientStateRouter } from "./client-state/router";
+import { cronjobsRouter } from "./cronjobs/router";
+import { editorRouter } from "./editor/router";
+import { historyRouter } from "./history/router";
+import { hooksRouter } from "./hooks/router";
+import { modelsRouter } from "./models/router";
+import { modesRouter } from "./modes/router";
+import { panelFocusRouter } from "./panel-focus/router";
+import { pluginsRouter } from "./plugins/router";
+import { prereqsRouter } from "./prereqs/router";
+import { projectsRouter } from "./projects/router";
+import { queueRouter } from "./queue/router";
+import { reportsRouter } from "./reports/router";
+import { reviewsRouter } from "./reviews/router";
+import { sessionsRouter } from "./sessions/router";
+import { settingsRouter } from "./settings/router";
+import { statusesRouter, statusRouter } from "./statuses/router";
+import { systemRouter } from "./system/router";
+import { tasksRouter } from "./tasks/router";
+import { terminalsRouters } from "./terminals/router";
+import { t } from "./trpc";
+import { tunnelRouter } from "./tunnel/router";
+import { workspaceRouter } from "./workspace/router";
+import { workspacesRouter } from "./workspaces/router";
+
+export const appRouter = t.router({
+  settings: settingsRouter,
+  projects: projectsRouter,
+  workspaces: workspacesRouter,
+  workspace: workspaceRouter,
+  cronjobs: cronjobsRouter,
+  chats: chatsRouter,
+  agentSessions: agentSessionsRouter,
+  chat: chatRouter,
+  browsers: browsersRouter,
+  browserProfiles: browserProfilesRouter,
+  panelFocus: panelFocusRouter,
+  clientState: clientStateRouter,
+  tasks: tasksRouter,
+  sessions: sessionsRouter,
+  ...terminalsRouters,
+  cli: cliRouter,
+  hooks: hooksRouter,
+  host: hostRouter,
+  browserHost: browserHostRouter,
+  editor: editorRouter,
+  tunnel: tunnelRouter,
+  prereqs: prereqsRouter,
+  modes: modesRouter,
+  models: modelsRouter,
+  statuses: statusesRouter,
+  status: statusRouter,
+  history: historyRouter,
+  queue: queueRouter,
+  reports: reportsRouter,
+  plugins: pluginsRouter,
+  reviews: reviewsRouter,
+  // `system` is the new home for the legacy `servicesRouter`. The wire
+  // surface is preserved by mounting it under the original `services`
+  // key so every existing client (TunnelDialog, ResourcesPage, the
+  // desktop activity monitor, the CLI) keeps calling `trpc.services.*`
+  // without change. The internal name (`system`) follows the 3-tier
+  // convention; the public key (`services`) follows the contract.
+  services: systemRouter,
+});
+
+export type AppRouter = typeof appRouter;

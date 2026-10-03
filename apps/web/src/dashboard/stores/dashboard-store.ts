@@ -1,5 +1,5 @@
+import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
-import type { GitOpResult } from "../../shared/git-op-result";
 import type { DashboardAdapter } from "../adapter";
 import type {
   CIStatus,

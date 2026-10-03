@@ -3,7 +3,7 @@
 ##############################################################################
 # Band server — Linux test image (issue #594)
 #
-# Builds the standalone @band-app/server (web-only, no Electron) plus the
+# Builds the standalone @band-app/server (API server plus UI, no Electron) plus the
 # Rust `band` CLI, then runs them on a stock Debian host that has NO zsh and
 # NO Homebrew — exactly the environment the Linux-compatibility work targets.
 # This is a test harness, not a production/publish image.
@@ -21,7 +21,7 @@ COPY apps/cli ./apps/cli
 RUN cargo build --release --manifest-path apps/cli/Cargo.toml
 
 # ---------------------------------------------------------------------------
-# Stage 2 — build the self-contained web bundle (apps/web/dist).
+# Stage 2 — build the hub bundle (apps/hub/dist) and the UI (apps/web/dist/client).
 # Mirrors CI: node-pty 1.1.0 ships no linux-x64 prebuild, so it compiles via
 # node-gyp during `pnpm install` (node-pty is allow-listed in
 # pnpm-workspace.yaml's onlyBuiltDependencies) — the toolchain must be present.
@@ -70,8 +70,10 @@ RUN apt-get update \
 COPY --from=cli-builder /src/apps/cli/target/release/band /opt/band/binaries/band
 RUN ln -sf /opt/band/binaries/band /usr/local/bin/band
 
-WORKDIR /app/apps/web
-COPY --from=web-builder /app/apps/web/dist ./dist
+WORKDIR /app/apps/hub
+COPY --from=web-builder /app/apps/hub/dist ./dist
+# The hub serves the UI from `client/` beside its bundle when apps/web is absent.
+COPY --from=web-builder /app/apps/web/dist/client ./dist/client
 COPY docker/entrypoint.sh /usr/local/bin/band-entrypoint.sh
 RUN chmod +x /usr/local/bin/band-entrypoint.sh
 

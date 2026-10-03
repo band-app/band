@@ -11,7 +11,7 @@
  *           while you type into it); keystrokes are matched with the frame
  *           that carries their echo
  *
- *   BAND_TYPING_BENCH=1 pnpm --filter @band-app/server test:e2e \
+ *   BAND_TYPING_BENCH=1 pnpm --filter @band-app/web test:e2e \
  *     terminal-typing-latency --headed --reporter=list
  *
  * Run headed so the WebGL renderer uses the real GPU; headless Chromium

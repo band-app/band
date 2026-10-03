@@ -45,9 +45,9 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { HISTORY_PAGE_SIZE } from "@band-app/shared/chat-events";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { HISTORY_PAGE_SIZE } from "@/shared/chat-events";
 import { acpStubEnv, type SeededTurn, seedStubSession } from "./helpers/acp-stub";
 import {
   cleanupTmpHome,

@@ -1,5 +1,5 @@
+import type { AgentMode } from "@band-app/shared/agent-sessions";
 import { useCallback, useEffect, useState } from "react";
-import type { AgentMode } from "../../shared/agent-sessions";
 
 /**
  * Per-device agent mode (issue #682): whether agents this device starts open

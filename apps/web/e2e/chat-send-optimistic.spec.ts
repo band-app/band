@@ -18,7 +18,7 @@
  *   - NO tRPC mocking. The chat-events subscription, the
  *     `POST /api/chats/:chatId/messages` endpoint, and the agent
  *     orchestration all run for real.
- *   - The ACP stub agent at `apps/web/tests/fixtures/acp-stub-agent.mjs`
+ *   - The ACP stub agent at `apps/hub/tests/fixtures/acp-stub-agent.mjs`
  *     is the *only* mock. It is the boundary stub for the coding-agent
  *     subprocess, which speaks the Agent Client Protocol over stdio.
  *   - The stub's scenario is deliberately SLOW: it pauses 30 s

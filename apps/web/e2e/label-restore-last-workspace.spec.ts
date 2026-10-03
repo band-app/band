@@ -35,7 +35,7 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 
 const TOKEN = "e2e-label-restore-last-workspace-token";
 
-// Label ids match the test fixture in apps/web/tests/trpc.test.ts so the
+// Label ids match the test fixture in apps/hub/tests/trpc.test.ts so the
 // reader can see the convention at a glance: lbl_<short_name>.
 const LABEL_PERSONAL = "lbl_personal";
 const LABEL_WORK = "lbl_work";

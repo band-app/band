@@ -22,8 +22,8 @@ import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-
 //      `typeof window` to a literal, so the dead branch (sprite injection
 //      in SSR, `{}` placeholder in client) is dead-code-eliminated and the
 //      ~1.2k inlined SVG strings stay out of the SSR bundle.
-//   2. esbuild (apps/web/scripts/build-server.sh) — bundles
-//      `apps/web/start-server.ts` into `dist/start-server.mjs`. esbuild
+//   2. esbuild (apps/hub/scripts/build-server.sh) — bundles
+//      `apps/hub/start-server.ts` into `dist/start-server.mjs`. esbuild
 //      does NOT define `import.meta.env`, so `import.meta.env.SSR` throws
 //      `TypeError: Cannot read properties of undefined (reading 'SSR')` at
 //      runtime. Switching to `typeof window` keeps esbuild's

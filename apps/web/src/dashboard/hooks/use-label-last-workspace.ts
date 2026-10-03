@@ -1,6 +1,6 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { useCallback, useEffect, useRef } from "react";
 import { clientStorage } from "../../lib/client-state";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useLabelFilter } from "./use-label-filter";
 import { useProjects } from "./use-projects";
 

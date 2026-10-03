@@ -9,7 +9,7 @@
  *   the gaps between renders that moved the scroll position,
  *   dropped browser frames, and long animation frames by invoker.
  *
- *   BAND_SCROLL_BENCH=1 pnpm --filter @band-app/server test:e2e \
+ *   BAND_SCROLL_BENCH=1 pnpm --filter @band-app/web test:e2e \
  *     terminal-scroll-smoothness --headed --reporter=list
  *
  * Run headed so the WebGL renderer uses the real GPU. `BENCH_RENDERER=dom`

@@ -1,3 +1,4 @@
+import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import {
   Button,
   ContextMenu,
@@ -82,7 +83,6 @@ import {
 } from "../hooks/use-project-mutations";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { isWorkspaceDeleting } from "../stores/dashboard-store";
 import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type {

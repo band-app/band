@@ -20,10 +20,7 @@
         "src/router.tsx",
         "src/dashboard/index.ts",
         "src/dashboard/adapters/web.ts",
-        "src/dashboard/adapters/desktop.ts",
-        "bin/band-server.mjs",
-        "start-server.ts",
-        "terminal-daemon.ts"
+        "src/dashboard/adapters/desktop.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
       "ignoreDependencies": [
@@ -34,10 +31,16 @@
         "tailwind-merge",
         "@tanstack/router-plugin",
         "nanoid",
-        "typescript-language-server",
         "vscode-jsonrpc",
         "@babel/runtime",
-        "@codemirror/lint",
+        "@codemirror/lint"
+      ]
+    },
+    "apps/hub": {
+      "entry": ["bin/band-server.mjs", "terminal-daemon.ts", "src/index.ts", "scripts/*.{mjs,ts}"],
+      "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.{mjs,ts}", "*.ts"],
+      "ignoreDependencies": [
+        "typescript-language-server",
         "esbuild",
         "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp"
@@ -77,6 +80,10 @@
     "packages/plugin-api": {
       "entry": ["src/index.ts", "src/server.ts", "src/client.tsx"],
       "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/shared": {
+      "entry": ["src/*.ts"],
+      "project": ["src/**/*.ts"]
     },
     "plugins/github": {
       "entry": ["src/server/index.ts", "src/client/index.tsx"],

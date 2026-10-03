@@ -1,6 +1,6 @@
 # Testing Criteria
 
-The source of truth for what a Band PR review checks on **test changes** under `apps/web/tests/**`, `apps/web/e2e/**`, and any `*.test.ts` / `*.spec.ts` in the repo. Each criterion has a stable ID (`TEST-N`) — cite the ID when you flag a violation.
+The source of truth for what a Band PR review checks on **test changes** under `apps/hub/tests/**`, `apps/web/tests/**`, `apps/web/e2e/**`, and any `*.test.ts` / `*.spec.ts` in the repo. Each criterion has a stable ID (`TEST-N`) — cite the ID when you flag a violation.
 
 This file is loaded by:
 
@@ -20,8 +20,8 @@ These four are non-negotiable.
   1. Adding a `data-testid` attribute on a JSX element.
   2. Refactoring an outbound URL to be read from an env var **at request time** (not at module load) so the test can override it (see TEST-30).
   Any other production-code edit landing in the same diff as a new test is a blocker.
-- **TEST-2** *(blocker)* — **Black-box only.** Tests drive the system through the same surface a real client uses: HTTP, the rendered DOM, files on disk, the CLI's stdout/stderr/exit code. A new test that `import`s an internal module from `apps/web/src/server/services/**` or `apps/web/src/server/infra/**` and calls it directly is a blocker. Asserting on internal state (private fields, module-level singletons, etc.) is also a blocker.
-- **TEST-3** *(blocker)* — **The real binary runs inside the test.** Both backend and frontend tests boot the production server (`apps/web/dist/start-server.mjs`) via `startServer()` against a fresh tmp home. No shallow renders, no `renderHook` from `@testing-library`, no in-memory React mounts, no test-only build flags. New tests that mount React in-process for behaviour that's user-observable in the rendered DOM are a blocker.
+- **TEST-2** *(blocker)* — **Black-box only.** Tests drive the system through the same surface a real client uses: HTTP, the rendered DOM, files on disk, the CLI's stdout/stderr/exit code. A new test that `import`s an internal module from `apps/hub/src/server/services/**` or `apps/hub/src/server/infra/**` and calls it directly is a blocker. Asserting on internal state (private fields, module-level singletons, etc.) is also a blocker.
+- **TEST-3** *(blocker)* — **The real binary runs inside the test.** Both backend and frontend tests boot the production server (`apps/hub/dist/start-server.mjs`) via `startServer()` against a fresh tmp home. No shallow renders, no `renderHook` from `@testing-library`, no in-memory React mounts, no test-only build flags. New tests that mount React in-process for behaviour that's user-observable in the rendered DOM are a blocker.
 - **TEST-4** *(blocker)* — **Mock only what is external to the server process.** External = third-party APIs, identity providers, agent binaries' HTTP surfaces, GitHub, etc. **Use Express stubs on a random port + an env-var override read at request time.** All of the following are blockers in new code:
   - `msw` / `mswjs/data` of any kind.
   - `page.route('**/trpc/**', …)` or any `page.route()` on the app's own routes.
@@ -33,7 +33,7 @@ These four are non-negotiable.
 
 | Change touches… | Required test | Path |
 |---|---|---|
-| HTTP / tRPC / WebSocket / SSE response shape, status, headers, DB or filesystem side effects | Backend API test (vitest) | `apps/web/tests/<feature>.test.ts` |
+| HTTP / tRPC / WebSocket / SSE response shape, status, headers, DB or filesystem side effects | Backend API test (vitest) | `apps/hub/tests/<feature>.test.ts` |
 | What the user sees in the rendered DOM, the URL they land on, what's saved in `localStorage` by client code | Frontend test (Playwright) | `apps/web/e2e/<feature>.spec.ts` |
 | Both | One of each. Don't conflate them. |
 | CLI / binary spawning behaviour | Per the sibling `integration-tests` skill | — |
@@ -44,14 +44,14 @@ These four are non-negotiable.
 
 ## 3. Test framework — match the package
 
-- **TEST-8** *(nit)* — `apps/web` uses **vitest** (`describe`/`it`/`expect`/`beforeAll`). New tests under `apps/web/tests/` or `apps/web/e2e/` must use vitest (or `@playwright/test` for `e2e/`). A new `node:test` + `node:assert/strict` test under `apps/web/` is a nit — call out the inconsistency.
+- **TEST-8** *(nit)* — `apps/hub` and `apps/web` use **vitest** (`describe`/`it`/`expect`/`beforeAll`). New tests under `apps/hub/tests/`, `apps/web/tests/` or `apps/web/e2e/` must use vitest (or `@playwright/test` for `e2e/`). A new `node:test` + `node:assert/strict` test under `apps/web/` is a nit — call out the inconsistency.
 - **TEST-9** *(blocker)* — All other packages use **`node:test` + `node:assert/strict`**. A new vitest/jest dependency in a package that doesn't already have one is a blocker.
 
 ## 4. Backend integration tests — the real-server checklist
 
-For every new test at `apps/web/tests/<feature>.test.ts`:
+For every new test at `apps/hub/tests/<feature>.test.ts`:
 
-- **TEST-10** *(blocker)* — Boots the server via `startServer({ home, settings, env })` from `apps/web/tests/helpers/server-runtime.ts`. Hardcoding a port (other than `0` for OS-assigned) is a blocker.
+- **TEST-10** *(blocker)* — Boots the server via `startServer({ home, settings, env })` from `apps/hub/tests/helpers/server-runtime.ts`. Hardcoding a port (other than `0` for OS-assigned) is a blocker.
 - **TEST-11** *(nit)* — Uses `mkdtempSync()` for `HOME`. The temp dir is removed in `afterAll`. Missing teardown is a nit (or a blocker if it leaks subprocesses — see TEST-14).
 - **TEST-12** *(blocker)* — Drives the server via real `fetch` against `server.url`. No `supertest`, no direct route handler imports.
 - **TEST-13** *(blocker)* — Real auth: a `tokenSecret` is seeded into settings; requests send `Authorization: Bearer <token>` or the `band_token` cookie. **At least one negative test** asserts `401` without a token — missing is a blocker.
@@ -83,7 +83,7 @@ For every new test at `apps/web/e2e/<feature>.spec.ts`:
 For every external service the change touches:
 
 - **TEST-27** *(nit)* — One Express stub per external service, one env var per service. Bundling two services into one stub by exporting two env vars is a nit.
-- **TEST-28** *(blocker)* — Stub lives under `apps/web/tests/fixtures/` (or `apps/web/e2e/fixtures/`) and exports an object with `start()`, `stop()`, `baseUrl`, and `set*` methods. `set*` methods register routes directly via `app.get(...)` / `app.post(...)`. Sharing a mutable handler object across tests is a blocker — that pattern leaks state across tests.
+- **TEST-28** *(blocker)* — Stub lives under `apps/hub/tests/fixtures/` (or `apps/web/e2e/fixtures/`) and exports an object with `start()`, `stop()`, `baseUrl`, and `set*` methods. `set*` methods register routes directly via `app.get(...)` / `app.post(...)`. Sharing a mutable handler object across tests is a blocker — that pattern leaks state across tests.
 - **TEST-29** *(nit)* — Lifetime is test-scoped: `start()` in `beforeAll`, `stop()` in `afterAll`. Sharing a single stub instance across spec files is a nit — call out the implicit coupling.
 - **TEST-30** *(blocker)* — Production code reads the upstream URL **at request time**, not at module load. `axios.create({ baseURL: process.env.X })` at the top of a module is a blocker — refactor to a `getBaseUrl()` method called inside the fetch. (This refactor is one of the two allowed production-code changes a test may introduce — see TEST-1.)
 - **TEST-31** *(blocker)* — No browser-level `page.route('**/api/external/*', ...)` interception, even for external services. The env-var override is the only mechanism.

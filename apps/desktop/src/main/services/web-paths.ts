@@ -4,7 +4,7 @@
  * Direct port of `apps/dashboard/src-tauri/src/commands/webserver.rs::resolve_web_dir`.
  *
  *   - In dev (Electron run from the repo): walk up from the compiled main
- *     entry to `<repo>/apps/web/`. We never trust `process.cwd()` because
+ *     entry to `<repo>/apps/hub/`. We never trust `process.cwd()` because
  *     Electron may be launched with a different working directory.
  *   - In a packaged app: `process.resourcesPath/web/` — matches the layout
  *     `electron-builder` will produce in Phase 8 (which mirrors the existing
@@ -40,13 +40,13 @@ export function resolveWebDir(opts: WebPathOptions): string {
     return dir;
   }
 
-  // Dev: walk up from app.getAppPath() looking for apps/web/dist/start-server.mjs.
+  // Dev: walk up from app.getAppPath() looking for apps/hub/dist/start-server.mjs.
   // Tauri uses CARGO_MANIFEST_DIR (compile-time); we use a runtime scan since
   // Node has no equivalent. Bounded depth so we fail loudly.
   const start = opts.appPath ?? process.cwd();
   let current = start;
   for (let i = 0; i < 8; i++) {
-    const candidate = join(current, "apps", "web");
+    const candidate = join(current, "apps", "hub");
     if (existsSync(join(candidate, SENTINEL))) {
       return candidate;
     }

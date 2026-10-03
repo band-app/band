@@ -5,7 +5,7 @@
 // "Opus 5.5" and "Medium", and the row that goes back to the default reads
 // "Default: Opus 5.5".
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
-import type { ResolvedDefaults } from "../../shared/chat-events";
+import type { ResolvedDefaults } from "@band-app/shared/chat-events";
 
 export interface ModelChoice {
   id: string;

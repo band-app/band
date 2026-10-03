@@ -53,7 +53,7 @@ Backend and frontend tests share the **same** server boot and the **same** fixtu
 
 Concretely for Band:
 
-- The real binary is `apps/web/dist/start-server.mjs`, spawned with `HOME` pointing at a fresh `mkdtempSync()` directory. It runs migrations against the SQLite DB inside that home automatically *(enforces TEST-3, TEST-34)*.
+- The real binary is `apps/hub/dist/start-server.mjs`, spawned with `HOME` pointing at a fresh `mkdtempSync()` directory. It runs migrations against the SQLite DB inside that home automatically *(enforces TEST-3, TEST-34)*.
 - External services Band calls out to (GitHub API, agent binaries' HTTP surfaces, etc.) get Express stubs on random ports. The server reads each upstream's URL from an env var at request time, which the fixture overrides *(enforces TEST-4, TEST-30)*.
 - Frontend tests boot exactly the same server and additionally drive the rendered UI through Playwright + page objects.
 
@@ -63,7 +63,7 @@ The layer-decision table is in `testing-criteria.md` §2 (rules `TEST-5`–`TEST
 
 | Change touches… | Write a… | Lives in… |
 |---|---|---|
-| HTTP / tRPC / WebSocket / SSE response shape, status, headers, side effects on disk or DB | **Backend API test** | `apps/web/tests/<feature>.test.ts` |
+| HTTP / tRPC / WebSocket / SSE response shape, status, headers, side effects on disk or DB | **Backend API test** | `apps/hub/tests/<feature>.test.ts` |
 | What the user sees in the rendered DOM, what URL they land on, what's saved in `localStorage` by client code | **Frontend test** | `apps/web/e2e/<feature>.spec.ts` |
 | Both | One of each. Don't conflate them. |
 
@@ -75,10 +75,10 @@ A feature that adds an endpoint *and* a UI button needs **two** tests *(enforces
 
 ### Where they live and what runs them
 
-- Path: `apps/web/tests/<feature>.test.ts`.
-- Runner: **vitest** (`describe` / `it` / `expect`) — `apps/web` is on vitest *(enforces TEST-8)*. Other packages use `node:test` per `CLAUDE.md` *(enforces TEST-9)*.
-- Command: `pnpm --filter @band-app/server test` (from repo root) or `pnpm test` (from `apps/web/`).
-- Server helper: `apps/web/tests/helpers/server-runtime.ts` — spawns the real production binary on a random port against a tmp home.
+- Path: `apps/hub/tests/<feature>.test.ts`.
+- Runner: **vitest** (`describe` / `it` / `expect`) — `apps/hub` and `apps/web` are on vitest *(enforces TEST-8)*. Other packages use `node:test` per `CLAUDE.md` *(enforces TEST-9)*.
+- Command: `pnpm --filter @band-app/server test` (from repo root) or `pnpm test` (from `apps/hub/`).
+- Server helper: `apps/hub/tests/helpers/server-runtime.ts` — spawns the real production binary on a random port against a tmp home.
 
 ### Minimal shape
 
@@ -178,7 +178,7 @@ Poll with a timeout. Never `setTimeout` to "wait for events to settle".
 
 - Path: `apps/web/e2e/<feature>.spec.ts`.
 - Runner: **Playwright** (`@playwright/test`).
-- Command: `pnpm --filter @band-app/server test:e2e`.
+- Command: `pnpm --filter @band-app/web test:e2e`.
 - Config: `apps/web/playwright.config.ts` — pins viewport, locale, and timezone for deterministic snapshots.
 - Server helper: `apps/web/e2e/helpers/server.ts` — `startServer()` boots the real production binary against a fresh tmp home *(enforces TEST-19)*. **Use it.**
 
@@ -341,7 +341,7 @@ We do **not** use MSW. Reasons, in order of weight:
 ### Fixture pattern
 
 ```ts
-// apps/web/tests/fixtures/catalog.ts  (works for backend OR frontend tests)
+// apps/hub/tests/fixtures/catalog.ts  (works for backend OR frontend tests)
 import express, { type Express, type Request, type Response } from "express";
 import type { Server } from "node:http";
 
@@ -460,7 +460,7 @@ Is the change user-observable in the rendered UI?
 │        ├── Drive via page objects
 │        └── Assert on DOM, localStorage, URL, request capture
 └── No (server-side only)
-    ├── Backend test (vitest, apps/web/tests/)
+    ├── Backend test (vitest, apps/hub/tests/)
     │   ├── fetch against the REAL server on port 0
     │   ├── Same Express fixtures as frontend tests
     │   └── Temp ~/.band/ + migrations

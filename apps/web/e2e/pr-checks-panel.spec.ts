@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { type GhInvocation, type GhStub, ghStub } from "../tests/fixtures/gh-stub";
+import { type GhInvocation, type GhStub, ghStub } from "../../hub/tests/fixtures/gh-stub";
 import {
   checkRunNode,
   checkSuiteNode,
@@ -26,7 +26,7 @@ import {
   jobUrl,
   pullRequestNode,
   reviewQueryData,
-} from "../tests/fixtures/github-review-data";
+} from "../../hub/tests/fixtures/github-review-data";
 import { acpStubEnv, stubRequests } from "./helpers/acp-stub";
 import { git, gitCommit } from "./helpers/git";
 import {

@@ -21,7 +21,7 @@
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
-import { createTsLspRepo } from "../tests/fixtures/ts-lsp-repo";
+import { createTsLspRepo } from "../../hub/tests/fixtures/ts-lsp-repo";
 import {
   cleanupTmpHome,
   createTmpHome,

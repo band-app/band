@@ -190,7 +190,7 @@ function makeSpawnOptions(
       ELECTRON_RUN_AS_NODE: "1",
       // Signal to the bundled web server that it's running inside a
       // packaged Electron app (not a dev `pnpm dev:desktop` run). Used by
-      // `apps/web/src/server/services/cli.ts::installCli` to pick the right error
+      // `apps/hub/src/server/services/cli.ts::installCli` to pick the right error
       // message when the sidecar can't be found: ".dmg user, try
       // reinstalling" vs. "developer, run cargo build first". Set only
       // when truly packaged so dev-electron stays on the dev message.
@@ -233,7 +233,7 @@ function makeSpawnOptions(
  * works even when the user has no system Node installed (or has the wrong
  * version, or a sparse `PATH` from a Finder/Spotlight launch). It also
  * guarantees the runtime ships `node:sqlite` as a built-in, which our
- * `apps/web/src/server/infra/db/connection.ts` relies on.
+ * `apps/hub/src/server/infra/db/connection.ts` relies on.
  */
 export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<ChildProcess> {
   const startScript = join(opts.webDir, "dist/start-server.mjs");
