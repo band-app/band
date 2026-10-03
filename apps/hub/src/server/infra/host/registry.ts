@@ -15,17 +15,25 @@ export class HostRegistry {
   hostForProject(_projectName: string): Host {
     return this.local;
   }
+
+  /** Every host the hub can place work on. */
+  all(): Host[] {
+    return [this.local];
+  }
 }
 
 let terminalBackend: TerminalBackend | null = null;
 
 /**
- * Called by `TerminalService` whenever it picks its backend, so `local.pty` is
- * the backend the terminal service uses. The registry can't import the
+ * Called by `TerminalService` whenever it picks the local backend, so
+ * `local.pty` is the backend the terminal service uses. Returns the backend it
+ * replaced. The registry can't import the
  * service, which depends on the workspace service that depends on the registry.
  */
-export function setLocalTerminalBackend(backend: TerminalBackend): void {
+export function setLocalTerminalBackend(backend: TerminalBackend): TerminalBackend | null {
+  const previous = terminalBackend;
   terminalBackend = backend;
+  return previous;
 }
 
 export const hostRegistry = new HostRegistry(

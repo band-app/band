@@ -1,7 +1,8 @@
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
-import { setLocalTerminalBackend } from "../infra/host/registry";
+import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { TerminalDaemonUnavailableError } from "../infra/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "../infra/terminals/in-process-backend";
@@ -84,8 +85,8 @@ const WorkspaceTerminalConfigSchema = z.object({
 /**
  * Business logic for the terminal domain.
  *
- * Services tier — coordinates the {@link TerminalBackend} (PTY lifecycle,
- * in this process or in the terminal daemon), the dockview layout store (so
+ * Services tier — coordinates each host's {@link TerminalBackend} (`host.pty`:
+ * PTY lifecycle, in this process or in the terminal daemon), the dockview layout store (so
  * a freshly spawned terminal survives a reload), and the workspace status
  * event bus. The backend stays oblivious to the workspace registry; the
  * service is the one that resolves a workspaceId to a worktree path and
@@ -98,38 +99,107 @@ const WorkspaceTerminalConfigSchema = z.object({
  *     spawning + attaching a live PTY.
  *   - The workspace router, for `getTerminalConfig`, and the workspace
  *     deletion cleanup (`killWorkspace` + `deleteLayout`).
- *   - `start-server.ts`, which picks the backend at boot and calls
+ *   - `start-server.ts`, which picks the local host's backend at boot and calls
  *     {@link close} on shutdown.
  */
 export class TerminalService {
-  private backend!: TerminalBackend;
-  private unsubscribeExit: (() => void) | null = null;
+  /** The backend each host's exit stream is subscribed to, so a replaced backend is noticed. */
+  private readonly subscriptions = new Map<
+    Host,
+    { backend: TerminalBackend; unsubscribe: () => void }
+  >();
+  /** terminalId -> the host it lives on. Filled by spawn, info, attach and listings. */
+  private readonly terminalHosts = new Map<string, Host>();
   /** terminalId -> exit listeners, so an exit only reaches its own viewers. */
   private readonly exitListeners = new Map<string, Set<(event: TerminalExitEvent) => void>>();
-  /** Tab titles for every open terminal, from one shared poll of the current backend. */
-  private readonly titles = new TitlePoller(() => this.backend.listAll());
+  /** Tab titles for every open terminal, from one shared poll of every host's backend. */
+  private readonly titles = new TitlePoller(() => this.listAll());
 
   constructor(backend: TerminalBackend = new InProcessTerminalBackend()) {
     this.setBackend(backend);
   }
 
   /**
-   * Switch where PTYs live. Called once at boot by `start-server.ts`, and
-   * again if the daemon backend cannot start and the service falls back to
-   * an in-process one. Sessions on the previous backend are not carried over.
+   * Switch where the local host's PTYs live. Called once at boot by
+   * `start-server.ts`, and again if the daemon backend cannot start and the
+   * service falls back to an in-process one. Sessions on the previous backend
+   * are not carried over.
    */
   setBackend(backend: TerminalBackend): void {
-    this.unsubscribeExit?.();
+    const previous = setLocalTerminalBackend(backend);
     // Release the one being replaced (a no-op for the empty boot default; a
     // disconnect for a daemon backend that failed to spawn).
-    if (this.backend) {
-      void this.backend.close().catch((err) => {
+    if (previous) {
+      void previous.close().catch((err) => {
         log.warn("failed to close the replaced terminal backend: %s", err);
       });
     }
-    this.backend = backend;
-    setLocalTerminalBackend(backend);
-    this.unsubscribeExit = backend.onExit((event) => this.handleExit(event));
+    this.subscribe(hostRegistry.local);
+  }
+
+  /** The host's terminal backend, with its exit stream wired to {@link handleExit}. */
+  private ptyOf(host: Host): TerminalBackend {
+    return this.subscribe(host);
+  }
+
+  private subscribe(host: Host): TerminalBackend {
+    const backend = host.pty;
+    const current = this.subscriptions.get(host);
+    if (current?.backend !== backend) {
+      current?.unsubscribe();
+      this.subscriptions.set(host, {
+        backend,
+        unsubscribe: backend.onExit((event) => this.handleExit(event)),
+      });
+    }
+    return backend;
+  }
+
+  /** The host a workspace's terminals live on. */
+  private hostOfWorkspace(workspaceId: string): Host {
+    return hostRegistry.hostFor(workspaceId);
+  }
+
+  /**
+   * The backend of the host a known terminal lives on, or `null` if no call
+   * has resolved this terminal yet (the server restarted and nothing has
+   * looked it up). {@link locate} resolves those by asking every host.
+   */
+  private knownBackend(terminalId: string): TerminalBackend | null {
+    const host = this.terminalHosts.get(terminalId);
+    return host ? this.ptyOf(host) : null;
+  }
+
+  /** Find the host that has `terminalId` live, remembering it. */
+  private async locate(
+    terminalId: string,
+  ): Promise<{ backend: TerminalBackend; entry: TerminalListEntry } | null> {
+    const known = this.knownBackend(terminalId);
+    if (known) {
+      const entry = await known.info(terminalId);
+      if (entry) return { backend: known, entry };
+      this.terminalHosts.delete(terminalId);
+    }
+    for (const host of hostRegistry.all()) {
+      const backend = this.ptyOf(host);
+      const entry = await backend.info(terminalId);
+      if (entry) {
+        this.terminalHosts.set(terminalId, host);
+        return { backend, entry };
+      }
+    }
+    return null;
+  }
+
+  /** Every live terminal on every host. */
+  private async listAll(): Promise<TerminalListEntry[]> {
+    const entries: TerminalListEntry[] = [];
+    for (const host of hostRegistry.all()) {
+      const hostEntries = await this.ptyOf(host).listAll();
+      for (const entry of hostEntries) this.terminalHosts.set(entry.terminalId, host);
+      entries.push(...hostEntries);
+    }
+    return entries;
   }
 
   // -------------------------------------------------------------------------
@@ -171,7 +241,8 @@ export class TerminalService {
       options,
       cleanupOnExit: opts?.cleanupOnExit,
     };
-    const backend = this.backend;
+    const host = this.hostOfWorkspace(workspaceId);
+    const backend = this.ptyOf(host);
     let entry: TerminalListEntry;
     try {
       entry = await backend.spawn(request);
@@ -180,15 +251,16 @@ export class TerminalService {
       // A terminal that dies with the server beats no terminal. Swap only
       // once: concurrent spawns that failed together must land on the same
       // replacement.
-      if (this.backend === backend) {
+      if (host.pty === backend) {
         log.error(
           { err },
           "terminal daemon unavailable; falling back to in-process terminals, which will not survive a server restart",
         );
         this.setBackend(new InProcessTerminalBackend());
       }
-      entry = await this.backend.spawn(request);
+      entry = await this.ptyOf(host).spawn(request);
     }
+    this.terminalHosts.set(terminalId, host);
 
     // The workspace can be removed while the spawn is in flight (e.g.
     // `band workspaces create --prompt` spawns fire-and-forget and a quick
@@ -197,7 +269,7 @@ export class TerminalService {
     // the removal already deleted. Shells now outlive the server, so a stray
     // one would otherwise run until the next boot's reconcile.
     if (!workspaceService.resolve(workspaceId)) {
-      await this.backend.kill(terminalId);
+      await this.ptyOf(host).kill(terminalId);
       throw new Error(`Workspace removed while its terminal was starting: ${workspaceId}`);
     }
 
@@ -222,7 +294,10 @@ export class TerminalService {
    * panel. Safe to call with an unknown terminalId — no-op.
    */
   async kill(terminalId: string): Promise<void> {
-    const killed = await this.backend.kill(terminalId);
+    const located = await this.locate(terminalId);
+    if (!located) return;
+    const killed = await located.backend.kill(terminalId);
+    this.terminalHosts.delete(terminalId);
     if (killed) {
       this.emitRemoved(killed.workspaceId, terminalId);
     }
@@ -246,6 +321,7 @@ export class TerminalService {
    * it in {@link kill}, so `killed` exits are skipped to avoid a double emit.
    */
   private handleExit(event: TerminalExitEvent): void {
+    this.terminalHosts.delete(event.terminalId);
     if (event.cleanupOnExit && !event.killed) {
       this.emitRemoved(event.workspaceId, event.terminalId);
     }
@@ -263,8 +339,11 @@ export class TerminalService {
    * deletion path — the caller is responsible for tearing down the layout
    * tree via {@link deleteLayout} as well.
    */
-  killWorkspace(workspaceId: string): Promise<void> {
-    return this.backend.killWorkspace(workspaceId);
+  async killWorkspace(workspaceId: string): Promise<void> {
+    const backend = this.ptyOf(this.hostOfWorkspace(workspaceId));
+    const entries = await backend.list(workspaceId);
+    await backend.killWorkspace(workspaceId);
+    for (const entry of entries) this.terminalHosts.delete(entry.terminalId);
   }
 
   /**
@@ -275,7 +354,7 @@ export class TerminalService {
    * desktop) never kills the other's terminals.
    */
   async reconcile(): Promise<void> {
-    const entries = await this.backend.listAll();
+    const entries = await this.listAll();
     // One kill per deleted workspace, not per terminal: each is a daemon round trip.
     const deleted = new Set(
       entries
@@ -284,13 +363,13 @@ export class TerminalService {
     );
     for (const workspaceId of deleted) {
       log.info({ workspaceId }, "killing terminals of a deleted workspace");
-      await this.backend.killWorkspace(workspaceId);
+      await this.ptyOf(this.hostOfWorkspace(workspaceId)).killWorkspace(workspaceId);
     }
   }
 
   /** Release the backend at server shutdown — see `TerminalBackend.close`. */
-  close(): Promise<void> {
-    return this.backend.close();
+  async close(): Promise<void> {
+    await Promise.all(hostRegistry.all().map((host) => this.ptyOf(host).close()));
   }
 
   /**
@@ -298,60 +377,70 @@ export class TerminalService {
    * start a fresh one — see `TerminalBackend.restartDaemon`. A no-op when the
    * backend has no separate daemon process.
    */
-  restartDaemon(): Promise<{ killedCount: number }> {
-    return this.backend.restartDaemon();
+  async restartDaemon(): Promise<{ killedCount: number }> {
+    let killedCount = 0;
+    for (const host of hostRegistry.all()) {
+      killedCount += (await this.ptyOf(host).restartDaemon()).killedCount;
+    }
+    return { killedCount };
   }
 
   // -------------------------------------------------------------------------
   // Per-terminal accessors
   // -------------------------------------------------------------------------
 
-  list(workspaceId: string): Promise<TerminalListEntry[]> {
-    return this.backend.list(workspaceId);
+  async list(workspaceId: string): Promise<TerminalListEntry[]> {
+    const host = this.hostOfWorkspace(workspaceId);
+    const entries = await this.ptyOf(host).list(workspaceId);
+    for (const entry of entries) this.terminalHosts.set(entry.terminalId, host);
+    return entries;
   }
 
   /** pid, foreground process name (`title`) and workspace, or `null` if not live. */
-  info(terminalId: string): Promise<TerminalListEntry | null> {
-    return this.backend.info(terminalId);
+  async info(terminalId: string): Promise<TerminalListEntry | null> {
+    return (await this.locate(terminalId))?.entry ?? null;
   }
 
-  getScrollback(terminalId: string, lines?: number): Promise<string | null> {
-    return this.backend.getScrollback(terminalId, lines);
+  async getScrollback(terminalId: string, lines?: number): Promise<string | null> {
+    const located = await this.locate(terminalId);
+    return located ? located.backend.getScrollback(terminalId, lines) : null;
   }
 
   /**
    * Snapshot plus live output from the point the snapshot was taken — the
    * replay-on-reconnect path. See `TerminalBackend.attach`.
    */
-  attach(
+  async attach(
     terminalId: string,
     dims?: { cols: number; rows: number },
   ): Promise<TerminalAttachment | null> {
-    return this.backend.attach(terminalId, dims);
+    const located = await this.locate(terminalId);
+    return located ? located.backend.attach(terminalId, dims) : null;
   }
 
-  write(terminalId: string, data: string): Promise<boolean> {
-    return this.backend.write(terminalId, data);
+  async write(terminalId: string, data: string): Promise<boolean> {
+    const located = await this.locate(terminalId);
+    return located ? located.backend.write(terminalId, data) : false;
   }
 
   /** Keystrokes from a live terminal socket: fire-and-forget, ordered with {@link resize}. */
   input(terminalId: string, data: string): void {
-    this.backend.input(terminalId, data);
+    this.knownBackend(terminalId)?.input(terminalId, data);
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
-    this.backend.resize(terminalId, cols, rows);
+    this.knownBackend(terminalId)?.resize(terminalId, cols, rows);
   }
 
   /** Force a live TUI to repaint after re-attach — see `TerminalPool.nudgeResize`. */
   nudgeResize(terminalId: string): void {
-    this.backend.nudgeResize(terminalId);
+    this.knownBackend(terminalId)?.nudgeResize(terminalId);
   }
 
   /**
    * Subscribe to one terminal's exit. Returns an unsubscribe function. Held
    * here rather than on the backend so it keeps working across
-   * {@link setBackend}.
+   * a backend swap.
    */
   onExit(terminalId: string, listener: (event: TerminalExitEvent) => void): () => void {
     return addKeyed(this.exitListeners, terminalId, listener);
