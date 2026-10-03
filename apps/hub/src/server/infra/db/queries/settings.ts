@@ -93,8 +93,8 @@ export interface Settings {
   tokenSecret?: string;
   /**
    * Extra browser origins allowed to call the hub from another origin (the
-   * UI on a static host or another port). Same-origin and `app://` / `file://`
-   * are always allowed. `BAND_CORS_ORIGINS` (comma-separated) adds to this list.
+   * UI on a static host or another port). Same-origin, `app://local` and
+   * `app://h-<12 hex>` are always allowed. `file://` and `null` need an entry. `BAND_CORS_ORIGINS` (comma-separated) adds to this list.
    */
   corsAllowedOrigins?: string[];
   autoStartTunnel?: boolean;

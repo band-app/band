@@ -26,12 +26,20 @@ import {
   LOCAL_APP_HOST,
 } from "./app-protocol.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
+import { type HubFallbackAction, hubUnreachableUrl } from "./hub-unreachable.js";
 import { resolveAppIcon } from "./icon.js";
-import { isTrustedSender, registerHubConfigSync } from "./ipc/hub.js";
+import { registerHubConfigSync } from "./ipc/hub.js";
 import { registerIpc } from "./ipc/register.js";
+import { isTrustedSender } from "./ipc/sender-guard.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
-import { type HubChoice, loadHubChoice, saveHubChoice } from "./services/hub-choice.js";
+import {
+  checkRemoteHub,
+  type HubChoice,
+  LOCAL_HUB_CHOICE,
+  loadHubChoice,
+  saveHubChoice,
+} from "./services/hub-choice.js";
 import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled, tryGetToken } from "./services/settings.js";
@@ -183,6 +191,10 @@ function trustedUiOrigins(): string[] {
   const origins = [appOriginForHost(state.appHost)];
   const dev = devWebUrl();
   if (dev) origins.push(`${new URL(dev).protocol}//${new URL(dev).host}`);
+  // With no UI build the window loads the local hub's own page.
+  if (!state.uiDir && state.hubChoice.mode === "local" && state.port) {
+    origins.push(`http://localhost:${state.port}`);
+  }
   return origins;
 }
 
@@ -265,10 +277,20 @@ function startActivityMonitorForLocalHub(win: BrowserWindow): void {
  */
 let switchingHub = false;
 
+/** Starts a switch after the IPC reply. False while another one runs, which the picker reports. */
+function scheduleHubSwitch(choice: HubChoice): boolean {
+  if (switchingHub) return false;
+  switchingHub = true;
+  setImmediate(() => void switchHub(choice));
+  return true;
+}
+
 async function switchHub(choice: HubChoice): Promise<void> {
   const win = state.mainWindow;
-  if (!win || win.isDestroyed() || switchingHub) return;
-  switchingHub = true;
+  if (!win || win.isDestroyed()) {
+    switchingHub = false;
+    return;
+  }
   const previous = state.hubChoice;
   try {
     if (choice.mode === "remote") {
@@ -305,6 +327,55 @@ async function switchHub(choice: HubChoice): Promise<void> {
     }
   } finally {
     switchingHub = false;
+  }
+}
+
+/** Resolves the wait in `recoverUnreachableHub` when the page's link is clicked. */
+let hubFallbackWaiter: ((action: HubFallbackAction) => void) | null = null;
+
+function nextHubFallbackAction(): Promise<HubFallbackAction> {
+  return new Promise((resolve) => {
+    hubFallbackWaiter = (action) => {
+      hubFallbackWaiter = null;
+      resolve(action);
+    };
+  });
+}
+
+/**
+ * The window shows the "hub unreachable" page. Retry checks the saved hub
+ * again and loads the UI once it answers. Use local starts the bundled hub for
+ * this run and leaves the saved remote choice alone, so the next launch asks
+ * again instead of silently forgetting the URL and token.
+ */
+async function recoverUnreachableHub(win: BrowserWindow, firstError: string): Promise<void> {
+  let error = firstError;
+  while (!win.isDestroyed()) {
+    const saved = state.hubChoice;
+    const action = await nextHubFallbackAction();
+    try {
+      if (action === "use-local") {
+        state.hubChoice = LOCAL_HUB_CHOICE;
+        const url = await connectHub(LOCAL_HUB_CHOICE);
+        startActivityMonitorForLocalHub(win);
+        await win.loadURL(url);
+        return;
+      }
+      if (saved.mode !== "remote") return;
+      const check = await checkRemoteHub(saved.url, saved.token);
+      if (check.ok) {
+        await win.loadURL(await connectHub(saved));
+        return;
+      }
+      error = check.error;
+    } catch (err) {
+      state.hubChoice = saved;
+      error = err instanceof Error ? err.message : String(err);
+      log.error({ err: error, action }, "leaving the unreachable-hub page failed");
+    }
+    if (!win.isDestroyed() && saved.mode === "remote") {
+      await win.loadURL(hubUnreachableUrl(saved.url, error));
+    }
   }
 }
 
@@ -425,11 +496,30 @@ async function bootstrap(): Promise<void> {
     );
   }
   // Answer the preload's hub-config read before any page can ask.
-  const unregisterHubConfig = registerHubConfigSync(() => state.rendererHub, trustedUiOrigins);
+  const unregisterHubConfig = registerHubConfigSync(
+    () => state.rendererHub,
+    (event) =>
+      state.mainWindow !== null && isTrustedSender(event, state.mainWindow, trustedUiOrigins()),
+  );
 
-  const url = await connectHub(state.hubChoice);
+  // A saved remote hub that is down must not leave a blank window: show a
+  // page with Retry and Use local instead of loading the UI against it.
+  const startupCheck =
+    state.hubChoice.mode === "remote"
+      ? await checkRemoteHub(state.hubChoice.url, state.hubChoice.token)
+      : ({ ok: true } as const);
+  const url = startupCheck.ok
+    ? await connectHub(state.hubChoice)
+    : hubUnreachableUrl(
+        state.hubChoice.mode === "remote" ? state.hubChoice.url : "",
+        startupCheck.error,
+      );
   log.info({ url: url.split("?")[0], hub: state.hubChoice.mode }, "loading url");
-  state.mainWindow = createMainWindow({ url });
+  state.mainWindow = createMainWindow({
+    url,
+    onHubFallbackAction: (action) => hubFallbackWaiter?.(action),
+  });
+  if (!startupCheck.ok) void recoverUnreachableHub(state.mainWindow, startupCheck.error);
 
   // Surface preload load failures, which otherwise fail silently and leave
   // `__BAND_DESKTOP__` undefined on `window` (collapses isDesktop everywhere).
@@ -490,14 +580,12 @@ async function bootstrap(): Promise<void> {
     mainWindow: state.mainWindow,
     getWebDir: () => state.webDir,
     isLocalHub: () => state.hubChoice.mode === "local",
+    isTrustedSender: (event) =>
+      state.mainWindow !== null && isTrustedSender(event, state.mainWindow, trustedUiOrigins()),
     hub: {
-      isTrustedSender: (event) =>
-        state.mainWindow !== null && isTrustedSender(event, state.mainWindow, trustedUiOrigins()),
       getChoice: () => state.hubChoice,
       // The reload replaces the page that asked, so it runs after the reply.
-      switchTo: (choice) => {
-        setImmediate(() => void switchHub(choice));
-      },
+      switchTo: scheduleHubSwitch,
     },
     managed: state.managed,
     browserManager: state.browserManager,

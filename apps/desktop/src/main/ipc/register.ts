@@ -1,7 +1,8 @@
 /**
  * Register every `ipcMain.handle` for the renderer's command surface.
  *
- * One `ipcMain.handle` per command. Handlers return Promises (or values that
+ * One `ipcMain.handle` per command, each refused unless the sender is the main
+ * window's top frame on a bundled `app://` origin (`sender-guard.ts`). Handlers return Promises (or values that
  * resolve to Promises via `Promise.resolve` semantics) so the renderer's
  * `invoke()` always returns a Promise.
  */
@@ -47,6 +48,7 @@ import {
   pickSaveFile,
   revealInFinder,
 } from "./macos-shell.js";
+import { guardedHandler } from "./sender-guard.js";
 import { getAppTitle } from "./window-title.js";
 
 export interface RegisterOptions {
@@ -56,6 +58,8 @@ export interface RegisterOptions {
   /** False while a remote hub is selected: there is no local hub to start or stop. */
   isLocalHub: () => boolean;
   hub: HubIpcDeps;
+  /** True only for the main window's top frame, showing the bundled UI. Checked on every channel. */
+  isTrustedSender: (event: Electron.IpcMainInvokeEvent) => boolean;
   managed: ManagedProcess;
   browserManager: BrowserGuestManager;
   /**
@@ -80,7 +84,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
     channel: string,
     fn: (args: T, event: Electron.IpcMainInvokeEvent) => unknown,
   ): void => {
-    const wrapped = (event: Electron.IpcMainInvokeEvent, args: T) => fn(args, event);
+    const wrapped = guardedHandler(opts.isTrustedSender, fn);
     ipcMain.handle(channel, wrapped);
     handlers.push([channel, wrapped as (args: unknown) => unknown]);
   };
