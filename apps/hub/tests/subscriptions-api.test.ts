@@ -221,6 +221,18 @@ describe("subscriptions api", () => {
     ).rejects.toThrow(/404/);
   });
 
+  it("refuses the subscription procedures without the server token", async () => {
+    const { url } = await boot();
+    const create = await fetch(`${url}/trpc/subscriptions.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "webhook", chatId: "x", workspaceId: WORKSPACE_ID }),
+    });
+    expect(create.status).toBe(401);
+    const list = await fetch(`${url}/trpc/subscriptions.list`);
+    expect(list.status).toBe(401);
+  });
+
   it("defaults the chat from an agent's headers", async () => {
     const { url } = await boot();
     const chatId = await newChat(url);

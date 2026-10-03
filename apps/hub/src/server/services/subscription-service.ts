@@ -307,8 +307,8 @@ export class SubscriptionService {
     const at = Date.now();
     try {
       this.ingest({
-        // One id per fire, so each tick is its own event.
-        id: `${at}`,
+        // One id per fire, so each tick is its own event even within a millisecond.
+        id: `${at}-${randomUUID()}`,
         source: "timer",
         kind: "timer",
         key: `timer:${id}`,
