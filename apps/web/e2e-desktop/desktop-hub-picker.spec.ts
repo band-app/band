@@ -39,6 +39,7 @@ import {
 import { isPackagedRun, type LaunchedDesktop, launchDesktop } from "./helpers/desktop-app";
 import { DesktopDashboardPage } from "./pages/DesktopDashboardPage";
 import { HubPickerPage } from "./pages/HubPickerPage";
+import { HubUnreachablePage } from "./pages/HubUnreachablePage";
 
 const LOCAL_TOKEN = "desktop-e2e-local-token";
 const REMOTE_TOKEN = "desktop-e2e-remote-token";
@@ -192,6 +193,40 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     // Nothing listens on the local hub's port, and it never wrote a server log.
     expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(false);
     expect(existsSync(join(hub.home, ".band", "server.log"))).toBe(false);
+    expect(app.cspViolations).toEqual([]);
+  });
+
+  test("a saved remote hub that is down offers Retry and Use local, and Use local starts the local hub", async () => {
+    const hub = await seedHome("localproj", LOCAL_REPLY, LOCAL_TOKEN);
+    homes.push(hub.home);
+    // Nothing listens on this port: the saved hub is down.
+    const deadPort = await getRandomPort();
+    writeFileSync(
+      join(hub.home, ".band", "desktop-hub.json"),
+      JSON.stringify({ mode: "remote", url: `http://127.0.0.1:${deadPort}`, token: REMOTE_TOKEN }),
+    );
+    const app = await launchDesktop({
+      home: hub.home,
+      hubPort: hub.port,
+      firstPage: "unreachable",
+      env: acpStubEnv(hub.home, { turns: [{ steps: [{ say: LOCAL_REPLY }] }] }),
+    });
+    desktop = app;
+    const unreachable = new HubUnreachablePage(app.window);
+    await unreachable.expectShown();
+    // No local hub yet: the window shows the choice instead of a blank page.
+    expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(false);
+
+    // Retry against the same dead hub keeps the page and says why.
+    await unreachable.clickRetry();
+    await unreachable.expectShown();
+    await unreachable.expectReasonShown();
+
+    await unreachable.clickUseLocal();
+    const dashboard = new DesktopDashboardPage(app.window);
+    await expect.poll(() => dashboard.url(), { timeout: 60_000 }).toMatch(/^app:\/\/local\//);
+    await dashboard.expectProjectListed("localproj");
+    expect(await localHubAnswers(hub.port, LOCAL_TOKEN)).toBe(true);
     expect(app.cspViolations).toEqual([]);
   });
 

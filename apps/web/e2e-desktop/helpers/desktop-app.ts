@@ -61,6 +61,8 @@ export async function launchDesktop(opts: {
   env?: Record<string, string>;
   /** The local hub's port from `settings.json`, freed on close. */
   hubPort?: number;
+  /** What the first window shows. `unreachable` is the "hub unreachable" page, a `data:` URL. */
+  firstPage?: "app" | "unreachable";
 }): Promise<LaunchedDesktop> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -91,14 +93,15 @@ export async function launchDesktop(opts: {
   });
 
   // The dashboard window is the one on `app://`; the DevTools window is not.
-  const find = () => app.windows().find((page) => page.url().startsWith("app://"));
+  const prefix = opts.firstPage === "unreachable" ? "data:text/html" : "app://";
+  const find = () => app.windows().find((page) => page.url().startsWith(prefix));
   const deadline = Date.now() + 60_000;
   let window = find();
   while (!window && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 250));
     window = find();
   }
-  if (!window) throw new Error("The desktop app never opened a window on app://");
+  if (!window) throw new Error(`The desktop app never opened a window on ${prefix}`);
 
   return {
     app,

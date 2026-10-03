@@ -8,6 +8,7 @@ import WebSocket from "ws";
 import { seedSettings } from "./helpers/seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 
+const REMOTE_HUB_ORIGIN = "app://h-0123456789ab";
 const TOKEN = "cross-origin-test-token";
 const ALLOWED_ORIGIN = "http://ui.allowed.test";
 const SETTINGS_ORIGIN = "http://ui.settings.test";
@@ -60,17 +61,6 @@ describe("HTTP auth", () => {
     expect(bad.status).toBe(401);
   });
 
-  it("ignores the cookie from an opaque origin but accepts its Bearer token", async () => {
-    const withCookie = await fetch(`${server.url}/trpc/projects.list`, {
-      headers: { Cookie: `band_token=${TOKEN}`, Origin: "null" },
-    });
-    expect(withCookie.status).toBe(401);
-    const withBearer = await fetch(`${server.url}/trpc/projects.list`, {
-      headers: { ...bearer, Origin: "null" },
-    });
-    expect(withBearer.status).toBe(200);
-  });
-
   it("returns 401 for an unauthenticated POST", async () => {
     const res = await fetch(`${server.url}/api/chats/x/submit`, { method: "POST", body: "{}" });
     expect(res.status).toBe(401);
@@ -89,7 +79,14 @@ describe("HTTP auth", () => {
 
 describe("CORS allowlist", () => {
   it("answers a preflight from an allowed origin without credentials", async () => {
-    for (const origin of [ALLOWED_ORIGIN, SETTINGS_ORIGIN, "app://local", "null"]) {
+    for (const origin of ["app://local", REMOTE_HUB_ORIGIN]) {
+      const res = await fetch(`${server.url}/trpc/projects.list`, {
+        headers: { ...bearer, Origin: origin },
+      });
+      expect(res.status, origin).toBe(200);
+      expect(res.headers.get("access-control-allow-origin"), origin).toBe(origin);
+    }
+    for (const origin of [ALLOWED_ORIGIN, SETTINGS_ORIGIN, "app://local", REMOTE_HUB_ORIGIN]) {
       const res = await fetch(`${server.url}/trpc/projects.list`, {
         method: "OPTIONS",
         headers: {
@@ -131,6 +128,28 @@ describe("CORS allowlist", () => {
     expect(await res.text()).toBe("Origin not allowed");
   });
 
+  it("rejects app:// hosts that are not Band's, file:// and null", async () => {
+    for (const origin of [
+      "app://evil",
+      "app://h-0123456789a",
+      "app://h-0123456789abc",
+      "app://h-0123456789AB",
+      "file://",
+      "null",
+    ]) {
+      const preflight = await fetch(`${server.url}/trpc/projects.list`, {
+        method: "OPTIONS",
+        headers: { Origin: origin, "Access-Control-Request-Method": "GET" },
+      });
+      expect(preflight.status, origin).toBe(403);
+      const res = await fetch(`${server.url}/trpc/projects.list`, {
+        headers: { ...bearer, Origin: origin },
+      });
+      expect(res.status, origin).toBe(403);
+      expect(res.headers.get("access-control-allow-origin"), origin).toBeNull();
+    }
+  });
+
   it("treats the server's own origin as same-origin", async () => {
     const res = await fetch(`${server.url}/trpc/projects.list`, {
       headers: { Cookie: `band_token=${TOKEN}`, Origin: server.url },
@@ -168,6 +187,34 @@ const WS_PATHS = [
   "/lsp?workspaceId=none&lang=ts",
   "/cdp",
 ];
+
+describe("CORS with null configured", () => {
+  let nullHome: string;
+  let nullServer: ServerHandle;
+
+  beforeAll(async () => {
+    nullHome = createTmpHome("band-cross-origin-null-");
+    seedSettings(nullHome, { tokenSecret: TOKEN });
+    nullServer = await startServer({ tmpHome: nullHome, env: { BAND_CORS_ORIGINS: "null" } });
+  }, 60_000);
+
+  afterAll(async () => {
+    await nullServer?.close();
+    rmSync(nullHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+
+  it("allows Origin null only when it is configured, and ignores the cookie from it", async () => {
+    const withCookie = await fetch(`${nullServer.url}/trpc/projects.list`, {
+      headers: { Cookie: `band_token=${TOKEN}`, Origin: "null" },
+    });
+    expect(withCookie.status).toBe(401);
+    const withBearer = await fetch(`${nullServer.url}/trpc/projects.list`, {
+      headers: { ...bearer, Origin: "null" },
+    });
+    expect(withBearer.status).toBe(200);
+    expect(withBearer.headers.get("access-control-allow-origin")).toBe("null");
+  });
+});
 
 describe("WebSocket auth", () => {
   for (const path of WS_PATHS) {
