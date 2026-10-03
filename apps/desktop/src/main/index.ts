@@ -229,9 +229,10 @@ async function connectHub(choice: HubChoice): Promise<string> {
     appPath: app.getAppPath(),
   });
   let token: string;
-  if (state.managed.isRunning() && tryGetToken()) {
+  const runningToken = state.managed.isRunning() ? tryGetToken() : null;
+  if (runningToken) {
     // Switching back to local while the hub we spawned is still up.
-    token = tryGetToken() as string;
+    token = runningToken;
   } else {
     const started = await ensureWebserverRunning({
       webDir: state.webDir,

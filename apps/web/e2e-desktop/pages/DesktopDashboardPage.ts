@@ -36,7 +36,7 @@ export class DesktopDashboardPage {
       await this.gotoDeepLink(workspaceId);
       // A workspace with no tabs shows an empty state with "New agent"; one
       // with tabs has the "+" button the chat page object uses.
-      const emptyStateAgent = this.page.getByRole("button", { name: "New agent" });
+      const emptyStateAgent = this.page.getByTestId("workspace-center__empty-new-agent");
       const plus = this.page.getByTestId("workspace-center__new-tab-button").first();
       await expect(plus.or(emptyStateAgent).first()).toBeVisible({ timeout: 30_000 });
       if (await emptyStateAgent.isVisible()) {
@@ -92,7 +92,7 @@ export class DesktopDashboardPage {
   /** Open a browser tab from the empty workspace's "New browser" button. */
   async openBrowserTab(): Promise<void> {
     await test.step("Open a browser tab", async () => {
-      await this.page.getByRole("button", { name: "New browser" }).click();
+      await this.page.getByTestId("workspace-center__empty-new-browser").click();
     });
   }
 
