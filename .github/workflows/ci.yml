@@ -345,6 +345,7 @@ jobs:
     outputs:
       cli: ${{ steps.filter.outputs.cli }}
       web: ${{ steps.filter.outputs.web }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -378,6 +379,7 @@ jobs:
           run_all() {
             echo "cli=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "docker=true" >> "$GITHUB_OUTPUT"
             exit 0
           }
 
@@ -421,6 +423,56 @@ jobs:
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
           fi
+
+          # Docker: the image builds the Rust CLI, the hub and the UI, so it
+          # depends on the Dockerfile, the build scripts, every app, the
+          # packages and plugins, the lockfile and this workflow file.
+          if [ "$EVENT_NAME" = "push" ] || grep -qE '^(docker/|\.dockerignore$|apps/|packages/|plugins/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.github/workflows/ci\.yml$)' <<< "$CHANGED"; then
+            echo "docker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Builds docker/Dockerfile and starts the image. #743 turned the UI into a
+  # static SPA whose shell is prerendered at build time. The prerender failed
+  # silently inside the image, so it built fine and crashed at start with
+  # ENOENT on _shell.html. Nothing else in CI builds the image.
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    needs: macos-changes
+    if: needs.macos-changes.outputs.docker == 'true'
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build image
+        run: docker build -f docker/Dockerfile -t band-check . 2>&1 | tee docker-build.log
+
+      - name: Check the shell was prerendered
+        run: |
+          grep -E '\[prerender\] Prerendered [1-9][0-9]* pages' docker-build.log
+          docker run --rm --entrypoint test band-check -f dist/client/_shell.html
+
+      - name: Smoke-run the image
+        run: |
+          docker run -d --name band-smoke -p 3456:3456 -e BAND_ACCESS_TOKEN=ci-smoke band-check
+          for i in $(seq 1 30); do
+            code=$(curl -s -o page.html -w '%{http_code}' "http://localhost:3456/?token=ci-smoke" || true)
+            [ "$code" = 200 ] && break
+            sleep 1
+          done
+          if [ "$code" != 200 ] || ! grep -qi '<html' page.html; then
+            echo "GET /?token=... returned $code" >&2
+            docker logs band-smoke >&2
+            exit 1
+          fi
+          test "$(docker inspect -f '{{.State.Running}}' band-smoke)" = true
+
+      - name: Container logs
+        if: failure()
+        run: docker logs band-smoke || true
 
   cli-macos:
     name: CLI Integration Tests (macOS)

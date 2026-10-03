@@ -55,6 +55,13 @@ export default defineConfig(({ command }) => ({
   server: {
     allowedHosts: [".trycloudflare.com"],
   },
+  // The shell prerender fetches the preview server at `localhost`. Left to
+  // default, the server binds whichever of ::1 / 127.0.0.1 resolves first, and
+  // on Linux (Docker, CI) that is not the one the fetch connects to, so the
+  // crawl fails with ECONNREFUSED and writes no shell. Pin both ends to IPv4.
+  preview: {
+    host: "127.0.0.1",
+  },
   define: {
     __BAND_VERSION__: JSON.stringify(buildInfo.version),
     __BAND_BUILD_SHA__: JSON.stringify(buildInfo.sha),
