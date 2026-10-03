@@ -160,6 +160,21 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       await host.fs.rm(join(dir, "moved"), { force: true });
     });
 
+    it("globs, resolves real paths and makes private temp dirs", async () => {
+      const root = join(fixture.workDir, "globbed");
+      await host.fs.mkdir(join(root, "sub"), { recursive: true });
+      await host.fs.writeFile(join(root, "sub", "a.txt"), "a", { mode: 0o600 });
+      await host.fs.writeFile(join(root, "b.md"), "b");
+      assert.deepEqual(await host.fs.glob("sub/*.txt", root), [join("sub", "a.txt")]);
+      assert.equal(
+        await host.fs.realpath(join(root, "sub", "..", "b.md")),
+        await host.fs.realpath(join(root, "b.md")),
+      );
+      const tmp = await host.fs.mkdtemp("band-contract-");
+      assert.equal((await host.fs.stat(tmp)).kind, "directory");
+      await host.fs.rm(tmp, { recursive: true });
+    });
+
     it("streams file changes and stops on abort", async () => {
       const dir = join(fixture.workDir, "watched");
       await host.fs.mkdir(dir, { recursive: true });
@@ -281,6 +296,18 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         await host.scripts.prepare({ projectPath: repo, worktreePath: repo, label: "setup" }),
         null,
       );
+    });
+
+    it("reads a script's command from the config", async () => {
+      const project = join(fixture.workDir, "commanded");
+      await host.fs.mkdir(join(project, ".band"), { recursive: true });
+      await host.fs.writeFile(
+        join(project, ".band", "config.json"),
+        JSON.stringify({ teardown: "echo bye" }),
+      );
+      const workspace = { projectPath: project, worktreePath: project };
+      assert.equal(await host.scripts.command({ ...workspace, label: "teardown" }), "echo bye");
+      assert.equal(await host.scripts.command({ ...workspace, label: "setup" }), null);
     });
 
     it("prepares a project's setup script", async () => {

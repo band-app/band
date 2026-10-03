@@ -165,8 +165,14 @@ export interface HostFs {
   /** Rejects when the path does not exist. */
   stat(path: string): Promise<FsStat>;
   readFile(path: string): Promise<Uint8Array>;
-  /** Creates the file or replaces its content. The parent directory must exist. */
-  writeFile(path: string, data: string | Uint8Array): Promise<void>;
+  /** Creates the file or replaces its content. The parent directory must exist. `mode` sets the permissions of a new file. */
+  writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
+  /** The canonical path, with every symlink resolved. Rejects when the path does not exist. */
+  realpath(path: string): Promise<string>;
+  /** Paths under `cwd` matching the glob `pattern`, relative to `cwd`. */
+  glob(pattern: string, cwd: string): Promise<string[]>;
+  /** Creates a private (mode 0700) directory in the host's temp dir, named from `prefix`, and returns its path. */
+  mkdtemp(prefix: string): Promise<string>;
   list(path: string): Promise<FsEntry[]>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   /** Removes a file or directory tree. Rejects when the path is missing unless `force` is set. */
@@ -279,7 +285,23 @@ export interface ScriptPlan {
   dispose(): void;
 }
 
+/** Where a workspace's `.band/config.json` lives. */
+export interface ScriptWorkspace {
+  projectPath: string;
+  worktreePath: string;
+}
+
 export interface HostScripts {
+  /**
+   * The workspace's `setup` or `teardown` command as written in
+   * `.band/config.json`, or `null` when it declares none.
+   */
+  command(workspace: ScriptWorkspace & { label: ScriptLabel }): Promise<string | null>;
+  /**
+   * Runs `script` in `cwd` without a terminal (the Windows path, through
+   * `cmd.exe`). Resolves with its exit code, or `null` when `timeoutMs` passes.
+   */
+  runHidden(script: string, cwd: string, timeoutMs?: number): Promise<number | null>;
   /**
    * Reads the workspace's `.band/config.json` (worktree first, then the
    * project checkout) and prepares its `setup` or `teardown` script. Resolves
