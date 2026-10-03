@@ -5,10 +5,11 @@ export const SUMMARY_LIMIT = 500;
 
 /**
  * Keeps text from closing or opening a block of its own: angle brackets
- * become entities, so `</untrusted-event>` in a summary stays text.
+ * and double quotes become entities, so `</untrusted-event>` in a summary
+ * stays text and a quote in `source` or `kind` can't end the tag attribute.
  */
 function escapeText(text: string): string {
-  return text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function capSummary(summary: string): string {

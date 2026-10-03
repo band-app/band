@@ -43,6 +43,14 @@ function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, env: gitEnv, stdio: "ignore" });
 }
 
+const ENV_KEYS = [
+  "BAND_HOME",
+  "BAND_TEST_ACP_LOG",
+  "BAND_TEST_ACP_STATE",
+  "BAND_TEST_ACP_SCENARIO",
+] as const;
+const originalEnv: Record<string, string | undefined> = {};
+
 let home: string;
 let stubLog: string;
 let seq = 0;
@@ -97,6 +105,7 @@ function subscribeChat(key: string, over: Record<string, unknown> = {}) {
 }
 
 beforeAll(() => {
+  for (const key of ENV_KEYS) originalEnv[key] = process.env[key];
   home = realpathSync(createTmpHome("band-subscriptions-"));
   process.env.BAND_HOME = join(home, ".band");
   assertTempBandHome();
@@ -144,6 +153,10 @@ afterAll(() => {
     agentSessionService.stop(chat.id);
   }
   closeDb();
+  for (const key of ENV_KEYS) {
+    if (originalEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = originalEnv[key];
+  }
   rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -216,8 +229,7 @@ describe("subscriptions", () => {
     expect(promptsAbout(key)).toHaveLength(2);
 
     const expiredKey = uniqueKey();
-    const { sub: expired } = subscribeChat(expiredKey, { expiresAt: Date.now() + 150 });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const { sub: expired } = subscribeChat(expiredKey, { expiresAt: Date.now() - 1 });
     subscriptionService.ingest(event(expiredKey));
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(promptsAbout(expiredKey)).toHaveLength(0);
@@ -249,7 +261,7 @@ describe("subscriptions", () => {
     subscriptionService.ingest(event(chatKey));
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(promptsAbout(chatKey)).toHaveLength(0);
-    expect(subscriptionService.events(sub.id)).toHaveLength(0);
+    expect(subscriptionService.listEvents(sub.id)).toHaveLength(0);
 
     const featureChat = chatService.create(FEATURE);
     subscriptionService.create({

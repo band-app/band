@@ -145,7 +145,7 @@ export class SubscriptionService {
   }
 
   /** Events recorded for a subscription, with delivery times. */
-  events(subscriptionId: string) {
+  listEvents(subscriptionId: string) {
     return this.queries.events(subscriptionId);
   }
 
@@ -225,7 +225,7 @@ export class SubscriptionService {
       Date.now(),
     );
     const wakeups = sub.wakeups + 1;
-    this.queries.incrementWakeups(id, wakeups);
+    this.queries.setWakeups(id, wakeups);
     emit({
       kind: "subscription-delivered",
       subscriptionId: id,

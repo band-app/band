@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../connection";
 import { subscriptionEvents, subscriptions } from "../schema";
 
@@ -59,7 +59,7 @@ export class SubscriptionQueries {
     return row ? toRecord(row) : undefined;
   }
 
-  incrementWakeups(id: string, wakeups: number): void {
+  setWakeups(id: string, wakeups: number): void {
     getDb().update(subscriptions).set({ wakeups }).where(eq(subscriptions.id, id)).run();
   }
 
@@ -92,13 +92,14 @@ export class SubscriptionQueries {
   }
 
   markDelivered(eventIds: string[], deliveredAt: number): void {
-    const db = getDb();
-    for (const eventId of eventIds) {
-      db.update(subscriptionEvents)
-        .set({ deliveredAt })
-        .where(and(eq(subscriptionEvents.eventId, eventId), isNull(subscriptionEvents.deliveredAt)))
-        .run();
-    }
+    if (eventIds.length === 0) return;
+    getDb()
+      .update(subscriptionEvents)
+      .set({ deliveredAt })
+      .where(
+        and(inArray(subscriptionEvents.eventId, eventIds), isNull(subscriptionEvents.deliveredAt)),
+      )
+      .run();
   }
 
   events(subscriptionId: string): SubscriptionEventRecord[] {
