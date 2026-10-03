@@ -238,7 +238,11 @@ export interface HostSearch {
 // lsp and acp
 // ---------------------------------------------------------------------------
 
-/** A byte pipe to a process on the host. */
+/**
+ * A byte pipe to a process on the host. Writes and output are raw bytes, with
+ * whatever framing the process speaks. Writes after the process ends or the
+ * pipe closes are dropped.
+ */
 export interface Duplex {
   write(chunk: Uint8Array | string): void;
   readonly output: Stream<Uint8Array>;
@@ -247,8 +251,21 @@ export interface Duplex {
 }
 
 export interface HostLsp {
-  /** Opens a stdio connection to the language server for `lang` in the workspace. */
+  /**
+   * Opens a stdio connection to the language server for `lang` in the
+   * workspace, starting it in `root` if it isn't running. Every connection to
+   * one workspace and language shares the server and receives all its output.
+   * `output` ends when the server exits or the connection closes. Rejects when
+   * `lang` has no server or the server cannot start.
+   */
   connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
+  /**
+   * Signals the workspace's language servers to stop. Resolves without waiting
+   * for them to exit. Each connection's output ends once its server has.
+   */
+  killWorkspace(workspaceId: string): Promise<void>;
+  /** Stops every language server on the host. */
+  killAll(): Promise<void>;
 }
 
 /** What it takes to start an agent's ACP adapter. */
