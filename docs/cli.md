@@ -1,6 +1,6 @@
 # Band CLI
 
-The CLI is split into six domain-specific skills, each authored as its own `SKILL.md` with its own command reference:
+The CLI is split into seven domain-specific skills, each authored as its own `SKILL.md` with its own command reference:
 
 - [`apps/cli/skills/band/SKILL.md`](../apps/cli/skills/band/SKILL.md) — workspaces, projects, cronjobs, tunnel, settings, schema, notify, skills install.
 - [`apps/cli/skills/band-chat/SKILL.md`](../apps/cli/skills/band-chat/SKILL.md) — chat panes (`band chats ...`), including label management.
@@ -8,6 +8,7 @@ The CLI is split into six domain-specific skills, each authored as its own `SKIL
 - [`apps/cli/skills/band-browser/SKILL.md`](../apps/cli/skills/band-browser/SKILL.md) — browser tabs (`band browsers ...`).
 - [`apps/cli/skills/band-start/SKILL.md`](../apps/cli/skills/band-start/SKILL.md) — kickoff flow (`band workspaces create --prompt ...`).
 - [`apps/cli/skills/band-loop/SKILL.md`](../apps/cli/skills/band-loop/SKILL.md) — recurring agent prompts (`band cronjobs ...`).
+- [`apps/cli/skills/band-subscribe/SKILL.md`](../apps/cli/skills/band-subscribe/SKILL.md) — wait for PR reviews, CI, webhooks and timers (`band subscriptions ...`).
 
 Run `band schema` for live introspection of every command, or `band <command> --help` for inline help.
 

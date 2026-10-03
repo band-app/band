@@ -1616,6 +1616,288 @@ fn chat_send_while_agent_runs_queues_the_message() {
 
 // --- Cronjobs tests ---
 
+// --- Subscriptions tests ---
+
+/// A workspace with one chat, and the environment an agent in that chat has.
+fn subscriptions_chat(env: &TestEnv) -> (String, String) {
+    let created = env.band(&["workspaces", "create", "my-project", "feat/listen"]);
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let workspace_id = "my-project-feat-listen".to_string();
+    let chat = env.band(&["chats", "create", &workspace_id, "--output", "json"]);
+    assert!(chat.status.success(), "stderr: {}", stderr(&chat));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&chat)).unwrap();
+    let chat_id = json["chat"]["id"].as_str().expect("chat id").to_string();
+    (workspace_id, chat_id)
+}
+
+/// A `gh` stand-in that answers `pr view ... -q .headRefName` with a branch.
+fn gh_stub(dir: &Path, branch: &str) -> PathBuf {
+    let path = dir.join("gh-stub.sh");
+    fs::write(&path, format!("#!/bin/sh\necho {branch}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path
+}
+
+fn json_of(output: &std::process::Output) -> serde_json::Value {
+    serde_json::from_str(&stdout(output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(output)))
+}
+
+#[test]
+fn subscriptions_create_list_remove_use_the_agents_chat() {
+    let env = TestEnv::new();
+    let (workspace_id, chat_id) = subscriptions_chat(&env);
+    let gh = gh_stub(env.tmp.path(), "feat/login");
+    let agent_env = [
+        ("BAND_CHAT_ID", chat_id.as_str()),
+        ("BAND_WORKSPACE_ID", workspace_id.as_str()),
+        ("BAND_GH_BIN", gh.to_str().unwrap()),
+    ];
+
+    // `--pr` with `--reviews --ci` is two subscriptions: PR activity and CI.
+    let created = env.band_with_env(
+        &[
+            "subscriptions",
+            "create",
+            "--pr",
+            "o/r#1",
+            "--reviews",
+            "--ci",
+            "--output",
+            "json",
+        ],
+        &agent_env,
+    );
+    assert!(created.status.success(), "stderr: {}", stderr(&created));
+    let created = json_of(&created);
+    let subs = created["subscriptions"].as_array().expect("subscriptions");
+    assert_eq!(subs.len(), 2, "created: {created}");
+    let keys: Vec<&str> = subs
+        .iter()
+        .map(|s| s["filterKey"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"github:pr:o/r#1"), "keys: {keys:?}");
+    assert!(keys.contains(&"github:ci:o/r@feat/login"), "keys: {keys:?}");
+    for sub in subs {
+        assert_eq!(sub["chatId"], chat_id.as_str());
+        assert_eq!(sub["workspaceId"], workspace_id.as_str());
+    }
+
+    // `list` with no flags lists the agent's own chat.
+    let listed = env.band_with_env(&["subscriptions", "list", "--output", "json"], &agent_env);
+    assert!(listed.status.success(), "stderr: {}", stderr(&listed));
+    let listed = json_of(&listed);
+    let listed_subs = listed["subscriptions"].as_array().expect("subscriptions");
+    let mut listed_ids: Vec<&str> = listed_subs
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    let mut created_ids: Vec<&str> = subs.iter().map(|s| s["id"].as_str().unwrap()).collect();
+    listed_ids.sort_unstable();
+    created_ids.sort_unstable();
+    assert_eq!(listed_ids, created_ids);
+
+    // The text table names what each one watches.
+    let text = env.band_with_env(&["subscriptions", "list"], &agent_env);
+    let text = stdout(&text);
+    assert!(text.contains("PR o/r#1"), "text: {text}");
+    assert!(text.contains("CI on o/r@feat/login"), "text: {text}");
+    assert!(text.contains("0/10"), "text: {text}");
+
+    // `--workspace` lists the workspace even though `BAND_CHAT_ID` is set.
+    let by_workspace = env.band_with_env(
+        &[
+            "subscriptions",
+            "list",
+            "--workspace",
+            &workspace_id,
+            "--output",
+            "json",
+        ],
+        &agent_env,
+    );
+    assert!(
+        by_workspace.status.success(),
+        "stderr: {}",
+        stderr(&by_workspace)
+    );
+    assert_eq!(
+        json_of(&by_workspace)["subscriptions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // `remove` deletes one and leaves the other.
+    let doomed = created_ids[0];
+    let removed = env.band_with_env(&["subscriptions", "remove", doomed], &agent_env);
+    assert!(removed.status.success(), "stderr: {}", stderr(&removed));
+    let after =
+        json_of(&env.band_with_env(&["subscriptions", "list", "--output", "json"], &agent_env));
+    let after_ids: Vec<&str> = after["subscriptions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(after_ids, vec![created_ids[1]]);
+
+    // Removing it again fails.
+    let again = env.band_with_env(&["subscriptions", "remove", doomed], &agent_env);
+    assert!(!again.status.success());
+}
+
+#[test]
+fn subscriptions_create_timer_branch_and_webhook() {
+    let env = TestEnv::new();
+    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let agent_env = [("BAND_CHAT_ID", chat_id.as_str())];
+
+    let timer = json_of(&env.band_with_env(
+        &["subscriptions", "create", "--at", "10m", "--output", "json"],
+        &agent_env,
+    ));
+    let timer = &timer["subscriptions"][0];
+    assert_eq!(timer["source"], "timer");
+    assert_eq!(
+        timer["maxWakeups"], 1,
+        "a one-off timer fires once: {timer}"
+    );
+
+    let cron = json_of(&env.band_with_env(
+        &[
+            "subscriptions",
+            "create",
+            "--cron",
+            "0 9 * * *",
+            "--max-wakeups",
+            "3",
+            "--output",
+            "json",
+        ],
+        &agent_env,
+    ));
+    assert_eq!(cron["subscriptions"][0]["cron"], "0 9 * * *");
+    assert_eq!(cron["subscriptions"][0]["maxWakeups"], 3);
+
+    let branch = json_of(&env.band_with_env(
+        &[
+            "subscriptions",
+            "create",
+            "--branch",
+            "o/r@main",
+            "--ci",
+            "--output",
+            "json",
+        ],
+        &agent_env,
+    ));
+    assert_eq!(
+        branch["subscriptions"][0]["filterKey"],
+        "github:ci:o/r@main"
+    );
+
+    // A webhook prints its path and a token once, and the list never shows the token.
+    let hook = env.band_with_env(&["subscriptions", "create", "--webhook"], &agent_env);
+    assert!(hook.status.success(), "stderr: {}", stderr(&hook));
+    let hook = stdout(&hook);
+    assert!(hook.contains("POST /api/hooks/"), "text: {hook}");
+    assert!(hook.contains("X-Band-Webhook-Token: "), "text: {hook}");
+    let listed = env.band_with_env(&["subscriptions", "list", "--output", "json"], &agent_env);
+    assert!(
+        !stdout(&listed).contains("secretHash"),
+        "list leaked the secret: {}",
+        stdout(&listed)
+    );
+}
+
+#[test]
+fn subscriptions_create_rejects_bad_input() {
+    let env = TestEnv::new();
+    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let agent_env = [("BAND_CHAT_ID", chat_id.as_str())];
+
+    // Outside a chat there is nothing to subscribe.
+    let no_chat = env.band(&["subscriptions", "create", "--at", "10m"]);
+    assert!(!no_chat.status.success());
+    assert!(
+        stderr(&no_chat).contains("BAND_CHAT_ID"),
+        "stderr: {}",
+        stderr(&no_chat)
+    );
+
+    let none = env.band_with_env(&["subscriptions", "create"], &agent_env);
+    assert!(!none.status.success());
+    assert!(
+        stderr(&none).contains("exactly one"),
+        "stderr: {}",
+        stderr(&none)
+    );
+
+    let two = env.band_with_env(
+        &["subscriptions", "create", "--webhook", "--at", "10m"],
+        &agent_env,
+    );
+    assert!(!two.status.success());
+
+    let bad_pr = env.band_with_env(&["subscriptions", "create", "--pr", "nonsense"], &agent_env);
+    assert!(!bad_pr.status.success());
+    assert!(stderr(&bad_pr).contains("owner/repo#N"));
+
+    let bad_at = env.band_with_env(&["subscriptions", "create", "--at", "soon"], &agent_env);
+    assert!(!bad_at.status.success());
+
+    let reviews_alone = env.band_with_env(
+        &["subscriptions", "create", "--at", "10m", "--reviews"],
+        &agent_env,
+    );
+    assert!(!reviews_alone.status.success());
+
+    // Nothing was created by any of the failures.
+    let listed =
+        json_of(&env.band_with_env(&["subscriptions", "list", "--output", "json"], &agent_env));
+    assert_eq!(listed["subscriptions"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn subscriptions_create_ci_creates_nothing_when_the_branch_lookup_fails() {
+    let env = TestEnv::new();
+    let (_workspace_id, chat_id) = subscriptions_chat(&env);
+    let missing = env.tmp.path().join("no-such-gh");
+    let agent_env = [
+        ("BAND_CHAT_ID", chat_id.as_str()),
+        ("BAND_GH_BIN", missing.to_str().unwrap()),
+    ];
+
+    let out = env.band_with_env(
+        &[
+            "subscriptions",
+            "create",
+            "--pr",
+            "o/r#1",
+            "--reviews",
+            "--ci",
+        ],
+        &agent_env,
+    );
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("--branch o/r@<branch> --ci"),
+        "stderr: {}",
+        stderr(&out)
+    );
+
+    // The lookup runs before anything is created, so no half-made PR subscription stays.
+    let listed =
+        json_of(&env.band_with_env(&["subscriptions", "list", "--output", "json"], &agent_env));
+    assert_eq!(listed["subscriptions"].as_array().unwrap().len(), 0);
+}
+
 #[test]
 fn cronjobs_list_empty() {
     let env = TestEnv::new();
@@ -3102,8 +3384,8 @@ fn skills_install_writes_shared_skills_and_links_into_claude() {
         .expect("written array");
     assert_eq!(
         written.len(),
-        6,
-        "expected 6 shared writes, got {written:?}"
+        7,
+        "expected 7 shared writes, got {written:?}"
     );
 
     let shared_dir = home.join(".agents").join("skills");
@@ -3114,6 +3396,7 @@ fn skills_install_writes_shared_skills_and_links_into_claude() {
         "band-browser",
         "band-start",
         "band-loop",
+        "band-subscribe",
     ] {
         let shared = shared_dir.join(name).join("SKILL.md");
         assert!(
@@ -3148,11 +3431,11 @@ fn skills_install_is_idempotent_on_second_run() {
     let home = tmp.path();
 
     let first = run_install_json(home);
-    assert_eq!(first["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(first["shared"]["written"].as_array().unwrap().len(), 7);
     assert_eq!(
         first["symlinks"]["linked"].as_array().unwrap().len(),
-        6,
-        "expected 6 fresh symlinks on first run"
+        7,
+        "expected 7 fresh symlinks on first run"
     );
 
     let second = run_install_json(home);
@@ -3163,8 +3446,8 @@ fn skills_install_is_idempotent_on_second_run() {
     );
     assert_eq!(
         second["shared"]["unchanged"].as_array().unwrap().len(),
-        6,
-        "second run should report 6 unchanged shared files"
+        7,
+        "second run should report 7 unchanged shared files"
     );
     assert_eq!(
         second["symlinks"]["linked"].as_array().unwrap().len(),
@@ -3176,8 +3459,8 @@ fn skills_install_is_idempotent_on_second_run() {
             .as_array()
             .unwrap()
             .len(),
-        6,
-        "second run should report 6 already-linked"
+        7,
+        "second run should report 7 already-linked"
     );
 }
 
@@ -3203,6 +3486,7 @@ fn skills_install_skips_agents_without_a_config_dir() {
         "band-browser",
         "band-start",
         "band-loop",
+        "band-subscribe",
     ] {
         let link = home.join(".gemini").join("skills").join(name);
         let meta = fs::symlink_metadata(&link)
@@ -3348,7 +3632,7 @@ fn skills_install_writes_shared_skills_even_when_no_agents_are_detected() {
     let home = tmp.path();
     let result = run_install_json(home);
 
-    assert_eq!(result["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(result["shared"]["written"].as_array().unwrap().len(), 7);
     assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 0);
     assert_eq!(result["agents"].as_array().unwrap().len(), 0);
 
@@ -3360,6 +3644,7 @@ fn skills_install_writes_shared_skills_even_when_no_agents_are_detected() {
         "band-browser",
         "band-start",
         "band-loop",
+        "band-subscribe",
     ] {
         assert!(
             shared_dir.join(name).join("SKILL.md").is_file(),
@@ -3377,9 +3662,9 @@ fn skills_install_text_output_summarizes_each_stage() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let stdout = stdout(&output);
-    assert!(stdout.contains("Installed 6 skill(s)"));
-    assert!(stdout.contains("shared: 6 written"));
-    assert!(stdout.contains("symlinks: 6 created"));
+    assert!(stdout.contains("Installed 7 skill(s)"));
+    assert!(stdout.contains("shared: 7 written"));
+    assert!(stdout.contains("symlinks: 7 created"));
     assert!(stdout.contains("claude-code →"));
 }
 
@@ -3420,7 +3705,7 @@ fn skills_install_filter_limits_to_matching_skills_only() {
 /// [command] [args...]` in `apps/cli/skills/band/SKILL.md` was parsed by
 /// strict YAML as a malformed flow sequence).
 ///
-/// Install all 6 templates via the public CLI surface, then parse each
+/// Install all 7 templates via the public CLI surface, then parse each
 /// installed file's YAML frontmatter with a strict parser. Any template that
 /// regresses to invalid YAML (unquoted flow-sequence-looking values, stray
 /// colons, bad indentation) will fail here before it reaches a user's
@@ -3434,8 +3719,8 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
     let result = run_install_json(home);
     assert_eq!(
         result["shared"]["written"].as_array().map(Vec::len),
-        Some(6),
-        "install did not write 6 shared skills: {result}"
+        Some(7),
+        "install did not write 7 shared skills: {result}"
     );
 
     let shared_dir = home.join(".agents").join("skills");
@@ -3446,6 +3731,7 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
         "band-browser",
         "band-start",
         "band-loop",
+        "band-subscribe",
     ] {
         let path = shared_dir.join(name).join("SKILL.md");
         let content =
@@ -3464,7 +3750,7 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
 
         // Sanity-check that the fields the agent reads are present and the
         // right shape (not an accidental flow sequence). Catches the exact
-        // regression that prompted this test. All 6 Band skills are
+        // regression that prompted this test. All 7 Band skills are
         // expected to declare `argument-hint` — the hard unwrap below is
         // intentional, not an oversight. A future skill without
         // `argument-hint` should add the field rather than soften the

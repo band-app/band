@@ -1,6 +1,6 @@
 /**
  * Sync the CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
- * `band-browser`, `band-start`, `band-loop`) into a single canonical,
+ * `band-browser`, `band-start`, `band-loop`, `band-subscribe`) into a single canonical,
  * agent-agnostic skills directory (`~/.agents/skills/<name>/SKILL.md`) and
  * link each detected coding-agent's skills directory to that shared root so
  * the skills become discoverable to every agent on the host without
@@ -41,7 +41,7 @@ import { getSharedSkillsDir } from "@band-app/coding-agent";
 import { findCliBinary } from "./cli-service";
 import { systemService } from "./system-service";
 
-/** The six skills the `band` CLI installs. */
+/** The seven skills the `band` CLI installs. */
 export const BAND_SKILL_NAMES = [
   "band",
   "band-chat",
@@ -49,6 +49,7 @@ export const BAND_SKILL_NAMES = [
   "band-browser",
   "band-start",
   "band-loop",
+  "band-subscribe",
 ] as const;
 
 const SKILL_FILE = "SKILL.md";
@@ -158,7 +159,7 @@ export interface InstallSkillsResult {
    * Shared-directory SKILL.md paths that were skipped because the install
    * couldn't run at all — typically because no band binary could be located
    * on this host, or the `band skills install` invocation failed. Always one
-   * entry per skill in `BAND_SKILL_NAMES` (i.e. exactly 6 today) — *not* one
+   * entry per skill in `BAND_SKILL_NAMES` (i.e. exactly 7 today) — *not* one
    * entry per (agent × skill) pair, because the shared layout means there is
    * one canonical path regardless of how many agents would have been linked.
    */

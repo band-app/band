@@ -57,6 +57,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: CronjobsCmd,
     },
+    /// Manage what a chat listens for (PR reviews, CI, webhooks, timers)
+    Subscriptions {
+        #[command(subcommand)]
+        cmd: SubscriptionsCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -89,7 +94,7 @@ enum Commands {
         command: Option<String>,
     },
     /// Manage CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
-    /// `band-browser`, `band-start`, `band-loop`)
+    /// `band-browser`, `band-start`, `band-loop`, `band-subscribe`)
     Skills {
         #[command(subcommand)]
         cmd: SkillsCmd,
@@ -455,6 +460,66 @@ enum CronjobsCmd {
 }
 
 #[derive(Subcommand)]
+enum SubscriptionsCmd {
+    /// List a chat's subscriptions
+    List {
+        /// Chat ID (defaults to `$BAND_CHAT_ID`)
+        #[arg(long, env = "BAND_CHAT_ID")]
+        chat: Option<String>,
+        /// List every subscription in this workspace instead of one chat's
+        /// (wins over `$BAND_CHAT_ID`)
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    /// Subscribe a chat to events. Exactly one of `--pr`, `--branch`,
+    /// `--webhook`, `--cron` and `--at`.
+    Create {
+        /// Chat ID (defaults to `$BAND_CHAT_ID`)
+        #[arg(long, env = "BAND_CHAT_ID")]
+        chat: Option<String>,
+        /// Workspace ID (defaults to `$BAND_WORKSPACE_ID`, then the chat's workspace)
+        #[arg(long, env = "BAND_WORKSPACE_ID")]
+        workspace: Option<String>,
+        /// Watch a pull request, as `owner/repo#N`
+        #[arg(long, value_name = "OWNER/REPO#N")]
+        pr: Option<String>,
+        /// Watch a branch's CI, as `owner/repo@branch`. Implies `--ci`.
+        #[arg(long, value_name = "OWNER/REPO@BRANCH")]
+        branch: Option<String>,
+        /// With `--pr`: deliver reviews. Reviews and comments are one
+        /// subscription, and either flag (or neither, with no `--ci`) creates it.
+        #[arg(long)]
+        reviews: bool,
+        /// With `--pr`: deliver comments (see `--reviews`)
+        #[arg(long)]
+        comments: bool,
+        /// With `--pr`: also watch CI on the PR's head branch (looked up with `gh`)
+        #[arg(long)]
+        ci: bool,
+        /// Create a webhook the chat is woken by. Prints its path and token once.
+        #[arg(long)]
+        webhook: bool,
+        /// Recurring timer, as a cron expression (seconds field optional)
+        #[arg(long)]
+        cron: Option<String>,
+        /// One-off timer: epoch milliseconds, or a delay such as `90s`, `10m`, `2h`, `1d`
+        #[arg(long)]
+        at: Option<String>,
+        /// Stop after this many wakeups (default 10; a one-off timer always 1)
+        #[arg(long)]
+        max_wakeups: Option<u32>,
+        /// Seconds to hold events before waking the chat (default 30)
+        #[arg(long)]
+        coalesce: Option<u32>,
+    },
+    /// Remove a subscription
+    Remove {
+        /// Subscription ID
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -669,6 +734,39 @@ fn main() {
             ),
             CronjobsCmd::Delete { key, id } => cmd_cronjobs_delete(&key, &id),
             CronjobsCmd::Trigger { key, id } => cmd_cronjobs_trigger(&key, &id),
+        },
+        Commands::Subscriptions { cmd } => match cmd {
+            SubscriptionsCmd::List { chat, workspace } => {
+                cmd_subscriptions_list(chat.as_deref(), workspace.as_deref())
+            }
+            SubscriptionsCmd::Create {
+                chat,
+                workspace,
+                pr,
+                branch,
+                reviews,
+                comments,
+                ci,
+                webhook,
+                cron,
+                at,
+                max_wakeups,
+                coalesce,
+            } => cmd_subscriptions_create(&SubscriptionSpec {
+                chat,
+                workspace,
+                pr,
+                branch,
+                reviews,
+                comments,
+                ci,
+                webhook,
+                cron,
+                at,
+                max_wakeups,
+                coalesce,
+            }),
+            SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -2471,6 +2569,340 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Subscriptions commands ---
+
+const MS_PER_SECOND: u64 = 1000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Parse `owner/repo#N`.
+fn parse_pr_ref(value: &str) -> Result<(String, u64), String> {
+    let invalid = || format!("Invalid --pr '{value}'. Use owner/repo#N, e.g. acme/api#12");
+    let (repo, number) = value.split_once('#').ok_or_else(invalid)?;
+    let number: u64 = number.parse().map_err(|_| invalid())?;
+    if number == 0 || !repo.contains('/') || repo.starts_with('/') || repo.ends_with('/') {
+        return Err(invalid());
+    }
+    Ok((repo.to_string(), number))
+}
+
+/// Parse `owner/repo@branch`.
+fn parse_branch_ref(value: &str) -> Result<(String, String), String> {
+    let invalid =
+        || format!("Invalid --branch '{value}'. Use owner/repo@branch, e.g. acme/api@main");
+    let (repo, branch) = value.split_once('@').ok_or_else(invalid)?;
+    if branch.is_empty() || !repo.contains('/') || repo.starts_with('/') || repo.ends_with('/') {
+        return Err(invalid());
+    }
+    Ok((repo.to_string(), branch.to_string()))
+}
+
+/// Parse `--at`: epoch milliseconds, or a delay (`90s`, `10m`, `2h`, `1d`) from `now`.
+fn parse_at(value: &str, now: u64) -> Result<u64, String> {
+    let invalid = || {
+        format!(
+            "Invalid --at '{value}'. Use epoch milliseconds or a delay such as 90s, 10m, 2h, 1d"
+        )
+    };
+    if let Ok(ms) = value.parse::<u64>() {
+        return Ok(ms);
+    }
+    let unit = value.chars().last().ok_or_else(invalid)?;
+    let per_unit = match unit {
+        's' => MS_PER_SECOND,
+        'm' => 60 * MS_PER_SECOND,
+        'h' => 3600 * MS_PER_SECOND,
+        'd' => 86_400 * MS_PER_SECOND,
+        _ => return Err(invalid()),
+    };
+    let amount: u64 = value[..value.len() - 1].parse().map_err(|_| invalid())?;
+    if amount == 0 {
+        return Err(invalid());
+    }
+    Ok(now.saturating_add(amount.saturating_mul(per_unit)))
+}
+
+/// The branch a pull request's head is on, from `gh` (`$BAND_GH_BIN` overrides the binary).
+fn resolve_pr_branch(repo: &str, number: u64) -> Result<String, String> {
+    let gh = std::env::var("BAND_GH_BIN").unwrap_or_else(|_| "gh".to_string());
+    let output = std::process::Command::new(&gh)
+        .args([
+            "pr",
+            "view",
+            &number.to_string(),
+            "-R",
+            repo,
+            "--json",
+            "headRefName",
+            "-q",
+            ".headRefName",
+        ])
+        .output()
+        .map_err(|e| {
+            format!("--ci with --pr needs `gh` to look up the PR's branch ({e}). Use --branch {repo}@<branch> --ci instead")
+        })?;
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() || branch.is_empty() {
+        return Err(format!(
+            "Could not look up the branch of {repo}#{number}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(branch)
+}
+
+/// `1d`, `3h`, `12m` from a millisecond span; `now` for anything under a minute.
+fn format_span(ms: u64) -> String {
+    const MINUTE: u64 = 60 * MS_PER_SECOND;
+    if ms >= 86_400 * MS_PER_SECOND {
+        format!("{}d", ms / (86_400 * MS_PER_SECOND))
+    } else if ms >= 3600 * MS_PER_SECOND {
+        format!("{}h", ms / (3600 * MS_PER_SECOND))
+    } else if ms >= MINUTE {
+        format!("{}m", ms / MINUTE)
+    } else {
+        "<1m".to_string()
+    }
+}
+
+/// What a subscription watches, from its source and event key.
+fn describe_subscription(sub: &serde_json::Value) -> String {
+    let source = sub.get("source").and_then(|v| v.as_str()).unwrap_or("");
+    let key = sub.get("filterKey").and_then(|v| v.as_str()).unwrap_or("");
+    match source {
+        "github" => {
+            if let Some(pr) = key.strip_prefix("github:pr:") {
+                format!("PR {pr}")
+            } else if let Some(ci) = key.strip_prefix("github:ci:") {
+                format!("CI on {ci}")
+            } else {
+                key.to_string()
+            }
+        }
+        "timer" => {
+            if let Some(cron) = sub.get("cron").and_then(|v| v.as_str()) {
+                format!("cron {cron}")
+            } else if let Some(at) = sub.get("at").and_then(serde_json::Value::as_u64) {
+                let now = now_ms();
+                if at > now {
+                    format!("once, in {}", format_span(at - now))
+                } else {
+                    "once, due now".to_string()
+                }
+            } else {
+                key.to_string()
+            }
+        }
+        "webhook" => {
+            let id = sub.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            format!("POST /api/hooks/{id}")
+        }
+        _ => key.to_string(),
+    }
+}
+
+fn cmd_subscriptions_list(
+    chat: Option<&str>,
+    workspace: Option<&str>,
+) -> Result<CommandResult, String> {
+    if chat.is_none() && workspace.is_none() {
+        return Err(
+            "A chat is required. Pass --chat <id> or --workspace <id>, or run inside an agent chat ($BAND_CHAT_ID)"
+                .to_string(),
+        );
+    }
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({});
+    if let Some(w) = workspace {
+        input["workspaceId"] = serde_json::json!(w);
+    } else if let Some(c) = chat {
+        input["chatId"] = serde_json::json!(c);
+    }
+    let data = client.trpc_query("subscriptions.list", &input)?;
+    let subs = data.as_array().cloned().unwrap_or_default();
+
+    let now = now_ms();
+    let rows: Vec<[String; 5]> = subs
+        .iter()
+        .map(|sub| {
+            let text = |key: &str| sub.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let num = |key: &str| {
+                sub.get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            let expires_at = num("expiresAt");
+            [
+                text("id").to_string(),
+                text("source").to_string(),
+                describe_subscription(sub),
+                format!("{}/{}", num("wakeups"), num("maxWakeups")),
+                if expires_at > now {
+                    format!("in {}", format_span(expires_at - now))
+                } else {
+                    "expired".to_string()
+                },
+            ]
+        })
+        .collect();
+
+    Ok(CommandResult {
+        text: format_table(&["ID", "SOURCE", "WATCHES", "WAKEUPS", "EXPIRES"], &rows),
+        json: serde_json::json!({"subscriptions": subs}),
+    })
+}
+
+/// The flags of `band subscriptions create`.
+#[allow(clippy::struct_excessive_bools)]
+struct SubscriptionSpec {
+    chat: Option<String>,
+    workspace: Option<String>,
+    pr: Option<String>,
+    branch: Option<String>,
+    reviews: bool,
+    comments: bool,
+    ci: bool,
+    webhook: bool,
+    cron: Option<String>,
+    at: Option<String>,
+    max_wakeups: Option<u32>,
+    coalesce: Option<u32>,
+}
+
+/// The `subscriptions.create` inputs a `create` call stands for, without the
+/// chat and limits. One `--pr` can mean two subscriptions (PR activity and CI).
+fn subscription_sources(
+    spec: &SubscriptionSpec,
+    now: u64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let chosen = [
+        spec.pr.is_some(),
+        spec.branch.is_some(),
+        spec.webhook,
+        spec.cron.is_some(),
+        spec.at.is_some(),
+    ]
+    .iter()
+    .filter(|set| **set)
+    .count();
+    if chosen != 1 {
+        return Err("Pick exactly one of --pr, --branch, --webhook, --cron and --at".to_string());
+    }
+    if spec.pr.is_none() && (spec.reviews || spec.comments) {
+        return Err("--reviews and --comments apply to --pr only".to_string());
+    }
+    if spec.pr.is_none() && spec.branch.is_none() && spec.ci {
+        return Err("--ci applies to --pr and --branch only".to_string());
+    }
+
+    if let Some(pr) = &spec.pr {
+        let (repo, number) = parse_pr_ref(pr)?;
+        let mut sources = Vec::new();
+        // PR activity is one subscription: reviews and comments arrive together.
+        if spec.reviews || spec.comments || !spec.ci {
+            sources.push(serde_json::json!({"source": "github", "repo": repo, "pr": number}));
+        }
+        if spec.ci {
+            let branch = resolve_pr_branch(&repo, number)?;
+            sources.push(serde_json::json!({"source": "github", "repo": repo, "branch": branch}));
+        }
+        return Ok(sources);
+    }
+    if let Some(branch) = &spec.branch {
+        let (repo, branch) = parse_branch_ref(branch)?;
+        return Ok(vec![
+            serde_json::json!({"source": "github", "repo": repo, "branch": branch}),
+        ]);
+    }
+    if spec.webhook {
+        return Ok(vec![serde_json::json!({"source": "webhook"})]);
+    }
+    if let Some(cron) = &spec.cron {
+        return Ok(vec![serde_json::json!({"source": "timer", "cron": cron})]);
+    }
+    let at = parse_at(spec.at.as_deref().unwrap_or(""), now)?;
+    Ok(vec![serde_json::json!({"source": "timer", "at": at})])
+}
+
+fn cmd_subscriptions_create(spec: &SubscriptionSpec) -> Result<CommandResult, String> {
+    let Some(chat) = spec.chat.as_deref() else {
+        return Err(
+            "A chat is required. Pass --chat <id>, or run inside an agent chat ($BAND_CHAT_ID)"
+                .to_string(),
+        );
+    };
+    let sources = subscription_sources(spec, now_ms())?;
+
+    let client = api::ApiClient::from_settings()?;
+    let mut created: Vec<serde_json::Value> = Vec::new();
+    for mut input in sources {
+        input["chatId"] = serde_json::json!(chat);
+        input["createdBy"] = serde_json::json!("agent");
+        if let Some(w) = &spec.workspace {
+            input["workspaceId"] = serde_json::json!(w);
+        }
+        if let Some(n) = spec.max_wakeups {
+            input["maxWakeups"] = serde_json::json!(n);
+        }
+        if let Some(c) = spec.coalesce {
+            input["coalesceSeconds"] = serde_json::json!(c);
+        }
+        match client.trpc_mutate("subscriptions.create", &input) {
+            Ok(sub) => created.push(sub),
+            Err(err) => {
+                // Don't leave half of a `--pr ... --ci` behind.
+                for sub in &created {
+                    if let Some(id) = sub.get("id").and_then(|v| v.as_str()) {
+                        let _ = client
+                            .trpc_mutate("subscriptions.remove", &serde_json::json!({"id": id}));
+                    }
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    let mut text = String::new();
+    for sub in &created {
+        let id = sub.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let _ = writeln!(text, "{id}\t{}", describe_subscription(sub));
+        if let Some(hook) = sub.get("webhook").filter(|h| h.get("token").is_some()) {
+            let path = hook.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let token = hook.get("token").and_then(|v| v.as_str()).unwrap_or("");
+            let _ = writeln!(
+                text,
+                "  POST {path} with header X-Band-Webhook-Token: {token}\n  The token is shown once."
+            );
+        }
+        if let Some(status) = sub
+            .get("webhook")
+            .and_then(|h| h.get("status"))
+            .and_then(|v| v.as_str())
+            .filter(|s| *s != "registered")
+        {
+            let _ = writeln!(text, "  GitHub webhook: {status}");
+        }
+    }
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"subscriptions": created}),
+    })
+}
+
+fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("subscriptions.remove", &serde_json::json!({"id": id}))?;
+    Ok(CommandResult {
+        text: format!("Subscription {id} removed\n"),
+        json: serde_json::json!({"ok": true, "id": id}),
+    })
+}
+
 /// Resolve an explicit workspace ID, or auto-detect it from the current
 /// working directory by matching `git rev-parse --show-toplevel` against
 /// registered workspace paths.
@@ -3049,6 +3481,41 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "subscriptions list",
+            "description": "List what a chat listens for",
+            "parameters": [
+                {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "List every subscription in this workspace instead of one chat's"},
+            ],
+            "notes": "Text output: `ID  SOURCE  WATCHES  WAKEUPS  EXPIRES` (space-padded table).\nJSON output: `{\"subscriptions\": [{\"id\": \"...\", \"source\": \"github|timer|webhook\", \"filterKey\": \"...\", \"wakeups\": 0, \"maxWakeups\": 10, \"expiresAt\": 0}]}`."
+        }),
+        serde_json::json!({
+            "name": "subscriptions create",
+            "description": "Subscribe a chat to events; the chat is woken with a short message when one arrives",
+            "parameters": [
+                {"name": "--chat", "type": "string", "required": false, "description": "Chat ID (defaults to $BAND_CHAT_ID)"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (defaults to $BAND_WORKSPACE_ID, then the chat's workspace)"},
+                {"name": "--pr", "type": "string", "required": false, "description": "Watch a pull request, as owner/repo#N"},
+                {"name": "--branch", "type": "string", "required": false, "description": "Watch a branch's CI, as owner/repo@branch"},
+                {"name": "--reviews", "type": "boolean", "required": false, "description": "With --pr: deliver reviews"},
+                {"name": "--comments", "type": "boolean", "required": false, "description": "With --pr: deliver comments"},
+                {"name": "--ci", "type": "boolean", "required": false, "description": "With --pr: also watch CI on the PR's head branch (looked up with gh)"},
+                {"name": "--webhook", "type": "boolean", "required": false, "description": "Create a webhook; prints its path and token once"},
+                {"name": "--cron", "type": "string", "required": false, "description": "Recurring timer, as a cron expression"},
+                {"name": "--at", "type": "string", "required": false, "description": "One-off timer: epoch milliseconds or a delay such as 90s, 10m, 2h, 1d"},
+                {"name": "--max-wakeups", "type": "number", "required": false, "description": "Stop after this many wakeups (default 10)"},
+                {"name": "--coalesce", "type": "number", "required": false, "description": "Seconds to hold events before waking the chat (default 30)"},
+            ],
+            "notes": "Exactly one of --pr, --branch, --webhook, --cron, --at. PR activity (reviews and comments) is one subscription; --ci adds a second one on the PR's head branch. Subscriptions last at most 180 days.\nJSON output: `{\"subscriptions\": [...]}`."
+        }),
+        serde_json::json!({
+            "name": "subscriptions remove",
+            "description": "Remove a subscription",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Subscription ID"},
             ]
         }),
         serde_json::json!({

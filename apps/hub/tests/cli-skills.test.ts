@@ -42,6 +42,7 @@ const SKILL_NAMES = [
   "band-browser",
   "band-start",
   "band-loop",
+  "band-subscribe",
 ] as const;
 
 /**
