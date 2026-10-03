@@ -32,6 +32,7 @@ import type {
   Settings,
 } from "../infra/db/queries/settings";
 import { resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
+import { hostRegistry } from "../infra/host/registry";
 import {
   agentSessionService,
   type CatalogEntry,
@@ -161,7 +162,7 @@ export class ModelRefreshService {
       // Start the agent in a scratch ACP session and read the model option
       // it offers (issue #648).
       const def = resolveAgentDefinition(settings, agentId);
-      fresh = modelsFromCatalog(await agentSessionService.probe(def));
+      fresh = modelsFromCatalog(await agentSessionService.probe(def, hostRegistry.local));
     } catch (err) {
       // Surface only a sanitized classification to the tRPC response —
       // raw error messages from the agent can include filesystem paths,

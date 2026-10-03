@@ -1187,7 +1187,7 @@ export class WorkspaceService {
 
     let lastTurnText: string;
     try {
-      lastTurnText = await agentSessionService.oneShot(agentDef, cwd, prompt);
+      lastTurnText = await agentSessionService.oneShot(agentDef, cwd, prompt, workspace.host);
     } catch (e) {
       throw new Error(
         `Coding agent "${agentDef.label}" failed: ${e instanceof Error ? e.message : String(e)}`,

@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createReadStream, watch as fsWatch } from "node:fs";
 import {
   cp,
@@ -16,9 +16,7 @@ import { hostname } from "node:os";
 import { getUsageReader } from "@band-app/coding-agent";
 import {
   type AcpAgentDefinition,
-  type AcpLaunch,
   type AgentDescriptor,
-  type AgentStdio,
   type ClaudeDefaults,
   type Duplex,
   type ExecOptions,
@@ -49,7 +47,12 @@ import {
   type WorktreeSpec,
 } from "@band-app/host-api";
 import { resolveAcpLaunch } from "../agents/acp-launch";
-import { configuredClaudeDefaults } from "../agents/claude-defaults";
+import { spawnAgentProcess } from "../agents/agent-spawn";
+import {
+  configuredClaudeDefaults,
+  findClaudeCliArgs,
+  reportedClaudeDefaults,
+} from "../agents/claude-defaults";
 import { execGh, execGit, listWorktrees } from "../git/git-client";
 import { duBytes } from "../process/du";
 import { prependBinDirs } from "../process/path";
@@ -103,17 +106,27 @@ export class LocalHost implements Host {
   };
   readonly acp: HostAcp = {
     resolveLaunch: (def: AcpAgentDefinition) => resolveAcpLaunch(def),
-    spawn: (launch, cwd) => spawnAgent(launch, cwd),
+    spawn: (launch, cwd) => spawnAgentProcess(launch, cwd),
   };
   readonly scripts: HostScripts = {
     prepare: (workspace) => prepareScript(workspace),
     copyFiles: (projectPath, worktreePath) => copyWorkspaceFiles(projectPath, worktreePath),
   };
   readonly agentEnv: HostAgentEnv = {
-    claudeDefaults: async (cwd): Promise<ClaudeDefaults> => {
-      const { model, effort } = configuredClaudeDefaults({ cwd, env: process.env });
+    claudeDefaults: async (cwd, cli): Promise<ClaudeDefaults> => {
+      const { model, effort } = configuredClaudeDefaults({ cwd, env: process.env, cli });
       return { model, effort };
     },
+    reportedClaudeDefaults: async ({ cwd, sessionId, since }): Promise<ClaudeDefaults> => {
+      const { model, effort } = reportedClaudeDefaults({
+        cwd,
+        env: process.env,
+        sessionId,
+        since,
+      });
+      return { model, effort };
+    },
+    claudeCliArgs: (adapterPid, sessionId) => findClaudeCliArgs(adapterPid, sessionId),
     latestClaudeSession: async (cwd) => findLatestClaudeSessionId(cwd),
     usageReader: async (agent: AgentDescriptor) =>
       getUsageReader(agent.agentType, { command: agent.command }),
@@ -302,39 +315,6 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
         },
       };
     },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// acp
-// ---------------------------------------------------------------------------
-
-async function spawnAgent(launch: AcpLaunch, cwd: string): Promise<AgentStdio> {
-  const child = spawn(launch.command, launch.args, {
-    cwd,
-    env: { ...process.env, ...launch.env },
-    stdio: ["pipe", "pipe", "pipe"],
-    detached: process.platform !== "win32",
-  });
-  await new Promise<void>((resolve, reject) => {
-    child.once("spawn", resolve);
-    child.once("error", reject);
-  });
-  const stdin = child.stdin;
-  const stdout = child.stdout;
-  const stderr = child.stderr;
-  return {
-    pid: child.pid,
-    stdin: {
-      write: (chunk) => void stdin.write(chunk),
-      end: () => stdin.end(),
-    },
-    stdout: stdout as AsyncIterable<Buffer>,
-    stderr: stderr as AsyncIterable<Buffer>,
-    exit: new Promise((resolve) => {
-      child.once("exit", (code, signal) => resolve({ code, signal }));
-    }),
-    kill: (signal) => void child.kill(signal),
   };
 }
 

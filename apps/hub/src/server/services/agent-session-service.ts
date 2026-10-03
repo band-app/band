@@ -26,6 +26,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type * as acp from "@agentclientprotocol/sdk";
+import type { AcpAgentDefinition, ClaudeCliArgs, ClaudeDefaults, Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type {
   ChatEvent,
@@ -41,13 +42,6 @@ import {
   type AttachedSession,
   type PermissionOutcome,
 } from "../infra/agents/acp-agent-process";
-import { type AcpAgentDefinition, resolveAcpLaunch } from "../infra/agents/acp-launch";
-import {
-  type ClaudeCliArgs,
-  configuredClaudeDefaults,
-  findClaudeCliArgs,
-  reportedClaudeDefaults,
-} from "../infra/agents/claude-defaults";
 import { ChatEventQueries, type ChatEventRow } from "../infra/db/queries/chat-events";
 import {
   bandHome,
@@ -55,6 +49,7 @@ import {
   resolveAgentDefinition,
   SettingsQueries,
 } from "../infra/db/queries/settings";
+import { hostRegistry } from "../infra/host/registry";
 import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { type ChatSession, chatService } from "./chat-service";
@@ -382,29 +377,29 @@ function findEffortOption(options: acp.SessionConfigOption[]): acp.SessionConfig
  * reported. With `learn`, a reported value the config doesn't explain is
  * kept for chats that have no session yet. Undefined for other agents.
  */
-function claudeDefaults(
+async function claudeDefaults(
   chatId: string,
   chat: ChatSession | undefined,
   def: CodingAgentDefinition,
   configOptions: acp.SessionConfigOption[],
   learn = false,
-): ResolvedDefaults | undefined {
+): Promise<ResolvedDefaults | undefined> {
   if (def.type !== "claude-code") return undefined;
-  const cwd = chat ? workspaceService.resolve(chat.workspaceId)?.worktree.path : undefined;
-  const configured = configuredClaudeDefaults({
+  const workspace = chat ? workspaceService.resolve(chat.workspaceId) : undefined;
+  const cwd = workspace?.worktree.path;
+  const host = workspace?.host ?? hostRegistry.local;
+  const configured = await host.agentEnv.claudeDefaults(
     cwd,
-    env: process.env,
-    cli: runtimes.get(chatId)?.claudeCli ?? undefined,
-  });
-  const reported =
+    runtimes.get(chatId)?.claudeCli ?? undefined,
+  );
+  const reported: ClaudeDefaults =
     cwd && chat?.activeSessionId
-      ? reportedClaudeDefaults({
+      ? await host.agentEnv.reportedClaudeDefaults({
           cwd,
-          env: process.env,
           sessionId: chat.activeSessionId,
           since: defaultsChangedAt.get(chatId),
         })
-      : {};
+      : { model: undefined, effort: undefined };
   const modelOption = findOption(configOptions, "model");
   const modelChoice = modelOption?.type === "select" ? String(modelOption.currentValue) : undefined;
   const effortOption = findEffortOption(configOptions);
@@ -612,14 +607,21 @@ async function ensureProcess(
   if (rt.starting) return rt.starting;
   const generation = ++rt.generation;
   rt.starting = (async () => {
-    const launch = await resolveAcpLaunch(launchDefinition(def));
+    const host = hostRegistry.hostFor(rt.workspaceId);
+    const launch = await host.acp.resolveLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
     // Lets the agent say which chat it runs in, for `subscriptions.create`.
     const withChat = {
       ...launch,
       env: { ...launch.env, BAND_CHAT_ID: rt.chatId, BAND_WORKSPACE_ID: rt.workspaceId },
     };
-    const proc = await AcpAgentProcess.start(withChat, cwd, def.label, handlersFor(rt, generation));
+    const proc = await AcpAgentProcess.start(
+      host.acp,
+      withChat,
+      cwd,
+      def.label,
+      handlersFor(rt, generation),
+    );
     remember(def, { agentName: proc.agentName, canList: proc.canList });
     return proc;
   })();
@@ -965,7 +967,7 @@ export class AgentSessionService {
       if (rt.process) scheduleIdle(rt);
       // Never let a failed push replace the turn's result.
       try {
-        this.pushClaudeDefaults(chatId, true);
+        await this.pushClaudeDefaults(chatId, true);
       } catch (err) {
         log.debug({ chatId, err }, "could not push Claude defaults");
       }
@@ -974,13 +976,13 @@ export class AgentSessionService {
 
   /** Sends a Claude Code chat's session state again once the turn wrote what
    *  its `default` choices ran with, or the CLI's flags are known. */
-  private pushClaudeDefaults(chatId: string, learn: boolean): void {
+  private async pushClaudeDefaults(chatId: string, learn: boolean): Promise<void> {
     const chat = chatService.get(chatId);
     if (!chat) return;
     const def = definitionFor(chat);
     if (def.type !== "claude-code") return;
-    const state = this.getSessionState(chatId, { resolveDefaults: false });
-    const resolvedDefaults = claudeDefaults(chatId, chat, def, state.configOptions, learn);
+    const state = this.getSessionState(chatId);
+    const resolvedDefaults = await claudeDefaults(chatId, chat, def, state.configOptions, learn);
     broadcastTransient(chatId, { type: "session-state", state: { ...state, resolvedDefaults } });
   }
 
@@ -990,10 +992,10 @@ export class AgentSessionService {
     const pid = rt.process?.pid;
     const sessionId = rt.sessionId;
     if (!pid || !sessionId) return;
-    const args = await findClaudeCliArgs(pid, sessionId);
+    const args = await hostRegistry.hostFor(rt.workspaceId).agentEnv.claudeCliArgs(pid, sessionId);
     if (!args || rt.sessionId !== sessionId) return;
     rt.claudeCli = args;
-    this.pushClaudeDefaults(rt.chatId, false);
+    await this.pushClaudeDefaults(rt.chatId, false);
   }
 
   /**
@@ -1097,9 +1099,7 @@ export class AgentSessionService {
       chatService.get(chatId) ??
       (workspaceId ? chatService.create(workspaceId, { id: chatId, name: "Chat" }) : undefined);
     if (!chat) throw new ChatNotFoundError(chatId);
-    const option = this.getSessionState(chatId, { resolveDefaults: false }).configOptions.find(
-      (o) => o.id === configId,
-    );
+    const option = this.getSessionState(chatId).configOptions.find((o) => o.id === configId);
     const category =
       option?.category === "model" || configId === "model"
         ? "model"
@@ -1151,7 +1151,7 @@ export class AgentSessionService {
         });
       }
     }
-    const next = this.getSessionState(chatId);
+    const next = await this.resolvedSessionState(chatId);
     broadcastTransient(chatId, { type: "session-state", state: next });
     return next;
   }
@@ -1162,11 +1162,10 @@ export class AgentSessionService {
    * the chat's saved choices applied. A chat the server has no row for yet
    * (a new pane, created lazily on its first message) gets the default
    * agent's catalog entry. Claude Code chats also get what their `default`
-   * choices resolve to, which reads Claude's settings files and transcript;
-   * callers that only need the options or the cost pass
-   * `resolveDefaults: false`.
+   * choices resolve to is `resolvedSessionState`'s job: it reads Claude's
+   * settings files and transcript on the chat's host.
    */
-  getSessionState(chatId: string, opts: { resolveDefaults?: boolean } = {}): SessionState {
+  getSessionState(chatId: string): SessionState {
     const saved = chatService.get(chatId);
     const chat: Pick<ChatSession, "agent" | "activeSessionId" | "model" | "mode"> = saved ?? {
       agent: undefined as unknown as string,
@@ -1175,9 +1174,15 @@ export class AgentSessionService {
       mode: undefined,
     };
     const def = definitionFor(chat);
-    const state = this.baseSessionState(chatId, chat, def);
-    if (opts.resolveDefaults === false) return state;
-    const resolvedDefaults = claudeDefaults(chatId, saved, def, state.configOptions);
+    return this.baseSessionState(chatId, chat, def);
+  }
+
+  /** `getSessionState` plus what a Claude Code chat's `default` choices run with. */
+  async resolvedSessionState(chatId: string): Promise<SessionState> {
+    const state = this.getSessionState(chatId);
+    const saved = chatService.get(chatId);
+    const def = definitionFor(saved ?? { agent: undefined as unknown as string });
+    const resolvedDefaults = await claudeDefaults(chatId, saved, def, state.configOptions);
     return resolvedDefaults ? { ...state, resolvedDefaults } : state;
   }
 
@@ -1373,11 +1378,15 @@ export class AgentSessionService {
    * modes, slash commands) without a chat. Feeds the pickers of chats that
    * have no session yet and the settings model cache.
    */
-  async probe(def: CodingAgentDefinition, cwd = bandHome()): Promise<CatalogEntry> {
-    const launch = await resolveAcpLaunch(launchDefinition(def));
+  async probe(
+    def: CodingAgentDefinition,
+    host: Host = hostRegistry.local,
+    cwd = bandHome(),
+  ): Promise<CatalogEntry> {
+    const launch = await host.acp.resolveLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
     let commands: acp.AvailableCommand[] = [];
-    const proc = await AcpAgentProcess.start(launch, cwd, def.label, {
+    const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
         if (n.update.sessionUpdate === "available_commands_update") {
           commands = n.update.availableCommands;
@@ -1436,12 +1445,17 @@ export class AgentSessionService {
    * commands don't reach this: Claude Code allows them without asking and
    * Codex runs them in its workspace sandbox.
    */
-  async oneShot(def: CodingAgentDefinition, cwd: string, prompt: string): Promise<string> {
-    const launch = await resolveAcpLaunch(launchDefinition(def));
+  async oneShot(
+    def: CodingAgentDefinition,
+    cwd: string,
+    prompt: string,
+    host: Host = hostRegistry.local,
+  ): Promise<string> {
+    const launch = await host.acp.resolveLaunch(launchDefinition(def));
     if (typeof launch === "string") throw new Error(launch);
     let sessionId: string | null = null;
     let text = "";
-    const proc = await AcpAgentProcess.start(launch, cwd, def.label, {
+    const proc = await AcpAgentProcess.start(host.acp, launch, cwd, def.label, {
       onUpdate: (n) => {
         if (n.sessionId !== sessionId) return;
         const u = n.update;

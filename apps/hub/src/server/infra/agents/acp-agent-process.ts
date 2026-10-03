@@ -13,13 +13,11 @@
  * (Codex runs a separate app-server).
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import type { AcpLaunch, AgentStdio, HostAcp } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
-import type { AcpLaunch } from "./acp-launch";
 
 const log = createLogger("acp-agent");
 
@@ -36,16 +34,6 @@ function canonicalPath(path: string): string {
 const STARTUP_TIMEOUT_MS = 60_000;
 /** `session/load` streams the whole history before answering. */
 const LOAD_TIMEOUT_MS = 180_000;
-/** How long `stopAllAgentProcesses` waits after SIGTERM before SIGKILL. */
-const STOP_TIMEOUT_MS = 3_000;
-
-/**
- * Every agent process started and not yet exited, including one still
- * starting up. Agents run in their own process group, so nothing else stops
- * them when the server exits.
- */
-const liveChildren = new Set<ChildProcess>();
-
 const CLIENT_CAPABILITIES: acp.ClientCapabilities = {
   fs: { readTextFile: false, writeTextFile: false },
   terminal: false,
@@ -161,12 +149,31 @@ export interface AttachedSession {
   models: SessionModelState | null;
 }
 
+/** A web stream over the host's stdout chunks, which end when the process does. */
+function iterableToReadable(source: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+  const iterator = source[Symbol.asyncIterator]();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await iterator.next();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+    async cancel() {
+      await iterator.return?.();
+    },
+  });
+}
+
 /** The last few KB of stderr, which is where an agent explains a crash. */
 function stderrTail() {
   let buf = "";
   return {
-    push: (d: Buffer) => {
-      buf = (buf + d.toString()).slice(-4000);
+    push: (d: Uint8Array) => {
+      buf = (buf + Buffer.from(d).toString()).slice(-4000);
     },
     text: () => buf,
   };
@@ -203,9 +210,9 @@ function toAttached(
 
 export class AcpAgentProcess {
   private closed = false;
-
   private constructor(
-    private readonly child: ChildProcess,
+    private readonly lifecycle: { exited: boolean },
+    private readonly child: AgentStdio,
     private readonly connection: acp.ClientConnection,
     private readonly label: string,
     readonly init: acp.InitializeResponse,
@@ -213,41 +220,38 @@ export class AcpAgentProcess {
   ) {}
 
   /**
-   * Spawns the agent in `cwd` and runs `initialize`. Throws with the
-   * agent's stderr attached when it fails to start or answer.
+   * Spawns the agent on `host` in `cwd` and runs `initialize`. Throws with
+   * the agent's stderr attached when it fails to start or answer.
    */
   static async start(
+    host: HostAcp,
     launch: AcpLaunch,
     cwd: string,
     label: string,
     handlers: AcpAgentHandlers,
   ): Promise<AcpAgentProcess> {
     const stderr = stderrTail();
-    const child = spawn(launch.command, launch.args, {
-      cwd,
-      env: { ...process.env, ...launch.env },
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    });
-    child.stderr?.on("data", stderr.push);
-    liveChildren.add(child);
-    child.once("exit", () => liveChildren.delete(child));
-    child.once("error", () => {
-      if (child.pid === undefined) liveChildren.delete(child);
-    });
-
+    const lifecycle = { exited: false };
+    let child: AgentStdio;
     try {
-      await new Promise<void>((resolve, reject) => {
-        child.once("spawn", resolve);
-        child.once("error", reject);
-      });
+      child = await host.spawn(launch, cwd);
     } catch (err) {
       throw new Error(`Could not start ${label}: ${(err as Error).message}`);
     }
+    void (async () => {
+      try {
+        for await (const chunk of child.stderr) stderr.push(chunk);
+      } catch {
+        // The stream ends with the process.
+      }
+    })();
 
     const wire = acp.ndJsonStream(
-      Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
+      new WritableStream<Uint8Array>({
+        write: (chunk) => child.stdin.write(chunk),
+        close: () => child.stdin.end(),
+      }),
+      iterableToReadable(child.stdout),
     );
     const stream = {
       writable: wire.writable,
@@ -266,7 +270,9 @@ export class AcpAgentProcess {
       )
       .connect(stream);
 
-    child.once("exit", (code) => {
+    void child.exit.then(({ code }) => {
+      // Before the handler, so a caller it wakes already sees `alive` false.
+      lifecycle.exited = true;
       connection.close();
       handlers.onExit(code, stderr.text());
     });
@@ -284,9 +290,9 @@ export class AcpAgentProcess {
         { label, agent: init.agentInfo?.name, version: init.agentInfo?.version, pid: child.pid },
         "agent initialized",
       );
-      return new AcpAgentProcess(child, connection, label, init, stderr);
+      return new AcpAgentProcess(lifecycle, child, connection, label, init, stderr);
     } catch (err) {
-      killTree(child);
+      child.kill("SIGTERM");
       throw withStderr(label, err, stderr.text());
     }
   }
@@ -297,7 +303,7 @@ export class AcpAgentProcess {
   }
 
   get alive(): boolean {
-    return !this.closed && this.child.exitCode === null && this.child.signalCode === null;
+    return !this.closed && !this.lifecycle.exited;
   }
 
   get agentName(): string {
@@ -467,7 +473,7 @@ export class AcpAgentProcess {
     if (this.closed) return;
     this.closed = true;
     this.connection.close();
-    killTree(this.child);
+    this.child.kill("SIGTERM");
   }
 
   /** Adds the agent's stderr to a failed request, so the error says why. */
@@ -494,71 +500,4 @@ function describe(err: unknown): string {
     return `${String(e.message)}${data ? ` ${data}` : ""}`;
   }
   return String(err);
-}
-
-/**
- * Stops every agent process of this server that is still running, with its
- * whole process group, and resolves once they have exited. For server
- * shutdown: a detached agent would otherwise outlive the server, and a Codex
- * agent's app-server with it. An agent that already exited is no longer
- * tracked, so anything it left behind in its group is not reached.
- */
-export async function stopAllAgentProcesses(): Promise<void> {
-  await Promise.all([...liveChildren].map(stopAgentProcess));
-}
-
-async function stopAgentProcess(child: ChildProcess): Promise<void> {
-  // Spawned an instant ago: wait for its pid, or for the spawn to fail.
-  if (child.pid === undefined) {
-    await new Promise<void>((resolve) => {
-      child.once("spawn", () => resolve());
-      child.once("error", () => resolve());
-    });
-  }
-  const pid = child.pid;
-  if (pid === undefined) return;
-  const exited = new Promise<void>((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) resolve();
-    else child.once("exit", () => resolve());
-  });
-  // The whole group, not only the agent: a process it started can outlive
-  // it or ignore SIGTERM.
-  const running = () => {
-    if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
-    try {
-      process.kill(-pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  killTree(child);
-  const deadline = Date.now() + STOP_TIMEOUT_MS;
-  while (running() && Date.now() < deadline) await delay(20);
-  if (running()) signalGroup(child, pid, "SIGKILL");
-  // Bounded, so shutdown can't hang on a process that never exits.
-  await Promise.race([exited, delay(1_000)]);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function signalGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
-  try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-pid, signal);
-  } catch {
-    // Already gone.
-  }
-}
-
-function killTree(child: ChildProcess): void {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
-  try {
-    if (process.platform === "win32") child.kill("SIGTERM");
-    else process.kill(-child.pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
 }

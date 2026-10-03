@@ -331,9 +331,35 @@ export interface ClaudeDefaults {
   effort: string | undefined;
 }
 
+/** Flags read off a running Claude Code CLI's command line. */
+export interface ClaudeCliArgs {
+  /** `--settings` values, in order. */
+  settings: string[];
+  model?: string;
+  effort?: string;
+}
+
 export interface HostAgentEnv {
-  /** The model and effort Claude Code would use in `cwd` according to its config files and environment. */
-  claudeDefaults(cwd: string): Promise<ClaudeDefaults>;
+  /**
+   * The model and effort Claude Code would use in `cwd` according to its
+   * config files and environment. Without `cwd`, project files are skipped. `cli` adds the flags of a running CLI.
+   */
+  claudeDefaults(cwd?: string, cli?: ClaudeCliArgs): Promise<ClaudeDefaults>;
+  /**
+   * The model and effort of the session's last main-thread assistant record,
+   * when it was written at or after `since` (epoch ms). Empty values when the
+   * transcript is missing or older.
+   */
+  reportedClaudeDefaults(opts: {
+    cwd: string;
+    sessionId: string;
+    since?: number;
+  }): Promise<ClaudeDefaults>;
+  /**
+   * The flags of the Claude Code CLI running `sessionId` under the adapter
+   * process `adapterPid`, or null when there is no such process.
+   */
+  claudeCliArgs(adapterPid: number, sessionId: string): Promise<ClaudeCliArgs | null>;
   /** The newest Claude Code session id recorded for `cwd`, or null. */
   latestClaudeSession(cwd: string): Promise<string | null>;
   /** The usage reader for an agent, or `undefined` when it keeps no on-disk usage data. */
