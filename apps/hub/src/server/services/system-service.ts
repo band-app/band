@@ -1,5 +1,5 @@
-import { listWorktrees, type WorktreeInfo } from "../infra/git/git-client";
-import { duBytes as duBytesRaw } from "../infra/process/du";
+import type { WorktreeInfo } from "@band-app/host-api";
+import { hostRegistry } from "../infra/host/registry";
 import { brewInstall } from "../infra/process/install";
 import { shellPath, whichBinary } from "../infra/process/path";
 
@@ -110,23 +110,23 @@ export class SystemService {
   }
 
   /**
-   * Enumerate git worktrees for a project. Thin façade over `GitClient`
+   * Enumerate git worktrees for a project. Thin façade over the project's host
    * so the system router (and any future API-tier caller that needs the
    * porcelain output) doesn't reach into `infra/git/` directly.
    */
-  async listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
-    return listWorktrees(repoPath);
+  async listWorktrees(project: string, repoPath: string): Promise<WorktreeInfo[]> {
+    return hostRegistry.hostForProject(project).worktree.list(repoPath);
   }
 
   /**
    * Run `du -sk PATH` and return the allocated byte total, gated by the
-   * process-wide concurrency cap above. The shell-out itself lives in
-   * `infra/process/du.ts`; this method is just the rate-limit wrapper.
+   * process-wide concurrency cap above. The shell-out runs on the
+   * project's host (`host.fs.du`); this method is just the rate-limit wrapper.
    */
-  async duBytes(path: string): Promise<number> {
+  async duBytes(project: string, path: string): Promise<number> {
     const release = await acquireDuSlot();
     try {
-      return await duBytesRaw(path);
+      return await hostRegistry.hostForProject(project).fs.du(path);
     } finally {
       release();
     }

@@ -9,6 +9,7 @@ import type {
 } from "@band-app/plugin-api";
 import { WorkspaceNotFoundError } from "../errors";
 import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "../infra/git/git-client";
+import { gitRunner } from "../infra/host/git-run";
 import { type PluginHost, pluginHost } from "./plugin-host-service";
 import { type WorkspaceService, workspaceService } from "./workspace-service";
 
@@ -100,7 +101,7 @@ export class ReviewService {
   private async resolve(workspaceId: string): Promise<Target> {
     const resolved = this.workspaces.resolve(workspaceId);
     if (!resolved) throw new WorkspaceNotFoundError(workspaceId);
-    const { project, worktree } = resolved;
+    const { project, worktree, host } = resolved;
 
     if (project.kind === "plain") {
       return unavailable("plain-project", "This project is not a git repository.");
@@ -108,7 +109,7 @@ export class ReviewService {
     if (worktree.branch.startsWith(DETACHED_BRANCH_PREFIX)) {
       return unavailable("detached-head", "The workspace is not on a branch.");
     }
-    const repo = await getRepoInfo(project.path);
+    const repo = await getRepoInfo(project.path, gitRunner(host));
     if (!repo) {
       return unavailable("no-remote", "The project has no origin remote.");
     }

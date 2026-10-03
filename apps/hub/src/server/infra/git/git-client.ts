@@ -313,9 +313,12 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
  * checkout, has no `origin` remote, or the URL format isn't recognised.
  * See issue #458 for why these are debug-level rather than error-level.
  */
-export async function getRepoInfo(worktreePath: string): Promise<RepoInfo | null> {
+export async function getRepoInfo(
+  worktreePath: string,
+  run: (args: string[], cwd: string) => Promise<string> = execGit,
+): Promise<RepoInfo | null> {
   try {
-    const remoteUrl = (await execGit(["remote", "get-url", "origin"], worktreePath)).trim();
+    const remoteUrl = (await run(["remote", "get-url", "origin"], worktreePath)).trim();
     const parsed = parseGitRemoteUrl(remoteUrl);
     if (!parsed) {
       // Steady-state condition (e.g. self-hosted remote with an unusual URL
@@ -335,62 +338,5 @@ export async function getRepoInfo(worktreePath: string): Promise<RepoInfo | null
       err instanceof Error ? err.message : String(err),
     );
     return null;
-  }
-}
-
-/**
- * Typed wrapper around the git CLI. Group related operations on this class
- * so services can depend on `git: GitClient = new GitClient()` instead of
- * importing a bag of loose functions.
- *
- * Methods are thin wrappers over the existing functional API so the
- * back-compat shim in `lib/git.ts` and the in-flight refactor (issue #313)
- * can co-exist while callers migrate one at a time. Once every caller goes
- * through the class, the standalone exports will be removed from this
- * module and `lib/git.ts` retired.
- */
-export class GitClient {
-  /**
-   * Run `git init` (optionally with `-b <branch>`) in `cwd`. Idempotent —
-   * if the directory is already a git repo, git itself reports a no-op
-   * rather than failing.
-   */
-  async init(cwd: string, branch?: string): Promise<void> {
-    const args = ["init"];
-    if (branch) args.push("-b", branch);
-    await execGit(args, cwd);
-  }
-
-  /**
-   * `listWorktrees` instance method — parses
-   * `git worktree list --porcelain` into structured `WorktreeInfo` records.
-   * See the module-level export for full semantics.
-   */
-  listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
-    return listWorktrees(repoPath);
-  }
-
-  /**
-   * Resolve the local HEAD's short symbolic ref (the current branch name).
-   * Returns `null` when HEAD is detached or any other failure mode — the
-   * caller should fall back to a sensible default (`"main"`).
-   */
-  async currentBranch(cwd: string): Promise<string | null> {
-    try {
-      const output = (await execGit(["symbolic-ref", "--short", "HEAD"], cwd)).trim();
-      return output || null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * `getRepoInfo` instance method — extracts host/owner/repo from the
-   * `origin` remote URL. Returns `null` cleanly when the directory isn't
-   * a git checkout, has no `origin` remote, or the URL format isn't
-   * recognised. See the module-level export for full semantics.
-   */
-  getRepoInfo(worktreePath: string): Promise<RepoInfo | null> {
-    return getRepoInfo(worktreePath);
   }
 }

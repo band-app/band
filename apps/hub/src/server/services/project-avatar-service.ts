@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { ProjectQueries, type ProjectState } from "../infra/db/queries/projects";
 import { bandHome } from "../infra/db/queries/settings";
-import { GitClient } from "../infra/git/git-client";
+import { getRepoInfo } from "../infra/git/git-client";
 import { GitHubClient } from "../infra/github/github-client";
 import { type GitHubRepoRef, githubRepoRef } from "../infra/github/github-repo-ref";
+import { gitRunner } from "../infra/host/git-run";
+import { hostRegistry } from "../infra/host/registry";
 
 const log = createLogger("project-avatars");
 
@@ -63,7 +65,6 @@ export class ProjectAvatarService {
 
   constructor(
     private readonly queries: ProjectQueries = new ProjectQueries(),
-    private readonly git: GitClient = new GitClient(),
     private readonly github: GitHubClient = new GitHubClient(),
   ) {}
 
@@ -75,7 +76,7 @@ export class ProjectAvatarService {
     project: Pick<ProjectState, "name" | "path" | "kind">,
   ): Promise<ProjectAvatarInfo | null> {
     if (project.kind !== "git") return null;
-    const ref = await this.repoRef(project.path);
+    const ref = await this.repoRef(project.name, project.path);
     if (!ref) return null;
     const entry = await this.entry(ref);
     if (entry.meta?.status === "missing" && !this.isStale(entry.meta)) return null;
@@ -93,7 +94,7 @@ export class ProjectAvatarService {
   async image(projectName: string): Promise<AvatarImage | null> {
     const project = this.queries.findLocation(projectName);
     if (!project || project.kind !== "git") return null;
-    const ref = await this.repoRef(project.path);
+    const ref = await this.repoRef(projectName, project.path);
     if (!ref) return null;
 
     const key = cacheKey(ref);
@@ -181,10 +182,12 @@ export class ProjectAvatarService {
     return Date.now() - meta.fetchedAt > CACHE_TTL_MS;
   }
 
-  private async repoRef(projectPath: string): Promise<GitHubRepoRef | null> {
+  private async repoRef(projectName: string, projectPath: string): Promise<GitHubRepoRef | null> {
     const cached = this.remotes.get(projectPath);
     if (cached && Date.now() - cached.at < REMOTE_TTL_MS) return cached.ref;
-    const ref = githubRepoRef(await this.git.getRepoInfo(projectPath));
+    const ref = githubRepoRef(
+      await getRepoInfo(projectPath, gitRunner(hostRegistry.hostForProject(projectName))),
+    );
     this.remotes.set(projectPath, { ref, at: Date.now() });
     return ref;
   }

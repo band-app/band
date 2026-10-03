@@ -1,5 +1,5 @@
 import type { GitOpResult } from "@band-app/shared/git-op-result";
-import { execGit } from "./git-client";
+import type { CommandRun } from "../host/git-run";
 
 /** How many file names a refusal message lists before "and N more". */
 const MAX_LISTED_FILES = 3;
@@ -11,7 +11,11 @@ type Refusal = Extract<GitOpResult, { ok: false }>;
  * the working tree or a missing upstream, or `null` for a genuine failure
  * (network, auth, a conflict mid-rebase) the caller should rethrow.
  */
-export async function pullRefusal(err: unknown, cwd: string): Promise<Refusal | null> {
+export async function pullRefusal(
+  err: unknown,
+  cwd: string,
+  execGit: CommandRun,
+): Promise<Refusal | null> {
   const stderr = errorText(err);
   if (/There is no tracking information for the current branch/i.test(stderr)) {
     return {
@@ -30,7 +34,7 @@ export async function pullRefusal(err: unknown, cwd: string): Promise<Refusal | 
     .filter((line) => line.startsWith("\t"))
     .map((line) => line.trim())
     .filter(Boolean);
-  const files = listed.length > 0 ? listed : await changedTrackedFiles(cwd);
+  const files = listed.length > 0 ? listed : await changedTrackedFiles(execGit, cwd);
   const which = files.length > 0 ? ` (${formatFileList(files)})` : "";
   // A plain `git stash` leaves untracked files in place, so they get their own advice.
   const advice = /untracked working tree files would be overwritten/i.test(stderr)
@@ -67,7 +71,7 @@ function errorText(err: unknown): string {
 }
 
 /** Tracked files with staged or unstaged changes, from `git status`. */
-async function changedTrackedFiles(cwd: string): Promise<string[]> {
+async function changedTrackedFiles(execGit: CommandRun, cwd: string): Promise<string[]> {
   try {
     const out = await execGit(["status", "--porcelain", "--untracked-files=no"], cwd);
     return out

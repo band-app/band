@@ -18,6 +18,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
+import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
@@ -271,12 +272,12 @@ function isRebaseCollision(err: unknown): boolean {
  * (local changes, no upstream) resolve as `ok: false`; any other failure
  * rethrows with git's stderr.
  */
-async function pullRebase(cwd: string): Promise<GitOpResult> {
+async function pullRebase(execGit: CommandRun, cwd: string): Promise<GitOpResult> {
   try {
     await execGit(["pull", "--rebase"], cwd);
   } catch (e) {
     if (isRebaseCollision(e)) return { ok: true };
-    const refusal = await pullRefusal(e, cwd);
+    const refusal = await pullRefusal(e, cwd, execGit);
     if (refusal) return refusal;
     throw e;
   }
@@ -963,7 +964,7 @@ export class WorkspaceService {
         `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
       );
     }
-    return pullRebase(workspace.worktree.path);
+    return pullRebase(gitRunner(workspace.host), workspace.worktree.path);
   }
 
   /**
@@ -1026,7 +1027,7 @@ export class WorkspaceService {
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
     }
-    return pullRebase(workspace.worktree.path);
+    return pullRebase(gitRunner(workspace.host), workspace.worktree.path);
   }
 
   /**

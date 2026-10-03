@@ -8,13 +8,12 @@
  * Git Graph tab prototype (PR #612); this service narrows the log to HEAD,
  * adds paging, and returns refs as structured badges.
  *
- * Every git shell-out goes through `infra/git/git-client.ts::execGit`
- * (execFile, no shell).
+ * Every git shell-out goes through the workspace's host (`host.git.exec`).
  */
 
 import { createHash } from "node:crypto";
 import { WorkspaceNotFoundError } from "../errors";
-import { execGit } from "../infra/git/git-client";
+import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { assertWorktreeRelative } from "./diff-service";
 import {
   workspaceService as defaultWorkspaceService,
@@ -138,10 +137,10 @@ function parseNameStatus(output: string): CommitFileChange[] {
 export class GitGraphService {
   constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
 
-  private cwd(workspaceId: string): string {
+  private target(workspaceId: string): { cwd: string; execGit: CommandRun } {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
-    return workspace.worktree.path;
+    return { cwd: workspace.worktree.path, execGit: gitRunner(workspace.host) };
   }
 
   /**
@@ -150,10 +149,11 @@ export class GitGraphService {
    * the history only when it moves. Empty for a repo with no commits.
    */
   async getCommitHistorySignature(workspaceId: string): Promise<string> {
-    return this.signature(this.cwd(workspaceId));
+    const { cwd, execGit } = this.target(workspaceId);
+    return this.signature(execGit, cwd);
   }
 
-  private async signature(cwd: string): Promise<string> {
+  private async signature(execGit: CommandRun, cwd: string): Promise<string> {
     let out = "";
     try {
       // `--head` includes HEAD itself; show-ref exits 1 when there are no refs.
@@ -174,14 +174,14 @@ export class GitGraphService {
     workspaceId: string,
     options: { skip?: number; limit?: number } = {},
   ): Promise<CommitHistoryResult> {
-    const cwd = this.cwd(workspaceId);
+    const { cwd, execGit } = this.target(workspaceId);
     const skip = options.skip ?? 0;
     const limit = options.limit ?? COMMIT_HISTORY_DEFAULT_LIMIT;
 
     // Read the signature before the log: if refs move while the log runs,
     // the client sees a newer signature on its next poll and reloads.
     const [signature, head] = await Promise.all([
-      this.signature(cwd),
+      this.signature(execGit, cwd),
       execGit(["rev-parse", "--verify", "HEAD"], cwd).then(
         (out) => out.trim(),
         () => null,
@@ -228,7 +228,7 @@ export class GitGraphService {
 
   /** Full metadata and changed-file list for a single commit. */
   async getCommitDetails(workspaceId: string, sha: string): Promise<CommitDetails> {
-    const cwd = this.cwd(workspaceId);
+    const { cwd, execGit } = this.target(workspaceId);
 
     // Body (%b) is last so it can safely contain newlines and separators.
     const fmt = ["%H", "%P", "%an", "%ae", "%at", "%cn", "%ct", "%s", "%b"].join(FS);
@@ -248,7 +248,7 @@ export class GitGraphService {
       committerTs: Number.parseInt(committerTsStr, 10) || 0,
       subject,
       body,
-      files: await this.commitFiles(cwd, sha),
+      files: await this.commitFiles(execGit, cwd, sha),
     };
   }
 
@@ -257,7 +257,11 @@ export class GitGraphService {
    * the graph draws it on. For a root commit `git show` lists every file as
    * added. `-M` reports renames as one entry instead of a delete + add.
    */
-  private async commitFiles(cwd: string, sha: string): Promise<CommitFileChange[]> {
+  private async commitFiles(
+    execGit: CommandRun,
+    cwd: string,
+    sha: string,
+  ): Promise<CommitFileChange[]> {
     const out = await execGit(
       ["show", "--first-parent", "-M", "--name-status", "-z", "--format=", sha],
       cwd,
@@ -276,9 +280,11 @@ export class GitGraphService {
     filePath: string,
     options: { contextLines?: number } = {},
   ): Promise<{ diff: string }> {
-    const cwd = this.cwd(workspaceId);
+    const { cwd, execGit } = this.target(workspaceId);
     assertWorktreeRelative(cwd, filePath);
-    const oldPath = (await this.commitFiles(cwd, sha)).find((f) => f.path === filePath)?.oldPath;
+    const oldPath = (await this.commitFiles(execGit, cwd, sha)).find(
+      (f) => f.path === filePath,
+    )?.oldPath;
     const args = ["show", "--first-parent", "-M", "--format="];
     if (options.contextLines !== undefined) args.push(`-U${options.contextLines}`);
     // `--` pins the paths as pathspecs, never flags.
