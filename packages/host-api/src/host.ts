@@ -174,13 +174,18 @@ export interface HostFs {
   readStream(path: string): Stream<Uint8Array>;
   /**
    * Creates the file or replaces its content. The parent directory must
-   * exist. With `exclusive`, rejects when the path already exists.
+   * exist. With `exclusive`, rejects when the path already exists. `mode`
+   * sets the permissions of a new file.
    */
   writeFile(
     path: string,
     data: string | Uint8Array,
-    options?: { exclusive?: boolean },
+    options?: { exclusive?: boolean; mode?: number },
   ): Promise<void>;
+  /** Paths under `cwd` matching the glob `pattern`, relative to `cwd`. */
+  glob(pattern: string, cwd: string): Promise<string[]>;
+  /** Creates a private (mode 0700) directory in the host's temp dir, named from `prefix`, and returns its path. */
+  mkdtemp(prefix: string): Promise<string>;
   list(path: string): Promise<FsEntry[]>;
   /** Rejects when the directory already exists, unless `recursive` is set. */
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
@@ -301,7 +306,23 @@ export interface ScriptPlan {
   dispose(): void;
 }
 
+/** Where a workspace's `.band/config.json` lives. */
+export interface ScriptWorkspace {
+  projectPath: string;
+  worktreePath: string;
+}
+
 export interface HostScripts {
+  /**
+   * The workspace's `setup` or `teardown` command as written in
+   * `.band/config.json`, or `null` when it declares none.
+   */
+  command(workspace: ScriptWorkspace & { label: ScriptLabel }): Promise<string | null>;
+  /**
+   * Runs `script` in `cwd` without a terminal (the Windows path, through
+   * `cmd.exe`). Resolves with its exit code, or `null` when `timeoutMs` passes.
+   */
+  runHidden(script: string, cwd: string, timeoutMs?: number): Promise<number | null>;
   /**
    * Reads the workspace's `.band/config.json` (worktree first, then the
    * project checkout) and prepares its `setup` or `teardown` script. Resolves

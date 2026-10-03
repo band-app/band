@@ -2,8 +2,10 @@ import { execFile, spawn } from "node:child_process";
 import { createReadStream, watch as fsWatch } from "node:fs";
 import {
   cp,
+  glob as fsGlob,
   lstat,
   mkdir,
+  mkdtemp,
   readdir,
   readFile,
   realpath,
@@ -12,7 +14,8 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
 import { getUsageReader } from "@band-app/coding-agent";
 import {
   type AcpAgentDefinition,
@@ -106,8 +109,10 @@ export class LocalHost implements Host {
     spawn: (launch, cwd) => spawnAgent(launch, cwd),
   };
   readonly scripts: HostScripts = {
-    prepare: (workspace) => prepareScript(workspace),
-    copyFiles: (projectPath, worktreePath) => copyWorkspaceFiles(projectPath, worktreePath),
+    command: (workspace) => scriptCommand(this, workspace),
+    runHidden: (script, cwd, timeoutMs) => runScriptHidden(script, cwd, timeoutMs),
+    prepare: (workspace) => prepareScript(this, workspace),
+    copyFiles: (projectPath, worktreePath) => copyWorkspaceFiles(this, projectPath, worktreePath),
   };
   readonly agentEnv: HostAgentEnv = {
     claudeDefaults: async (cwd): Promise<ClaudeDefaults> => {
@@ -235,7 +240,16 @@ const localFs: HostFs = {
     }
   },
   writeFile: (path, data, options) =>
-    writeFile(path, data, options?.exclusive ? { flag: "wx" } : undefined),
+    writeFile(path, data, {
+      mode: options?.mode,
+      ...(options?.exclusive ? { flag: "wx" } : {}),
+    }),
+  async glob(pattern, cwd) {
+    const matches: string[] = [];
+    for await (const match of fsGlob(pattern, { cwd })) matches.push(match);
+    return matches;
+  },
+  mkdtemp: (prefix) => mkdtemp(join(tmpdir(), prefix)),
   async list(path) {
     const entries = await readdir(path, { withFileTypes: true });
     return entries.map((entry) => ({ name: entry.name, kind: kindOf(entry) }));
@@ -245,9 +259,11 @@ const localFs: HostFs = {
   },
   rm: (path, options) => rm(path, options),
   rename: (from, to) => rename(from, to),
+  // dereference: copy a symlink's target bytes, as copyFileSync did, so the copy never links back into the source tree.
   copy: (from, to, options) =>
     cp(from, to, {
       recursive: options?.recursive ?? false,
+      dereference: true,
       ...(options?.exclusive ? { errorOnExist: true, force: false } : {}),
     }),
   du: (path) => duBytes(path),
@@ -342,12 +358,61 @@ async function spawnAgent(launch: AcpLaunch, cwd: string): Promise<AgentStdio> {
 // scripts
 // ---------------------------------------------------------------------------
 
-async function prepareScript(workspace: {
-  projectPath: string;
-  worktreePath: string;
-  label: ScriptLabel;
-}): Promise<ScriptPlan | null> {
-  const value = loadProjectConfig(workspace.worktreePath, workspace.projectPath)?.[workspace.label];
-  if (typeof value !== "string" || value.trim() === "") return null;
-  return prepareScriptRun(value, workspace.label);
+async function prepareScript(
+  host: Host,
+  workspace: {
+    projectPath: string;
+    worktreePath: string;
+    label: ScriptLabel;
+  },
+): Promise<ScriptPlan | null> {
+  const value = await scriptCommand(host, workspace);
+  if (value === null) return null;
+  return prepareScriptRun(host, value, workspace.label);
+}
+
+async function scriptCommand(
+  host: Host,
+  workspace: {
+    projectPath: string;
+    worktreePath: string;
+    label: ScriptLabel;
+  },
+): Promise<string | null> {
+  const value = (await loadProjectConfig(host, workspace.worktreePath, workspace.projectPath))?.[
+    workspace.label
+  ];
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/**
+ * Run `script` through `cmd.exe /d /s /c` in `cwd`, without a terminal, and
+ * resolve with its exit code (or `null` on `timeoutMs`). The Windows path:
+ * terminals there cannot run the bash wrapper `prepareScriptRun` builds.
+ */
+function runScriptHidden(script: string, cwd: string, timeoutMs?: number): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const { PORT: _port, ...parentEnv } = process.env;
+    const child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", script], {
+      cwd,
+      env: { ...parentEnv, PATH: prependBinDirs(process.env.PATH) },
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            child.kill();
+            resolve(null);
+          }, timeoutMs);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code ?? 1);
+    });
+  });
 }

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 
@@ -11,21 +11,30 @@ const log = createLogger("project-config");
  * config file lives on the main branch but is .gitignored, so new worktrees
  * don't contain it.
  */
-export function loadProjectConfig(
+export async function loadProjectConfig(
+  host: Host,
   worktreePath: string,
   projectPath: string,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
   for (const base of [worktreePath, projectPath]) {
-    const configPath = join(base, ".band", "config.json");
-    if (existsSync(configPath)) {
-      try {
-        return JSON.parse(readFileSync(configPath, "utf-8"));
-      } catch {
-        // Malformed JSON – skip and try next location
-      }
+    const text = await readConfig(host, join(base, ".band", "config.json"));
+    if (text === null) continue;
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Malformed JSON – skip and try next location
     }
   }
   return null;
+}
+
+/** The file's text, or `null` when it does not exist (or cannot be read). */
+async function readConfig(host: Host, configPath: string): Promise<string | null> {
+  try {
+    return new TextDecoder().decode(await host.fs.readFile(configPath));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -60,13 +69,14 @@ const CopyFilesSchema = z.array(z.string()).optional();
  * A `null` return is indistinguishable from an empty list at the call site
  * and intentionally so — both mean "no Option-A copies."
  */
-export function getCopyFiles(projectPath: string): string[] | null {
+export async function getCopyFiles(host: Host, projectPath: string): Promise<string[] | null> {
   const configPath = join(projectPath, ".band", "config.json");
-  if (!existsSync(configPath)) return null;
+  const text = await readConfig(host, configPath);
+  if (text === null) return null;
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    raw = JSON.parse(text);
   } catch (err) {
     log.warn({ err, configPath }, "failed to parse .band/config.json");
     return null;

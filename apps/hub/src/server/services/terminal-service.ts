@@ -1,3 +1,4 @@
+import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
@@ -455,21 +456,26 @@ export class TerminalService {
    * tier so callers (currently the workspace router's `getTerminalConfig`
    * query) reach it via `terminalService` instead of a stand-alone helper.
    */
-  getWorkspaceConfig(workspaceId: string): WorkspaceTerminalConfig | null {
+  async getWorkspaceConfig(workspaceId: string): Promise<WorkspaceTerminalConfig | null> {
     const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) return null;
-    return this.loadWorkspaceConfigFromPaths(workspace.worktree.path, workspace.project.path);
+    return this.loadWorkspaceConfigFromPaths(
+      workspace.host,
+      workspace.worktree.path,
+      workspace.project.path,
+    );
   }
 
   /**
    * Internal: the path-driven parse so tests / future non-tRPC entry
    * points can plug raw paths in without going through `resolveWorkspace`.
    */
-  private loadWorkspaceConfigFromPaths(
+  private async loadWorkspaceConfigFromPaths(
+    host: Host,
     worktreePath: string,
     projectPath: string,
-  ): WorkspaceTerminalConfig | null {
-    const raw = loadProjectConfig(worktreePath, projectPath);
+  ): Promise<WorkspaceTerminalConfig | null> {
+    const raw = await loadProjectConfig(host, worktreePath, projectPath);
     if (!raw) return null;
 
     const terminalBlock =

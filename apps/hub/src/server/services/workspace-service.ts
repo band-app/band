@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { resumeCliInvocation } from "@band-app/coding-agent";
 import type { Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
@@ -16,13 +13,12 @@ import { TaskQueries } from "../infra/db/queries/tasks";
 import { UsageEventQueries } from "../infra/db/queries/usage-events";
 import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
+import { DETACHED_BRANCH_PREFIX } from "../infra/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
 import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
-import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { formatShellCommand } from "./_utils/format-shell-command";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
 // back from this file. Safe only while `agentLaunchService` is used inside
@@ -72,8 +68,6 @@ import { emit } from "./watcher-service";
 // reference inside a function body; capturing it at module load would
 // silently get `undefined`.
 import { workspaceScriptService } from "./workspace-script-service";
-
-const execFileAsync = promisify(execFile);
 
 /** How long {@link WorkspaceService.remove} waits for a `teardown` command. */
 const TEARDOWN_TIMEOUT_MS = 60_000;
@@ -437,6 +431,8 @@ export class WorkspaceService {
 
     const wtDir = worktreesDir();
     const worktreePath = join(wtDir, input.project, input.branch);
+    const workspaceId = toWorkspaceId(input.project, input.branch);
+    const host = hostRegistry.hostFor(workspaceId);
     // Pre-create the `<project>` subdir under the worktrees root so the
     // first `workspaces.create` call on a freshly-installed Band has
     // somewhere to land. For slash-containing branch names (e.g.
@@ -447,15 +443,7 @@ export class WorkspaceService {
     // redundant. Verified against `git 2.x` — `git worktree add
     // /tmp/wt/feature/login -b feature/login` succeeds without the
     // parent existing.
-    mkdirSync(join(wtDir, input.project), { recursive: true });
-
-    const { command, env } = gitCmd();
-    const args = ["worktree", "add"];
-    if (input.base) {
-      args.push("-b", input.branch, worktreePath, input.base);
-    } else {
-      args.push("-b", input.branch, worktreePath);
-    }
+    await host.fs.mkdir(join(wtDir, input.project), { recursive: true });
 
     try {
       // Async — `git worktree add` on a large repo can take 200–500 ms
@@ -463,7 +451,12 @@ export class WorkspaceService {
       // event loop for the duration would stall every concurrent SSE
       // stream / chat event / API request. Mirrors the async `git`
       // helpers used by `remove` below.
-      await execFileAsync(command, args, { cwd: project.path, env, encoding: "utf-8" });
+      await host.worktree.create({
+        repoPath: project.path,
+        path: worktreePath,
+        branch: input.branch,
+        base: input.base,
+      });
     } catch (e) {
       throw new Error(e instanceof Error ? e.message : String(e));
     }
@@ -481,8 +474,6 @@ export class WorkspaceService {
     }
     syncService.commitWorktreeAdd(input.project, row);
 
-    const workspaceId = toWorkspaceId(input.project, input.branch);
-
     // Copy declared workspace files from the main checkout into the new
     // worktree. Driven by `.band/config.json::workspace.copyFiles` and/or
     // `.worktreeinclude` at the project root — see `copyWorkspaceFiles`
@@ -493,7 +484,7 @@ export class WorkspaceService {
     // with a warning rather than failing the create, matching the
     // non-fatal contract used by the setup script itself.
     try {
-      const copied = await copyWorkspaceFiles(project.path, worktreePath);
+      const copied = await host.scripts.copyFiles(project.path, worktreePath);
       if (copied.length > 0) {
         log.info({ workspaceId, count: copied.length }, "copied workspace files into new worktree");
       }
@@ -661,7 +652,7 @@ export class WorkspaceService {
     // porcelain inline — it applies the detached-HEAD → `detached-<sha>`
     // fallback that the rest of the app sees in `project.worktrees`, so
     // the live branch matches.
-    const worktrees = await listWorktrees(project.path);
+    const worktrees = await hostRegistry.hostForProject(project.name).worktree.list(project.path);
     const match = worktrees.find((wt) => wt.branch === currentBranch);
     if (!match) {
       throw new WorkspaceNotFoundError(input.name);
@@ -669,8 +660,8 @@ export class WorkspaceService {
     const worktreePath = match.path;
 
     const workspaceId = toWorkspaceId(input.project, input.name);
-    const teardownCmd = workspaceScriptService.getCommand("teardown", worktreePath, project.path);
-    if (!teardownCmd) {
+    const teardownScript = { worktreePath, projectPath: project.path };
+    if (!(await workspaceScriptService.getCommand(workspaceId, "teardown", teardownScript))) {
       return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
     }
 
@@ -680,7 +671,7 @@ export class WorkspaceService {
       const outcome = await workspaceScriptService.run(
         workspaceId,
         "teardown",
-        teardownCmd,
+        teardownScript,
         TEARDOWN_TIMEOUT_MS,
       );
       // `closed` from a duplicate run is not a failure; the first run reports.
@@ -739,7 +730,7 @@ export class WorkspaceService {
     if (!project.worktrees.some((wt) => wt.name === input.name)) {
       throw new WorkspaceNotFoundError(input.name);
     }
-    const { command, env: gitEnv } = gitCmd();
+    const host = hostRegistry.hostFor(workspaceId);
 
     // ── Fast path: update state and emit immediately ──
     project.worktrees = project.worktrees.filter((wt) => wt.name !== input.name);
@@ -850,27 +841,13 @@ export class WorkspaceService {
         // workspace on the next tick (issue: locked worktrees resurrect
         // forever). Best-effort: swallow "not locked" and any other error.
         try {
-          await execFileAsync(command, ["worktree", "unlock", worktreePath], {
-            cwd: projPath,
-            env: gitEnv,
-            encoding: "utf-8",
-          });
-        } catch {
-          // Worktree was not locked, or the path is already gone — either
-          // way there's nothing to unlock. Removal/prune below still runs.
-        }
-
-        try {
-          await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
-            cwd: projPath,
-            env: gitEnv,
-            encoding: "utf-8",
-          });
+          // Unlocks first (best-effort), then removes.
+          await host.worktree.remove({ repoPath: projPath, path: worktreePath });
         } catch {
           // Worktree may be corrupted (e.g. missing .git file) or still
           // refused. Manually remove the directory and prune stale entries.
           try {
-            await rm(worktreePath, { recursive: true, force: true });
+            await host.fs.rm(worktreePath, { recursive: true, force: true });
           } catch (err) {
             // Permission errors / EBUSY here leave the directory on disk;
             // log so a stale worktree path is traceable, then still try
@@ -883,20 +860,12 @@ export class WorkspaceService {
           // would otherwise survive the prune and resurrect on sync. Unlock
           // resolves the entry by its recorded path even when the dir is gone.
           try {
-            await execFileAsync(command, ["worktree", "unlock", worktreePath], {
-              cwd: projPath,
-              env: gitEnv,
-              encoding: "utf-8",
-            });
+            await host.git.exec(["worktree", "unlock", worktreePath], projPath);
           } catch {
             // Already unlocked or entry gone — prune below handles the rest.
           }
           try {
-            await execFileAsync(command, ["worktree", "prune"], {
-              cwd: projPath,
-              env: gitEnv,
-              encoding: "utf-8",
-            });
+            await host.git.exec(["worktree", "prune"], projPath);
           } catch (err) {
             log.warn({ err, workspaceId }, "git worktree prune failed");
           }
@@ -904,11 +873,7 @@ export class WorkspaceService {
 
         if (branchToDelete) {
           try {
-            await execFileAsync(command, ["branch", "-D", branchToDelete], {
-              cwd: projPath,
-              env: gitEnv,
-              encoding: "utf-8",
-            });
+            await host.git.exec(["branch", "-D", branchToDelete], projPath);
           } catch {
             // Branch may already be deleted
           }
@@ -997,6 +962,7 @@ export class WorkspaceService {
       );
     }
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     try {
       await execGit(["push"], cwd);
     } catch (err) {
@@ -1052,6 +1018,7 @@ export class WorkspaceService {
       throw new WorkspaceNotFoundError(workspaceId);
     }
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
     try {
       await execGit(["push"], cwd);
     } catch (err) {
@@ -1099,6 +1066,7 @@ export class WorkspaceService {
       throw new WorkspaceNotFoundError(workspaceId);
     }
     const cwd = workspace.worktree.path;
+    const execGit = gitRunner(workspace.host);
 
     await execGit(["add", "-A"], cwd);
     // `git commit` reports "nothing to commit" on stdout, which `execGit`'s
@@ -1151,6 +1119,7 @@ export class WorkspaceService {
     // permission denied, …) is a real, user-actionable error: surface
     // it instead of silently spawning an agent that will run the same
     // status command and fail the same way.
+    const execGit = gitRunner(workspace.host);
     const status = await execGit(["status", "--porcelain"], cwd);
     if (!status.trim()) {
       throw new Error("No changes to summarise");
@@ -1246,7 +1215,10 @@ export class WorkspaceService {
       throw new Error(`Invalid script type "${input.scriptType}"`);
     }
     const scriptPath = join(input.path, ".band", input.scriptType);
-    if (!existsSync(scriptPath)) {
+    const host = hostRegistry.local;
+    try {
+      await host.fs.stat(scriptPath);
+    } catch {
       throw new Error(`Script "${input.scriptType}" not found`);
     }
 
@@ -1254,7 +1226,7 @@ export class WorkspaceService {
       // `bash <scriptPath>` on POSIX; on Windows the script runs through
       // the command interpreter (see `scriptInvocation`).
       const { file, args } = scriptInvocation(scriptPath);
-      await execFileAsync(file, args, { cwd: input.path });
+      await host.exec(file, args, { cwd: input.path });
     } catch (err) {
       // Rewrap as a plain `Error` carrying just the message — preserves the
       // legacy router's behaviour, where the callback-style failure path
