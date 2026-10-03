@@ -9,7 +9,6 @@ import {
   type AgentDescriptor,
   type AgentStdio,
   type ClaudeDefaults,
-  type Duplex,
   type ExecOptions,
   type ExecResult,
   type FileChange,
@@ -40,6 +39,7 @@ import {
 import { resolveAcpLaunch } from "../agents/acp-launch";
 import { configuredClaudeDefaults } from "../agents/claude-defaults";
 import { execGh, execGit, listWorktrees } from "../git/git-client";
+import { connectLspServer, killAllServers, killWorkspaceServers } from "../lsp/lsp-manager";
 import { duBytes } from "../process/du";
 import { prependBinDirs } from "../process/path";
 import { listFiles, streamMatches } from "../search/ripgrep-client";
@@ -84,11 +84,9 @@ export class LocalHost implements Host {
     listFiles: (root) => listFiles(root),
   };
   readonly lsp: HostLsp = {
-    // The language server manager is keyed by workspace and shared by every
-    // client, so exposing it as one client's byte stream needs the proxy
-    // reworked. Nothing calls it through the host yet.
-    connect: (): Promise<Duplex> =>
-      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "lsp.connect")),
+    connect: (spec) => connectLspServer(spec),
+    killWorkspace: async (workspaceId) => killWorkspaceServers(workspaceId),
+    killAll: async () => killAllServers(),
   };
   readonly acp: HostAcp = {
     resolveLaunch: (def: AcpAgentDefinition) => resolveAcpLaunch(def),
@@ -149,7 +147,7 @@ export class LocalHost implements Host {
         gh,
         fsWatch: true,
         search: true,
-        lsp: false,
+        lsp: true,
         pty: true,
         acp: true,
       },

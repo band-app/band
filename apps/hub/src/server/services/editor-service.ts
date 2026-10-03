@@ -2,7 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { formatFileLocation } from "@band-app/shared/file-location";
 import { WorkspaceNotFoundError } from "../errors";
-import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
+import { hostRegistry } from "../infra/host/registry";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
 import { emit } from "./watcher-service";
@@ -21,7 +21,7 @@ import { workspaceService } from "./workspace-service";
  *
  * Plus a couple of behaviours that used to be inlined in the legacy
  * `editorRouter` (`apps/web/src/trpc/router.ts`):
- *   - LSP shutdown hooks (`killWorkspaceServers`, `killAllServers`) so
+ *   - LSP shutdown hooks (`host.lsp.killWorkspace`, `host.lsp.killAll`) so
  *     the workspace cleanup path and the server-shutdown handler reach
  *     LSP state via the service tier rather than poking infra directly.
  *   - `openFile` resolution + SSE emit (used by the CLI's `band open`).
@@ -85,12 +85,12 @@ export class EditorService {
   // LSP lifecycle pass-throughs
   // -------------------------------------------------------------------------
 
-  killWorkspaceLspServers(workspaceId: string): void {
-    killWorkspaceServers(workspaceId);
+  killWorkspaceLspServers(workspaceId: string): Promise<void> {
+    return hostRegistry.hostFor(workspaceId).lsp.killWorkspace(workspaceId);
   }
 
-  killAllLspServers(): void {
-    killAllServers();
+  killAllLspServers(): Promise<void> {
+    return hostRegistry.local.lsp.killAll();
   }
 
   // -------------------------------------------------------------------------

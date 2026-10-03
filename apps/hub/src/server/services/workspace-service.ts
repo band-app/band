@@ -20,7 +20,6 @@ import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
 import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
-import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { copyWorkspaceFiles } from "../infra/setup/workspace-files";
 import { formatShellCommand } from "./_utils/format-shell-command";
@@ -783,7 +782,12 @@ export class WorkspaceService {
     subscriptionService.removeForWorkspace(workspaceId);
 
     // Kill any running language server processes
-    killWorkspaceServers(workspaceId);
+    void hostRegistry
+      .hostFor(workspaceId)
+      .lsp.killWorkspace(workspaceId)
+      .catch((err) => {
+        log.warn({ workspaceId, err }, "failed to kill the workspace's language servers");
+      });
 
     // Clean up workspace-scoped cronjobs
     cronjobService.removeForKey(workspaceId);

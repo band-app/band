@@ -38,7 +38,7 @@ import {
   startUsageEventPruneScheduler,
   stopUsageEventPruneScheduler,
 } from "./src/server/infra/db/queries/usage-events.ts";
-import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
+import { hostRegistry } from "./src/server/infra/host/registry.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
 import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
@@ -1363,7 +1363,9 @@ async function main() {
     await terminalService.close().catch((err) => {
       console.error("Failed to close terminal backend:", err);
     });
-    killAllServers();
+    await hostRegistry.local.lsp.killAll().catch((err) => {
+      console.error("Failed to stop language servers:", err);
+    });
 
     // Wait for any still-in-flight Phase B work to settle so we don't
     // tear down the DB / sockets out from under it. `runFirstTimeSetup`

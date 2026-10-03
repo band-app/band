@@ -79,6 +79,7 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       assert.equal(info.id, host.id);
       assert.equal(info.capabilities.git, true);
       assert.equal(info.capabilities.pty, true);
+      assert.equal(info.capabilities.lsp, true);
       assert.ok(info.os);
       assert.ok(info.versions.node);
     });
@@ -257,6 +258,55 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         unsubscribe();
         await host.pty.killWorkspace("contract-ws");
       }
+    });
+
+    it("connects to a language server and stops it with the workspace", async () => {
+      const spec = { workspaceId: "contract-lsp", lang: "typescript", root: repo };
+      await assert.rejects(host.lsp.connect({ ...spec, lang: "no-such-language" }));
+
+      const first = await host.lsp.connect(spec);
+      const second = await host.lsp.connect(spec);
+      const request = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { processId: null, rootUri: null, capabilities: {} },
+      });
+      const frame = `Content-Length: ${new TextEncoder().encode(request).byteLength}\r\n\r\n${request}`;
+
+      /** Reads one connection's output until a response with id 1 has arrived. */
+      const readResponse = async (connection: typeof first) => {
+        let received = "";
+        for await (const chunk of connection.output) {
+          received += text(chunk);
+          if (/"id":\s*1\b/.test(received) && received.includes('"capabilities"')) break;
+        }
+        return received;
+      };
+
+      first.write(frame);
+      // The server's output reaches every connection to it.
+      const [onFirst, onSecond] = await Promise.all([readResponse(first), readResponse(second)]);
+      assert.match(onFirst, /^Content-Length: \d+/);
+      assert.match(onSecond, /"capabilities"/);
+
+      // Closing one connection leaves the server and the other connection up.
+      first.close();
+      second.write(frame.replace('"id":1', '"id":2'));
+
+      // Stopping the workspace ends the remaining connection's output.
+      const ended = (async () => {
+        for await (const _chunk of second.output) {
+          // drain until the server exits
+        }
+      })();
+      await host.lsp.killWorkspace(spec.workspaceId);
+      await Promise.race([
+        ended,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("output did not end after killWorkspace")), TIMEOUT_MS),
+        ),
+      ]);
     });
 
     it("resolves an agent launch and runs the agent process", async () => {

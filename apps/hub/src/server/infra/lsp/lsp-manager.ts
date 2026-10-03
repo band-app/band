@@ -1,11 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Duplex } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
-import { WorkspaceQueries } from "../db/queries/workspaces";
 import { shellPath } from "../process/path";
-
-const workspaceQueries = new WorkspaceQueries();
 
 /** Directory of this module — used to locate local node_modules/.bin */
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -27,16 +25,43 @@ const LANG_SERVER_CONFIG: Record<string, LangServerConfig> = {
 // ---------------------------------------------------------------------------
 // Session tracking (mirrors terminal-manager.ts dual-map pattern)
 // ---------------------------------------------------------------------------
-export interface LspServerSession {
+interface LspServerSession {
   process: ChildProcess;
-  workspaceId: string;
-  lang: string;
-  /**
-   * How many connected clients hold each document open. Every WebSocket for
-   * this workspace and language shares the process, so `lsp-proxy.ts` only
-   * forwards the first `didOpen` and the last `didClose` of a URI.
-   */
-  openDocuments: Map<string, number>;
+  /** Output queues of the open connections. Each receives every stdout chunk. */
+  subscribers: Set<OutputQueue>;
+}
+
+/** Single-consumer queue (one concurrent iterator) behind a connection's `output` stream. */
+class OutputQueue implements AsyncIterable<Uint8Array> {
+  private readonly chunks: Uint8Array[] = [];
+  private wake: (() => void) | null = null;
+  private ended = false;
+
+  push(chunk: Uint8Array): void {
+    if (this.ended) return;
+    this.chunks.push(chunk);
+    this.wake?.();
+  }
+
+  end(): void {
+    this.ended = true;
+    this.wake?.();
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+    for (;;) {
+      const chunk = this.chunks.shift();
+      if (chunk) {
+        yield chunk;
+        continue;
+      }
+      if (this.ended) return;
+      await new Promise<void>((resolve) => {
+        this.wake = resolve;
+      });
+      this.wake = null;
+    }
+  }
 }
 
 /** serverId -> session (serverId = `${workspaceId}:${lang}`) */
@@ -54,13 +79,14 @@ function toServerId(workspaceId: string, lang: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns an existing language server session or spawns a new one.
+ * Returns an existing language server session or spawns a new one in `root`.
  * The server process is ready for stdio communication but the LSP
  * initialize handshake is left to the client library (@codemirror/lsp-client).
  */
-export async function getOrSpawnServer(
+async function getOrSpawnServer(
   workspaceId: string,
   lang: string,
+  root: string,
 ): Promise<LspServerSession> {
   const serverId = toServerId(workspaceId, lang);
 
@@ -72,18 +98,8 @@ export async function getOrSpawnServer(
     throw new Error(`No language server configured for: ${lang}`);
   }
 
-  // Direct infra-tier DB read rather than the services-tier
-  // `WorkspaceService.resolve` cache because `lsp-manager.ts` is in the
-  // infra tier and cannot depend on services (issue #535). Both paths
-  // resolve the same identity; the service-tier cache is purely an
-  // optimisation that infra doesn't get to benefit from.
-  const workspace = workspaceQueries.findIdentity(workspaceId);
-  if (!workspace) {
-    throw new Error(`Workspace not found: ${workspaceId}`);
-  }
-
   const resolvedPath = await shellPath();
-  const cwd = workspace.worktreePath;
+  const cwd = root;
 
   // Build PATH: app node_modules/.bin (where typescript-language-server
   // lives), workspace node_modules/.bin (where tsserver lives), then
@@ -111,14 +127,12 @@ export async function getOrSpawnServer(
     },
   });
 
-  const session: LspServerSession = {
-    process: child,
-    workspaceId,
-    lang,
-    openDocuments: new Map(),
-  };
+  const session: LspServerSession = { process: child, subscribers: new Set() };
 
   function removeSession(): void {
+    // A replacement may already hold the id after a kill and respawn.
+    const current = servers.get(serverId);
+    if (current && current !== session) return;
     servers.delete(serverId);
     const set = workspaceServers.get(workspaceId);
     if (set) {
@@ -139,10 +153,17 @@ export async function getOrSpawnServer(
   }
   ids.add(serverId);
 
-  // Auto-remove on exit
+  // Server stdout fans out to every connection
+  child.stdout?.on("data", (chunk: Buffer) => {
+    for (const subscriber of session.subscribers) subscriber.push(chunk);
+  });
+
+  // Auto-remove on exit, and end every connection's output
   child.on("exit", (code) => {
     log.debug("Language server exited: %s (code %s)", serverId, String(code));
     removeSession();
+    for (const subscriber of session.subscribers) subscriber.end();
+    session.subscribers.clear();
   });
 
   // Handle spawn errors (e.g. ENOENT when the command is not found).
@@ -171,10 +192,37 @@ export async function getOrSpawnServer(
 }
 
 /**
- * Returns an existing language server session by serverId, or undefined.
+ * Opens a connection to the workspace's language server for `lang`, starting
+ * the server first if it isn't running.
  */
-export function getServer(serverId: string): LspServerSession | undefined {
-  return servers.get(serverId);
+export async function connectLspServer(spec: {
+  workspaceId: string;
+  lang: string;
+  root: string;
+}): Promise<Duplex> {
+  const session = await getOrSpawnServer(spec.workspaceId, spec.lang, spec.root);
+  const { process: child, subscribers } = session;
+  if (!child.stdin || !child.stdout) {
+    throw new Error("Language server stdio not available");
+  }
+  const output = new OutputQueue();
+  let closed = false;
+  // The server may have exited between spawn and now.
+  if (child.exitCode !== null || child.signalCode !== null) output.end();
+  else subscribers.add(output);
+
+  return {
+    write(chunk) {
+      if (closed || !child.stdin?.writable) return;
+      child.stdin.write(chunk);
+    },
+    output,
+    close() {
+      closed = true;
+      subscribers.delete(output);
+      output.end();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
