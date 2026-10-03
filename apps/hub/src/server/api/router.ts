@@ -65,6 +65,7 @@ import { reviewsRouter } from "./reviews/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
+import { subscriptionsRouter } from "./subscriptions/router";
 import { systemRouter } from "./system/router";
 import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
@@ -79,6 +80,7 @@ export const appRouter = t.router({
   workspaces: workspacesRouter,
   workspace: workspaceRouter,
   cronjobs: cronjobsRouter,
+  subscriptions: subscriptionsRouter,
   chats: chatsRouter,
   agentSessions: agentSessionsRouter,
   chat: chatRouter,

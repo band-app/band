@@ -95,7 +95,12 @@ export interface StubRequest {
   cwd: string;
   /** The stub process that received it. */
   pid: number;
-  env: { BAND_DISPATCH?: string; BAND_SERVER_URL?: string };
+  env: {
+    BAND_DISPATCH?: string;
+    BAND_SERVER_URL?: string;
+    BAND_CHAT_ID?: string;
+    BAND_WORKSPACE_ID?: string;
+  };
 }
 
 /** Every request and notification the stub agent received, in order. */

@@ -1,0 +1,1 @@
+ALTER TABLE `subscriptions` ADD `config` text DEFAULT '{}' NOT NULL;

@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, join, resolve, sep } from "node:path";
+import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
@@ -40,6 +41,7 @@ import {
 } from "./src/server/infra/db/queries/usage-events.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { tokenFromHeaders } from "./src/server/infra/subscriptions/webhook.ts";
 import { createTerminalBackend } from "./src/server/infra/terminals/create-backend.ts";
 import {
   startUsageScanner,
@@ -364,7 +366,11 @@ function serveStaticFile(
  * Serve a file from a workspace by workspaceId and nested file path.
  * Used for binary file previews (images, PDFs) in the file viewer.
  */
-function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: string): void {
+async function serveWorkspaceFile(
+  res: ServerResponse,
+  workspaceId: string,
+  rawPath: string,
+): Promise<void> {
   const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     res.writeHead(404);
@@ -386,14 +392,19 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
   }
 
   try {
-    const fileStat = statSync(target);
+    const { fs } = workspace.host;
+    const fileStat = await fs.stat(target, { followSymlinks: true });
     const contentType = mimeTypeFromFilename(basename(target));
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": fileStat.size.toString(),
       "Cache-Control": "private, no-cache",
     });
-    createReadStream(target).pipe(res);
+    pipeline(
+      Readable.from(fs.readStream(target), { objectMode: false, highWaterMark: 64 * 1024 }),
+      res,
+      () => {},
+    );
   } catch {
     res.writeHead(404);
     res.end("Not found");
@@ -407,6 +418,49 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
 // `fetch` adapter, so the conversion lives here. Prod serves a static shell
 // and renders nothing per request.
 // ---------------------------------------------------------------------------
+
+const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
+
+async function handleSubscriptionWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  subscriptionId: string,
+): Promise<void> {
+  const send = (status: number, body: Record<string, unknown>) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+  // Check the token before buffering a body from an unauthenticated sender.
+  const verdict = subscriptionService.authorizeWebhook(
+    subscriptionId,
+    tokenFromHeaders(req.headers),
+  );
+  if (verdict === "not-found") return send(404, { error: "Unknown subscription" });
+  if (verdict === "unauthorized") return send(401, { error: "Invalid token" });
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).byteLength;
+    if (size > MAX_WEBHOOK_BODY_BYTES) {
+      send(413, { error: "Request body too large" });
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    subscriptionService.deliverWebhook(
+      subscriptionId,
+      req.headers,
+      Buffer.concat(chunks).toString("utf8"),
+    );
+  } catch (err) {
+    // Log the error only: the request headers carry the token.
+    console.error("webhook delivery failed", subscriptionId, err);
+    return send(500, { error: "Delivery failed" });
+  }
+  send(202, { ok: true });
+}
 
 async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
   // `Host` is optional in HTTP/1.0 — without the fallback `new URL(...,
@@ -652,6 +706,23 @@ async function main() {
     // without the session cookie when the app is added to the home screen.
     if (handleWebAppManifest(req, res, isDev ? join(uiRoot, "public") : clientDir)) return;
 
+    // Generic webhook source: POST /api/hooks/<subscriptionId>. Before the
+    // server's auth check, because senders outside Band can't hold its token;
+    // the subscription's own secret authenticates the request.
+    const hookMatch = req.url?.match(/^\/api\/hooks\/([^/?]+)(?:\?|$)/);
+    if (hookMatch && req.method === "POST") {
+      let subscriptionId: string;
+      try {
+        subscriptionId = decodeURIComponent(hookMatch[1]);
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Bad subscription id" }));
+        return;
+      }
+      await handleSubscriptionWebhook(req, res, subscriptionId);
+      return;
+    }
+
     // Auth check (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
@@ -729,7 +800,7 @@ async function main() {
         res.end("Bad request");
         return;
       }
-      serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
+      await serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
       return;
     }
 
@@ -881,7 +952,7 @@ async function main() {
         endpoint: "/trpc",
         req: request,
         router: appRouter,
-        createContext,
+        createContext: ({ req }) => createContext({ req }),
       });
       pipeWebResponseToNodeRes(response, res);
       return;

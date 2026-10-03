@@ -389,6 +389,8 @@ export const subscriptions = sqliteTable(
     expiresAt: integer("expires_at").notNull(),
     createdBy: text("created_by", { enum: ["agent", "coordinator", "user"] }).notNull(),
     createdAt: integer("created_at").notNull(),
+    // Source settings as JSON: a webhook's `secretHash`, a timer's `at` or `cron`.
+    config: text("config").notNull().default("{}"),
   },
   (t) => [
     index("subscriptions_chat_idx").on(t.chatId),

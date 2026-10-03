@@ -20,8 +20,9 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, screen, shell } from "electron";
 import { resolveAppIcon } from "./icon.js";
+import { decideNavigation, decideOpen } from "./navigation-guard.js";
 import { createLogger } from "./services/log.js";
 import {
   fitToDisplays,
@@ -147,6 +148,21 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
       // partitions and sources and strips Node and preload access.
       webviewTag: true,
     },
+  });
+
+  // The window stays on the bundled UI. A link to a web page opens in the
+  // browser; any other navigation, and any new window, is dropped.
+  const guardNavigation = (event: Electron.Event, url: string) => {
+    const decision = decideNavigation(win.webContents.getURL(), url);
+    if (decision === "allow") return;
+    event.preventDefault();
+    if (decision === "external") void shell.openExternal(url);
+  };
+  win.webContents.on("will-navigate", guardNavigation);
+  win.webContents.on("will-redirect", guardNavigation);
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (decideOpen(url) === "external") void shell.openExternal(url);
+    return { action: "deny" };
   });
 
   const saved = restoreWindowState(win);

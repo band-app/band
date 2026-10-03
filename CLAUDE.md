@@ -73,6 +73,8 @@ Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/
 
 - `apps/hub/tests/pty-error-hints.test.ts` calls `hintForPtySpawnError` (`infra/terminals/pty-error-hints.ts`) directly instead of forcing a real spawn failure through the public interface. It's a pure function (raw error text in, a short user-facing hint out) with no external state to fake, and forcing the one thing that would exercise it end to end — a native `pty.spawn` call throwing synchronously after a successful node-pty preload — isn't practical to do deterministically: verified empirically that even an unusable shell path (a non-executable file) doesn't make node-pty throw synchronously, it spawns and the failure surfaces later as a PTY exit event the hint function never sees, and the other real trigger (EMFILE/ENFILE resource exhaustion) isn't safe to force in a test process. Do not add a `TerminalPool`/`TerminalService` test-only hook to make this reachable through `terminal.create` instead — the pure-function test is the intended coverage for this mapping.
 
+- `apps/desktop/tests/app-protocol.test.ts`, `navigation-guard.test.ts`, `hub-choice.test.ts` and `ui-paths.test.ts` cover the `app://` handler (hosts, CSP, deep links, traversal), the navigation rules, the hub choice storage and validation (against a real HTTP server on another port) and the UI path lookup, with no Electron. The Electron-bound code is covered by `apps/web/e2e-desktop/desktop-hub-picker.spec.ts` (local hub, remote hub with no local spawn, live switching, per-hub storage, CSP, navigation guard, `<webview>` attach). Still untested: the sender-frame identity check in `isTrustedSender` (`ipc/hub.ts`; its URL half is covered), the macOS folder picker and the other macOS shell IPC, terminals and browser-pane page loads over `app://` in the e2e (the app spawns real PTYs only in the hub's own tests), cookie import (`ChromeImportDialog.tsx`, Keychain), and the updater toast, which needs a packaged app. The existing desktop unit tests for guest policy, chrome-import and the updater still pass and none of their code changed.
+
 ## Git Hooks & CI
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.
@@ -92,6 +94,19 @@ The hub serves the built UI from `--ui-dir <path>` or `BAND_UI_DIR`. By default 
 ## Architecture: Hub vs Desktop App
 
 The hub (`apps/hub`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
+
+## Architecture: desktop hub picker
+
+The desktop window loads the bundled UI from `app://<host>/` (`apps/desktop/src/main/app-protocol.ts`, a standard, secure, `supportFetchAPI` scheme; a path with no extension and no file gets `_shell.html`, so reloads and deep links keep their route). The UI build comes from `resources/web/dist/client` when packaged and `apps/web/dist/client` in a repo build (`services/ui-paths.ts`); with no build the window falls back to loading the hub's own URL. With `BAND_DEV_WEB_URL` set in an unpackaged run, local mode still loads the dev server.
+
+- The hub is `local` (default: Electron spawns `apps/hub`) or `remote` (a URL and token, nothing spawned). The choice lives in `~/.band/desktop-hub.json` (mode 0600, `services/hub-choice.ts`). A remote `http:` URL is accepted only for loopback, because the secure `app://` page can't make plain `http:`/`ws:` requests to other hosts.
+- Each hub has its own host, so its own origin and localStorage (drafts, tabs, last workspace): `app://local` for the bundled hub, `app://h-<12 hex of sha256(hub origin)>` for a remote one. The handler serves only the host the window is loaded under.
+- Every `app://` response carries a CSP (`buildCsp`): `connect-src` is `'self'` plus the current hub's http and ws origins, `frame-src` and `media-src` allow the hub, `object-src 'none'`. Inline scripts are allowed because the SPA shell has inline bootstrap scripts. A new origin the UI must reach (another API host) needs adding there.
+- The main window can't leave its `app://` host: `will-navigate` and `will-redirect` open web links in the browser and drop everything else, and `window.open` never creates a window (`navigation-guard.ts`). A hub switch loads programmatically, so it is unaffected.
+- The preload reads `{ url, token }` with a synchronous IPC (`band_hub_config`, answered only to the bundled UI's frames, `ipc/hub.ts`) and exposes it as `window.__BAND_HUB__`, which `apps/web/src/lib/hub-config.ts` already reads. The renderer never gets the saved remote token back: `hub_get_choice` returns only `hasToken`. The hub IPC handlers also require the main window's top frame on a trusted origin.
+- Settings > Hub (`HubSettings.tsx`, desktop only) calls `hub_set_choice`. The main process checks the remote hub with `GET /api/health` and the Bearer token, then `switchHub` in `index.ts` stops or starts the local hub and reloads the window.
+- The PWA manifest is `apps/web/public/manifest.webmanifest`. The hub still answers it before auth, for iOS.
+- `apps/web/e2e-desktop/` drives the real unpackaged Electron app with Playwright's `_electron` (`pnpm --filter @band-app/web test:e2e:desktop`, CI job `desktop-macos`). It needs `pnpm build:web` and `pnpm --filter @band-app/desktop build` first, and runs against a throwaway HOME with a random `webServerPort`: the app kills whatever listens on that port, so never point it at 3456.
 
 ## Architecture: browser profiles
 
@@ -119,6 +134,13 @@ An agent session is one run of a coding agent (issue #682). Its mode is how it i
 - A chat's ACP process stops after 15 minutes without a turn or an update from the agent (`BAND_AGENT_IDLE_TIMEOUT_MS` overrides it). Every update restarts the countdown, so a turn the agent started itself (a `/loop` wakeup, a task notification) isn't cut off. Work that lives in the process holds the stop off (`services/_utils/agent-pending-work.ts`): AIR `async_task_*` updates for background Bash, Monitor and workflows (Band lists the `asyncTasks` capability and takes those updates off the stream before the SDK's validator, in `acp-agent-process.ts`), and `ScheduleWakeup` and `CronCreate` tool calls. Each hold lapses after at most 8 hours.
 - `services/agent-launch-service.ts` starts agents (`agentSessions.launch`, `workspaces.create` with a prompt). The CLI reaches it through `band agents launch` and `band agents list`. An agent with no TUI invocation (cursor-cli) falls back to `gui`, and the response carries a `notice`.
 - Each browser stores its own mode in localStorage (`band.agent-mode`, `dashboard/lib/agent-mode.ts`) and sends it on every launch. With no mode sent, the server uses `agents.defaultMode` from `~/.band/settings.json`. Boot copies the older `cli.defaultVia` into it once and leaves the old key, because the CLI still reads it.
+
+## Architecture: subscriptions
+
+`subscriptions.create | list | remove | events` (`apps/hub/src/server/api/subscriptions/router.ts`) are tRPC procedures, so the MCP endpoint lists them as `band_subscriptions_*`. A call carrying `x-band-chat-id` and `x-band-workspace-id` headers (an agent's `BAND_CHAT_ID` and `BAND_WORKSPACE_ID`) can omit both ids. ACP chat agents get both variables; terminals get only `BAND_WORKSPACE_ID`, since a terminal has no chat.
+
+- Webhook source: `create` with `source: "webhook"` returns a token once and stores only its SHA-256 (`subscriptions.config`). `POST /api/hooks/:id` is answered before the server's auth check, takes the token in `X-Band-Webhook-Token` or `Authorization: Bearer`, and compares hashes in constant time. 404 for an unknown id, 401 for a bad token, 202 otherwise.
+- Timer source: `source: "timer"` with `at` (epoch ms, one-off, forced to `maxWakeups: 1` so it removes itself after delivery) or `cron` (croner syntax, optional seconds field; it ends after `maxWakeups` fires, default 10, or at the 180-day cap). Timers are re-armed from the database in `SubscriptionService.start()`.
 
 ## Architecture: client state
 

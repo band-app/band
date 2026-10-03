@@ -102,7 +102,12 @@ function logRequest(method, params) {
       params,
       cwd: process.cwd(),
       pid: process.pid,
-      env: { BAND_DISPATCH: env.BAND_DISPATCH, BAND_SERVER_URL: env.BAND_SERVER_URL },
+      env: {
+        BAND_DISPATCH: env.BAND_DISPATCH,
+        BAND_SERVER_URL: env.BAND_SERVER_URL,
+        BAND_CHAT_ID: env.BAND_CHAT_ID,
+        BAND_WORKSPACE_ID: env.BAND_WORKSPACE_ID,
+      },
     })}\n`,
   );
 }

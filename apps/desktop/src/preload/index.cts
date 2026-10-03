@@ -40,6 +40,9 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "get_app_title",
   "get_window_fullscreen",
   "get_app_metrics",
+  // Hub picker
+  "hub_get_choice",
+  "hub_set_choice",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "pick_file",
@@ -125,6 +128,17 @@ const api = {
     return () => ipcRenderer.removeListener(event, handler);
   },
 };
+
+// The hub the UI talks to. The bundled UI loads from `app://`, so it has no
+// hub of its own origin; the main process answers with the local hub's URL and
+// token or the chosen remote hub's. It answers null to any other page. Read
+// here, synchronously, so `window.__BAND_HUB__` exists before the UI's code.
+try {
+  const hub = ipcRenderer.sendSync("band_hub_config") as { url: string; token?: string } | null;
+  if (hub?.url) contextBridge.exposeInMainWorld("__BAND_HUB__", hub);
+} catch (err) {
+  console.error("[band-preload] reading the hub config failed:", err);
+}
 
 try {
   contextBridge.exposeInMainWorld("__BAND_DESKTOP__", api);

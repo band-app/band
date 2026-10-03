@@ -162,24 +162,45 @@ export interface WatchOptions {
 }
 
 export interface HostFs {
-  /** Rejects when the path does not exist. */
-  stat(path: string): Promise<FsStat>;
-  readFile(path: string): Promise<Uint8Array>;
-  /** Creates the file or replaces its content. The parent directory must exist. `mode` sets the permissions of a new file. */
-  writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
+  /**
+   * Rejects when the path does not exist. A symlink reports `kind: "symlink"`
+   * unless `followSymlinks` is set, which reports the entry it points at.
+   */
+  stat(path: string, options?: { followSymlinks?: boolean }): Promise<FsStat>;
   /** The canonical path, with every symlink resolved. Rejects when the path does not exist. */
   realpath(path: string): Promise<string>;
+  readFile(path: string): Promise<Uint8Array>;
+  /** Yields a file's bytes in chunks. Breaking out of the loop closes the file. */
+  readStream(path: string): Stream<Uint8Array>;
+  /**
+   * Creates the file or replaces its content. The parent directory must
+   * exist. With `exclusive`, rejects when the path already exists. `mode`
+   * sets the permissions of a new file.
+   */
+  writeFile(
+    path: string,
+    data: string | Uint8Array,
+    options?: { exclusive?: boolean; mode?: number },
+  ): Promise<void>;
   /** Paths under `cwd` matching the glob `pattern`, relative to `cwd`. */
   glob(pattern: string, cwd: string): Promise<string[]>;
   /** Creates a private (mode 0700) directory in the host's temp dir, named from `prefix`, and returns its path. */
   mkdtemp(prefix: string): Promise<string>;
   list(path: string): Promise<FsEntry[]>;
+  /** Rejects when the directory already exists, unless `recursive` is set. */
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   /** Removes a file or directory tree. Rejects when the path is missing unless `force` is set. */
   rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   rename(from: string, to: string): Promise<void>;
-  /** Copies a file or, with `recursive`, a directory tree. */
-  copy(from: string, to: string, options?: { recursive?: boolean }): Promise<void>;
+  /**
+   * Copies a file or, with `recursive`, a directory tree. With `exclusive`,
+   * rejects instead of overwriting an existing destination.
+   */
+  copy(
+    from: string,
+    to: string,
+    options?: { recursive?: boolean; exclusive?: boolean },
+  ): Promise<void>;
   /** Disk space the path occupies, in bytes. */
   du(path: string): Promise<number>;
   /** Yields changes under `root` until aborted or the consumer stops iterating. */

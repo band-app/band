@@ -45,6 +45,8 @@ async function waitFor<T>(what: string, read: () => Promise<T | undefined> | T |
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
 export function runHostContract(name: string, { api, create }: HostContractOptions): void {
@@ -175,6 +177,63 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
       await host.fs.rm(tmp, { recursive: true });
     });
 
+    it("follows symlinks on request, resolves real paths and refuses exclusive overwrites", async () => {
+      const dir = join(fixture.workDir, "fs-links");
+      await host.fs.mkdir(join(dir, "real"), { recursive: true });
+      await host.fs.writeFile(join(dir, "real", "f.txt"), "linked");
+      await host.exec("ln", ["-s", join(dir, "real"), join(dir, "link")], { cwd: dir });
+
+      assert.equal((await host.fs.stat(join(dir, "link"))).kind, "symlink");
+      assert.equal(
+        (await host.fs.stat(join(dir, "link"), { followSymlinks: true })).kind,
+        "directory",
+      );
+      assert.equal(
+        await host.fs.realpath(join(dir, "link")),
+        await host.fs.realpath(join(dir, "real")),
+      );
+      await assert.rejects(host.fs.realpath(join(dir, "missing")));
+
+      await assert.rejects(host.fs.writeFile(join(dir, "real", "f.txt"), "x", { exclusive: true }));
+      assert.equal(text(await host.fs.readFile(join(dir, "real", "f.txt"))), "linked");
+      await host.fs.writeFile(join(dir, "real", "new.txt"), "n", { exclusive: true });
+
+      await host.fs.copy(join(dir, "real"), join(dir, "link-copy-target"), { recursive: true });
+      await assert.rejects(
+        host.fs.copy(join(dir, "real"), join(dir, "link-copy-target"), {
+          recursive: true,
+          exclusive: true,
+        }),
+      );
+      await assert.rejects(host.fs.mkdir(join(dir, "real")));
+
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of host.fs.readStream(join(dir, "real", "f.txt"))) chunks.push(chunk);
+      assert.equal(text(Buffer.concat(chunks)), "linked");
+      await assert.rejects(
+        (async () => {
+          for await (const _chunk of host.fs.readStream(join(dir, "missing"))) {
+            // Never reached.
+          }
+        })(),
+      );
+    });
+
+    it("stops a watch when the consumer stops iterating", async () => {
+      const dir = join(fixture.workDir, "watched-break");
+      await host.fs.mkdir(dir, { recursive: true });
+      const done = (async () => {
+        for await (const _change of host.fs.watch(dir)) break;
+      })();
+      let n = 0;
+      await waitFor("the watch to end", async () => {
+        await host.fs.writeFile(join(dir, "changed.txt"), `v${n++}`);
+        return (await Promise.race([done.then(() => true), sleep(100).then(() => false)]))
+          ? true
+          : undefined;
+      });
+    });
+
     it("streams file changes and stops on abort", async () => {
       const dir = join(fixture.workDir, "watched");
       await host.fs.mkdir(dir, { recursive: true });
@@ -214,6 +273,13 @@ export function runHostContract(name: string, { api, create }: HostContractOptio
         none.push(match);
       }
       assert.equal(none.length, 0);
+
+      let first = 0;
+      for await (const _match of host.search.stream({ query: "e" }, dir)) {
+        first++;
+        break;
+      }
+      assert.equal(first, 1, "breaking out of a search stream ends it cleanly");
 
       const files = await host.search.listFiles(dir);
       assert.deepEqual([...files].sort(), ["one.txt", "two.txt"]);

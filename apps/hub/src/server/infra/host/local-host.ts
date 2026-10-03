@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { watch as fsWatch } from "node:fs";
+import { createReadStream, watch as fsWatch } from "node:fs";
 import {
   cp,
   glob as fsGlob,
@@ -11,6 +11,7 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
@@ -224,15 +225,25 @@ function kindOf(entry: {
 }
 
 const localFs: HostFs = {
-  async stat(path): Promise<FsStat> {
-    const stats = await lstat(path);
+  async stat(path, options): Promise<FsStat> {
+    const stats = options?.followSymlinks ? await stat(path) : await lstat(path);
     return { kind: kindOf(stats), size: stats.size, mtimeMs: stats.mtimeMs };
   },
   async readFile(path) {
     return new Uint8Array(await readFile(path));
   },
-  writeFile: (path, data, options) => writeFile(path, data, { mode: options?.mode }),
   realpath: (path) => realpath(path),
+  async *readStream(path) {
+    for await (const chunk of createReadStream(path)) {
+      const buffer = chunk as Buffer;
+      yield new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    }
+  },
+  writeFile: (path, data, options) =>
+    writeFile(path, data, {
+      mode: options?.mode,
+      ...(options?.exclusive ? { flag: "wx" } : {}),
+    }),
   async glob(pattern, cwd) {
     const matches: string[] = [];
     for await (const match of fsGlob(pattern, { cwd })) matches.push(match);
@@ -250,7 +261,11 @@ const localFs: HostFs = {
   rename: (from, to) => rename(from, to),
   // dereference: copy a symlink's target bytes, as copyFileSync did, so the copy never links back into the source tree.
   copy: (from, to, options) =>
-    cp(from, to, { recursive: options?.recursive ?? false, dereference: true }),
+    cp(from, to, {
+      recursive: options?.recursive ?? false,
+      dereference: true,
+      ...(options?.exclusive ? { errorOnExist: true, force: false } : {}),
+    }),
   du: (path) => duBytes(path),
   watch: (root, options) => watchTree(root, options),
 };
@@ -271,11 +286,15 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
         watcher.close();
         wake?.();
       };
-      const watcher = fsWatch(root, { recursive: options.recursive ?? true }, (kind, filename) => {
-        if (done || filename === null) return;
-        queue.push({ path: filename.toString().split("\\").join("/"), kind });
-        wake?.();
-      });
+      const watcher = fsWatch(
+        root,
+        { recursive: options.recursive ?? true, persistent: false },
+        (kind, filename) => {
+          if (done || filename === null) return;
+          queue.push({ path: filename.toString().split("\\").join("/"), kind });
+          wake?.();
+        },
+      );
       // A watch that fails after it started (the root was deleted) ends the stream.
       watcher.on("error", finish);
       if (options.signal?.aborted) finish();

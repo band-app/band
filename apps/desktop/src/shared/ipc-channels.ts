@@ -17,6 +17,12 @@ export const Channels = {
   // Surfaced on the Resources page's "Desktop app (Electron)" card.
   getAppMetrics: "get_app_metrics",
 
+  // Hub picker: which hub the app talks to (local, or a remote URL + token).
+  // `hubGetChoice` returns the saved choice without its token; `hubSetChoice`
+  // validates, saves and reloads the window against the new hub.
+  hubGetChoice: "hub_get_choice",
+  hubSetChoice: "hub_set_choice",
+
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",
   pickFile: "pick_file",
@@ -73,6 +79,13 @@ export const Channels = {
   browserProfileClearData: "browser_profile_clear_data",
   browserProfilePrune: "browser_profile_prune",
 } as const;
+
+/**
+ * Synchronous channel the preload reads once per page load to learn the hub's
+ * URL and token (`window.__BAND_HUB__`). Answered only to the bundled UI's own
+ * frames. It is not in `Channels` because the renderer can't invoke it.
+ */
+export const HUB_CONFIG_SYNC_CHANNEL = "band_hub_config";
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
 
