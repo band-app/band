@@ -28,6 +28,7 @@ export interface CheckRunStub {
   status: "queued" | "in_progress" | "completed";
   conclusion?: string | null;
   html_url?: string;
+  head_sha?: string;
 }
 
 export interface RepoCoords {
@@ -76,6 +77,13 @@ export interface GhStub {
     sha: string,
     runs: CheckRunStub[] | (() => CheckRunStub[]),
   ) => void;
+  /**
+   * Answer the subscription poller's PR activity query for `repo`
+   * (`buildPrActivityQuery`, one `pr<n>: pullRequest(number: n)` alias per
+   * PR). `answer(number)` is that alias's `pullRequest` object, `null` when it
+   * returns undefined. Called per request, so a test can add comments between polls.
+   */
+  setPrActivityQuery: (repo: RepoCoords, answer: (number: number) => unknown) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
     number: number,
@@ -184,6 +192,22 @@ export const ghStub = {
           res.json({
             stdout: JSON.stringify({ total_count: list.length, check_runs: slice }),
           });
+        });
+      },
+      setPrActivityQuery(repo, answer) {
+        app.post("/api/graphql", (req, res, next) => {
+          const rawQuery = (req.body as GhInvocation).fields.query;
+          const query = typeof rawQuery === "string" ? rawQuery : "";
+          const header = `repository(owner: "${repo.owner}", name: "${repo.name}")`;
+          if (!query.includes(header)) {
+            next();
+            return;
+          }
+          const repository: Record<string, unknown> = {};
+          for (const [, number] of query.matchAll(/pr(\d+): pullRequest/g)) {
+            repository[`pr${number}`] = answer(Number(number)) ?? null;
+          }
+          res.json({ stdout: JSON.stringify({ data: { repository } }) });
         });
       },
       setPrMerge(number, opts) {

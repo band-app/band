@@ -280,6 +280,15 @@ export class SubscriptionService {
     return this.queries.list().filter((s) => s.source === "github" && s.config.repo === repo);
   }
 
+  /** The polling cursor of a subscription (see `GithubPollService`). */
+  getCursor(id: string): string | undefined {
+    return this.queries.cursor(id);
+  }
+
+  setCursor(id: string, cursor: string): void {
+    this.queries.setCursor(id, cursor, Date.now());
+  }
+
   setConfig(id: string, config: SubscriptionConfig): void {
     this.queries.setConfig(id, config);
   }

@@ -13,6 +13,7 @@ import {
   parseBatchedCIResponse,
 } from "./_utils/github-graphql";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
+import { githubPollService } from "./github-poll-service";
 import { pluginHost } from "./plugin-host-service";
 import { loadState } from "./state";
 import { syncService } from "./sync-service";
@@ -525,6 +526,14 @@ async function pollTick() {
     if (ciWorkspaces.length > 0) {
       ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
     }
+  }
+
+  // Subscriptions of repos with no webhook are polled on the same cadence.
+  // The call is not awaited: a slow `gh` must not hold up the status pass.
+  if (queryCI) {
+    void githubPollService
+      .poll()
+      .catch((err) => log.warn({ err }, "github subscription poll failed"));
   }
 
   await forEachLimited(workspaces, (ws) =>

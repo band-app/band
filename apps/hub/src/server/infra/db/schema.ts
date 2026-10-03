@@ -412,3 +412,12 @@ export const subscriptionEvents = sqliteTable(
   },
   (t) => [index("subscription_events_subscription_idx").on(t.subscriptionId)],
 );
+
+// Where the GitHub polling fallback stopped reading a subscribed PR: the
+// newest comment or review timestamp it saw (ISO 8601). Rows go away with
+// their subscription.
+export const subscriptionCursors = sqliteTable("subscription_cursors", {
+  subscriptionId: text("subscription_id").primaryKey(),
+  cursor: text("cursor").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
