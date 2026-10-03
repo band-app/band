@@ -17,10 +17,16 @@ export interface Box {
  *  from 95%) has finished. An animation that is cancelled instead (Radix
  *  restarts it when the content re-renders) makes `finished` reject with
  *  `AbortError: The user aborted a request`. A cancelled animation is over
- *  too, so that rejection is swallowed, like the other settled-box helpers. */
+ *  too, so only that rejection is swallowed. */
 export async function readSettledBox(locator: Locator): Promise<Box> {
   await locator.evaluate((el) =>
-    Promise.all(el.getAnimations().map((a) => a.finished.catch(() => {}))),
+    Promise.all(
+      el.getAnimations().map((a) =>
+        a.finished.catch((e) => {
+          if (e?.name !== "AbortError") throw e;
+        }),
+      ),
+    ),
   );
   const box = await locator.boundingBox();
   if (!box) throw new Error("element has no layout box");
