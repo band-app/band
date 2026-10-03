@@ -1,6 +1,7 @@
 import type { AgentMode } from "@band-app/shared/agent-sessions";
 import type { GitOpResult } from "@band-app/shared/git-op-result";
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
+import { HubWebSocket, hubAssetUrl, hubFetch, hubUrl, hubWsUrl } from "../../lib/hub-config";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
@@ -23,9 +24,9 @@ import type {
 
 const wsClient = createWSClient({
   url: () => {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}/trpc`;
+    return hubWsUrl("/trpc");
   },
+  WebSocket: HubWebSocket,
 });
 
 export class WebDashboardAdapter implements DashboardAdapter {
@@ -38,7 +39,11 @@ export class WebDashboardAdapter implements DashboardAdapter {
         condition: (op) => op.type === "subscription",
         true: wsLink({ client: wsClient }),
         // Cap batched GETs to stay under Node/proxy header limits — issue #430.
-        false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
+        false: httpBatchLink({
+          url: hubUrl("/trpc"),
+          maxURLLength: 2000,
+          fetch: (url, init) => hubFetch(String(url), init),
+        }),
       }),
     ],
   });
@@ -526,10 +531,12 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   getWorkspaceFileUrl(workspaceId: string, path: string): string {
-    return `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
-      .split("/")
-      .map(encodeURIComponent)
-      .join("/")}`;
+    return hubAssetUrl(
+      `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    );
   }
 
   async searchWorkspaceFiles(

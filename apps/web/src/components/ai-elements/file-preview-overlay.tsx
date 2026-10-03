@@ -3,6 +3,7 @@ import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { CodeMirrorViewer } from "@/dashboard";
+import { hubAssetUrl } from "../../lib/hub-config";
 
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
 
@@ -22,7 +23,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
   const filename = part.filename ?? "file";
 
   const handleDownload = useCallback(() => {
-    downloadFile(part.url, filename);
+    downloadFile(hubAssetUrl(part.url), filename);
   }, [part.url, filename]);
 
   return (
@@ -90,7 +91,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
 function ImagePreview({ url, alt }: { url: string; alt: string }) {
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <img src={url} alt={alt} className="max-h-full max-w-full object-contain" />
+      <img src={hubAssetUrl(url)} alt={alt} className="max-h-full max-w-full object-contain" />
     </div>
   );
 }
@@ -102,7 +103,7 @@ function TextPreview({ url, filename }: { url: string; filename: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(url)
+    fetch(hubAssetUrl(url))
       .then((res) => res.text())
       .then((text) => {
         if (!cancelled) setContent(text);

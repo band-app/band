@@ -181,6 +181,8 @@ export class ChatPanePage {
     private readonly page: Page,
     private readonly baseUrl: string,
     private readonly token: string,
+    /** Hub URL when the UI at `baseUrl` is served from another origin. */
+    private readonly hubUrl?: string,
   ) {
     this.promptInput = page.getByPlaceholder("Type a message...");
     this.promptForm = page.getByTestId("prompt-input__form").filter({ visible: true });
@@ -234,8 +236,14 @@ export class ChatPanePage {
   /** Navigate to the workspace's chat view. The only place URLs are
    *  constructed in this page object. */
   async goto(workspaceId: string): Promise<void> {
-    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
+    const path = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}`;
+    // A cross-origin UI reads the hub URL and token from the URL fragment, which no server sees.
+    const url = this.hubUrl
+      ? `${path}#hub=${encodeURIComponent(this.hubUrl)}${this.token ? `&token=${this.token}` : ""}`
+      : `${path}?token=${this.token}`;
     await test.step(`Navigate to workspace ${workspaceId}`, async () => {
+      // A fragment-only change is not a page load, so leave the page first, as a link opened fresh would.
+      if (this.hubUrl) await this.page.goto("about:blank");
       await this.page.goto(url);
     });
   }
