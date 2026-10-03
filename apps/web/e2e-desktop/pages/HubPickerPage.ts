@@ -12,10 +12,8 @@ export class HubPickerPage {
   readonly token: Locator;
   readonly apply: Locator;
   readonly error: Locator;
-  private readonly settingsButton: Locator;
 
-  constructor(page: Page) {
-    this.settingsButton = page.getByTestId("project-list__settings-button");
+  constructor(private readonly page: Page) {
     this.dialog = page.getByRole("dialog", { name: "Settings" });
     this.mode = page.getByTestId("settings__hub-mode");
     this.url = page.getByTestId("settings__hub-url");
@@ -26,7 +24,11 @@ export class HubPickerPage {
 
   async open(): Promise<void> {
     await test.step("Open Settings > Hub", async () => {
-      await this.settingsButton.click();
+      // The native menu's Cmd+, calls this global. The sidebar's Settings
+      // button can sit under the center panel in a small window (CI runners).
+      await this.page.evaluate(() => {
+        (window as unknown as { __bandOpenSettings?: () => void }).__bandOpenSettings?.();
+      });
       await this.dialog.waitFor({ state: "visible" });
       await this.mode.waitFor({ state: "visible" });
     });
