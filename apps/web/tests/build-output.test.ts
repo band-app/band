@@ -306,13 +306,21 @@ describe("published @band-app/server runs via the bin shim", () => {
     }
   });
 
-  it("answers HEAD for a deep link without a body, and a non-GET page request with 404", async () => {
-    const headers = { Authorization: `Bearer ${token}` };
-    const head = await fetch(`${baseUrl}/workspace/some-workspace`, { method: "HEAD", headers });
+  it("answers HEAD for a deep link without a body", async () => {
+    const head = await fetch(`${baseUrl}/workspace/some-workspace`, {
+      method: "HEAD",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     expect(head.status).toBe(200);
     expect(head.headers.get("content-type")).toContain("text/html");
     expect(await head.text()).toBe("");
-    const post = await fetch(`${baseUrl}/workspace/some-workspace`, { method: "POST", headers });
+  });
+
+  it("answers a non-GET page request with 404", async () => {
+    const post = await fetch(`${baseUrl}/workspace/some-workspace`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
     expect(post.status).toBe(404);
   });
 

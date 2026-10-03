@@ -83,8 +83,8 @@ export default defineConfig(({ command }) => ({
   ssr:
     command === "build"
       ? {
-          // Bundle all dependencies into server.js so the Electron DMG
-          // doesn't need node_modules at runtime.
+          // Bundle all dependencies into the server build the shell
+          // prerender loads, so `vite build` needs no external lookup.
           noExternal: true,
           // node-pty is a native addon that cannot be bundled
           external: ["node-pty"],
