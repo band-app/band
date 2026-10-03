@@ -232,7 +232,10 @@ export interface HostLsp {
    * `lang` has no server or the server cannot start.
    */
   connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
-  /** Stops the workspace's language servers. Their connections' output ends. */
+  /**
+   * Signals the workspace's language servers to stop. Resolves without waiting
+   * for them to exit. Each connection's output ends once its server has.
+   */
   killWorkspace(workspaceId: string): Promise<void>;
   /** Stops every language server on the host. */
   killAll(): Promise<void>;

@@ -177,6 +177,9 @@ async function getOrSpawnServer(
   child.on("error", (err) => {
     log.error("Language server error: %s — %s", serverId, err.message);
     removeSession();
+    // An error after spawn (a broken stdin pipe) need not be followed by `exit`.
+    for (const subscriber of session.subscribers) subscriber.end();
+    session.subscribers.clear();
   });
 
   // Log stderr (language server diagnostics/errors)
