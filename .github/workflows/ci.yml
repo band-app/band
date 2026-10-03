@@ -759,6 +759,72 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The same Electron e2e as `desktop-macos`, against the electron-builder
+  # output instead of the dev tree: it proves the packaged app starts, loads
+  # the bundled UI from app://, spawns the hub from its Resources/ and shows
+  # the dashboard. Unsigned and unnotarised, no DMG, nothing published.
+  desktop-packaged-macos:
+    name: Desktop e2e, packaged app (macOS)
+    runs-on: macos-latest
+    needs: macos-changes
+    if: needs.macos-changes.outputs.desktop == 'true'
+    env:
+      NODE_OPTIONS: "--max-old-space-size=6144"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Builds the CLI and copies it to apps/desktop/binaries/band, which
+      # electron-builder ships as an extraResource.
+      - name: Build and stage the CLI
+        run: pnpm build:cli:desktop
+
+      - name: Build the hub and the UI
+        run: pnpm build:web
+
+      - name: Build desktop (TypeScript main + preload)
+        run: pnpm --filter @band-app/desktop build
+
+      - name: Package the app (unpacked, unsigned)
+        run: pnpm --filter @band-app/desktop package:dir --mac --arm64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          SKIP_NOTARIZE: "1"
+          SKIP_NATIVE_SIGN: "1"
+          ELECTRON_BUILDER_PUBLISH: never
+
+      - name: Test e2e (packaged desktop app)
+        run: |
+          EXE="$PWD/apps/desktop/dist-builder/mac-arm64/Band.app/Contents/MacOS/Band"
+          test -x "$EXE"
+          BAND_DESKTOP_EXECUTABLE="$EXE" pnpm --filter @band-app/web test:e2e:desktop
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-desktop-packaged-test-results
+          path: apps/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   deploy-docs:
     name: Deploy Docs
     runs-on: ubuntu-latest

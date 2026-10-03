@@ -19,3 +19,4 @@ screenshots/
 .last-run.json
 apps/desktop/binaries/*
 !apps/desktop/binaries/.gitkeep
+apps/desktop/dist-builder/
