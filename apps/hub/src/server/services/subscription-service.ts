@@ -19,6 +19,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** No subscription outlives this, whatever `expiresAt` asks for. */
 export const MAX_SUBSCRIPTION_DAYS = 180;
 const SWEEP_INTERVAL_MS = 60_000;
+/** A burst this large is delivered at once instead of waiting out the window. */
+const MAX_PENDING_EVENTS = 50;
 
 export type Subscription = SubscriptionRecord;
 
@@ -194,6 +196,10 @@ export class SubscriptionService {
     const pending = state.pending.get(sub.id);
     if (pending) {
       pending.events.push(event);
+      if (pending.events.length >= MAX_PENDING_EVENTS) {
+        clearTimeout(pending.timer);
+        this.flush(sub.id);
+      }
       return;
     }
     const timer = setTimeout(() => this.flush(sub.id), sub.coalesceSeconds * 1000);
@@ -235,9 +241,7 @@ export class SubscriptionService {
     });
     if (wakeups >= sub.maxWakeups) {
       this.removeAll([id], "max-wakeups");
-      return;
     }
-    this.rebuildIndex();
   }
 
   private sweepExpired(): void {
