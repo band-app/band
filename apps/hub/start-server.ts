@@ -13,7 +13,8 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
-import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
+import { createAuthMiddleware, isAuthorizedUpgrade, selectWsProtocol } from "./auth.ts";
+import { classifyOrigin, createCorsMiddleware, parseOriginList } from "./cors.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatHistory } from "./src/api/chat-history.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
@@ -242,6 +243,20 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 const isDev = process.env.NODE_ENV === "development";
 const persistedToken = getOrCreateToken();
 const { handleAuth, expectedToken } = createAuthMiddleware(isDev ? undefined : persistedToken);
+
+// Origins that may call the hub from another origin: `corsAllowedOrigins` in
+// settings plus `BAND_CORS_ORIGINS`. Read on every request so an edit applies
+// without a restart.
+function allowedOrigins(): string[] {
+  const fromSettings = (loadSettings() as { corsAllowedOrigins?: unknown }).corsAllowedOrigins;
+  return [
+    ...(Array.isArray(fromSettings)
+      ? fromSettings.filter((o): o is string => typeof o === "string")
+      : []),
+    ...parseOriginList(process.env.BAND_CORS_ORIGINS),
+  ];
+}
+const handleCors = createCorsMiddleware(allowedOrigins);
 
 // `sirv` calls `totalist` (which calls `readdirSync`) eagerly at construction
 // time to build its asset map. The dev server runs from source where
@@ -615,6 +630,10 @@ async function main() {
   });
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // CORS first: preflights carry no credentials, and a denied origin gets
+    // no data from any route.
+    if (handleCors(req, res)) return;
+
     // Dev-mode liveness check. In prod `/api/health` is auth-protected
     // (and answered inside `handleAuth`); in dev there is no token so
     // `handleAuth` returns early and the request would otherwise fall
@@ -980,23 +999,23 @@ async function main() {
   // ---------------------------------------------------------------------------
   // WebSocket server for tRPC subscriptions
   // ---------------------------------------------------------------------------
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
 
   // ---------------------------------------------------------------------------
   // WebSocket server for terminal connections
   // ---------------------------------------------------------------------------
-  const terminalWss = new WebSocketServer({ noServer: true });
+  const terminalWss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
 
   // ---------------------------------------------------------------------------
   // WebSocket server for LSP connections
   // ---------------------------------------------------------------------------
-  const lspWss = new WebSocketServer({ noServer: true });
+  const lspWss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
 
   // ---------------------------------------------------------------------------
   // WebSocket server for CDP screencast proxy (experiment)
   // ---------------------------------------------------------------------------
-  const cdpWss = new WebSocketServer({ noServer: true });
+  const cdpWss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
 
   httpServer.on("upgrade", (req, socket, head) => {
     // Vite's HMR WebSocket lives on this same http server in dev mode. It
@@ -1015,13 +1034,21 @@ async function main() {
       return;
     }
 
-    // Auth check: validate band_token cookie (skip if no token configured)
-    if (expectedToken) {
-      const cookies = parseCookies(req);
-      if (!tokensEqual(cookies.band_token, expectedToken)) {
-        socket.destroy();
-        return;
-      }
+    // Cross-site WebSocket hijacking guard: a browser page on an origin
+    // outside the allowlist can't open a socket, even with a valid cookie.
+    if (classifyOrigin(req, allowedOrigins) === "denied") {
+      socket.destroy();
+      return;
+    }
+
+    // Auth check: cookie, Bearer header or `band-token.<token>` subprotocol
+    // (skip if no token configured)
+    // An opaque (`null`) origin is a file:// page or a sandboxed frame on any
+    // site, so the ambient cookie doesn't count for it: it must send the token.
+    const allowCookie = req.headers.origin !== "null";
+    if (expectedToken && !isAuthorizedUpgrade(req, expectedToken, { allowCookie })) {
+      socket.destroy();
+      return;
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);

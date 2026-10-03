@@ -3,6 +3,7 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import type { SearchOptions } from "@/dashboard";
 import { listen as desktopListen } from "./desktop-ipc";
+import { HubWebSocket, hubWsUrl } from "./hub-config";
 import { isDesktop } from "./is-desktop";
 import { openExternalUrl } from "./open-external-url";
 import { createTerminalFileLinkProvider } from "./terminal-file-links";
@@ -671,8 +672,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
     wrapper.addEventListener("touchcancel", onTapCancel, { passive: true });
 
     // --- WebSocket with reconnect + heartbeat ---
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`;
+    const wsUrl = `${hubWsUrl("/terminal")}?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`;
 
     let intentionalClose = false;
     // Shell exited (close 1000) or fatal server error (≥4000): the terminal is
@@ -743,7 +743,7 @@ function createEntry(terminalId: string, opts: CreateOptions): TerminalCacheEntr
       if (intentionalClose || terminated || destroyed) return;
       clearReconnectTimer();
       const isReconnect = didConnectOnce;
-      const sock = new WebSocket(wsUrl);
+      const sock = new HubWebSocket(wsUrl);
       ws = sock;
       sock.binaryType = "arraybuffer";
 

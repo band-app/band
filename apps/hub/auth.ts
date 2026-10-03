@@ -12,6 +12,52 @@ export function parseCookies(req: IncomingMessage): Record<string, string> {
   return cookies;
 }
 
+/** First subprotocol a browser offers; the hub echoes it so the handshake succeeds. */
+export const WS_BASE_PROTOCOL = "band";
+/** Subprotocol carrying the token: `band-token.<token>`. Browsers can't set headers on a WebSocket. */
+export const WS_TOKEN_PROTOCOL_PREFIX = "band-token.";
+
+export function wsProtocols(req: IncomingMessage): string[] {
+  const header = req.headers["sec-websocket-protocol"];
+  if (typeof header !== "string") return [];
+  return header
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+/** Token from `Authorization: Bearer`, if the request has one. */
+export function bearerToken(req: IncomingMessage): string | undefined {
+  const header = req.headers.authorization;
+  return header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+}
+
+/**
+ * Whether a WebSocket upgrade carries the token: the cookie (same-origin),
+ * a Bearer header (non-browser clients), or the `band-token.<token>`
+ * subprotocol (cross-origin browsers). Never the query string.
+ */
+export function isAuthorizedUpgrade(
+  req: IncomingMessage,
+  expected: string,
+  opts: { allowCookie?: boolean } = {},
+): boolean {
+  if (opts.allowCookie !== false && tokensEqual(parseCookies(req).band_token, expected)) {
+    return true;
+  }
+  if (tokensEqual(bearerToken(req), expected)) return true;
+  return wsProtocols(req).some(
+    (p) =>
+      p.startsWith(WS_TOKEN_PROTOCOL_PREFIX) &&
+      tokensEqual(p.slice(WS_TOKEN_PROTOCOL_PREFIX.length), expected),
+  );
+}
+
+/** `ws` `handleProtocols` hook: select `band`, never echo the token protocol. */
+export function selectWsProtocol(protocols: Set<string>): string | false {
+  return protocols.has(WS_BASE_PROTOCOL) ? WS_BASE_PROTOCOL : false;
+}
+
 export function tokensEqual(a: string | undefined, b: string): boolean {
   if (!a || !b) return false;
   const bufA = Buffer.from(a);
@@ -52,6 +98,7 @@ export function createAuthMiddleware(token: string | undefined) {
       const cookies = parseCookies(req);
       if (
         tokensEqual(queryToken, expectedToken) ||
+        tokensEqual(bearerToken(req), expectedToken) ||
         tokensEqual(cookies.band_token, expectedToken)
       ) {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -79,8 +126,7 @@ export function createAuthMiddleware(token: string | undefined) {
     }
 
     // Check Authorization: Bearer header
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith("Bearer ") && tokensEqual(authHeader.slice(7), expectedToken)) {
+    if (tokensEqual(bearerToken(req), expectedToken)) {
       return false; // Authenticated — continue to normal handler
     }
 

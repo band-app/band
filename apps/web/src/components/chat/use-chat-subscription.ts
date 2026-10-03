@@ -20,6 +20,12 @@ import {
   type SessionState,
 } from "@band-app/shared/chat-events";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { hubFetch } from "../../lib/hub-config";
+import {
+  EVENT_SOURCE_CLOSED,
+  type EventSourceLike,
+  openEventSource,
+} from "../../lib/hub-event-source";
 import { trpc } from "../../lib/trpc-client";
 import {
   type ChatMessage,
@@ -147,7 +153,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
     void resumeKey;
 
     let cancelled = false;
-    let source: EventSource | null = null;
+    let source: EventSourceLike | null = null;
     let retryDelay = INITIAL_BACKOFF_MS;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const offs: Array<() => void> = [];
@@ -160,9 +166,8 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         params.set("lastEventId", String(lastEventId));
         params.set("revision", String(revision));
       }
-      source = new EventSource(
+      source = openEventSource(
         `/api/chats/${encodeURIComponent(chatId)}/events?${params.toString()}`,
-        { withCredentials: true },
       );
       const current = source;
       const onOpen = () => {
@@ -192,7 +197,7 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         setIsConnected(false);
         // Transient errors are retried by EventSource itself. A closed
         // stream has to be reopened by hand.
-        if (current.readyState === EventSource.CLOSED) {
+        if (current.readyState === EVENT_SOURCE_CLOSED) {
           for (const off of offs) off();
           offs.length = 0;
           current.close();
@@ -247,9 +252,8 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
           createdAt: Date.now(),
         });
       }
-      const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      const res = await hubFetch(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workspaceId: agentRef.current.workspaceId,
@@ -338,9 +342,8 @@ export function useChatSubscription(opts: UseChatSubscriptionOptions): UseChatSu
         before: String(oldestEventId),
         revision: String(revision),
       });
-      const res = await fetch(
+      const res = await hubFetch(
         `/api/chats/${encodeURIComponent(chatId)}/history?${params.toString()}`,
-        { credentials: "include" },
       );
       if (!res.ok) throw new Error(`history fetch failed: HTTP ${res.status}`);
       const page = (await res.json()) as {

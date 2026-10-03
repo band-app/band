@@ -107,6 +107,44 @@ export class TerminalSurface {
     return grid;
   }
 
+  /** The text on xterm's visible screen, one line per row. */
+  async readScreenText(): Promise<string> {
+    return await this.page.evaluate((id) => {
+      type Term = {
+        buffer: {
+          active: {
+            viewportY: number;
+            getLine(y: number): { translateToString(trim: boolean): string } | undefined;
+          };
+        };
+        rows: number;
+      };
+      const cache = (
+        globalThis as unknown as {
+          __bandTerminalCache__?: Map<string, { workspaceId: string; getTerminal(): unknown }>;
+        }
+      ).__bandTerminalCache__;
+      const entry = [...(cache?.values() ?? [])].find((e) => e.workspaceId === id);
+      const term = entry?.getTerminal() as Term | null;
+      if (!term) return "";
+      const lines: string[] = [];
+      for (let y = 0; y < term.rows; y++) {
+        lines.push(
+          term.buffer.active.getLine(term.buffer.active.viewportY + y)?.translateToString(true) ??
+            "",
+        );
+      }
+      return lines.join("\n");
+    }, this.workspaceId);
+  }
+
+  /** Type a line into the terminal, as a user would. */
+  async typeLine(text: string): Promise<void> {
+    await this.input.focus();
+    await this.page.keyboard.type(text);
+    await this.page.keyboard.press("Enter");
+  }
+
   /** Whether xterm has a text selection. */
   async hasSelection(): Promise<boolean> {
     return await this.page.evaluate((id) => {

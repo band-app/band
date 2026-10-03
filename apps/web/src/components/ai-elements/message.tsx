@@ -4,6 +4,7 @@ import type { ComponentProps, HTMLAttributes } from "react";
 import { memo, useCallback, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
+import { hubAssetUrl } from "../../lib/hub-config";
 
 import { streamdownPlugins } from "../streamdown-components";
 import {
@@ -97,7 +98,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
   const handleDownload = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      downloadFile(part.url, filename);
+      downloadFile(hubAssetUrl(part.url), filename);
     },
     [part.url, filename],
   );
@@ -112,7 +113,7 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
           className="group/img relative max-w-xs cursor-pointer overflow-hidden rounded-md"
         >
           <img
-            src={part.url}
+            src={hubAssetUrl(part.url)}
             alt={filename}
             className="rounded-md transition-opacity group-hover/img:opacity-90"
           />

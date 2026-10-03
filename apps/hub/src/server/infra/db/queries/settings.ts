@@ -91,6 +91,12 @@ export interface Settings {
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
   tokenSecret?: string;
+  /**
+   * Extra browser origins allowed to call the hub from another origin (the
+   * UI on a static host or another port). Same-origin and `app://` / `file://`
+   * are always allowed. `BAND_CORS_ORIGINS` (comma-separated) adds to this list.
+   */
+  corsAllowedOrigins?: string[];
   autoStartTunnel?: boolean;
   /** Enable Language Server Protocol features (file preview hovers, etc.). */
   enableLSP?: boolean;
