@@ -65,9 +65,10 @@ export class SubscriptionQueries {
 
   /** Deletes the subscription and its event rows. */
   remove(id: string): void {
-    const db = getDb();
-    db.delete(subscriptionEvents).where(eq(subscriptionEvents.subscriptionId, id)).run();
-    db.delete(subscriptions).where(eq(subscriptions.id, id)).run();
+    getDb().transaction((tx) => {
+      tx.delete(subscriptionEvents).where(eq(subscriptionEvents.subscriptionId, id)).run();
+      tx.delete(subscriptions).where(eq(subscriptions.id, id)).run();
+    });
   }
 
   /** Ids of the subscriptions of a chat, or of a workspace's chats. */

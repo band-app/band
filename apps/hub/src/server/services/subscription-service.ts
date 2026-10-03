@@ -8,7 +8,7 @@ import {
 } from "../infra/db/queries/subscriptions";
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
-import { buildSubscriptionMessage } from "../infra/subscriptions/message";
+import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
 import { chatService } from "./chat-service";
 import { submitOrQueueTask } from "./task-service";
 import { emit } from "./watcher-service";
@@ -167,11 +167,12 @@ export class SubscriptionService {
   ingest(raw: SubscriptionEvent): void {
     const event = subscriptionEventSchema.parse(raw);
     const now = Date.now();
+    const expired: string[] = [];
     for (const sub of state.index.get(event.key) ?? []) {
       if (sub.source !== event.source) continue;
       if (sub.kinds.length > 0 && !sub.kinds.includes(event.kind)) continue;
       if (sub.expiresAt <= now) {
-        this.removeAll([sub.id], "expired");
+        expired.push(sub.id);
         continue;
       }
       // The table's primary key is the event id; one event can match several
@@ -181,11 +182,12 @@ export class SubscriptionService {
         subscriptionId: sub.id,
         receivedAt: now,
         deliveredAt: null,
-        summary: event.summary.slice(0, 500),
+        summary: event.summary.slice(0, SUMMARY_LIMIT),
       });
       if (!fresh) continue;
       this.hold(sub, event);
     }
+    this.removeAll(expired, "expired");
   }
 
   private hold(sub: Subscription, event: SubscriptionEvent): void {
