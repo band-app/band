@@ -1119,7 +1119,8 @@ export class WorkspaceService {
     // permission denied, …) is a real, user-actionable error: surface
     // it instead of silently spawning an agent that will run the same
     // status command and fail the same way.
-    const status = await gitRunner(workspace.host)(["status", "--porcelain"], cwd);
+    const execGit = gitRunner(workspace.host);
+    const status = await execGit(["status", "--porcelain"], cwd);
     if (!status.trim()) {
       throw new Error("No changes to summarise");
     }
