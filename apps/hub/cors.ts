@@ -74,7 +74,8 @@ export function createCorsMiddleware(getAllowedOrigins: () => readonly string[])
 
     const origin = req.headers.origin as string;
     res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
+    const vary = res.getHeader("Vary");
+    res.setHeader("Vary", vary ? `${vary}, Origin` : "Origin");
 
     if (req.method === "OPTIONS" && req.headers["access-control-request-method"]) {
       const requestedRaw = req.headers["access-control-request-headers"];

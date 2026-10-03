@@ -155,6 +155,10 @@ function connect(
     });
     ws.on("error", () => resolve("closed"));
     ws.on("unexpected-response", () => resolve("closed"));
+    setTimeout(() => {
+      ws.terminate();
+      resolve("closed");
+    }, 5_000).unref();
   });
 }
 

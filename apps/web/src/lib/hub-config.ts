@@ -125,7 +125,7 @@ export function crossOriginHub(): { origin: string; token?: string } | null {
   const origin = normalizeUrl(config.url);
   if (!origin || origin === window.location.origin) return null;
   // A token outside the subprotocol token set would make `new WebSocket` throw.
-  const token = config.token && /^[\w.~-]+$/.test(config.token) ? config.token : undefined;
+  const token = config.token && /^[A-Za-z0-9._~-]+$/.test(config.token) ? config.token : undefined;
   return { origin, token };
 }
 
@@ -161,6 +161,8 @@ export function hubAssetUrl(path: string): string {
 /** `fetch` for hub requests: Bearer and no credentials when cross-origin. */
 export function hubFetch(input: string, init?: RequestInit): Promise<Response> {
   const hub = crossOriginHub();
+  // Same-origin: the cookie authenticates, and a caller may override credentials.
+  // Cross-origin (below): credentials are always off, Bearer is the only auth.
   if (!hub) return fetch(input, { credentials: "include", ...init });
   const headers = new Headers(init?.headers);
   if (hub.token) headers.set("Authorization", `Bearer ${hub.token}`);
@@ -175,7 +177,8 @@ function withTokenProtocol(protocols?: string | string[]): string[] {
   const hub = crossOriginHub();
   const list = protocols === undefined ? [] : Array.isArray(protocols) ? protocols : [protocols];
   if (!hub?.token) return list;
-  return [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${hub.token}`, ...list];
+  const rest = list.filter((p) => p !== WS_BASE_PROTOCOL);
+  return [WS_BASE_PROTOCOL, `${WS_TOKEN_PROTOCOL_PREFIX}${hub.token}`, ...rest];
 }
 
 /** A WebSocket that authenticates to a cross-origin hub through its subprotocol. */

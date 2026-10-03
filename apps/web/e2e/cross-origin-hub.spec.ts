@@ -118,8 +118,8 @@ test("a #hub= link to another hub never receives the token saved for this one", 
     await expect(terminal.wrapper).toHaveCount(0);
     expect(JSON.stringify(other.requests)).not.toContain(TOKEN);
     expect(
-      other.requests.every((r) => !r.authorization && !r.wsProtocol?.includes("band-token")),
-    ).toBe(true);
+      other.requests.filter((r) => r.authorization || r.wsProtocol?.includes("band-token")),
+    ).toEqual([]);
 
     // The old token stayed with its old origin: a link back needs no token.
     const back = new ChatPanePage(page, ui.url, "", hub.url);
