@@ -10,6 +10,7 @@ import {
 } from "../infra/db/queries/subscriptions";
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
+import { githubCiKey, githubPrKey } from "../infra/subscriptions/github";
 import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
 import {
   hashWebhookToken,
@@ -76,6 +77,30 @@ export class InvalidTimerError extends Error {
     this.name = "InvalidTimerError";
   }
 }
+
+// Lowercased because GitHub reports `full_name` in its own casing and keys must match.
+const repoSchema = z
+  .string()
+  .regex(/^[\w.-]+\/[\w.-]+$/, "repo must look like owner/name")
+  .refine(
+    (r) => r.split("/").every((s) => s !== "." && s !== ".."),
+    "repo must look like owner/name",
+  )
+  .transform((r) => r.toLowerCase());
+
+/** Activity on one pull request: comments, reviews, review comments and lifecycle. */
+export const githubPrCreateInput = sourceCommon.extend({
+  repo: repoSchema,
+  number: z.number().int().min(1),
+});
+export type GithubPrCreateInput = z.input<typeof githubPrCreateInput>;
+
+/** CI results on a branch, delivered once per commit when every check is done. */
+export const githubCiCreateInput = sourceCommon.extend({
+  repo: repoSchema,
+  branch: z.string().min(1),
+});
+export type GithubCiCreateInput = z.input<typeof githubCiCreateInput>;
 
 export type WebhookDeliveryResult = "accepted" | "unauthorized" | "not-found";
 
@@ -220,6 +245,43 @@ export class SubscriptionService {
     );
     this.armTimer(subscription);
     return subscription;
+  }
+
+  /** Subscribes a chat to one PR. Webhook registration is the caller's job (`GithubWebhookService`). */
+  createGithubPr(input: GithubPrCreateInput): Subscription {
+    const parsed = githubPrCreateInput.parse(input);
+    const { repo, number, ...common } = parsed;
+    return this.insert(
+      newSubscriptionId(),
+      { ...common, kinds: [] },
+      { source: "github", filterKey: githubPrKey(repo, number), config: { repo } },
+    );
+  }
+
+  /** Subscribes a chat to CI on a branch. Push events stay out unless asked for. */
+  createGithubCi(input: GithubCiCreateInput): Subscription {
+    const parsed = githubCiCreateInput.parse(input);
+    const { repo, branch, ...common } = parsed;
+    return this.insert(
+      newSubscriptionId(),
+      { ...common, kinds: ["ci"] },
+      { source: "github", filterKey: githubCiKey(repo, branch), config: { repo } },
+    );
+  }
+
+  /** Whether a live subscription listens to this event key. */
+  hasSubscribers(key: string): boolean {
+    const now = Date.now();
+    return (state.index.get(key) ?? []).some((s) => s.expiresAt > now);
+  }
+
+  /** GitHub subscriptions of a repository. */
+  listGithub(repo: string): Subscription[] {
+    return this.queries.list().filter((s) => s.source === "github" && s.config.repo === repo);
+  }
+
+  setConfig(id: string, config: SubscriptionConfig): void {
+    this.queries.setConfig(id, config);
   }
 
   /**

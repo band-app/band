@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
@@ -238,6 +239,29 @@ export function execGh(args: string[], cwd: string): Promise<string> {
   // GitHub plugin's `runGh` does (tests point it at their `gh` stub).
   const bin = process.env.BAND_GH_BIN || "gh";
   return execOffThread(bin, args, { cwd, env, maxBuffer: MAX_BUFFER });
+}
+
+/**
+ * `execGh` with `input` written to the process's stdin, for a body that must
+ * not appear in argv (a webhook secret shows up in `ps`). Pass `--input -`
+ * in `args`. Rejects with gh's stderr, like `execGh`.
+ */
+export function execGhWithInput(args: string[], cwd: string, input: string): Promise<string> {
+  const env = { ...process.env };
+  env.PATH = prependBinDirs(env.PATH);
+  const bin = process.env.BAND_GH_BIN || "gh";
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      bin,
+      args,
+      { cwd, env, maxBuffer: MAX_BUFFER },
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr || "gh api failed"));
+        else resolve(stdout);
+      },
+    );
+    child.stdin?.end(input);
+  });
 }
 
 /**
