@@ -255,7 +255,8 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
   // this connection closes.
   void (async () => {
     try {
-      for await (const chunk of connection.output) parseFrame(Buffer.from(chunk));
+      for await (const chunk of connection.output)
+        parseFrame(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
     } catch (err) {
       log.warn("LSP output stream failed [%s/%s]: %s", workspaceId, lang, String(err));
     }

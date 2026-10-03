@@ -43,6 +43,12 @@ class OutputQueue implements AsyncIterable<Uint8Array> {
     this.wake?.();
   }
 
+  /** Ends the stream and drops chunks nobody will read. */
+  discard(): void {
+    this.chunks.length = 0;
+    this.end();
+  }
+
   end(): void {
     this.ended = true;
     this.wake?.();
@@ -93,7 +99,7 @@ async function getOrSpawnServer(
   const existing = servers.get(serverId);
   if (existing) return existing;
 
-  const config = LANG_SERVER_CONFIG[lang];
+  const config = Object.hasOwn(LANG_SERVER_CONFIG, lang) ? LANG_SERVER_CONFIG[lang] : undefined;
   if (!config) {
     throw new Error(`No language server configured for: ${lang}`);
   }
@@ -220,7 +226,7 @@ export async function connectLspServer(spec: {
     close() {
       closed = true;
       subscribers.delete(output);
-      output.end();
+      output.discard();
     },
   };
 }
