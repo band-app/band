@@ -15,10 +15,19 @@ const GH_STUB_BIN = join(import.meta.dirname, "gh-stub-bin.mjs");
 export interface GhInvocation {
   args: string[];
   positional: string[];
-  fields: Record<string, string>;
+  fields: Record<string, string | string[]>;
   flags: Record<string, string | true>;
+  /** The JSON body given with `--input -`, if any. */
+  input?: unknown;
   cwd: string;
   env: { GH_PROMPT_DISABLED: string | null };
+}
+
+export interface CheckRunStub {
+  name: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion?: string | null;
+  html_url?: string;
 }
 
 export interface RepoCoords {
@@ -53,6 +62,20 @@ export interface GhStub {
    * per request.
    */
   setBranchStatusQuery: (repo: RepoCoords, answer: (branch: string) => unknown) => void;
+  /**
+   * Answer `gh api repos/<repo>/hooks` (create a webhook). `stderr` makes it
+   * fail the way `gh` does. Each call is in `requests`, with the JSON body in `input`.
+   */
+  setHookCreate: (repo: RepoCoords, opts?: { stderr?: string }) => void;
+  /**
+   * Answer the check-runs query for `sha` of `repo`. A function is called
+   * per request, so a test can complete checks between deliveries.
+   */
+  setCheckRuns: (
+    repo: RepoCoords,
+    sha: string,
+    runs: CheckRunStub[] | (() => CheckRunStub[]),
+  ) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
     number: number,
@@ -117,7 +140,8 @@ export const ghStub = {
       },
       setBranchStatusQuery(repo, answer) {
         app.post("/api/graphql", (req, res, next) => {
-          const query = (req.body as GhInvocation).fields.query ?? "";
+          const rawQuery = (req.body as GhInvocation).fields.query;
+          const query = typeof rawQuery === "string" ? rawQuery : "";
           const aliases = [...query.matchAll(BATCHED_ALIAS)];
           if (aliases.length === 0) {
             next();
@@ -129,6 +153,37 @@ export const ghStub = {
               owner === repo.owner && name === repo.name ? (answer(branch) ?? null) : null;
           }
           res.json({ stdout: JSON.stringify({ data }) });
+        });
+      },
+      setHookCreate(repo, opts) {
+        app.post("/api/:endpoint", (req, res, next) => {
+          if (req.params.endpoint !== `repos/${repo.owner}/${repo.name}/hooks`) {
+            next();
+            return;
+          }
+          res.json(
+            opts?.stderr
+              ? { stdout: "", stderr: opts.stderr, exitCode: 1 }
+              : { stdout: JSON.stringify({ id: 1, active: true }) },
+          );
+        });
+      },
+      setCheckRuns(repo, sha, runs) {
+        app.post("/api/:endpoint", (req, res, next) => {
+          const endpoint = req.params.endpoint.split("?")[0];
+          if (endpoint !== `repos/${repo.owner}/${repo.name}/commits/${sha}/check-runs`) {
+            next();
+            return;
+          }
+          const list = typeof runs === "function" ? runs() : runs;
+          // Pages the way the REST endpoint does: `per_page` and `page` in the query.
+          const query = new URLSearchParams(req.params.endpoint.split("?")[1] ?? "");
+          const perPage = Number(query.get("per_page") ?? 30);
+          const page = Number(query.get("page") ?? 1);
+          const slice = list.slice((page - 1) * perPage, page * perPage);
+          res.json({
+            stdout: JSON.stringify({ total_count: list.length, check_runs: slice }),
+          });
         });
       },
       setPrMerge(number, opts) {
