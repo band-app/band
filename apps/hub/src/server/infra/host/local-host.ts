@@ -1,6 +1,17 @@
 import { execFile, spawn } from "node:child_process";
-import { watch as fsWatch } from "node:fs";
-import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, watch as fsWatch } from "node:fs";
+import {
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { hostname } from "node:os";
 import { getUsageReader } from "@band-app/coding-agent";
 import {
@@ -209,14 +220,22 @@ function kindOf(entry: {
 }
 
 const localFs: HostFs = {
-  async stat(path): Promise<FsStat> {
-    const stats = await lstat(path);
+  async stat(path, options): Promise<FsStat> {
+    const stats = options?.followSymlinks ? await stat(path) : await lstat(path);
     return { kind: kindOf(stats), size: stats.size, mtimeMs: stats.mtimeMs };
   },
   async readFile(path) {
     return new Uint8Array(await readFile(path));
   },
-  writeFile: (path, data) => writeFile(path, data),
+  realpath: (path) => realpath(path),
+  async *readStream(path) {
+    for await (const chunk of createReadStream(path)) {
+      const buffer = chunk as Buffer;
+      yield new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    }
+  },
+  writeFile: (path, data, options) =>
+    writeFile(path, data, options?.exclusive ? { flag: "wx" } : undefined),
   async list(path) {
     const entries = await readdir(path, { withFileTypes: true });
     return entries.map((entry) => ({ name: entry.name, kind: kindOf(entry) }));
@@ -226,7 +245,11 @@ const localFs: HostFs = {
   },
   rm: (path, options) => rm(path, options),
   rename: (from, to) => rename(from, to),
-  copy: (from, to, options) => cp(from, to, { recursive: options?.recursive ?? false }),
+  copy: (from, to, options) =>
+    cp(from, to, {
+      recursive: options?.recursive ?? false,
+      ...(options?.exclusive ? { errorOnExist: true, force: false } : {}),
+    }),
   du: (path) => duBytes(path),
   watch: (root, options) => watchTree(root, options),
 };
@@ -247,11 +270,15 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
         watcher.close();
         wake?.();
       };
-      const watcher = fsWatch(root, { recursive: options.recursive ?? true }, (kind, filename) => {
-        if (done || filename === null) return;
-        queue.push({ path: filename.toString().split("\\").join("/"), kind });
-        wake?.();
-      });
+      const watcher = fsWatch(
+        root,
+        { recursive: options.recursive ?? true, persistent: false },
+        (kind, filename) => {
+          if (done || filename === null) return;
+          queue.push({ path: filename.toString().split("\\").join("/"), kind });
+          wake?.();
+        },
+      );
       // A watch that fails after it started (the root was deleted) ends the stream.
       watcher.on("error", finish);
       if (options.signal?.aborted) finish();

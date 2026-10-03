@@ -1,8 +1,9 @@
-import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
+import type { HostFs } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type { FormatFileResult } from "@band-app/shared/format-file-result";
 import prettier from "prettier";
+import { hostRegistry } from "../infra/host/registry";
 
 const log = createLogger("formatter");
 
@@ -54,6 +55,12 @@ interface FormatFileOptions {
    * field — matching how the project's own `pnpm prettier --write` runs.
    */
   configOverride?: prettier.Options | null;
+  /**
+   * The file system of the host the worktree lives on, for the containment
+   * check and the `.prettierignore` lookup. Defaults to the local host.
+   * Prettier itself still reads config files from the hub's disk.
+   */
+  fs?: HostFs;
 }
 
 /**
@@ -75,9 +82,10 @@ export async function formatFile(
   content: string,
   options: FormatFileOptions = {},
 ): Promise<FormatFileResult> {
+  const fs = options.fs ?? hostRegistry.local.fs;
   const absFile = isAbsolute(filePath) ? filePath : resolvePath(worktreePath, filePath);
 
-  if (!isInsideWorktree(absFile, worktreePath)) {
+  if (!(await isInsideWorktree(fs, absFile, worktreePath))) {
     throw new FormatterError(
       "FILE_NOT_IN_WORKTREE",
       `File ${absFile} is outside the worktree ${worktreePath}`,
@@ -106,7 +114,7 @@ export async function formatFile(
   const ignorePath = resolvePath(worktreePath, ".prettierignore");
   const info = await prettier.getFileInfo(absFile, {
     resolveConfig: true,
-    ignorePath: existsSync(ignorePath) ? ignorePath : undefined,
+    ignorePath: (await pathExists(fs, ignorePath)) ? ignorePath : undefined,
   });
   // Order matters: `.prettierignore` matches set both `ignored: true` and
   // `inferredParser: null`, so check `ignored` first to produce the more
@@ -171,7 +179,18 @@ export async function formatFile(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function isInsideWorktree(absFile: string, worktreePath: string): boolean {
+async function pathExists(fs: HostFs, path: string): Promise<boolean> {
+  return fs.stat(path, { followSymlinks: true }).then(
+    () => true,
+    () => false,
+  );
+}
+
+async function isInsideWorktree(
+  fs: HostFs,
+  absFile: string,
+  worktreePath: string,
+): Promise<boolean> {
   // A plain prefix check is symlink-naive: a symlink inside the worktree
   // pointing at e.g. `/etc` would let `worktreePath/link/passwd` pass the
   // guard even though `realpath` resolves it outside the worktree. The
@@ -181,13 +200,13 @@ function isInsideWorktree(absFile: string, worktreePath: string): boolean {
   // resolving real paths on both sides before comparing.
   let realFile: string;
   try {
-    realFile = realpathSync(absFile);
+    realFile = await fs.realpath(absFile);
   } catch {
     // File doesn't exist on disk yet (untitled / unsaved buffer). Resolve
     // the parent directory instead; the leaf is the user's choice and
     // hasn't been materialized into a possibly-traversal-y symlink yet.
     try {
-      realFile = join(realpathSync(dirname(absFile)), basename(absFile));
+      realFile = join(await fs.realpath(dirname(absFile)), basename(absFile));
     } catch {
       // Neither the file nor its parent exists yet (e.g. a deep new path
       // the user hasn't materialized). With nothing on disk there's no
@@ -199,7 +218,7 @@ function isInsideWorktree(absFile: string, worktreePath: string): boolean {
   }
   let realWorktree: string;
   try {
-    realWorktree = realpathSync(worktreePath);
+    realWorktree = await fs.realpath(worktreePath);
   } catch {
     realWorktree = worktreePath;
   }

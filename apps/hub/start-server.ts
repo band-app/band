@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, join, resolve, sep } from "node:path";
+import { pipeline, Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
@@ -364,7 +365,11 @@ function serveStaticFile(
  * Serve a file from a workspace by workspaceId and nested file path.
  * Used for binary file previews (images, PDFs) in the file viewer.
  */
-function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: string): void {
+async function serveWorkspaceFile(
+  res: ServerResponse,
+  workspaceId: string,
+  rawPath: string,
+): Promise<void> {
   const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     res.writeHead(404);
@@ -386,14 +391,19 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
   }
 
   try {
-    const fileStat = statSync(target);
+    const { fs } = workspace.host;
+    const fileStat = await fs.stat(target, { followSymlinks: true });
     const contentType = mimeTypeFromFilename(basename(target));
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": fileStat.size.toString(),
       "Cache-Control": "private, no-cache",
     });
-    createReadStream(target).pipe(res);
+    pipeline(
+      Readable.from(fs.readStream(target), { objectMode: false, highWaterMark: 64 * 1024 }),
+      res,
+      () => {},
+    );
   } catch {
     res.writeHead(404);
     res.end("Not found");
@@ -729,7 +739,7 @@ async function main() {
         res.end("Bad request");
         return;
       }
-      serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
+      await serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
       return;
     }
 

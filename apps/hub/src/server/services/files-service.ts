@@ -2,8 +2,8 @@
  * Workspace files service — owns file-system CRUD operations rooted at a
  * workspace's worktree path. Lifted out of `api/workspace/router.ts`
  * (issue #535, follow-up 1) so the router contains validation + delegation
- * only, with the actual `node:fs/promises` calls living behind a single
- * service-tier seam.
+ * only, with the actual file calls going through the workspace's host
+ * (`host.fs`).
  *
  * Every path argument is workspace-relative; the service resolves it
  * against the worktree root and refuses anything that escapes the root
@@ -15,9 +15,8 @@
  * without dragging tRPC along.
  */
 
-import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
+import type { FsStat, HostFs } from "@band-app/host-api";
 import { WorkspaceNotFoundError } from "../errors";
 import {
   workspaceService as defaultWorkspaceService,
@@ -79,6 +78,27 @@ export type GetFileResult =
   | { binary: true; size: number }
   | { content: string; size: number; language?: string };
 
+/** Follows symlinks, as the `stat` and `existsSync` calls this replaced did. */
+const FOLLOW = { followSymlinks: true } as const;
+
+async function exists(fs: HostFs, path: string): Promise<boolean> {
+  return fs.stat(path, FOLLOW).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Throws unless `parent` is an existing directory. `label` names it in the error. */
+async function assertParentDirectory(fs: HostFs, parent: string, label: string): Promise<void> {
+  if (!(await exists(fs, parent))) {
+    throw new Error(`${label} directory does not exist`);
+  }
+  const parentStat = await fs.stat(parent, FOLLOW);
+  if (parentStat.kind !== "directory") {
+    throw new Error(`${label} is not a directory`);
+  }
+}
+
 export class FilesService {
   constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
 
@@ -92,7 +112,7 @@ export class FilesService {
     workspaceId: string,
     relative: string,
     opts: { allowRoot: boolean },
-  ): { root: string; target: string } {
+  ): { root: string; target: string; fs: HostFs } {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
@@ -110,7 +130,7 @@ export class FilesService {
     if (!opts.allowRoot && target === root) {
       throw new Error("Invalid path");
     }
-    return { root, target };
+    return { root, target, fs: workspace.host.fs };
   }
 
   /**
@@ -132,12 +152,12 @@ export class FilesService {
   }
 
   async listFiles(workspaceId: string, path = ""): Promise<ListFilesResult> {
-    const { target } = this.resolveInside(workspaceId, path, { allowRoot: true });
-    const dirents = await readdir(target, { withFileTypes: true });
+    const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: true });
+    const dirents = await fs.list(target);
     const entries: FileEntry[] = dirents
       .map((d) => ({
         name: d.name,
-        type: d.isDirectory() ? ("directory" as const) : ("file" as const),
+        type: d.kind === "directory" ? ("directory" as const) : ("file" as const),
       }))
       .sort((a, b) => {
         if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
@@ -148,16 +168,17 @@ export class FilesService {
 
   async getFile(workspaceId: string, path: string): Promise<GetFileResult> {
     if (!path) throw new Error("Path is required");
-    const { target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
 
-    const fileStat = await stat(target);
+    const fileStat = await fs.stat(target, FOLLOW);
     const size = fileStat.size;
 
     if (size > MAX_FILE_SIZE) {
       return { tooLarge: true, size };
     }
 
-    const buffer = await readFile(target);
+    const bytes = await fs.readFile(target);
+    const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
     // Cheap binary sniff: a NUL byte in the first 8 KB is the same
     // heuristic git uses. Avoids returning random bytes to a JSON
@@ -178,86 +199,72 @@ export class FilesService {
   }
 
   async saveFile(workspaceId: string, path: string, content: string): Promise<{ ok: true }> {
-    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     // Refuse to write into `.git/*` — overwriting `config`, `HEAD`, or
     // a hook would corrupt the worktree or run attacker-controlled code
     // on the next git invocation. Matches the guard on delete/rename/
     // copy.
     this.assertNotGitInternals(root, target, "write");
-    const fileStat = await stat(target);
-    if (fileStat.isDirectory()) {
+    const fileStat = await fs.stat(target, FOLLOW);
+    if (fileStat.kind === "directory") {
       throw new Error("Cannot write to a directory");
     }
-    await writeFile(target, content, "utf-8");
+    await fs.writeFile(target, content);
     return { ok: true };
   }
 
   async createFile(workspaceId: string, path: string, content = ""): Promise<{ ok: true }> {
-    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     // Same .git guard as saveFile — creating `.git/hooks/pre-commit`
     // would let an attacker run arbitrary code under the user's account
     // the next time git commits inside the worktree.
     this.assertNotGitInternals(root, target, "create");
 
-    if (existsSync(target)) {
+    if (await exists(fs, target)) {
       throw new Error("A file or directory already exists at this path");
     }
 
-    const parent = dirname(target);
-    if (!existsSync(parent)) {
-      throw new Error("Parent directory does not exist");
-    }
-    const parentStat = await stat(parent);
-    if (!parentStat.isDirectory()) {
-      throw new Error("Parent is not a directory");
-    }
+    await assertParentDirectory(fs, dirname(target), "Parent");
 
-    // `wx` flag rejects an existing file at the destination, closing the
-    // race between the `existsSync` check above and the write.
-    await writeFile(target, content, { encoding: "utf-8", flag: "wx" });
+    // `exclusive` rejects an existing file at the destination, closing the
+    // race between the `exists` check above and the write.
+    await fs.writeFile(target, content, { exclusive: true });
     return { ok: true };
   }
 
   async createDirectory(workspaceId: string, path: string): Promise<{ ok: true }> {
-    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     // Same .git guard as createFile / saveFile.
     this.assertNotGitInternals(root, target, "create");
 
-    if (existsSync(target)) {
+    if (await exists(fs, target)) {
       throw new Error("A file or directory already exists at this path");
     }
 
-    const parent = dirname(target);
-    if (!existsSync(parent)) {
-      throw new Error("Parent directory does not exist");
-    }
-    const parentStat = await stat(parent);
-    if (!parentStat.isDirectory()) {
-      throw new Error("Parent is not a directory");
-    }
+    await assertParentDirectory(fs, dirname(target), "Parent");
 
-    await mkdir(target);
+    await fs.mkdir(target);
     return { ok: true };
   }
 
   async deletePath(workspaceId: string, path: string): Promise<{ ok: true; kind: FileEntryKind }> {
-    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     this.assertNotGitInternals(root, target, "delete");
 
-    let entryStat: Awaited<ReturnType<typeof stat>>;
+    let entryStat: FsStat;
     try {
-      entryStat = await stat(target);
+      entryStat = await fs.stat(target, FOLLOW);
     } catch {
       throw new Error("Path does not exist");
     }
 
     // `rm` with `recursive` handles both files and directories. We pass
     // it unconditionally so callers don't need to know the entry kind.
-    await rm(target, { recursive: true, force: false });
+    await fs.rm(target, { recursive: true, force: false });
 
     return {
       ok: true,
-      kind: entryStat.isDirectory() ? "directory" : "file",
+      kind: entryStat.kind === "directory" ? "directory" : "file",
     };
   }
 
@@ -266,7 +273,11 @@ export class FilesService {
     fromPath: string,
     toPath: string,
   ): Promise<{ ok: true; kind: FileEntryKind }> {
-    const { root, target: fromTarget } = this.resolveInside(workspaceId, fromPath, {
+    const {
+      root,
+      target: fromTarget,
+      fs,
+    } = this.resolveInside(workspaceId, fromPath, {
       allowRoot: false,
     });
     const { target: toTarget } = this.resolveInside(workspaceId, toPath, { allowRoot: false });
@@ -278,31 +289,24 @@ export class FilesService {
     this.assertNotGitInternals(root, fromTarget, "rename");
     this.assertNotGitInternals(root, toTarget, "rename");
 
-    let entryStat: Awaited<ReturnType<typeof stat>>;
+    let entryStat: FsStat;
     try {
-      entryStat = await stat(fromTarget);
+      entryStat = await fs.stat(fromTarget, FOLLOW);
     } catch {
       throw new Error("Source path does not exist");
     }
 
-    if (existsSync(toTarget)) {
+    if (await exists(fs, toTarget)) {
       throw new Error("A file or directory already exists at the destination");
     }
 
-    const toParent = dirname(toTarget);
-    if (!existsSync(toParent)) {
-      throw new Error("Destination parent directory does not exist");
-    }
-    const toParentStat = await stat(toParent);
-    if (!toParentStat.isDirectory()) {
-      throw new Error("Destination parent is not a directory");
-    }
+    await assertParentDirectory(fs, dirname(toTarget), "Destination parent");
 
-    await rename(fromTarget, toTarget);
+    await fs.rename(fromTarget, toTarget);
 
     return {
       ok: true,
-      kind: entryStat.isDirectory() ? "directory" : "file",
+      kind: entryStat.kind === "directory" ? "directory" : "file",
     };
   }
 
@@ -311,7 +315,11 @@ export class FilesService {
     fromPath: string,
     toPath: string,
   ): Promise<{ ok: true; kind: FileEntryKind }> {
-    const { root, target: fromTarget } = this.resolveInside(workspaceId, fromPath, {
+    const {
+      root,
+      target: fromTarget,
+      fs,
+    } = this.resolveInside(workspaceId, fromPath, {
       allowRoot: false,
     });
     const { target: toTarget } = this.resolveInside(workspaceId, toPath, { allowRoot: false });
@@ -323,44 +331,32 @@ export class FilesService {
     this.assertNotGitInternals(root, fromTarget, "copy");
     this.assertNotGitInternals(root, toTarget, "copy");
 
-    let entryStat: Awaited<ReturnType<typeof stat>>;
+    let entryStat: FsStat;
     try {
-      entryStat = await stat(fromTarget);
+      entryStat = await fs.stat(fromTarget, FOLLOW);
     } catch {
       throw new Error("Source path does not exist");
     }
 
     // Block copying a directory into itself or any descendant — would
     // either fail mid-copy or produce an infinite tree.
-    if (entryStat.isDirectory() && toTarget.startsWith(fromTarget + sep)) {
+    if (entryStat.kind === "directory" && toTarget.startsWith(fromTarget + sep)) {
       throw new Error("Cannot copy a directory into itself");
     }
 
-    if (existsSync(toTarget)) {
+    if (await exists(fs, toTarget)) {
       throw new Error("A file or directory already exists at the destination");
     }
 
-    const toParent = dirname(toTarget);
-    if (!existsSync(toParent)) {
-      throw new Error("Destination parent directory does not exist");
-    }
-    const toParentStat = await stat(toParent);
-    if (!toParentStat.isDirectory()) {
-      throw new Error("Destination parent is not a directory");
-    }
+    await assertParentDirectory(fs, dirname(toTarget), "Destination parent");
 
-    // `cp` with `recursive: true` handles both files and directories.
-    // `errorOnExist: true` guards against the race between our
-    // existsSync check above and the write.
-    await cp(fromTarget, toTarget, {
-      recursive: true,
-      errorOnExist: true,
-      force: false,
-    });
+    // `recursive` handles both files and directories. `exclusive` guards
+    // against the race between our `exists` check above and the write.
+    await fs.copy(fromTarget, toTarget, { recursive: true, exclusive: true });
 
     return {
       ok: true,
-      kind: entryStat.isDirectory() ? "directory" : "file",
+      kind: entryStat.kind === "directory" ? "directory" : "file",
     };
   }
 }
