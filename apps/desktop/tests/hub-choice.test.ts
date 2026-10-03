@@ -6,6 +6,7 @@
  */
 
 import { strict as assert } from "node:assert";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -38,7 +39,6 @@ describe("hub choice", () => {
 
   test("defaults to local with no file, and for an unreadable one", async () => {
     assert.deepEqual(loadHubChoice(), { mode: "local" });
-    const { mkdirSync, writeFileSync } = await import("node:fs");
     mkdirSync(join(sandboxHome, ".band"), { recursive: true });
     writeFileSync(join(sandboxHome, ".band", "desktop-hub.json"), "{not json");
     assert.deepEqual(loadHubChoice(), { mode: "local" });

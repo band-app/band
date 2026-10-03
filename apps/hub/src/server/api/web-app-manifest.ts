@@ -1,4 +1,4 @@
-import { createReadStream, readFileSync, statSync } from "node:fs";
+import { createReadStream, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 
@@ -34,30 +34,32 @@ export function handleWebAppManifest(
     // The manifest is a UI asset (`apps/web/public/manifest.webmanifest`), also
     // served by the desktop app's `app://` scheme. The hub only answers it
     // before auth, for iOS.
-    try {
-      const body = readFileSync(join(publicDir, "manifest.webmanifest"));
-      res.writeHead(200, {
-        "Content-Type": "application/manifest+json",
-        "Cache-Control": "no-cache",
-      });
-      res.end(req.method === "HEAD" ? undefined : body);
-    } catch {
-      res.writeHead(404);
-      res.end("Not found");
-    }
+    sendFile(req, res, join(publicDir, "manifest.webmanifest"), {
+      "Content-Type": "application/manifest+json",
+      "Cache-Control": "no-cache",
+    });
     return true;
   }
 
   const icon = ICON_FILES.find((name) => pathname === `/icons/${name}`);
   if (!icon) return false;
-  const filePath = join(publicDir, "icons", icon);
+  sendFile(req, res, join(publicDir, "icons", icon), {
+    "Content-Type": "image/png",
+    "Cache-Control": "public, max-age=86400",
+  });
+  return true;
+}
+
+/** Streams a file with a 200, or answers 404 when it can't be read. */
+function sendFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  filePath: string,
+  headers: Record<string, string>,
+): void {
   try {
     const { size } = statSync(filePath);
-    res.writeHead(200, {
-      "Content-Type": "image/png",
-      "Content-Length": size.toString(),
-      "Cache-Control": "public, max-age=86400",
-    });
+    res.writeHead(200, { ...headers, "Content-Length": size.toString() });
     if (req.method === "HEAD") res.end();
     // A read that fails after the 200 ends the response instead of
     // crashing the server with an unhandled stream error.
@@ -69,5 +71,4 @@ export function handleWebAppManifest(
     res.writeHead(404);
     res.end("Not found");
   }
-  return true;
 }

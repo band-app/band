@@ -21,7 +21,6 @@ export function HubSettings() {
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
-  const [hasToken, setHasToken] = useState(false);
   const [saved, setSaved] = useState<HubChoiceView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,7 +33,6 @@ export function HubSettings() {
         setSaved(choice);
         setMode(choice.mode);
         setUrl(choice.url);
-        setHasToken(choice.hasToken);
       })
       .catch(() => {});
     return () => {
@@ -43,6 +41,9 @@ export function HubSettings() {
   }, []);
 
   if (!saved) return null;
+
+  // A token is "saved" only while the form still points at the saved remote hub.
+  const hasToken = saved.hasToken && mode === saved.mode && url.trim() === saved.url;
 
   const unchanged =
     mode === saved.mode && (mode === "local" || (url.trim() === saved.url && token === ""));

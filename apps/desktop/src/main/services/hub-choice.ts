@@ -90,6 +90,8 @@ export function saveHubChoice(choice: HubChoice): void {
   const file = choiceFile();
   mkdirSync(bandHome(), { recursive: true });
   const tmp = `${file}.tmp`;
+  // `mode` creates the file private; the chmod covers a leftover temp file from
+  // a crash, whose old mode `writeFileSync` would keep.
   writeFileSync(tmp, JSON.stringify(choice), { mode: 0o600 });
   chmodSync(tmp, 0o600);
   renameSync(tmp, file);

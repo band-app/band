@@ -13,7 +13,11 @@ export type NavigationDecision = "allow" | "external" | "deny";
 function originOf(url: string): string | null {
   try {
     const parsed = new URL(url);
-    return parsed.origin === "null" ? `${parsed.protocol}//${parsed.host}` : parsed.origin;
+    // A custom scheme's origin is "null" in WHATWG URL; only `app:` is ours.
+    if (parsed.origin === "null") {
+      return parsed.protocol === "app:" ? `${parsed.protocol}//${parsed.host}` : null;
+    }
+    return parsed.origin;
   } catch {
     return null;
   }

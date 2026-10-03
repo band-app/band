@@ -3,7 +3,7 @@
  * the local hub or a remote one.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 export class HubPickerPage {
   readonly dialog: Locator;
@@ -29,8 +29,8 @@ export class HubPickerPage {
       await this.page.evaluate(() => {
         (window as unknown as { __bandOpenSettings?: () => void }).__bandOpenSettings?.();
       });
-      await this.dialog.waitFor({ state: "visible" });
-      await this.mode.waitFor({ state: "visible" });
+      await expect(this.dialog).toBeVisible();
+      await expect(this.mode).toBeVisible();
     });
   }
 
