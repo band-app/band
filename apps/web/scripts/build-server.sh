@@ -19,7 +19,6 @@ esbuild start-server.ts \
   --platform=node \
   --format=esm \
   --outfile=dist/start-server.mjs \
-  --external:./server/server.js \
   --external:node-pty \
   --external:@vscode/ripgrep \
   --external:prettier \
