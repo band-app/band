@@ -228,20 +228,21 @@ test.describe("Desktop app: bundled UI and hub picker", () => {
     const { app } = await launchLocal();
     const dashboard = new DesktopDashboardPage(app.window);
     await dashboard.expectProjectListed("localproj");
-    const before = dashboard.url();
-    const windowsBefore = app.app.windows().length;
+    const windowsBefore = app.windowCount();
 
     await dashboard.navigateTo("app://h-000000000000/");
     await dashboard.navigateTo("file:///etc/hosts");
     await dashboard.openWindow("app://local/");
     await dashboard.openWindow("file:///etc/hosts");
 
-    // Give a (wrongly) allowed navigation or window time to appear.
-    await expect
-      .poll(async () => (await app.window.evaluate(() => document.readyState)) === "complete")
-      .toBe(true);
-    expect(dashboard.url()).toBe(before);
-    expect(app.app.windows().length).toBe(windowsBefore);
+    // A fresh in-app navigation queues behind the attempts above, so once the
+    // dashboard renders again a wrongly allowed navigation or window would
+    // already have shown up.
+    await dashboard.gotoDeepLink(LOCAL_WORKSPACE);
+    await dashboard.expectProjectListed("localproj");
+    expect(dashboard.url()).toContain("app://local/");
+    expect(dashboard.url()).not.toContain("h-000000000000");
+    expect(app.windowCount()).toBe(windowsBefore);
   });
 
   test("browser panes still attach their <webview> guests under app://", async () => {

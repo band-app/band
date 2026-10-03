@@ -16,6 +16,8 @@ export interface LaunchedDesktop {
   window: Page;
   /** Console messages that report a Content-Security-Policy violation. */
   cspViolations: string[];
+  /** How many windows the app has open. */
+  windowCount: () => number;
   close: () => Promise<void>;
 }
 
@@ -66,14 +68,19 @@ export async function launchDesktop(opts: {
     app,
     window,
     cspViolations,
+    windowCount: () => app.windows().length,
     close: async () => {
       // Quitting waits out the local hub's 3 s shutdown grace. If it hangs,
       // kill the app: a test must never leave an Electron process behind.
       const quit = app.close().catch(() => {});
+      let timer: NodeJS.Timeout | undefined;
       const timedOut = await Promise.race([
         quit.then(() => false),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 20_000)),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(true), 20_000);
+        }),
       ]);
+      clearTimeout(timer);
       if (timedOut) app.process().kill("SIGKILL");
       // The hub is detached and outlives a killed app. Free its (random) port.
       if (opts.hubPort) {

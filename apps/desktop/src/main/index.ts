@@ -271,6 +271,10 @@ async function switchHub(choice: HubChoice): Promise<void> {
   const previous = state.hubChoice;
   try {
     if (choice.mode === "remote") {
+      // Check before tearing down the local hub, so a failure leaves it running.
+      if (!state.uiDir) {
+        throw new Error("The UI build was not found, which a remote hub needs. Run `pnpm build`.");
+      }
       state.activityMonitor?.stop();
       state.activityMonitor = null;
       await state.managed.kill();

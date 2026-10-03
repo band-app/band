@@ -106,13 +106,14 @@ describe("app:// handler", () => {
 
   test("every response carries a CSP that names the current hub", async () => {
     for (const path of ["/", "/assets/main-abc123.js", "/workspace/x"]) {
-      const csp = (await get(path)).headers.get("content-security-policy") ?? "";
+      const res = await get(path);
+      const csp = res.headers.get("content-security-policy") ?? "";
       assert.match(
         csp,
         /connect-src 'self' http:\/\/localhost:4567 ws:\/\/localhost:4567(;|$)/,
         path,
       );
-      assert.equal((await get(path)).headers.get("x-content-type-options"), "nosniff");
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     }
   });
 

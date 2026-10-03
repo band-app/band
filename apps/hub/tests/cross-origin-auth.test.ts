@@ -89,7 +89,7 @@ describe("HTTP auth", () => {
 
 describe("CORS allowlist", () => {
   it("answers a preflight from an allowed origin without credentials", async () => {
-    for (const origin of [ALLOWED_ORIGIN, SETTINGS_ORIGIN, "app://band", "null"]) {
+    for (const origin of [ALLOWED_ORIGIN, SETTINGS_ORIGIN, "app://local", "null"]) {
       const res = await fetch(`${server.url}/trpc/projects.list`, {
         method: "OPTIONS",
         headers: {
