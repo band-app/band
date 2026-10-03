@@ -6,6 +6,7 @@
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { ChatPanePage } from "../../e2e/pages/ChatPanePage";
+import { TerminalSurface } from "../../e2e/pages/TerminalSurface";
 
 export class DesktopDashboardPage {
   readonly chat: ChatPanePage;
@@ -45,6 +46,33 @@ export class DesktopDashboardPage {
         await this.page.getByRole("menuitem").first().click();
       }
       await this.chat.waitForReady();
+    });
+  }
+
+  /** Show the workspace's terminal, opening one if the workspace has no tabs. */
+  async openTerminal(workspaceId: string): Promise<TerminalSurface> {
+    return await test.step("Open a terminal tab", async () => {
+      await this.gotoDeepLink(workspaceId);
+      const terminal = new TerminalSurface(this.page, workspaceId);
+      // A workspace opens with a terminal tab unless its tabs are empty, which
+      // shows the "New terminal" button instead.
+      const emptyStateTerminal = this.page.getByTestId("workspace-center__empty-new-term");
+      await expect(terminal.input.or(emptyStateTerminal).first()).toBeVisible({ timeout: 30_000 });
+      if (await emptyStateTerminal.isVisible()) await emptyStateTerminal.click();
+      await expect(terminal.input).toBeAttached({ timeout: 30_000 });
+      return terminal;
+    });
+  }
+
+  /** Call the folder picker's IPC, the way the "Register Project" browse button does. */
+  async pickFolderViaIpc(): Promise<string | null> {
+    return await this.page.evaluate(async () => {
+      const bridge = (
+        window as unknown as {
+          __BAND_DESKTOP__: { invoke(channel: string): Promise<string | null> };
+        }
+      ).__BAND_DESKTOP__;
+      return await bridge.invoke("pick_folder");
     });
   }
 
@@ -89,10 +117,21 @@ export class DesktopDashboardPage {
     }, url);
   }
 
-  /** Open a browser tab from the empty workspace's "New browser" button. */
+  /**
+   * Open a browser tab from the "+" menu, or from the "New browser" button when
+   * the workspace has no tabs. A workspace normally opens with a terminal tab.
+   */
   async openBrowserTab(): Promise<void> {
     await test.step("Open a browser tab", async () => {
-      await this.page.getByTestId("workspace-center__empty-new-browser").click();
+      const emptyState = this.page.getByTestId("workspace-center__empty-new-browser");
+      const plus = this.page.getByTestId("workspace-center__new-tab-button").first();
+      await expect(plus.or(emptyState).first()).toBeVisible({ timeout: 30_000 });
+      if (await emptyState.isVisible()) {
+        await emptyState.click();
+        return;
+      }
+      await plus.click();
+      await this.page.getByTestId("workspace-center__new-tab--browser").click();
     });
   }
 
