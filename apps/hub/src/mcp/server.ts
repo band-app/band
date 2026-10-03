@@ -51,14 +51,14 @@ function discoverProcedures(): ProcedureInfo[] {
 // Create a configured McpServer with all tRPC tools registered
 // ---------------------------------------------------------------------------
 
-function createMcpServer(): McpServer {
+function createMcpServer(req: IncomingMessage): McpServer {
   const server = new McpServer({
     name: "band",
     version: "1.0.0",
   });
 
   const procedures = discoverProcedures();
-  const caller = appRouter.createCaller(createContext());
+  const caller = appRouter.createCaller(createContext({ req }));
 
   for (const proc of procedures) {
     const description = `${proc.type === "mutation" ? "Mutation" : "Query"}: ${proc.path}`;
@@ -117,7 +117,7 @@ function createMcpServer(): McpServer {
 export async function handleMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Stateless mode: create a new server + transport per request.
   // This is the recommended pattern from the MCP SDK for stateless servers.
-  const server = createMcpServer();
+  const server = createMcpServer(req);
 
   try {
     const transport = new StreamableHTTPServerTransport({

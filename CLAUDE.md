@@ -120,6 +120,13 @@ An agent session is one run of a coding agent (issue #682). Its mode is how it i
 - `services/agent-launch-service.ts` starts agents (`agentSessions.launch`, `workspaces.create` with a prompt). The CLI reaches it through `band agents launch` and `band agents list`. An agent with no TUI invocation (cursor-cli) falls back to `gui`, and the response carries a `notice`.
 - Each browser stores its own mode in localStorage (`band.agent-mode`, `dashboard/lib/agent-mode.ts`) and sends it on every launch. With no mode sent, the server uses `agents.defaultMode` from `~/.band/settings.json`. Boot copies the older `cli.defaultVia` into it once and leaves the old key, because the CLI still reads it.
 
+## Architecture: subscriptions
+
+`subscriptions.create | list | remove | events` (`apps/hub/src/server/api/subscriptions/router.ts`) are tRPC procedures, so the MCP endpoint lists them as `band_subscriptions_*`. A call carrying `x-band-chat-id` and `x-band-workspace-id` headers (an agent's `BAND_CHAT_ID` and `BAND_WORKSPACE_ID`) can omit both ids. ACP chat agents get both variables; terminals get only `BAND_WORKSPACE_ID`, since a terminal has no chat.
+
+- Webhook source: `create` with `source: "webhook"` returns a token once and stores only its SHA-256 (`subscriptions.config`). `POST /api/hooks/:id` is answered before the server's auth check, takes the token in `X-Band-Webhook-Token` or `Authorization: Bearer`, and compares hashes in constant time. 404 for an unknown id, 401 for a bad token, 202 otherwise.
+- Timer source: `source: "timer"` with `at` (epoch ms, one-off, forced to `maxWakeups: 1` so it removes itself after delivery) or `cron` (croner syntax, optional seconds field; it ends after `maxWakeups` fires, default 10, or at the 180-day cap). Timers are re-armed from the database in `SubscriptionService.start()`.
+
 ## Architecture: client state
 
 Small UI state (center tabs, drafts, panel widths, collapsed projects) lives on the web server so the phone and the desktop show the same thing. localStorage stays the synchronous read cache.

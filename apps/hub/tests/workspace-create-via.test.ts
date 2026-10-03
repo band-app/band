@@ -609,7 +609,10 @@ describe("chat-hosted agent dispatch env (band-start nested create)", () => {
     // The agent that ran the chat turn was spawned with the chat dispatch
     // target, and the server advertised its own bound URL so a nested CLI
     // call reaches it regardless of which port it claimed.
-    expect(prompt.env).toEqual({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
+    // It also learns which chat and workspace it runs in.
+    expect(prompt.env).toMatchObject({ BAND_DISPATCH: "chat", BAND_SERVER_URL: server.url });
+    expect(prompt.env.BAND_CHAT_ID).toBeTruthy();
+    expect(prompt.env.BAND_WORKSPACE_ID).toBeTruthy();
   });
 });
 

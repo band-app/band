@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "@band-app/logger";
+import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
 import {
+  type SubscriptionConfig,
   type SubscriptionCreator,
   SubscriptionQueries,
   type SubscriptionRecord,
@@ -9,6 +11,12 @@ import {
 import { subscribe as subscribeStatusBus } from "../infra/events/status-event-bus";
 import { type SubscriptionEvent, subscriptionEventSchema } from "../infra/subscriptions/event";
 import { buildSubscriptionMessage, SUMMARY_LIMIT } from "../infra/subscriptions/message";
+import {
+  hashWebhookToken,
+  newWebhookToken,
+  normalizeWebhook,
+  webhookTokenMatches,
+} from "../infra/subscriptions/webhook";
 import { chatService } from "./chat-service";
 import { submitOrQueueTask } from "./task-service";
 import { emit } from "./watcher-service";
@@ -23,6 +31,8 @@ const SWEEP_INTERVAL_MS = 60_000;
 const MAX_DELIVERY_ATTEMPTS = 3;
 /** A burst this large is delivered at once instead of waiting out the window. */
 const MAX_PENDING_EVENTS = 50;
+/** How long a one-off timer's row survives its fire time, for the delivery and its retries. */
+const ONE_OFF_GRACE_MS = 60 * 60 * 1000;
 
 export type Subscription = SubscriptionRecord;
 
@@ -31,7 +41,8 @@ export const subscriptionCreateInput = z.object({
   workspaceId: z.string().min(1),
   source: z.string().min(1),
   kinds: z.array(z.string().min(1)).default([]),
-  filterKey: z.string().min(1),
+  /** Defaults to the key of the source (`hook:<id>`, `timer:<id>`). */
+  filterKey: z.string().min(1).optional(),
   coalesceSeconds: z.number().int().min(0).max(3600).default(30),
   maxWakeups: z.number().int().min(1).default(10),
   /** Epoch milliseconds. Defaults to, and is capped at, 180 days from now. */
@@ -40,6 +51,33 @@ export const subscriptionCreateInput = z.object({
 });
 
 export type SubscriptionCreateInput = z.input<typeof subscriptionCreateInput>;
+
+const sourceCommon = subscriptionCreateInput.omit({ source: true, kinds: true, filterKey: true });
+
+export const webhookCreateInput = sourceCommon;
+export type WebhookCreateInput = z.input<typeof webhookCreateInput>;
+
+/** A timer fires once at `at` (epoch milliseconds) or on a `cron` schedule, not both. */
+export const timerCreateInput = sourceCommon
+  .extend({
+    // Nothing to batch for a single tick, so fire at once by default.
+    coalesceSeconds: z.number().int().min(0).max(3600).default(0),
+    at: z.number().int().optional(),
+    cron: z.string().min(1).optional(),
+  })
+  .refine((v) => (v.at === undefined) !== (v.cron === undefined), {
+    message: "A timer needs exactly one of `at` and `cron`",
+  });
+export type TimerCreateInput = z.input<typeof timerCreateInput>;
+
+export class InvalidTimerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidTimerError";
+  }
+}
+
+export type WebhookDeliveryResult = "accepted" | "unauthorized" | "not-found";
 
 export class SubscriptionChatNotFoundError extends Error {
   constructor(chatId: string, workspaceId: string) {
@@ -60,6 +98,8 @@ interface RuntimeState {
   index: Map<string, Subscription[]>;
   /** Events waiting out their subscription's coalesce window. */
   pending: Map<string, Pending>;
+  /** Armed timer subscriptions by id. */
+  timers: Map<string, Cron>;
   stopBus?: () => void;
   sweeper?: NodeJS.Timeout;
   started: boolean;
@@ -70,9 +110,16 @@ interface RuntimeState {
 const STATE_KEY = Symbol.for("band.subscription-service");
 const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[STATE_KEY]) {
-  g[STATE_KEY] = { index: new Map(), pending: new Map(), started: false } satisfies RuntimeState;
+  g[STATE_KEY] = {
+    index: new Map(),
+    pending: new Map(),
+    timers: new Map(),
+    started: false,
+  } satisfies RuntimeState;
 }
 const state = g[STATE_KEY] as RuntimeState;
+// A state object from before timers existed (dev reload) lacks the map.
+state.timers ??= new Map();
 
 /**
  * Subscriptions (plan step S.1). A subscription points at a chat and a
@@ -92,6 +139,7 @@ export class SubscriptionService {
     if (state.started) return;
     state.started = true;
     this.rebuildIndex();
+    for (const sub of this.queries.list()) this.armTimer(sub);
     state.stopBus = subscribeStatusBus((event) => {
       if (event.kind === "chat-removed" && event.chatId) {
         this.removeAll(this.queries.idsFor({ chatId: event.chatId }), "chat-removed");
@@ -110,11 +158,96 @@ export class SubscriptionService {
     state.sweeper = undefined;
     for (const pending of state.pending.values()) clearTimeout(pending.timer);
     state.pending.clear();
+    for (const id of [...state.timers.keys()]) this.disarmTimer(id);
     state.index.clear();
   }
 
   create(input: SubscriptionCreateInput): Subscription {
     const parsed = subscriptionCreateInput.parse(input);
+    const id = newSubscriptionId();
+    return this.insert(id, parsed, {
+      source: parsed.source,
+      filterKey: parsed.filterKey ?? `${parsed.source}:${id}`,
+      config: {},
+    });
+  }
+
+  /**
+   * A generic webhook: `POST /api/hooks/<id>` with the returned token in
+   * `X-Band-Webhook-Token` becomes an event. Only the token's hash is
+   * stored, so the token can't be read back later.
+   */
+  createWebhook(input: WebhookCreateInput): { subscription: Subscription; token: string } {
+    const parsed = webhookCreateInput.parse(input);
+    const id = newSubscriptionId();
+    const token = newWebhookToken();
+    const subscription = this.insert(
+      id,
+      { ...parsed, kinds: [] },
+      {
+        source: "webhook",
+        filterKey: `hook:${id}`,
+        config: { secretHash: hashWebhookToken(token) },
+      },
+    );
+    return { subscription, token };
+  }
+
+  /**
+   * A timer: fires at `at` once, or on `cron` (croner syntax, an optional
+   * leading seconds field). A one-off removes itself after its message went out.
+   */
+  createTimer(input: TimerCreateInput): Subscription {
+    const parsed = timerCreateInput.parse(input);
+    const now = Date.now();
+    const config: SubscriptionConfig = {};
+    let expiresAt = parsed.expiresAt;
+    let maxWakeups = parsed.maxWakeups;
+    if (parsed.at !== undefined) {
+      if (parsed.at <= now) throw new InvalidTimerError("`at` must be in the future");
+      config.at = parsed.at;
+      maxWakeups = 1;
+      expiresAt ??= parsed.at + ONE_OFF_GRACE_MS;
+    } else if (parsed.cron !== undefined) {
+      assertValidCron(parsed.cron);
+      config.cron = parsed.cron;
+    }
+    const id = newSubscriptionId();
+    const subscription = this.insert(
+      id,
+      { ...parsed, kinds: [], maxWakeups, expiresAt },
+      { source: "timer", filterKey: `timer:${id}`, config },
+    );
+    this.armTimer(subscription);
+    return subscription;
+  }
+
+  /**
+   * Checks a webhook delivery's id and token. Returns `not-found` for an
+   * unknown id (or a subscription that isn't a webhook), `unauthorized` for
+   * a wrong token. Callers run it before reading the request body.
+   */
+  authorizeWebhook(subscriptionId: string, token: string): WebhookDeliveryResult {
+    const sub = this.queries.find(subscriptionId);
+    if (!sub || sub.source !== "webhook") return "not-found";
+    if (!webhookTokenMatches(token, sub.config.secretHash)) return "unauthorized";
+    return "accepted";
+  }
+
+  /** Turns an authorized webhook request into an event. */
+  deliverWebhook(
+    subscriptionId: string,
+    headers: Record<string, string | string[] | undefined>,
+    body: string,
+  ): void {
+    this.ingest(normalizeWebhook(subscriptionId, headers, body));
+  }
+
+  private insert(
+    id: string,
+    parsed: Omit<z.output<typeof subscriptionCreateInput>, "source" | "filterKey">,
+    source: { source: string; filterKey: string; config: SubscriptionConfig },
+  ): Subscription {
     const chat = chatService.get(parsed.chatId);
     if (!chat || chat.workspaceId !== parsed.workspaceId) {
       throw new SubscriptionChatNotFoundError(parsed.chatId, parsed.workspaceId);
@@ -122,22 +255,71 @@ export class SubscriptionService {
     const now = Date.now();
     const latest = now + MAX_SUBSCRIPTION_DAYS * DAY_MS;
     const record: Subscription = {
-      id: `sub_${randomUUID()}`,
+      id,
       chatId: parsed.chatId,
       workspaceId: parsed.workspaceId,
-      source: parsed.source,
+      source: source.source,
       kinds: parsed.kinds,
-      filterKey: parsed.filterKey,
+      filterKey: source.filterKey,
       coalesceSeconds: parsed.coalesceSeconds,
       maxWakeups: parsed.maxWakeups,
       wakeups: 0,
       expiresAt: Math.min(parsed.expiresAt ?? latest, latest),
       createdBy: parsed.createdBy as SubscriptionCreator,
       createdAt: now,
+      config: source.config,
     };
     this.queries.insert(record);
     this.rebuildIndex();
     return record;
+  }
+
+  private armTimer(sub: Subscription): void {
+    if (sub.source !== "timer" || state.timers.has(sub.id)) return;
+    const fire = () => this.fireTimer(sub.id);
+    try {
+      let job: Cron;
+      if (sub.config.at !== undefined) {
+        // A one-off whose time passed while the server was down fires once now.
+        job = new Cron(new Date(Math.max(sub.config.at, Date.now() + 10)), { unref: true }, fire);
+      } else if (sub.config.cron) {
+        job = new Cron(sub.config.cron, { unref: true }, fire);
+      } else {
+        return;
+      }
+      state.timers.set(sub.id, job);
+    } catch (err) {
+      log.error({ err, subscriptionId: sub.id }, "could not arm timer subscription");
+    }
+  }
+
+  private disarmTimer(id: string): void {
+    state.timers.get(id)?.stop();
+    state.timers.delete(id);
+  }
+
+  private fireTimer(id: string): void {
+    const sub = this.queries.find(id);
+    if (!sub) {
+      this.disarmTimer(id);
+      return;
+    }
+    const at = Date.now();
+    try {
+      this.ingest({
+        // One id per fire, so each tick is its own event.
+        id: `${at}`,
+        source: "timer",
+        kind: "timer",
+        key: `timer:${id}`,
+        url: "",
+        actor: "timer",
+        summary: sub.config.cron ? `Timer fired (cron ${sub.config.cron})` : "Timer fired",
+        at,
+      });
+    } catch (err) {
+      log.error({ err, subscriptionId: id }, "timer fire failed");
+    }
   }
 
   list(filter?: { chatId?: string; workspaceId?: string }): Subscription[] {
@@ -295,6 +477,7 @@ export class SubscriptionService {
       const pending = state.pending.get(id);
       if (pending) clearTimeout(pending.timer);
       state.pending.delete(id);
+      this.disarmTimer(id);
       this.queries.remove(id);
       if (sub) {
         emit({
@@ -317,6 +500,19 @@ export class SubscriptionService {
       else index.set(sub.filterKey, [sub]);
     }
     state.index = index;
+  }
+}
+
+function newSubscriptionId(): string {
+  return `sub_${randomUUID()}`;
+}
+
+function assertValidCron(expression: string): void {
+  try {
+    const options: CronOptions = { maxRuns: 0 };
+    void new Cron(expression, options);
+  } catch {
+    throw new InvalidTimerError("Invalid cron expression");
   }
 }
 
