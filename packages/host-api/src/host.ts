@@ -352,6 +352,32 @@ export interface ClaudeDefaults {
   effort: string | undefined;
 }
 
+export interface InstallSkillsResult {
+  /** Canonical SKILL.md paths that did not exist before the run. */
+  written: string[];
+  /** Canonical SKILL.md paths whose content differed and was overwritten. */
+  updated: string[];
+  /** Canonical SKILL.md paths whose content already matched. */
+  unchanged: string[];
+  /** Symlink paths created, one per agent and skill. */
+  linked: string[];
+  /** Symlink paths that already pointed at the shared directory. */
+  alreadyLinked: string[];
+  /** Per-agent paths the install left alone because something was in the way, as "path: reason". */
+  conflicts: string[];
+  /** Canonical SKILL.md paths skipped because the install could not run. */
+  skipped: string[];
+  /** Why the install could not run, when it could not. */
+  warnings: string[];
+}
+
+export interface HooksStatus {
+  /** Band's hook is present for every hook event. */
+  installed: boolean;
+  /** The settings also hold hooks that are not Band's. */
+  other_hooks_exist: boolean;
+}
+
 export interface HostAgentEnv {
   /** The model and effort Claude Code would use in `cwd` according to its config files and environment. */
   claudeDefaults(cwd: string): Promise<ClaudeDefaults>;
@@ -359,8 +385,15 @@ export interface HostAgentEnv {
   latestClaudeSession(cwd: string): Promise<string | null>;
   /** The usage reader for an agent, or `undefined` when it keeps no on-disk usage data. */
   usageReader(agent: AgentDescriptor): Promise<UsageReader | undefined>;
-  /** Installs Band's skills for the coding agents found on the host. */
-  installSkills(skills: string[]): Promise<void>;
-  /** Installs agent hooks that report to `hubRelayUrl`. */
-  installHooks(hubRelayUrl: string): Promise<void>;
+  /**
+   * Installs Band's skills into the host's shared skills directory and links
+   * each coding agent found on the host to it. `home` replaces the host's home
+   * directory (tests only). A host that cannot run the install returns every
+   * skill as `skipped` and says why in `warnings`.
+   */
+  installSkills(options?: { home?: string }): Promise<InstallSkillsResult>;
+  /** Whether Band's hooks are in the host's Claude Code settings. */
+  hooksStatus(): Promise<HooksStatus>;
+  /** Installs Band's agent hooks into the host's Claude Code settings. Rejects when the host has no `band` CLI. */
+  installHooks(): Promise<void>;
 }
