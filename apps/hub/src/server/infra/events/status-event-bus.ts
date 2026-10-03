@@ -99,6 +99,8 @@ export interface StatusEvent {
     | "agent-session-updated"
     | "agent-session-ended"
     | "client-state-changed"
+    | "subscription-delivered"
+    | "subscription-removed"
     | "open-file";
   status?: WorkspaceStatusSnapshot;
   statuses?: WorkspaceStatusSnapshot[];
@@ -117,6 +119,12 @@ export interface StatusEvent {
   chatId?: string;
   /** For the `agent-session-*` kinds: the session's current record (issue #682). */
   agentSession?: AgentSessionRecord;
+  /** For the `subscription-*` kinds: the subscription the event is about. */
+  subscriptionId?: string;
+  /** For `kind: "subscription-delivered"`: how many events the message carried. */
+  eventCount?: number;
+  /** For `kind: "subscription-removed"`: why the subscription ended. */
+  reason?: "expired" | "max-wakeups" | "removed" | "chat-removed" | "workspace-removed";
   /** For `kind: "client-state-changed"`: the entry as stored after the write. */
   clientState?: ClientStateEntry;
   /**

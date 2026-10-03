@@ -368,3 +368,45 @@ export const clientState = sqliteTable(
     index("client_state_workspace_idx").on(t.workspaceId),
   ],
 );
+
+// Subscriptions (plan step S.1): a chat asks to be woken when events for a
+// key arrive (`github:pr:owner/repo#123`). `kinds` is a JSON array of event
+// kinds, empty meaning every kind. `wakeups` counts delivered messages;
+// the row is deleted at `max_wakeups` or `expires_at`. Rows go away with
+// their chat or workspace.
+export const subscriptions = sqliteTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    source: text("source").notNull(),
+    kinds: text("kinds").notNull(),
+    filterKey: text("filter_key").notNull(),
+    coalesceSeconds: integer("coalesce_seconds").notNull(),
+    maxWakeups: integer("max_wakeups").notNull(),
+    wakeups: integer("wakeups").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    createdBy: text("created_by", { enum: ["agent", "coordinator", "user"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("subscriptions_chat_idx").on(t.chatId),
+    index("subscriptions_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+// One row per event routed to a subscription: the primary key is the event
+// id, so a repeated delivery of the same event is ignored. `delivered_at`
+// stays null until the coalesced message went out.
+export const subscriptionEvents = sqliteTable(
+  "subscription_events",
+  {
+    eventId: text("event_id").primaryKey(),
+    subscriptionId: text("subscription_id").notNull(),
+    receivedAt: integer("received_at").notNull(),
+    deliveredAt: integer("delivered_at"),
+    summary: text("summary").notNull(),
+  },
+  (t) => [index("subscription_events_subscription_idx").on(t.subscriptionId)],
+);

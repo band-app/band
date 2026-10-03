@@ -61,6 +61,7 @@ import {
   resetAgentStatuses,
   startStatusSourceCleanup,
 } from "./src/server/services/state.ts";
+import { subscriptionService } from "./src/server/services/subscription-service.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
@@ -1240,6 +1241,10 @@ async function main() {
       // to the first scheduled load.
       cronjobService.start();
 
+      // Rebuild the subscription index from the database. Events that were
+      // waiting out a coalesce window when the last server stopped are gone.
+      subscriptionService.start();
+
       // Activate the bundled plugins that ask for `onStartup`. The rest
       // activate lazily, e.g. the GitHub plugin on the first review lookup
       // for a github.com project.
@@ -1264,6 +1269,7 @@ async function main() {
   const shutdown = async () => {
     branchStatusPoller.stop();
     cronjobService.stop();
+    subscriptionService.stop();
     stopTaskPruneScheduler();
     stopUsageEventPruneScheduler();
     stopUsageScanner();

@@ -57,6 +57,10 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "./state";
+// FRAGILE: ESM cycle leg — `./subscription-service` imports `task-service`,
+// which imports `workspaceService` from this file. Keep every
+// `subscriptionService` reference inside a function body.
+import { subscriptionService } from "./subscription-service";
 import { syncService, type WorktreeRemoval } from "./sync-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
@@ -769,6 +773,9 @@ export class WorkspaceService {
 
     // Drop the workspace's shared UI state (center tabs, drafts, splits).
     clientStateService.removeAllForWorkspace(workspaceId);
+
+    // Drop the workspace's subscriptions.
+    subscriptionService.removeForWorkspace(workspaceId);
 
     // Kill any running language server processes
     killWorkspaceServers(workspaceId);
