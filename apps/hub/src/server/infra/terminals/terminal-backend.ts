@@ -1,91 +1,30 @@
-import type { SpawnOptions, TerminalExitEvent, TerminalListEntry } from "./terminal-pool";
-
-export type { SpawnOptions, TerminalExitEvent, TerminalListEntry };
+import type {
+  SpawnOptions,
+  TerminalAttachment,
+  TerminalBackend,
+  TerminalExitEvent,
+  TerminalListEntry,
+  TerminalSpawnRequest,
+} from "@band-app/host-api";
 
 /**
- * Everything `TerminalService` needs from wherever the PTYs live. Two
- * implementations:
+ * The backend contract lives in `@band-app/host-api`, because it is the PTY
+ * part of the `Host` interface. Two implementations here:
  *
  *   - `DaemonTerminalBackend` — PTYs live in the detached terminal daemon, so
  *     they survive a web-server restart. The default on macOS and Linux.
  *   - `InProcessTerminalBackend` — PTYs live in this process and die with it.
  *     Used on Windows, when `BAND_TERMINAL_DAEMON=0`, and when the daemon
  *     cannot start.
- *
- * Async throughout because the daemon answers over a socket. `write`,
- * `resize` and `nudgeResize` are fire-and-forget: the daemon keeps their
- * order on one connection, and none of their callers can act on a reply.
  */
-export interface TerminalBackend {
-  /**
-   * Spawn (or return the already-live) PTY for `terminalId`. Idempotent per
-   * id, including across concurrent calls (issue #617).
-   */
-  spawn(request: TerminalSpawnRequest): Promise<TerminalListEntry>;
-  /** Metadata for one live terminal, or `null` if it isn't live. */
-  info(terminalId: string): Promise<TerminalListEntry | null>;
-  list(workspaceId: string): Promise<TerminalListEntry[]>;
-  listAll(): Promise<TerminalListEntry[]>;
-  /** Kill one terminal. Resolves with its entry, or `null` if it wasn't live. */
-  kill(terminalId: string): Promise<TerminalListEntry | null>;
-  killWorkspace(workspaceId: string): Promise<void>;
-  getScrollback(terminalId: string, lines?: number): Promise<string | null>;
-  /** Resolves `false` when the terminal isn't live. */
-  write(terminalId: string, data: string): Promise<boolean>;
-  /** Keystrokes: like {@link write}, but fire-and-forget, ordered with `resize`. */
-  input(terminalId: string, data: string): void;
-  resize(terminalId: string, cols: number, rows: number): void;
-  /** Force a live TUI to repaint after a re-attach — see `TerminalPool.nudgeResize`. */
-  nudgeResize(terminalId: string): void;
-  /**
-   * Replay-on-attach. Resizes to `dims`, then resolves with a serialized
-   * snapshot of the terminal. Call {@link TerminalAttachment.start} once the
-   * snapshot is on its way to the client: from then on `onData` receives
-   * every chunk produced after the snapshot, each exactly once and in order.
-   * Resolves `null` when the terminal isn't live.
-   */
-  attach(
-    terminalId: string,
-    dims?: { cols: number; rows: number },
-  ): Promise<TerminalAttachment | null>;
-  /** Subscribe to every terminal's exit. Returns an unsubscribe function. */
-  onExit(listener: (event: TerminalExitEvent) => void): () => void;
-  /**
-   * End every terminal hosted by the current daemon and let the next spawn
-   * start a fresh one. A no-op (`{ killedCount: 0 }`) when there is no
-   * separate daemon process to restart, as with {@link InProcessTerminalBackend}.
-   */
-  restartDaemon(): Promise<{ killedCount: number }>;
-  /**
-   * Release this process's hold on the backend at server shutdown. The
-   * in-process backend kills its PTYs; the daemon backend only disconnects,
-   * which is what lets shells outlive the server.
-   */
-  close(): Promise<void>;
-}
-
-export interface TerminalSpawnRequest {
-  workspaceId: string;
-  terminalId: string;
-  /** Absolute worktree path; `options.cwd` resolves inside it. */
-  workspaceRoot: string;
-  options?: SpawnOptions;
-  cleanupOnExit?: boolean;
-}
-
-export interface TerminalAttachment {
-  snapshot: string;
-  start(onData: (data: string) => void): void;
-  /**
-   * Pause (`true`) or resume reading the terminal's PTY on this viewer's
-   * behalf, for a client that has fallen behind parsing its output. Each
-   * attachment holds at most once; the PTY resumes when no attachment (and no
-   * other holder, such as a backed-up daemon stream) holds it. `detach`
-   * releases a hold that is still set.
-   */
-  setOutputHeld(held: boolean): void;
-  detach(): void;
-}
+export type {
+  SpawnOptions,
+  TerminalAttachment,
+  TerminalBackend,
+  TerminalExitEvent,
+  TerminalListEntry,
+  TerminalSpawnRequest,
+};
 
 /**
  * Turns a `seq`-numbered output feed into a {@link TerminalAttachment}. Feed

@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
 import { z } from "zod";
+import { setLocalTerminalBackend } from "../infra/host/registry";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { TerminalDaemonUnavailableError } from "../infra/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "../infra/terminals/in-process-backend";
@@ -127,6 +128,7 @@ export class TerminalService {
       });
     }
     this.backend = backend;
+    setLocalTerminalBackend(backend);
     this.unsubscribeExit = backend.onExit((event) => this.handleExit(event));
   }
 
