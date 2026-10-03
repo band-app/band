@@ -36,6 +36,7 @@ import { type ManagedProcess, webserverStart, webserverStop } from "../services/
 import type { UpdateController } from "../updater.js";
 import { getAppMetrics } from "./app-metrics.js";
 import { browserHandlers } from "./browser.js";
+import { type HubIpcDeps, hubHandlers } from "./hub.js";
 import {
   checkAppExists,
   installCli,
@@ -50,7 +51,11 @@ import { getAppTitle } from "./window-title.js";
 
 export interface RegisterOptions {
   mainWindow: BrowserWindow;
-  webDir: string;
+  /** The bundled hub's directory. A getter: it is resolved when "local" is first used. */
+  getWebDir: () => string;
+  /** False while a remote hub is selected: there is no local hub to start or stop. */
+  isLocalHub: () => boolean;
+  hub: HubIpcDeps;
   managed: ManagedProcess;
   browserManager: BrowserGuestManager;
   /**
@@ -71,8 +76,11 @@ export interface RegisterOptions {
 export function registerIpc(opts: RegisterOptions): () => void {
   const handlers: Array<readonly [string, (args: unknown) => unknown]> = [];
 
-  const handle = <T>(channel: string, fn: (args: T) => unknown): void => {
-    const wrapped = (_e: unknown, args: T) => fn(args);
+  const handle = <T>(
+    channel: string,
+    fn: (args: T, event: Electron.IpcMainInvokeEvent) => unknown,
+  ): void => {
+    const wrapped = (event: Electron.IpcMainInvokeEvent, args: T) => fn(args, event);
     ipcMain.handle(channel, wrapped);
     handlers.push([channel, wrapped as (args: unknown) => unknown]);
   };
@@ -81,15 +89,21 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Native window dragging is handled via CSS `-webkit-app-region: drag` on
   // the title bar — no IPC handler needed.
   handle(Channels.webserverStart, () =>
-    webserverStart({
-      webDir: opts.webDir,
-      managed: opts.managed,
-      isPackaged: opts.cliPaths.isPackaged,
-    }),
+    opts.isLocalHub()
+      ? webserverStart({
+          webDir: opts.getWebDir(),
+          managed: opts.managed,
+          isPackaged: opts.cliPaths.isPackaged,
+        })
+      : undefined,
   );
   handle(Channels.webserverStop, () =>
-    webserverStop({ webDir: opts.webDir, managed: opts.managed }),
+    opts.isLocalHub()
+      ? webserverStop({ webDir: opts.getWebDir(), managed: opts.managed })
+      : undefined,
   );
+  // ---- Hub picker ----
+  for (const [channel, fn] of hubHandlers(opts.hub)) handle(channel, fn);
   handle(Channels.getAppTitle, () => getAppTitle());
   handle(Channels.getWindowFullscreen, () => opts.mainWindow.isFullScreen());
   // Per-process Electron/Chromium resource metrics for the Resources page.
