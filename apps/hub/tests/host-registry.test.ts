@@ -9,7 +9,7 @@ import { workspaceService } from "../src/server/services/workspace-service";
 
 // Uses a real SQLite DB in a temp BAND_HOME, as `sync-service.test.ts` does.
 describe("host registry", () => {
-  let tmp: string;
+  let tmp = "";
   let originalBandHome: string | undefined;
 
   beforeEach(() => {
@@ -22,7 +22,7 @@ describe("host registry", () => {
     closeDb();
     if (originalBandHome !== undefined) process.env.BAND_HOME = originalBandHome;
     else delete process.env.BAND_HOME;
-    rmSync(tmp, { recursive: true, force: true });
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
   });
 
   it("puts every workspace and project on the local host", () => {

@@ -87,9 +87,8 @@ export class LocalHost implements Host {
     // The language server manager is keyed by workspace and shared by every
     // client, so exposing it as one client's byte stream needs the proxy
     // reworked. Nothing calls it through the host yet.
-    connect: (): Promise<Duplex> => {
-      throw new HostNotImplementedError(LOCAL_HOST_ID, "lsp.connect");
-    },
+    connect: (): Promise<Duplex> =>
+      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "lsp.connect")),
   };
   readonly acp: HostAcp = {
     resolveLaunch: (def: AcpAgentDefinition) => resolveAcpLaunch(def),
@@ -109,12 +108,10 @@ export class LocalHost implements Host {
       getUsageReader(agent.agentType, { command: agent.command }),
     // Skills install through the `band` CLI and hook install through the hooks
     // service, both above the infra tier. Nothing calls them through the host yet.
-    installSkills: () => {
-      throw new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installSkills");
-    },
-    installHooks: () => {
-      throw new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installHooks");
-    },
+    installSkills: () =>
+      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installSkills")),
+    installHooks: () =>
+      Promise.reject(new HostNotImplementedError(LOCAL_HOST_ID, "agentEnv.installHooks")),
   };
 
   constructor(private readonly options: LocalHostOptions) {}
@@ -245,6 +242,7 @@ function watchTree(root: string, options: WatchOptions = {}): Stream<FileChange>
       let wake: (() => void) | null = null;
       let done = false;
       const finish = () => {
+        if (done) return;
         done = true;
         watcher.close();
         wake?.();
