@@ -13,9 +13,10 @@ import { join } from "node:path";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
+import { initialCursor } from "../src/server/infra/subscriptions/github-poll";
 import { agentSessionService } from "../src/server/services/agent-session-service";
 import { chatService } from "../src/server/services/chat-service";
-import { githubPollService, MAX_CALLS_PER_POLL } from "../src/server/services/github-poll-service";
+import { githubPollService } from "../src/server/services/github-poll-service";
 import { githubWebhookService } from "../src/server/services/github-webhook-service";
 import { subscriptionService } from "../src/server/services/subscription-service";
 import { type CheckRunStub, type GhStub, ghStub } from "./fixtures/gh-stub";
@@ -195,6 +196,27 @@ describe("github polling fallback", () => {
     expect(promptsAbout("please rename the helper")).toHaveLength(1);
   });
 
+  it("S1: a comment older than a second subscription is not delivered to it", async () => {
+    const { coords, full } = newRepo();
+    const first = await subscribe({ pr: 7 }, full);
+    const comment = {
+      id: "C_between",
+      body: "between the two subscriptions",
+      createdAt: initialCursor(first.createdAt + 1000),
+    };
+    stub.setPrActivityQuery(coords, () => prAnswer([comment]));
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    const second = await subscribe({ pr: 7 }, full);
+    await githubPollService.poll();
+    await waitFor(async () => promptsAbout("between the two subscriptions").length === 1, {
+      label: "first subscription delivery",
+    });
+    expect(subscriptionService.getCursor(first.id)).toBe(comment.createdAt);
+    expect(subscriptionService.getCursor(second.id)).toBe(initialCursor(second.createdAt));
+    await githubPollService.poll();
+    expect(promptsAbout("between the two subscriptions")).toHaveLength(1);
+  });
+
   it("S2: CI is silent while a check is pending and delivers once when the last completes", async () => {
     const { coords, full } = newRepo();
     let runs = [
@@ -263,7 +285,7 @@ describe("github polling fallback", () => {
 
   it("S4: one poll makes a bounded number of gh calls and later polls cover the rest", async () => {
     const { coords, full } = newRepo();
-    const branches = Array.from({ length: MAX_CALLS_PER_POLL + 4 }, (_, i) => `branch-${i}`);
+    const branches = Array.from({ length: 6 + 4 }, (_, i) => `branch-${i}`);
     for (const branch of branches) {
       stub.setCheckRuns(coords, branch, [
         check({ name: "build", status: "in_progress", conclusion: null }),
@@ -272,7 +294,7 @@ describe("github polling fallback", () => {
     }
     const mine = () => calls(`repos/${full}/commits/`);
     await githubPollService.poll();
-    expect(mine()).toHaveLength(MAX_CALLS_PER_POLL);
+    expect(mine()).toHaveLength(6);
     await githubPollService.poll();
     const seen = new Set(mine().map((r) => r.positional[1].split("/commits/")[1].split("/")[0]));
     expect(seen.size).toBe(branches.length);

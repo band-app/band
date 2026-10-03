@@ -23,7 +23,7 @@ const log = createLogger("github-poll");
  * `gh` calls one poll makes at most, one after another. Work beyond it waits
  * for the next poll, so many subscriptions never fire a burst of requests.
  */
-export const MAX_CALLS_PER_POLL = 6;
+const MAX_CALLS_PER_POLL = 6;
 /** Pages of check runs read for one commit. */
 const MAX_CHECK_PAGES = 5;
 /** A failing source is skipped for 2^failures polls, up to this many. */
@@ -42,6 +42,8 @@ interface PollState {
   offset: number;
   failures: Map<string, { count: number; retryAtPoll: number; message: string }>;
   running: boolean;
+  /** `gh` calls this poll may still make. */
+  callsLeft: number;
 }
 
 /**
@@ -59,6 +61,7 @@ export class GithubPollService {
     offset: 0,
     failures: new Map(),
     running: false,
+    callsLeft: 0,
   };
 
   /** One poll pass. Overlapping calls are dropped. */
@@ -83,8 +86,11 @@ export class GithubPollService {
     if (due.length === 0) return;
     const start = this.state.offset % due.length;
     const batch = [...due.slice(start), ...due.slice(0, start)].slice(0, MAX_CALLS_PER_POLL);
-    this.state.offset = start + batch.length;
+    this.state.callsLeft = MAX_CALLS_PER_POLL;
+    let ran = 0;
     for (const item of batch) {
+      if (this.state.callsLeft <= 0) break;
+      ran++;
       try {
         await item.run();
         this.state.failures.delete(item.id);
@@ -92,6 +98,13 @@ export class GithubPollService {
         this.fail(item, poll, err);
       }
     }
+    this.state.offset = start + ran;
+  }
+
+  /** One `gh` call, counted against the poll's budget. */
+  private gh(args: string[]): Promise<string> {
+    this.state.callsLeft--;
+    return execGh(args, tmpdir());
   }
 
   /** Logs a failure once per distinct message, and skips the item for longer each time it repeats. */
@@ -161,10 +174,12 @@ export class GithubPollService {
     const numberOf = (s: Subscription) => Number(s.filterKey.slice(`github:pr:${repo}#`.length));
     const numbers = [...new Set(subs.map(numberOf))].filter((n) => Number.isInteger(n) && n > 0);
     if (numbers.length === 0) return;
-    const output = await execGh(
-      ["api", "graphql", "-f", `query=${buildPrActivityQuery(repo, numbers)}`],
-      tmpdir(),
-    );
+    const output = await this.gh([
+      "api",
+      "graphql",
+      "-f",
+      `query=${buildPrActivityQuery(repo, numbers)}`,
+    ]);
     const activity = parsePrActivity(repo, numbers, output);
     for (const sub of subs) {
       const items = activity.get(numberOf(sub));
@@ -174,7 +189,12 @@ export class GithubPollService {
       for (const item of items) {
         // `>=` because GitHub stamps to the second; the event id dedupes the overlap.
         if (item.createdAt < cursor) continue;
-        subscriptionService.ingest(item.event);
+        try {
+          // Only this subscription: another one on the PR has its own cursor.
+          subscriptionService.ingest(item.event, sub.id);
+        } catch (err) {
+          log.warn({ repo, subscriptionId: sub.id, err }, "skipping a malformed PR event");
+        }
         if (item.createdAt > newest) newest = item.createdAt;
       }
       if (newest !== cursor || subscriptionService.getCursor(sub.id) === undefined) {
@@ -189,13 +209,12 @@ export class GithubPollService {
     const ref = branch.split("/").map(encodeURIComponent).join("/");
     const checks: CheckRun[] = [];
     for (let page = 1; page <= MAX_CHECK_PAGES; page++) {
-      const output = await execGh(
-        [
-          "api",
-          `repos/${repo}/commits/${ref}/check-runs?per_page=${CHECK_RUNS_PER_PAGE}&page=${page}`,
-        ],
-        tmpdir(),
-      );
+      // Out of budget mid-commit: a partial list could look complete, so wait for the next poll.
+      if (page > 1 && this.state.callsLeft <= 0) return;
+      const output = await this.gh([
+        "api",
+        `repos/${repo}/commits/${ref}/check-runs?per_page=${CHECK_RUNS_PER_PAGE}&page=${page}`,
+      ]);
       const runs = parseCheckRuns(output);
       checks.push(...runs);
       if (runs.length < CHECK_RUNS_PER_PAGE) break;
