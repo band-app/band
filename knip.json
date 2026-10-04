@@ -56,6 +56,10 @@
         "@agentclientprotocol/codex-acp"
       ]
     },
+    "apps/worker": {
+      "entry": ["src/main.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts", "bin/*.mjs"]
+    },
     "apps/desktop": {
       "entry": [
         "src/main/index.ts",

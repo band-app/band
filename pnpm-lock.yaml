@@ -452,6 +452,37 @@ importers:
         specifier: ^4.1.4
         version: 4.2.1
 
+  apps/worker:
+    dependencies:
+      '@band-app/host-api':
+        specifier: workspace:^
+        version: link:../../packages/host-api
+      '@band-app/host-local':
+        specifier: workspace:^
+        version: link:../../packages/host-local
+      '@band-app/link':
+        specifier: workspace:^
+        version: link:../../packages/link
+      '@band-app/logger':
+        specifier: workspace:^
+        version: link:../../packages/logger
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+
   packages/coding-agent:
     dependencies:
       '@band-app/logger':
