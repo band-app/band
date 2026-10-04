@@ -109,7 +109,7 @@ export async function handleChatEvents(
   try {
     writer.write({
       type: "session-state",
-      state: agentSessionService.getSessionState(chatId),
+      state: await agentSessionService.resolvedSessionState(chatId),
       eventId: syntheticId--,
     });
 

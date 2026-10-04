@@ -19,22 +19,8 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AGENT_DISPATCH_ENV } from "@band-app/coding-agent";
+import type { AcpAgentDefinition, AcpLaunch } from "@band-app/host-api";
 import { shellPath } from "../process/path";
-
-export interface AcpLaunch {
-  command: string;
-  args: string[];
-  /** Merged over `process.env` at spawn. */
-  env: Record<string, string>;
-}
-
-/** The parts of a settings agent definition the launcher reads. */
-export interface AcpAgentDefinition {
-  type: string;
-  label?: string;
-  /** User-configured binary path (settings `command`). */
-  command?: string;
-}
 
 const require = createRequire(import.meta.url);
 
