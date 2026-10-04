@@ -98,6 +98,14 @@ export interface LifecyclePolicy {
   idleExitMs?: number;
 }
 
+/**
+ * Hub to worker: asks an ephemeral worker to go through the same hand-off as an idle one now. The
+ * worker answers at once and sends `lifecycle.idle`, so the hub's checks and the storing of every
+ * workspace are the ones an idle worker gets. The reaper uses it at a machine's maximum lifetime
+ * (plan step 3.7).
+ */
+export const METHOD_LIFECYCLE_SLEEP = "lifecycle.sleep";
+
 /** Hub to worker: reads the agent session files of the named sessions. See `apps/worker/src/methods-lifecycle.ts`. */
 export const METHOD_LIFECYCLE_EXPORT_SESSIONS = "lifecycle.exportSessions";
 /** Hub to worker: moves staged session files into the agent session directories. */

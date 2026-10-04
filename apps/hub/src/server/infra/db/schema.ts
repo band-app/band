@@ -259,6 +259,37 @@ export const workspaceSleep = sqliteTable(
   (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
 );
 
+// A machine a runner hook started (plan step 3.7). The reaper compares these
+// rows with the hosts and with the runner's `status` hook, and destroys the
+// ones that are lost, orphaned or past the runner's maximum lifetime.
+// `worker_id` is the host id. `handle` is what the spawn hook printed as
+// `BAND_MACHINE_HANDLE=` (a container id, a pid, a VM id).
+export const runnerMachines = sqliteTable(
+  "runner_machines",
+  {
+    id: text("id").primaryKey(),
+    runnerId: text("runner_id").notNull(),
+    requestId: text("request_id"),
+    workerId: text("worker_id").notNull(),
+    handle: text("handle"),
+    state: text("state", { enum: ["spawning", "running", "stopping", "destroyed", "lost"] })
+      .notNull()
+      .default("spawning"),
+    spawnedAt: integer("spawned_at").notNull(),
+    lastSeenAt: integer("last_seen_at"),
+    // When the reaper began to stop the machine for its maximum lifetime.
+    stoppingSince: integer("stopping_since"),
+    destroyedAt: integer("destroyed_at"),
+    // Failed runs of the destroy hook. The reaper tries again until the third, then marks the machine lost.
+    destroyAttempts: integer("destroy_attempts").notNull().default(0),
+    error: text("error"),
+  },
+  (t) => [
+    index("runner_machines_state_idx").on(t.state),
+    index("runner_machines_worker_idx").on(t.workerId),
+  ],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

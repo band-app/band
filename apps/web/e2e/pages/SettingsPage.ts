@@ -439,6 +439,23 @@ export class SettingsPage {
     return this.runnerRun(workspaceId).getByTestId("settings__runner-log");
   }
 
+  /** The rows of the machines a runner started. `data-testid` set in `RunnersSettings.tsx`. */
+  runnerMachines(runnerId: string): Locator {
+    return this.dialog.getByTestId("settings__machine").filter({ hasText: runnerId });
+  }
+
+  /** The state of a machine row (`spawning`, `running`, `destroyed`, ...). */
+  machineState(machine: Locator): Locator {
+    return machine.getByTestId("settings__machine-state");
+  }
+
+  /** Clicks Destroy on a machine row. */
+  async destroyMachine(machine: Locator): Promise<void> {
+    await test.step("Destroy the machine", async () => {
+      await machine.getByTestId("settings__machine-destroy").click();
+    });
+  }
+
   /** The "Add worker" button in the Hosts section, before the form opens. */
   addWorkerButton(): Locator {
     return this.dialog.getByTestId("settings__add-worker");

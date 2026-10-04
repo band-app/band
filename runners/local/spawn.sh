@@ -46,4 +46,5 @@ if [ -n "${BAND_IDLE_EXIT:-}" ]; then export BAND_WORKER_IDLE_EXIT="$BAND_IDLE_E
 cd "$base"
 nohup "$@" >"$base/worker.log" 2>&1 </dev/null &
 echo $! >"$base/pid"
+echo "BAND_MACHINE_HANDLE=$(cat "$base/pid")"
 echo "started worker $BAND_WORKER_ID as pid $(cat "$base/pid")"

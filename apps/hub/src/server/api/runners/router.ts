@@ -5,7 +5,9 @@
  * router out, like `hosts.*`.
  */
 
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { MachineError, runnerReaperService } from "../../services/runner-reaper-service";
 import { runnerService } from "../../services/runner-service";
 import { adminProcedure, t } from "../trpc";
 
@@ -19,4 +21,27 @@ export const runnersRouter = t.router({
   log: adminProcedure
     .input(z.object({ requestId: z.string().min(1).max(100) }))
     .query(({ input }) => ({ log: runnerService.readLog(input.requestId) })),
+
+  /** The machines the runners started, newest first, with the state the reaper keeps them in. */
+  machines: adminProcedure.query(() => ({ machines: runnerReaperService.list() })),
+
+  /**
+   * Destroys a machine now. A machine holding workspaces that are not stored is refused unless
+   * `force` is set.
+   */
+  destroyMachine: adminProcedure
+    .input(z.object({ id: z.string().min(1).max(100), force: z.boolean().optional() }))
+    .mutation(async ({ input }) => {
+      try {
+        return await runnerReaperService.destroy(input.id, { force: input.force });
+      } catch (err) {
+        if (err instanceof MachineError) {
+          throw new TRPCError({
+            code: err.reason === "not-found" ? "NOT_FOUND" : "CONFLICT",
+            message: err.message,
+          });
+        }
+        throw err;
+      }
+    }),
 });

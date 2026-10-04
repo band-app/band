@@ -6,8 +6,22 @@ import { useAdapter } from "../../context";
 import { SettingsRow } from "./SettingsRow";
 
 type RunnerList = Awaited<ReturnType<typeof trpc.runners.list.query>>;
+type MachineList = Awaited<ReturnType<typeof trpc.runners.machines.query>>["machines"];
+type Machine = MachineList[number];
 
 const RUNNERS_KEY = ["runners.list"] as const;
+const MACHINES_KEY = ["runners.machines"] as const;
+
+/** "45s", "12m", "3h 5m", "2d 4h": the two largest units of a duration. */
+function ageText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
 
 function labelText(labels: Record<string, string>): string {
   const pairs = Object.entries(labels).map(([k, v]) => `${k}=${v}`);
@@ -29,6 +43,7 @@ export function RunnersSettings() {
       adapter.subscribeStatusEvents((event) => {
         if (event.kind === "host-request-changed") {
           void queryClient.invalidateQueries({ queryKey: RUNNERS_KEY });
+          void queryClient.invalidateQueries({ queryKey: MACHINES_KEY });
         }
       }),
     [adapter, queryClient],
@@ -38,6 +53,26 @@ export function RunnersSettings() {
     queryFn: () => trpc.runners.list.query(),
     refetchInterval: 5000,
   });
+  const machines = useQuery<MachineList>({
+    queryKey: MACHINES_KEY,
+    queryFn: async () => (await trpc.runners.machines.query()).machines,
+    refetchInterval: 5000,
+  });
+  // The machine whose destroy the hub refused because its workspaces are not stored, with why.
+  const [refused, setRefused] = useState<{ id: string; message: string } | null>(null);
+  const [destroyError, setDestroyError] = useState<string | null>(null);
+  const destroyMachine = async (machine: Machine, force: boolean) => {
+    setDestroyError(null);
+    try {
+      await trpc.runners.destroyMachine.mutate({ id: machine.id, force });
+      setRefused(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!force && /not stored/.test(message)) setRefused({ id: machine.id, message });
+      else setDestroyError(message);
+    }
+    await queryClient.invalidateQueries({ queryKey: MACHINES_KEY });
+  };
   const [openLog, setOpenLog] = useState<string | null>(null);
   const log = useQuery({
     queryKey: ["runners.log", openLog],
@@ -98,6 +133,89 @@ export function RunnersSettings() {
             {error}
           </p>
         ))}
+      </SettingsRow>
+
+      <SettingsRow
+        variant="stacked"
+        label="Machines"
+        description="Every machine a runner started. The hub destroys one that never connects, that goes offline, that no runner knows about, or that outlives the runner's maximum lifetime (docs/runner-hooks.md)."
+      >
+        {(machines.data ?? []).length === 0 ? (
+          <p className="text-xs text-muted-foreground" data-testid="settings__machines-empty">
+            No machines yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {(machines.data ?? []).map((machine) => (
+              <li
+                key={machine.id}
+                data-testid="settings__machine"
+                data-state={machine.state}
+                className="px-3 py-2 text-sm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate">
+                      <span data-testid="settings__machine-worker">{machine.workerId}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {" · "}
+                        {machine.runnerId}
+                        {machine.handle ? ` · ${machine.handle}` : ""}
+                        {" · "}
+                        <span data-testid="settings__machine-state">{machine.state}</span>
+                        {" · "}
+                        <span data-testid="settings__machine-age">
+                          {ageText((machine.destroyedAt ?? Date.now()) - machine.spawnedAt)}
+                        </span>
+                      </span>
+                    </div>
+                    {machine.note ? (
+                      <p
+                        data-testid="settings__machine-note"
+                        className="text-xs text-muted-foreground"
+                      >
+                        {machine.note}
+                      </p>
+                    ) : null}
+                  </div>
+                  {machine.state !== "destroyed" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Destroy machine ${machine.workerId}`}
+                      data-testid="settings__machine-destroy"
+                      onClick={() => void destroyMachine(machine, false)}
+                    >
+                      Destroy
+                    </Button>
+                  ) : null}
+                </div>
+                {refused?.id === machine.id ? (
+                  <div role="alert" className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-xs text-destructive" data-testid="settings__machine-refused">
+                      {refused.message}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      data-testid="settings__machine-destroy-force"
+                      onClick={() => void destroyMachine(machine, true)}
+                    >
+                      Destroy anyway
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+        {destroyError ? (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {destroyError}
+          </p>
+        ) : null}
       </SettingsRow>
 
       {runs.length > 0 ? (
