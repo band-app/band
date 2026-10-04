@@ -9,7 +9,13 @@
  */
 
 import { join, resolve, sep } from "node:path";
-import { type CommandRun, gitRunner, type Host } from "@band-app/host-api";
+import {
+  type CommandRun,
+  gitRunner,
+  type Host,
+  HostOfflineError,
+  HostTimeoutError,
+} from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import {
@@ -758,7 +764,11 @@ export class DiffService {
     const execGit = gitRunner(workspace.host);
     const hasGit = await workspace.host.fs.stat(join(cwd, ".git")).then(
       () => true,
-      () => false,
+      (err) => {
+        // An unreachable worker is not a missing repository.
+        if (err instanceof HostOfflineError || err instanceof HostTimeoutError) throw err;
+        return false;
+      },
     );
     if (workspace.project.kind === "plain" || !hasGit) {
       return {

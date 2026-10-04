@@ -22,6 +22,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -57,13 +58,13 @@ function guardFiles(home: string): { paths: string; violations: string } {
  * and tells it where the worker-owned paths and the violation log are.
  * `guardFiles` start empty, so the hub may read anything until workspaces move.
  */
-export function workerGuardEnv(home: string): Record<string, string> {
+export function workerGuardEnv(home: string, baseNodeOptions?: string): Record<string, string> {
   const files = guardFiles(home);
   writeFileSync(files.paths, "[]");
   writeFileSync(files.violations, "");
   const preload = `--import ${pathToFileURL(GUARD_PRELOAD).href}`;
   return {
-    NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(" "),
+    NODE_OPTIONS: [baseNodeOptions ?? process.env.NODE_OPTIONS, preload].filter(Boolean).join(" "),
     BAND_TEST_WORKER_PATHS_FILE: files.paths,
     BAND_TEST_WORKER_VIOLATIONS_FILE: files.violations,
   };
@@ -261,5 +262,16 @@ export function moveSeededWorkspacesToHost(home: string, hostId: string): void {
   for (const dir of [".band-worktrees", ".band-uploads", ".band-shared"]) {
     workerPaths.push(join(root, dir));
   }
-  writeFileSync(guardFiles(home).paths, JSON.stringify([...new Set(workerPaths)]));
+  // Both spellings of each path, so a symlinked temp root (macOS /var) cannot hide a violation.
+  const withReal = workerPaths.flatMap((path) => {
+    try {
+      return [path, realpathSync(path)];
+    } catch {
+      return [path];
+    }
+  });
+  // Rename into place: the guard re-reads this file every 50 ms and must never see half of it.
+  const file = guardFiles(home).paths;
+  writeFileSync(`${file}.tmp`, JSON.stringify([...new Set(withReal)]));
+  renameSync(`${file}.tmp`, file);
 }

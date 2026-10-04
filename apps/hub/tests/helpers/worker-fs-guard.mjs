@@ -12,9 +12,9 @@
 // rewritten by the harness as workspaces move onto the worker.
 // `BAND_TEST_WORKER_VIOLATIONS_FILE` collects one JSON line per violation.
 
-import { createRequire } from "node:module";
-import { syncBuiltinESMExports } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 const pathsFile = process.env.BAND_TEST_WORKER_PATHS_FILE;
 const violationsFile = process.env.BAND_TEST_WORKER_VIOLATIONS_FILE;
@@ -52,7 +52,7 @@ if (pathsFile && violationsFile) {
 
   const check = (api, value) => {
     const raw = toPath(value);
-    if (!raw || !raw.startsWith("/")) return;
+    if (!raw) return;
     const target = resolve(raw);
     for (const dir of workerDirs()) {
       if (target === dir || target.startsWith(dir + sep)) {
@@ -71,6 +71,9 @@ if (pathsFile && violationsFile) {
       return original.apply(this, args);
     };
     Object.assign(wrapped, original);
+    if (original[promisify.custom]) {
+      Object.defineProperty(wrapped, promisify.custom, { value: original[promisify.custom] });
+    }
     target[name] = wrapped;
   };
 
@@ -79,6 +82,7 @@ if (pathsFile && violationsFile) {
     "access",
     "appendFile",
     "chmod",
+    "chown",
     "copyFile",
     "cp",
     "createReadStream",
@@ -86,6 +90,7 @@ if (pathsFile && violationsFile) {
     "exists",
     "lstat",
     "mkdir",
+    "mkdtemp",
     "open",
     "opendir",
     "readdir",
@@ -104,13 +109,13 @@ if (pathsFile && violationsFile) {
     "writeFile",
   ];
   for (const name of names) {
-    const indexes = oneAndTwo.has(name) || name === "rename" ? [0, 1] : [0];
+    const indexes = oneAndTwo.has(name) ? [0, 1] : [0];
     wrap(fs, name, indexes);
     wrap(fs, `${name}Sync`, indexes);
     wrap(fs.promises, name, indexes);
   }
 
-  const wrapSpawn = (name, optionsIndex) => {
+  const wrapSpawn = (name) => {
     const original = childProcess[name];
     childProcess[name] = function (...args) {
       for (const arg of args.slice(1)) {
@@ -121,6 +126,11 @@ if (pathsFile && violationsFile) {
       return original.apply(this, args);
     };
     Object.assign(childProcess[name], original);
+    if (original[promisify.custom]) {
+      Object.defineProperty(childProcess[name], promisify.custom, {
+        value: original[promisify.custom],
+      });
+    }
   };
   for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]) {
     wrapSpawn(name);

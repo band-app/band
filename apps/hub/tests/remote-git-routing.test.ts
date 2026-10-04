@@ -12,6 +12,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
@@ -51,9 +52,21 @@ interface ChangeEntry {
 
 interface Changes {
   headBranch: string;
+  staged: ChangeEntry[];
   unstaged: ChangeEntry[];
   untracked: ChangeEntry[];
   branch: ChangeEntry[];
+}
+
+/** Reads rows the hub persisted, through a read-only connection to its database. */
+function readDb<T>(home: string, sql: string, ...params: string[]): T[] {
+  const db = new DatabaseSync(join(home, ".band", "band.db"), { readOnly: true });
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    return db.prepare(sql).all(...params) as T[];
+  } finally {
+    db.close();
+  }
 }
 
 describe("git for a workspace runs on the workspace's host", () => {
@@ -77,6 +90,10 @@ describe("git for a workspace runs on the workspace's host", () => {
     git(repo, ["add", "."]);
     git(repo, ["commit", "-q", "-m", "init"]);
     mkdirSync(join(tmpHome, "worktrees"));
+    // A local bare origin, so the push test has somewhere to push to.
+    const origin = join(tmpHome, "origin.git");
+    git(tmpHome, ["init", "-q", "--bare", origin]);
+    git(repo, ["remote", "add", "origin", origin]);
     git(repo, ["worktree", "add", "-q", "-b", LIVE_BRANCH, worktree]);
     writeFileSync(join(worktree, "branch-only.txt"), "committed on the branch\n");
     git(worktree, ["add", "."]);
@@ -104,8 +121,17 @@ describe("git for a workspace runs on the workspace's host", () => {
   }, 60_000);
 
   afterAll(async () => {
-    await server?.close();
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try {
+      await server?.close();
+    } finally {
+      rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
+  it("rejects a request without a token", async () => {
+    const input = encodeURIComponent(JSON.stringify({ workspaceId: WORKSPACE_ID }));
+    const res = await fetch(`${server.url}/trpc/workspace.getChanges?input=${input}`);
+    expect(res.status).toBe(401);
   });
 
   it("getChanges reports the live branch and the edited and untracked files", async () => {
@@ -148,9 +174,11 @@ describe("git for a workspace runs on the workspace's host", () => {
     const result = await query<{ branches: string[] }>("workspace.listBranches", {
       workspaceId: WORKSPACE_ID,
     });
-    expect(result.branches).toContain("main");
+    // The checked-out branch is not offered.
+    expect(result.branches).toEqual(["main"]);
   });
 
+  // These steps change the checkout in order: later tests run after new.txt is gone.
   it("stageFiles and discardChanges act on the worker's checkout", async () => {
     const staged = await trpcMutate(
       server.url,
@@ -160,6 +188,7 @@ describe("git for a workspace runs on the workspace's host", () => {
     );
     expect(staged.status).toBe(200);
     let changes = await query<Changes>("workspace.getChanges", { workspaceId: WORKSPACE_ID });
+    expect(changes.staged.map((e) => e.path)).toEqual(["new.txt"]);
     expect(changes.untracked).toEqual([]);
 
     const discarded = await trpcMutate(
@@ -170,8 +199,28 @@ describe("git for a workspace runs on the workspace's host", () => {
     );
     expect(discarded.status).toBe(200);
     changes = await query<Changes>("workspace.getChanges", { workspaceId: WORKSPACE_ID });
+    expect(changes.staged).toEqual([]);
     expect(changes.untracked).toEqual([]);
     expect(changes.unstaged.map((e) => e.path)).toEqual(["README.md"]);
+  });
+
+  it("gitPush pushes from the worker's checkout and records its head", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.gitPush",
+      { workspaceId: WORKSPACE_ID },
+      TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree, env: gitEnv })
+      .toString()
+      .trim();
+    const rows = readDb<{ sha: string }>(
+      tmpHome,
+      "SELECT sha FROM pushed_shas WHERE workspace_id = ?",
+      WORKSPACE_ID,
+    );
+    expect(rows.map((r) => r.sha)).toEqual([head]);
   });
 
   it("branch status and sync follow the live checkout", async () => {
@@ -181,18 +230,19 @@ describe("git for a workspace runs on the workspace's host", () => {
         timeoutMs: 15_000,
         label: "dirty branch status for the workspace",
       });
-      // The poller's first tick syncs worktrees from git on the host.
+      // The sync tick persists the branch git reports on the host. `projects.list`
+      // refreshes remote rows without saving them, so read the stored row.
       await waitFor(
         async () => {
-          const { projects } = await query<{
-            projects: Array<{ name: string; worktrees: Array<{ name: string; branch: string }> }>;
-          }>("projects.list", undefined);
-          const row = projects
-            .find((p) => p.name === PROJECT)
-            ?.worktrees.find((w) => w.name === WORKSPACE);
-          return row?.branch === LIVE_BRANCH ? true : undefined;
+          const rows = readDb<{ branch: string }>(
+            tmpHome,
+            "SELECT branch FROM worktrees WHERE project_name = ? AND name = ?",
+            PROJECT,
+            WORKSPACE,
+          );
+          return rows[0]?.branch === LIVE_BRANCH ? true : undefined;
         },
-        { timeoutMs: 15_000, label: "sync picks up the live branch" },
+        { timeoutMs: 15_000, label: "sync stores the live branch" },
       );
     } finally {
       stream.close();

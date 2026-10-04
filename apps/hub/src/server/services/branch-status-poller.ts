@@ -1,5 +1,11 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
-import { ghRunner, gitRunner, type Host, HostOfflineError } from "@band-app/host-api";
+import {
+  ghRunner,
+  gitRunner,
+  type Host,
+  HostOfflineError,
+  HostTimeoutError,
+} from "@band-app/host-api";
 import { getRepoInfo, type RepoInfo } from "@band-app/host-local/git/git-client";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
@@ -184,8 +190,8 @@ async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
       ws.worktreePath,
     );
   } catch (err) {
-    // An offline worker says nothing about the workspace; keep the stored status.
-    if (err instanceof HostOfflineError) throw err;
+    // An offline or unresponsive worker says nothing about the workspace; keep the stored status.
+    if (err instanceof HostOfflineError || err instanceof HostTimeoutError) throw err;
     // git status failed - leave defaults
     return status;
   }
@@ -510,8 +516,8 @@ export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boole
     .then(
       () => true,
       (err) => {
-        // An offline worker has no status to refresh.
-        if (err instanceof HostOfflineError) return false;
+        // An offline or unresponsive worker has no status to refresh.
+        if (err instanceof HostOfflineError || err instanceof HostTimeoutError) return false;
         throw err;
       },
     )

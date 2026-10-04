@@ -221,7 +221,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
 
   const handle = await startHubServer({
     ...opts,
-    env: { ...opts.env, ...workerGuardEnv(opts.tmpHome) },
+    env: { ...opts.env, ...workerGuardEnv(opts.tmpHome, opts.env?.NODE_OPTIONS) },
   });
 
   let worker: Awaited<ReturnType<typeof startLoopbackWorker>>;
@@ -237,6 +237,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     close: async (closeOpts) => {
       await worker.close();
       await handle.close(closeOpts);
+      // Teardown is done by now, so a violation fails the test without leaking the worker or the hub.
       assertNoWorkerPathAccess(handle.home);
     },
   };
