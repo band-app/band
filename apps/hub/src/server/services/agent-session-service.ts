@@ -1161,9 +1161,9 @@ export class AgentSessionService {
    * chat's session, else rebuilt from the log, else the agent catalog with
    * the chat's saved choices applied. A chat the server has no row for yet
    * (a new pane, created lazily on its first message) gets the default
-   * agent's catalog entry. Claude Code chats also get what their `default`
-   * choices resolve to is `resolvedSessionState`'s job: it reads Claude's
-   * settings files and transcript on the chat's host.
+   * agent's catalog entry. It does not resolve what a Claude Code chat's
+   * `default` choices run with. `resolvedSessionState` does, by reading
+   * Claude's settings files and transcript on the chat's host.
    */
   getSessionState(chatId: string): SessionState {
     const saved = chatService.get(chatId);
