@@ -57,10 +57,93 @@ export const RELAY_PROCEDURES: ReadonlySet<string> = new Set([
   "editor.openFile",
   "statuses.notify",
   "statuses.clearNeedsAttention",
+  "projects.list",
+  "cronjobs.list",
+  "cronjobs.create",
+  "cronjobs.update",
+  "cronjobs.delete",
+  "cronjobs.trigger",
+  "subscriptions.remove",
+  "terminal.stream",
+  "workspaces.create",
+  "workspaces.remove",
 ]);
 
-/** Procedures that take the workspace from the caller's headers, which the hub sets from the token's scope. */
-const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list"]);
+/** Calls whose body or answer the relay rewrites, which only works for a single, unbatched call. */
+const UNBATCHABLE = new Set(["projects.list", "workspaces.create"]);
+
+/**
+ * `workspaces.create` from a worker makes the workspace on that worker. The
+ * check refuses another `hostId`, and this puts the caller's own into the body
+ * the hub sees, so a call that names no host cannot land on the hub's machine.
+ */
+export function pinWorkspaceHost(request: RelayHttpRequest, workerId: string): RelayHttpRequest {
+  if (request.method !== "POST" || request.path.split("?")[0] !== "/trpc/workspaces.create") {
+    return request;
+  }
+  const parsed = parseJson(bodyText(request.body));
+  if (!parsed.ok || parsed.value === null || typeof parsed.value !== "object") return request;
+  const body = Buffer.from(
+    JSON.stringify({ ...(parsed.value as object), hostId: workerId }),
+    "utf8",
+  ).toString("base64");
+  return { ...request, body };
+}
+
+/**
+ * Procedures that take the workspace from the caller's headers, which the hub
+ * sets from the token's scope. `projects.list` names nothing, and the relay
+ * service cuts its answer down to the worker's own workspaces
+ * (`filterRelayReply`).
+ */
+const SCOPE_FROM_HEADERS = new Set(["subscriptions.create", "subscriptions.list", "projects.list"]);
+
+/** The cronjob key is a workspace id for a workspace-scoped job and a project name for a project-scoped one. */
+const CRONJOB_KEY_PROCEDURES = new Set([
+  "cronjobs.create",
+  "cronjobs.update",
+  "cronjobs.delete",
+  "cronjobs.trigger",
+]);
+
+/** The tRPC error code and JSON-RPC number for each refusal status. */
+const TRPC_ERRORS: Record<number, { code: string; number: number }> = {
+  400: { code: "BAD_REQUEST", number: -32600 },
+  403: { code: "FORBIDDEN", number: -32003 },
+  404: { code: "NOT_FOUND", number: -32004 },
+};
+
+/**
+ * The body of a refused tRPC call, in the shape the hub's own tRPC handler
+ * answers with, so the `band` CLI and the web client print the message.
+ */
+export function trpcRefusalBody(status: number, message: string, batch: boolean): unknown {
+  const known = TRPC_ERRORS[status] ?? TRPC_ERRORS[403];
+  const error = {
+    message,
+    code: known.number,
+    data: { code: known.code, httpStatus: status },
+  };
+  return batch ? [{ error }] : { error };
+}
+
+/** Keeps only the worktrees on `workerId` in a `projects.list` answer, and the projects that have any. */
+export function filterProjectsReply(data: unknown, workerId: string): unknown {
+  if (data === null || typeof data !== "object") return data;
+  const result = (data as { result?: { data?: { projects?: unknown } } }).result;
+  const projects = result?.data?.projects;
+  if (!Array.isArray(projects)) return data;
+  const kept = projects
+    .map((project) => {
+      const worktrees = Array.isArray(project?.worktrees) ? project.worktrees : [];
+      return {
+        ...project,
+        worktrees: worktrees.filter((w: { hostId?: string }) => w.hostId === workerId),
+      };
+    })
+    .filter((project) => project.worktrees.length > 0);
+  return { ...data, result: { ...result, data: { ...result?.data, projects: kept } } };
+}
 
 const CHAT_ROUTE = /^\/api\/chats\/([^/]+)\/(events|history|messages)$/;
 const MAX_DEPTH = 8;
@@ -76,6 +159,8 @@ export interface ScopeLookups {
   hostOfTerminal(terminalId: string): string | null;
   /** The workspace a browser tab belongs to, or null when there is no such tab. */
   workspaceOfBrowser(browserId: string): string | null;
+  /** The workspace a subscription belongs to, or null when there is no such subscription. */
+  workspaceOfSubscription(subscriptionId: string): string | null;
 }
 
 export type RelayVerdict = { ok: true } | { ok: false; status: number; reason: string };
@@ -113,9 +198,10 @@ function collect(value: unknown, into: Named, depth = 0): void {
     const { project, name } = record;
     if (typeof project === "string" && typeof name === "string") {
       into.workspaces.push(toWorkspaceId(project, name));
-    } else if (project !== undefined || name !== undefined) {
+    } else if (project !== undefined) {
       into.unscoped = true;
     }
+    // A `name` with no `project` is a display name (a chat or a job), not a workspace.
   }
   for (const [key, v] of Object.entries(record)) {
     if (depth === 0 && UNSCOPED_KEYS.has(key)) into.unscoped = true;
@@ -205,12 +291,44 @@ function checkCall(
   lookups: ScopeLookups,
 ): RelayVerdict {
   if (!RELAY_PROCEDURES.has(procedure)) return deny(403, `${procedure} is not available to agents`);
-  const verdict = checkNamed(input, workerId, lookups);
-  if (!verdict.ok) return verdict;
+  let named = input;
+  if (CRONJOB_KEY_PROCEDURES.has(procedure)) {
+    const { key, ...rest } = (input ?? {}) as Record<string, unknown>;
+    if (typeof key !== "string") return deny(400, `${procedure} needs a key`);
+    if (procedure === "cronjobs.create" && rest.scope !== "workspace") {
+      return deny(403, `${procedure} is available to agents for workspace-scoped jobs only`);
+    }
+    named = { ...rest, workspaceId: key };
+    if (typeof rest.workspaceId === "string" && rest.workspaceId !== key) {
+      return deny(403, `${procedure} names two different workspaces`);
+    }
+  }
+  if (procedure === "workspaces.create") {
+    const { project, branch, hostId } = (input ?? {}) as Record<string, unknown>;
+    if (typeof project !== "string" || typeof branch !== "string") {
+      return deny(400, `${procedure} needs a project and a branch`);
+    }
+    if (hostId !== undefined && hostId !== workerId) {
+      return deny(403, `${procedure}: A workspace made from a worker is created on that worker`);
+    }
+    return { ok: true };
+  }
+  if (procedure === "subscriptions.remove") {
+    const { id } = (input ?? {}) as { id?: unknown };
+    if (typeof id !== "string") return deny(400, `${procedure} needs an id`);
+    const owner = lookups.workspaceOfSubscription(id);
+    if (owner === null || lookups.hostOfWorkspace(owner) !== workerId) {
+      return deny(403, `${procedure}: That subscription is not on this host`);
+    }
+    return { ok: true };
+  }
+  const verdict = checkNamed(named, workerId, lookups);
+  if (!verdict.ok) return deny(verdict.status, `${procedure}: ${verdict.reason}`);
   if (verdict.named === 0 && !SCOPE_FROM_HEADERS.has(procedure)) {
     return deny(403, `${procedure} must name a workspace on this host`);
   }
-  return checkChosenId(procedure, input, lookups);
+  const chosen = checkChosenId(procedure, input, lookups);
+  return chosen.ok ? chosen : deny(chosen.status, `${procedure}: ${chosen.reason}`);
 }
 
 function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
@@ -244,6 +362,9 @@ function checkTrpc(
       isBatch && input !== null && typeof input === "object"
         ? (input as Record<string, unknown>)[String(i)]
         : input;
+    if (isBatch && UNBATCHABLE.has(procedure)) {
+      return deny(400, `${procedure}: cannot be batched through the relay`);
+    }
     const verdict = checkCall(procedure, own, workerId, lookups);
     if (!verdict.ok) return verdict;
   }

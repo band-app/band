@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { findCliBinary } from "@band-app/host-local/process/cli-binary";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openStream, STUB_AGENT_PATH, TEST_TOKEN, trpc, turnEnded } from "./helpers/acp-chat";
+import { RELAY_CLI_COMMANDS } from "./helpers/relay-cli-commands";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,
@@ -554,47 +555,259 @@ describe("what an agent may call, and which ids it may take", () => {
 describe("the band CLI through the relay (S2)", () => {
   const cli = findCliBinary();
 
+  // The agent's own environment, as the stub recorded it.
+  const agentEnv = () =>
+    readFileSync(a.stubLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { env: { BAND_SERVER_URL?: string; BAND_TOKEN?: string } })
+      .find((r) => r.env.BAND_TOKEN)?.env;
+
+  interface RunOptions {
+    stdin?: string;
+    cwd?: string;
+    /** Stops a command that streams, after this many ms. */
+    killAfterMs?: number;
+  }
+  const runWith = (options: RunOptions, ...args: string[]) =>
+    new Promise<{ code: number | null; out: string }>((resolve) => {
+      const env = agentEnv();
+      const child = spawn(cli as string, args, {
+        cwd: options.cwd,
+        env: {
+          PATH: process.env.PATH,
+          HOME: tmp("band-relay-cli-home-"),
+          BAND_SERVER_URL: env?.BAND_SERVER_URL,
+          BAND_TOKEN: env?.BAND_TOKEN,
+        },
+      });
+      let out = "";
+      child.stdout.on("data", (d) => {
+        out += d;
+      });
+      child.stderr.on("data", (d) => {
+        out += d;
+      });
+      const timer = options.killAfterMs
+        ? setTimeout(() => child.kill("SIGTERM"), options.killAfterMs)
+        : undefined;
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code, out });
+      });
+      child.stdin.end(options.stdin ?? "");
+    });
+  const run = (...args: string[]) => runWith({}, ...args);
+
+  /** The commands that ran and succeeded, as `<group> <command>`, for the drift check. */
+  const succeeded = new Set<string>();
+  const TOP_LEVEL = new Set(["notify", "open", "schema", "settings"]);
+  const commandOf = (args: string[]) =>
+    TOP_LEVEL.has(args[0]) ? args[0] : `${args[0]} ${args[1]}`;
+  const ok = async (...args: string[]) => {
+    const result = await run(...args);
+    expect(result.code, `band ${args.join(" ")}: ${result.out}`).toBe(0);
+    succeeded.add(commandOf(args));
+    return result.out;
+  };
+
   it.skipIf(!cli)(
     "runs `band chats list` for its own workspace and is refused another's",
     async () => {
-      // The agent's own environment, as the stub recorded it.
-      const env = readFileSync(a.stubLog, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as { env: { BAND_SERVER_URL?: string; BAND_TOKEN?: string } })
-        .find((r) => r.env.BAND_TOKEN)?.env;
-      expect(env?.BAND_SERVER_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-      const run = (workspace: string) =>
-        new Promise<{ code: number | null; out: string }>((resolve) => {
-          const child = spawn(cli as string, ["chats", "list", workspace, "--output", "json"], {
-            env: {
-              PATH: process.env.PATH,
-              HOME: tmp("band-relay-cli-home-"),
-              BAND_SERVER_URL: env?.BAND_SERVER_URL,
-              BAND_TOKEN: env?.BAND_TOKEN,
-            },
-          });
-          let out = "";
-          child.stdout.on("data", (d) => {
-            out += d;
-          });
-          child.stderr.on("data", (d) => {
-            out += d;
-          });
-          child.on("close", (code) => resolve({ code, out }));
-        });
-
-      const own = await run("proj-relay-a");
+      expect(agentEnv()?.BAND_SERVER_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      const own = await run("chats", "list", "proj-relay-a", "--output", "json");
       expect(own.code).toBe(0);
       expect(own.out).toContain("a-owned-chat");
 
-      const other = await run("proj-relay-b");
+      const other = await run("chats", "list", "proj-relay-b", "--output", "json");
       expect(other.code).not.toBe(0);
       expect(other.out).not.toContain("b-owned-chat");
-      const hubs = await run("proj-main");
+      const hubs = await run("chats", "list", "proj-main", "--output", "json");
       expect(hubs.code).not.toBe(0);
     },
   );
+
+  it.skipIf(!cli)("runs the commands the band skills name, for its own workspace", async () => {
+    const ws = "proj-relay-a";
+    const json = async (...args: string[]) => JSON.parse(await ok(...args));
+
+    const listed = await json("workspaces", "list", "--output", "json");
+    expect(JSON.stringify(listed)).toContain(ws);
+    const worktree = (listed.workspaces as Array<{ workspaceId: string; path: string }>).find(
+      (w) => w.workspaceId === ws,
+    )?.path as string;
+    expect(await ok("projects", "list", "--output", "json")).toContain("proj");
+
+    const chat = await json("chats", "create", ws, "--name", "skill-chat", "--output", "json");
+    const chatId: string = chat.chatId ?? chat.id ?? chat.chat?.id;
+    expect(chatId).toBeTruthy();
+    await ok("chats", "list", ws);
+    await ok("chats", "label", chatId, "topic=relay");
+    await ok("chats", "unlabel", chatId, "topic");
+    await ok("chats", "send", chatId, "--workspace", ws, "--message", "hello from the relay");
+    // The watch streams the chat's events through the relay until the turn ends or the guard stops it.
+    const watched = await runWith({ killAfterMs: 20_000 }, "chats", "watch", chatId);
+    expect(watched.out, watched.out).not.toContain("error:");
+    expect(watched.out.length).toBeGreaterThan(0);
+    succeeded.add("chats watch");
+    await ok("chats", "stop", chatId);
+    await ok("chats", "remove", chatId);
+
+    await ok("agents", "list", ws);
+    await ok("agents", "launch", ws, "--mode", "gui");
+
+    const terminal = await json("terminals", "create", ws, "--output", "json");
+    const terminalId: string = terminal.terminalId ?? terminal.id ?? terminal.terminal?.id;
+    expect(terminalId).toBeTruthy();
+    expect(await ok("terminals", "list", ws)).toContain(terminalId);
+    await ok("terminals", "send", terminalId, "--data", "echo relay-skill-check\\n");
+    await ok("terminals", "output", terminalId);
+    await ok("terminals", "kill", terminalId);
+
+    const tab = await json(
+      "browsers",
+      "create",
+      ws,
+      "--url",
+      "http://127.0.0.1:1/",
+      "--output",
+      "json",
+    );
+    const browserId: string = tab.browserId ?? tab.id ?? tab.browser?.id;
+    expect(browserId).toBeTruthy();
+    await ok("browsers", "list", ws);
+    await ok("browsers", "get", browserId);
+    await ok("browsers", "navigate", browserId, "--url", "http://127.0.0.1:2/");
+    await ok("browsers", "remove", browserId);
+
+    const sub = await json(
+      "subscriptions",
+      "create",
+      "--chat",
+      "a-owned-chat",
+      "--workspace",
+      ws,
+      "--at",
+      "1h",
+      "--output",
+      "json",
+    );
+    const subId: string = sub.subscriptions?.[0]?.id;
+    expect(subId).toBeTruthy();
+    expect(await ok("subscriptions", "list", "--workspace", ws)).toContain(subId);
+    await ok("subscriptions", "remove", subId);
+
+    const job = await json(
+      "cronjobs",
+      "create",
+      ws,
+      "--name",
+      "relay-job",
+      "--prompt",
+      "check",
+      "--cron",
+      "0 0 1 1 *",
+      "--scope",
+      "workspace",
+      "--workspace-id",
+      ws,
+      "--via",
+      "chat",
+      "--output",
+      "json",
+    );
+    const jobId: string = job.job?.id;
+    expect(jobId).toBeTruthy();
+    await ok("cronjobs", "list", "--workspace", ws);
+    await ok("cronjobs", "update", ws, jobId, "--prompt", "check again");
+    await ok("cronjobs", "trigger", ws, jobId);
+    await ok("cronjobs", "delete", ws, jobId);
+
+    await ok("open", `${worktree}/hello.txt`, "--workspace", ws, "--no-focus");
+    const notified = await runWith(
+      {
+        cwd: worktree,
+        stdin: JSON.stringify({
+          session_id: "cli-notify",
+          cwd: worktree,
+          hook_event_name: "UserPromptSubmit",
+        }),
+      },
+      "notify",
+      "--agent",
+      "claude-code",
+    );
+    expect(notified.code, notified.out).toBe(0);
+    succeeded.add("notify");
+  });
+
+  it.skipIf(!cli)(
+    "creates a workspace on its own worker and removes only its own (S1)",
+    async () => {
+      const created = await ok("workspaces", "create", "proj", "relay-cli-new", "--output", "json");
+      expect(created).toContain("relay-cli-new");
+      const { projects } = await q<{
+        projects: Array<{ name: string; worktrees: Array<{ name: string; hostId?: string }> }>;
+      }>("projects.list");
+      const made = projects
+        .find((p) => p.name === "proj")
+        ?.worktrees.find((w) => w.name === "relay-cli-new");
+      expect(made?.hostId).toBe(a.hostId);
+
+      // A call that names another host is refused, and so is removing a workspace on another host.
+      const relay = agentEnv();
+      const post = (procedure: string, body: object) =>
+        fetch(`${relay?.BAND_SERVER_URL}/trpc/${procedure}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Cookie: `band_token=${relay?.BAND_TOKEN}`,
+          },
+          body: JSON.stringify(body),
+        });
+      const elsewhere = await post("workspaces.create", {
+        project: "proj",
+        branch: "x",
+        hostId: b.hostId,
+      });
+      expect(elsewhere.status).toBe(403);
+      expect(await elsewhere.text()).toContain("workspaces.create");
+      const foreign = await run("workspaces", "remove", "proj", "relay-b");
+      expect(foreign.code).not.toBe(0);
+      expect(foreign.out).toContain("workspaces.remove");
+
+      await ok("workspaces", "remove", "proj", "relay-cli-new");
+    },
+  );
+
+  it.skipIf(!cli)("lists only the projects that have a workspace on its worker (S3)", async () => {
+    const out = JSON.parse((await run("workspaces", "list", "--output", "json")).out);
+    const ids = (out.workspaces as Array<{ workspaceId: string }>).map((w) => w.workspaceId);
+    expect(ids).toContain("proj-relay-a");
+    expect(ids).not.toContain("proj-relay-b");
+    expect(ids).not.toContain("proj-main");
+  });
+
+  it.skipIf(!cli)("prints a clear error naming a refused procedure (S4)", async () => {
+    for (const [args, name] of [
+      [["projects", "remove", "proj"], "projects.remove"],
+      [["tokens", "list"], "tokens.list"],
+      [["tunnel", "status"], "tunnel.status"],
+    ] as const) {
+      const result = await run(...args);
+      expect(result.code).not.toBe(0);
+      expect(result.out).toContain(`${name} is not available to agents`);
+      expect(result.out).not.toContain("Unknown error");
+    }
+    const other = await run("chats", "list", "proj-relay-b");
+    expect(other.out).toContain("chats.list");
+    expect(other.out).not.toContain("Unknown error");
+  });
+
+  it.skipIf(!cli)("has run every command in the list the drift check reads", () => {
+    const missing = RELAY_CLI_COMMANDS.filter((c) => !succeeded.has(c));
+    expect(missing).toEqual([]);
+  });
 });
 
 describe("the band CLI on a worker", () => {

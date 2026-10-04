@@ -156,6 +156,7 @@ fn parse_trpc_body(mut response: http::Response<Body>) -> Result<serde_json::Val
         let msg: &str = error
             .get("message")
             .and_then(serde_json::Value::as_str)
+            .or_else(|| error.as_str())
             .unwrap_or("Unknown error");
         return Err(msg.to_string());
     }

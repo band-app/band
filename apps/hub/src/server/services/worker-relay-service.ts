@@ -21,8 +21,15 @@ import { CHAT_ID_HEADER, WORKSPACE_ID_HEADER } from "../api/context";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
-import { checkRelayRequest, type ScopeLookups } from "./relay-scope";
+import {
+  checkRelayRequest,
+  filterProjectsReply,
+  pinWorkspaceHost,
+  type ScopeLookups,
+  trpcRefusalBody,
+} from "./relay-scope";
 import { resolveWorkspaceIdByCwd } from "./state";
+import { subscriptionService } from "./subscription-service";
 import { terminalService } from "./terminal-service";
 
 const log = createLogger("worker-relay");
@@ -49,6 +56,8 @@ const defaultLookups: ScopeLookups = {
   workspaceOfCwd: (cwd) => resolveWorkspaceIdByCwd(cwd),
   hostOfTerminal: (id) => terminalService.hostIdOf(id),
   workspaceOfBrowser: (id) => browserService.get(id)?.workspaceId ?? null,
+  workspaceOfSubscription: (id) =>
+    subscriptionService.list().find((s) => s.id === id)?.workspaceId ?? null,
 };
 
 export class WorkerRelayService {
@@ -67,15 +76,16 @@ export class WorkerRelayService {
   }
 
   private async handle(session: ServerSession, params: unknown): Promise<RelayHttpReply> {
-    const request = parseRequest(params);
+    let request = parseRequest(params);
     const verdict = checkRelayRequest(request, session.workerId, this.lookups);
     if (!verdict.ok) {
       log.warn(
         `refused ${request.method} ${request.path.split("?")[0]} from ${session.workerId}: ${verdict.reason}`,
       );
-      return this.answer(session, verdict.status, { error: verdict.reason });
+      return this.answer(session, verdict.status, refusalBody(request, verdict));
     }
     if (!this.target) return this.answer(session, 503, { error: "The hub is not ready" });
+    request = pinWorkspaceHost(request, session.workerId);
     const { baseUrl, token } = this.target;
 
     const headers: Record<string, string> = {
@@ -112,6 +122,16 @@ export class WorkerRelayService {
       const value = upstream.headers.get(name);
       if (value !== null) replyHeaders[name] = value;
     }
+    // The project list covers every host, so a worker gets only its own workspaces.
+    if (request.path.split("?")[0] === "/trpc/projects.list" && upstream.ok) {
+      try {
+        const filtered = filterProjectsReply(await upstream.json(), session.workerId);
+        return this.answer(session, upstream.status, filtered);
+      } catch (err) {
+        log.warn(`relay call failed: ${err instanceof Error ? err.message : err}`);
+        return this.answer(session, 502, { error: "The hub could not answer" });
+      }
+    }
     const ch = session.openChannel("relay.body", { path: request.path.split("?")[0] });
     // A reset from the worker (the caller went away) stops the upstream read.
     void (async () => {
@@ -147,6 +167,17 @@ export class WorkerRelayService {
       .catch(() => undefined);
     return { status, headers: { "content-type": "application/json" }, chan: ch.id };
   }
+}
+
+/** A refused tRPC call answers in tRPC's error shape, which the CLI and web client print; other routes keep a plain body. */
+function refusalBody(
+  request: RelayHttpRequest,
+  verdict: { status: number; reason: string },
+): unknown {
+  const [pathname, query = ""] = request.path.split("?");
+  if (!pathname.startsWith("/trpc/")) return { error: verdict.reason };
+  const batch = new URLSearchParams(query).get("batch") === "1" || pathname.includes(",");
+  return trpcRefusalBody(verdict.status, verdict.reason, batch);
 }
 
 function parseRequest(params: unknown): RelayHttpRequest {
