@@ -185,6 +185,16 @@ band tunnel stop
 
 Stops the remote tunnel.
 
+### List, create and revoke the hub's tokens
+
+```sh
+band tokens list
+band tokens create-device [--label <string>]
+band tokens revoke <id>
+```
+
+`list` shows each token's id, kind, label, state and last use, never its secret. `create-device` prints a new device token once, for a UI or script. `revoke` stops a token from authenticating. The shared token in `settings.json` cannot be revoked. These commands change who can reach the hub, so run them only when the user asks.
+
 ### List cronjobs, optionally filtered by project or workspace
 
 ```sh

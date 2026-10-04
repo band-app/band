@@ -35,7 +35,6 @@ import {
   type HostGit,
   type HostInfo,
   type HostLsp,
-  HostNotImplementedError,
   type HostScripts,
   type HostSearch,
   type HostWorktree,

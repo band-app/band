@@ -475,3 +475,25 @@ export const pushedShas = sqliteTable("pushed_shas", {
   workspaceId: text("workspace_id").notNull(),
   pushedAt: integer("pushed_at").notNull(),
 });
+
+// Revocable credentials, stored as a SHA-256 hash (hex) of the token, never
+// the token. `device` tokens are for UIs and the CLI. A `worker_bootstrap`
+// token is shown once, valid once, and exchanged for a `worker_session`
+// token. For the two worker kinds `host_id` is the worker's id, which is also
+// its `hosts` row. The shared `settings.tokenSecret` is the row with id
+// `shared`, kept in step with settings at boot.
+export const tokens = sqliteTable(
+  "tokens",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", { enum: ["device", "worker_bootstrap", "worker_session"] }).notNull(),
+    hash: text("hash").notNull(),
+    hostId: text("host_id").references(() => hosts.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at"),
+    lastUsedAt: integer("last_used_at"),
+    revokedAt: integer("revoked_at"),
+  },
+  (t) => [uniqueIndex("tokens_hash_idx").on(t.hash), index("tokens_host_idx").on(t.hostId)],
+);

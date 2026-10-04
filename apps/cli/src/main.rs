@@ -62,6 +62,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: SubscriptionsCmd,
     },
+    /// Manage the hub's device and worker tokens
+    Tokens {
+        #[command(subcommand)]
+        cmd: TokensCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -520,6 +525,23 @@ enum SubscriptionsCmd {
 }
 
 #[derive(Subcommand)]
+enum TokensCmd {
+    /// List tokens (never their secrets)
+    List,
+    /// Create a device token for a UI or script. Prints the token once.
+    CreateDevice {
+        /// What the token is for, shown in the token list
+        #[arg(long, default_value = "CLI device")]
+        label: String,
+    },
+    /// Revoke a token. Whatever uses it stops authenticating.
+    Revoke {
+        /// Token ID (from `band tokens list`)
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -767,6 +789,11 @@ fn main() {
                 coalesce,
             }),
             SubscriptionsCmd::Remove { id } => cmd_subscriptions_remove(&id),
+        },
+        Commands::Tokens { cmd } => match cmd {
+            TokensCmd::List => cmd_tokens_list(),
+            TokensCmd::CreateDevice { label } => cmd_tokens_create_device(&label),
+            TokensCmd::Revoke { id } => cmd_tokens_revoke(&id),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -2903,6 +2930,72 @@ fn cmd_subscriptions_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Tokens commands ---
+
+fn cmd_tokens_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("tokens.list", &serde_json::json!({}))?;
+    let tokens = data
+        .get("tokens")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let rows: Vec<[String; 5]> = tokens
+        .iter()
+        .map(|token| {
+            let text = |key: &str| token.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let last_used = token
+                .get("lastUsedAt")
+                .and_then(serde_json::Value::as_u64)
+                .map_or_else(
+                    || "never".to_string(),
+                    |at| format!("{} ago", format_span(now_ms().saturating_sub(at))),
+                );
+            [
+                text("id").to_string(),
+                text("kind").to_string(),
+                text("label").to_string(),
+                text("state").to_string(),
+                last_used,
+            ]
+        })
+        .collect();
+
+    Ok(CommandResult {
+        text: format_table(&["ID", "KIND", "LABEL", "STATE", "LAST USED"], &rows),
+        json: serde_json::json!({"tokens": tokens}),
+    })
+}
+
+fn cmd_tokens_create_device(label: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("tokens.createDevice", &serde_json::json!({"label": label}))?;
+    let token = data
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("The hub returned no token")?;
+    let id = data
+        .pointer("/view/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Ok(CommandResult {
+        text: format!(
+            "Device token {id} created for \"{label}\"\nToken: {token}\nThis is the only time the token is shown.\n"
+        ),
+        json: serde_json::json!({"id": id, "label": label, "token": token}),
+    })
+}
+
+fn cmd_tokens_revoke(id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("tokens.revoke", &serde_json::json!({"tokenId": id}))?;
+    Ok(CommandResult {
+        text: format!("Token {id} revoked\n"),
+        json: serde_json::json!({"ok": true, "id": id}),
+    })
+}
+
 /// Resolve an explicit workspace ID, or auto-detect it from the current
 /// working directory by matching `git rev-parse --show-toplevel` against
 /// registered workspace paths.
@@ -3517,6 +3610,28 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Subscription ID"},
             ]
+        }),
+        serde_json::json!({
+            "name": "tokens list",
+            "description": "List the hub's tokens (never their secrets)",
+            "parameters": [],
+            "notes": "Text output: `ID  KIND  LABEL  STATE  LAST USED` (space-padded table). KIND is device, worker_bootstrap or worker_session; STATE is active, revoked, expired or used.\nJSON output: `{\"tokens\": [{\"id\": \"...\", \"kind\": \"device\", \"label\": \"...\", \"state\": \"active\", \"lastUsedAt\": null}]}`."
+        }),
+        serde_json::json!({
+            "name": "tokens create-device",
+            "description": "Create a device token for a UI or script",
+            "parameters": [
+                {"name": "--label", "type": "string", "required": false, "description": "What the token is for (default \"CLI device\")"},
+            ],
+            "notes": "The token is printed once; the hub keeps only a hash.\nJSON output: `{\"id\": \"...\", \"label\": \"...\", \"token\": \"...\"}`."
+        }),
+        serde_json::json!({
+            "name": "tokens revoke",
+            "description": "Revoke a token; whatever uses it stops authenticating",
+            "parameters": [
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Token ID (from `band tokens list`)"},
+            ],
+            "notes": "The shared token in settings.json cannot be revoked."
         }),
         serde_json::json!({
             "name": "chats list",

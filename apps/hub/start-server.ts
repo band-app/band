@@ -68,6 +68,7 @@ import {
 import { subscriptionService } from "./src/server/services/subscription-service.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
+import { tokenService } from "./src/server/services/token-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
@@ -246,7 +247,14 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 // dist/start-server.mjs`) enforces the cookie as before.
 const isDev = process.env.NODE_ENV === "development";
 const persistedToken = getOrCreateToken();
-const { handleAuth, expectedToken } = createAuthMiddleware(isDev ? undefined : persistedToken);
+// The shared token is a device token like any other from here on: any live
+// (not revoked, not expired) device token passes, and `tokens.revoke` takes
+// one away.
+tokenService.ensureSharedToken(persistedToken);
+const { handleAuth, expectedToken } = createAuthMiddleware(
+  isDev ? undefined : persistedToken,
+  tokenService.acceptsDevice,
+);
 
 // Origins that may call the hub from another origin: `corsAllowedOrigins` in
 // settings plus `BAND_CORS_ORIGINS`. Read on every request so an edit applies
@@ -1156,9 +1164,25 @@ async function main() {
     // An opaque (`null`) origin is a file:// page or a sandboxed frame on any
     // site, so the ambient cookie doesn't count for it: it must send the token.
     const allowCookie = req.headers.origin !== "null";
-    if (expectedToken && !isAuthorizedUpgrade(req, expectedToken, { allowCookie })) {
-      socket.destroy();
-      return;
+    if (expectedToken) {
+      // `accepts` runs synchronously inside `isAuthorizedUpgrade`, so the id
+      // it records is this request's.
+      let tokenId: string | undefined;
+      const accepted = isAuthorizedUpgrade(
+        req,
+        (candidate) => {
+          const row = tokenService.resolveDevice(candidate);
+          if (row) tokenId = row.id;
+          return row !== null;
+        },
+        { allowCookie },
+      );
+      if (!accepted || !tokenId) {
+        socket.destroy();
+        return;
+      }
+      // Revoking the token closes the sockets it opened.
+      tokenService.trackSocket(tokenId, socket);
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);

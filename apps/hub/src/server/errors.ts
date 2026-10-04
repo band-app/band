@@ -108,3 +108,28 @@ export class ClientStateWorkspaceNotFoundError extends Error {
     this.name = "ClientStateWorkspaceNotFoundError";
   }
 }
+
+/**
+ * Thrown by `TokenService.revoke` for an unknown token id.
+ * `api/tokens/router.ts` maps it to 404 `NOT_FOUND`.
+ */
+export class TokenNotFoundError extends Error {
+  constructor(tokenId: string) {
+    super(`Token not found: ${tokenId}`);
+    this.name = "TokenNotFoundError";
+  }
+}
+
+/**
+ * Thrown by `TokenService.revoke` for the shared token, which the desktop
+ * app and the CLI read from `settings.json`. `api/tokens/router.ts` maps it
+ * to 409 `CONFLICT`.
+ */
+export class SharedTokenRevokeError extends Error {
+  constructor() {
+    super(
+      "The shared token is the one in settings.json. Rotate it by removing tokenSecret and restarting the hub.",
+    );
+    this.name = "SharedTokenRevokeError";
+  }
+}
