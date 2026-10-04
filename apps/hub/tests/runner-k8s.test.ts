@@ -303,5 +303,8 @@ describe("k8s runner hook: destroy and status", () => {
     expect(res.code, res.stderr).toBe(0);
     const [get] = calls().map((c) => c.args);
     expect(get).toEqual(expect.arrayContaining(["get", "pods", "band.worker=h-0123456789ab"]));
+    expect(get.join(" ")).toContain(
+      "BAND_MACHINE_HANDLE={.metadata.namespace}/{.metadata.name} worker=",
+    );
   });
 });

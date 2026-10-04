@@ -1,5 +1,6 @@
 #!/bin/sh
-# Runner hook "k8s": lists the live worker pods, one `<namespace>/<pod> <phase>` line each.
+# Runner hook "k8s": lists the live worker pods, one line each in the format the VM hooks use:
+# `BAND_MACHINE_HANDLE=<namespace>/<pod> worker=<worker id> request=<request id> state=<phase>`.
 # With BAND_WORKER_ID it lists that worker's pods, else every pod the runner (BAND_RUNNER_ID) started,
 # else every pod with a band.worker label in the namespace.
 set -eu
@@ -17,4 +18,4 @@ fi
 
 "${BAND_KUBECTL_BIN:-kubectl}" ${BAND_K8S_CONTEXT:+--context "$BAND_K8S_CONTEXT"} --namespace "$ns" \
   get pods --selector "$selector" \
-  --output 'jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} {.status.phase}{"\n"}{end}'
+  --output 'jsonpath={range .items[*]}BAND_MACHINE_HANDLE={.metadata.namespace}/{.metadata.name} worker={.metadata.labels.band\.worker} request={.metadata.labels.band\.request} state={.status.phase}{"\n"}{end}'
