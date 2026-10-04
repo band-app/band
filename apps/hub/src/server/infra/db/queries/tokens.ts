@@ -79,8 +79,39 @@ export class TokenQueries {
     return this.db().select().from(hosts).orderBy(hosts.createdAt).limit(limit).all();
   }
 
+  /**
+   * Records that the worker presented a valid credential. Its status is not
+   * touched: the worker link sets `online` once the link is up and the host's
+   * info is stored.
+   */
   markHostSeen(id: string, at: number): void {
-    this.db().update(hosts).set({ lastSeenAt: at, status: "online" }).where(eq(hosts.id, id)).run();
+    this.db().update(hosts).set({ lastSeenAt: at }).where(eq(hosts.id, id)).run();
+  }
+
+  findHost(id: string): HostRow | undefined {
+    return this.db().select().from(hosts).where(eq(hosts.id, id)).get();
+  }
+
+  /** Records what a worker said when it connected: it is online, with its facts and build. */
+  markHostOnline(
+    id: string,
+    at: number,
+    fields: { info: Record<string, unknown> | null; version: string | null },
+  ): void {
+    this.db()
+      .update(hosts)
+      .set({ status: "online", lastSeenAt: at, info: fields.info, version: fields.version })
+      .where(eq(hosts.id, id))
+      .run();
+  }
+
+  /** Sets a host's status and, when the worker was last heard from, its last-seen time. */
+  setHostStatus(id: string, status: HostRow["status"], lastSeenAt?: number): void {
+    this.db()
+      .update(hosts)
+      .set(lastSeenAt === undefined ? { status } : { status, lastSeenAt })
+      .where(eq(hosts.id, id))
+      .run();
   }
 
   insertHost(row: HostRow): void {

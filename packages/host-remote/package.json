@@ -1,0 +1,23 @@
+{
+  "name": "@band-app/host-remote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@band-app/coding-agent": "workspace:^",
+    "@band-app/host-api": "workspace:^",
+    "@band-app/link": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "typescript": "^5.7.0"
+  }
+}

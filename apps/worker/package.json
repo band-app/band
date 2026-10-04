@@ -22,6 +22,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
+    "@band-app/host-remote": "workspace:^",
     "@types/node": "^22.19.13",
     "@types/ws": "^8.18.0",
     "typescript": "^5.7.0",

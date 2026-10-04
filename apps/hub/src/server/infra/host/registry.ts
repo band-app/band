@@ -1,8 +1,10 @@
 import type { Host, TerminalBackend } from "@band-app/host-api";
 import { LocalHost } from "@band-app/host-local";
+import { ProjectQueries } from "../db/queries/projects";
 import { WorkspaceQueries } from "../db/queries/workspaces";
 
 const workspaceQueries = new WorkspaceQueries();
+const projectQueries = new ProjectQueries();
 
 /**
  * Finds the host a workspace or project lives on. A workspace's host is the
@@ -33,8 +35,28 @@ export class HostRegistry {
     return this.hostById(workspaceQueries.findHostId(workspaceId) ?? this.local.id);
   }
 
+  /**
+   * The host a project's main checkout is on for hub-wide work (sync, GitHub
+   * polling). That is always the local host: a remote checkout only holds the
+   * worktrees workspaces on that host use, and {@link projectPathOn} finds it.
+   */
   hostForProject(_projectName: string): Host {
     return this.local;
+  }
+
+  /**
+   * Where a project's checkout is on a host. `fallback` (the project's own
+   * path) answers for the local host, and a remote host answers from
+   * `project_hosts`. Null when the project has no checkout on that host.
+   */
+  projectPathOn(projectName: string, hostId: string, fallback: string): string | null {
+    if (hostId === this.local.id) return fallback;
+    return projectQueries.findHostPath(projectName, hostId);
+  }
+
+  /** Records a project's checkout on a remote host. */
+  setProjectPathOn(projectName: string, hostId: string, path: string): void {
+    projectQueries.setHostPath(projectName, hostId, path);
   }
 
   /** Every host the hub can place work on. */

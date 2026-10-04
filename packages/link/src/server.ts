@@ -84,6 +84,19 @@ export class LinkServer extends EventEmitter {
     return this.sessions.get(workerId);
   }
 
+  /**
+   * Ends a worker's session now, without waiting for its resume window. Its
+   * socket closes and its channels fail. Used when the hub revokes the
+   * worker's credential. Returns whether a session existed.
+   */
+  drop(workerId: string, reason = "dropped by the server"): boolean {
+    const session = this.sessions.get(workerId);
+    if (!session) return false;
+    this.dropSession(session, reason);
+    this.emit("expired", session);
+    return true;
+  }
+
   /** Starts a standalone HTTP + WebSocket server and resolves with its port. The hub mounts `handleConnection` instead. */
   listen(port = 0, host = "127.0.0.1", path = "/"): Promise<number> {
     const http = createServer();

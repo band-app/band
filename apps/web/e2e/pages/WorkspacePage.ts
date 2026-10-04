@@ -317,6 +317,36 @@ export class WorkspacePage {
     return this.page.getByTestId("new-workspace-form__dialog");
   }
 
+  /** The host picker in the New Workspace dialog. It appears once a worker is online.
+   *  `data-testid` set in `NewWorkspaceForm.tsx`. */
+  get newWorkspaceHostSelect(): Locator {
+    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host");
+  }
+
+  /** Repository path on the chosen remote host, asked the first time a project is used there. */
+  get newWorkspaceHostPathInput(): Locator {
+    return this.newWorkspaceDialog.getByTestId("new-workspace-form__host-path");
+  }
+
+  /** Opens the New Workspace dialog from the project's context menu, picks a host and creates the workspace. */
+  async createWorkspaceOnHost(opts: {
+    project: string;
+    hostId: string;
+    hostProjectPath: string;
+    branch: string;
+  }): Promise<void> {
+    await test.step(`Create workspace ${opts.branch} on host ${opts.hostId}`, async () => {
+      await this.openProjectContextMenu(opts.project);
+      await this.addWorkspaceMenuItem.click();
+      await expect(this.newWorkspaceDialog).toBeVisible();
+      await this.newWorkspaceHostSelect.selectOption(opts.hostId);
+      await this.newWorkspaceHostPathInput.fill(opts.hostProjectPath);
+      await this.newWorkspaceDialog.getByRole("textbox", { name: "Branch name" }).fill(opts.branch);
+      await this.newWorkspaceDialog.getByRole("button", { name: "Create" }).click();
+      await expect(this.newWorkspaceDialog).toBeHidden();
+    });
+  }
+
   /** The header's "⋮" project-actions button (revealed on hover / focus). */
   projectMenuTrigger(projectName: string): Locator {
     return this.page.getByTestId(`project-list__project-menu-trigger--${projectName}`);

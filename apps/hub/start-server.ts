@@ -75,6 +75,11 @@ import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tokenService } from "./src/server/services/token-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
+import {
+  WORKER_CONNECT_PATH,
+  WORKER_EXCHANGE_PATH,
+  workerLinkService,
+} from "./src/server/services/worker-link-service.ts";
 import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------
@@ -687,6 +692,8 @@ async function main() {
   // The shared `tokenSecret` becomes the admin device token. This needs the
   // `tokens` table, so it runs after the migrations.
   tokenService.ensureSharedToken(persistedToken);
+  // Known workers become resolvable hosts, before any workspace asks for one.
+  workerLinkService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -778,6 +785,13 @@ async function main() {
     // The web app manifest and its icons, before auth: iOS fetches them
     // without the session cookie when the app is added to the home screen.
     if (handleWebAppManifest(req, res, isDev ? join(uiRoot, "public") : clientDir)) return;
+
+    // A worker trades its one-time bootstrap token for a session token. Before
+    // the device-token check, because the bootstrap token is the credential.
+    if (req.url?.split("?")[0] === WORKER_EXCHANGE_PATH) {
+      await workerLinkService.handleExchange(req, res);
+      return;
+    }
 
     // Generic webhook source: POST /api/hooks/<subscriptionId>. Before the
     // server's auth check, because senders outside Band can't hold its token;
@@ -1193,6 +1207,13 @@ async function main() {
       return;
     }
 
+    // A worker's link. The `hello` carries the worker's own token, which the
+    // link server checks, so the device-token check below doesn't apply.
+    if (req.url?.split("?")[0] === WORKER_CONNECT_PATH) {
+      workerLinkService.handleUpgrade(req, socket, head);
+      return;
+    }
+
     // Auth check: cookie, Bearer header or `band-token.<token>` subprotocol
     // (skip if no token configured)
     // An opaque (`null`) origin is a file:// page or a sandboxed frame on any
@@ -1488,6 +1509,7 @@ async function main() {
     await hostRegistry.local.lsp.killAll().catch((err) => {
       console.error("Failed to stop language servers:", err);
     });
+    await workerLinkService.close().catch(() => {});
 
     // Wait for any still-in-flight Phase B work to settle so we don't
     // tear down the DB / sockets out from under it. `runFirstTimeSetup`

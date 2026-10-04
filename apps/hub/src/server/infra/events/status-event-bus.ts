@@ -99,6 +99,7 @@ export interface StatusEvent {
     | "agent-session-updated"
     | "agent-session-ended"
     | "client-state-changed"
+    | "host-status-changed"
     | "subscription-created"
     | "subscription-delivered"
     | "subscription-removed"
@@ -126,6 +127,9 @@ export interface StatusEvent {
   eventCount?: number;
   /** For `kind: "subscription-removed"`: why the subscription ended. */
   reason?: "expired" | "max-wakeups" | "removed" | "chat-removed" | "workspace-removed";
+  /** For `kind: "host-status-changed"`: the host and its new status. */
+  hostId?: string;
+  hostStatus?: "online" | "offline" | "lost" | "disposed";
   /** For `kind: "client-state-changed"`: the entry as stored after the write. */
   clientState?: ClientStateEntry;
   /**

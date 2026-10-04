@@ -63,6 +63,8 @@ export interface HostView {
   lastSeenAt: number | null;
   version: string | null;
   createdAt: number;
+  /** What the worker reported when it connected (os, arch, roots, capabilities), or null before it has. */
+  info: HostRow["info"];
 }
 
 /** Why `exchangeBootstrap` refused. The link only ever shows the worker a generic reason. */
@@ -112,6 +114,7 @@ function toView(row: TokenRow, now: number): TokenView {
 
 export class TokenService {
   private readonly lastTouch = new Map<string, number>();
+  private readonly revokeListeners = new Set<(row: TokenRow) => void>();
 
   constructor(
     private readonly queries = new TokenQueries(),
@@ -233,6 +236,26 @@ export class TokenService {
   }
 
   /**
+   * The exchange a worker makes before it connects. The bootstrap token names
+   * the worker (the host id it was issued for), so a worker that does not know
+   * its id passes none and learns it from the answer. One that does must give
+   * the right one. Throws {@link TokenExchangeError}.
+   */
+  exchangeForWorker(
+    token: string,
+    requestedWorkerId?: string,
+  ): { sessionToken: string; workerId: string } {
+    const row = this.queries.findByHash(hashToken(token));
+    if (!row || row.kind !== "worker_bootstrap" || row.hostId == null) {
+      throw new TokenExchangeError("invalid");
+    }
+    if (requestedWorkerId !== undefined && requestedWorkerId !== row.hostId) {
+      throw new TokenExchangeError("worker-mismatch");
+    }
+    return { sessionToken: this.exchangeBootstrap(token, row.hostId), workerId: row.hostId };
+  }
+
+  /**
    * For `LinkServer`: decides a `hello`. A live session token for this
    * worker, sent as `token` or as `sessionToken`, passes unchanged. Anything
    * else must be a bootstrap token, which is exchanged and its new session
@@ -276,6 +299,7 @@ export class TokenService {
       lastSeenAt: h.lastSeenAt,
       version: h.version,
       createdAt: h.createdAt,
+      info: h.info,
     }));
   }
 
@@ -288,8 +312,15 @@ export class TokenService {
       this.sockets.closeAll(id);
       this.lastTouch.delete(id);
       log.info(`revoked token ${id}`);
+      for (const listener of this.revokeListeners) listener(row);
     }
     return toView(this.queries.findById(id) ?? row, this.now());
+  }
+
+  /** Calls `listener` after a token is revoked, with its row. The worker link uses it to cut a revoked worker off. */
+  onRevoked(listener: (row: TokenRow) => void): () => void {
+    this.revokeListeners.add(listener);
+    return () => this.revokeListeners.delete(listener);
   }
 
   /** Remembers a socket opened with this token, so revoking the token closes it. */

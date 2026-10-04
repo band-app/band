@@ -50,6 +50,7 @@
     "@band-app/coding-agent": "workspace:^",
     "@band-app/host-api": "workspace:^",
     "@band-app/host-local": "workspace:^",
+    "@band-app/host-remote": "workspace:^",
     "@band-app/link": "workspace:^",
     "@band-app/logger": "workspace:^",
     "@band-app/plugin-api": "workspace:^",

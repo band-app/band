@@ -1,6 +1,6 @@
 # @band-app/worker
 
-`band-worker` is the process that runs on a machine and serves it to a Band hub. It dials the hub over `@band-app/link`, completes the handshake, and answers the hub's calls with `@band-app/host-local`: files, git, processes, terminals, language servers, agent processes and the agent environment. Nothing in the hub calls it yet. `RemoteHost` and the hub's `/api/workers/connect` endpoint land in step 2.3, and the tests here use a link server of their own.
+`band-worker` is the process that runs on a machine and serves it to a Band hub. It dials the hub over `@band-app/link`, completes the handshake, and answers the hub's calls with `@band-app/host-local`: files, git, processes, terminals, language servers, agent processes and the agent environment. The hub reaches it through `RemoteHost` (`packages/host-remote`) and its `/api/workers/connect` endpoint. The tests here use a link server of their own.
 
 ## Run it
 
@@ -15,7 +15,8 @@ pnpm --filter @band-app/worker start -- \
 | Flag | Environment | Meaning |
 | --- | --- | --- |
 | `--hub <url>` | `BAND_HUB_URL` | Hub URL. `http` and `ws` are accepted only for loopback, because the hello carries the token. |
-| `--token <token>` | `BAND_WORKER_TOKEN`, `BAND_BOOTSTRAP_TOKEN` | A session token, or a bootstrap token (prefix `bst_`). |
+| `--token <token>` | `BAND_WORKER_TOKEN`, `BAND_BOOTSTRAP_TOKEN` | A session token, or a bootstrap token (prefix `bwb_`). |
+| `--worker-id <id>` | `BAND_WORKER_ID` | The id the hub issued with the bootstrap token. Without it the hub names the worker when it trades the token. |
 | `--root <dir>` | `BAND_WORKER_ROOTS` | A directory the worker may serve. Repeat for more. With none, `<state dir>/workspaces`. |
 | `--name <name>` | `BAND_WORKER_NAME` | Reported as the `name` label. |
 | `--labels k=v,...` | `BAND_WORKER_LABELS` | Placement labels. |
@@ -27,7 +28,7 @@ Exit codes: 0 after a signal or an idle exit, 1 when the hub rejects the worker 
 
 ## State and tokens
 
-The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/bootstrap` with `{ token, workerId, name }`, answered by `{ sessionToken }`. The hub rotates the session token at every handshake, and the worker saves the newest, so restarting with the same bootstrap token reuses the saved one. Tokens are never logged. This exchange is the worker's guess at the hub's endpoint (`TODO(2.3)` in `src/bootstrap.ts`).
+The state directory (mode 0700) holds `worker-id`, created once and reused so the hub sees the same worker after a restart, and `session-token` (mode 0600). A session token passed with `--token` is used as given. A bootstrap token is traded once for a session token by `POST /api/workers/exchange` with `{ token, workerId?, name? }`, answered by `{ sessionToken, workerId }`. The hub binds the token to the host id it issued it for, and the worker adopts that id and saves it as `worker-id`. A session token lives until it is revoked. Restarting with the same bootstrap token reuses the saved one. Tokens are never logged.
 
 ## Path policy
 

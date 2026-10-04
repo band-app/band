@@ -172,6 +172,7 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   let mutated = false;
 
   let diskWorktrees: WorktreeState[];
+  let remoteWorktrees: WorktreeState[] = [];
   try {
     const gitWorktrees = await hostRegistry
       .hostForProject(project.name)
@@ -184,7 +185,13 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     // which must never move. `name` falls back to the current branch for
     // worktrees created outside Band (first time we see them), matching the
     // create-time invariant that `name === branch` initially.
-    const existingByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
+    // Worktrees on remote hosts belong to those hosts. Git on this machine
+    // can't list them, so a sync must not drop them.
+    const isRemote = (wt: WorktreeState) => wt.hostId !== undefined && wt.hostId !== "local";
+    remoteWorktrees = project.worktrees.filter(isRemote);
+    const existingByPath = new Map(
+      project.worktrees.filter((wt) => !isRemote(wt)).map((wt) => [wt.path, wt]),
+    );
     // A worktree being removed is neither added nor dropped: the removal
     // saves after every sync that could have loaded its row, and git may list
     // it until the background `git worktree remove` is done.
@@ -219,14 +226,15 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     return false;
   }
 
-  const existingSet = new Set(project.worktrees.map((wt) => `${wt.branch}\0${wt.path}`));
+  const localWorktrees = project.worktrees.filter((wt) => !remoteWorktrees.includes(wt));
+  const existingSet = new Set(localWorktrees.map((wt) => `${wt.branch}\0${wt.path}`));
   const diskSet = new Set(diskWorktrees.map((wt) => `${wt.branch}\0${wt.path}`));
 
   if (
     existingSet.size !== diskSet.size ||
     Array.from(existingSet).some((key) => !diskSet.has(key))
   ) {
-    project.worktrees = diskWorktrees;
+    project.worktrees = [...diskWorktrees, ...remoteWorktrees];
     mutated = true;
   }
 

@@ -12,7 +12,7 @@ import {
   waitFor,
 } from "./helpers.ts";
 
-const BOOTSTRAP = "bst_one-time-bootstrap-secret";
+const BOOTSTRAP = "bwb_one-time-bootstrap-secret";
 
 // S6: the bootstrap exchange, and the session token file that results.
 describe("session token", () => {
@@ -106,7 +106,7 @@ describe("session token", () => {
       "--hub",
       hub.url,
       "--token",
-      "bst_wrong-secret",
+      "bwb_wrong-secret",
       "--root",
       root,
       "--state-dir",
@@ -115,6 +115,6 @@ describe("session token", () => {
     const { code } = await proc.exited;
     assert.equal(code, 1);
     assert.match(proc.output(), /refused the bootstrap token \(HTTP 401\)/);
-    assert.ok(!proc.output().includes("bst_wrong-secret"));
+    assert.ok(!proc.output().includes("bwb_wrong-secret"));
   });
 });

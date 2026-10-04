@@ -1,4 +1,4 @@
-import type { Host } from "@band-app/host-api";
+import { type Host, HostOfflineError, HostTimeoutError } from "@band-app/host-api";
 import { loadProjectConfig } from "@band-app/host-local/setup/project-config";
 import { TerminalDaemonUnavailableError } from "@band-app/host-local/terminals/daemon/daemon-backend";
 import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
@@ -81,6 +81,15 @@ const TerminalLayoutNodeSchema: z.ZodType<TerminalLayoutNodeInput> = z.lazy(() =
 const WorkspaceTerminalConfigSchema = z.object({
   layout: TerminalLayoutNodeSchema,
 });
+
+/**
+ * A worker that is offline or slow has no terminals to report right now. The
+ * other hosts' terminals must still resolve, so a lookup skips it.
+ */
+function skipUnreachable(err: unknown): undefined {
+  if (err instanceof HostOfflineError || err instanceof HostTimeoutError) return undefined;
+  throw err;
+}
 
 /**
  * Business logic for the terminal domain.
@@ -182,7 +191,7 @@ export class TerminalService {
     }
     for (const host of hostRegistry.all()) {
       const backend = this.ptyOf(host);
-      const entry = await backend.info(terminalId);
+      const entry = await backend.info(terminalId).catch(skipUnreachable);
       if (entry) {
         this.terminalHosts.set(terminalId, host);
         return { backend, entry };
@@ -195,7 +204,7 @@ export class TerminalService {
   private async listAll(): Promise<TerminalListEntry[]> {
     const entries: TerminalListEntry[] = [];
     for (const host of hostRegistry.all()) {
-      const hostEntries = await this.ptyOf(host).listAll();
+      const hostEntries = (await this.ptyOf(host).listAll().catch(skipUnreachable)) ?? [];
       for (const entry of hostEntries) this.terminalHosts.set(entry.terminalId, host);
       entries.push(...hostEntries);
     }
@@ -380,7 +389,8 @@ export class TerminalService {
   async restartDaemon(): Promise<{ killedCount: number }> {
     let killedCount = 0;
     for (const host of hostRegistry.all()) {
-      killedCount += (await this.ptyOf(host).restartDaemon()).killedCount;
+      const restarted = await this.ptyOf(host).restartDaemon().catch(skipUnreachable);
+      killedCount += restarted?.killedCount ?? 0;
     }
     return { killedCount };
   }

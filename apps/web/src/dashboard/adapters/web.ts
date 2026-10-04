@@ -95,8 +95,17 @@ export class WebDashboardAdapter implements DashboardAdapter {
     base?: string,
     prompt?: string,
     agentMode?: AgentMode,
+    host?: { hostId: string; hostProjectPath?: string },
   ): Promise<void> {
-    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt, agentMode });
+    await this.trpc.workspaces.create.mutate({
+      project,
+      branch,
+      base,
+      prompt,
+      agentMode,
+      hostId: host?.hostId,
+      hostProjectPath: host?.hostProjectPath,
+    });
   }
 
   async removeWorkspace(project: string, name: string): Promise<void> {
