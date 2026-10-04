@@ -26,6 +26,7 @@ import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
+import { workerCliService } from "./worker-cli-service";
 import { workerRelayService } from "./worker-relay-service";
 import { workspaceService } from "./workspace-service";
 
@@ -123,6 +124,7 @@ export class WorkerLinkService {
   private onSession(session: ServerSession): void {
     this.remoteHost(session.workerId).attachSession(session);
     workerRelayService.attach(session);
+    workerCliService.attach(session);
   }
 
   private async onConnected(session: ServerSession): Promise<void> {

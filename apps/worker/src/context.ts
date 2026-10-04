@@ -3,6 +3,7 @@ import type { Host, HostDirs, HostInfo } from "@band-app/host-api";
 import type { LinkSession } from "@band-app/link";
 import type { Logger } from "@band-app/logger";
 import type { ActivityTracker } from "./activity.ts";
+import type { CliCache } from "./cli.ts";
 import type { PathPolicy } from "./path-policy.ts";
 import { asParams, encodeBytes, encodeJson, mapError, type Params } from "./rpc-util.ts";
 
@@ -13,6 +14,8 @@ export interface WorkerContext {
   activity: ActivityTracker;
   log: Logger;
   labels: Record<string, string>;
+  /** The hub's `band` CLI, cached on this machine. Absent in a worker that does not fetch it. */
+  cli?: CliCache;
 }
 
 /** What `host.info` reports: the host's own facts with this worker's labels and roots. */
