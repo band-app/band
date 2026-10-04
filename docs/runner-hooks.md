@@ -2,7 +2,7 @@
 
 A runner is a pair of scripts the hub runs to get a machine for a workspace that has none. When `workspaces.create` carries a `placement` that no online host satisfies, the hub records a host request. `RunnerService` (`apps/hub/src/server/services/runner-service.ts`) takes that request, runs the runner's `spawn` script, and completes the request once the worker that script started says hello.
 
-The hub ships two hooks in `runners/`: `local` and `ssh`. Any executable can be a hook.
+The hub ships three hooks in `runners/`: `local`, `ssh` and `docker`. Any executable can be a hook.
 
 ## Configure a runner
 
@@ -35,7 +35,7 @@ Runners live in `~/.band/settings.json` under `runners`. `settings.update` valid
 | `status` | Optional. The script that lists the runner's live machines, so the reaper can find ones the hub forgot. `bundled:<name>` means `runners/<name>/status.sh`. |
 | `labels` | What the runner offers. It takes a request when every label the request asks for is in this map. A request with no labels fits any runner. |
 | `provides` | Optional facts about the machines it starts, like `{ "node": "24", "os": "linux" }`. When set, a request's `requires` must hold for them. When unset, `requires` is not checked. |
-| `isolation` | A name for how strongly the machine is separated from the hub (`process`, `container`, `vm`). The hub passes it to the hook and does nothing else with it. Default `process`. |
+| `isolation` | The isolation of the machines it starts: `process` (same as `worktree`), `container` or `vm`. A request that asks for `container` or `vm` goes only to a runner that offers at least that (see [Isolation levels](#isolation-levels)). Passed to the hook as `BAND_ISOLATION`. Default `process`. |
 | `maxConcurrent` | How many requests the runner has in flight at once. Default 1. |
 | `timeoutSec` | Seconds from the start of an attempt to the worker's hello. Default 120. |
 | `maxLifetimeSec` | Optional. How long a machine may live, counted from its spawn. Past it the reaper has the worker store its workspaces and exit, then runs `destroy`. Without it a machine lives until it exits. |
@@ -43,6 +43,20 @@ Runners live in `~/.band/settings.json` under `runners`. `settings.update` valid
 | `env` | Extra environment for the hook, such as `BAND_SSH_TARGET`. The settings file is readable by any device token, so put no secrets here. |
 
 `bundled:` hooks are found in the nearest `runners/` directory above the hub's bundle, or in `BAND_RUNNERS_DIR`.
+
+## Isolation levels
+
+A workspace asks for a level with `isolation` in its environment (`placement.environment.isolation`, or `.band/environment.json` once placement reads it). A runner offers a level with its `isolation` setting.
+
+| Level | Meaning | Placement |
+| --- | --- | --- |
+| `worktree` | A git worktree on a worker that other workspaces share. The default. | Goes to an online worker whose labels match, or to a runner offering any level. A worker a runner started is ephemeral and belongs to the workspace it was started for, so only a worker registered by hand is shared. A worker started for a `container` or `vm` workspace is never used. |
+| `container` | A worker of its own, in a container. | Never reuses a host. A runner offering `container` or `vm` starts a new worker for each workspace. |
+| `vm` | A worker of its own in a virtual machine. | Only a runner with `isolation: "vm"` takes it. The bundled hooks start no virtual machines, so you bring your own hook. |
+
+A stronger level satisfies a weaker request, so a `vm` runner takes a `container` request. If no configured runner offers the level a `container` or `vm` workspace asks for, `workspaces.create` fails at once with `No runner offers isolation vm` (or `container`) instead of waiting for the placement timeout. A runner outside the hub's settings that leases requests with `hostRequests.lease` should pass `filter.isolation` with the level it offers.
+
+The hub labels each worker it starts for a `container` or `vm` workspace with `band.isolation=<level>`, and placement skips hosts with that label.
 
 ## The contract
 
@@ -55,6 +69,7 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
 | `BAND_REPO_URLS` | Comma-separated clone URLs of the request's repository, without credentials. The hub's local path when the project has no origin remote; only a hook on the hub's machine can use that. |
 | `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser (`docs/agent-environments.md`), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
+| `BAND_PROJECT_IMAGE` | The project's current environment image (`band env build`, `docs/agent-environments.md`), empty before its first ready build. |
 | `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
 | `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the host carries them. |
 | `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
@@ -132,6 +147,74 @@ Settings (`env`):
 
 The target must reach `BAND_HUB_URL`, and `ssh` must log in without a prompt (the hub passes `BatchMode=yes`). Because `HOME` and `SSH_AUTH_SOCK` are passed through, an agent-held key works. The host key is accepted on first use (`StrictHostKeyChecking=accept-new`); set `BAND_SSH_OPTS` to change that.
 
+### `docker`
+
+Starts the worker image in a hardened container with `docker run --detach --rm`. The flags follow Bunny's docker runtime (`packages/runner/src/runtime/dockerRuntimeAdapter.ts`, `docker/client.ts`).
+
+| Setting | Why |
+| --- | --- |
+| `--user 65532:65532` | A non-root uid with no entry in `/etc/passwd`. |
+| `--cap-drop ALL`, `--security-opt no-new-privileges` | No capabilities, and a process cannot gain any. |
+| `--read-only`, `--tmpfs /tmp`, `--volume /work` | The root file system is read-only. The worker writes to `/tmp` (memory, 512 MB by default) and to the `/work` volume (its `HOME`, state and checkouts). The volume is anonymous, so `--rm` removes it. |
+| `--pids-limit 512`, `--memory`, `--cpus` | From `BAND_DOCKER_PIDS_LIMIT` and the environment's `resources` (`memory` `8Gi` becomes `8g`). `resources.disk` is not enforced. |
+| `--label band.runner`, `band.request`, `band.worker` | The runner, the host request and the worker id, for `docker ps --filter label=...`. |
+| `--network bridge` | The default. See below. |
+
+The project's image is `BAND_PROJECT_IMAGE` when this docker daemon has it or can pull it (it has the toolchain, the installed dependencies and the worker, and needs `git` for the clone). When it cannot get the image, for example one built on another host with no registry, the hook says so in its log and runs the base image. Nothing from the host is mounted and the docker socket is never passed in. The token goes in with `-e BAND_BOOTSTRAP_TOKEN`, so it is not in a command line or `ps`. It is in the container's config, though, so anyone who can run `docker inspect` on that daemon can read it. That is accepted: access to a docker daemon is root-equivalent on that machine, and the token is single-use and spent when the worker exchanges it. The container clones the first of `BAND_REPO_URLS` into `/work/<project>` before the worker starts, so the repository needs a URL the container can reach. A project with no origin remote has only a path on the hub's machine, which fails the clone.
+
+Settings (`env`):
+
+| Variable | Meaning |
+| --- | --- |
+| `BAND_DOCKER_IMAGE` | The worker base image, run when the project has no ready environment image. Default `band-worker`, built with `docker build -f docker/worker.Dockerfile -t band-worker .`. |
+| `BAND_DOCKER_NETWORK` | Docker network. Default `bridge`. |
+| `BAND_DOCKER_PIDS_LIMIT` | Default 512. |
+| `BAND_DOCKER_MEMORY`, `BAND_DOCKER_CPUS` | Limits for an environment with no `resources`. Default none. |
+| `BAND_DOCKER_TMP_SIZE` | Size of the `/tmp` tmpfs. Default `512m`. |
+| `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
+| `DOCKER_HOST` | A remote docker daemon, such as `ssh://user@build-host`. |
+
+A wake of an ephemeral host runs `spawn` again with the same worker id. The old container is gone by then (`--rm`), so it starts a fresh one. A container with that name that has stopped is removed first, and one that still runs makes `spawn` fail. `destroy` runs `docker rm --force --volumes band-<worker id>` and succeeds when the container is gone already.
+
+A worker takes plain `http` only for a loopback hub, and a container on the `bridge` network cannot reach the hub's loopback. So the hub URL must be `https`, or on Linux the runner uses `"BAND_DOCKER_NETWORK": "host"` with the default `http://127.0.0.1:<port>`.
+
+On the hub's machine (a container runner on the same host as the hub, Linux):
+
+```json
+{
+  "id": "docker",
+  "spawn": "bundled:docker",
+  "destroy": "bundled:docker",
+  "labels": { "pool": "docker" },
+  "isolation": "container",
+  "maxConcurrent": 4,
+  "timeoutSec": 180,
+  "env": { "BAND_DOCKER_NETWORK": "host" }
+}
+```
+
+On a separate docker host, with a hub that has a public `https` URL (set `BAND_PUBLIC_URL`, or `BAND_HUB_URL` in `env`):
+
+```json
+{
+  "id": "docker-build-host",
+  "spawn": "bundled:docker",
+  "destroy": "bundled:docker",
+  "labels": { "pool": "build" },
+  "isolation": "container",
+  "maxConcurrent": 8,
+  "env": {
+    "DOCKER_HOST": "ssh://runner@build-host",
+    "BAND_DOCKER_IMAGE": "ghcr.io/example/band-worker:latest",
+    "BAND_HUB_URL": "https://hub.example.com"
+  }
+}
+```
+
+The hub runs the docker CLI, which reaches the daemon over ssh with the hub user's keys (`HOME` and `SSH_AUTH_SOCK` are passed through). The container, its `/work` volume and the image all live on that host.
+
+A `workspaces.create` call picks this runner with `placement: { labels: { pool: "docker" }, environment: { isolation: "container" } }`. `band workspaces create --isolation container --labels pool=docker` does the same from the CLI.
+
 ## Writing a hook
 
 A minimal hook that starts a worker in a container:
@@ -145,4 +228,4 @@ docker run -d --rm --name "band-$BAND_WORKER_ID" \
   --network host my-band-worker-image
 ```
 
-`-e NAME` with no value copies the variable from the hook's environment, so the token does not appear in `ps`. The matching `destroy` is `docker rm -f "band-$BAND_WORKER_ID"`.
+`-e NAME` with no value copies the variable from the hook's environment, so the token does not appear in `ps`. It does appear in `docker inspect` of the container. The matching `destroy` is `docker rm -f "band-$BAND_WORKER_ID"`.

@@ -12,7 +12,7 @@ export interface RunnerSettings {
   status?: string;
   labels: Record<string, string>;
   provides?: Record<string, string>;
-  isolation: string;
+  isolation: "process" | "worktree" | "container" | "vm";
   maxConcurrent: number;
   timeoutSec: number;
   maxLifetimeSec?: number;

@@ -4940,3 +4940,74 @@ fn agents_launch_rejects_an_unknown_mode() {
         stderr(&output)
     );
 }
+
+#[test]
+fn workspaces_create_isolation_needs_a_runner_that_offers_it() {
+    let env = TestEnv::new();
+    for level in ["container", "vm"] {
+        let out = env.band(&[
+            "workspaces",
+            "create",
+            "my-project",
+            &format!("feat/iso-{level}"),
+            "--isolation",
+            level,
+        ]);
+        assert!(!out.status.success(), "{level} should be refused");
+        assert!(
+            stderr(&out).contains(&format!("No runner offers isolation {level}")),
+            "stderr: {}",
+            stderr(&out)
+        );
+    }
+    // Only the three levels parse.
+    let bad = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/iso-x",
+        "--isolation",
+        "kvm",
+    ]);
+    assert!(!bad.status.success());
+    assert!(
+        stderr(&bad).contains("possible values"),
+        "stderr: {}",
+        stderr(&bad)
+    );
+}
+
+#[test]
+fn workspaces_create_isolation_container_waits_for_a_runner() {
+    let env = TestEnv::new();
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(env.band_dir.join("settings.json")).expect("settings.json"),
+    )
+    .expect("settings json");
+    let port = settings["webServerPort"].as_u64().expect("port");
+    let token = settings["tokenSecret"].as_str().expect("token");
+    // A runner that offers `container` but only for another pool, so it does not take the request.
+    ureq::post(format!("http://127.0.0.1:{port}/trpc/settings.update"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send_json(serde_json::json!({"runners": [{
+            "id": "boxes", "spawn": "/bin/false", "isolation": "container",
+            "labels": {"pool": "elsewhere"}
+        }]}))
+        .expect("settings.update");
+    let out = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/iso-ok",
+        "--isolation",
+        "container",
+        "--labels",
+        "pool=iso",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("provisioning (host request"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { bandHome } from "../../infra/db/queries/settings";
+import { RUNNER_ISOLATIONS } from "./isolation";
 
 export const DEFAULT_RUNNER_TIMEOUT_SEC = 120;
 export const MAX_RUNNER_TIMEOUT_SEC = 3600;
@@ -42,8 +43,12 @@ export const runnerSchema = z.object({
    * request's `requires`. Without it the runner takes requests whatever they require.
    */
   provides: z.record(z.string(), z.string()).optional(),
-  /** How strongly the machine is isolated from the hub: `process`, `container`, `vm`, … Passed to the hook. */
-  isolation: z.string().trim().min(1).max(50).default("process"),
+  /**
+   * The isolation the machines it starts have. A request asking for `container` or `vm`
+   * (`placement.environment.isolation`) goes only to a runner offering at least that.
+   * `process` is the same as `worktree`. Passed to the hook as `BAND_ISOLATION`.
+   */
+  isolation: z.enum(RUNNER_ISOLATIONS).default("process"),
   maxConcurrent: z.number().int().min(1).max(100).default(1),
   /** Seconds from the start of an attempt to the worker's hello. */
   timeoutSec: z

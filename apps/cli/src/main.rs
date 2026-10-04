@@ -204,6 +204,12 @@ enum WorkspacesCmd {
         /// Place on any online host, with no label or requirement.
         #[arg(long)]
         any_host: bool,
+        /// How strongly the workspace is isolated: `worktree` (a git worktree
+        /// on a shared worker, the default), `container` (a worker of its own
+        /// in a container) or `vm`. `container` and `vm` need a runner that
+        /// offers that level. Implies placement.
+        #[arg(long, value_parser = ["worktree", "container", "vm"])]
+        isolation: Option<String>,
         /// Where the project's repository is on the chosen host (needed the
         /// first time the project is used there).
         #[arg(long)]
@@ -718,6 +724,7 @@ fn main() {
                 labels,
                 requires,
                 any_host,
+                isolation,
                 host_project_path,
             } => cmd_workspaces_create(
                 &project,
@@ -732,6 +739,7 @@ fn main() {
                     labels: &labels,
                     requires: &requires,
                     any_host,
+                    isolation: isolation.as_deref(),
                     host_project_path: host_project_path.as_deref(),
                 },
             ),
@@ -1116,6 +1124,7 @@ struct Placement<'a> {
     labels: &'a [String],
     requires: &'a [String],
     any_host: bool,
+    isolation: Option<&'a str>,
     host_project_path: Option<&'a str>,
 }
 
@@ -1194,11 +1203,18 @@ fn cmd_workspaces_create(
     if let Some(agent) = agent {
         input["codingAgentId"] = serde_json::json!(agent);
     }
-    if !placement.labels.is_empty() || !placement.requires.is_empty() || placement.any_host {
+    if !placement.labels.is_empty()
+        || !placement.requires.is_empty()
+        || placement.any_host
+        || placement.isolation.is_some()
+    {
         input["placement"] = serde_json::json!({
             "labels": parse_label_pairs(placement.labels)?,
             "requires": parse_requirement_pairs(placement.requires)?,
         });
+        if let Some(isolation) = placement.isolation {
+            input["placement"]["environment"] = serde_json::json!({ "isolation": isolation });
+        }
     }
     if let Some(path) = placement.host_project_path {
         input["hostProjectPath"] = serde_json::json!(path);
