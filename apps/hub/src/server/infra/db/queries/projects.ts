@@ -297,13 +297,25 @@ export class ProjectQueries {
    * (e.g. the avatar route) that don't need the worktree tree `loadAll`
    * assembles.
    */
-  findLocation(name: string): { path: string; kind: ProjectKind } | undefined {
+  findLocation(
+    name: string,
+  ): { path: string; kind: ProjectKind; defaultBranch: string } | undefined {
     const db = getDb();
     const row = db
-      .select({ path: projectsTable.path, kind: projectsTable.kind })
+      .select({
+        path: projectsTable.path,
+        kind: projectsTable.kind,
+        defaultBranch: projectsTable.defaultBranch,
+      })
       .from(projectsTable)
       .where(eq(projectsTable.name, name))
       .get();
-    return row ? { path: row.path, kind: (row.kind ?? "git") as ProjectKind } : undefined;
+    return row
+      ? {
+          path: row.path,
+          kind: (row.kind ?? "git") as ProjectKind,
+          defaultBranch: row.defaultBranch,
+        }
+      : undefined;
   }
 }

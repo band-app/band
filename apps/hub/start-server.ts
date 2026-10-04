@@ -60,6 +60,7 @@ import { branchStatusPoller } from "./src/server/services/branch-status-poller.t
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { environmentBuildService } from "./src/server/services/environment-build-service.ts";
 import { githubWebhookService } from "./src/server/services/github-webhook-service.ts";
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
@@ -730,6 +731,7 @@ async function main() {
   // Known workers become resolvable hosts, before any workspace asks for one.
   workerLinkService.start();
   placementService.start();
+  environmentBuildService.start();
   runnerService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
@@ -1567,6 +1569,7 @@ async function main() {
     });
     runnerService.stop();
     placementService.stop();
+    environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});
 
     // Wait for any still-in-flight Phase B work to settle so we don't

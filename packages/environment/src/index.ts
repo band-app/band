@@ -1,3 +1,24 @@
+export {
+  commitArgs,
+  devcontainerBuildArgs,
+  dockerBuildArgs,
+  IMAGE_WORKDIR,
+  imageKey,
+  imageTag,
+  installCreateArgs,
+  type KeyInput,
+  type KeyParts,
+  keyInputs,
+  LOCKFILES,
+  layeredTag,
+  scrubEnv,
+  toolchainTag,
+  WORKER_DIR,
+  WORKER_LAUNCHER,
+  WORKER_NODE,
+  workerLauncherScript,
+  workerLayerDockerfile,
+} from "./image.ts";
 export { type UnmetRequirement, unmetRequirements } from "./requires.ts";
 export {
   checkReferences,

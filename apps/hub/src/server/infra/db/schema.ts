@@ -202,6 +202,33 @@ export const hostRequests = sqliteTable(
   ],
 );
 
+// One build of a project's environment image (plan step 3.2). `key` is the
+// hash of the environment file, what it references, the lockfiles and the
+// worker base. `ready` rows hold the image tag; the newest ready row is the
+// project's current image, and a failed build never replaces it.
+export const environmentBuilds = sqliteTable(
+  "environment_builds",
+  {
+    id: text("id").primaryKey(),
+    project: text("project").notNull(),
+    key: text("key").notNull(),
+    status: text("status", { enum: ["building", "ready", "failed"] }).notNull(),
+    image: text("image"),
+    hostId: text("host_id").notNull(),
+    // The default-branch commit the image was built from.
+    commit: text("commit_sha"),
+    trigger: text("trigger", { enum: ["manual", "auto"] }).notNull(),
+    log: text("log").notNull().default(""),
+    error: text("error"),
+    startedAt: integer("started_at").notNull(),
+    endedAt: integer("ended_at"),
+  },
+  (t) => [
+    index("environment_builds_project_idx").on(t.project, t.startedAt),
+    index("environment_builds_key_idx").on(t.project, t.key),
+  ],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),
