@@ -115,6 +115,8 @@ function getWorkspaces(): WorkspaceInfo[] {
     // avoids noisy `git status` / `gh` errors in the server log.
     if (project.kind === "plain") continue;
     for (const wt of project.worktrees) {
+      // A worker's checkout is not on this machine; the poller reads local paths only.
+      if (wt.hostId && wt.hostId !== "local") continue;
       workspaces.push({
         workspaceId: toWorkspaceId(project.name, wt.name),
         project: project.name,

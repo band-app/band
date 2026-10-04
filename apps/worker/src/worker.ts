@@ -18,6 +18,7 @@ import {
   loadOrCreateWorkerId,
   readSessionToken,
   writeSessionToken,
+  writeWorkerId,
 } from "./state.ts";
 
 const log = createLogger("band-worker");
@@ -70,11 +71,17 @@ export class Worker {
    */
   static async start(config: WorkerConfig, options: WorkerOptions = {}): Promise<Worker> {
     await ensureStateDir(config.stateDir);
-    const workerId = await loadOrCreateWorkerId(config.stateDir);
+    let workerId = config.workerId ?? (await loadOrCreateWorkerId(config.stateDir));
     const policy = await PathPolicy.create(
       config.roots.length > 0 ? config.roots : [join(config.stateDir, "workspaces")],
     );
-    const token = await resolveToken(config, workerId);
+    const resolved = await resolveToken(config, workerId);
+    const token = resolved.token;
+    // The hub names the worker when it trades the bootstrap token, and a worker told its id keeps it.
+    if (resolved.workerId !== workerId || config.workerId !== undefined) {
+      workerId = resolved.workerId;
+      await writeWorkerId(config.stateDir, workerId);
+    }
 
     const backend = new InProcessTerminalBackend();
     const host = new LocalHost({ terminalBackend: () => backend });
@@ -197,20 +204,23 @@ export class Worker {
  * traded once, and the session token that comes back is kept, so a restart
  * with the same bootstrap token reuses it.
  */
-async function resolveToken(config: WorkerConfig, workerId: string): Promise<string> {
+async function resolveToken(
+  config: WorkerConfig,
+  workerId: string,
+): Promise<{ token: string; workerId: string }> {
   const given = config.token;
-  if (given && !given.startsWith(BOOTSTRAP_TOKEN_PREFIX)) return given;
+  if (given && !given.startsWith(BOOTSTRAP_TOKEN_PREFIX)) return { token: given, workerId };
   const stored = await readSessionToken(config.stateDir);
-  if (stored) return stored;
+  if (stored) return { token: stored, workerId };
   if (!given) throw new ConfigError("no token: pass --token or set BAND_WORKER_TOKEN");
-  const sessionToken = await exchangeBootstrapToken({
+  const exchanged = await exchangeBootstrapToken({
     hubUrl: config.hubUrl,
     bootstrapToken: given,
-    workerId,
+    workerId: config.workerId,
     name: config.name,
   });
-  await writeSessionToken(config.stateDir, sessionToken);
-  return sessionToken;
+  await writeSessionToken(config.stateDir, exchanged.sessionToken);
+  return { token: exchanged.sessionToken, workerId: exchanged.workerId };
 }
 
 /** The agent types this machine can start, by asking the host to resolve each. */

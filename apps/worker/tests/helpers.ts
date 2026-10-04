@@ -33,6 +33,7 @@ export function cleanup(...dirs: string[]): void {
 
 export interface BootstrapCall {
   token: string;
+  /** The worker id the hub assigned, which is the one the worker asked for or a fresh one. */
   workerId: string;
   name?: string;
 }
@@ -41,7 +42,7 @@ export interface TestHub {
   server: LinkServer;
   /** `http://127.0.0.1:<port>`, as a worker is given it. */
   url: string;
-  /** Every `POST /api/workers/bootstrap` the hub accepted. */
+  /** Every `POST /api/workers/exchange` the hub accepted. */
   bootstraps: BootstrapCall[];
   /** Resolves with the next worker session that completes a handshake. */
   nextSession(): Promise<ServerSession>;
@@ -50,7 +51,7 @@ export interface TestHub {
 
 /**
  * A hub stand-in on a random port: `/api/workers/connect` runs the link
- * handshake and `POST /api/workers/bootstrap` trades a bootstrap token for a
+ * handshake and `POST /api/workers/exchange` trades a bootstrap token for a
  * session token. It accepts the given credentials, and the session token it
  * issues for every redial after that.
  */
@@ -76,15 +77,22 @@ export async function startHub(
       body += d;
     });
     req.on("end", () => {
-      const parsed = JSON.parse(body || "{}") as BootstrapCall;
-      if (req.method !== "POST" || req.url !== "/api/workers/bootstrap") {
+      const parsed = JSON.parse(body || "{}") as Omit<BootstrapCall, "workerId"> & {
+        workerId?: string;
+      };
+      if (req.method !== "POST" || req.url !== "/api/workers/exchange") {
         res.writeHead(404).end();
       } else if (!bootstrapTokens.includes(parsed.token)) {
         res.writeHead(401).end();
       } else {
-        bootstraps.push(parsed);
+        const workerId = parsed.workerId ?? `w-stub${bootstraps.length}`;
+        bootstraps.push({
+          token: parsed.token,
+          workerId,
+          ...(parsed.name === undefined ? {} : { name: parsed.name }),
+        });
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ sessionToken: `sess-${parsed.workerId}` }));
+        res.end(JSON.stringify({ sessionToken: `sess-${workerId}`, workerId }));
       }
     });
   });

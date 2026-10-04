@@ -5,8 +5,7 @@
  *
  * Assertions on the outcome read the server back: a revoked device token must
  * get 401 from the HTTP API, and a new bootstrap token must show up as active
- * in the hub's token list. Exchanging it for a session token happens on the
- * worker link, which has no endpoint yet.
+ * in the hub's token list. `remote-host.spec.ts` covers a worker using it.
  *
  * A device token without the admin flag sees the hosts but not the tokens.
  */
@@ -85,8 +84,7 @@ test("creates a worker bootstrap token and lists its offline host", async ({ pag
   await expect(row).toHaveAttribute("data-status", "offline");
   await expect(row).toContainText("os=linux, gpu");
 
-  // Closing the panel drops the secret from the page. The exchange that makes it
-  // one-time is on the worker link, which has no endpoint yet.
+  // Closing the panel drops the secret from the page. A worker spends it on its first exchange.
   await expect(settingsPage.bootstrapToken()).toBeVisible();
   await settingsPage.finishAddWorker();
   await expect(settingsPage.addWorkerButton()).toBeVisible();

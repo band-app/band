@@ -71,6 +71,7 @@ export interface DashboardAdapter {
     base?: string,
     prompt?: string,
     agentMode?: AgentMode,
+    host?: { hostId: string; hostProjectPath?: string },
   ): Promise<void>;
   removeWorkspace(project: string, name: string): Promise<void>;
   setWorkspacePinned(project: string, name: string, pinned: boolean): Promise<void>;

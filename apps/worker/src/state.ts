@@ -39,6 +39,11 @@ export async function loadOrCreateWorkerId(stateDir: string): Promise<string> {
   return id;
 }
 
+/** Replaces the saved worker id, for a worker the hub named when it traded its bootstrap token. */
+export async function writeWorkerId(stateDir: string, id: string): Promise<void> {
+  await writePrivate(join(stateDir, WORKER_ID_FILE), id);
+}
+
 export function readSessionToken(stateDir: string): Promise<string | undefined> {
   return readTrimmed(join(stateDir, SESSION_TOKEN_FILE));
 }

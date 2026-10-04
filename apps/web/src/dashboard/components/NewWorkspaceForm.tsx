@@ -11,7 +11,9 @@ import {
   Label,
   Textarea,
 } from "@band-app/ui";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { trpc } from "../../lib/trpc-client";
 import { useCreateWorkspace } from "../hooks/use-project-mutations";
 import { useProjects } from "../hooks/use-projects";
 
@@ -21,12 +23,28 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+const LOCAL_HOST_ID = "local";
+
 export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
+  const [chosenHostId, setHostId] = useState(LOCAL_HOST_ID);
+  const [hostProjectPath, setHostProjectPath] = useState("");
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
   const createWorkspaceMutation = useCreateWorkspace();
   const { projects } = useProjects();
+  const hosts = useQuery({
+    queryKey: ["hosts.list"],
+    queryFn: async () => (await trpc.hosts.list.query()).hosts,
+    enabled: open,
+  });
+  // Only machines that are connected can take a new workspace. Local is always there.
+  const hostChoices = (hosts.data ?? []).filter(
+    (h) => h.id === LOCAL_HOST_ID || h.status === "online",
+  );
+  // A host that went offline since it was picked falls back to local.
+  const hostId = hostChoices.some((h) => h.id === chosenHostId) ? chosenHostId : LOCAL_HOST_ID;
+  const remote = hostId !== LOCAL_HOST_ID;
 
   const slug = slugifyBranchName(branch);
 
@@ -49,6 +67,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
       branch: slug,
       base: base.trim() || undefined,
       prompt: prompt.trim() || undefined,
+      host: remote ? { hostId, hostProjectPath: hostProjectPath.trim() || undefined } : undefined,
     });
     setBranch("");
     setBase("");
@@ -65,6 +84,43 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
             <DialogDescription>Create a new worktree branch for {projectName}.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-4">
+            {hostChoices.length > 1 && (
+              <>
+                <Label htmlFor="workspace-host">Host</Label>
+                <select
+                  id="workspace-host"
+                  data-testid="new-workspace-form__host"
+                  value={hostId}
+                  onChange={(e) => setHostId(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                >
+                  {hostChoices.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            {remote && (
+              <>
+                <Label htmlFor="host-project-path">
+                  Repository path on {hostChoices.find((h) => h.id === hostId)?.name ?? hostId}
+                </Label>
+                <Input
+                  id="host-project-path"
+                  data-testid="new-workspace-form__host-path"
+                  placeholder="Needed the first time. Remembered after that."
+                  value={hostProjectPath}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setHostProjectPath(e.target.value)
+                  }
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </>
+            )}
             <Label htmlFor="branch-name">Branch name</Label>
             <Input
               id="branch-name"

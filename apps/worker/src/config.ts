@@ -3,8 +3,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 /** A hub token with this prefix is a one-time bootstrap token, not a session token. */
-// TODO(2.3): use the prefix the hub's token issuer settles on.
-export const BOOTSTRAP_TOKEN_PREFIX = "bst_";
+export const BOOTSTRAP_TOKEN_PREFIX = "bwb_";
 
 export const DEFAULT_IDLE_EXIT_MS = 10 * 60_000;
 
@@ -14,6 +13,8 @@ export interface WorkerConfig {
   /** Session token, or a bootstrap token when it has {@link BOOTSTRAP_TOKEN_PREFIX}. */
   token: string | undefined;
   name: string | undefined;
+  /** The id the hub issued for this worker. Without it the worker keeps the id in its state dir, or makes one. */
+  workerId: string | undefined;
   labels: Record<string, string>;
   /** Absolute directories the worker serves. Empty means the default root under the state dir. */
   roots: string[];
@@ -33,6 +34,7 @@ const USAGE = `Usage: band-worker --hub <url> --token <token> [options]
 
   --hub <url>          Hub URL (env BAND_HUB_URL). Plain http/ws is accepted only for loopback.
   --token <token>      Bootstrap or session token (env BAND_WORKER_TOKEN, or BAND_BOOTSTRAP_TOKEN).
+  --worker-id <id>     The id the hub issued with the bootstrap token (env BAND_WORKER_ID).
   --name <name>        Display name, reported as the "name" label (env BAND_WORKER_NAME).
   --labels k=v,...     Placement labels (env BAND_WORKER_LABELS).
   --root <dir>         Directory the worker may serve. Repeatable (env BAND_WORKER_ROOTS, ${delimiter} separated).
@@ -140,6 +142,7 @@ export function parseConfig(argv: string[], env: NodeJS.ProcessEnv = process.env
     hubUrl: parseHubUrl(hub),
     token: values.token ?? env.BAND_WORKER_TOKEN ?? env.BAND_BOOTSTRAP_TOKEN,
     name,
+    workerId: values["worker-id"] ?? env.BAND_WORKER_ID,
     labels,
     roots,
     stateDir: resolve(
@@ -163,6 +166,7 @@ function parse(argv: string[]) {
       hub: { type: "string" },
       token: { type: "string" },
       name: { type: "string" },
+      "worker-id": { type: "string" },
       labels: { type: "string" },
       root: { type: "string", multiple: true },
       "state-dir": { type: "string" },

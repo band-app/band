@@ -133,12 +133,14 @@ export function useCreateWorkspace() {
       branch,
       base,
       prompt,
+      host,
     }: {
       project: string;
       branch: string;
       base?: string;
       prompt?: string;
-    }) => adapter.createWorkspace(project, branch, base, prompt, readAgentMode()),
+      host?: { hostId: string; hostProjectPath?: string };
+    }) => adapter.createWorkspace(project, branch, base, prompt, readAgentMode(), host),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       const workspaceId = toWorkspaceId(vars.project, vars.branch);

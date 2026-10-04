@@ -1,9 +1,10 @@
 import { Button, Input } from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { crossOriginHub } from "../../../lib/hub-config";
 import { trpc } from "../../../lib/trpc-client";
+import { useAdapter } from "../../context";
 import { SettingsRow } from "./SettingsRow";
 
 type HostList = Awaited<ReturnType<typeof trpc.hosts.list.query>>["hosts"];
@@ -49,6 +50,17 @@ function workerCommand(issued: IssuedWorker): string {
  */
 export function HostsSettings() {
   const queryClient = useQueryClient();
+  const adapter = useAdapter();
+  // A worker connecting or dropping changes its row, so follow the hub's status stream.
+  useEffect(
+    () =>
+      adapter.subscribeStatusEvents((event) => {
+        if (event.kind === "host-status-changed") {
+          void queryClient.invalidateQueries({ queryKey: HOSTS_KEY });
+        }
+      }),
+    [adapter, queryClient],
+  );
   const hosts = useQuery<HostList>({
     queryKey: HOSTS_KEY,
     queryFn: async () => (await trpc.hosts.list.query()).hosts,

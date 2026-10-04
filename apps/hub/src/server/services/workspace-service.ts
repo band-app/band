@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { resumeCliInvocation } from "@band-app/coding-agent";
 import type { Host } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX } from "@band-app/host-local/git/git-client";
@@ -137,6 +137,11 @@ export const workspaceCreateInput = z.object({
   // `agentMode`. With neither, `agents.defaultMode` applies.
   agentMode: z.enum(["gui", "tui"]).optional(),
   via: workspaceVia.optional(),
+  // The host to create the workspace on (`hosts.list`). Defaults to the hub's own machine.
+  hostId: z.string().min(1).optional(),
+  // Where the project's repository is on that host. Needed the first time a
+  // project is used on a remote host, and remembered after that.
+  hostProjectPath: z.string().min(1).optional(),
 });
 export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
 
@@ -330,6 +335,38 @@ export class WorkspaceService {
   }
 
   /**
+   * The project's checkout on a remote host. `given` records it the first
+   * time, since the hub can't know where a worker keeps the repository.
+   */
+  private async remoteCheckout(
+    projectName: string,
+    host: Host,
+    given: string | undefined,
+  ): Promise<string> {
+    if (given !== undefined) {
+      const resolved = await host.fs.realpath(given).catch(() => {
+        throw new Error(`Host "${host.id}" has no directory ${given}`);
+      });
+      hostRegistry.setProjectPathOn(projectName, host.id, resolved);
+      return resolved;
+    }
+    const known = hostRegistry.projectPathOn(projectName, host.id, "");
+    if (!known) {
+      throw new Error(
+        `Project "${projectName}" has no checkout on host "${host.id}". Pass hostProjectPath with the repository's path on that host.`,
+      );
+    }
+    return known;
+  }
+
+  /** Where a remote host keeps the worktrees of Band workspaces: under its first root. */
+  private async remoteWorktreesDir(host: Host): Promise<string> {
+    const [root] = (await host.info()).roots;
+    if (!root) throw new Error(`Host "${host.id}" serves no directory to put workspaces in`);
+    return posix.join(root, ".band-worktrees");
+  }
+
+  /**
    * Create a workspace (git worktree) for `(project, branch)`.
    *
    * Idempotent: returns the existing path when the branch is already a
@@ -429,10 +466,20 @@ export class WorkspaceService {
       return { ok: true, path: existing.path };
     }
 
-    const wtDir = worktreesDir();
-    const worktreePath = join(wtDir, input.project, input.branch);
     const workspaceId = toWorkspaceId(input.project, input.branch);
-    const host = hostRegistry.hostFor(workspaceId);
+    const hostId = input.hostId ?? hostRegistry.local.id;
+    // No row exists for a new workspace yet, so the host comes from the request.
+    const host = hostRegistry.hostById(hostId);
+    const remote = hostId !== hostRegistry.local.id;
+    // On a remote host the project's checkout and the worktree live under the
+    // worker's roots, at paths the worker reports.
+    const repoPath = remote
+      ? await this.remoteCheckout(project.name, host, input.hostProjectPath)
+      : project.path;
+    const wtDir = remote ? await this.remoteWorktreesDir(host) : worktreesDir();
+    const worktreePath = remote
+      ? posix.join(wtDir, input.project, input.branch)
+      : join(wtDir, input.project, input.branch);
     // Pre-create the `<project>` subdir under the worktrees root so the
     // first `workspaces.create` call on a freshly-installed Band has
     // somewhere to land. For slash-containing branch names (e.g.
@@ -443,7 +490,9 @@ export class WorkspaceService {
     // redundant. Verified against `git 2.x` — `git worktree add
     // /tmp/wt/feature/login -b feature/login` succeeds without the
     // parent existing.
-    await host.fs.mkdir(join(wtDir, input.project), { recursive: true });
+    await host.fs.mkdir(remote ? posix.join(wtDir, input.project) : join(wtDir, input.project), {
+      recursive: true,
+    });
 
     try {
       // Async — `git worktree add` on a large repo can take 200–500 ms
@@ -452,7 +501,7 @@ export class WorkspaceService {
       // stream / chat event / API request. Mirrors the async `git`
       // helpers used by `remove` below.
       await host.worktree.create({
-        repoPath: project.path,
+        repoPath,
         path: worktreePath,
         branch: input.branch,
         base: input.base,
@@ -463,7 +512,13 @@ export class WorkspaceService {
 
     // `name` == `branch` at creation and is frozen from here on — sync will
     // update `branch` to track git but never `name`, keeping the id stable.
-    const row = { name: input.branch, branch: input.branch, path: worktreePath, pinned: false };
+    const row = {
+      name: input.branch,
+      branch: input.branch,
+      path: worktreePath,
+      pinned: false,
+      ...(remote ? { hostId } : {}),
+    };
     // Re-read state: `git worktree add` took a while, and a sync or another
     // create may have saved since `state` was loaded.
     const fresh = loadState();
@@ -484,7 +539,7 @@ export class WorkspaceService {
     // with a warning rather than failing the create, matching the
     // non-fatal contract used by the setup script itself.
     try {
-      const copied = await host.scripts.copyFiles(project.path, worktreePath);
+      const copied = await host.scripts.copyFiles(repoPath, worktreePath);
       if (copied.length > 0) {
         log.info({ workspaceId, count: copied.length }, "copied workspace files into new worktree");
       }
@@ -510,7 +565,7 @@ export class WorkspaceService {
     // agent: the prompt goes out now rather than after setup, so a slow or
     // failing setup never holds back or drops it, and the user can watch
     // (and answer) the setup in its tab.
-    workspaceScriptService.startSetup(workspaceId, worktreePath, project.path);
+    workspaceScriptService.startSetup(workspaceId, worktreePath, repoPath);
 
     if (!input.prompt) {
       return { ok: true, path: worktreePath };
@@ -652,7 +707,14 @@ export class WorkspaceService {
     // porcelain inline — it applies the detached-HEAD → `detached-<sha>`
     // fallback that the rest of the app sees in `project.worktrees`, so
     // the live branch matches.
-    const worktrees = await hostRegistry.hostForProject(project.name).worktree.list(project.path);
+    // A worktree on a remote host is listed from that host's checkout.
+    const wtHostId = wtRow.hostId ?? hostRegistry.local.id;
+    const checkoutPath =
+      hostRegistry.projectPathOn(project.name, wtHostId, project.path) ?? project.path;
+    const worktrees = await (wtHostId === hostRegistry.local.id
+      ? hostRegistry.hostForProject(project.name)
+      : hostRegistry.hostById(wtHostId)
+    ).worktree.list(checkoutPath);
     const match = worktrees.find((wt) => wt.branch === currentBranch);
     if (!match) {
       throw new WorkspaceNotFoundError(input.name);
@@ -660,7 +722,7 @@ export class WorkspaceService {
     const worktreePath = match.path;
 
     const workspaceId = toWorkspaceId(input.project, input.name);
-    const teardownScript = { worktreePath, projectPath: project.path };
+    const teardownScript = { worktreePath, projectPath: checkoutPath };
     if (!(await workspaceScriptService.getCommand(workspaceId, "teardown", teardownScript))) {
       return this.removeNow(input, workspaceId, worktreePath, currentBranch, match.branch);
     }
@@ -774,12 +836,9 @@ export class WorkspaceService {
     subscriptionService.removeForWorkspace(workspaceId);
 
     // Kill any running language server processes
-    void hostRegistry
-      .hostFor(workspaceId)
-      .lsp.killWorkspace(workspaceId)
-      .catch((err) => {
-        log.warn({ workspaceId, err }, "failed to kill the workspace's language servers");
-      });
+    void host.lsp.killWorkspace(workspaceId).catch((err) => {
+      log.warn({ workspaceId, err }, "failed to kill the workspace's language servers");
+    });
 
     // Clean up workspace-scoped cronjobs
     cronjobService.removeForKey(workspaceId);
@@ -825,7 +884,8 @@ export class WorkspaceService {
     emit({ kind: "remove", workspaceId });
 
     // ── Background cleanup: slow git/fs operations ──
-    const projPath = project.path;
+    const projPath =
+      hostRegistry.projectPathOn(project.name, host.id, project.path) ?? project.path;
     // Synthetic "detached-<short-sha>" labels generated by `listWorktrees`
     // for detached-HEAD worktrees do not correspond to a real git ref.
     // Trying to `git branch -D detached-abc1234` would error ("branch not

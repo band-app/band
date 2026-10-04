@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "../connection";
 import {
   projectHosts as projectHostsTable,
@@ -200,6 +200,13 @@ export class ProjectQueries {
     const db = getDb();
 
     db.transaction((tx) => {
+      // Deleting a project cascades to its `project_hosts` rows. Keep the ones
+      // for remote hosts, which the whole-tree rewrite knows nothing about.
+      const remoteCheckouts = tx
+        .select()
+        .from(projectHostsTable)
+        .where(ne(projectHostsTable.hostId, "local"))
+        .all();
       tx.delete(worktreesTable).run();
       tx.delete(projectsTable).run();
 
@@ -231,13 +238,40 @@ export class ProjectQueries {
             .run();
         }
 
-        // TODO(phase-2): preserve non-local project_hosts rows. The project delete
-        // above cascades to them, and only the local row is re-inserted here.
         tx.insert(projectHostsTable)
           .values({ projectName: project.name, hostId: "local", path: project.path })
           .run();
+        for (const checkout of remoteCheckouts) {
+          if (checkout.projectName === project.name) {
+            tx.insert(projectHostsTable).values(checkout).run();
+          }
+        }
       }
     });
+  }
+
+  /** The project's checkout path on a host, or null when the project has no checkout there. */
+  findHostPath(projectName: string, hostId: string): string | null {
+    const row = getDb()
+      .select({ path: projectHostsTable.path })
+      .from(projectHostsTable)
+      .where(
+        and(eq(projectHostsTable.projectName, projectName), eq(projectHostsTable.hostId, hostId)),
+      )
+      .get();
+    return row?.path ?? null;
+  }
+
+  /** Records where the project's checkout lives on a host. Replaces an earlier path. */
+  setHostPath(projectName: string, hostId: string, path: string): void {
+    getDb()
+      .insert(projectHostsTable)
+      .values({ projectName, hostId, path })
+      .onConflictDoUpdate({
+        target: [projectHostsTable.projectName, projectHostsTable.hostId],
+        set: { path },
+      })
+      .run();
   }
 
   /**

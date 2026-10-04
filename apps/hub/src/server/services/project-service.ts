@@ -77,6 +77,8 @@ export class ProjectService {
         path: string;
         head?: string;
         pinned: boolean;
+        /** The remote host the workspace lives on. Absent for the hub's own machine. */
+        hostId?: string;
         workspaceId: string;
         // `WorkspaceAgentInfo` is the per-workspace agent snapshot owned
         // by the infra status event-bus (`infra/events/status-event-bus.ts`).
@@ -141,12 +143,19 @@ export class ProjectService {
         // worktree from the list (and reset its `name`/`pinned`) in the
         // window before the next sync tick reconciles the tracked branch.
         // This mirrors the path-keyed merge in `sync-service.ts`.
-        const trackedByPath = new Map(project.worktrees.map((wt) => [wt.path, wt]));
+        // Worktrees on a remote host are not in this machine's `git worktree
+        // list`, so they pass through as tracked.
+        const isRemote = (wt: { hostId?: string }) =>
+          wt.hostId !== undefined && wt.hostId !== "local";
+        const remoteWorktrees = project.worktrees.filter(isRemote);
+        const trackedByPath = new Map(
+          project.worktrees.filter((wt) => !isRemote(wt)).map((wt) => [wt.path, wt]),
+        );
         try {
           const gitWorktrees = await hostRegistry
             .hostForProject(project.name)
             .worktree.list(project.path);
-          worktrees = gitWorktrees
+          const local: WorktreeState[] = gitWorktrees
             .filter((wt) => !wt.isBare && trackedByPath.has(wt.path))
             .map((wt) => {
               const tracked = trackedByPath.get(wt.path);
@@ -161,6 +170,7 @@ export class ProjectService {
                 pinned: tracked?.pinned ?? false,
               };
             });
+          worktrees = [...local, ...remoteWorktrees];
         } catch {
           // Fall back to tracked worktrees
         }
