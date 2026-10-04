@@ -74,10 +74,22 @@ describe("terminals over the link", () => {
 
   // S3
   it("runs a command and streams its output", async () => {
+    // The pool runs the command as soon as the shell prints its prompt. On a fast
+    // machine that is before this attach, so the output is already in the snapshot,
+    // and on a slow one it arrives on the channel. Either way the viewer sees it.
     await spawnTerminal(w, "echo", { command: "echo $((6*7))marker" });
-    const { ch } = await attach(w.session, "echo");
+    const { ch, snapshot } = await attach(w.session, "echo");
     const out = collect(ch);
-    await waitFor(() => out.text().includes("42marker"), 8000, "echo output");
+    await waitFor(() => (snapshot + out.text()).includes("42marker"), 8000, "echo output");
+    ch.reset();
+  });
+
+  it("streams a command's output on the channel after the viewer attached", async () => {
+    await spawnTerminal(w, "echo-live");
+    const { ch } = await attach(w.session, "echo-live");
+    const out = collect(ch);
+    await ch.send(Buffer.from("echo $((6*7))live\n"));
+    await waitFor(() => out.text().includes("42live"), 8000, "live echo output");
     ch.reset();
   });
 
@@ -137,10 +149,14 @@ describe("terminals over the link", () => {
   // S4
   it("loses no output when the socket is killed in the middle of a stream", async () => {
     const lines = 4000;
-    await spawnTerminal(w, "flood", {
-      command: `for i in $(seq 1 ${lines}); do echo "line-$i-${"x".repeat(80)}"; done; echo FINISHED`,
-    });
+    // Attach first and start the flood through the channel, so no output predates the viewer.
+    await spawnTerminal(w, "flood");
     const { ch } = await attach(w.session, "flood");
+    await ch.send(
+      Buffer.from(
+        `for i in $(seq 1 ${lines}); do echo "line-$i-${"x".repeat(80)}"; done; echo FINISHED\n`,
+      ),
+    );
 
     let received = 0;
     let text = "";
@@ -154,7 +170,8 @@ describe("terminals over the link", () => {
         nextDrop += 60_000;
         w.session.dropConnection();
       }
-      if (text.includes("FINISHED\r\n")) break;
+      // The typed command is echoed back and ends in "echo FINISHED", so match a line of its own.
+      if (/^FINISHED\r?$/m.test(text)) break;
     }
     assert.ok(drops >= 3, `dropped the socket ${drops} times`);
 
