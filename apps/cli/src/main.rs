@@ -67,6 +67,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: HostsCmd,
     },
+    /// List the runners that start workers for workspaces waiting on a host
+    Runners {
+        #[command(subcommand)]
+        cmd: RunnersCmd,
+    },
     /// Check a repository's .band/environment.json
     Env {
         #[command(subcommand)]
@@ -563,6 +568,17 @@ enum HostsCmd {
 }
 
 #[derive(Subcommand)]
+enum RunnersCmd {
+    /// List the configured runners, what they are running and any settings errors
+    List,
+    /// Show what a runner's hooks printed for a host request
+    Log {
+        /// Host request ID (from `band workspaces create`'s provisioning result)
+        request_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum EnvCmd {
     /// Validate .band/environment.json, printing OK or each problem with its path
     Validate {
@@ -885,6 +901,10 @@ fn main() {
         Commands::Hosts { cmd } => match cmd {
             HostsCmd::List => cmd_hosts_list(),
             HostsCmd::Remove { id } => cmd_hosts_remove(&id),
+        },
+        Commands::Runners { cmd } => match cmd {
+            RunnersCmd::List => cmd_runners_list(),
+            RunnersCmd::Log { request_id } => cmd_runners_log(&request_id),
         },
         Commands::Tokens { cmd } => match cmd {
             TokensCmd::List => cmd_tokens_list(),
@@ -3159,6 +3179,77 @@ fn cmd_hosts_remove(id: &str) -> Result<CommandResult, String> {
     })
 }
 
+// --- Runners commands ---
+
+fn cmd_runners_list() -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("runners.list", &serde_json::json!({}))?;
+    let runners = data
+        .get("runners")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let errors = data
+        .get("errors")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let rows: Vec<[String; 5]> = runners
+        .iter()
+        .map(|runner| {
+            let text = |key: &str| runner.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            let number = |key: &str| {
+                runner
+                    .get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            let labels = runner
+                .get("labels")
+                .and_then(|v| v.as_object())
+                .map(|l| {
+                    l.iter()
+                        .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or("")))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .filter(|joined| !joined.is_empty())
+                .unwrap_or_else(|| "-".to_string());
+            [
+                text("id").to_string(),
+                text("spawn").to_string(),
+                labels,
+                format!("{}/{}", number("running"), number("maxConcurrent")),
+                format!("{}s", number("timeoutSec")),
+            ]
+        })
+        .collect();
+
+    let mut text = format_table(&["ID", "SPAWN", "LABELS", "RUNNING", "TIMEOUT"], &rows);
+    for error in &errors {
+        text.extend(["Invalid runner: ", error.as_str().unwrap_or(""), "\n"]);
+    }
+    Ok(CommandResult { text, json: data })
+}
+
+fn cmd_runners_log(request_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("runners.log", &serde_json::json!({"requestId": request_id}))?;
+    let log = data.get("log").and_then(|v| v.as_str());
+    match log {
+        Some(log) => Ok(CommandResult {
+            text: if log.ends_with('\n') {
+                log.to_string()
+            } else {
+                format!("{log}\n")
+            },
+            json: data,
+        }),
+        None => Err(format!("No runner log for request {request_id}")),
+    }
+}
+
 // --- Env commands ---
 
 /// Ask the hub to validate the environment file under `path`. Prints OK, or
@@ -4127,6 +4218,20 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Host ID (from `band hosts list`)"},
             ],
             "notes": "Needs an admin token. Refused for the local host, a host that is online or lost, and a host that still has workspaces."
+        }),
+        serde_json::json!({
+            "name": "runners list",
+            "description": "List the runners that start workers for workspaces waiting on a host",
+            "parameters": [],
+            "notes": "Text output: `ID  SPAWN  LABELS  RUNNING  TIMEOUT` (space-padded table), then one `Invalid runner: ...` line per entry of `runners` in settings.json that the hub skips. RUNNING is `<in flight>/<maxConcurrent>`.\nJSON output: `{\"runners\": [{\"id\": \"local\", \"spawn\": \"bundled:local\", \"labels\": {}, \"maxConcurrent\": 1, \"timeoutSec\": 120, \"running\": 0}], \"runs\": [...], \"errors\": []}`."
+        }),
+        serde_json::json!({
+            "name": "runners log",
+            "description": "Show what a runner's hooks printed for a host request",
+            "parameters": [
+                {"name": "request_id", "type": "string", "required": true, "positional": true, "description": "Host request ID"},
+            ],
+            "notes": "Prints the hub's log of the request's spawn and destroy hooks, with tokens replaced by `[redacted]`. Fails when there is no log for the request."
         }),
         serde_json::json!({
             "name": "tokens list",

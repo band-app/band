@@ -65,6 +65,7 @@ import { githubWebhookService } from "./src/server/services/github-webhook-servi
 import { placementService } from "./src/server/services/placement-service.ts";
 import { pluginHost } from "./src/server/services/plugin-host-service.ts";
 import { projectAvatarService } from "./src/server/services/project-avatar-service.ts";
+import { runnerService } from "./src/server/services/runner-service.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,
@@ -731,6 +732,7 @@ async function main() {
   workerLinkService.start();
   placementService.start();
   environmentBuildService.start();
+  runnerService.start();
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -1363,6 +1365,7 @@ async function main() {
   // to). Set AFTER `listenWithFallback` because the value before
   // then was just a hint, not a guarantee.
   process.env.BAND_PORT = String(boundPort);
+  runnerService.setHubUrl(`http://127.0.0.1:${boundPort}`);
 
   // Advertise this server's own URL to every child process we fork
   // (coding-agent subprocesses, terminal PTYs, setup scripts). A nested
@@ -1564,6 +1567,7 @@ async function main() {
     await hostRegistry.local.lsp.killAll().catch((err) => {
       console.error("Failed to stop language servers:", err);
     });
+    runnerService.stop();
     placementService.stop();
     environmentBuildService.stop();
     await workerLinkService.close().catch(() => {});

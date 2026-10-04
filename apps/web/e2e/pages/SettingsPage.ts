@@ -406,6 +406,39 @@ export class SettingsPage {
     return this.tokenRows().filter({ hasText: label });
   }
 
+  /** One row per configured runner. `data-testid` set in `RunnersSettings.tsx`. */
+  runnerRow(runnerId: string): Locator {
+    return this.dialog.getByTestId("settings__runner").filter({
+      has: this.page.getByTestId("settings__runner-id").getByText(runnerId, { exact: true }),
+    });
+  }
+
+  /** The count of runs in flight on a runner's row. */
+  runnerRunning(runner: Locator): Locator {
+    return runner.getByTestId("settings__runner-running");
+  }
+
+  /** The row of a request a runner took, matched on its workspace id. */
+  runnerRun(workspaceId: string): Locator {
+    return this.dialog.getByTestId("settings__runner-run").filter({
+      has: this.page
+        .getByTestId("settings__runner-run-workspace")
+        .getByText(workspaceId, { exact: true }),
+    });
+  }
+
+  /** Opens or closes the log under a run. */
+  async toggleRunnerLog(workspaceId: string): Promise<void> {
+    await test.step(`Toggle the runner log of ${workspaceId}`, async () => {
+      await this.runnerRun(workspaceId).getByTestId("settings__runner-run-log-toggle").click();
+    });
+  }
+
+  /** The log text under an open run. */
+  runnerLog(workspaceId: string): Locator {
+    return this.runnerRun(workspaceId).getByTestId("settings__runner-log");
+  }
+
   /** The "Add worker" button in the Hosts section, before the form opens. */
   addWorkerButton(): Locator {
     return this.dialog.getByTestId("settings__add-worker");
