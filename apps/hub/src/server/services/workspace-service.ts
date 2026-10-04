@@ -17,7 +17,6 @@ import { DETACHED_BRANCH_PREFIX } from "../infra/git/git-client";
 import { NOTHING_TO_COMMIT, pullRefusal, pushRefusal } from "../infra/git/git-refusals";
 import { type CommandRun, gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
-import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { scriptInvocation } from "../infra/process/path";
 import { formatShellCommand } from "./_utils/format-shell-command";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
@@ -46,6 +45,7 @@ import { clientStateService } from "./client-state-service";
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
 import { panelFocusService } from "./panel-focus-service";
+import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
@@ -774,7 +774,12 @@ export class WorkspaceService {
     subscriptionService.removeForWorkspace(workspaceId);
 
     // Kill any running language server processes
-    killWorkspaceServers(workspaceId);
+    void hostRegistry
+      .hostFor(workspaceId)
+      .lsp.killWorkspace(workspaceId)
+      .catch((err) => {
+        log.warn({ workspaceId, err }, "failed to kill the workspace's language servers");
+      });
 
     // Clean up workspace-scoped cronjobs
     cronjobService.removeForKey(workspaceId);
@@ -981,6 +986,7 @@ export class WorkspaceService {
       // after a branch switch they differ, and we push the current checkout.
       await execGit(["push", "--set-upstream", "origin", workspace.worktree.branch], cwd);
     }
+    await recordPushedHead(workspaceId, cwd);
     return { ok: true };
   }
 
@@ -1048,6 +1054,7 @@ export class WorkspaceService {
       // unchanged, carrying its captured stderr.
       await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
     }
+    await recordPushedHead(workspaceId, cwd);
     return { ok: true };
   }
 

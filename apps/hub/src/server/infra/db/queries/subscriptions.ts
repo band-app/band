@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../connection";
-import { subscriptionCursors, subscriptionEvents, subscriptions } from "../schema";
+import { pushedShas, subscriptionCursors, subscriptionEvents, subscriptions } from "../schema";
 
 type Row = typeof subscriptions.$inferSelect;
 
@@ -36,6 +36,11 @@ export interface SubscriptionConfig {
   repo?: string;
   /** GitHub source: whether the repo's webhook exists (see `GithubWebhookService`). */
   webhook?: { status: "registered" | "waiting-for-url" | "failed"; error?: string };
+  /**
+   * GitHub source: logins whose comments and reviews are delivered (compared
+   * ignoring case). Events from anyone else are recorded and dropped.
+   */
+  allowedSenders?: string[];
 }
 
 export interface SubscriptionEventRecord {
@@ -44,6 +49,8 @@ export interface SubscriptionEventRecord {
   receivedAt: number;
   deliveredAt: number | null;
   summary: string;
+  /** Set when a guard kept the event from being delivered. */
+  droppedReason?: string | null;
 }
 
 function toRecord(row: Row): SubscriptionRecord {
@@ -162,6 +169,23 @@ export class SubscriptionQueries {
         set: { cursor, updatedAt },
       })
       .run();
+  }
+
+  /** Remembers a head commit Band pushed from a workspace. */
+  recordPushedSha(sha: string, workspaceId: string, pushedAt: number): void {
+    getDb()
+      .insert(pushedShas)
+      .values({ sha: sha.toLowerCase(), workspaceId, pushedAt })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  isPushedSha(sha: string): boolean {
+    return !!getDb()
+      .select({ sha: pushedShas.sha })
+      .from(pushedShas)
+      .where(eq(pushedShas.sha, sha.toLowerCase()))
+      .get();
   }
 
   events(subscriptionId: string): SubscriptionEventRecord[] {

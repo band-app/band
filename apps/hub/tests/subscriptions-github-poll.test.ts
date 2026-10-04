@@ -8,7 +8,8 @@
  * Same in-process style as `subscriptions.test.ts`.
  */
 
-import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -99,7 +100,7 @@ function prAnswer(comments: { id: string; body: string; createdAt: string }[]) {
       nodes: comments.map((c) => ({
         ...c,
         url: `https://github.com/c/${c.id}`,
-        author: { login: "rev" },
+        author: { login: "acme" },
       })),
     },
     reviews: { nodes: [] },
@@ -118,13 +119,28 @@ beforeAll(async () => {
   assertTempBandHome();
   delete process.env.BAND_PUBLIC_URL;
   process.env.BAND_GITHUB_WEBHOOK_SECRET = "poll-test-secret";
+  const repo = join(home, "repo");
+  mkdirSync(repo, { recursive: true });
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@test.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@test.com",
+  };
+  for (const args of [
+    ["init", "-b", "main"],
+    ["commit", "--allow-empty", "-m", "initial"],
+  ]) {
+    execFileSync("git", args, { cwd: repo, env: gitEnv, stdio: "ignore" });
+  }
   seedState(home, {
     projects: [
       {
         name: PROJECT,
-        path: home,
+        path: repo,
         defaultBranch: "main",
-        worktrees: [{ branch: "main", path: home }],
+        worktrees: [{ branch: "main", path: repo }],
       },
     ],
   });

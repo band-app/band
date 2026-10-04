@@ -15,6 +15,7 @@ import {
 } from "../infra/subscriptions/github-poll";
 import { githubWebhookService, publicHubUrl } from "./github-webhook-service";
 import { pluginHost } from "./plugin-host-service";
+import { isBandPushed } from "./pushed-sha-service";
 import { type Subscription, subscriptionService } from "./subscription-service";
 
 const log = createLogger("github-poll");
@@ -230,7 +231,7 @@ export class GithubPollService {
     }
     const sha = checks.find((c) => c.headSha)?.headSha;
     if (!sha) return;
-    const event = aggregateChecks(checks, { repo, branch, sha });
+    const event = aggregateChecks(checks, { repo, branch, sha }, Date.now(), isBandPushed(sha));
     // The event id is the commit and verdict, so repeated polls of a finished commit deliver once.
     if (event) subscriptionService.ingest(event);
   }

@@ -32,8 +32,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { findBandBinary } from "../src/server/infra/agents/skills-install";
 import { closeDb } from "../src/server/infra/db/connection";
-import { findBandBinary } from "../src/server/services/cli-skills-service";
 
 const SKILL_NAMES = [
   "band",

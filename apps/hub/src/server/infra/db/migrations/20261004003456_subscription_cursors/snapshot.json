@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "d499c0c9-21d4-4cf7-bb60-858877e46ab7",
+  "id": "fd7a93b0-07a0-43e7-ac9b-dc42c5cf3da3",
   "prevIds": [
-    "c65256fe-40e9-4d5e-a674-d083d9a31e35"
+    "c0ffa085-e4ef-41fb-8a67-55d676ba33ed"
   ],
   "ddl": [
     {
@@ -44,6 +44,10 @@
     },
     {
       "name": "projects",
+      "entityType": "tables"
+    },
+    {
+      "name": "pushed_shas",
       "entityType": "tables"
     },
     {
@@ -868,6 +872,36 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "sha",
+      "entityType": "columns",
+      "table": "pushed_shas"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "workspace_id",
+      "entityType": "columns",
+      "table": "pushed_shas"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pushed_at",
+      "entityType": "columns",
+      "table": "pushed_shas"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "subscription_id",
       "entityType": "columns",
       "table": "subscription_cursors"
@@ -939,6 +973,16 @@
       "default": null,
       "generated": null,
       "name": "summary",
+      "entityType": "columns",
+      "table": "subscription_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "dropped_reason",
       "entityType": "columns",
       "table": "subscription_events"
     },
@@ -1736,6 +1780,15 @@
       "nameExplicit": false,
       "name": "projects_pk",
       "table": "projects",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "sha"
+      ],
+      "nameExplicit": false,
+      "name": "pushed_shas_pk",
+      "table": "pushed_shas",
       "entityType": "pks"
     },
     {

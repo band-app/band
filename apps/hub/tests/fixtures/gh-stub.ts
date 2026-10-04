@@ -84,6 +84,8 @@ export interface GhStub {
    * returns undefined. Called per request, so a test can add comments between polls.
    */
   setPrActivityQuery: (repo: RepoCoords, answer: (number: number) => unknown) => void;
+  /** Answer `gh api user` (the authenticated account) with this login. */
+  setAuthUser: (login: string) => void;
   /** Answer `gh pr merge <number>`; `stderr` makes it fail. */
   setPrMerge: (
     number: number,
@@ -208,6 +210,11 @@ export const ghStub = {
             repository[`pr${number}`] = answer(Number(number)) ?? null;
           }
           res.json({ stdout: JSON.stringify({ data: { repository } }) });
+        });
+      },
+      setAuthUser(login) {
+        app.post("/api/user", (_req, res) => {
+          res.json({ stdout: JSON.stringify({ login }) });
         });
       },
       setPrMerge(number, opts) {

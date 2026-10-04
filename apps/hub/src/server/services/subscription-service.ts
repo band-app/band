@@ -27,6 +27,12 @@ const log = createLogger("subscription-service");
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** No subscription outlives this, whatever `expiresAt` asks for. */
 export const MAX_SUBSCRIPTION_DAYS = 180;
+/** Wakeups a CI subscription gets when it names no `maxWakeups`. */
+export const DEFAULT_CI_MAX_WAKEUPS = 10;
+/** Wakeups every other subscription gets when it names no `maxWakeups`. */
+export const DEFAULT_MAX_WAKEUPS = 50;
+/** Kinds written by people. Only allowlisted senders' events of these kinds are delivered. */
+const SENDER_GATED_KINDS = new Set(["comment", "review", "review_comment", "issue"]);
 const SWEEP_INTERVAL_MS = 60_000;
 /** Tries to start a delivery this many times before giving the events up. */
 const MAX_DELIVERY_ATTEMPTS = 3;
@@ -45,7 +51,8 @@ export const subscriptionCreateInput = z.object({
   /** Defaults to the key of the source (`hook:<id>`, `timer:<id>`). */
   filterKey: z.string().min(1).optional(),
   coalesceSeconds: z.number().int().min(0).max(3600).default(30),
-  maxWakeups: z.number().int().min(1).default(10),
+  /** Defaults to 10 for a CI subscription and 50 for any other. */
+  maxWakeups: z.number().int().min(1).optional(),
   /** Epoch milliseconds. Defaults to, and is capped at, 180 days from now. */
   expiresAt: z.number().int().optional(),
   createdBy: z.enum(["agent", "coordinator", "user"]).default("agent"),
@@ -92,6 +99,12 @@ const repoSchema = z
 export const githubPrCreateInput = sourceCommon.extend({
   repo: repoSchema,
   number: z.number().int().min(1),
+  /**
+   * Logins whose comments and reviews wake the chat (case-insensitive); a
+   * list replaces the default. Defaults to the repo owner here, and to the
+   * owner plus the authenticated gh user through the API.
+   */
+  allowedSenders: z.array(z.string().min(1)).optional(),
 });
 export type GithubPrCreateInput = z.input<typeof githubPrCreateInput>;
 
@@ -259,11 +272,20 @@ export class SubscriptionService {
   /** Subscribes a chat to one PR. Webhook registration is the caller's job (`GithubWebhookService`). */
   createGithubPr(input: GithubPrCreateInput): Subscription {
     const parsed = githubPrCreateInput.parse(input);
-    const { repo, number, ...common } = parsed;
+    const { repo, number, allowedSenders, ...common } = parsed;
     return this.insert(
       newSubscriptionId(),
       { ...common, kinds: [] },
-      { source: "github", filterKey: githubPrKey(repo, number), config: { repo } },
+      {
+        source: "github",
+        filterKey: githubPrKey(repo, number),
+        config: {
+          repo,
+          allowedSenders: [
+            ...new Set((allowedSenders ?? [repoOwner(repo)]).map((l) => l.toLowerCase())),
+          ],
+        },
+      },
     );
   }
 
@@ -342,7 +364,9 @@ export class SubscriptionService {
       kinds: parsed.kinds,
       filterKey: source.filterKey,
       coalesceSeconds: parsed.coalesceSeconds,
-      maxWakeups: parsed.maxWakeups,
+      maxWakeups:
+        parsed.maxWakeups ??
+        (source.filterKey.startsWith("github:ci:") ? DEFAULT_CI_MAX_WAKEUPS : DEFAULT_MAX_WAKEUPS),
       wakeups: 0,
       expiresAt: Math.min(parsed.expiresAt ?? latest, latest),
       createdBy: parsed.createdBy as SubscriptionCreator,
@@ -448,14 +472,23 @@ export class SubscriptionService {
       }
       // The table's primary key is the event id; one event can match several
       // subscriptions, so the row is keyed by subscription and event together.
+      const droppedReason = dropReason(sub, event);
       const fresh = this.queries.insertEventIfAbsent({
         eventId: `${sub.id}:${event.id}`,
         subscriptionId: sub.id,
         receivedAt: now,
         deliveredAt: null,
         summary: event.summary.slice(0, SUMMARY_LIMIT),
+        droppedReason: droppedReason ?? null,
       });
       if (!fresh) continue;
+      if (droppedReason) {
+        log.info(
+          { subscriptionId: sub.id, key: event.key, kind: event.kind, reason: droppedReason },
+          "dropped subscription event",
+        );
+        continue;
+      }
       this.hold(sub, event);
     }
     this.removeAll(expired, "expired");
@@ -584,6 +617,26 @@ export class SubscriptionService {
     }
     state.index = index;
   }
+}
+
+function repoOwner(repo: string): string {
+  return repo.split("/")[0];
+}
+
+/**
+ * Why a guard keeps an event from waking the subscription, if one does: the
+ * event came from Band's own push (`self`), or a person's comment or review
+ * came from a login outside the subscription's allowlist. The allowlist is
+ * the stored `allowedSenders`, or the repo owner for a row without one.
+ */
+function dropReason(sub: Subscription, event: SubscriptionEvent): "self" | "sender" | undefined {
+  if (event.self) return "self";
+  if (event.source !== "github" || !SENDER_GATED_KINDS.has(event.kind)) return undefined;
+  const allowed =
+    sub.config.allowedSenders ?? (sub.config.repo ? [repoOwner(sub.config.repo)] : undefined);
+  // A subscription made without a repo (the generic `create`) has no allowlist to apply.
+  if (!allowed) return undefined;
+  return allowed.includes(event.actor.toLowerCase()) ? undefined : "sender";
 }
 
 function newSubscriptionId(): string {

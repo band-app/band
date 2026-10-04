@@ -409,6 +409,8 @@ export const subscriptionEvents = sqliteTable(
     receivedAt: integer("received_at").notNull(),
     deliveredAt: integer("delivered_at"),
     summary: text("summary").notNull(),
+    // Why a guard kept the event from being delivered (`self`, `sender`); null otherwise.
+    droppedReason: text("dropped_reason"),
   },
   (t) => [index("subscription_events_subscription_idx").on(t.subscriptionId)],
 );
@@ -420,4 +422,12 @@ export const subscriptionCursors = sqliteTable("subscription_cursors", {
   subscriptionId: text("subscription_id").primaryKey(),
   cursor: text("cursor").notNull(),
   updatedAt: integer("updated_at").notNull(),
+});
+
+// Head commits Band pushed from its workspaces. Subscriptions use them to
+// tell their own agent's work from a human's.
+export const pushedShas = sqliteTable("pushed_shas", {
+  sha: text("sha").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  pushedAt: integer("pushed_at").notNull(),
 });

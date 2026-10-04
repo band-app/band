@@ -238,7 +238,11 @@ export interface HostSearch {
 // lsp and acp
 // ---------------------------------------------------------------------------
 
-/** A byte pipe to a process on the host. */
+/**
+ * A byte pipe to a process on the host. Writes and output are raw bytes, with
+ * whatever framing the process speaks. Writes after the process ends or the
+ * pipe closes are dropped.
+ */
 export interface Duplex {
   write(chunk: Uint8Array | string): void;
   readonly output: Stream<Uint8Array>;
@@ -247,8 +251,21 @@ export interface Duplex {
 }
 
 export interface HostLsp {
-  /** Opens a stdio connection to the language server for `lang` in the workspace. */
+  /**
+   * Opens a stdio connection to the language server for `lang` in the
+   * workspace, starting it in `root` if it isn't running. Every connection to
+   * one workspace and language shares the server and receives all its output.
+   * `output` ends when the server exits or the connection closes. Rejects when
+   * `lang` has no server or the server cannot start.
+   */
   connect(spec: { workspaceId: string; lang: string; root: string }): Promise<Duplex>;
+  /**
+   * Signals the workspace's language servers to stop. Resolves without waiting
+   * for them to exit. Each connection's output ends once its server has.
+   */
+  killWorkspace(workspaceId: string): Promise<void>;
+  /** Stops every language server on the host. */
+  killAll(): Promise<void>;
 }
 
 /** What it takes to start an agent's ACP adapter. */
@@ -352,6 +369,32 @@ export interface ClaudeDefaults {
   effort: string | undefined;
 }
 
+export interface InstallSkillsResult {
+  /** Canonical SKILL.md paths that did not exist before the run. */
+  written: string[];
+  /** Canonical SKILL.md paths whose content differed and was overwritten. */
+  updated: string[];
+  /** Canonical SKILL.md paths whose content already matched. */
+  unchanged: string[];
+  /** Symlink paths created, one per agent and skill. */
+  linked: string[];
+  /** Symlink paths that already pointed at the shared directory. */
+  alreadyLinked: string[];
+  /** Per-agent paths the install left alone because something was in the way, as "path: reason". */
+  conflicts: string[];
+  /** Canonical SKILL.md paths skipped because the install could not run. */
+  skipped: string[];
+  /** Why the install could not run, when it could not. */
+  warnings: string[];
+}
+
+export interface HooksStatus {
+  /** Band's hook is present for every hook event. */
+  installed: boolean;
+  /** The settings also hold hooks that are not Band's. */
+  other_hooks_exist: boolean;
+}
+
 export interface HostAgentEnv {
   /** The model and effort Claude Code would use in `cwd` according to its config files and environment. */
   claudeDefaults(cwd: string): Promise<ClaudeDefaults>;
@@ -359,8 +402,15 @@ export interface HostAgentEnv {
   latestClaudeSession(cwd: string): Promise<string | null>;
   /** The usage reader for an agent, or `undefined` when it keeps no on-disk usage data. */
   usageReader(agent: AgentDescriptor): Promise<UsageReader | undefined>;
-  /** Installs Band's skills for the coding agents found on the host. */
-  installSkills(skills: string[]): Promise<void>;
-  /** Installs agent hooks that report to `hubRelayUrl`. */
-  installHooks(hubRelayUrl: string): Promise<void>;
+  /**
+   * Installs Band's skills into the host's shared skills directory and links
+   * each coding agent found on the host to it. `home` replaces the host's home
+   * directory (tests only). A host that cannot run the install returns every
+   * skill as `skipped` and says why in `warnings`.
+   */
+  installSkills(options?: { home?: string }): Promise<InstallSkillsResult>;
+  /** Whether Band's hooks are in the host's Claude Code settings. */
+  hooksStatus(): Promise<HooksStatus>;
+  /** Installs Band's agent hooks into the host's Claude Code settings. Rejects when the host has no `band` CLI. */
+  installHooks(): Promise<void>;
 }
