@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { launchDaemon } from "@band-app/host-local/terminals/daemon/launch";
+import { daemonPaths } from "@band-app/host-local/terminals/daemon/protocol";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { afterEach, describe, expect, it } from "vitest";
-import { launchDaemon } from "@/server/infra/terminals/daemon/launch";
-import { daemonPaths } from "@/server/infra/terminals/daemon/protocol";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import {
   createTmpHome,

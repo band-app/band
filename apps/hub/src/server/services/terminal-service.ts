@@ -1,19 +1,19 @@
 import type { Host } from "@band-app/host-api";
-import { createLogger } from "@band-app/logger";
-import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
-import { z } from "zod";
-import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
-import { loadProjectConfig } from "../infra/setup/project-config";
-import { TerminalDaemonUnavailableError } from "../infra/terminals/daemon/daemon-backend";
-import { InProcessTerminalBackend } from "../infra/terminals/in-process-backend";
+import { loadProjectConfig } from "@band-app/host-local/setup/project-config";
+import { TerminalDaemonUnavailableError } from "@band-app/host-local/terminals/daemon/daemon-backend";
+import { InProcessTerminalBackend } from "@band-app/host-local/terminals/in-process-backend";
 import type {
   SpawnOptions,
   TerminalAttachment,
   TerminalBackend,
   TerminalExitEvent,
   TerminalListEntry,
-} from "../infra/terminals/terminal-backend";
-import { TitlePoller } from "../infra/terminals/title-poller";
+} from "@band-app/host-local/terminals/terminal-backend";
+import { TitlePoller } from "@band-app/host-local/terminals/title-poller";
+import { createLogger } from "@band-app/logger";
+import type { WorkspaceTerminalConfig } from "@band-app/shared/terminal-config";
+import { z } from "zod";
+import { hostRegistry, setLocalTerminalBackend } from "../infra/host/registry";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,

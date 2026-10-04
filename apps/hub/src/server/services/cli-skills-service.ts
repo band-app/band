@@ -2,7 +2,7 @@
  * Sync the CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
  * `band-browser`, `band-start`, `band-loop`) into the local host's shared
  * skills directory and link each detected coding agent to it. The host does
- * the work (`host.agentEnv.installSkills`, in `infra/agents/skills-install.ts`);
+ * the work (`host.agentEnv.installSkills`, in `packages/host-local/src/agents/skills-install.ts`);
  * this module logs what it reports.
  */
 

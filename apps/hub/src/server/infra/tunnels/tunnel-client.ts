@@ -1,8 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { shellPath } from "@band-app/host-local/process/path";
 import { createLogger } from "@band-app/logger";
 import { getToken } from "../auth/auth-token";
 import { emit } from "../events/status-event-bus";
-import { shellPath } from "../process/path";
 
 const log = createLogger("tunnel");
 

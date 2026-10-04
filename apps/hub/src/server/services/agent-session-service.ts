@@ -372,7 +372,7 @@ function findEffortOption(options: acp.SessionConfigOption[]): acp.SessionConfig
 
 /**
  * What a Claude Code chat's `default` model and effort choices run with (see
- * `infra/agents/claude-defaults.ts`): the session's transcript when its last
+ * `packages/host-local/src/agents/claude-defaults.ts`): the session's transcript when its last
  * turn ran on them, else config, else what an earlier session of the agent
  * reported. With `learn`, a reported value the config doesn't explain is
  * kept for chats that have no session yet. Undefined for other agents.

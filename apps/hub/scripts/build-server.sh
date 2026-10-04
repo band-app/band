@@ -27,7 +27,7 @@ esbuild start-server.ts \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Bundle the terminal daemon: the detached process that owns terminal PTYs
-# so shells survive a server restart (src/server/infra/terminals/daemon/).
+# so shells survive a server restart (packages/host-local/src/terminals/daemon/).
 # The server forks it from next to its own bundle, so it must land in dist/
 # beside start-server.mjs; the desktop app ships all of dist/. Same flags as
 # the server bundle: node-pty stays external and resolves from
@@ -215,7 +215,7 @@ SHIM
   # -----------------------------------------------------------------------
   # ACP adapters for Claude Code and Codex (issue #648). Band runs each as a
   # Node subprocess speaking the Agent Client Protocol over stdio (see
-  # `src/server/infra/agents/acp-launch.ts`, which looks for them at
+  # `packages/host-local/src/agents/acp-launch.ts`, which looks for them at
   # `dist/agents/<name>.mjs` before falling back to node_modules). Bundled
   # into one file each so the desktop app needs no node_modules for them.
   #

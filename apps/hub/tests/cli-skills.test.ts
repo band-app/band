@@ -32,10 +32,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { findBandBinary } from "@band-app/host-local/agents/skills-install";
+import { findCliBinary } from "@band-app/host-local/process/cli-binary";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { findBandBinary } from "../src/server/infra/agents/skills-install";
 import { closeDb } from "../src/server/infra/db/connection";
-import { findCliBinary } from "../src/server/infra/process/cli-binary";
 
 // The CLI build under test. Resolved from the checkout, never from PATH or
 // /usr/local/bin, which may hold an older global install.

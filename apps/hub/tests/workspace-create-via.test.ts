@@ -540,7 +540,7 @@ describe("workspaces.create via=terminal — adapter fallback", () => {
 // We exercise the claude-code agent as the representative case: every
 // ACP launch merges the SAME `AGENT_DISPATCH_ENV` constant into the agent
 // subprocess env (`resolveAcpLaunch` in
-// src/server/infra/agents/acp-launch.ts), so one integration test plus
+// packages/host-local/src/agents/acp-launch.ts), so one integration test plus
 // the shared constant covers the mechanism.
 // ---------------------------------------------------------------------------
 

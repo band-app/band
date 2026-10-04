@@ -1,5 +1,5 @@
-import { getRepoInfo } from "../infra/git/git-client";
-import { gitRunner } from "../infra/host/git-run";
+import { getRepoInfo } from "@band-app/host-local/git/git-client";
+import { gitRunner } from "@band-app/host-local/git-run";
 import { hostRegistry } from "../infra/host/registry";
 import {
   loadState,

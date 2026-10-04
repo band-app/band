@@ -175,6 +175,7 @@ jobs:
           pnpm --filter @band-app/server test
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
+          pnpm --filter @band-app/host-local test
 
       # Keyed on the Playwright version, with no restore-keys, so a bump
       # starts clean instead of carrying old browser builds forward.
@@ -680,6 +681,7 @@ jobs:
           pnpm --filter @band-app/server test
           pnpm --filter @band-app/web test
           pnpm --filter @band-app/link test
+          pnpm --filter @band-app/host-local test
 
       - name: Save Cargo registry cache
         if: |

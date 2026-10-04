@@ -1,8 +1,8 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TerminalPool } from "@band-app/host-local/terminals/terminal-pool";
 import { afterEach, describe, expect, it } from "vitest";
-import { TerminalPool } from "../src/server/infra/terminals/terminal-pool.ts";
 
 // `nudgeResize` is the shrink-and-restore SIGWINCH pair fired after a
 // reconnect replay so a live full-screen TUI repaints for the re-attached

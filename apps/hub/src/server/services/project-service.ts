@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import type { Host } from "@band-app/host-api";
+import { gitRunner } from "@band-app/host-local/git-run";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { TRPCError } from "@trpc/server";
 import {
@@ -12,7 +13,6 @@ import {
 } from "../infra/db/queries/projects";
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
-import { gitRunner } from "../infra/host/git-run";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import {

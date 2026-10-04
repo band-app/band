@@ -15,9 +15,9 @@
  * the database.
  */
 
+import type { PullRequestSummary } from "@band-app/host-local/git/git-client";
 import type { AgentSessionRecord } from "@band-app/shared/agent-sessions";
 import type { ClientStateEntry } from "@band-app/shared/client-state";
-import type { PullRequestSummary } from "../git/git-client";
 
 /**
  * Per-workspace agent info embedded in a `WorkspaceStatusSnapshot`. The

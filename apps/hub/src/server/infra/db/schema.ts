@@ -1,3 +1,4 @@
+import type { PullRequestSummary } from "@band-app/host-local/git/git-client";
 import {
   index,
   integer,
@@ -7,7 +8,6 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import type { PullRequestSummary } from "../git/git-client";
 
 // A machine Band can run workspaces on. The `local` row is seeded by the
 // migration and is the only one until remote hosts are registered. `host_id`

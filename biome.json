@@ -72,5 +72,77 @@
       "!**/playwright-report",
       "!**/apps/hub/src/server/infra/db/migrations"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/hub/src/server/services/**", "apps/hub/src/server/api/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs. Hub-state modules are allowlisted in biome.json.",
+                  "node:fs/promises": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs/promises. Hub-state modules are allowlisted in biome.json.",
+                  "node:child_process": "Run processes through the Host (host.exec, host.git), not node:child_process. Hub-state modules are allowlisted in biome.json.",
+                  "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local.",
+                  "@band-app/host-local/process/exec-file-worker": "Run processes through the Host (host.exec, host.git), not the exec helpers.",
+                  "@band-app/host-local/git/git-client": {
+                    "importNames": ["execGit", "execGh", "execGhWithInput", "execFileOffThread"],
+                    "message": "Run git and gh through the Host (host.git.exec / host.git.gh), not the exec helpers."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/hub/src/server/services/cli-service.ts",
+        "apps/hub/src/server/services/project-avatar-service.ts",
+        "apps/hub/src/server/services/_utils/upload-utils.ts",
+        "apps/hub/src/server/services/task-service.ts",
+        "apps/hub/src/server/services/workspace-service.ts",
+        "apps/hub/src/server/api/web-app-manifest.ts",
+        "apps/hub/src/server/api/queue/router.ts",
+        "apps/hub/src/server/api/browser-host/router.ts",
+        "apps/hub/src/server/services/diff-service.ts",
+        "apps/hub/src/server/services/project-service.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/hub/src/server/services/github-webhook-service.ts",
+        "apps/hub/src/server/services/github-poll-service.ts",
+        "apps/hub/src/server/services/pushed-sha-service.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs. Hub-state modules are allowlisted in biome.json.",
+                  "node:fs/promises": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs/promises. Hub-state modules are allowlisted in biome.json.",
+                  "node:child_process": "Run processes through the Host (host.exec, host.git), not node:child_process. Hub-state modules are allowlisted in biome.json.",
+                  "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

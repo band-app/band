@@ -17,54 +17,54 @@ import {
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { getUsageReader } from "@band-app/coding-agent";
-import {
-  type AcpAgentDefinition,
-  type AgentDescriptor,
-  type ClaudeDefaults,
-  type ExecOptions,
-  type ExecResult,
-  type FileChange,
-  type FsEntryKind,
-  type FsStat,
-  type Host,
-  type HostAcp,
-  type HostAgentEnv,
-  type HostFs,
-  type HostGit,
-  type HostInfo,
-  type HostLsp,
-  type HostScripts,
-  type HostSearch,
-  type HostWorktree,
-  type ScriptLabel,
-  type ScriptPlan,
-  type SearchMatch,
-  type SearchQuery,
-  type Stream,
-  type TerminalBackend,
-  type WatchOptions,
-  type Worktree,
-  type WorktreeInfo,
-  type WorktreeSpec,
+import type {
+  AcpAgentDefinition,
+  AgentDescriptor,
+  ClaudeDefaults,
+  ExecOptions,
+  ExecResult,
+  FileChange,
+  FsEntryKind,
+  FsStat,
+  Host,
+  HostAcp,
+  HostAgentEnv,
+  HostFs,
+  HostGit,
+  HostInfo,
+  HostLsp,
+  HostScripts,
+  HostSearch,
+  HostWorktree,
+  ScriptLabel,
+  ScriptPlan,
+  SearchMatch,
+  SearchQuery,
+  Stream,
+  TerminalBackend,
+  WatchOptions,
+  Worktree,
+  WorktreeInfo,
+  WorktreeSpec,
 } from "@band-app/host-api";
-import { resolveAcpLaunch } from "../agents/acp-launch";
-import { spawnAgentProcess } from "../agents/agent-spawn";
+import { resolveAcpLaunch } from "./agents/acp-launch";
+import { spawnAgentProcess } from "./agents/agent-spawn";
 import {
   configuredClaudeDefaults,
   findClaudeCliArgs,
   reportedClaudeDefaults,
-} from "../agents/claude-defaults";
-import { checkHooks, installHooks } from "../agents/hooks-install";
-import { installSkills } from "../agents/skills-install";
-import { execGh, execGit, listWorktrees } from "../git/git-client";
-import { connectLspServer, killAllServers, killWorkspaceServers } from "../lsp/lsp-manager";
-import { duBytes } from "../process/du";
-import { prependBinDirs } from "../process/path";
-import { listFiles, streamMatches } from "../search/ripgrep-client";
-import { loadProjectConfig } from "../setup/project-config";
-import { prepareScriptRun } from "../setup/script-run";
-import { copyWorkspaceFiles } from "../setup/workspace-files";
-import { findLatestClaudeSessionId } from "../terminals/claude-resume";
+} from "./agents/claude-defaults";
+import { checkHooks, installHooks } from "./agents/hooks-install";
+import { installSkills } from "./agents/skills-install";
+import { execGh, execGit, listWorktrees } from "./git/git-client";
+import { connectLspServer, killAllServers, killWorkspaceServers } from "./lsp/lsp-manager";
+import { duBytes } from "./process/du";
+import { prependBinDirs } from "./process/path";
+import { listFiles, streamMatches } from "./search/ripgrep-client";
+import { loadProjectConfig } from "./setup/project-config";
+import { prepareScriptRun } from "./setup/script-run";
+import { copyWorkspaceFiles } from "./setup/workspace-files";
+import { findLatestClaudeSessionId } from "./terminals/claude-resume";
 
 /** Same cap `execFile` callers in the hub use for command output. */
 const EXEC_MAX_BUFFER = 50 * 1024 * 1024;

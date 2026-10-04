@@ -1,5 +1,5 @@
 import type { GitOpResult } from "@band-app/shared/git-op-result";
-import type { CommandRun } from "../host/git-run";
+import type { CommandRun } from "../git-run";
 
 /** How many file names a refusal message lists before "and N more". */
 const MAX_LISTED_FILES = 3;

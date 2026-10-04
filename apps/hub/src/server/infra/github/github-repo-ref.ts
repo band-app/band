@@ -1,4 +1,4 @@
-import type { RepoInfo } from "../git/git-client";
+import type { RepoInfo } from "@band-app/host-local/git/git-client";
 
 /**
  * GitHub coordinates of a project's `origin`, normalised for avatar
