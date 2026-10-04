@@ -145,19 +145,36 @@ export class LocalHost implements Host {
     installHooks: () => installHooks(),
   };
 
-  constructor(private readonly options: LocalHostOptions) {}
+  constructor(private readonly options: LocalHostOptions) {
+    // The first probe takes about half a second (seven processes). Starting it
+    // now keeps the first `hosts.list` after boot from waiting on it.
+    void this.toolVersions();
+  }
 
   get pty(): TerminalBackend {
     return this.options.terminalBackend();
   }
 
-  /** Probing runs seven processes, so `info()` reuses a recent answer. */
+  /**
+   * Probing runs seven processes. `info()` returns the last answer at once and
+   * refreshes it in the background once it is older than `TOOLS_TTL_MS`.
+   */
   private tools: { at: number; value: Promise<Record<string, string>> } | null = null;
+  private toolsRefreshing = false;
 
   private toolVersions(): Promise<Record<string, string>> {
     const now = Date.now();
-    if (!this.tools || now - this.tools.at > TOOLS_TTL_MS) {
+    if (!this.tools) {
       this.tools = { at: now, value: probeTools() };
+    } else if (now - this.tools.at > TOOLS_TTL_MS && !this.toolsRefreshing) {
+      this.toolsRefreshing = true;
+      void probeTools()
+        .then((value) => {
+          this.tools = { at: Date.now(), value: Promise.resolve(value) };
+        })
+        .finally(() => {
+          this.toolsRefreshing = false;
+        });
     }
     return this.tools.value;
   }
