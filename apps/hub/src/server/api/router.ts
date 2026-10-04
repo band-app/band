@@ -65,6 +65,7 @@ import { projectsRouter } from "./projects/router";
 import { queueRouter } from "./queue/router";
 import { reportsRouter } from "./reports/router";
 import { reviewsRouter } from "./reviews/router";
+import { runnersRouter } from "./runners/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
 import { statusesRouter, statusRouter } from "./statuses/router";
@@ -101,6 +102,7 @@ export const appRouter = t.router({
   hosts: hostsRouter,
   environment: environmentRouter,
   hostRequests: hostRequestsRouter,
+  runners: runnersRouter,
   tokens: tokensRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

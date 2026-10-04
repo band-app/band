@@ -56,6 +56,8 @@ export const REFUSED_CLI_COMMANDS: Readonly<Record<string, string>> = {
   "tokens create-device": "token management is admin only",
   "hosts list": "lists every host, which a worker has no need to see",
   "hosts remove": "admin only, removes a host",
+  "runners list": "reads the hub's runner settings, which name its scripts and machines",
+  "runners log": "reads what the hub's runner scripts printed",
   "env validate": "admin only, reads a path on the hub's machine",
   "terminals restart-daemon": "ends every terminal on the hub's machine",
   "terminals attach":

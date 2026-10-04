@@ -130,7 +130,9 @@
         "apps/hub/src/server/api/web-app-manifest.ts",
         "apps/hub/src/server/api/queue/router.ts",
         "apps/hub/src/server/api/browser-host/router.ts",
-        "apps/hub/src/server/services/project-service.ts"
+        "apps/hub/src/server/services/project-service.ts",
+        "apps/hub/src/server/services/runner-service.ts",
+        "apps/hub/src/server/services/_utils/runner-config.ts"
       ],
       "linter": {
         "rules": {

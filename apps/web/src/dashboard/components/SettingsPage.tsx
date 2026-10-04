@@ -40,6 +40,7 @@ import { BrowserProfilesSettings } from "./settings/BrowserProfilesSettings";
 import { EnvironmentSettings } from "./settings/EnvironmentSettings";
 import { HostsSettings } from "./settings/HostsSettings";
 import { HubSettings } from "./settings/HubSettings";
+import { RunnersSettings } from "./settings/RunnersSettings";
 import { SettingsRow } from "./settings/SettingsRow";
 import { SettingsSection } from "./settings/SettingsSection";
 
@@ -608,6 +609,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Hosts ──────────────────────────────────────── */}
             <SettingsSection title="Hosts">
               <HostsSettings />
+            </SettingsSection>
+
+            {/* ── Runners ────────────────────────────────────── */}
+            <SettingsSection title="Runners">
+              <RunnersSettings />
             </SettingsSection>
 
             {/* ── Environment ────────────────────────────────── */}
