@@ -151,6 +151,7 @@ enum ProjectsCmd {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum WorkspacesCmd {
     /// List workspaces, optionally filtered by project
     List {
@@ -186,6 +187,22 @@ enum WorkspacesCmd {
         /// `~/.band/settings.json` `cli.defaultVia` → terminal (issue #551)
         #[arg(long)]
         via: Option<String>,
+        /// Place the workspace on an online host with these labels (k=v,
+        /// comma-separated or repeated). With no match, the workspace waits
+        /// as "provisioning" until a runner provides a host.
+        #[arg(long, value_delimiter = ',')]
+        labels: Vec<String>,
+        /// Require host facts, e.g. `node=>=24` or `os=linux` (repeatable).
+        /// Implies placement.
+        #[arg(long)]
+        requires: Vec<String>,
+        /// Place on any online host, with no label or requirement.
+        #[arg(long)]
+        any_host: bool,
+        /// Where the project's repository is on the chosen host (needed the
+        /// first time the project is used there).
+        #[arg(long)]
+        host_project_path: Option<String>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -661,6 +678,10 @@ fn main() {
                 model,
                 agent,
                 via,
+                labels,
+                requires,
+                any_host,
+                host_project_path,
             } => cmd_workspaces_create(
                 &project,
                 &branch,
@@ -670,6 +691,12 @@ fn main() {
                 model.as_deref(),
                 agent.as_deref(),
                 via.as_deref(),
+                &Placement {
+                    labels: &labels,
+                    requires: &requires,
+                    any_host,
+                    host_project_path: host_project_path.as_deref(),
+                },
             ),
             WorkspacesCmd::Remove { project, name } => cmd_workspaces_remove(&project, &name),
         },
@@ -1042,6 +1069,15 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
     })
 }
 
+/// Where `workspaces create` should put the workspace, when the caller gave
+/// criteria instead of a host.
+struct Placement<'a> {
+    labels: &'a [String],
+    requires: &'a [String],
+    any_host: bool,
+    host_project_path: Option<&'a str>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_workspaces_create(
     project: &str,
@@ -1052,6 +1088,7 @@ fn cmd_workspaces_create(
     model: Option<&str>,
     agent: Option<&str>,
     via: Option<&str>,
+    placement: &Placement,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -1116,7 +1153,28 @@ fn cmd_workspaces_create(
     if let Some(agent) = agent {
         input["codingAgentId"] = serde_json::json!(agent);
     }
+    if !placement.labels.is_empty() || !placement.requires.is_empty() || placement.any_host {
+        input["placement"] = serde_json::json!({
+            "labels": parse_label_pairs(placement.labels)?,
+            "requires": parse_requirement_pairs(placement.requires)?,
+        });
+    }
+    if let Some(path) = placement.host_project_path {
+        input["hostProjectPath"] = serde_json::json!(path);
+    }
     let data = client.trpc_mutate("workspaces.create", &input)?;
+    // No host fits yet: the hub recorded a host request and creates the
+    // workspace when a runner provides one.
+    if let Some(request_id) = data
+        .get("provisioning")
+        .and_then(|p| p.get("requestId"))
+        .and_then(|r| r.as_str())
+    {
+        return Ok(CommandResult {
+            text: format!("provisioning (host request {request_id})\n"),
+            json: serde_json::json!({ "provisioning": { "requestId": request_id } }),
+        });
+    }
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
     // The server is the source of truth for the actual dispatch. It echoes
     // back the via it dispatched with (which may differ from
@@ -1369,6 +1427,26 @@ fn cmd_chats_create(
         text: format!("{id}\n"),
         json: serde_json::json!({"chat": chat}),
     })
+}
+
+/// Parse `key=constraint` host requirements such as `node=>=24`. Only the first
+/// `=` separates the key, so the constraint may start with `>=`.
+fn parse_requirement_pairs(
+    pairs: &[String],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut out = serde_json::Map::new();
+    for raw in pairs {
+        let (k, v) = raw
+            .split_once('=')
+            .ok_or_else(|| format!("requirement \"{raw}\" must be in the form key=constraint"))?;
+        if k.is_empty() || v.is_empty() {
+            return Err(format!(
+                "requirement \"{raw}\" needs a key and a constraint"
+            ));
+        }
+        out.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+    }
+    Ok(out)
 }
 
 /// Parse a list of `key=value` strings into a JSON object. Splits each

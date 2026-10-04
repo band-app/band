@@ -25,6 +25,7 @@ import { UsageScanStateQueries } from "../infra/db/queries/usage-scan-state";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { hostRegistry } from "../infra/host/registry";
 import { formatShellCommand } from "./_utils/format-shell-command";
+import { placementInput } from "./_utils/placement-input";
 // FRAGILE: ESM cycle leg — `agent-launch-service` imports `workspaceService`
 // back from this file. Safe only while `agentLaunchService` is used inside
 // method bodies, never at module top level.
@@ -52,6 +53,9 @@ import { clientStateService } from "./client-state-service";
 import { cronjobService } from "./cronjob-service";
 import { resolveWorkspaceHostId } from "./local-host-policy";
 import { panelFocusService } from "./panel-focus-service";
+// FRAGILE: ESM cycle leg — `./placement-service` imports `workspaceService` from
+// this file. Keep every `placementService` reference inside a function body.
+import { placementService } from "./placement-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
 import {
@@ -149,6 +153,10 @@ export const workspaceCreateInput = z.object({
   // Where the project's repository is on that host. Needed the first time a
   // project is used on a remote host, and remembered after that.
   hostProjectPath: z.string().min(1).optional(),
+  // Pick the host by criteria instead of naming one. The workspace goes on an
+  // online host that fits, or waits as `provisioning` while a runner starts one
+  // (plan step 3.3). `placement: {}` means any host. Excludes `hostId`.
+  placement: placementInput.optional(),
 });
 export type WorkspaceCreateInput = z.infer<typeof workspaceCreateInput>;
 
@@ -468,6 +476,8 @@ export class WorkspaceService {
     path: string;
     via?: WorkspaceVia;
     terminalId?: string;
+    /** Set when no host fits yet: the workspace is created once the request is fulfilled. */
+    provisioning?: { requestId: string };
   }> {
     const sanitizedBranch = slugifyBranchName(input.branch);
     if (!sanitizedBranch) {
@@ -511,6 +521,17 @@ export class WorkspaceService {
     }
 
     const workspaceId = toWorkspaceId(input.project, input.branch);
+    if (input.placement) {
+      if (input.hostId) {
+        throw new Error("Pass either hostId or placement, not both.");
+      }
+      const placed = await placementService.placeWorkspace(input, input.placement);
+      if (placed.kind === "request") {
+        return { ok: true, path: "", provisioning: { requestId: placed.requestId } };
+      }
+      const { placement: _placement, ...rest } = input;
+      return this.create({ ...rest, hostId: placed.hostId });
+    }
     const hostId = resolveWorkspaceHostId(input.hostId);
     // No row exists for a new workspace yet, so the host comes from the request.
     const host = hostRegistry.hostById(hostId);

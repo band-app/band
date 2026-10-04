@@ -54,6 +54,7 @@ import { editorRouter } from "./editor/router";
 import { environmentRouter } from "./environment/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
+import { hostRequestsRouter } from "./host-requests/router";
 import { hostsRouter } from "./hosts/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
@@ -99,6 +100,7 @@ export const appRouter = t.router({
   host: hostRouter,
   hosts: hostsRouter,
   environment: environmentRouter,
+  hostRequests: hostRequestsRouter,
   tokens: tokensRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

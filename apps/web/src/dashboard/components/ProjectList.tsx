@@ -73,6 +73,7 @@ import {
   UNLABELED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
+import { useHostRequests } from "../hooks/use-host-requests";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import {
   usePromoteProjectToGit,
@@ -98,6 +99,7 @@ import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
 import { ProjectAvatar } from "./ProjectAvatar";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
+import { ProvisioningWorkspaceCard } from "./ProvisioningWorkspaceCard";
 import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
 
 /**
@@ -213,6 +215,7 @@ function SortableProject({
   // workspace button, and crucially no pinning (the workspace is already
   // at the project level — there's nothing to "pull up to the top"). See
   // #427.
+  const provisioning = useHostRequests().filter((r) => r.project === project.name);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   // Plain projects are guaranteed to have exactly one worktree (the
@@ -522,8 +525,11 @@ function SortableProject({
           (no divider rail) conveys the hierarchy, keeping the list uncluttered. */}
       {!isPlain && (
         <CollapsibleSection collapsed={collapsed} className="flex flex-col gap-0.5 ml-3">
+          {provisioning.map((request) => (
+            <ProvisioningWorkspaceCard key={request.id} request={request} />
+          ))}
           {project.worktrees.length === 0 ? (
-            hasPinnedSiblings ? null : (
+            hasPinnedSiblings || provisioning.length > 0 ? null : (
               <p className="text-[13px] text-foreground/60 px-4 py-2">No workspaces yet</p>
             )
           ) : (
