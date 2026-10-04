@@ -34,6 +34,7 @@ import type {
 } from "../infra/db/queries/settings";
 import { bandHome, resolveAgentDefinition, SettingsQueries } from "../infra/db/queries/settings";
 import { TokenQueries } from "../infra/db/queries/tokens";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 import { hostRegistry } from "../infra/host/registry";
 import {
   agentSessionService,
@@ -92,7 +93,11 @@ export class ModelRefreshService {
    */
   async hostForAgent(def: CodingAgentDefinition, hostId?: string): Promise<Host> {
     if (hostId) return hostRegistry.hostById(hostId);
-    const candidates = [hostRegistry.local, ...hostRegistry.all().filter((h) => h.id !== "local")];
+    // `BAND_LOCAL_HOST=off` keeps work off the hub's own machine, agents included.
+    const candidates = [
+      ...(isLocalHostEnabled() ? [hostRegistry.local] : []),
+      ...hostRegistry.all().filter((h) => h.id !== "local"),
+    ];
     for (const host of candidates) {
       if (host.id !== "local" && this.hostQueries.findHost(host.id)?.status !== "online") continue;
       if (await canLaunch(host, def)) return host;
@@ -112,7 +117,7 @@ export class ModelRefreshService {
   }> {
     const settings = this.queries.load();
     const hosts = hostRegistry.all().flatMap((host) => {
-      if (host.id === "local") return [{ host, name: "Local", up: true }];
+      if (host.id === "local") return [{ host, name: "Local", up: isLocalHostEnabled() }];
       const row = this.hostQueries.findHost(host.id);
       return [{ host, name: row?.name ?? host.id, up: row?.status === "online" }];
     });
@@ -130,7 +135,7 @@ export class ModelRefreshService {
       );
       agents.push({ agentId: def.id, agentType: def.type, hosts: perHost });
     }
-    let defaultHostId = hostRegistry.local.id;
+    let defaultHostId = hosts.find((h) => h.up)?.host.id ?? hostRegistry.local.id;
     if (workspaceId) {
       try {
         const id = hostRegistry.hostFor(workspaceId).id;
@@ -140,7 +145,7 @@ export class ModelRefreshService {
       }
     }
     return {
-      hosts: hosts.map(({ host, name }) => ({ id: host.id, name })),
+      hosts: hosts.filter((h) => h.up).map(({ host, name }) => ({ id: host.id, name })),
       defaultHostId,
       agents,
     };

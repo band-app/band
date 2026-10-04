@@ -38,12 +38,14 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
     queryFn: async () => (await trpc.hosts.list.query()).hosts,
     enabled: open,
   });
-  // Only machines that are connected can take a new workspace. Local is always there.
+  // Only machines that are connected can take a new workspace. Local is there unless the hub turned it off.
   const hostChoices = (hosts.data ?? []).filter(
-    (h) => h.id === LOCAL_HOST_ID || h.status === "online",
+    (h) => h.usable && (h.id === LOCAL_HOST_ID || h.status === "online"),
   );
-  // A host that went offline since it was picked falls back to local.
-  const hostId = hostChoices.some((h) => h.id === chosenHostId) ? chosenHostId : LOCAL_HOST_ID;
+  // A host that went offline since it was picked falls back to local, or to the first host left.
+  const hostId = hostChoices.some((h) => h.id === chosenHostId)
+    ? chosenHostId
+    : (hostChoices[0]?.id ?? LOCAL_HOST_ID);
   const remote = hostId !== LOCAL_HOST_ID;
   const hostRoots = hostChoices.find((h) => h.id === hostId)?.roots ?? [];
 

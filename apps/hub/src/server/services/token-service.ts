@@ -21,6 +21,7 @@ import {
   TokenQueries,
   type TokenRow,
 } from "../infra/db/queries/tokens";
+import { isLocalHostEnabled } from "../infra/host/local-host-enabled";
 
 const log = createLogger("token-service");
 
@@ -73,7 +74,10 @@ export interface HostView {
   capabilities: string[];
   /** The worker's home directory, or null when it has not said. */
   home: string | null;
+  /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
+  usable: boolean;
 }
+
 
 /** Why `removeHost` refused. */
 export class HostRemoveError extends Error {
@@ -338,6 +342,7 @@ export class TokenService {
       roots: stringList(h.info?.roots),
       capabilities: capabilityNames(h.info?.capabilities),
       home: typeof h.info?.home === "string" ? h.info.home : null,
+      usable: h.id !== "local" || isLocalHostEnabled(),
     }));
   }
 

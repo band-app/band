@@ -50,6 +50,7 @@ import { clientStateService } from "./client-state-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { resolveWorkspaceHostId } from "./local-host-policy";
 import { panelFocusService } from "./panel-focus-service";
 import { recordPushedHead } from "./pushed-sha-service";
 import { agentModeFromVia, SettingsService, settingsService } from "./settings-service";
@@ -510,7 +511,7 @@ export class WorkspaceService {
     }
 
     const workspaceId = toWorkspaceId(input.project, input.branch);
-    const hostId = input.hostId ?? hostRegistry.local.id;
+    const hostId = resolveWorkspaceHostId(input.hostId);
     // No row exists for a new workspace yet, so the host comes from the request.
     const host = hostRegistry.hostById(hostId);
     const remote = hostId !== hostRegistry.local.id;
