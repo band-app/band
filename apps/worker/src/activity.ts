@@ -7,16 +7,20 @@ export class ActivityTracker {
   private holds = 0;
   private lastActivity = Date.now();
 
-  /** Marks something as running. Call the returned function once, when it is done. */
-  hold(): () => void {
+  /**
+   * Marks something as running. Call the returned function once, when it is done.
+   * A `passive` hold keeps the worker up while it lasts, but finishing it does not
+   * restart the idle clock: it is a read the hub makes on its own schedule.
+   */
+  hold(options: { passive?: boolean } = {}): () => void {
     this.holds++;
-    this.lastActivity = Date.now();
+    if (!options.passive) this.lastActivity = Date.now();
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.holds--;
-      this.lastActivity = Date.now();
+      if (!options.passive) this.lastActivity = Date.now();
     };
   }
 

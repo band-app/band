@@ -7,6 +7,7 @@ import type { Host } from "@band-app/host-api";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hostRegistry } from "../../infra/host/registry";
+import { ephemeralLifecycleService } from "../../services/ephemeral-lifecycle-service";
 import {
   DEFAULT_LIST_LIMIT,
   HostRemoveError,
@@ -53,7 +54,13 @@ export const hostsRouter = t.router({
           local.tools = info.tools;
         }
       }
-      return { hosts };
+      // An ephemeral worker the hub could not store before it exits stays up, and says why.
+      return {
+        hosts: hosts.map((h) => ({
+          ...h,
+          sleepError: ephemeralLifecycleService.lastError(h.id) ?? null,
+        })),
+      };
     }),
 
   /**

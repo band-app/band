@@ -125,6 +125,9 @@ export class CliCache {
       }
     } finally {
       clearTimeout(timer);
+      // Ending the worker's side lets the channel close. An open one counts as activity
+      // and would keep an ephemeral worker from ever going idle.
+      ch.end();
     }
     const data = Buffer.concat(chunks);
     const sha = createHash("sha256").update(data).digest("hex");

@@ -19,6 +19,7 @@ import {
   deleteTerminalLayout,
   removeTerminalFromLayout,
 } from "./_utils/terminal-layout-manager";
+import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
 
@@ -241,6 +242,8 @@ export class TerminalService {
     // `handleExit`), so it holds even when the shell outlives this server.
     opts?: { cleanupOnExit?: boolean },
   ): Promise<TerminalListEntry> {
+    // Opening a terminal in a sleeping workspace brings its worker back first.
+    await ephemeralLifecycleService.ensureAwake(workspaceId);
     const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);

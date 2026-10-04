@@ -88,6 +88,8 @@ export interface WorktreeInfo {
    *  The DB column is `NOT NULL DEFAULT false`, so the value is always
    *  defined when the worktree comes through `projects.list`. */
   pinned: boolean;
+  /** Set while the workspace's ephemeral worker has exited (`sleeping`) or is being started again (`waking`). */
+  lifecycle?: "sleeping" | "waking";
 }
 
 export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";

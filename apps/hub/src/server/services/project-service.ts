@@ -15,6 +15,7 @@ import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
 import { hostRegistry } from "../infra/host/registry";
 import { GIT_SPAWN_CONCURRENCY, mapLimited } from "./_utils/map-limited";
 import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
+import { ephemeralLifecycleService, type WorkspaceLifecycle } from "./ephemeral-lifecycle-service";
 import {
   type ProjectAvatarInfo,
   type ProjectAvatarService,
@@ -84,6 +85,8 @@ export class ProjectService {
         pinned: boolean;
         /** The remote host the workspace lives on. Absent for the hub's own machine. */
         hostId?: string;
+        /** Set while the workspace's ephemeral worker has exited (`sleeping`) or is coming back (`waking`). */
+        lifecycle?: WorkspaceLifecycle;
         workspaceId: string;
         // `WorkspaceAgentInfo` is the per-workspace agent snapshot owned
         // by the infra status event-bus (`infra/events/status-event-bus.ts`).
@@ -100,6 +103,7 @@ export class ProjectService {
     const settings = this.settings.get();
     const statuses = this.statusQueries.loadCurrent();
     const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
+    const lifecycles = ephemeralLifecycleService.states();
 
     // Inline, read-only kind re-detection via the shared helper.
     // Persistence lives in `syncWorktrees` (called on every branch-
@@ -196,9 +200,11 @@ export class ProjectService {
           // Identity is by the immutable `name`, not the live branch.
           const workspaceId = toWorkspaceId(project.name, wt.name);
           const status = statusMap.get(workspaceId);
+          const lifecycle = lifecycles.get(workspaceId);
           return {
             ...wt,
             workspaceId,
+            ...(lifecycle ? { lifecycle } : {}),
             agent: status?.agent ?? null,
           };
         }),

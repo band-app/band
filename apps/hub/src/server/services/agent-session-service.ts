@@ -25,7 +25,13 @@
 
 import { randomUUID } from "node:crypto";
 import type * as acp from "@agentclientprotocol/sdk";
-import type { AcpAgentDefinition, ClaudeCliArgs, ClaudeDefaults, Host } from "@band-app/host-api";
+import {
+  type AcpAgentDefinition,
+  type ClaudeCliArgs,
+  type ClaudeDefaults,
+  type Host,
+  HostOfflineError,
+} from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import type {
   ChatEvent,
@@ -53,6 +59,7 @@ import { PendingWork } from "./_utils/agent-pending-work";
 import { rowsToEvents } from "./_utils/chat-log-replay";
 import { agentExtraDirs } from "./_utils/shared-dir";
 import { type ChatSession, chatService } from "./chat-service";
+import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { workspaceService } from "./workspace-service";
 
 const log = createLogger("agent-sessions");
@@ -383,6 +390,22 @@ async function claudeDefaults(
   def: CodingAgentDefinition,
   configOptions: acp.SessionConfigOption[],
   learn = false,
+): Promise<ResolvedDefaults | undefined> {
+  try {
+    return await readClaudeDefaults(chatId, chat, def, configOptions, learn);
+  } catch (err) {
+    // Showing a chat whose worker is asleep or gone needs no answer from it.
+    if (err instanceof HostOfflineError) return undefined;
+    throw err;
+  }
+}
+
+async function readClaudeDefaults(
+  chatId: string,
+  chat: ChatSession | undefined,
+  def: CodingAgentDefinition,
+  configOptions: acp.SessionConfigOption[],
+  learn: boolean,
 ): Promise<ResolvedDefaults | undefined> {
   if (def.type !== "claude-code") return undefined;
   const workspace = chat ? workspaceService.resolve(chat.workspaceId) : undefined;
@@ -910,6 +933,8 @@ export class AgentSessionService {
   async ensureSession(chatId: string, purpose: "prompt" | "view"): Promise<string | null> {
     const chat = chatService.get(chatId);
     if (!chat) throw new ChatNotFoundError(chatId);
+    // A message to a sleeping workspace brings its worker back first.
+    if (purpose === "prompt") await ephemeralLifecycleService.ensureAwake(chat.workspaceId);
     const workspace = workspaceService.resolve(chat.workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${chat.workspaceId}`);
     const def = definitionFor(chat);
@@ -1087,6 +1112,16 @@ export class AgentSessionService {
   /** True while the chat's agent runs a turn. */
   isInTurn(chatId: string): boolean {
     return runtimes.get(chatId)?.inTurn === true;
+  }
+
+  /**
+   * True while the chat's agent has something Band must not cut off: a turn,
+   * a request waiting on the user, or work the agent started on its own.
+   */
+  isActive(chatId: string): boolean {
+    const rt = runtimes.get(chatId);
+    if (!rt) return false;
+    return rt.inTurn || rt.pending.size > 0 || rt.work.outstanding().length > 0;
   }
 
   /**

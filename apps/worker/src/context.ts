@@ -29,6 +29,25 @@ export async function describeHost(ctx: WorkerContext): Promise<HostInfo> {
   };
 }
 
+/**
+ * Reads the hub makes on its own schedule (status pollers, the project list, a
+ * file tree), so they must not keep an ephemeral worker awake. A call still
+ * holds the worker while it runs, but finishing one does not restart the idle clock.
+ */
+const PASSIVE_METHODS = new Set([
+  "host.info",
+  "worktree.list",
+  "git.exec",
+  "git.gh",
+  "fs.stat",
+  "fs.realpath",
+  "fs.readFile",
+  "fs.list",
+  "fs.glob",
+  "fs.du",
+  "search.listFiles",
+]);
+
 type Handler<T> = (params: Params, call: { signal: AbortSignal }) => T | Promise<T>;
 
 /** Registers RPC methods, each counted as activity and with errors mapped to RPC codes. */
@@ -54,7 +73,7 @@ export class Registrar {
   private add(method: string, fn: Handler<unknown>): void {
     this.names.push(method);
     this.ctx.session.handle(method, async (raw, call) => {
-      const release = this.ctx.activity.hold();
+      const release = this.ctx.activity.hold({ passive: PASSIVE_METHODS.has(method) });
       try {
         return await fn(asParams(raw ?? {}), call);
       } catch (err) {

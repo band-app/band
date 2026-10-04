@@ -104,6 +104,37 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
 }
 
 /**
+ * Marks a seeded workspace as asleep (an ephemeral worker stored it and exited, plan step 3.5),
+ * or waking when `waking` is set. The UI only reads the row, so no worker is involved.
+ */
+export function seedSleepingWorkspace(
+  tmpHome: string,
+  row: { workspaceId: string; project: string; name: string; path: string; waking?: boolean },
+): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    sqlite
+      .prepare(
+        `INSERT INTO workspace_sleep (workspace_id, host_id, project, name, branch, worktree_path,
+           base_sha, snapshot_sha, ref, store, session_ids, waking_since, created_at)
+         VALUES (?, 'h-seeded', ?, ?, ?, ?, 'a', 'a', 'refs/heads/band/wip/x', 'remote', '[]', ?, ?)`,
+      )
+      .run(
+        row.workspaceId,
+        row.project,
+        row.name,
+        row.name,
+        row.path,
+        row.waking ? Date.now() : null,
+        Date.now(),
+      );
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
  * Delete a seeded project and its workspaces from the DB, the way removing
  * them while Band was closed leaves it. Call it while the server is stopped.
  */
