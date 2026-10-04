@@ -275,3 +275,40 @@ export function moveSeededWorkspacesToHost(home: string, hostId: string): void {
   writeFileSync(`${file}.tmp`, JSON.stringify([...new Set(withReal)]));
   renameSync(`${file}.tmp`, file);
 }
+
+function rowsOffHost(home: string, hostId: string): number {
+  const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
+  try {
+    sqlite.exec("PRAGMA busy_timeout = 5000");
+    const row = sqlite
+      .prepare("SELECT count(*) AS n FROM worktrees WHERE host_id <> ?")
+      .get(hostId) as { n: number };
+    return row.n;
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
+ * Moves the seeded workspaces onto `hostId` and keeps them there. The hub's
+ * boot sync can still hold the rows it loaded before the move and save them
+ * back as `local`, which would put a workspace on the hub's own host while
+ * the guard lists its path as the worker's. So this re-applies the move until
+ * the rows have stayed on the host across two checks.
+ */
+export async function settleWorkspacesOnHost(home: string, hostId: string): Promise<void> {
+  let stable = 0;
+  const deadline = Date.now() + 10_000;
+  while (stable < 2) {
+    moveSeededWorkspacesToHost(home, hostId);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (rowsOffHost(home, hostId) === 0) {
+      stable++;
+    } else {
+      stable = 0;
+      if (Date.now() > deadline) {
+        throw new Error("the seeded workspaces would not stay on the loopback worker's host");
+      }
+    }
+  }
+}

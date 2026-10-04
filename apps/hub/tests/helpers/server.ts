@@ -32,7 +32,7 @@ import { stopTerminalDaemon } from "./terminal-daemon";
 import {
   assertNoWorkerPathAccess,
   isRemoteLoopback,
-  moveSeededWorkspacesToHost,
+  settleWorkspacesOnHost,
   startLoopbackWorker,
   workerGuardEnv,
 } from "./test-host";
@@ -231,7 +231,7 @@ export async function startServer(opts: StartServerOptions): Promise<ServerHandl
     await handle.close();
     throw err;
   }
-  moveSeededWorkspacesToHost(handle.home, worker.hostId);
+  await settleWorkspacesOnHost(handle.home, worker.hostId);
   return {
     ...handle,
     close: async (closeOpts) => {
