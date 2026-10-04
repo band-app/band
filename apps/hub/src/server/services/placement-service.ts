@@ -20,6 +20,7 @@ import { z } from "zod";
 import { HostRequestQueries, type HostRequestRow } from "../infra/db/queries/host-requests";
 import { hostRegistry } from "../infra/host/registry";
 import type { Placement } from "./_utils/placement-input";
+import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import { tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { type WorkspaceCreateInput, workspaceService } from "./workspace-service";
@@ -51,6 +52,18 @@ export class HostRequestError extends Error {
     super(message);
     this.name = "HostRequestError";
   }
+}
+
+/** What a wake request (plan step 3.5) carries in `input.wake`: the sleeping host to bring back. */
+export interface WakeInput {
+  hostId: string;
+  workspaceIds: string[];
+}
+
+/** The sleeping host a request is for, or null for an ordinary request for a new workspace. */
+export function wakeOf(row: HostRequestRow): WakeInput | null {
+  const wake = (row.input as { wake?: WakeInput }).wake;
+  return wake && typeof wake.hostId === "string" ? wake : null;
 }
 
 /** What placement knows about a host. */
@@ -127,7 +140,7 @@ export class PlacementService {
     this.timer = null;
   }
 
-  private timeoutMs(): number {
+  timeoutMs(): number {
     const raw = Number(process.env.BAND_PLACEMENT_TIMEOUT_MS);
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
   }
@@ -138,6 +151,8 @@ export class PlacementService {
     const out: Candidate[] = [];
     for (const row of tokenService.listHosts(1000)) {
       if (row.status !== "online" || !row.usable) continue;
+      // An ephemeral worker is claimed by the workspace it was started for.
+      if ((row.info as { mode?: unknown } | null)?.mode === "ephemeral") continue;
       const info =
         row.id === LOCAL_HOST_ID ? await hostRegistry.local.info().catch(() => null) : null;
       const stored = (row.info ?? {}) as Record<string, unknown>;
@@ -212,6 +227,48 @@ export class PlacementService {
     log.info(`no host fits ${workspaceId}; recorded request ${id}`);
     this.publish(id, workspaceId, "pending");
     return { kind: "request", requestId: id };
+  }
+
+  /**
+   * Asks for a machine to bring a sleeping ephemeral host back (plan step
+   * 3.5). The request repeats the placement of the one that created the host
+   * and names the host in `input.wake`, so the runner starts a worker with the
+   * same id. Asking again while a request is open returns that request.
+   */
+  requestWake(wake: WakeInput, project: string, branch: string): HostRequestRow {
+    const first = wake.workspaceIds[0];
+    if (!first) throw new Error("A wake request names no workspace");
+    const open = this.queries.findOpenForWorkspace(first);
+    if (open) return open;
+    const earlier = this.queries.latestForHost(wake.hostId);
+    const now = this.now();
+    const row: HostRequestRow = {
+      id: `hr-${randomUUID().slice(0, 12)}`,
+      workspaceId: first,
+      project,
+      branch,
+      labels: earlier?.labels ?? {},
+      requires: earlier?.requires ?? {},
+      environment: earlier?.environment ?? null,
+      input: {
+        wake,
+        ...(typeof (earlier?.input as { hostProjectPath?: unknown })?.hostProjectPath === "string"
+          ? { hostProjectPath: (earlier?.input as { hostProjectPath: string }).hostProjectPath }
+          : {}),
+      },
+      status: "pending",
+      leasedBy: null,
+      leaseExpiresAt: null,
+      hostId: null,
+      error: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.queries.insert(row);
+    log.info(`recorded request ${row.id} to wake ${wake.hostId}`);
+    this.publish(row.id, first, "pending");
+    return row;
   }
 
   // ---- the lease API a runner uses ----------------------------------------
@@ -293,8 +350,9 @@ export class PlacementService {
     return this.require(requestId);
   }
 
+  /** The requests the UI lists: waiting workspaces. A wake request shows as its workspace waking instead. */
   list(): HostRequestRow[] {
-    return this.queries.listActive();
+    return this.queries.listActive().filter((r) => wakeOf(r) === null);
   }
 
   get(requestId: string): HostRequestRow | undefined {
@@ -345,6 +403,18 @@ export class PlacementService {
     if (host?.status !== "online") return;
     this.completing.add(row.id);
     try {
+      const wake = wakeOf(row);
+      if (wake) {
+        await ephemeralLifecycleService.restoreHost(
+          wake.hostId,
+          (row.input as { hostProjectPath?: string }).hostProjectPath,
+        );
+        if (this.queries.complete(row.id, this.now())) {
+          log.info(`host ${wake.hostId} is awake`);
+          this.publish(row.id, row.workspaceId, "fulfilled");
+        }
+        return;
+      }
       await workspaceService.create({
         ...(row.input as WorkspaceCreateInput),
         hostId: row.hostId,

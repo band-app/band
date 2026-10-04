@@ -36,6 +36,16 @@ export class HostRequestQueries {
       .get();
   }
 
+  /** The newest request that was fulfilled with this host. */
+  latestForHost(hostId: string): HostRequestRow | undefined {
+    return getDb()
+      .select()
+      .from(hostRequests)
+      .where(and(eq(hostRequests.hostId, hostId), eq(hostRequests.status, "fulfilled")))
+      .orderBy(desc(hostRequests.createdAt))
+      .get();
+  }
+
   /** Requests the UI shows: not cancelled, and not yet turned into a workspace. */
   listActive(): HostRequestRow[] {
     return getDb()

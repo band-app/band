@@ -79,6 +79,11 @@ export class WorkerCliService {
       try {
         await ch.send(data);
         ch.end();
+        // The worker ends its side once it has the body. Reading that end marker is what
+        // lets the channel close, and an open channel keeps an ephemeral worker from going idle.
+        const drained = setTimeout(() => ch.reset("the worker did not close the channel"), 30_000);
+        drained.unref?.();
+        await ch.readAll().finally(() => clearTimeout(drained));
       } catch (err) {
         ch.reset(err instanceof Error ? err.message : "cli transfer failed");
       }

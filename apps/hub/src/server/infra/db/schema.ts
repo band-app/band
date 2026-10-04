@@ -202,6 +202,36 @@ export const hostRequests = sqliteTable(
   ],
 );
 
+// A workspace whose ephemeral worker exited after persisting it (plan step 3.5).
+// The row records where the checkout went (`store`, `ref`, `snapshot_sha`) and
+// the agent session ids whose files the hub holds. It stays until a new
+// worker restores the workspace. `waking_since` is set while a host request
+// for that restore is open.
+export const workspaceSleep = sqliteTable(
+  "workspace_sleep",
+  {
+    workspaceId: text("workspace_id").primaryKey(),
+    hostId: text("host_id").notNull(),
+    project: text("project").notNull(),
+    // The workspace's immutable name (the worktree's `name`), also its branch at creation.
+    name: text("name").notNull(),
+    // The branch checked out when the worker exited. Empty for a detached HEAD.
+    branch: text("branch").notNull(),
+    worktreePath: text("worktree_path").notNull(),
+    baseSha: text("base_sha").notNull(),
+    // The commit holding the working tree. Equals `base_sha` when it was clean.
+    snapshotSha: text("snapshot_sha").notNull(),
+    ref: text("ref").notNull(),
+    // origin: pushed to the origin remote. hub: bundle held by the hub.
+    // remote: already reachable from a remote, nothing was uploaded.
+    store: text("store", { enum: ["origin", "hub", "remote"] }).notNull(),
+    sessionIds: text("session_ids", { mode: "json" }).$type<string[]>().notNull().default([]),
+    wakingSince: integer("waking_since"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("workspace_sleep_host_idx").on(t.hostId)],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

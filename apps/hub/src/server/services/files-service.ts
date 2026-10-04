@@ -18,6 +18,7 @@
 import { dirname, extname, join, resolve, sep } from "node:path";
 import type { FsStat, HostFs } from "@band-app/host-api";
 import { WorkspaceNotFoundError } from "../errors";
+import { ephemeralLifecycleService } from "./ephemeral-lifecycle-service";
 import {
   workspaceService as defaultWorkspaceService,
   type WorkspaceService,
@@ -152,6 +153,7 @@ export class FilesService {
   }
 
   async listFiles(workspaceId: string, path = ""): Promise<ListFilesResult> {
+    await ephemeralLifecycleService.ensureAwake(workspaceId);
     const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: true });
     const dirents = await fs.list(target);
     const entries: FileEntry[] = dirents
@@ -167,6 +169,7 @@ export class FilesService {
   }
 
   async getFile(workspaceId: string, path: string): Promise<GetFileResult> {
+    await ephemeralLifecycleService.ensureAwake(workspaceId);
     if (!path) throw new Error("Path is required");
     const { target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
 
@@ -199,6 +202,7 @@ export class FilesService {
   }
 
   async saveFile(workspaceId: string, path: string, content: string): Promise<{ ok: true }> {
+    await ephemeralLifecycleService.ensureAwake(workspaceId);
     const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     // Refuse to write into `.git/*` — overwriting `config`, `HEAD`, or
     // a hook would corrupt the worktree or run attacker-controlled code
@@ -214,6 +218,7 @@ export class FilesService {
   }
 
   async createFile(workspaceId: string, path: string, content = ""): Promise<{ ok: true }> {
+    await ephemeralLifecycleService.ensureAwake(workspaceId);
     const { root, target, fs } = this.resolveInside(workspaceId, path, { allowRoot: false });
     // Same .git guard as saveFile — creating `.git/hooks/pre-commit`
     // would let an attacker run arbitrary code under the user's account

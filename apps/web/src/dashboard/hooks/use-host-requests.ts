@@ -17,6 +17,11 @@ export function useHostRequests() {
   useEffect(
     () =>
       adapter.subscribeStatusEvents((event) => {
+        // A worker that exits or comes back changes whether its workspaces sleep.
+        if (event.kind === "host-status-changed") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+          return;
+        }
         if (event.kind !== "host-request-changed") return;
         void queryClient.invalidateQueries({ queryKey: HOST_REQUESTS_KEY });
         void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
