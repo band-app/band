@@ -1,6 +1,6 @@
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+import { ghRunner, gitRunner, type Host, HostOfflineError } from "@band-app/host-api";
 import { getRepoInfo, type RepoInfo } from "@band-app/host-local/git/git-client";
-import { ghRunner, gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { eq } from "drizzle-orm";
@@ -35,7 +35,10 @@ interface WorkspaceInfo {
   branch: string;
   defaultBranch: string;
   worktreePath: string;
+  /** The project's checkout on the workspace's host. */
   projectPath: string;
+  /** The host the workspace lives on. Absent or `local` is the hub's own machine. */
+  hostId?: string;
   /**
    * Whether the project's git repo has an `origin` remote. Populated
    * from `ProjectState.hasOrigin`, which `syncWorktrees` keeps in sync
@@ -106,6 +109,22 @@ const pollerState = {
  */
 const lastCIPollErrorByHost = new Map<string, string>();
 
+/** The host a workspace's git runs on, or null when the hub has no such host registered. */
+function hostFor(project: string, hostId: string | undefined): Host | null {
+  if (hostId === undefined || hostId === "local") return hostRegistry.hostForProject(project);
+  try {
+    return hostRegistry.hostById(hostId);
+  } catch {
+    return null;
+  }
+}
+
+function hostOf(ws: Pick<WorkspaceInfo, "project" | "hostId">): Host {
+  const host = hostFor(ws.project, ws.hostId);
+  if (!host) throw new Error(`Unknown host "${ws.hostId}"`);
+  return host;
+}
+
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
   const workspaces: WorkspaceInfo[] = [];
@@ -115,16 +134,22 @@ function getWorkspaces(): WorkspaceInfo[] {
     // avoids noisy `git status` / `gh` errors in the server log.
     if (project.kind === "plain") continue;
     for (const wt of project.worktrees) {
-      // A worker's checkout is not on this machine; the poller reads local paths only.
-      if (wt.hostId && wt.hostId !== "local") continue;
+      const remote = wt.hostId !== undefined && wt.hostId !== "local";
+      // A remote workspace is read on its host, from the project's checkout there.
+      const projectPath = remote
+        ? hostRegistry.projectPathOn(project.name, wt.hostId as string, project.path)
+        : project.path;
+      if (projectPath === null || !hostFor(project.name, wt.hostId)) continue;
       workspaces.push({
         workspaceId: toWorkspaceId(project.name, wt.name),
         project: project.name,
         branch: wt.branch,
         defaultBranch: project.defaultBranch,
         worktreePath: wt.path,
-        projectPath: project.path,
-        hasOrigin: project.hasOrigin,
+        projectPath,
+        hostId: remote ? wt.hostId : undefined,
+        // The hub's flag describes its own copy; a worker's repo is probed.
+        hasOrigin: remote ? true : project.hasOrigin,
       });
     }
   }
@@ -143,7 +168,7 @@ async function forEachLimited<T>(items: readonly T[], task: (item: T) => Promise
  * header only when the branch has a resolvable upstream, and one line per
  * changed path (`u <XY>` for unmerged ones).
  */
-async function getGitStatus(project: string, worktreePath: string): Promise<GitStatus> {
+async function getGitStatus(ws: WorkspaceInfo): Promise<GitStatus> {
   const status: GitStatus = {
     dirty: false,
     conflict: false,
@@ -154,11 +179,13 @@ async function getGitStatus(project: string, worktreePath: string): Promise<GitS
 
   let porcelain: string;
   try {
-    porcelain = await gitRunner(hostRegistry.hostForProject(project))(
+    porcelain = await gitRunner(hostOf(ws))(
       ["status", "--porcelain=v2", "--branch"],
-      worktreePath,
+      ws.worktreePath,
     );
-  } catch {
+  } catch (err) {
+    // An offline worker says nothing about the workspace; keep the stored status.
+    if (err instanceof HostOfflineError) throw err;
     // git status failed - leave defaults
     return status;
   }
@@ -215,12 +242,13 @@ export async function getBatchedCIStatuses(
   // same `projectPath`; without this, each tick fans out to N
   // identical `git remote get-url origin` subprocesses. One probe per
   // unique project per tick is all we need.
-  const uniqueProjectPaths = [...new Set(workspaces.map((ws) => ws.projectPath))];
-  const projectByPath = new Map(workspaces.map((ws) => [ws.projectPath, ws.project]));
+  const repoKey = (ws: WorkspaceInfo) => `${ws.hostId ?? "local"}\0${ws.projectPath}`;
+  const repoWorkspaces = new Map(workspaces.map((ws) => [repoKey(ws), ws]));
+  const uniqueProjectPaths = [...repoWorkspaces.keys()];
   const repoInfoByPath = new Map<string, RepoInfo | null>();
-  await forEachLimited(uniqueProjectPaths, async (path) => {
-    const host = hostRegistry.hostForProject(projectByPath.get(path) as string);
-    repoInfoByPath.set(path, await getRepoInfo(path, gitRunner(host)));
+  await forEachLimited(uniqueProjectPaths, async (key) => {
+    const ws = repoWorkspaces.get(key) as WorkspaceInfo;
+    repoInfoByPath.set(key, await getRepoInfo(ws.projectPath, gitRunner(hostOf(ws))));
   });
 
   // Caller already filtered to `hasOrigin === true`, so a null result
@@ -229,11 +257,11 @@ export async function getBatchedCIStatuses(
   // misbehaving (binary missing, auth broken, FS perms). Surface those
   // at `warn` so operators don't miss them. `syncWorktrees` will rewrite
   // `hasOrigin` on its next tick and the noise stops on its own.
-  for (const path of uniqueProjectPaths) {
-    if (repoInfoByPath.get(path) === null) {
+  for (const [key, ws] of repoWorkspaces) {
+    if (repoInfoByPath.get(key) === null && ws.hostId === undefined) {
       log.warn(
         "CI poll: getRepoInfo returned null for %s despite hasOrigin=true; will reconcile on next sync tick",
-        path,
+        ws.projectPath,
       );
     }
   }
@@ -244,7 +272,7 @@ export async function getBatchedCIStatuses(
     alias: string;
   }> = [];
   for (const [index, ws] of workspaces.entries()) {
-    const repoInfo = repoInfoByPath.get(ws.projectPath);
+    const repoInfo = repoInfoByPath.get(repoKey(ws));
     if (repoInfo) {
       resolved.push({ ws, repoInfo, alias: `ws_${index}` });
     }
@@ -262,19 +290,21 @@ export async function getBatchedCIStatuses(
     return results;
   }
 
-  // Group by GitHub host (one query per host for correct auth)
+  // Group by the machine that runs `gh` and the GitHub host (one query per
+  // pair, for correct auth).
   const byHost = new Map<string, typeof resolved>();
   for (const entry of resolved) {
-    const host = entry.repoInfo.host;
-    const group = byHost.get(host) ?? [];
+    const key = `${entry.ws.hostId ?? "local"}\0${entry.repoInfo.host}`;
+    const group = byHost.get(key) ?? [];
     group.push(entry);
-    byHost.set(host, group);
+    byHost.set(key, group);
   }
 
   const allResults = new Map<string, CIStatus>();
 
   // Execute one batched GraphQL query per host
-  for (const [host, group] of byHost) {
+  for (const [groupKey, group] of byHost) {
+    const host = group[0].repoInfo.host;
     const inputs = group.map((g) => ({
       alias: g.alias,
       branch: g.ws.branch,
@@ -291,7 +321,7 @@ export async function getBatchedCIStatuses(
     }
 
     try {
-      const output = await ghRunner(hostRegistry.hostForProject(group[0].ws.project))(ghArgs, cwd);
+      const output = await ghRunner(hostOf(group[0].ws))(ghArgs, cwd);
       const response = JSON.parse(output) as {
         data: Record<string, unknown>;
       };
@@ -319,15 +349,15 @@ export async function getBatchedCIStatuses(
 
       // Host recovered — reset the throttle so the next distinct failure
       // for this host logs again.
-      lastCIPollErrorByHost.delete(host);
+      lastCIPollErrorByHost.delete(groupKey);
     } catch (err) {
       // Log only when this host's error is new or changed since the last
       // tick; suppress identical repeats so a persistent failure doesn't
       // spam the log on every poll. Same message/prefix as before so log
       // greppers keep matching.
       const message = err instanceof Error ? err.message : String(err);
-      if (lastCIPollErrorByHost.get(host) !== message) {
-        lastCIPollErrorByHost.set(host, message);
+      if (lastCIPollErrorByHost.get(groupKey) !== message) {
+        lastCIPollErrorByHost.set(groupKey, message);
         console.error(
           `CI poll: GraphQL query failed for host (${group.length} workspaces):`,
           message,
@@ -339,8 +369,8 @@ export async function getBatchedCIStatuses(
   // Drop throttle state for hosts that dropped out of the polled set, so
   // it doesn't leak as projects/workspaces come and go — and a host that
   // returns re-arms logging.
-  for (const host of [...lastCIPollErrorByHost.keys()]) {
-    if (!byHost.has(host)) lastCIPollErrorByHost.delete(host);
+  for (const key of [...lastCIPollErrorByHost.keys()]) {
+    if (!byHost.has(key)) lastCIPollErrorByHost.delete(key);
   }
 
   // Fill in "none" for workspaces that couldn't resolve repo info
@@ -391,7 +421,7 @@ async function pollWorkspace(ws: WorkspaceInfo, newCI: CIStatus | null): Promise
   const poll = ++pollCount;
   latestPollByWorkspace.set(ws.workspaceId, poll);
   if (newCI) pendingCIByWorkspace.set(ws.workspaceId, newCI);
-  const git = await getGitStatus(ws.project, ws.worktreePath);
+  const git = await getGitStatus(ws);
   // Store and emit in an event-loop turn of its own. Git replies from the
   // exec-file worker arrive in batches, and handling a batch in one turn
   // held off terminal I/O on a slow host.
@@ -477,7 +507,14 @@ export function refreshWorkspaceBranchStatus(workspaceId: string): Promise<boole
   const ws = getWorkspaces().find((w) => w.workspaceId === workspaceId);
   if (!ws) return Promise.resolve(false);
   const refresh = pollWorkspace(ws, null)
-    .then(() => true)
+    .then(
+      () => true,
+      (err) => {
+        // An offline worker has no status to refresh.
+        if (err instanceof HostOfflineError) return false;
+        throw err;
+      },
+    )
     .finally(() => refreshesInFlight.delete(workspaceId));
   refreshesInFlight.set(workspaceId, refresh);
   return refresh;
@@ -502,12 +539,11 @@ async function pollTick() {
   // of ahead of it; the counts it changes show up on the next tick.
   let fetches: Promise<void> = Promise.resolve();
   if (isCITick) {
-    const projectByPath = new Map(workspaces.map((w) => [w.projectPath, w.project]));
-    fetches = forEachLimited([...projectByPath], async ([projectPath, project]) => {
-      await gitRunner(hostRegistry.hostForProject(project))(
-        ["fetch", "--quiet", "--all"],
-        projectPath,
-      ).catch(() => {});
+    const fetchTargets = new Map(
+      workspaces.map((w) => [`${w.hostId ?? "local"}\0${w.projectPath}`, w]),
+    );
+    fetches = forEachLimited([...fetchTargets.values()], async (ws) => {
+      await gitRunner(hostOf(ws))(["fetch", "--quiet", "--all"], ws.projectPath).catch(() => {});
     });
   }
 

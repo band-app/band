@@ -8,10 +8,8 @@
  * the service layer never spawns git itself.
  */
 
-import { existsSync } from "node:fs";
-import { readFile, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
-import { type CommandRun, gitRunner } from "@band-app/host-local/git-run";
+import { type CommandRun, gitRunner, type Host } from "@band-app/host-api";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import {
@@ -293,9 +291,13 @@ export function assertWorktreeRelative(cwd: string, filePath: string): string {
 }
 
 /** Reads an untracked file as the lines that would appear in a synthesized diff. */
-async function readUntrackedFileLines(cwd: string, file: string): Promise<string[] | null> {
+async function readUntrackedFileLines(
+  host: Host,
+  cwd: string,
+  file: string,
+): Promise<string[] | null> {
   try {
-    const content = await readFile(join(cwd, file), "utf-8");
+    const content = new TextDecoder().decode(await host.fs.readFile(join(cwd, file)));
     const lines = content.split("\n");
     if (lines.length > 0 && lines[lines.length - 1] === "") {
       lines.pop();
@@ -468,11 +470,11 @@ const MAX_COUNTED_FILE_BYTES = 1024 * 1024;
 
 /** Line count of an untracked file, or null for a binary, large or
  *  unreadable one. */
-async function countUntrackedLines(absPath: string): Promise<number | null> {
+async function countUntrackedLines(host: Host, absPath: string): Promise<number | null> {
   try {
-    const info = await stat(absPath);
-    if (!info.isFile() || info.size > MAX_COUNTED_FILE_BYTES) return null;
-    const content = await readFile(absPath);
+    const info = await host.fs.stat(absPath);
+    if (info.kind !== "file" || info.size > MAX_COUNTED_FILE_BYTES) return null;
+    const content = await host.fs.readFile(absPath);
     if (content.includes(0)) return null;
     if (content.length === 0) return 0;
     let lines = 0;
@@ -693,7 +695,7 @@ export class DiffService {
     // as the parallelised git calls above. Result-ordering preserved by
     // pairing back with the original `untrackedFiles` array.
     const untrackedLines = await Promise.all(
-      untrackedFiles.map((file) => readUntrackedFileLines(cwd, file)),
+      untrackedFiles.map((file) => readUntrackedFileLines(workspace.host, cwd, file)),
     );
 
     for (let i = 0; i < untrackedFiles.length; i++) {
@@ -754,7 +756,10 @@ export class DiffService {
     const compareBranch = options.compareBranch ?? defaultBranch;
     const cwd = workspace.worktree.path;
     const execGit = gitRunner(workspace.host);
-    const hasGit = existsSync(join(cwd, ".git"));
+    const hasGit = await workspace.host.fs.stat(join(cwd, ".git")).then(
+      () => true,
+      () => false,
+    );
     if (workspace.project.kind === "plain" || !hasGit) {
       return {
         headBranch: defaultBranch,
@@ -795,7 +800,7 @@ export class DiffService {
     applyLineCounts(status.staged, parseNumstat(stagedNumstat));
     await Promise.all(
       status.untracked.map(async (entry) => {
-        const lines = await countUntrackedLines(join(cwd, entry.path));
+        const lines = await countUntrackedLines(workspace.host, join(cwd, entry.path));
         if (lines !== null) {
           entry.additions = lines;
           entry.deletions = 0;
@@ -849,7 +854,7 @@ export class DiffService {
     if (options.oldPath) assertWorktreeRelative(cwd, options.oldPath);
 
     if (options.section === "untracked") {
-      const lines = await readUntrackedFileLines(cwd, options.filePath);
+      const lines = await readUntrackedFileLines(workspace.host, cwd, options.filePath);
       if (lines === null) return { diff: "" };
       return { diff: synthesizeAddedFileDiff(options.filePath, lines) };
     }
@@ -912,7 +917,7 @@ export class DiffService {
     options: { paths: string[]; section: "unstaged" | "staged" | "untracked" },
   ): Promise<{ ok: true }> {
     const { paths, section } = options;
-    const { cwd, execGit } = this.worktreeFor(workspaceId, paths);
+    const { cwd, execGit, host } = this.worktreeFor(workspaceId, paths);
     switch (section) {
       case "unstaged":
         await execGitOnPaths(execGit, ["restore", "--worktree"], paths, cwd);
@@ -929,7 +934,9 @@ export class DiffService {
           // No commits yet, so every staged file is new: drop it from the
           // index and delete it, as restoring from HEAD would.
           await execGitOnPaths(execGit, ["rm", "--cached", "-r", "-q"], paths, cwd);
-          await Promise.all(paths.map((p) => rm(assertWorktreeRelative(cwd, p), { force: true })));
+          await Promise.all(
+            paths.map((p) => host.fs.rm(assertWorktreeRelative(cwd, p), { force: true })),
+          );
         }
         break;
       case "untracked": {
@@ -953,7 +960,7 @@ export class DiffService {
           untracked.push(...output.split("\0").filter((p) => requested.has(p)));
         }
         await Promise.all(
-          untracked.map((p) => rm(assertWorktreeRelative(cwd, p), { force: true })),
+          untracked.map((p) => host.fs.rm(assertWorktreeRelative(cwd, p), { force: true })),
         );
         break;
       }
@@ -962,12 +969,15 @@ export class DiffService {
   }
 
   /** Resolve the workspace's worktree and check every path stays inside it. */
-  private worktreeFor(workspaceId: string, paths: string[]): { cwd: string; execGit: CommandRun } {
+  private worktreeFor(
+    workspaceId: string,
+    paths: string[],
+  ): { cwd: string; execGit: CommandRun; host: Host } {
     const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
     const cwd = workspace.worktree.path;
     for (const p of paths) assertWorktreeRelative(cwd, p);
-    return { cwd, execGit: gitRunner(workspace.host) };
+    return { cwd, execGit: gitRunner(workspace.host), host: workspace.host };
   }
 }
 

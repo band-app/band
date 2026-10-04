@@ -1,5 +1,5 @@
+import { gitRunner } from "@band-app/host-api";
 import { DETACHED_BRANCH_PREFIX, getRepoInfo } from "@band-app/host-local/git/git-client";
-import { gitRunner } from "@band-app/host-local/git-run";
 import { createLogger } from "@band-app/logger";
 import type {
   MergeMethod,

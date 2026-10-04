@@ -6,6 +6,9 @@
 //
 // The worker is on the same machine, so it sees the same temp dirs the test
 // wrote. Its root is the OS temp dir, which holds every path a test seeds.
+// The hub must not see them: `worker-fs-guard.mjs` is preloaded into the hub
+// process and fails any fs call or child process cwd under a worker-owned
+// path, as the hub would on a real worker's disk (see `workerGuardEnv`).
 //
 // A test that cannot run on a worker (it reaches into the hub's own terminal
 // daemon, the hub's machine, or a path outside the temp dir) opts out with
@@ -13,10 +16,19 @@
 // of those files is in `docs/integration-testing.md`.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { waitFor } from "./wait-for";
 
 type TestHostMode = "local" | "remote-loopback";
@@ -30,6 +42,52 @@ function readMode(): TestHostMode {
 }
 
 export const isRemoteLoopback = readMode() === "remote-loopback";
+
+const GUARD_PRELOAD = join(import.meta.dirname, "worker-fs-guard.mjs");
+
+function guardFiles(home: string): { paths: string; violations: string } {
+  return {
+    paths: join(home, ".band-test-worker-paths.json"),
+    violations: join(home, ".band-test-worker-violations.jsonl"),
+  };
+}
+
+/**
+ * Environment for the hub process in remote-loopback mode: preloads the guard
+ * and tells it where the worker-owned paths and the violation log are.
+ * `guardFiles` start empty, so the hub may read anything until workspaces move.
+ */
+export function workerGuardEnv(home: string): Record<string, string> {
+  const files = guardFiles(home);
+  writeFileSync(files.paths, "[]");
+  writeFileSync(files.violations, "");
+  const preload = `--import ${pathToFileURL(GUARD_PRELOAD).href}`;
+  return {
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(" "),
+    BAND_TEST_WORKER_PATHS_FILE: files.paths,
+    BAND_TEST_WORKER_VIOLATIONS_FILE: files.violations,
+  };
+}
+
+/** Throws when the hub touched a worker path during the test. Call after the hub has stopped. */
+export function assertNoWorkerPathAccess(home: string): void {
+  const file = guardFiles(home).violations;
+  if (!existsSync(file)) return;
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  if (lines.length === 0) return;
+  const seen = new Set<string>();
+  const report: string[] = [];
+  for (const line of lines) {
+    const v = JSON.parse(line) as { api: string; path: string; stack?: string };
+    const key = `${v.api} ${v.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    report.push(`${key}\n${v.stack ?? ""}`);
+  }
+  throw new Error(
+    `The hub read or ran something under a path the worker owns. A hub service must reach a remote workspace through its Host.\n${report.join("\n")}`,
+  );
+}
 
 const WORKER_BIN = join(import.meta.dirname, "../../../worker/bin/band-worker.mjs");
 
@@ -169,9 +227,12 @@ export async function startLoopbackWorker(target: WorkerTarget): Promise<Loopbac
 /**
  * Move every workspace in the hub's database onto `hostId`: its worktree rows, and
  * the projects' checkout paths on that host (the same paths, because the
- * worker shares this machine's disk).
+ * worker shares this machine's disk). Then lists the worktree paths for the
+ * guard, so the hub can no longer read them. A workspace at the project root
+ * stays readable, because that path is also the hub's own copy of the project.
  */
 export function moveSeededWorkspacesToHost(home: string, hostId: string): void {
+  const workerPaths: string[] = [];
   const sqlite = new DatabaseSync(join(home, ".band", "band.db"));
   try {
     sqlite.exec("PRAGMA busy_timeout = 5000");
@@ -182,7 +243,23 @@ export function moveSeededWorkspacesToHost(home: string, hostId: string): void {
       .run(hostId);
     // Rows of an earlier worker count too: a test that restarts the hub gets a new worker.
     sqlite.prepare("UPDATE worktrees SET host_id = ? WHERE host_id <> ?").run(hostId, hostId);
+    // A project's own path is the hub's copy of it, which the hub keeps on a
+    // real worker too. Only checkouts that are not a project root are off limits.
+    const rows = sqlite
+      .prepare(
+        "SELECT path FROM worktrees WHERE host_id = ? AND path NOT IN (SELECT path FROM projects)",
+      )
+      .all(hostId) as Array<{
+      path: string;
+    }>;
+    workerPaths.push(...rows.map((row) => row.path));
   } finally {
     sqlite.close();
   }
+  // The worker's own directories sit under its root, the OS temp dir.
+  const root = realpathSync(tmpdir());
+  for (const dir of [".band-worktrees", ".band-uploads", ".band-shared"]) {
+    workerPaths.push(join(root, dir));
+  }
+  writeFileSync(guardFiles(home).paths, JSON.stringify([...new Set(workerPaths)]));
 }

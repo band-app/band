@@ -1,6 +1,7 @@
+import { gitRunner } from "@band-app/host-api";
 import { getRepoInfo } from "@band-app/host-local/git/git-client";
-import { gitRunner } from "@band-app/host-local/git-run";
 import { hostRegistry } from "../infra/host/registry";
+import { refreshRemoteWorktrees } from "./_utils/remote-worktrees";
 import {
   loadState,
   type ProjectState,
@@ -235,6 +236,12 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     Array.from(existingSet).some((key) => !diskSet.has(key))
   ) {
     project.worktrees = [...diskWorktrees, ...remoteWorktrees];
+    mutated = true;
+  }
+
+  const remote = await refreshRemoteWorktrees(project.name, project.path, project.worktrees);
+  if (remote.changed) {
+    project.worktrees = remote.worktrees;
     mutated = true;
   }
 

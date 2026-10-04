@@ -6,3 +6,4 @@ export {
 } from "./errors";
 export * from "./host";
 export * from "./pty";
+export * from "./git-run";

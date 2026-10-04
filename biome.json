@@ -82,16 +82,36 @@
             "noRestrictedImports": {
               "level": "error",
               "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@band-app/host-local",
+                      "@band-app/host-local/**",
+                      "!@band-app/host-local/git/git-client",
+                      "!@band-app/host-local/git/git-refusals",
+                      "!@band-app/host-local/process/path",
+                      "!@band-app/host-local/process/cli-binary",
+                      "!@band-app/host-local/process/install",
+                      "!@band-app/host-local/setup/project-config",
+                      "!@band-app/host-local/terminals/daemon/daemon-backend",
+                      "!@band-app/host-local/terminals/in-process-backend",
+                      "!@band-app/host-local/terminals/terminal-backend",
+                      "!@band-app/host-local/terminals/title-poller"
+                    ],
+                    "message": "Services and API handlers use @band-app/host-local for types only. A machine's git, files and processes go through the Host (ctx.host / hostRegistry). Hub-only helpers are listed in biome.json."
+                  },
+                  {
+                    "group": ["@band-app/host-local/git/git-client"],
+                    "message": "Run git and gh through the Host (host.git.exec / host.git.gh), not the exec helpers. Only pure helpers may be imported.",
+                    "importNamePattern": "(getRepoInfo|DETACHED_BRANCH_PREFIX|parseGitRemoteUrl|RepoInfo|PullRequestSummary)",
+                    "invertImportNamePattern": true
+                  }
+                ],
                 "paths": {
                   "node:fs": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs. Hub-state modules are allowlisted in biome.json.",
                   "node:fs/promises": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs/promises. Hub-state modules are allowlisted in biome.json.",
                   "node:child_process": "Run processes through the Host (host.exec, host.git), not node:child_process. Hub-state modules are allowlisted in biome.json.",
-                  "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local.",
-                  "@band-app/host-local/process/exec-file-worker": "Run processes through the Host (host.exec, host.git), not the exec helpers.",
-                  "@band-app/host-local/git/git-client": {
-                    "importNames": ["execGit", "execGh", "execGhWithInput", "execFileOffThread"],
-                    "message": "Run git and gh through the Host (host.git.exec / host.git.gh), not the exec helpers."
-                  }
+                  "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local."
                 }
               }
             }
@@ -109,22 +129,7 @@
         "apps/hub/src/server/api/web-app-manifest.ts",
         "apps/hub/src/server/api/queue/router.ts",
         "apps/hub/src/server/api/browser-host/router.ts",
-        "apps/hub/src/server/services/diff-service.ts",
         "apps/hub/src/server/services/project-service.ts"
-      ],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": [
-        "apps/hub/src/server/services/github-webhook-service.ts",
-        "apps/hub/src/server/services/github-poll-service.ts",
-        "apps/hub/src/server/services/pushed-sha-service.ts"
       ],
       "linter": {
         "rules": {
@@ -132,6 +137,76 @@
             "noRestrictedImports": {
               "level": "error",
               "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@band-app/host-local",
+                      "@band-app/host-local/**",
+                      "!@band-app/host-local/git/git-client",
+                      "!@band-app/host-local/git/git-refusals",
+                      "!@band-app/host-local/process/path",
+                      "!@band-app/host-local/process/cli-binary",
+                      "!@band-app/host-local/process/install",
+                      "!@band-app/host-local/setup/project-config",
+                      "!@band-app/host-local/terminals/daemon/daemon-backend",
+                      "!@band-app/host-local/terminals/in-process-backend",
+                      "!@band-app/host-local/terminals/terminal-backend",
+                      "!@band-app/host-local/terminals/title-poller"
+                    ],
+                    "message": "Services and API handlers use @band-app/host-local for types only. A machine's git, files and processes go through the Host (ctx.host / hostRegistry). Hub-only helpers are listed in biome.json."
+                  },
+                  {
+                    "group": ["@band-app/host-local/git/git-client"],
+                    "message": "Run git and gh through the Host (host.git.exec / host.git.gh), not the exec helpers. Only pure helpers may be imported.",
+                    "importNamePattern": "(getRepoInfo|DETACHED_BRANCH_PREFIX|parseGitRemoteUrl|RepoInfo|PullRequestSummary)",
+                    "invertImportNamePattern": true
+                  }
+                ],
+                "paths": {
+                  "node-pty": "Terminals go through the Host's TerminalBackend; node-pty lives in @band-app/host-local."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/hub/src/server/services/github-webhook-service.ts",
+        "apps/hub/src/server/services/github-poll-service.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "@band-app/host-local",
+                      "@band-app/host-local/**",
+                      "!@band-app/host-local/git/git-client",
+                      "!@band-app/host-local/git/git-refusals",
+                      "!@band-app/host-local/process/path",
+                      "!@band-app/host-local/process/cli-binary",
+                      "!@band-app/host-local/process/install",
+                      "!@band-app/host-local/setup/project-config",
+                      "!@band-app/host-local/terminals/daemon/daemon-backend",
+                      "!@band-app/host-local/terminals/in-process-backend",
+                      "!@band-app/host-local/terminals/terminal-backend",
+                      "!@band-app/host-local/terminals/title-poller"
+                    ],
+                    "message": "Services and API handlers use @band-app/host-local for types only. A machine's git, files and processes go through the Host (ctx.host / hostRegistry). Hub-only helpers are listed in biome.json."
+                  },
+                  {
+                    "group": ["@band-app/host-local/git/git-client"],
+                    "message": "Run git and gh through the Host (host.git.exec / host.git.gh), not the exec helpers. Only pure helpers may be imported.",
+                    "importNamePattern": "(getRepoInfo|DETACHED_BRANCH_PREFIX|parseGitRemoteUrl|RepoInfo|PullRequestSummary|execGh|execGhWithInput)",
+                    "invertImportNamePattern": true
+                  }
+                ],
                 "paths": {
                   "node:fs": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs. Hub-state modules are allowlisted in biome.json.",
                   "node:fs/promises": "Services and API handlers reach a machine through the Host (ctx.host / hostRegistry), not node:fs/promises. Hub-state modules are allowlisted in biome.json.",
