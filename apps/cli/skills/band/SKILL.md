@@ -76,7 +76,7 @@ JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}
 ### Create a new workspace (git worktree + state registration)
 
 ```sh
-band workspaces create <project> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--host-project-path <string>]
+band workspaces create <project> <branch> [--base <string>] [--prompt <string>] [--mode <string>] [--model <string>] [--agent <string>] [--via <string>] [--labels <k=v,...>] [--requires <k=constraint>...] [--any-host] [--isolation worktree|container|vm] [--host-project-path <string>]
 ```
 
 Returns the worktree path and the dispatch target. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -107,7 +107,7 @@ When to omit `--prompt` (rare — user explicitly wants no task):
 band workspaces create my-app feat/experiment
 ```
 
-**Placement (`--labels`, `--requires`, `--any-host`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the workspace appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--host-project-path` says where the repository is on the chosen host the first time the project is used there.
+**Placement (`--labels`, `--requires`, `--any-host`, `--isolation`).** These pick the host by criteria instead of by id. `--labels zone=home,gpu=a100` needs an online host carrying every label. `--requires node=>=24 --requires os=linux` needs host facts (`node`, `git`, `os`, `arch`). The hub uses the least loaded host that fits. When none fits, the command prints `provisioning (host request <id>)` and the JSON output has `provisioning.requestId`: the workspace appears once a runner starts a matching host, or fails with a reason after `BAND_PLACEMENT_TIMEOUT_MS` (10 minutes by default). `--isolation container` or `vm` asks for a worker of its own for that workspace, started by a runner that offers the level (`worktree`, the default, may share a worker). With no such runner configured the command fails at once with `No runner offers isolation <level>`. `--host-project-path` says where the repository is on the chosen host the first time the project is used there.
 
 **Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one.
 

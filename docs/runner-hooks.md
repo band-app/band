@@ -189,7 +189,7 @@ On a separate docker host, with a hub that has a public `https` URL (set `BAND_P
 
 The hub runs the docker CLI, which reaches the daemon over ssh with the hub user's keys (`HOME` and `SSH_AUTH_SOCK` are passed through). The container, its `/work` volume and the image all live on that host.
 
-A `workspaces.create` call picks this runner with `placement: { labels: { pool: "docker" }, environment: { isolation: "container" } }`. The CLI has no flag for the isolation level yet.
+A `workspaces.create` call picks this runner with `placement: { labels: { pool: "docker" }, environment: { isolation: "container" } }`. `band workspaces create --isolation container --labels pool=docker` does the same from the CLI.
 
 ## Writing a hook
 
