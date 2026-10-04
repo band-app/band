@@ -2,7 +2,7 @@
 
 A runner is a pair of scripts the hub runs to get a machine for a workspace that has none. When `workspaces.create` carries a `placement` that no online host satisfies, the hub records a host request. `RunnerService` (`apps/hub/src/server/services/runner-service.ts`) takes that request, runs the runner's `spawn` script, and completes the request once the worker that script started says hello.
 
-The hub ships five hooks in `runners/`: `local`, `ssh`, `docker`, `hetzner` and `contabo`. The last two start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). Any executable can be a hook.
+The hub ships six hooks in `runners/`: `local`, `ssh`, `docker`, `k8s`, `hetzner` and `contabo`. `hetzner` and `contabo` start a virtual machine per request (see [VM hooks](#vm-hooks-hetzner-and-contabo)). Any executable can be a hook.
 
 ## Configure a runner
 
@@ -214,6 +214,78 @@ On a separate docker host, with a hub that has a public `https` URL (set `BAND_P
 The hub runs the docker CLI, which reaches the daemon over ssh with the hub user's keys (`HOME` and `SSH_AUTH_SOCK` are passed through). The container, its `/work` volume and the image all live on that host.
 
 A `workspaces.create` call picks this runner with `placement: { labels: { pool: "docker" }, environment: { isolation: "container" } }`. `band workspaces create --isolation container --labels pool=docker` does the same from the CLI.
+
+### `k8s`
+
+Starts the worker as a Pod in a Kubernetes namespace with `kubectl`. The hook renders the manifests in `runners/k8s/render.mjs` and pipes them to `kubectl create`. The security settings match the docker hook, written as a Pod `securityContext`:
+
+| Setting | Why |
+| --- | --- |
+| `runAsNonRoot`, `runAsUser: 65532`, `fsGroup: 65532` | A non-root uid, as in the docker hook. |
+| `capabilities.drop: [ALL]`, `allowPrivilegeEscalation: false` | No capabilities, and a process cannot gain any. |
+| `readOnlyRootFilesystem`, `emptyDir` at `/tmp` (memory) and `/work` | The worker writes to `/tmp` (512 MiB by default) and to `/work` (its `HOME`, state and checkouts). Both go away with the Pod. |
+| `seccompProfile: RuntimeDefault` | The container runtime's default syscall filter. |
+| `automountServiceAccountToken: false` | The worker gets no credentials for the Kubernetes API. |
+| `resources.requests` and `limits` | Both set to the environment's `resources.cpu` and `resources.memory` (`8Gi` is a valid Kubernetes quantity as is), so the Pod is Guaranteed. `resources.disk` is not enforced. |
+| Labels `band.runner`, `band.request`, `band.worker` | The runner, the host request and the worker id, for `kubectl get pods -l band.worker=<id>`. |
+
+The bootstrap token never appears in a command line or in the Pod manifest. The hook creates the Pod first, reads its uid from the `kubectl create` answer, and then creates a Secret named like the Pod with an `ownerReferences` entry for it. The Pod reads the token with `secretKeyRef`, and the garbage collector deletes the Secret with the Pod. If the Secret cannot be created, the hook retries for `BAND_K8S_SECRET_WAIT` seconds (default 30, the time the garbage collector needs to remove the Secret of a previous Pod of the same worker), then deletes the Pod and fails. `spawn` prints `BAND_MACHINE_HANDLE=<namespace>/<name>` and, when the request has a repository, `BAND_HOST_PROJECT_PATH=/work/<project>`.
+
+A worker id that wakes an ephemeral host runs `spawn` again. A Pod of that worker in `Pending` or `Running` makes `spawn` fail. A finished one is deleted before the new Pod is created, and the garbage collector removes its Secret.
+
+Settings (`env`):
+
+| Variable | Meaning |
+| --- | --- |
+| `BAND_K8S_NAMESPACE` | Namespace for the workers. Default `band-workers`. |
+| `BAND_K8S_IMAGE` | The worker base image. Default `band-worker`. The hub's `BAND_PROJECT_IMAGE` wins when the project has an environment image, so that image must be pullable by the cluster (set `environmentBuilder.registry`, and `BAND_K8S_PULL_SECRET` for a private one), or the Pod stays in `ImagePullBackOff` until `timeoutSec`. |
+| `BAND_K8S_KIND` | `pod` (default), `job` (`backoffLimit: 0`, deleted 5 minutes after it finishes) or `sandbox`. |
+| `BAND_K8S_RUNTIME_CLASS` | `runtimeClassName`, such as `kata` or `gvisor`. A request for `isolation: vm` fails at once when this is unset, because the node's default runtime would be a shared-kernel container. Set `"isolation": "vm"` on the runner when it is set. |
+| `BAND_K8S_PULL_POLICY`, `BAND_K8S_PULL_SECRET` | `imagePullPolicy` and an `imagePullSecrets` name. |
+| `BAND_K8S_CA_CONFIGMAP`, `BAND_K8S_CA_KEY` | A ConfigMap in the namespace that holds the CA of a hub behind a private certificate (key `ca.crt` by default). It is mounted read-only at `/etc/band-ca` and `NODE_EXTRA_CA_CERTS` points at it. The ConfigMap is mounted by the kubelet, so the runner needs no RBAC for it. |
+| `BAND_K8S_TMP_SIZE`, `BAND_K8S_WORK_SIZE` | Sizes of `/tmp` (default `512Mi`) and `/work` (default `10Gi`). |
+| `BAND_K8S_SECRET_WAIT` | Seconds to retry the token Secret create. Default `30`. |
+| `BAND_K8S_CONTEXT` | `kubectl --context`. |
+| `BAND_KUBECTL_BIN` | The kubectl binary. Default `kubectl`. |
+| `KUBECONFIG` | Hooks run with `HOME` only, so `~/.kube/config` is read by default. |
+| `BAND_IDLE_EXIT` | Idle wait before the worker exits, like `90s`. |
+
+`destroy` deletes the Pod (or Job, or Sandbox) with `--ignore-not-found` (the Secret goes with it, because the runner never reads or deletes Secrets: `kubectl delete` reads the object first), so a missing object is success and an unreachable cluster is an error. `status.sh` prints `BAND_MACHINE_HANDLE=<namespace>/<pod> worker=<id> request=<id> state=<phase>` (the VM hooks' format) for the pods with the worker's label (or the runner's, or every worker pod). The hub does not call `status` yet (plan step 3.7).
+
+`BAND_K8S_KIND=sandbox` creates a `Sandbox` (`agents.x-k8s.io/v1alpha1`, from kubernetes-sigs/agent-sandbox) whose `spec.podTemplate` is the Pod above. It needs that project's CRDs and controller. It has not been run against a cluster yet, and `deploy/k8s/agent-sandbox.yaml` shows the shape. It creates a `Sandbox` and not a `SandboxClaim` because a claim refers to a shared `SandboxTemplate`, which cannot carry one worker's id and token.
+
+Setup on a cluster:
+
+1. `kubectl apply -f deploy/k8s/namespace.yaml -f deploy/k8s/rbac.yaml`. The `band-workers` namespace enforces the `restricted` Pod Security Standard, which these Pods meet.
+2. `deploy/k8s/check-rbac.sh` runs `kubectl auth can-i --as system:serviceaccount:band:band-hub` and fails unless the account can create, delete, get, list and watch pods and create secrets in `band-workers`, and can do nothing else. It cannot read a Secret back, and it cannot touch other namespaces.
+3. Build the worker image (`docker/worker.Dockerfile`) and push it where the cluster pulls from.
+4. Run the hub. `deploy/k8s/hub.yaml` is an example Deployment that uses the `band-hub` service account. The stock hub image has neither `kubectl` nor `runners/`, so build `deploy/k8s/Dockerfile.hub` on top of it. Outside the cluster, any machine with `kubectl` access to the namespace works.
+5. Add the runner.
+
+How the worker reaches the hub: a worker takes plain `http` only for a loopback hub, so a Pod cannot use `http://band-hub.band.svc`. Give the hub an `https` URL the Pods trust (an Ingress or Gateway with a certificate) and set it as `BAND_HUB_URL` in the runner's `env`, or `BAND_PUBLIC_URL` on the hub.
+
+```json
+{
+  "id": "k8s",
+  "spawn": "bundled:k8s",
+  "destroy": "bundled:k8s",
+  "labels": { "pool": "k8s" },
+  "isolation": "container",
+  "maxConcurrent": 8,
+  "timeoutSec": 180,
+  "env": {
+    "BAND_HUB_URL": "https://band.example.com",
+    "BAND_K8S_NAMESPACE": "band-workers",
+    "BAND_K8S_IMAGE": "registry.example.com/band-worker:latest",
+    "KUBERNETES_SERVICE_HOST": "kubernetes.default.svc",
+    "KUBERNETES_SERVICE_PORT": "443"
+  }
+}
+```
+
+The two `KUBERNETES_SERVICE_*` entries are for a hub that runs in the cluster: hooks run with a minimal environment, and `kubectl` finds the service account token only when it sees them. A hub outside the cluster uses a kubeconfig instead and drops them. For a VM-isolated runner add `"isolation": "vm"` and `"BAND_K8S_RUNTIME_CLASS": "kata"`.
+
+Tests: `apps/hub/tests/runner-k8s.test.ts` runs the scripts against a stub `kubectl` and checks the manifests (securityContext, resources, labels, the owned Secret, the CA ConfigMap, the RuntimeClass, the token in no argument). The CI job `k8s (kind)` creates a kind cluster, applies `deploy/k8s`, runs `deploy/k8s/check-rbac.sh`, and runs `apps/hub/tests/runner-k8s-kind.test.ts`. That test starts a hub behind a self-signed TLS terminator, runs the hook as the `band-hub` service account, waits for the Pod's worker to say hello, inspects the live Pod, and destroys it. To run it on your own cluster, set `BAND_K8S_TEST_IMAGE` (an image the cluster has) and `BAND_K8S_TEST_KUBECONFIG` (an admin kubeconfig), and `BAND_K8S_TEST_HUB_HOST` when the pods cannot reach this machine at the gateway of docker's `kind` network.
 
 ## VM hooks: hetzner and contabo
 

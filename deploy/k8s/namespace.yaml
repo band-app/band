@@ -1,0 +1,19 @@
+# Namespaces for the hub and for the worker pods the k8s runner hook starts.
+#
+#   kubectl apply -f deploy/k8s/namespace.yaml
+#
+# band-workers enforces the "restricted" Pod Security Standard. The pods runners/k8s starts meet it
+# (non-root uid 65532, no capabilities, RuntimeDefault seccomp, no privilege escalation), so a
+# misconfigured runner that asks for more is refused by the API server instead of being admitted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: band
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: band-workers
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

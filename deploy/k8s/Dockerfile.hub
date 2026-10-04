@@ -1,0 +1,22 @@
+# The hub image plus what the k8s runner hook needs: kubectl and the bundled hooks.
+#
+#   docker build -f docker/Dockerfile -t band-hub:local .
+#   docker build -f deploy/k8s/Dockerfile.hub --build-arg BASE=band-hub:local -t registry.example.com/band-hub:k8s .
+#
+# The stock hub image ships neither, so the bundled: hooks do not resolve in it.
+ARG BASE=band-hub:local
+FROM ${BASE}
+ARG KUBECTL_VERSION=v1.31.4
+ARG TARGETARCH
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH:-amd64}/kubectl" \
+ && curl -fsSL -o /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH:-amd64}/kubectl.sha256" \
+ && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
+ && rm /tmp/kubectl.sha256 \
+ && chmod +x /usr/local/bin/kubectl \
+ && apt-get purge -y curl && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+COPY runners /opt/band/runners
+ENV BAND_RUNNERS_DIR=/opt/band/runners
