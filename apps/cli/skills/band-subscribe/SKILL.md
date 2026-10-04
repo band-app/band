@@ -30,7 +30,7 @@ Subscribe once per thing waited for, then end the turn. Do not poll `gh` in a lo
 
 ## When to unsubscribe
 
-Remove a subscription as soon as the wait is over: the PR merged or closed, CI passed and nobody is reviewing, the question was answered. A subscription also ends by itself after `--max-wakeups` wakeups (default 10, one for a one-off timer) and after 180 days.
+Remove a subscription as soon as the wait is over: the PR merged or closed, CI passed and nobody is reviewing, the question was answered. A subscription also ends by itself after `--max-wakeups` wakeups (default 10 for CI, 50 otherwise, one for a one-off timer) and after 180 days.
 
 ```sh
 band subscriptions list

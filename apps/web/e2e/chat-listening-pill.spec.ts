@@ -38,6 +38,7 @@ interface SubscriptionRow {
   id: string;
   source: string;
   cron?: string;
+  maxWakeups: number;
 }
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -127,7 +128,7 @@ test.describe("Chat Listening pill", () => {
     await expect(timerRow).toHaveAttribute("data-source", "timer");
     await expect(timerRow).toHaveAttribute("data-cron", "0 9 * * *");
     await expect(timerRow).toHaveAttribute("data-wakeups", "0");
-    await expect(timerRow).toHaveAttribute("data-max-wakeups", "10");
+    await expect(timerRow).toHaveAttribute("data-max-wakeups", String(timer.maxWakeups));
     const expiresAt = Number(await timerRow.getAttribute("data-expires-at"));
     expect(expiresAt).toBeGreaterThan(Date.now());
     await expect(chatPane.listeningItem(hook.id)).toHaveAttribute("data-source", "webhook");

@@ -505,7 +505,7 @@ enum SubscriptionsCmd {
         /// One-off timer: epoch milliseconds, or a delay such as `90s`, `10m`, `2h`, `1d`
         #[arg(long)]
         at: Option<String>,
-        /// Stop after this many wakeups (default 10; a one-off timer always 1)
+        /// Stop after this many wakeups (default 10 for CI, 50 otherwise; a one-off timer always 1)
         #[arg(long)]
         max_wakeups: Option<u32>,
         /// Seconds to hold events before waking the chat (default 30)
@@ -3506,7 +3506,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--webhook", "type": "boolean", "required": false, "description": "Create a webhook; prints its path and token once"},
                 {"name": "--cron", "type": "string", "required": false, "description": "Recurring timer, as a cron expression"},
                 {"name": "--at", "type": "string", "required": false, "description": "One-off timer: epoch milliseconds or a delay such as 90s, 10m, 2h, 1d"},
-                {"name": "--max-wakeups", "type": "number", "required": false, "description": "Stop after this many wakeups (default 10)"},
+                {"name": "--max-wakeups", "type": "number", "required": false, "description": "Stop after this many wakeups (default 10 for CI, 50 otherwise; a one-off timer always 1)"},
                 {"name": "--coalesce", "type": "number", "required": false, "description": "Seconds to hold events before waking the chat (default 30)"},
             ],
             "notes": "Exactly one of --pr, --branch, --webhook, --cron, --at. PR activity (reviews and comments) is one subscription; --ci adds a second one on the PR's head branch. Subscriptions last at most 180 days.\nJSON output: `{\"subscriptions\": [...]}`."
