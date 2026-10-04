@@ -22,7 +22,7 @@ const SKILL_FILE = "SKILL.md";
 
 /**
  * Locate a band CLI binary we can shell out to. Mirrors the resolution order
- * used by `installHooks` (hooks.ts):
+ * used by `installHooks` (hooks-install.ts):
  *   0. `$BAND_CLI_BIN`, when set and present.
  *   1. `/usr/local/bin/band` symlink (created by `ensureCliInstalled` on the
  *      previous setup step), trusted shortcut.
@@ -37,8 +37,8 @@ const SKILL_FILE = "SKILL.md";
  * idempotent setup pipeline).
  */
 export async function findBandBinary(): Promise<string | null> {
-  // Explicit override, read on every call. Tests point it at the CLI build
-  // under test so a globally installed (older) `band` is never picked up.
+  // Explicit override, read on every call. Pins a specific build so a
+  // globally installed `band` is never picked up.
   const override = process.env.BAND_CLI_BIN;
   if (override) {
     try {

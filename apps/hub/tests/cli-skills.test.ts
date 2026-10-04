@@ -79,10 +79,12 @@ let bandBinary: string | null = null;
 let expectedSkills: Map<(typeof SKILL_NAMES)[number], Buffer> | null = null;
 
 beforeAll(async () => {
+  // No built CLI: the suite is skipped, so there is nothing to set up.
+  if (!builtCli) return;
   bandBinary = await findBandBinary();
   if (!bandBinary) return;
   // Guard the hermetic setup: the service must resolve the built CLI.
-  if (bandBinary !== builtCli) {
+  if (realpathSync(bandBinary) !== realpathSync(builtCli)) {
     throw new Error(`expected the built CLI ${builtCli}, resolved ${bandBinary}`);
   }
   // Staging home with no agent config dirs → install writes the shared
