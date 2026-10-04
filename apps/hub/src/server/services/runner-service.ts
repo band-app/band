@@ -28,6 +28,7 @@ import { createLogger } from "@band-app/logger";
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
 import { bandHome } from "../infra/db/queries/settings";
 import { hostRegistry } from "../infra/host/registry";
+import { ISOLATION_LABEL_KEY, requestedIsolation, runnerLevel } from "./_utils/isolation";
 import { parseRunners, type RunnerConfig, resolveHookPath } from "./_utils/runner-config";
 import { HostRequestError, placementService } from "./placement-service";
 import { settingsService } from "./settings-service";
@@ -243,7 +244,11 @@ export class RunnerService {
         while (this.runningCount(runner.id) < runner.maxConcurrent) {
           const row = placementService.lease(
             runner.id,
-            { labels: runner.labels, provides: runner.provides },
+            {
+              labels: runner.labels,
+              provides: runner.provides,
+              isolation: runnerLevel(runner.isolation),
+            },
             LEASE_MS,
           );
           if (!row) break;
@@ -390,6 +395,9 @@ export class RunnerService {
   ): Promise<string> {
     const deadline = Date.now() + runner.timeoutSec * 1000;
     const labelList = Object.entries(row.labels).map(([k, v]) => `${k}=${v}`);
+    // A worker started for a container or vm workspace serves that workspace only: placement skips hosts with this label.
+    const wanted = requestedIsolation(row.environment as Record<string, unknown> | null);
+    if (wanted !== "worktree") labelList.push(`${ISOLATION_LABEL_KEY}=${wanted}`);
     const issued = tokenService.issueWorkerBootstrap(
       `runner:${runner.id}`,
       labelList,
@@ -478,7 +486,7 @@ export class RunnerService {
       BAND_WORKER_ID: workerId,
       BAND_REPO_URLS: repos.join(","),
       BAND_ENVIRONMENT: JSON.stringify(environmentOf(row) ?? {}),
-      BAND_ISOLATION: environmentOf(row)?.isolation ?? runner.isolation,
+      BAND_ISOLATION: environmentOf(row)?.isolation ?? runnerLevel(runner.isolation),
       BAND_LABELS: Object.entries(row.labels)
         .map(([k, v]) => `${k}=${v}`)
         .join(","),

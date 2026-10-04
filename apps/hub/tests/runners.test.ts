@@ -514,7 +514,7 @@ describe("the hook contract", () => {
           ].join("\n"),
         ),
         labels: { pool: "env", zone: "x" },
-        isolation: "process",
+        isolation: "vm",
         timeoutSec: 20,
         env: { MARKS: marks },
       },
