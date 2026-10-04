@@ -100,6 +100,7 @@ export interface StatusEvent {
     | "agent-session-ended"
     | "client-state-changed"
     | "host-status-changed"
+    | "host-request-changed"
     | "subscription-created"
     | "subscription-delivered"
     | "subscription-removed"
@@ -130,6 +131,9 @@ export interface StatusEvent {
   /** For `kind: "host-status-changed"`: the host and its new status. */
   hostId?: string;
   hostStatus?: "online" | "offline" | "lost" | "disposed";
+  /** For `kind: "host-request-changed"`: the request and its new status. */
+  hostRequestId?: string;
+  hostRequestStatus?: "pending" | "leased" | "fulfilled" | "failed" | "cancelled";
   /** For `kind: "client-state-changed"`: the entry as stored after the write. */
   clientState?: ClientStateEntry;
   /**

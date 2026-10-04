@@ -53,6 +53,7 @@ import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
 import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
+import { hostRequestsRouter } from "./host-requests/router";
 import { hostsRouter } from "./hosts/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
@@ -97,6 +98,7 @@ export const appRouter = t.router({
   hooks: hooksRouter,
   host: hostRouter,
   hosts: hostsRouter,
+  hostRequests: hostRequestsRouter,
   tokens: tokensRouter,
   browserHost: browserHostRouter,
   editor: editorRouter,

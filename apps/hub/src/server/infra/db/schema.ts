@@ -165,6 +165,43 @@ export const pendingRemovals = sqliteTable(
   (t) => [primaryKey({ columns: [t.hostId, t.worktreePath] })],
 );
 
+// A workspace waiting for a host (plan step 3.3). `workspaces.create` with
+// `placement` records one when no online host fits. A runner leases it
+// (`leased_by`, `lease_expires_at`), starts a machine and fulfils it with the
+// host id; the hub then finishes creating the workspace (`completed_at`). An
+// expired lease makes the request leasable again. `input` is the create call
+// to replay on the host.
+export const hostRequests = sqliteTable(
+  "host_requests",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    project: text("project").notNull(),
+    branch: text("branch").notNull(),
+    labels: text("labels", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+    requires: text("requires", { mode: "json" })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default({}),
+    environment: text("environment", { mode: "json" }).$type<Record<string, unknown>>(),
+    input: text("input", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    status: text("status", { enum: ["pending", "leased", "fulfilled", "failed", "cancelled"] })
+      .notNull()
+      .default("pending"),
+    leasedBy: text("leased_by"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    hostId: text("host_id"),
+    error: text("error"),
+    completedAt: integer("completed_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("host_requests_status_idx").on(t.status, t.createdAt),
+    index("host_requests_workspace_idx").on(t.workspaceId),
+  ],
+);
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

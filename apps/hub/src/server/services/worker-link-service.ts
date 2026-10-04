@@ -24,6 +24,7 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { selectWsProtocol } from "../../../auth";
 import { type HostRow, TokenQueries } from "../infra/db/queries/tokens";
 import { type HostRegistry, hostRegistry } from "../infra/host/registry";
+import { placementService } from "./placement-service";
 import { TokenExchangeError, type TokenService, tokenService } from "./token-service";
 import { emit } from "./watcher-service";
 import { workerCliService } from "./worker-cli-service";
@@ -153,6 +154,8 @@ export class WorkerLinkService {
     this.queries.markHostOnline(workerId, at, { info: stored, version: hello.buildId });
     log.info(`worker ${workerId} is online`);
     this.publish(workerId, "online");
+    // A request a runner fulfilled with this host can finish now.
+    placementService.onHostOnline(workerId);
     // Workspaces removed while the worker was away still have a checkout on it.
     void workspaceService.finishPendingRemovals(workerId).catch((err) => {
       log.warn(`pending removals on ${workerId}: ${err instanceof Error ? err.message : err}`);
