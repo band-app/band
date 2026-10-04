@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "4f41dfe0-ffe2-4d6a-865f-61580269148e",
+  "id": "e87f809f-98fc-40e4-b16d-b38674624b54",
   "prevIds": [
     "c121bbe9-ebf5-47ab-8e4a-d49c11597dfb"
   ],
@@ -32,6 +32,10 @@
     },
     {
       "name": "cronjobs",
+      "entityType": "tables"
+    },
+    {
+      "name": "environment_builds",
       "entityType": "tables"
     },
     {
@@ -92,10 +96,6 @@
     },
     {
       "name": "usage_scan_state",
-      "entityType": "tables"
-    },
-    {
-      "name": "workspace_sleep",
       "entityType": "tables"
     },
     {
@@ -729,6 +729,126 @@
       "name": "host_id",
       "entityType": "columns",
       "table": "cronjobs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "project",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "image",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "commit_sha",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "trigger",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "''",
+      "generated": null,
+      "name": "log",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "error",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "environment_builds"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_at",
+      "entityType": "columns",
+      "table": "environment_builds"
     },
     {
       "type": "text",
@@ -1942,136 +2062,6 @@
     },
     {
       "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "workspace_id",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "host_id",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "project",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "name",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "branch",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "worktree_path",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "base_sha",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "snapshot_sha",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "ref",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "store",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "'[]'",
-      "generated": null,
-      "name": "session_ids",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "waking_since",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "created_at",
-      "entityType": "columns",
-      "table": "workspace_sleep"
-    },
-    {
-      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -2484,6 +2474,15 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "environment_builds_pk",
+      "table": "environment_builds",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "host_requests_pk",
       "table": "host_requests",
       "entityType": "pks"
@@ -2585,15 +2584,6 @@
       "nameExplicit": false,
       "name": "usage_events_pk",
       "table": "usage_events",
-      "entityType": "pks"
-    },
-    {
-      "columns": [
-        "workspace_id"
-      ],
-      "nameExplicit": false,
-      "name": "workspace_sleep_pk",
-      "table": "workspace_sleep",
       "entityType": "pks"
     },
     {
@@ -2823,6 +2813,42 @@
     {
       "columns": [
         {
+          "value": "project",
+          "isExpression": false
+        },
+        {
+          "value": "started_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "environment_builds_project_idx",
+      "entityType": "indexes",
+      "table": "environment_builds"
+    },
+    {
+      "columns": [
+        {
+          "value": "project",
+          "isExpression": false
+        },
+        {
+          "value": "key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "environment_builds_key_idx",
+      "entityType": "indexes",
+      "table": "environment_builds"
+    },
+    {
+      "columns": [
+        {
           "value": "status",
           "isExpression": false
         },
@@ -3023,20 +3049,6 @@
       "name": "usage_scan_state_pk",
       "entityType": "indexes",
       "table": "usage_scan_state"
-    },
-    {
-      "columns": [
-        {
-          "value": "host_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "workspace_sleep_host_idx",
-      "entityType": "indexes",
-      "table": "workspace_sleep"
     },
     {
       "columns": [

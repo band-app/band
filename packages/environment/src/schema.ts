@@ -16,7 +16,10 @@ const buildSchema = z
   .object({
     devcontainer: z.string().min(1).optional(),
     dockerfile: z.string().min(1).optional(),
-    image: z.string().min(1).optional(),
+    image: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/, "not an image reference")
+      .optional(),
   })
   .strict()
   .superRefine((build, ctx) => {

@@ -22,7 +22,15 @@ export const settingsRouter = t.router({
   }),
 
   update: publicProcedure.input(settingsUpdateInput).mutation(({ input, ctx }) => {
-    // Runners are programs the hub executes, so only an admin token may change them.
+    // The builder host, registry and worker image decide where repository
+    // commands run and where images go, and runners are programs the hub
+    // executes, so only an admin token may change them.
+    if (input.environmentBuilder !== undefined && !ctx.admin) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Changing environmentBuilder needs an admin token.",
+      });
+    }
     if (input.runners !== undefined && !ctx.admin) {
       throw new TRPCError({
         code: "FORBIDDEN",

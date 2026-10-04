@@ -1,5 +1,5 @@
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@band-app/ui";
-import { useQuery } from "@tanstack/react-query";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button } from "@band-app/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { trpc } from "../../../lib/trpc-client";
 import { useProjects } from "../../hooks/use-projects";
@@ -12,6 +12,95 @@ function Summary({ label, value }: { label: string; value: string | undefined })
     <div className="flex gap-2 text-xs">
       <dt className="w-20 shrink-0 text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words font-mono">{value}</dd>
+    </div>
+  );
+}
+
+type ImageStatus = Awaited<ReturnType<typeof trpc.environment.imageStatus.query>>;
+
+/**
+ * The project's environment image: the current one (what a runner boots), the
+ * latest build with its status and log, and a button to build now. The status
+ * refreshes every two seconds while a build runs.
+ */
+function EnvironmentImage({ projectName }: { projectName: string }) {
+  const queryClient = useQueryClient();
+  const queryKey = ["environment.imageStatus", projectName];
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { data } = useQuery<ImageStatus>({
+    queryKey,
+    queryFn: () => trpc.environment.imageStatus.query({ projectName }),
+    refetchInterval: (query) => (query.state.data?.latest?.status === "building" ? 2000 : false),
+  });
+
+  async function build() {
+    setError(null);
+    setNotice(null);
+    setStarting(true);
+    try {
+      const started = await trpc.environment.build.mutate({ projectName });
+      if (started.cacheHit) setNotice("Cache hit: the image is already built.");
+      else setNotice(null);
+      await queryClient.invalidateQueries({ queryKey });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const latest = data?.latest ?? null;
+  const building = latest?.status === "building";
+  return (
+    <div
+      className="space-y-2"
+      data-testid="settings__environment-image"
+      data-status={latest?.status ?? "none"}
+      data-current={data?.current?.image ?? ""}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-xs font-medium">Image</h4>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={starting || building}
+          onClick={build}
+          data-testid="settings__environment-image-build"
+        >
+          {building ? "Building…" : "Build image"}
+        </Button>
+      </div>
+      {notice ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="settings__environment-image-notice"
+        >
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="text-xs text-destructive" data-testid="settings__environment-image-error">
+          {error}
+        </p>
+      ) : null}
+      <dl className="space-y-1">
+        <Summary label="Current" value={data?.current?.image ?? "none (no build has finished)"} />
+        <Summary
+          label="Last build"
+          value={latest ? `${latest.status}${latest.error ? `: ${latest.error}` : ""}` : "never"}
+        />
+      </dl>
+      {latest?.log ? (
+        <pre
+          className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px]"
+          data-testid="settings__environment-image-log"
+        >
+          {latest.log}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -97,6 +186,8 @@ function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
         </dl>
       ) : null}
 
+      {environment?.build ? <EnvironmentImage projectName={projectName} /> : null}
+
       {data.hosts.length > 0 && environment?.requires ? (
         <div className="space-y-1">
           <h4 className="text-xs font-medium">Hosts</h4>
@@ -131,9 +222,9 @@ function ProjectEnvironmentDetails({ projectName }: { projectName: string }) {
 /**
  * Rows for the Settings dialog's Environment section: one collapsed entry per
  * project that, when opened, shows the project's `.band/environment.json`
- * parsed, its validation problems and which hosts meet its `requires`. It is
- * read-only. Edit the file in the repository, or check it with
- * `band env validate`.
+ * parsed, its validation problems, which hosts meet its `requires` and, when it
+ * has a `build`, its image with a button to build it. The file is read-only.
+ * Edit it in the repository, or check it with `band env validate`.
  */
 export function EnvironmentSettings() {
   const { projects } = useProjects();
