@@ -1681,6 +1681,40 @@ fn tokens_create_list_revoke() {
     assert!(text.starts_with("ID"), "text: {text}");
     assert!(text.contains("ci box"), "text: {text}");
 
+    // A device token is not an admin one unless asked, and `create-device --admin` says so.
+    assert_eq!(created["admin"], false);
+    let admin = json_of(&env.band(&[
+        "tokens",
+        "create-device",
+        "--label",
+        "ops",
+        "--admin",
+        "--output",
+        "json",
+    ]));
+    assert_eq!(admin["admin"], true);
+    let listed = json_of(&env.band(&["tokens", "list", "--output", "json"]));
+    let flags: Vec<(String, bool)> = listed["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["id"] == id.as_str() || t["id"] == admin["id"])
+        .map(|t| {
+            (
+                t["label"].as_str().unwrap().to_string(),
+                t["admin"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        flags.contains(&("ci box".to_string(), false)),
+        "flags: {flags:?}"
+    );
+    assert!(
+        flags.contains(&("ops".to_string(), true)),
+        "flags: {flags:?}"
+    );
+
     // `revoke` takes it out of service.
     let revoked = env.band(&["tokens", "revoke", &id]);
     assert!(revoked.status.success(), "stderr: {}", stderr(&revoked));

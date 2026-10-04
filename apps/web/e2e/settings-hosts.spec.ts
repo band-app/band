@@ -4,8 +4,11 @@
  * real Settings dialog against the real server.
  *
  * Assertions on the outcome read the server back: a revoked device token must
- * get 401 from the HTTP API, and the bootstrap token shown on screen must be
- * the one the hub accepts exactly once (checked through its token list).
+ * get 401 from the HTTP API, and a new bootstrap token must show up as active
+ * in the hub's token list. Exchanging it for a session token happens on the
+ * worker link, which has no endpoint yet.
+ *
+ * A device token without the admin flag sees the hosts but not the tokens.
  */
 
 import { expect, test } from "@playwright/test";
@@ -60,7 +63,7 @@ test("lists the local host", async ({ page }) => {
   await expect(local).toHaveAttribute("data-status", "online");
 });
 
-test("creates a worker bootstrap token that is shown once", async ({ page }) => {
+test("creates a worker bootstrap token and lists its offline host", async ({ page }) => {
   const settingsPage = new SettingsPage(page, server.url, TOKEN);
   await settingsPage.goto();
   await settingsPage.openDialog();
@@ -82,7 +85,9 @@ test("creates a worker bootstrap token that is shown once", async ({ page }) => 
   await expect(row).toHaveAttribute("data-status", "offline");
   await expect(row).toContainText("os=linux, gpu");
 
-  // Closing the panel drops the secret from the page. Only the hash is left on the hub.
+  // Closing the panel drops the secret from the page. The exchange that makes it
+  // one-time is on the worker link, which has no endpoint yet.
+  await expect(settingsPage.bootstrapToken()).toBeVisible();
   await settingsPage.finishAddWorker();
   await expect(settingsPage.addWorkerButton()).toBeVisible();
   await expect(settingsPage.bootstrapToken()).toHaveCount(0);
@@ -120,4 +125,23 @@ test("revokes a device token, which then gets 401", async ({ page }) => {
   expect((await authed()).status).toBe(401);
   // The token the page itself uses is the shared one, which can't be revoked from here.
   await expect(settingsPage.revokeTokenButton("Shared token")).toBeDisabled();
+});
+
+test("a non-admin device token sees the hosts but is told tokens need an admin token", async ({
+  page,
+}) => {
+  const { token: plainToken } = await trpcMutateData<{ token: string }>(
+    server.url,
+    TOKEN,
+    "tokens.createDevice",
+    { label: "e2e plain device" },
+  );
+
+  const settingsPage = new SettingsPage(page, server.url, plainToken);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
+
+  await settingsPage.expectRowVisible(settingsPage.hostRow("local"));
+  await settingsPage.expectRowVisible(settingsPage.tokensDenied());
+  await expect(settingsPage.tokenRows()).toHaveCount(0);
 });

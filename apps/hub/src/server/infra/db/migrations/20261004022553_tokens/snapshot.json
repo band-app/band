@@ -1,10 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "641b8c8e-eeb2-4506-9642-d49b483110bb",
+  "id": "97dcffea-eb93-41e9-8370-0fab33fab09f",
   "prevIds": [
-    "d51b1638-2ff0-430f-8139-7894b011f2bc",
-    "fd7a93b0-07a0-43e7-ac9b-dc42c5cf3da3"
+    "641b8c8e-eeb2-4506-9642-d49b483110bb"
   ],
   "ddl": [
     {
@@ -1453,6 +1452,16 @@
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "admin",
+      "entityType": "columns",
+      "table": "tokens"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "created_at",
@@ -2419,6 +2428,20 @@
     {
       "columns": [
         {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "hosts_created_at_idx",
+      "entityType": "indexes",
+      "table": "hosts"
+    },
+    {
+      "columns": [
+        {
           "value": "subscription_id",
           "isExpression": false
         }
@@ -2483,6 +2506,20 @@
       "where": null,
       "origin": "manual",
       "name": "tokens_host_idx",
+      "entityType": "indexes",
+      "table": "tokens"
+    },
+    {
+      "columns": [
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "tokens_created_at_idx",
       "entityType": "indexes",
       "table": "tokens"
     },

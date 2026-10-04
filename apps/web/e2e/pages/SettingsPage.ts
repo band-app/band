@@ -374,6 +374,11 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__token");
   }
 
+  /** The notice shown instead of the token list when the token isn't an admin one. */
+  tokensDenied(): Locator {
+    return this.dialog.getByTestId("settings__tokens-denied");
+  }
+
   /** The row of the token with this label. */
   tokenRow(label: string): Locator {
     return this.tokenRows().filter({ hasText: label });

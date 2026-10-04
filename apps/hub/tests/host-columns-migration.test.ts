@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const migrationsDir = join(import.meta.dirname, "../src/server/infra/db/migrations");
 const HOSTS_MIGRATION = "20261004002518_hosts";
 
-// Runs every migration before the hosts one against a temp DB, seeds old-shape
+// Runs the migrations that come before the hosts one against a temp DB, seeds old-shape
 // rows, then applies the rest. Never touches the real ~/.band.
 describe("hosts migration", () => {
   let tmp = "";
@@ -31,7 +31,10 @@ describe("hosts migration", () => {
     cpSync(migrationsDir, before, { recursive: true });
     const names = readdirSync(before).filter((n) => /^\d/.test(n));
     expect(names).toContain(HOSTS_MIGRATION);
-    rmSync(join(before, HOSTS_MIGRATION), { recursive: true });
+    // Stop before the hosts migration. Later ones can depend on its tables.
+    for (const name of names.filter((n) => n >= HOSTS_MIGRATION)) {
+      rmSync(join(before, name), { recursive: true });
+    }
 
     const db = drizzle({ client: sqlite });
     migrate(db, { migrationsFolder: before });

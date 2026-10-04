@@ -239,6 +239,15 @@ export function HostsSettings() {
         label="Tokens"
         description="Revoking a token signs out whatever uses it. The shared token in settings.json cannot be revoked here."
       >
+        {tokens.isError ? (
+          <p
+            role="alert"
+            className="text-xs text-muted-foreground"
+            data-testid="settings__tokens-denied"
+          >
+            Managing tokens needs an admin token.
+          </p>
+        ) : null}
         <ul className="divide-y divide-border rounded-md border border-border">
           {(tokens.data ?? []).map((token) => (
             <li
@@ -251,7 +260,8 @@ export function HostsSettings() {
               <div className="min-w-0">
                 <div className="truncate">{token.label || KIND_LABEL[token.kind]}</div>
                 <div className="text-xs text-muted-foreground">
-                  {KIND_LABEL[token.kind]} · {token.state} · Last used{" "}
+                  {KIND_LABEL[token.kind]}
+                  {token.admin ? " (admin)" : ""} · {token.state} · Last used{" "}
                   {formatTime(token.lastUsedAt)}
                 </div>
               </div>

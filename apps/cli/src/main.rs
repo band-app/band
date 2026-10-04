@@ -544,6 +544,10 @@ enum TokensCmd {
         /// What the token is for, shown in the token list
         #[arg(long, default_value = "CLI device")]
         label: String,
+        /// Let the token manage tokens (`tokens.*`). Without it the token
+        /// gets 403 on every `band tokens` command.
+        #[arg(long)]
+        admin: bool,
     },
     /// Revoke a token. Whatever uses it stops authenticating.
     Revoke {
@@ -806,7 +810,7 @@ fn main() {
         },
         Commands::Tokens { cmd } => match cmd {
             TokensCmd::List => cmd_tokens_list(),
-            TokensCmd::CreateDevice { label } => cmd_tokens_create_device(&label),
+            TokensCmd::CreateDevice { label, admin } => cmd_tokens_create_device(&label, admin),
             TokensCmd::Revoke { id } => cmd_tokens_revoke(&id),
         },
         Commands::Settings => cmd_settings(json_output),
@@ -3030,9 +3034,12 @@ fn cmd_tokens_list() -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_tokens_create_device(label: &str) -> Result<CommandResult, String> {
+fn cmd_tokens_create_device(label: &str, admin: bool) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate("tokens.createDevice", &serde_json::json!({"label": label}))?;
+    let data = client.trpc_mutate(
+        "tokens.createDevice",
+        &serde_json::json!({"label": label, "admin": admin}),
+    )?;
     let token = data
         .get("token")
         .and_then(|v| v.as_str())
@@ -3041,11 +3048,12 @@ fn cmd_tokens_create_device(label: &str) -> Result<CommandResult, String> {
         .pointer("/view/id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let kind = if admin { "admin device" } else { "device" };
     Ok(CommandResult {
         text: format!(
-            "Device token {id} created for \"{label}\"\nToken: {token}\nThis is the only time the token is shown.\n"
+            "{kind} token {id} created for \"{label}\"\nToken: {token}\nThis is the only time the token is shown.\n"
         ),
-        json: serde_json::json!({"id": id, "label": label, "token": token}),
+        json: serde_json::json!({"id": id, "label": label, "admin": admin, "token": token}),
     })
 }
 
@@ -3683,15 +3691,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "tokens list",
             "description": "List the hub's tokens (never their secrets)",
             "parameters": [],
-            "notes": "Text output: `ID  KIND  LABEL  STATE  LAST USED` (space-padded table). KIND is device, worker_bootstrap or worker_session; STATE is active, revoked, expired or used.\nJSON output: `{\"tokens\": [{\"id\": \"...\", \"kind\": \"device\", \"label\": \"...\", \"state\": \"active\", \"lastUsedAt\": null}]}`."
+            "notes": "Text output: `ID  KIND  LABEL  STATE  LAST USED` (space-padded table). KIND is device, worker_bootstrap or worker_session; STATE is active, revoked, expired or used.\nJSON output: `{\"tokens\": [{\"id\": \"...\", \"kind\": \"device\", \"label\": \"...\", \"admin\": true, \"state\": \"active\", \"lastUsedAt\": null}]}`. Needs an admin token."
         }),
         serde_json::json!({
             "name": "tokens create-device",
             "description": "Create a device token for a UI or script",
             "parameters": [
                 {"name": "--label", "type": "string", "required": false, "description": "What the token is for (default \"CLI device\")"},
+                {"name": "--admin", "type": "boolean", "required": false, "description": "Let the token manage tokens; without it every `band tokens` command gets 403"},
             ],
-            "notes": "The token is printed once; the hub keeps only a hash.\nJSON output: `{\"id\": \"...\", \"label\": \"...\", \"token\": \"...\"}`."
+            "notes": "The token is printed once; the hub keeps only a hash. Only an admin token can run `band tokens`; the shared token in settings.json is one.\nJSON output: `{\"id\": \"...\", \"label\": \"...\", \"admin\": false, \"token\": \"...\"}`."
         }),
         serde_json::json!({
             "name": "tokens revoke",

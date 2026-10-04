@@ -4,6 +4,7 @@ CREATE TABLE `tokens` (
 	`hash` text NOT NULL,
 	`host_id` text,
 	`label` text DEFAULT '' NOT NULL,
+	`admin` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	`expires_at` integer,
 	`last_used_at` integer,
@@ -12,4 +13,6 @@ CREATE TABLE `tokens` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `tokens_hash_idx` ON `tokens` (`hash`);--> statement-breakpoint
-CREATE INDEX `tokens_host_idx` ON `tokens` (`host_id`);
+CREATE INDEX `tokens_host_idx` ON `tokens` (`host_id`);--> statement-breakpoint
+CREATE INDEX `tokens_created_at_idx` ON `tokens` (`created_at`);--> statement-breakpoint
+CREATE INDEX `hosts_created_at_idx` ON `hosts` (`created_at`);

@@ -16,7 +16,12 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
-import { createAuthMiddleware, isAuthorizedUpgrade, selectWsProtocol } from "./auth.ts";
+import {
+  authenticatedCredential,
+  createAuthMiddleware,
+  isAuthorizedUpgrade,
+  selectWsProtocol,
+} from "./auth.ts";
 import { classifyOrigin, createCorsMiddleware, parseOriginList } from "./cors.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatHistory } from "./src/api/chat-history.ts";
@@ -247,10 +252,9 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 // dist/start-server.mjs`) enforces the cookie as before.
 const isDev = process.env.NODE_ENV === "development";
 const persistedToken = getOrCreateToken();
-// The shared token is a device token like any other from here on: any live
-// (not revoked, not expired) device token passes, and `tokens.revoke` takes
-// one away.
-tokenService.ensureSharedToken(persistedToken);
+// The shared token is an admin device token (`tokenService.ensureSharedToken`,
+// called in `main()` once the `tokens` table exists). Any live device token
+// passes auth, and `tokens.revoke` takes one away.
 const { handleAuth, expectedToken } = createAuthMiddleware(
   isDev ? undefined : persistedToken,
   tokenService.acceptsDevice,
@@ -266,6 +270,18 @@ function allowedOrigins(): string[] {
   ];
 }
 const handleCors = createCorsMiddleware(allowedOrigins);
+
+/**
+ * Whether the device token that authenticated this request is an admin
+ * token. With auth off (dev) every caller is an admin.
+ */
+function requestIsAdmin(req: IncomingMessage): boolean {
+  if (!expectedToken) return true;
+  const token = authenticatedCredential(req, (c) => tokenService.resolveDevice(c), {
+    allowCookie: req.headers.origin !== "null",
+  });
+  return token?.admin === true;
+}
 
 // `sirv` calls `totalist` (which calls `readdirSync`) eagerly at construction
 // time to build its asset map. The dev server runs from source where
@@ -659,6 +675,9 @@ async function main() {
   // cold cache and saves the boot path one synchronous SQL pass.
   // -----------------------------------------------------------------------
   runMigrations();
+  // The shared `tokenSecret` becomes the admin device token. This needs the
+  // `tokens` table, so it runs after the migrations.
+  tokenService.ensureSharedToken(persistedToken);
 
   // Where terminals live: the detached terminal daemon (so shells survive a
   // restart of this server) or this process. Nothing has spawned yet, and the
@@ -1001,7 +1020,8 @@ async function main() {
         endpoint: "/trpc",
         req: request,
         router: appRouter,
-        createContext: ({ req }) => createContext({ req }),
+        createContext: ({ req: webRequest }) =>
+          createContext({ req: webRequest, admin: requestIsAdmin(req) }),
       });
       pipeWebResponseToNodeRes(response, res);
       return;
@@ -1118,7 +1138,11 @@ async function main() {
   // WebSocket server for tRPC subscriptions
   // ---------------------------------------------------------------------------
   const wss = new WebSocketServer({ noServer: true, handleProtocols: selectWsProtocol });
-  const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
+  const wssHandler = applyWSSHandler({
+    wss,
+    router: appRouter,
+    createContext: ({ req }) => createContext({ req, admin: requestIsAdmin(req) }),
+  });
 
   // ---------------------------------------------------------------------------
   // WebSocket server for terminal connections

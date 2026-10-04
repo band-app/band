@@ -32,6 +32,7 @@ interface TokenView {
   kind: string;
   label: string;
   hostId: string | null;
+  admin: boolean;
   state: string;
   lastUsedAt: number | null;
 }
@@ -69,8 +70,16 @@ async function listTokens(token = SHARED_TOKEN): Promise<TokenView[]> {
   return (await trpcData<{ tokens: TokenView[] }>(res)).tokens;
 }
 
-async function createDevice(label: string): Promise<{ token: string; view: TokenView }> {
-  const res = await trpcMutate(server.url, "tokens.createDevice", { label }, SHARED_TOKEN);
+async function createDevice(
+  label: string,
+  admin?: boolean,
+): Promise<{ token: string; view: TokenView }> {
+  const res = await trpcMutate(
+    server.url,
+    "tokens.createDevice",
+    admin === undefined ? { label } : { label, admin },
+    SHARED_TOKEN,
+  );
   expect(res.status).toBe(200);
   return trpcData(res);
 }
@@ -105,7 +114,7 @@ describe("upgrading with the shared token", () => {
 
   it("lists the shared token as a device token and keeps the old data", async () => {
     const shared = (await listTokens()).find((t) => t.id === "shared");
-    expect(shared).toMatchObject({ kind: "device", state: "active" });
+    expect(shared).toMatchObject({ kind: "device", state: "active", admin: true });
     const projects = await trpcQuery(server.url, "projects.list", undefined, SHARED_TOKEN);
     const { projects: listed } = await trpcData<{ projects: Array<{ name: string }> }>(projects);
     expect(listed.map((p) => p.name)).toContain("old");
@@ -128,7 +137,7 @@ describe("device tokens", () => {
     expect(
       (await fetch(`${server.url}/trpc/projects.list`, { headers: bearer(token) })).status,
     ).toBe(200);
-    const row = (await listTokens(token)).find((t) => t.id === view.id);
+    const row = (await listTokens()).find((t) => t.id === view.id);
     expect(row?.lastUsedAt).not.toBeNull();
   });
 
@@ -206,6 +215,57 @@ describe("device tokens", () => {
       status: "offline",
       labels: ["os=linux"],
     });
+  });
+});
+
+describe("admin tokens", () => {
+  it("creates non-admin device tokens by default and admin ones on request", async () => {
+    const plain = await createDevice("plain");
+    const admin = await createDevice("admin", true);
+    expect(plain.view.admin).toBe(false);
+    expect(admin.view.admin).toBe(true);
+  });
+
+  it("answers a non-admin device token with 403 on every tokens procedure", async () => {
+    const { token } = await createDevice("viewer");
+    const victim = await createDevice("victim");
+
+    const attempts = [
+      trpcQuery(server.url, "tokens.list", undefined, token),
+      trpcMutate(server.url, "tokens.createDevice", { label: "minted" }, token),
+      trpcMutate(server.url, "tokens.issueWorkerBootstrap", { hostName: "rogue" }, token),
+      trpcMutate(server.url, "tokens.revoke", { tokenId: victim.view.id }, token),
+    ];
+    for (const res of await Promise.all(attempts)) expect(res.status).toBe(403);
+
+    // Nothing happened: the victim still works, and no token or host was created.
+    expect(
+      (await fetch(`${server.url}/trpc/projects.list`, { headers: bearer(victim.token) })).status,
+    ).toBe(200);
+    const labels = (await listTokens()).map((t) => t.label);
+    expect(labels).not.toContain("minted");
+    expect(labels).not.toContain("rogue");
+  });
+
+  it("lets a non-admin device token use the rest of the API, including hosts.list", async () => {
+    const { token } = await createDevice("reader");
+    expect((await trpcQuery(server.url, "projects.list", undefined, token)).status).toBe(200);
+    expect((await trpcQuery(server.url, "hosts.list", undefined, token)).status).toBe(200);
+  });
+
+  it("lets an admin device token manage tokens, over a cookie and a Bearer header", async () => {
+    const { token, view } = await createDevice("operator", true);
+    expect((await listTokens(token)).some((t) => t.id === view.id)).toBe(true);
+    const bearerCall = await fetch(`${server.url}/trpc/tokens.list`, { headers: bearer(token) });
+    expect(bearerCall.status).toBe(200);
+    const minted = await trpcMutate(server.url, "tokens.createDevice", { label: "child" }, token);
+    expect(minted.status).toBe(200);
+  });
+
+  it("stops an admin token from managing tokens once it is revoked", async () => {
+    const { token, view } = await createDevice("short-lived admin", true);
+    await trpcMutate(server.url, "tokens.revoke", { tokenId: view.id }, SHARED_TOKEN);
+    expect((await trpcQuery(server.url, "tokens.list", undefined, token)).status).toBe(401);
   });
 });
 

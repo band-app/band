@@ -33,9 +33,13 @@ export class TokenQueries {
     this.db().insert(tokens).values(row).run();
   }
 
-  /** Sets the hash of `id` and clears its revocation. Used to follow `settings.tokenSecret`. */
-  replaceHash(id: string, hash: string): void {
-    this.db().update(tokens).set({ hash, revokedAt: null }).where(eq(tokens.id, id)).run();
+  /** Points the shared-token row at `hash`, live and admin. Used to follow `settings.tokenSecret`. */
+  resetShared(id: string, hash: string): void {
+    this.db()
+      .update(tokens)
+      .set({ hash, revokedAt: null, admin: true })
+      .where(eq(tokens.id, id))
+      .run();
   }
 
   touch(id: string, at: number): void {

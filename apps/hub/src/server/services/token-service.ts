@@ -46,6 +46,7 @@ export interface TokenView {
   kind: TokenKind;
   label: string;
   hostId: string | null;
+  admin: boolean;
   createdAt: number;
   expiresAt: number | null;
   lastUsedAt: number | null;
@@ -100,6 +101,7 @@ function toView(row: TokenRow, now: number): TokenView {
     kind: row.kind,
     label: row.label,
     hostId: row.hostId,
+    admin: row.admin,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     lastUsedAt: row.lastUsedAt,
@@ -132,6 +134,7 @@ export class TokenService {
         hash,
         hostId: null,
         label: "Shared token",
+        admin: true,
         createdAt: this.now(),
         expiresAt: null,
         lastUsedAt: null,
@@ -139,7 +142,9 @@ export class TokenService {
       });
       return;
     }
-    if (!sameHash(existing.hash, hash)) this.queries.replaceHash(SHARED_TOKEN_ID, hash);
+    if (!existing.admin || !sameHash(existing.hash, hash)) {
+      this.queries.resetShared(SHARED_TOKEN_ID, hash);
+    }
   }
 
   /** The live device token this value belongs to, or null. */
@@ -153,9 +158,10 @@ export class TokenService {
   acceptsDevice = (candidate: string | undefined): boolean =>
     this.resolveDevice(candidate) !== null;
 
-  createDevice(label: string): { token: string; view: TokenView } {
+  /** An admin device token may call `tokens.*`; the default one may not. */
+  createDevice(label: string, admin = false): { token: string; view: TokenView } {
     const token = newToken("device");
-    const row = this.insert("device", token, { label });
+    const row = this.insert("device", token, { label, admin });
     return { token, view: toView(row, this.now()) };
   }
 
@@ -305,7 +311,7 @@ export class TokenService {
   private insert(
     kind: TokenKind,
     token: string,
-    extra: { label: string; hostId?: string; expiresAt?: number },
+    extra: { label: string; hostId?: string; expiresAt?: number; admin?: boolean },
   ): TokenRow {
     const row = this.build(kind, token, extra);
     this.queries.insert(row);
@@ -315,7 +321,7 @@ export class TokenService {
   private build(
     kind: TokenKind,
     token: string,
-    extra: { label: string; hostId?: string; expiresAt?: number },
+    extra: { label: string; hostId?: string; expiresAt?: number; admin?: boolean },
   ): TokenRow {
     return {
       id: randomUUID(),
@@ -323,6 +329,7 @@ export class TokenService {
       hash: hashToken(token),
       hostId: extra.hostId ?? null,
       label: extra.label,
+      admin: extra.admin ?? false,
       createdAt: this.now(),
       expiresAt: extra.expiresAt ?? null,
       lastUsedAt: null,

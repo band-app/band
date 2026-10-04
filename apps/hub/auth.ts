@@ -53,6 +53,38 @@ export function isAuthorizedUpgrade(
   );
 }
 
+/**
+ * The credential `resolve` accepts for a request, checking the sources in the
+ * order the auth middleware does: `?token=`, Bearer header, cookie, then the
+ * `band-token.<token>` subprotocol. Null when none resolves.
+ */
+export function authenticatedCredential<T>(
+  req: IncomingMessage,
+  resolve: (candidate: string | undefined) => T | null,
+  opts: { allowCookie?: boolean } = {},
+): T | null {
+  const candidates: Array<string | undefined> = [];
+  try {
+    candidates.push(
+      new URL(req.url ?? "/", "http://localhost").searchParams.get("token") ?? undefined,
+    );
+  } catch {
+    // An unparseable URL has no query token.
+  }
+  candidates.push(bearerToken(req));
+  if (opts.allowCookie !== false) candidates.push(parseCookies(req).band_token);
+  for (const protocol of wsProtocols(req)) {
+    if (protocol.startsWith(WS_TOKEN_PROTOCOL_PREFIX)) {
+      candidates.push(protocol.slice(WS_TOKEN_PROTOCOL_PREFIX.length));
+    }
+  }
+  for (const candidate of candidates) {
+    const found = candidate ? resolve(candidate) : null;
+    if (found) return found;
+  }
+  return null;
+}
+
 /** `ws` `handleProtocols` hook: select `band`, never echo the token protocol. */
 export function selectWsProtocol(protocols: Set<string>): string | false {
   return protocols.has(WS_BASE_PROTOCOL) ? WS_BASE_PROTOCOL : false;

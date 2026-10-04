@@ -1,6 +1,7 @@
 /**
  * `tokens.*` — device tokens and worker bootstrap tokens. Thin: validates
- * input and delegates to `TokenService`. The MCP endpoint leaves out every
+ * input and delegates to `TokenService`. Every procedure needs an admin
+ * device token (403 otherwise). The MCP endpoint leaves out every
  * `tokens.*` procedure, so an agent can't mint or list tokens.
  *
  * A new token's secret is in the `create` response only. The hub keeps its
@@ -16,12 +17,12 @@ import {
   MAX_LIST_LIMIT,
   tokenService,
 } from "../../services/token-service";
-import { publicProcedure, t } from "../trpc";
+import { adminProcedure, t } from "../trpc";
 
 const label = z.string().trim().min(1).max(100);
 
 export const tokensRouter = t.router({
-  list: publicProcedure
+  list: adminProcedure
     .input(
       z
         .object({ limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT) })
@@ -29,12 +30,14 @@ export const tokensRouter = t.router({
     )
     .query(({ input }) => ({ tokens: tokenService.list(input.limit) })),
 
-  createDevice: publicProcedure.input(z.object({ label })).mutation(({ input }) => {
-    const { token, view } = tokenService.createDevice(input.label);
-    return { token, view };
-  }),
+  createDevice: adminProcedure
+    .input(z.object({ label, admin: z.boolean().default(false) }))
+    .mutation(({ input }) => {
+      const { token, view } = tokenService.createDevice(input.label, input.admin);
+      return { token, view };
+    }),
 
-  issueWorkerBootstrap: publicProcedure
+  issueWorkerBootstrap: adminProcedure
     .input(
       z.object({
         hostName: label,
@@ -56,7 +59,7 @@ export const tokensRouter = t.router({
       return { token, hostId, view };
     }),
 
-  revoke: publicProcedure.input(z.object({ tokenId: z.string().min(1) })).mutation(({ input }) => {
+  revoke: adminProcedure.input(z.object({ tokenId: z.string().min(1) })).mutation(({ input }) => {
     try {
       return { token: tokenService.revoke(input.tokenId) };
     } catch (err) {
