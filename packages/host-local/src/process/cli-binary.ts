@@ -1,6 +1,6 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { platform } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 /**
  * Pure resolver for the band CLI binary. Takes the cwd and the calling
@@ -16,6 +16,17 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
 
   // Cargo/Electron emit `band.exe` on Windows, `band` elsewhere.
   const exe = platform() === "win32" ? "band.exe" : "band";
+
+  // --- Strategy 0: explicit override (Docker image, server installs) ---
+  const explicit = process.env.BAND_CLI_PATH;
+  if (explicit) {
+    try {
+      lstatSync(explicit);
+      return explicit;
+    } catch {
+      // Fall through to the other strategies.
+    }
+  }
 
   // --- Strategy A: cargo build output (dev & source builds) ---
   const appsStrategies = [
@@ -67,6 +78,16 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     try {
       lstatSync(p);
       return p;
+    } catch {
+      // Continue
+    }
+  }
+
+  // --- Strategy C: `band` on PATH, symlinks resolved ---
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    try {
+      return realpathSync(join(dir, exe));
     } catch {
       // Continue
     }

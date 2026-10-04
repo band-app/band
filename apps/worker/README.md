@@ -62,7 +62,7 @@ The state directory (mode 0700) holds `worker-id`, created once and reused so th
 
 On every connect the worker asks the hub for the `band` CLI built for its platform and keeps it in `<state dir>/bin/band`, replacing it when the SHA-256 differs. It runs `band skills install` with that binary, and puts the directory first on the PATH of every agent and terminal it starts. Those processes call the hub through the relay with their own token.
 
-The hub answers from `$BAND_CLI_BINARIES_DIR/band-<platform>-<arch>` (for example `band-linux-x64`, `band-linux-arm64`, `band-darwin-arm64`), then from its own CLI when the worker has the hub's platform and architecture. A hub on macOS serving a Linux worker needs the Linux binaries in that directory. With none available the worker logs a warning and runs without `band`.
+The hub answers from `$BAND_CLI_BINARIES_DIR/band-<platform>-<arch>` (for example `band-linux-x64`, `band-linux-arm64`, `band-darwin-arm64`), then from its own CLI when the worker has the hub's platform and architecture. A hub on macOS serving a Linux worker needs the Linux binaries in that directory. The Docker image sets `BAND_CLI_PATH=/opt/band/binaries/band`, so a hub container serves workers of its own platform with no setup. `findCliBinary` also honours `BAND_CLI_PATH` and a `band` on the hub's PATH. With none available the worker logs a warning and runs without `band`.
 
 ## Path policy
 

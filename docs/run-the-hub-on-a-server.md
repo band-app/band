@@ -119,6 +119,8 @@ The volume name starts with the Compose project name, which is the directory nam
 | `BAND_ADMIN_TOKEN` | empty | Sets the admin token. Empty makes the first run create and print one. |
 | `BAND_LOCAL_HOST` | `off` | `on` allows workspaces on the hub's own machine and creates the sample project. |
 | `BAND_DEFAULT_HOST` | empty | Worker id used when a workspace names no host. Empty uses the only online worker. |
+| `BAND_CLI_PATH` | `/opt/band/binaries/band` | The `band` CLI the hub serves to workers of its own platform. |
+| `BAND_CLI_BINARIES_DIR` | empty | Directory with `band-<platform>-<arch>` files (for example `band-linux-arm64`), served to workers of other platforms. Mount it into the container and set the variable. |
 | `BAND_SERVE_UI` | `true` | `false` serves the API only. |
 | `BAND_ALLOWED_ORIGINS` | empty | Origins of a UI hosted elsewhere. |
 | `BAND_PORT` | `3456` | Host port. |
