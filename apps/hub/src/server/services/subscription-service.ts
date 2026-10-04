@@ -111,7 +111,16 @@ export type GithubPrCreateInput = z.input<typeof githubPrCreateInput>;
 /** CI results on a branch, delivered once per commit when every check is done. */
 export const githubCiCreateInput = sourceCommon.extend({
   repo: repoSchema,
-  branch: z.string().min(1),
+  branch: z
+    .string()
+    .min(1)
+    .refine(
+      (b) =>
+        !b.split("/").some((part) => part === "." || part === "..") &&
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: rejects control characters in a ref
+        !/[%\u0000-\u001f]/.test(b),
+      "invalid branch name",
+    ),
 });
 export type GithubCiCreateInput = z.input<typeof githubCiCreateInput>;
 
@@ -302,6 +311,15 @@ export class SubscriptionService {
     return this.queries.list().filter((s) => s.source === "github" && s.config.repo === repo);
   }
 
+  /** The polling cursor of a subscription (see `GithubPollService`). */
+  getCursor(id: string): string | undefined {
+    return this.queries.cursor(id);
+  }
+
+  setCursor(id: string, cursor: string): void {
+    this.queries.setCursor(id, cursor, Date.now());
+  }
+
   setConfig(id: string, config: SubscriptionConfig): void {
     this.queries.setConfig(id, config);
   }
@@ -442,13 +460,16 @@ export class SubscriptionService {
 
   /**
    * Routes one event: skips repeats of an event id, then holds the event
-   * for each matching subscription until its coalesce window ends.
+   * for each matching subscription until its coalesce window ends. With
+   * `onlySubscriptionId`, only that subscription gets the event (a poller
+   * with a cursor per subscription).
    */
-  ingest(raw: SubscriptionEvent): void {
+  ingest(raw: SubscriptionEvent, onlySubscriptionId?: string): void {
     const event = subscriptionEventSchema.parse(raw);
     const now = Date.now();
     const expired: string[] = [];
     for (const sub of state.index.get(event.key) ?? []) {
+      if (onlySubscriptionId !== undefined && sub.id !== onlySubscriptionId) continue;
       if (sub.source !== event.source) continue;
       if (sub.kinds.length > 0 && !sub.kinds.includes(event.kind)) continue;
       if (sub.expiresAt <= now) {
