@@ -51,8 +51,8 @@ For each attempt the hub issues a one-time bootstrap token for a new host, then 
 | `BAND_WORKER_ID` | The id of the host the hub created. The worker must run with this id. |
 | `BAND_BOOTSTRAP_TOKEN` | Trade for a session token once. Valid for the attempt's timeout plus a minute. |
 | `BAND_REPO_URLS` | Comma-separated clone URLs of the request's repository, without credentials. The hub's local path when the project has no origin remote; only a hook on the hub's machine can use that. |
-| `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, `{}` when there is none. |
-| `BAND_ISOLATION` | The runner's `isolation`. |
+| `BAND_ENVIRONMENT` | The request's `placement.environment` as JSON, parsed and checked with the `.band/environment.json` parser (`docs/agent-environments.md`), so it has the same shape. `{}` when there is none. A request whose environment does not parse fails at once, with the problems and their key paths, and no hook runs. |
+| `BAND_ISOLATION` | The environment's `isolation` (`worktree`, `container` or `vm`) when it sets one, else the runner's `isolation`. |
 | `BAND_LABELS` | The request's labels as `k=v,k=v`. Pass them to the worker (`BAND_WORKER_LABELS`) so the host carries them. |
 | `BAND_REQUIRES` | The request's `placement.requires` as JSON. |
 | `BAND_PROJECT` | The project name. |

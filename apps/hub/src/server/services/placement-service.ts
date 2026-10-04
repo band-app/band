@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { extractVersion, satisfies as inRange, rangeError } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
 import { toWorkspaceId } from "@band-app/shared/workspace-id";
 import { z } from "zod";
@@ -61,45 +62,17 @@ interface Candidate {
 
 // ---- matching -------------------------------------------------------------
 
-/** Compares dotted numbers. Missing segments count as 0. */
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  const pb = b.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d !== 0) return d;
-  }
-  return 0;
-}
-
 /**
- * Whether `actual` satisfies `constraint`: `>=24`, `>24`, `<=24`, `<24`, `=24`
- * or a plain `24` (which also matches `24.1.2`). A non-numeric constraint
- * (`linux`) must match exactly.
- * TODO(3.1): replace with the environment spec's requirement helper once it merges.
+ * Whether `actual` satisfies `constraint`. A version range (`>=24`, `^3.12`,
+ * `24.x`, `>=20 <23`, see `@band-app/environment`) is matched against the
+ * version found in `actual`. Anything else (`linux`, `arm64`) must match exactly.
  */
 export function satisfies(actual: string | undefined, constraint: string): boolean {
   if (actual === undefined) return false;
-  const m = /^(>=|<=|>|<|=)?\s*v?(\d+(?:\.\d+)*)$/.exec(constraint.trim());
-  if (!m) return actual === constraint.trim();
-  const found = /^v?(\d+(?:\.\d+)*)/.exec(actual.trim());
-  if (!found) return false;
-  const [, op, wanted] = m;
-  const cmp = compareVersions(found[1], wanted);
-  switch (op) {
-    case ">=":
-      return cmp >= 0;
-    case ">":
-      return cmp > 0;
-    case "<=":
-      return cmp <= 0;
-    case "<":
-      return cmp < 0;
-    case "=":
-      return cmp === 0;
-    default:
-      return found[1] === wanted || found[1].startsWith(`${wanted}.`);
-  }
+  const wanted = constraint.trim();
+  if (rangeError(wanted) !== null) return actual === wanted;
+  const version = extractVersion(actual);
+  return version !== null && inRange(version, wanted);
 }
 
 export function matches(host: Candidate, placement: Placement): boolean {
@@ -169,6 +142,7 @@ export class PlacementService {
         row.id === LOCAL_HOST_ID ? await hostRegistry.local.info().catch(() => null) : null;
       const stored = (row.info ?? {}) as Record<string, unknown>;
       const versions = stringRecord(info?.versions ?? stored.versions);
+      const tools = stringRecord(info?.tools ?? stored.tools);
       out.push({
         id: row.id,
         labels: [
@@ -176,6 +150,8 @@ export class PlacementService {
         ],
         facts: {
           ...versions,
+          // What is on the host's PATH wins over the hub's own runtime version.
+          ...tools,
           ...(typeof (info?.os ?? stored.os) === "string"
             ? { os: String(info?.os ?? stored.os) }
             : {}),

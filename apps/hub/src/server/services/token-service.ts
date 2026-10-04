@@ -74,6 +74,8 @@ export interface HostView {
   capabilities: string[];
   /** The worker's home directory, or null when it has not said. */
   home: string | null;
+  /** Toolchain versions on the host (`node`, `python`, `go`, ...), checked against a project's `requires`. Empty before the worker has connected. */
+  tools: Record<string, string>;
   /** False for the hub's own machine when `BAND_LOCAL_HOST=off`. */
   usable: boolean;
 }
@@ -87,6 +89,13 @@ export class HostRemoveError extends Error {
     super(message);
     this.name = "HostRemoveError";
   }
+}
+
+function stringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((e): e is [string, string] => typeof e[1] === "string"),
+  );
 }
 
 function stringList(value: unknown): string[] {
@@ -346,6 +355,7 @@ export class TokenService {
       roots: stringList(h.info?.roots),
       capabilities: capabilityNames(h.info?.capabilities),
       home: typeof h.info?.home === "string" ? h.info.home : null,
+      tools: stringMap(h.info?.tools),
       usable: h.id !== "local" || isLocalHostEnabled(),
     }));
   }

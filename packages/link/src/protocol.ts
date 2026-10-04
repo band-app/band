@@ -29,6 +29,8 @@ export interface Hello {
   labels: Record<string, string>;
   roots: string[];
   agents: string[];
+  /** Toolchain versions on the worker's PATH (`node`, `python`, `go`, ...). Absent from older workers. */
+  tools?: Record<string, string>;
   /** Highest sequence number the sender has received on each channel. */
   resume?: Record<string, number>;
 }
@@ -85,6 +87,17 @@ export function validateHello(h: Hello): string | null {
     !Object.values(labels).every((v) => typeof v === "string")
   ) {
     return "labels must map strings to strings";
+  }
+  if (h.tools !== undefined) {
+    const tools = h.tools as unknown;
+    if (
+      typeof tools !== "object" ||
+      tools === null ||
+      Array.isArray(tools) ||
+      !Object.values(tools).every((v) => typeof v === "string")
+    ) {
+      return "tools must map strings to strings";
+    }
   }
   if (h.resume !== undefined) {
     const resume = h.resume as unknown;

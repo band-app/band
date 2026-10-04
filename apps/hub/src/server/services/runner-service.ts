@@ -23,6 +23,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type Environment, parseEnvironment } from "@band-app/environment";
 import { createLogger } from "@band-app/logger";
 import type { HostRequestRow } from "../infra/db/queries/host-requests";
 import { bandHome } from "../infra/db/queries/settings";
@@ -288,6 +289,19 @@ export class RunnerService {
   private async run(runner: RunnerConfig, row: HostRequestRow, run: RunnerRun): Promise<void> {
     const runLog = new RunLog(this.logFile(row.id));
     runLog.write("hub", `runner ${runner.id} took request ${row.id} for ${row.workspaceId}`);
+    const environment = parseRequestEnvironment(row);
+    if (!environment.ok) {
+      // No machine can satisfy a malformed environment, so do not start one.
+      runLog.write("hub", environment.error);
+      run.status = "failed";
+      run.error = environment.error;
+      try {
+        placementService.fail(row.id, environment.error);
+      } catch (err) {
+        log.warn(`could not fail ${row.id}: ${err instanceof Error ? err.message : err}`);
+      }
+      return;
+    }
     let lastError = "";
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       run.attempt = attempt;
@@ -463,8 +477,8 @@ export class RunnerService {
       BAND_HUB_URL: this.hubUrlFor(runner),
       BAND_WORKER_ID: workerId,
       BAND_REPO_URLS: repos.join(","),
-      BAND_ENVIRONMENT: JSON.stringify(row.environment ?? {}),
-      BAND_ISOLATION: runner.isolation,
+      BAND_ENVIRONMENT: JSON.stringify(environmentOf(row) ?? {}),
+      BAND_ISOLATION: environmentOf(row)?.isolation ?? runner.isolation,
       BAND_LABELS: Object.entries(row.labels)
         .map(([k, v]) => `${k}=${v}`)
         .join(","),
@@ -555,6 +569,25 @@ export class RunnerService {
       });
     });
   }
+}
+
+/** Checks `placement.environment` with the `.band/environment.json` parser. A request without one is fine. */
+function parseRequestEnvironment(
+  row: HostRequestRow,
+): { ok: true; environment: Environment | null } | { ok: false; error: string } {
+  if (!row.environment) return { ok: true, environment: null };
+  const parsed = parseEnvironment(JSON.stringify(row.environment));
+  if (parsed.ok) return { ok: true, environment: parsed.environment };
+  const problems = parsed.issues
+    .map((i) => (i.path ? `${i.path}: ${i.message}` : i.message))
+    .join("; ");
+  return { ok: false, error: `Invalid placement environment: ${problems}` };
+}
+
+/** The parsed environment of a request, `null` when it has none or it is invalid (`run` has failed those). */
+function environmentOf(row: HostRequestRow): Environment | null {
+  const parsed = parseRequestEnvironment(row);
+  return parsed.ok ? parsed.environment : null;
 }
 
 /**

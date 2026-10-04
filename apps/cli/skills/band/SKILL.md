@@ -212,6 +212,14 @@ band runners log <request-id>
 
 A runner is a pair of scripts the hub runs to start a worker when `band workspaces create --labels ...` finds no host. `list` shows each runner's id, spawn script, labels, running count against its limit and timeout, and any entry of `runners` in `settings.json` that the hub skips as invalid. `log` prints what the hooks printed for one host request (the id comes from the provisioning result), with tokens removed. Runners are set up in `settings.json`; see `docs/runner-hooks.md` in the Band repository.
 
+### Validate a repository's environment file
+
+```sh
+band env validate [path]
+```
+
+Checks `.band/environment.json` in the repository at `path` (default: the current directory), or the file itself. The path must exist on the hub's machine. Prints `OK <file>` and exits 0, or prints each problem with its key path and exits 1. With `--output json` it prints the parsed environment and the issues. Needs an admin token.
+
 ### List, create and revoke the hub's tokens
 
 ```sh

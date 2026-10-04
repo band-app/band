@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@band-app/coding-agent": "workspace:^",
+    "@band-app/environment": "workspace:^",
     "@band-app/host-api": "workspace:^",
     "@band-app/host-local": "workspace:^",
     "@band-app/host-remote": "workspace:^",

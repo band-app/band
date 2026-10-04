@@ -43,6 +43,8 @@ function discoverProcedures(): ProcedureInfo[] {
       path.startsWith("runners.")
     )
       continue;
+    // `environment.validate` reads a directory the caller names on the hub's disk.
+    if (path === "environment.validate") continue;
 
     const toolName = `band_${path.replace(/\./g, "_")}`;
 

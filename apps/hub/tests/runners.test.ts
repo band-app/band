@@ -465,6 +465,37 @@ describe("concurrency", () => {
 });
 
 describe("the hook contract", () => {
+  it("fails a request whose environment is not valid, without starting a machine", async () => {
+    const marks = join(work, "badenv-marks");
+    mkdirSync(marks, { recursive: true });
+    await setRunners([
+      {
+        id: "badenv",
+        spawn: script(join(work, "badenv-spawn.sh"), `echo spawn >> "$MARKS/spawn"`),
+        labels: { pool: "badenv" },
+        env: { MARKS: marks },
+      },
+    ]);
+    const id = requestIdOf(
+      await create("runner-badenv", {
+        labels: { pool: "badenv" },
+        environment: { isolation: "spaceship", nope: 1 },
+      }),
+    );
+    const failed = await waitFor(
+      async () => {
+        const r = await request(id);
+        return r?.status === "failed" ? r : undefined;
+      },
+      { label: "request fails", timeoutMs: 20_000, intervalMs: 250 },
+    );
+    expect(failed.error).toContain("Invalid placement environment");
+    expect(failed.error).toContain("isolation");
+    expect(failed.error).toContain("nope: unknown key");
+    expect(lines(join(marks, "spawn"))).toHaveLength(0);
+    await m("hostRequests.cancel", { requestId: id });
+  });
+
   it("passes the contract environment and no hub secrets, and scrubs the token from logs (S5)", async () => {
     const marks = join(work, "env-marks");
     mkdirSync(marks, { recursive: true });
@@ -483,12 +514,16 @@ describe("the hook contract", () => {
           ].join("\n"),
         ),
         labels: { pool: "env", zone: "x" },
-        isolation: "container",
+        isolation: "process",
         timeoutSec: 20,
         env: { MARKS: marks },
       },
     ]);
-    const environment = { image: "node:24", start: ["pnpm dev"] };
+    const environment = {
+      build: { image: "node:24" },
+      start: "pnpm dev",
+      isolation: "container",
+    };
     const id = requestIdOf(
       await create("runner-env", { labels: { pool: "env", zone: "x" }, environment }),
     );
@@ -511,6 +546,7 @@ describe("the hook contract", () => {
     expect(env.BAND_BOOTSTRAP_TOKEN).toMatch(/^bwb_/);
     expect(env.BAND_REPO_URLS).toBe(hubRepo);
     expect(JSON.parse(env.BAND_ENVIRONMENT)).toEqual(environment);
+    // The environment's own isolation wins over the runner's.
     expect(env.BAND_ISOLATION).toBe("container");
     expect(env.BAND_LABELS.split(",").sort()).toEqual(["pool=env", "zone=x"]);
     expect(env.BAND_RUNNER_ID).toBe("envdump");

@@ -616,6 +616,49 @@ export class SettingsPage {
     });
   }
 
+  /** Trigger of a project's entry in the Environment section, collapsed by
+   *  default. `data-testid` set in `EnvironmentSettings.tsx`. */
+  environmentTrigger(projectName: string): Locator {
+    return this.dialog.getByTestId(`settings__environment-trigger-${projectName}`);
+  }
+
+  /** Open a project's entry in the Environment section. */
+  async expandEnvironment(projectName: string): Promise<void> {
+    await test.step(`Expand ${projectName}'s environment`, async () => {
+      const trigger = this.environmentTrigger(projectName);
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    });
+  }
+
+  /** The list of validation problems of the open environment. `data-testid`
+   *  set in `EnvironmentSettings.tsx`. */
+  environmentIssues(): Locator {
+    return this.dialog.getByTestId("settings__environment-issues");
+  }
+
+  /** Shown instead of the issues when the open environment is valid. */
+  environmentValid(): Locator {
+    return this.dialog.getByTestId("settings__environment-valid");
+  }
+
+  /** Shown when the open project has no `.band/environment.json`. */
+  environmentNone(): Locator {
+    return this.dialog.getByTestId("settings__environment-none");
+  }
+
+  /** The parsed fields of the open environment. */
+  environmentSummary(): Locator {
+    return this.dialog.getByTestId("settings__environment-summary");
+  }
+
+  /** One row per host in the open environment's host check. `data-meets`
+   *  is `true` or `false`. */
+  environmentHosts(): Locator {
+    return this.dialog.getByTestId("settings__environment-host");
+  }
+
   /** Click Save. */
   async save(): Promise<void> {
     await test.step("Click Save", async () => {
