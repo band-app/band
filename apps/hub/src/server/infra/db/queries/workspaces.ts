@@ -98,6 +98,26 @@ export class WorkspaceQueries {
   }
 
   /**
+   * The host a workspace lives on, from `worktrees.host_id`. Null when no
+   * worktree row matches the id.
+   */
+  findHostId(workspaceId: string): string | null {
+    const row = getDb()
+      .select({
+        project: worktreesTable.projectName,
+        name: worktreesTable.name,
+        hostId: worktreesTable.hostId,
+      })
+      .from(worktreesTable)
+      .where(
+        sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.name}, '/', '-') = ${workspaceId}`,
+      )
+      .get();
+    // Same sanity check as `findIdentity`.
+    return row && toWorkspaceId(row.project, row.name) === workspaceId ? row.hostId : null;
+  }
+
+  /**
    * Delete the `branch_statuses` row for the given workspace.
    *
    * Called from the workspace remove path to clear the per-workspace git /

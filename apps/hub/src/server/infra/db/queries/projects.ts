@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb } from "../connection";
-import { projects as projectsTable, worktrees as worktreesTable } from "../schema";
+import {
+  projectHosts as projectHostsTable,
+  projects as projectsTable,
+  worktrees as worktreesTable,
+} from "../schema";
 
 /**
  * Project data access — Phase 2 of the 3-tier refactor
@@ -76,6 +80,8 @@ export interface WorktreeState {
   path: string;
   head?: string;
   pinned: boolean;
+  /** Host the worktree lives on. Absent means `local`. */
+  hostId?: string;
 }
 
 /**
@@ -162,6 +168,7 @@ export class ProjectQueries {
         path: row.path,
         head: row.head ?? undefined,
         pinned: row.pinned,
+        hostId: row.hostId,
       });
       wtByProject.set(row.projectName, list);
     }
@@ -219,9 +226,16 @@ export class ProjectQueries {
               path: wt.path,
               head: wt.head ?? null,
               pinned: wt.pinned,
+              hostId: wt.hostId ?? "local",
             })
             .run();
         }
+
+        // TODO(phase-2): preserve non-local project_hosts rows. The project delete
+        // above cascades to them, and only the local row is re-inserted here.
+        tx.insert(projectHostsTable)
+          .values({ projectName: project.name, hostId: "local", path: project.path })
+          .run();
       }
     });
   }
