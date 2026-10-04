@@ -5,13 +5,39 @@
 // as a scripted ACP agent subprocess over the real protocol. The stub's
 // scenario, state and request log live in the test's tmp `$HOME`.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatEvent } from "@band-app/shared/chat-events";
 import { seedSettings, seedState } from "./seed-state";
 import { createTmpHome, type ServerHandle, startServer } from "./server";
+import { isRemoteLoopback } from "./test-host";
 
 export const STUB_AGENT_PATH = join(import.meta.dirname, "..", "fixtures", "acp-stub-agent.mjs");
+
+/**
+ * Where the hub keeps a workspace's chat uploads, and the URL the chat renders
+ * them from. A local workspace uses `<home>/.band/uploads`. A workspace on the
+ * loopback worker uses `<tmp>/.band-uploads/<workspaceId>`, because the worker
+ * owns those files (`docs/integration-testing.md`, "Host modes").
+ */
+export function uploadsLocation(home: string, workspaceId: string) {
+  if (!isRemoteLoopback) {
+    return { dir: join(home, ".band", "uploads"), urlPattern: /^\/api\/uploads\/[^/]+$/ };
+  }
+  return {
+    dir: join(realpathSync(tmpdir()), ".band-uploads", workspaceId),
+    urlPattern: new RegExp(`^/api/uploads/${workspaceId}/[^/]+$`),
+  };
+}
+
+/** The first-turn file-sharing hint's path segment: `<shared>/<workspaceId>/`. */
+export function sharedDirHintPattern(workspaceId: string): RegExp {
+  const root = isRemoteLoopback ? ".band-shared" : "shared";
+  return new RegExp(
+    `^\\[File sharing: to send a file to the user, write or copy it to .*/${root}/${workspaceId}/ `,
+  );
+}
 export const TEST_TOKEN = "acp-chat-test-token";
 export const WORKSPACE_ID = "testproject-main";
 

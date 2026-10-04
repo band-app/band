@@ -230,8 +230,11 @@ beforeAll(async () => {
       },
     ],
   });
+  // The hub's own workspace must stay local, and this file starts its own workers,
+  // so the loopback worker would only get in the way.
   server = await startServer({
     tmpHome: hubHome,
+    remoteHost: false,
     env: {
       BAND_SERVE_UI: "false",
       BAND_TEST_ACP_AGENT: STUB_AGENT_PATH,

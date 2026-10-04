@@ -19,6 +19,7 @@ import {
   runTurn,
   seedAcpHome,
   sendMessage,
+  sharedDirHintPattern,
   startAcpServer,
   stubRequests,
   trpc,
@@ -107,9 +108,7 @@ describe("chat over ACP", () => {
       { type: "text", text: "hello there" },
       {
         type: "text",
-        text: expect.stringMatching(
-          /^\[File sharing: to send a file to the user, write or copy it to .*\/shared\/testproject-main\/ /,
-        ),
+        text: expect.stringMatching(sharedDirHintPattern(WORKSPACE_ID)),
       },
     ]);
   });
@@ -355,7 +354,7 @@ describe("chat over ACP", () => {
       { type: "text", text: "look at this" },
       {
         type: "resource_link",
-        uri: expect.stringMatching(/^file:\/\/.*\/uploads\/.*note\.txt$/),
+        uri: expect.stringMatching(/^file:\/\/.*\/\.?(band-)?uploads\/.*note\.txt$/),
         name: "note.txt",
         mimeType: "text/plain",
       },

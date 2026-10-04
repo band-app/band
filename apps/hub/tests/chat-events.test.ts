@@ -31,11 +31,13 @@ import {
   openStream,
   runTurn,
   sendMessage,
+  sharedDirHintPattern,
   startAcpServer,
   stubRequests,
   TEST_TOKEN,
   trpc,
   turnEnded,
+  uploadsLocation,
   WORKSPACE_ID,
 } from "./helpers/acp-chat";
 import type { ServerHandle } from "./helpers/server";
@@ -281,9 +283,7 @@ describe("a turn", () => {
       .filter((blocks) => ["first message", "second message"].includes(blocks[0].text ?? ""));
     expect(sent).toHaveLength(2);
     expect(sent[0][0]).toEqual({ type: "text", text: "first message" });
-    expect(sent[0].at(-1)?.text).toMatch(
-      /^\[File sharing: to send a file to the user, write or copy it to .*\/shared\//,
-    );
+    expect(sent[0].at(-1)?.text).toMatch(sharedDirHintPattern(WORKSPACE_ID));
     expect(sent[1]).toEqual([{ type: "text", text: "second message" }]);
   });
 
@@ -499,7 +499,7 @@ describe("queue", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
       "base64",
     );
-    const uploadDir = join(server.home, ".band", "uploads");
+    const { dir: uploadDir, urlPattern } = uploadsLocation(server.home, WORKSPACE_ID);
     const before = new Set(existsSync(uploadDir) ? readdirSync(uploadDir) : []);
 
     const { events: done } = await openStream(server.url, chatId, {
@@ -525,7 +525,7 @@ describe("queue", () => {
     expect(files).toEqual([
       {
         mediaType: "image/png",
-        url: expect.stringMatching(/^\/api\/uploads\/.*queued-pixel\.png$/),
+        url: expect.stringMatching(urlPattern),
         filename: "queued-pixel.png",
       },
     ]);
