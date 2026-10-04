@@ -67,6 +67,23 @@ async function listHosts(): Promise<HostView[]> {
   return (await trpcData<{ hosts: HostView[] }>(res)).hosts;
 }
 
+describe("authentication", () => {
+  it("refuses every token procedure without a valid token", async () => {
+    for (const token of ["", "not-a-token"]) {
+      expect((await trpcQuery(server.url, "tokens.list", undefined, token)).status).toBe(401);
+      expect((await trpcQuery(server.url, "hosts.list", undefined, token)).status).toBe(401);
+      const issued = await trpcMutate(
+        server.url,
+        "tokens.issueWorkerBootstrap",
+        { hostName: "intruder" },
+        token,
+      );
+      expect(issued.status).toBe(401);
+    }
+    expect((await listHosts()).some((h) => h.name === "intruder")).toBe(false);
+  });
+});
+
 describe("issuing a worker bootstrap token", () => {
   it("registers an offline host bound to the token, with the requested labels", async () => {
     const res = await issue({ hostName: "gpu box", labels: ["os=linux", "gpu"] });

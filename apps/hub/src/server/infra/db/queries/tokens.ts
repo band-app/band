@@ -12,35 +12,39 @@ export type TokenRow = typeof tokens.$inferSelect;
 export type TokenKind = TokenRow["kind"];
 export type HostRow = typeof hosts.$inferSelect;
 
+type Db = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
+
 export class TokenQueries {
+  constructor(private readonly db: () => Db = getDb) {}
+
   findByHash(hash: string): TokenRow | undefined {
-    return getDb().select().from(tokens).where(eq(tokens.hash, hash)).get();
+    return this.db().select().from(tokens).where(eq(tokens.hash, hash)).get();
   }
 
   findById(id: string): TokenRow | undefined {
-    return getDb().select().from(tokens).where(eq(tokens.id, id)).get();
+    return this.db().select().from(tokens).where(eq(tokens.id, id)).get();
   }
 
-  list(): TokenRow[] {
-    return getDb().select().from(tokens).orderBy(desc(tokens.createdAt)).all();
+  list(limit: number): TokenRow[] {
+    return this.db().select().from(tokens).orderBy(desc(tokens.createdAt)).limit(limit).all();
   }
 
   insert(row: TokenRow): void {
-    getDb().insert(tokens).values(row).run();
+    this.db().insert(tokens).values(row).run();
   }
 
   /** Sets the hash of `id` and clears its revocation. Used to follow `settings.tokenSecret`. */
   replaceHash(id: string, hash: string): void {
-    getDb().update(tokens).set({ hash, revokedAt: null }).where(eq(tokens.id, id)).run();
+    this.db().update(tokens).set({ hash, revokedAt: null }).where(eq(tokens.id, id)).run();
   }
 
   touch(id: string, at: number): void {
-    getDb().update(tokens).set({ lastUsedAt: at }).where(eq(tokens.id, id)).run();
+    this.db().update(tokens).set({ lastUsedAt: at }).where(eq(tokens.id, id)).run();
   }
 
   /** Marks a live bootstrap token as spent. Returns whether this call spent it. */
-  consumeBootstrap(id: string, at: number): boolean {
-    const result = getDb()
+  spendBootstrap(id: string, at: number): boolean {
+    const result = this.db()
       .update(tokens)
       .set({ revokedAt: at, lastUsedAt: at })
       .where(and(eq(tokens.id, id), isNull(tokens.revokedAt)))
@@ -49,25 +53,17 @@ export class TokenQueries {
   }
 
   /**
-   * Spends a bootstrap token and inserts the session row in one transaction,
-   * so a failed insert doesn't burn the token. Returns whether this call won.
+   * Runs `fn` in one SQLite transaction. The queries it receives share the
+   * transaction, and everything rolls back if `fn` throws.
    */
-  exchangeBootstrap(id: string, at: number, session: TokenRow): boolean {
-    return getDb().transaction((tx) => {
-      const result = tx
-        .update(tokens)
-        .set({ revokedAt: at, lastUsedAt: at })
-        .where(and(eq(tokens.id, id), isNull(tokens.revokedAt)))
-        .run();
-      if (Number(result.changes ?? 0) === 0) return false;
-      tx.insert(tokens).values(session).run();
-      return true;
-    });
+  transaction<T>(fn: (queries: TokenQueries) => T): T {
+    // The sync driver rejects async callbacks at the type level; `fn` is sync.
+    return getDb().transaction((tx) => fn(new TokenQueries(() => tx)) as never) as T;
   }
 
   /** Revokes a live token. Returns whether this call did it. */
   revoke(id: string, at: number): boolean {
-    const result = getDb()
+    const result = this.db()
       .update(tokens)
       .set({ revokedAt: at })
       .where(and(eq(tokens.id, id), isNull(tokens.revokedAt)))
@@ -75,28 +71,15 @@ export class TokenQueries {
     return Number(result.changes ?? 0) > 0;
   }
 
-  /** Revokes every live token of a host. */
-  revokeForHost(hostId: string, at: number): void {
-    getDb()
-      .update(tokens)
-      .set({ revokedAt: at })
-      .where(and(eq(tokens.hostId, hostId), isNull(tokens.revokedAt)))
-      .run();
-  }
-
-  findHost(id: string): HostRow | undefined {
-    return getDb().select().from(hosts).where(eq(hosts.id, id)).get();
-  }
-
-  listHosts(): HostRow[] {
-    return getDb().select().from(hosts).orderBy(hosts.createdAt).all();
+  listHosts(limit: number): HostRow[] {
+    return this.db().select().from(hosts).orderBy(hosts.createdAt).limit(limit).all();
   }
 
   markHostSeen(id: string, at: number): void {
-    getDb().update(hosts).set({ lastSeenAt: at, status: "online" }).where(eq(hosts.id, id)).run();
+    this.db().update(hosts).set({ lastSeenAt: at, status: "online" }).where(eq(hosts.id, id)).run();
   }
 
   insertHost(row: HostRow): void {
-    getDb().insert(hosts).values(row).run();
+    this.db().insert(hosts).values(row).run();
   }
 }

@@ -1,7 +1,7 @@
 /**
  * `tokens.*` — device tokens and worker bootstrap tokens. Thin: validates
- * input and delegates to `TokenService`. The MCP endpoint skips this
- * namespace (`src/mcp/server.ts`), so an agent can't mint or list tokens.
+ * input and delegates to `TokenService`. The MCP endpoint leaves out every
+ * `tokens.*` procedure, so an agent can't mint or list tokens.
  *
  * A new token's secret is in the `create` response only. The hub keeps its
  * hash and can't show it again.
@@ -10,13 +10,24 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { SharedTokenRevokeError, TokenNotFoundError } from "../../errors";
-import { MAX_BOOTSTRAP_TTL_MS, tokenService } from "../../services/token-service";
+import {
+  DEFAULT_LIST_LIMIT,
+  MAX_BOOTSTRAP_TTL_MS,
+  MAX_LIST_LIMIT,
+  tokenService,
+} from "../../services/token-service";
 import { publicProcedure, t } from "../trpc";
 
 const label = z.string().trim().min(1).max(100);
 
 export const tokensRouter = t.router({
-  list: publicProcedure.query(() => ({ tokens: tokenService.list() })),
+  list: publicProcedure
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT) })
+        .default({ limit: DEFAULT_LIST_LIMIT }),
+    )
+    .query(({ input }) => ({ tokens: tokenService.list(input.limit) })),
 
   createDevice: publicProcedure.input(z.object({ label })).mutation(({ input }) => {
     const { token, view } = tokenService.createDevice(input.label);

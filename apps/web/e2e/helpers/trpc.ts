@@ -63,3 +63,30 @@ export async function trpcQuery<T>(
   const body = (await res.json()) as { result: { data: T } };
   return body.result.data;
 }
+
+/**
+ * Call a tRPC mutation and return its `result.data`. Throws on non-2xx, like
+ * `trpcMutate`.
+ */
+export async function trpcMutateData<T>(
+  serverUrl: string,
+  token: string,
+  procedure: string,
+  input: unknown,
+): Promise<T> {
+  const res = await fetch(`${serverUrl}/trpc/${procedure}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `band_token=${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const snippet = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    throw new Error(`trpcMutateData(${procedure}) failed: ${res.status} ${snippet}`);
+  }
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
+}

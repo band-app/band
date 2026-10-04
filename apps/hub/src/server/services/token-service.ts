@@ -14,6 +14,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { AuthResult, Hello } from "@band-app/link";
 import { createLogger } from "@band-app/logger";
 import { SharedTokenRevokeError, TokenNotFoundError } from "../errors";
+import { SocketRegistry } from "../infra/auth/socket-registry";
 import {
   type HostRow,
   type TokenKind,
@@ -24,6 +25,8 @@ import {
 const log = createLogger("token-service");
 
 export const SHARED_TOKEN_ID = "shared";
+export const DEFAULT_LIST_LIMIT = 200;
+export const MAX_LIST_LIMIT = 500;
 export const DEFAULT_BOOTSTRAP_TTL_MS = 60 * 60 * 1000;
 export const MAX_BOOTSTRAP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** A token's `lastUsedAt` is written at most this often, so a busy client isn't a write per request. */
@@ -105,17 +108,13 @@ function toView(row: TokenRow, now: number): TokenView {
   };
 }
 
-interface Closable {
-  destroy(): void;
-}
-
 export class TokenService {
   private readonly lastTouch = new Map<string, number>();
-  private readonly sockets = new Map<string, Set<Closable>>();
 
   constructor(
     private readonly queries = new TokenQueries(),
     private readonly now: () => number = Date.now,
+    private readonly sockets = new SocketRegistry(),
   ) {}
 
   /**
@@ -215,7 +214,14 @@ export class TokenService {
       label: row.label,
       hostId: workerId,
     });
-    if (!this.queries.exchangeBootstrap(row.id, at, session)) throw new TokenExchangeError("used");
+    // One transaction, so a failed insert doesn't burn the token. The spend is
+    // guarded in SQL, so of two concurrent exchanges only one wins.
+    const spent = this.queries.transaction((q) => {
+      if (!q.spendBootstrap(row.id, at)) return false;
+      q.insert(session);
+      return true;
+    });
+    if (!spent) throw new TokenExchangeError("used");
     log.info(`exchanged bootstrap token ${row.id} for a session of worker ${workerId}`);
     return sessionToken;
   }
@@ -247,13 +253,15 @@ export class TokenService {
     }
   };
 
-  list(): TokenView[] {
+  /** The newest `limit` tokens. */
+  list(limit: number = DEFAULT_LIST_LIMIT): TokenView[] {
     const at = this.now();
-    return this.queries.list().map((row) => toView(row, at));
+    return this.queries.list(limit).map((row) => toView(row, at));
   }
 
-  listHosts(): HostView[] {
-    return this.queries.listHosts().map((h) => ({
+  /** The oldest `limit` hosts, the local one first. */
+  listHosts(limit: number = DEFAULT_LIST_LIMIT): HostView[] {
+    return this.queries.listHosts(limit).map((h) => ({
       id: h.id,
       name: h.name,
       mode: h.mode,
@@ -270,33 +278,17 @@ export class TokenService {
     const row = this.queries.findById(id);
     if (!row) throw new TokenNotFoundError(id);
     if (row.id === SHARED_TOKEN_ID) throw new SharedTokenRevokeError();
-    this.queries.revoke(id, this.now());
-    this.closeSockets(id);
-    this.lastTouch.delete(id);
-    log.info(`revoked token ${id}`);
+    if (this.queries.revoke(id, this.now())) {
+      this.sockets.closeAll(id);
+      this.lastTouch.delete(id);
+      log.info(`revoked token ${id}`);
+    }
     return toView(this.queries.findById(id) ?? row, this.now());
   }
 
   /** Remembers a socket opened with this token, so revoking the token closes it. */
-  trackSocket(
-    tokenId: string,
-    socket: Closable & { once(event: "close", cb: () => void): unknown },
-  ): void {
-    let set = this.sockets.get(tokenId);
-    if (!set) {
-      set = new Set();
-      this.sockets.set(tokenId, set);
-    }
-    set.add(socket);
-    socket.once("close", () => {
-      set.delete(socket);
-      if (set.size === 0 && this.sockets.get(tokenId) === set) this.sockets.delete(tokenId);
-    });
-  }
-
-  private closeSockets(tokenId: string): void {
-    for (const socket of this.sockets.get(tokenId) ?? []) socket.destroy();
-    this.sockets.delete(tokenId);
+  trackSocket(tokenId: string, socket: Parameters<SocketRegistry["add"]>[1]): void {
+    this.sockets.add(tokenId, socket);
   }
 
   /** The row for a presented token when it is live and of `kind`. */

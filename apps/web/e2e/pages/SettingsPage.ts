@@ -362,9 +362,11 @@ export class SettingsPage {
     return this.dialog.getByTestId("settings__host");
   }
 
-  /** The row of one host by id (`data-host-id`, set in `HostsSettings.tsx`). */
+  /** The row of one host by id, matched on the id the row prints. */
   hostRow(hostId: string): Locator {
-    return this.dialog.locator(`[data-testid="settings__host"][data-host-id="${hostId}"]`);
+    return this.hostRows().filter({
+      has: this.page.getByTestId("settings__host-id").getByText(hostId, { exact: true }),
+    });
   }
 
   /** One row per token in the Hosts section's Tokens list. */

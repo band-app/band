@@ -125,7 +125,6 @@ export function HostsSettings() {
             <li
               key={host.id}
               data-testid="settings__host"
-              data-host-id={host.id}
               data-status={host.status}
               className="flex items-start justify-between gap-3 px-3 py-2 text-sm"
             >
@@ -134,6 +133,8 @@ export function HostsSettings() {
                   {host.name}
                 </div>
                 <div className="text-xs text-muted-foreground">
+                  <span data-testid="settings__host-id">{host.id}</span>
+                  {" · "}
                   {host.labels.length > 0 ? host.labels.join(", ") : "No labels"}
                   {" · "}
                   Last seen {formatTime(host.lastSeenAt)}

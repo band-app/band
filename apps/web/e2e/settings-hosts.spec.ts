@@ -17,7 +17,7 @@ import {
   seedSettings,
   startServer,
 } from "./helpers/server";
-import { trpcQuery } from "./helpers/trpc";
+import { trpcMutateData, trpcQuery } from "./helpers/trpc";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-hosts-token";
@@ -84,6 +84,7 @@ test("creates a worker bootstrap token that is shown once", async ({ page }) => 
 
   // Closing the panel drops the secret from the page. Only the hash is left on the hub.
   await settingsPage.finishAddWorker();
+  await expect(settingsPage.addWorkerButton()).toBeVisible();
   await expect(settingsPage.bootstrapToken()).toHaveCount(0);
 
   const issued = (await tokens()).find(
@@ -93,13 +94,12 @@ test("creates a worker bootstrap token that is shown once", async ({ page }) => 
 });
 
 test("revokes a device token, which then gets 401", async ({ page }) => {
-  const created = await fetch(`${server.url}/trpc/tokens.createDevice`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: `band_token=${TOKEN}` },
-    body: JSON.stringify({ label: "e2e phone" }),
-  });
-  const { result } = (await created.json()) as { result: { data: { token: string } } };
-  const deviceToken = result.data.token;
+  const { token: deviceToken } = await trpcMutateData<{ token: string }>(
+    server.url,
+    TOKEN,
+    "tokens.createDevice",
+    { label: "e2e phone" },
+  );
   const authed = () =>
     fetch(`${server.url}/trpc/projects.list`, {
       headers: { Authorization: `Bearer ${deviceToken}` },
