@@ -474,6 +474,22 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/link:
+    dependencies:
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.13
+        version: 22.19.13
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/logger:
     dependencies:
       pino:
